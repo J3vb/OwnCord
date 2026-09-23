@@ -1,0 +1,437 @@
+# B9 — Unified feature experience, accessibility and polish
+
+**Status:** DRAFT — 2026-09-23. Planning only; implementation not started.
+**Entry gate: NOT MET.** This document is not permission to bypass it.
+
+> **Drafted:** 2026-09-23. **Planning branch:** `docs/b9-unified-experience-plan`.
+> **Exact base:** `0beee8e4c50ca18823750e381d3a1d6e327029b8`, checked-out `dev`.
+> Source of phase scope: [roadmap B9](repo-health-roadmap-2026-08-23.md#b9--complete-unified-feature-ux-accessibility-and-polish).
+> Product scope: [beta requirements](beta-product-requirements-2026-08-23.md).
+> Evidence ownership: [traceability](beta-requirements-traceability-2026-08-23.md).
+> [README.md](README.md) remains the plan-status authority. This follows the B7
+> PRD plus per-PR milestone format; it does not supersede the roadmap or B5 decisions.
+
+## Problem
+
+B9 must turn the approved server contracts into complete desktop journeys,
+with accessibility and privacy acceptance for each change. B5 already exposes
+Message Requests, local reports and appeals (`Server/api/dm_request_handler.go:20-28`,
+`Server/api/report_handler.go:54-59`, `Server/api/appeal_handler.go:69-89`).
+The desktop broker also exists, with typed preview/image methods and refusal
+results (`Client/src/platform/contracts/externalContent.ts:18-64`,
+`Client/src/platform/desktop/externalContent.ts:55-67`). These are foundations
+to consume and preserve, not new features to rebuild in B9.
+
+The client NSFW helper still records acknowledgement in sessionStorage and
+describes the server as label-only, while B5 has authenticated acknowledgement
+routes and a caller-specific ready field (`Client/src/lib/nsfw-gate.ts:1-15`,
+`Client/src/lib/nsfw-gate.ts:50-65`, `Server/api/nsfw_handler.go:20-25`,
+`Server/ws/serve_ready.go:228-237`). That is code/document drift requiring
+contract integration. Likewise, literal English remains in settings and
+dynamic sidebar labels (`Client/src/components/settings/AccessibilityTab.ts:10-64`,
+`Client/src/pages/main-page/SidebarDmSection.ts:130-133`), and the sidebar
+documents its O(n) rebuild (`Client/src/pages/main-page/SidebarArea.ts:660-673`).
+Completeness cannot be inferred from an endpoint, a hidden overlay, a translated
+label or a screenshot alone.
+
+## Evidence and verification boundary
+
+All current-state references in this PRD and its milestones were inspected at
+the full base SHA above. They establish source behavior, not passing tests or
+release acceptance. Implementation must re-read them at its own `dev` base,
+record drift, and retain exact-integration-SHA evidence. Proposed files and tests
+are labelled as proposed; no product tests were added or run for this planning PR.
+
+| Area                        | Verified evidence                                                                                                                                                                                                                                                                   | Planning consequence                                                                                                                                                      |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop qualification       | `Server/updater/assets.go:32-43` maps Windows x64 and Linux x64/ARM64, with no Windows ARM64 client target. B7-17 and HP-7 remain pending in `docs/plans/b7-shared-client-platform-desktop-parity.prd.md:329-330`.                                                                  | Four-target desktop acceptance is not met. A Windows ARM server build is not client evidence.                                                                             |
+| B5 consent acceptance       | The public follow-up requires moderation-evidence consent verification before B9 interfaces (`docs/plans/b5-community-content-moderation-2026-09-04.md:2940-2956`). HP-5 accepted a design and narrowed server exits (`docs/plans/hp-5-scorecard-2026-09-05.md:18-28`, `:279-291`). | B5's stable, security-reviewed service gate cannot be declared complete from HP-5 alone. Keep this prerequisite blocked without publishing private investigation details. |
+| Broker ownership            | Typed metadata/image results and six refusal kinds exist; no AbortSignal is in the interface (`Client/src/platform/contracts/externalContent.ts:18-64`).                                                                                                                            | Consent checks must precede admission. Discarding a late result is not cancelling its network request.                                                                    |
+| Media path                  | YouTube metadata/thumbnail use the broker; click playback constructs a fixed-host sandboxed iframe (`Client/src/components/message-list/media.ts:178-239`).                                                                                                                         | Playback remains a distinct explicit activation and privacy boundary. Do not claim broker limits apply to iframe traffic.                                                 |
+| Shared state                | Dispatcher owns event subscriptions into stores (`Client/src/lib/dispatcher.ts:1-75`, `:98-107`; `Client/CLAUDE.md:46-56`).                                                                                                                                                         | Add feature handlers through the dispatcher; serialize global-state integration.                                                                                          |
+| Accessibility               | Modal helpers, focus styling and roving navigation exist (`Client/src/lib/modalFactory.ts:71-99`, `Client/src/styles/base.css:34-50`, `Client/src/lib/a11y.ts:95-160`). Existing smoke uses mocked Tauri (`Client/tests/e2e/a11y-smoke.spec.ts:1-24`).                              | Reuse primitives; add measured and manual native acceptance. Existing smoke is not an OS screen-reader qualification.                                                     |
+| Recipient actions           | Ready carries warnings; live moderation frames carry targeted action data (`Server/ws/serve_ready.go:416-465`, `Server/ws/moderation_actions.go:9-36`). The action-list service requires moderator authority (`Server/service/moderation.go:880-890`).                              | Q6 must settle restart-safe recipient discovery before complete notices/appeals can close. Never use a moderator read as the member fallback.                             |
+| Effective voice authority   | Sidebar affordances use role-level permission (`Client/src/components/ChannelSidebar.ts:178-185`, `Client/src/lib/permissions.ts:49-52`); ready exposes `can_send` rather than a complete moderation capability projection (`Server/ws/serve_ready.go:210-242`).                    | Q5 is a contract prerequisite for the remaining SEC-02 UI work.                                                                                                           |
+| Existing account experience | Recovery, sessions and retention already compose AccountTab (`Client/src/components/settings/AccountTab.ts:1389-1396`); deletion and local-log export already have disclosures (`:1110-1114`, `Client/src/components/settings/LogsTab.ts:348-376`).                                 | Polish and qualify those flows; do not re-plan them as absent or promise export redaction.                                                                                |
+| CSS ownership               | Main imports tokens/base/login/app/theme in order (`Client/src/main.ts:3-7`); shell, quick switch and NSFW rules still share app.css (`Client/src/styles/app.css:1-82`, `:4875-4905`, `:5073-5121`).                                                                                | Mechanical source split first, with output equivalence; visual changes follow in separate PRs.                                                                            |
+
+### Source-to-document drift
+
+- B7's historical inventory and pending B7-16 row are not current code status
+  (`docs/plans/b7-shared-client-platform-desktop-parity.prd.md:328`). The broker
+  code cited above exists. Reuse it and verify acceptance separately.
+- Client NSFW comments and local state do not describe the B5 server contract;
+  B9-7 replaces that client integration, without weakening the server policy.
+- Register entries for Large Font and quick-switch height should not be planned
+  as unfixed (`docs/plans/repo-health-issue-register-2026-08-23.md:123`, `:176`).
+  Current code has the font floor and bounded overlay
+  (`Client/src/lib/appearance.ts:14-56`, `Client/src/styles/app.css:4875-4905`).
+  B9 supplies regression acceptance and later reconciles the register.
+- Original multi-surface requirement wording is narrowed by the dated B8
+  amendments, not by an implicit B9 deferral. Browser/mobile rows stay visible
+  as post-beta scope, never desktop-qualified by substitution.
+
+## Users
+
+Desktop members reading and sending messages; first-contact recipients;
+reporters and moderated members; narrowly authorized local moderators; and
+operators reviewing capability/disclosure accuracy. Keyboard, screen-reader,
+large-text, high-contrast and reduced-motion users are part of every journey.
+No new persona, centralized moderation role or provider is introduced.
+
+## Hypothesis
+
+Small feature PRs built on accepted B5/B7 contracts, a shared interaction/text
+boundary and continuous accessibility review can close the approved desktop
+experience without changing OwnCord's identity or expanding the beta. This is
+a delivery hypothesis to test with the evidence below, not an acceptance claim.
+
+## Success metrics
+
+| Outcome                  | Gate                                                                                                                                                                                                                                                                                                        | Evidence owner/milestone                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Requirement completeness | Every row below has an automated journey and applicable native/manual proof on the candidate; no unexplained missing state.                                                                                                                                                                                 | Feature author; B9-26 consolidation          |
+| Consent                  | Zero NSFW content or consent-gated external fetch before the applicable acknowledgement, including native admission, alternate entry points and warm-cache cases. Message Requests use only their authorized text-preview DTO before acceptance. Revoke/teardown prevent new admission and stale rendering. | B9-5/7/8/11 and B9-26                        |
+| Authorization            | Member/reporter/subject/moderator/owner and permission-change cases expose only the authorized DTO fields; no private accessibility-tree residue.                                                                                                                                                           | B9-10..17                                    |
+| Accessibility            | No release-blocking defect in the six per-milestone check groups plus pointer, announcements, errors and media controls. Q1 fixes the measurable acceptance contract before product work.                                                                                                                   | Each author and named accessibility reviewer |
+| English readiness        | Every app-authored text sink inventoried; no unexplained hard-coded UI strings; typed parameters/plurals/date/number formatting and expanded-text checks pass. English remains the only shipped language.                                                                                                   | B9-3/18/19/20                                |
+| Identity and performance | Desktop visual review passes; existing B7 budgets are not weakened; before/after interaction and memory evidence uses the same fixture/hardware. Missing runtime baselines are measured in B9-0.                                                                                                            | B9-1/2/21..26                                |
+| Phase closure            | Owner accepts HP-9 and exact-SHA evidence; every exit row below passes.                                                                                                                                                                                                                                     | B9-27; repository owner                      |
+
+## Scope and dated amendments
+
+Scope is the eleven B9 workstreams in
+`docs/plans/repo-health-roadmap-2026-08-23.md:1183-1215`, read with all dated
+owner amendments. B9 owns BPR-064 and BPR-090..092 and completes the client
+halves of BPR-060..063 and BPR-070..073. It does not reassign server ownership.
+
+| Governing decision                                                                                                                                                                  | Effect on this plan                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-08-28 execution pattern; 2026-08-31 integration-evidence amendment (`docs/plans/repo-health-roadmap-2026-08-23.md:208-228`, `:374-382`)                                        | One coherent invariant per PR, updated dev base before merge, pre-squash evidence for structural work, ledger/traceability/scorecard agreement. Any identical-tree evidence follows the documented rule; no unproved SHA equivalence.                                                                       |
+| 2026-08-29 layout supplement (`docs/plans/developer-experience-layout-refactor-2026-08-29.md:381-407`)                                                                              | B9-1 preserves CSS selectors, cascade and built output. Token/visual changes ship later.                                                                                                                                                                                                                    |
+| 2026-08-31 slim protocol decision (`docs/plans/repo-health-roadmap-2026-08-23.md:971-979`)                                                                                          | Preserve the current protocol-window and incompatible-client behavior; B9 does not invent cross-epoch support.                                                                                                                                                                                              |
+| 2026-09-02 support-export scope and B7 follow-through (`docs/plans/repo-health-roadmap-2026-08-23.md:650-658`; `Client/src/components/settings/LogsTab.ts:348-376`)                 | Keep explicit user-initiated local export and truthful verbatim-log disclosure. No telemetry/upload or redaction promise.                                                                                                                                                                                   |
+| B5 owner decisions 2026-09-04/05 and HP-5 accepted 2026-09-06 (`docs/plans/b5-community-content-moderation-2026-09-04.md:255-412`; `docs/plans/hp-5-scorecard-2026-09-05.md:18-28`) | Keep client preview broker/server GIF split, silent request rejection, narrow moderation, server-backed NSFW consent, erasure/retention and appeal rules. Server-only acceptance did not complete the client journeys.                                                                                      |
+| 2026-09-18 B8 deferral (`docs/plans/repo-health-roadmap-2026-08-23.md:1042-1055`, `:1175-1259`)                                                                                     | Beta is Windows x64/ARM64 and Linux x64/ARM64 desktop only. Browser/PWA/phone/tablet, touch-device, responsive-device and unsupported-browser-API evidence move with B8. Desktop keyboard, screen reader, focus, contrast, reduced motion, text scaling, zoom/reflow and visual regression remain blocking. |
+| 2026-09-18 B10 direction (`docs/plans/repo-health-roadmap-2026-08-23.md:1263-1285`)                                                                                                 | HP-9 must confirm/revise the cut list. Do not make thirty-run/14-day-soak work a new B9 milestone, silently waive retained RC gates, or settle the comprehension-read method for the owner.                                                                                                                 |
+| B7 decisions and 2026-09-20 HP-6 exception (`docs/plans/b7-shared-client-platform-desktop-parity.prd.md:12-24`, `:386-395`)                                                         | Preserve B7 desktop target/qualification decisions. HP-6's B7 exception is not a B9 waiver; the rehearsed tag/HP-6 still precedes beta.                                                                                                                                                                     |
+
+### Explicitly out of scope
+
+No product/test/CI implementation in this planning PR. Later B9 PRs do not add
+browser adapters, PWA hosting/push, phone/tablet layouts, touch qualification,
+new providers, another shipping language, central moderation, unrelated server
+policy, a dependency major, a release pipeline redesign or a rebrand. No
+operational TLS/backup/update powers are added to moderation roles. No private
+advisory details, exploit reproductions or embargoed patches belong in these
+public documents. Public identifiers and affected properties suffice.
+
+Q5/Q6 may require narrowly scoped upstream contract PRs. Their payloads and
+scope are **not decided here**. Before either is implemented, the owner must
+assign it and approve its own small plan with code inventory and contract tests;
+then link its exact accepted result in B9-14 or B9-15/16. These are explicit
+blocking handoffs, not omitted work or implied authorization to widen those PRs.
+
+## Satisfied preconditions and entry-gate status
+
+**B9 product implementation is blocked today.** Source availability and planning
+preparation are satisfied; phase acceptance is not. The required gate is in
+`docs/plans/repo-health-roadmap-2026-08-23.md:1175-1181`.
+
+| Entry item                                                                      | Verdict at planning commit               | Required next evidence                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Current dev inspected, requirement/decision inputs read, small-PR plans present | Met for planning only                    | Re-verify each milestone at its actual implementation base.                                                                                                                                                                                  |
+| B7 broker/platform foundation                                                   | Code present; qualification not inferred | Preserve broker tests and native privacy evidence; reconcile historical pending rows with accepted results.                                                                                                                                  |
+| Desktop platform matrix green                                                   | **NOT MET**                              | B7-17 install/boot/connect/update/rollback/media/recovery results for all four targets, declared native/cross-compile distinctions, and HP-7 acceptance. The missing updater target is source evidence above, not merely an absent document. |
+| B5 contracts stable and security-reviewed                                       | **NOT MET as a complete B9 gate**        | Accepted resolution/evidence for the public moderation-evidence consent follow-up, including revoke/relabel/deletion; exact server contract and security-review status. No private details in B9 artifacts.                                  |
+| Agreed tokens, interaction patterns and accessibility test rules                | **NOT MET**                              | Owner answers Q1/Q2/Q8, named reviewer, accepted baseline and examples in B9-0. Existing tokens and helpers do not constitute this agreement.                                                                                                |
+| Recipient discovery and effective voice UI contracts                            | **Unresolved milestone prerequisites**   | Q5 before B9-14; Q6 before complete B9-15/16. Keep these separate from a false claim that all B5 APIs are absent.                                                                                                                            |
+| Common per-item entry contract                                                  | Prepared, not accepted for execution     | Assigned implementer, real base, reviewed code proof/failing control, contract/migration/privacy/rollback notes and green dependencies for each PR.                                                                                          |
+
+B9-0 may prepare evidence and obtain decisions now. B9-1 onward waits for the
+phase gates unless the owner records a specific roadmap amendment (Q9).
+HP-6/tag obligations remain upstream release work; this plan neither claims
+they passed nor creates a waiver.
+
+## Delivery milestones
+
+Every linked plan is one intended reviewable PR with its own branch, source
+inventory, tasks, file boundary, tests/evidence, risks and owner questions.
+Numbering is a stable reference, not a demand that independent work wait for
+every smaller number. All product rows additionally depend on the entry gate.
+
+| Milestone                                                                | One-PR outcome                                                          | Direct dependencies                                                                                                              | Roadmap workstreams | Status  |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ------- |
+| [B9-0](../../.claude/plans/b9-0-entry-evidence-and-decisions.plan.md)    | Verify entry evidence and settle the execution contract                 | Entry evidence preparation only                                                                                                  | entry; 8, 10        | Pending |
+| [B9-1](../../.claude/plans/b9-1-css-source-split.plan.md)                | Split app.css without changing its output                               | B9-0                                                                                                                             | 11                  | Pending |
+| [B9-2](../../.claude/plans/b9-2-shared-accessibility-and-tokens.plan.md) | Apply the agreed shared accessibility and token rules                   | B9-1                                                                                                                             | 7, 8                | Pending |
+| [B9-3](../../.claude/plans/b9-3-english-text-boundary.plan.md)           | Introduce the English text and formatting boundary                      | B9-2                                                                                                                             | 6                   | Pending |
+| [B9-4](../../.claude/plans/b9-4-shared-navigation.plan.md)               | Add the agreed shared navigation integration points                     | B9-3                                                                                                                             | 7, 8                | Pending |
+| [B9-5](../../.claude/plans/b9-5-message-requests-inbox.plan.md)          | Show the Message Requests inbox and safe text preview                   | B9-4                                                                                                                             | 1, 8                | Pending |
+| [B9-6](../../.claude/plans/b9-6-message-request-decisions.plan.md)       | Accept, ignore, delete or block a Message Request                       | B9-5                                                                                                                             | 1, 8                | Pending |
+| [B9-7](../../.claude/plans/b9-7-nsfw-consent-gate.plan.md)               | Make NSFW consent an authoritative pre-load gate                        | B9-4                                                                                                                             | 3, 8                | Pending |
+| [B9-8](../../.claude/plans/b9-8-external-content-consent.plan.md)        | Apply external-content consent before broker or provider work           | B9-7, B9-3                                                                                                                       | 2, 8                | Pending |
+| [B9-9](../../.claude/plans/b9-9-rich-content-states.plan.md)             | Polish approved rich-content loading, failure and media controls        | B9-8                                                                                                                             | 2, 8                | Pending |
+| [B9-10](../../.claude/plans/b9-10-local-report-intake.plan.md)           | Report local messages, users and attachments and show own report status | B9-4, B9-3                                                                                                                       | 4, 8                | Pending |
+| [B9-11](../../.claude/plans/b9-11-moderation-queue-evidence.plan.md)     | Show the permission-gated moderation queue and authorized evidence      | B9-4, B9-7, B9-10                                                                                                                | 4, 8                | Pending |
+| [B9-12](../../.claude/plans/b9-12-moderation-workflow.plan.md)           | Assign, annotate and close reports with immutable history               | B9-11                                                                                                                            | 4, 8                | Pending |
+| [B9-13](../../.claude/plans/b9-13-warning-timeout-actions.plan.md)       | Issue warnings and timeouts with accurate outcomes                      | B9-12                                                                                                                            | 4, 5, 8             | Pending |
+| [B9-14](../../.claude/plans/b9-14-removal-kick-ban-controls.plan.md)     | Finish narrow removal, kick, ban and effective voice controls           | B9-13                                                                                                                            | 4, 5, 8             | Pending |
+| [B9-15](../../.claude/plans/b9-15-moderation-notices.plan.md)            | Show authorized warnings, restrictions and action status to recipients  | B9-4, B9-3                                                                                                                       | 5, 8                | Pending |
+| [B9-16](../../.claude/plans/b9-16-personal-appeals.plan.md)              | Submit and track a local appeal                                         | B9-15                                                                                                                            | 5, 8                | Pending |
+| [B9-17](../../.claude/plans/b9-17-moderation-appeal-review.plan.md)      | Review and decide appeals without overexposing information              | B9-12, B9-13, B9-16                                                                                                              | 4, 5, 8             | Pending |
+| [B9-18](../../.claude/plans/b9-18-english-shell-connect.plan.md)         | Extract connect, shell and navigation text                              | B9-4                                                                                                                             | 6                   | Pending |
+| [B9-19](../../.claude/plans/b9-19-english-messaging-content.plan.md)     | Extract messaging, rich-content and media text                          | B9-9, B9-6, B9-18                                                                                                                | 6                   | Pending |
+| [B9-20](../../.claude/plans/b9-20-english-settings-and-native.plan.md)   | Extract settings, account and desktop-owned text                        | B9-3, B9-18                                                                                                                      | 6                   | Pending |
+| [B9-21](../../.claude/plans/b9-21-shell-polish-and-performance.plan.md)  | Polish desktop shell navigation without rebuilding it on every update   | B9-4, B9-18                                                                                                                      | 7, 8                | Pending |
+| [B9-22](../../.claude/plans/b9-22-messaging-interaction-polish.plan.md)  | Polish desktop message reading, composing and related overlays          | B9-19, B9-7                                                                                                                      | 7, 8                | Pending |
+| [B9-23](../../.claude/plans/b9-23-account-settings-polish.plan.md)       | Polish account, privacy, recovery and settings journeys                 | B9-20                                                                                                                            | 7, 8, 10            | Pending |
+| [B9-24](../../.claude/plans/b9-24-voice-media-polish.plan.md)            | Polish voice and video controls and their accessibility                 | B9-20, B9-14                                                                                                                     | 7, 8                | Pending |
+| [B9-25](../../.claude/plans/b9-25-honest-desktop-capabilities.plan.md)   | Make desktop network, notification and update limitations actionable    | B9-9, B9-15, B9-23, B9-24                                                                                                        | 9, 8                | Pending |
+| [B9-26](../../.claude/plans/b9-26-cross-feature-journeys.plan.md)        | Qualify complete desktop privacy, moderation and lifecycle journeys     | B9-6, B9-7, B9-9, B9-10, B9-11, B9-12, B9-13, B9-14, B9-15, B9-16, B9-17, B9-18, B9-19, B9-20, B9-21, B9-22, B9-23, B9-24, B9-25 | 10, 8               | Pending |
+| [B9-27](../../.claude/plans/b9-27-hp9-freeze-and-exit.plan.md)           | Record HP-9 feature freeze and the B9 exit decision                     | B9-26                                                                                                                            | HP-9; exit          | Pending |
+
+## Ordering, parallel work and shared ownership
+
+1. B9-0 settles entry evidence and pre-implementation decisions. B9-1 mechanically
+   splits styles. B9-2 then changes shared primitives/tokens, B9-3 fixes the text
+   boundary, and B9-4 establishes navigation integration. This foundation is
+   serialized; feature visual changes never ride the CSS source-move PR.
+2. After B9-4, requests (5 → 6), consent/content (7 → 8 → 9), report/center
+   (10 → 11 → 12 → 13 → 14), notices/appeals (15 → 16), and shell text (18)
+   can prepare independently. B9-11 also waits for B9-7 and B5 evidence consent;
+   B9-17 waits for 12/13/16. Q5/Q6 remain hard contract handoffs.
+3. Text extraction 19 follows 9/6/18; 20 follows 3/18. Shell polish 21 follows
+   4/18; message polish 22 follows 19/7; settings polish 23 follows 20;
+   voice polish 24 follows 20/14. Separate owned files can proceed in parallel.
+   Capability honesty 25 joins 9/15/23/24.
+4. B9-26 joins every feature/text/polish lane and qualifies whole journeys.
+   B9-27 records HP-9 and the exit verdict; neither is a bucket for unplanned
+   feature fixes. A discovered blocker gets its own narrowly scoped fix PR
+   and fresh evidence before the join passes.
+
+**Single-writer lane:** shared navigation/MainPage composition, design tokens,
+global stores, `api.ts`, `types.ts`, dispatcher registration, catalog API and
+CSS import order are serialized even when their feature work is independent.
+Reserve a file in the milestone PR, merge one shared change, rebase the next
+from current dev, and rerun its affected checks. Keep catalogs feature-owned
+after B9-3. Accessibility review runs continuously in every lane. Do not merge
+competing global-state implementations and call conflict resolution testing.
+
+Follow the roadmap's common execution contract (`:92-148`, `:188-228`): one
+invariant per PR; reviewed proof or failing control first; smallest surface;
+complete affected component checks; no threshold weakening; tracker and
+requirement updates with evidence. The implementer is assigned at entry;
+the owner retains product decisions and hold-point signatures.
+
+## Requirement and register map
+
+The requirement wording is in `docs/plans/beta-product-requirements-2026-08-23.md:90-103`,
+`:118-120`; the inherited map is in
+`docs/plans/beta-requirements-traceability-2026-08-23.md:113-126`, `:141-143`.
+The rows below are **planned proof**, not release-qualified claims.
+
+| Requirement | B9 milestones          | Required observable closure                                                                                                                                                            |
+| ----------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BPR-060     | 5, 6, 26               | First-contact text-only preview; accept/ignore/delete/block; sender silence; reconnect/block/erasure; no automatic media/embed/avatar fetch before trust.                              |
+| BPR-061     | 8, 9, 19, 26           | Existing link/GIF/YouTube/media set works with consent, accessible controls, loading/refusal/error and LAN/offline distinctions.                                                       |
+| BPR-062     | 8, 9, 26               | Preserve B5/B7 bounded retrieval, cache partitions, credential isolation and native network evidence; no new raw-fetch bypass.                                                         |
+| BPR-063     | 7, 11, 26              | Server-backed per-user/channel acknowledgement before all protected entry points; second-device inheritance, failure/revoke/relabel/teardown; moderator consent.                       |
+| BPR-064     | 3, 18, 19, 20, 26      | English catalogs, safe parameters/plurals/date/number seam, complete sink inventory and explained exclusions; no promised second beta language.                                        |
+| BPR-070     | 10, 26                 | Report local message/user/attachment; cancel/submit/refusal; own status only; no central service or evidence over-disclosure.                                                          |
+| BPR-071     | 11, 12, 13, 14, 17, 26 | Permission-gated queue/context/evidence, assignment/status/notes/actions/history/appeals; role-loss cleanup and confidential DTOs.                                                     |
+| BPR-072     | 13, 14, 15, 26         | Narrow warning/timeout/removal/kick/ban controls and recipient outcomes; server hierarchy/effective voice authority; owner operations remain separate.                                 |
+| BPR-073     | 15, 16, 17, 26         | Real action ids, one appeal per action/rate limit, status and audited decision; permitted reversal semantics and settled banned-user policy.                                           |
+| BPR-090     | 1, 2, 4, 21..26        | Recognizable identity, coherent desktop navigation/state/feedback, preserved performance and visual acceptance.                                                                        |
+| BPR-091     | Every milestone        | Keyboard, pointer, screen reader, focus, contrast, reduced motion, text scale/zoom/reflow, announcements/errors/media controls; no release blocker. B8 device clauses remain deferred. |
+| BPR-092     | 9, 24, 25, 26          | Honest desktop network/offline, media, notification and update behavior; unsupported-browser-API half remains with B8.                                                                 |
+
+Register follow-through (`docs/plans/repo-health-issue-register-2026-08-23.md:193`,
+`:210-216`, `:302-313`): BG-13 → 5/6; BG-14 → 10..17; BG-16 → 3/18..20;
+BG-18 → 7/11; BG-19 → 8/9; C-13 measured sidebar remainder → 21;
+SEC-02 effective-permission UI → 14. Existing account/session/recovery/retention
+and local export flows receive regression evidence in 23/26. Historical C-07,
+C-08 and C-12 descriptions are not instructions to repeat B7 extractions or
+remove its guards; inspect current code and preserve accepted B7 budgets.
+
+### Findings ledger disposition
+
+The canonical ledger is `.superpowers/findings-ledger.json`, not a new B9
+defect list. Reconciliation against the B9-tagged OC rows of the register at
+the planning SHA finds **24 fixed, zero open**: OC-0314, OC-0319, OC-0325,
+OC-0326, OC-0330, OC-0331, OC-0333, OC-0334, OC-0342, OC-0343, OC-0347,
+OC-0348, OC-0350, OC-0355, OC-0356, OC-0361, OC-0364, OC-0367, OC-0368,
+OC-0370, OC-0371, OC-0372, OC-0373 and OC-0375. Their existing status is
+preserved. B9 adds applicable regression evidence, not duplicate fixes.
+
+| B9-tagged finding | Canonical status | Ledger evidence                               |
+| ----------------- | ---------------- | --------------------------------------------- |
+| OC-0314           | Fixed            | `.superpowers/findings-ledger.json:7399-7407` |
+| OC-0319           | Fixed            | `.superpowers/findings-ledger.json:7514-7522` |
+| OC-0325           | Fixed            | `.superpowers/findings-ledger.json:7651-7659` |
+| OC-0326           | Fixed            | `.superpowers/findings-ledger.json:7674-7682` |
+| OC-0330           | Fixed            | `.superpowers/findings-ledger.json:7766-7774` |
+| OC-0331           | Fixed            | `.superpowers/findings-ledger.json:7789-7797` |
+| OC-0333           | Fixed            | `.superpowers/findings-ledger.json:7835-7843` |
+| OC-0334           | Fixed            | `.superpowers/findings-ledger.json:7858-7866` |
+| OC-0342           | Fixed            | `.superpowers/findings-ledger.json:8042-8050` |
+| OC-0343           | Fixed            | `.superpowers/findings-ledger.json:8065-8073` |
+| OC-0347           | Fixed            | `.superpowers/findings-ledger.json:8157-8165` |
+| OC-0348           | Fixed            | `.superpowers/findings-ledger.json:8180-8188` |
+| OC-0350           | Fixed            | `.superpowers/findings-ledger.json:8226-8234` |
+| OC-0355           | Fixed            | `.superpowers/findings-ledger.json:8341-8349` |
+| OC-0356           | Fixed            | `.superpowers/findings-ledger.json:8364-8372` |
+| OC-0361           | Fixed            | `.superpowers/findings-ledger.json:8477-8485` |
+| OC-0364           | Fixed            | `.superpowers/findings-ledger.json:8547-8555` |
+| OC-0367           | Fixed            | `.superpowers/findings-ledger.json:8616-8624` |
+| OC-0368           | Fixed            | `.superpowers/findings-ledger.json:8639-8647` |
+| OC-0370           | Fixed            | `.superpowers/findings-ledger.json:8685-8693` |
+| OC-0371           | Fixed            | `.superpowers/findings-ledger.json:8708-8716` |
+| OC-0372           | Fixed            | `.superpowers/findings-ledger.json:8731-8739` |
+| OC-0373           | Fixed            | `.superpowers/findings-ledger.json:8754-8762` |
+| OC-0375           | Fixed            | `.superpowers/findings-ledger.json:8799-8807` |
+
+The ledger's four open entries are OC-0445 (operational delivery budgets),
+OC-0446 (restart measurement), OC-0447 (capacity measurement) and OC-0448
+(release artifact verification property), at
+`.superpowers/findings-ledger.json:10331-10390`. **No B9 workstream closes one
+of these open findings.** They remain with their existing owners and release
+gates. Newly verified B9 defects must enter the canonical ledger or a private
+advisory before remediation. Phase exit requires no open B9-tagged finding
+unless the owner explicitly retags it with a written reason in the scorecard;
+a known exploitable beta blocker is not accepted risk.
+
+## HP-9 — Feature freeze and accessibility acceptance
+
+B9-27 prepares `docs/plans/hp-9-scorecard-<date>.md` with the exact candidate
+commit, B9-26 evidence manifest, every requirement journey, accessibility
+defect disposition and gate verdict. The owner reviews and signs; this plan
+does not supply that signature. Freeze features, English strings, protocol,
+migrations and user-visible behavior after acceptance. Blocker fixes require
+focused PRs, explicit freeze-impact review and new candidate evidence.
+
+At HP-9 the owner confirms or revises the 2026-09-18 B10 table (Q12), including
+the destination/owner of moved thirty-run and fourteen-day-soak work and moved
+documentation. Retain the RC matrix, alpha upgrade/rollback, protocol check,
+desktop/server/Docker evidence, one capacity comparison, zero unresolved
+advisory/open P0/P1, packaging/provenance/signing/update checks, safe release
+notes and HP-10 go/no-go unless a new explicit owner amendment changes them.
+Q11 settles the retained BPR-051 non-developer comprehension read. B9 closure
+does not itself tag, publish, merge, or satisfy B10.
+
+## Exit gate and required evidence
+
+Every row needs a dated PASS on the applicable candidate. FAIL, NOT RUN and
+missing owner decisions block closure; do not replace them with prose promises.
+
+| Exit condition                                         | Required artifact/test evidence                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Approved desktop journeys complete                     | Requirement → milestone → test/recording matrix, including pending/empty/error/refusal/reconnect and permission-change states; four-target desktop qualification inherited and refreshed for affected native changes.                                                                                       |
+| Consent and authorized disclosure preserved            | Native broker and network capture plus first-party request counters; no pre-acknowledgement request; warm-cache, revoke/relabel/deletion, late-result and account-switch checks. Moderation member/reporter/subject/moderator/owner role matrix and audit walkthrough.                                      |
+| No accessibility release blocker                       | Per-milestone keyboard/pointer scripts; native screen-reader recordings with OS/AT versions; focus order/restore proof; measured contrast; OS/app reduced motion; approved text scaling and desktop zoom/reflow; accessible names/errors/status/media controls. Automated reports supplement manual checks. |
+| OwnCord identity and desktop visual behavior preserved | Before/after desktop screenshots across approved themes, key states and window sizes. B9-1 additionally provides emitted-CSS equality or explained non-semantic build differences plus ordered-rule equality and owner review. No phone/tablet requirement is substituted here.                             |
+| Translation-ready English                              | Source-aware sink inventory/scan with zero unexplained literals, typed interpolation/plural/date/number tests, exact-English and expanded-text comparisons, approved native/external-data exclusions.                                                                                                       |
+| Honest capabilities                                    | LAN-without-internet, disconnected/reconnect, denied/cancelled device capture, notification limitations, manual/automatic update and failure demonstrations. No false success or unsupported offline/push/media claim.                                                                                      |
+| Performance and engineering gates preserved            | Existing bundle budget report; same-fixture startup/interaction/memory comparisons; complete affected client/server/Rust/generated checks where applicable; no added warnings, cycles, lifecycle violations or weakened thresholds.                                                                         |
+| Lifecycle/compatibility complete                       | Real-server privacy, report/action/appeal, deletion/retention, block, session displacement, recovery and incompatibility journeys; synthetic data only.                                                                                                                                                     |
+| Status and owner acceptance agree                      | HP-9 signed; PRD/README/traceability/register/ledger consistent; exact integration CI and pre-squash structural proof retained; B8 deferrals explicit; B10 decisions recorded.                                                                                                                              |
+
+Evidence records command, tool/OS/AT versions, fixture, expected/actual result,
+commit, PR/CI link and artifact location. Mocked Playwright cannot qualify
+native traffic, Windows/Linux media or OS assistive technology. Test names and
+proposed evidence files are in each milestone. Use the repository's ci-check
+skill at execution time; full affected-component checks remain required. No
+local Tauri packaging build (`Client/CLAUDE.md:125`); use the authorized CI
+artifact path. Evidence uses throwaway accounts and synthetic content; secrets,
+private reports and verbatim user logs do not enter public artifacts.
+
+## Risks and mitigations
+
+| Risk                                                                       | Impact                                                                 | Mitigation                                                                                                                          |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| An implemented API is mistaken for accepted service/desktop readiness      | Client ships on an unqualified boundary                                | Keep separate source, test and owner-acceptance verdicts; block entry and named contract handoffs.                                  |
+| Consent applied only to the visible overlay                                | Hidden content work violates the approved gate                         | Guard admission before render/fetch, test alternate paths and native traffic; retain server authority.                              |
+| Broader moderator DTO reused for recipient UX                              | Unauthorized information appears in DOM, state or assistive technology | Separate DTOs/stores, server-scoped reads, role matrix and teardown checks; Q6 prerequisite.                                        |
+| Shared files change concurrently                                           | Conflicting state/lifecycle and cascade behavior                       | Single-writer integration, rebase, focused gates; owned feature modules/catalogs.                                                   |
+| CSS split and visual fixes mix                                             | A cascade regression cannot be attributed                              | B9-1 mechanical-only output comparison and pre-squash head; subsequent visual PRs.                                                  |
+| Accessibility or extraction becomes late cleanup                           | New screens ship inaccessible or hard-coded                            | Blocking checks/catalog usage in every feature PR; B9-26 verifies already-complete lanes.                                           |
+| Revocation is described as cancelling requests without a cancellation seam | Privacy evidence overstates behavior                                   | Separate no-new-admission, stale-result suppression and actual cancellation; plan any required broker extension before claiming it. |
+| Shortened B10 is treated as automatic release permission                   | Required retained gates are skipped                                    | Q11/Q12 and explicit HP-9/HP-10 owner decisions; no release action in B9.                                                           |
+
+## Open questions
+
+These are owner decisions, not defaults already approved. Record answer, date,
+reason and affected milestone before implementation. Q1..Q10 gate the named
+work; Q11/Q12 are resolved at HP-9. Recommendations do not change product scope.
+
+### Q1 — Accessibility acceptance contract
+
+**Options and consequences:** Adopt a documented WCAG 2.2 AA-oriented checklist with Windows NVDA and Linux Orca native checks, text scaling and desktop reflow; or specify an equivalent native-task checklist covering every roadmap property with explicit thresholds and AT coverage. The first provides familiar criteria; the second needs more owner review to establish equivalent coverage. Structural smoke alone is insufficient under either option.
+
+**Recommendation (not approved):** Adopt the broader checklist, name supported OS/AT versions and assign human reviewers before implementation. This is a proposed bar, not a claim of certification.
+
+### Q2 — Navigation and badge placement
+
+**Options and consequences:** Place Requests beside DMs, Moderation Center behind a permission-gated server entry and personal notices/appeals in a safety view; or use a new top-level navigation rail. The first changes familiar workflows less; the rail is more visible but has a larger navigation and reflow cost. Badge semantics (pending requests versus unread) also need an explicit choice.
+
+**Recommendation (not approved):** Use the existing shell and a pending-request count; approve destinations, back behavior and badge meaning together before B9-4.
+
+### Q3 — External-content consent scope and persistence
+
+**Options and consequences:** Require per-item activation without persistence; remember consent for this server/account session; or persist provider/server permission across restarts. Per-item is clearest but repetitive, session memory reduces prompts, persistent grants need a discoverable revocation/reset model and stronger lifecycle evidence. All options keep zero fetch before the applicable acknowledgement; NSFW and request trust remain separate.
+
+**Recommendation (not approved):** Start with explicit per-item activation and no durable grants; offer broader grants only after the owner chooses their exact scope. Playback remains a separate deliberate action.
+
+### Q4 — Warning and timeout presentation
+
+**Options and consequences:** Use a persistent dismiss-resistant notice with an explicit Acknowledge action; or a blocking modal before other navigation. The former preserves access to recovery and help; the latter is harder to miss but interrupts the whole app and has stronger focus/escape obligations.
+
+**Recommendation (not approved):** Use a persistent notice with explicit acknowledgement; keep timeout state adjacent to disabled actions. The server acknowledgement requirement does not itself settle whether the UI blocks navigation.
+
+### Q5 — Effective voice moderation affordance contract
+
+**Options and consequences:** Provide a narrow server-computed capability projection for the caller in each channel; or expose sufficient authorized overrides for a complete client derivation. The first keeps policy canonical and payload small; the second duplicates more permission logic and data. Role-only controls with eventual server refusal do not close SEC-02's effective-permission UI requirement.
+
+**Recommendation (not approved):** Approve a minimal server-derived projection as a separately planned prerequisite PR; settle its payload, refresh semantics and owner before B9-14. Do not silently widen B9-14 into a server authorization rewrite.
+
+### Q6 — Restart-safe recipient sanctions and appeal eligibility
+
+**Options and consequences:** Add a member-safe own-action/restriction read with ids, reasons, expiry and eligibility; or use only existing live frames and ready warnings. The read needs a narrowly scoped server contract PR; live-only UX cannot recover removal/timeout action ids and all eligible history after restart and leaves BPR-072/073 incomplete. Currently banned users remain out-of-band under the existing B5 policy in either case.
+
+**Recommendation (not approved):** Approve a separate B5 contract-completion PR for own-action/restriction discovery, with a DTO excluding reporter/evidence/internal notes. B9-15/16 remain blocked for complete closure until its exact contract is accepted.
+
+### Q7 — Translation boundary beyond renderer text
+
+**Options and consequences:** Cover all app-authored desktop text, including native menus/notifications/errors, while treating OS/user/server data as classified inputs; or limit extraction to TypeScript. TypeScript-only is smaller but leaves desktop-owned text outside BPR-064; including the server admin panel would further expand this client phase.
+
+**Recommendation (not approved):** Cover renderer and app-authored native desktop text, inventory visible server errors with a client mapping where appropriate, explicitly exclude OS/user data and the separately served admin panel. Confirm catalog ownership and those exclusions.
+
+### Q8 — Theme and custom-accent accessibility policy
+
+**Options and consequences:** Qualify every built-in theme and provide a contrast-safe fallback for arbitrary custom accents; or require/warn users to adjust custom themes themselves. Fallback preserves readable controls but can alter chosen colors; warnings preserve exact choices but cannot establish an all-settings contrast claim.
+
+**Recommendation (not approved):** Qualify built-ins and high-contrast mode, retain identity, and approve a safe fallback for essential text/focus indicators. The owner must decide how custom accents are constrained or disclosed.
+
+### Q9 — B9 start while upstream acceptance is open
+
+**Options and consequences:** Keep all product implementation behind the roadmap entry gates; or approve a written amendment allowing specific non-boundary work before B7/B5 closure. Strict ordering waits for evidence; a narrow exception could allow CSS/text work but must list residual risks and cannot authorize moderation evidence before its contract is accepted.
+
+**Recommendation (not approved):** Keep current gate order. This planning PR and non-mutating evidence preparation are allowed now; do not infer a waiver from B7's HP-6 exception.
+
+### Q10 — Timeout duration control
+
+**Options and consequences:** Use a validated duration input within the existing one-minute to 28-day bounds; or add owner-chosen presets plus custom input. The former avoids inventing moderation policy; presets are faster but imply preferred sanction lengths.
+
+**Recommendation (not approved):** Use a validated duration input initially; add presets only if the owner chooses their labels and values.
+
+### Q11 — BPR-051 comprehension-read method at HP-9
+
+**Options and consequences:** Have one or more non-developer desktop users explain the operator trust, text/file access, deletion/backup and local-export disclosures after following the journey; or rely only on technical review. The first satisfies the stated comprehension purpose; technical review alone leaves that B10 item unproven.
+
+**Recommendation (not approved):** Owner names the reader(s), questions and pass criterion at HP-9, records safe results against the RC and keeps this B10 obligation even if longer documentation moves later.
+
+### Q12 — Confirm or revise the shortened B10 cut list
+
+**Options and consequences:** Confirm the 2026-09-18 keep/reduce/move table; or revise named rows at HP-9. Confirmation moves thirty-run and fourteen-day-soak evidence and the listed documentation to a later beta-to-stable gate; revision changes release work and needs an updated dated roadmap decision. Neither choice waives RC checks, upgrade/rollback, advisory closure or HP-10.
+
+**Recommendation (not approved):** Review the table row by row at HP-9 and record the owner's decision and later-gate ownership; do not pre-approve it in B9 planning.
