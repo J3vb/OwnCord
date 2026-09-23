@@ -297,7 +297,11 @@ re-run, and every one failed. Each was restored before commit.
   meet Q1 at 2px and 3:1 or better (e2e `focusIndicator`). The list keeps
   focus and its element through live updates (unit). On close, focus goes to
   the returned channel's composer, because the opener leaves with DM mode
-  (e2e).
+  (e2e). Entering DM mode from a focused control (the pending badge, "View
+  all") moves focus to the first DM-mode control, "Message Requests (N)",
+  instead of dropping it to the page (review fix, 2026-09-23; unit test
+  "opens DM mode from the badge for a user with no DMs", which fails without
+  it).
 - **Contrast:** intro, sender, username, time, preview and the no-text line
   meet 4.5:1 in neon-glow, dark, midnight and light, each with and without
   High Contrast (e2e `textContrast`). They use only the qualified tokens

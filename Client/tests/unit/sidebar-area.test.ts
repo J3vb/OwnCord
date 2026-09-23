@@ -3081,11 +3081,16 @@ describe("SidebarArea", () => {
 
         const badge = q(result, "dm-requests-badge");
         expect(badge?.tagName).toBe("BUTTON");
+        badge?.focus();
+        expect(document.activeElement).toBe(badge);
         badge?.click();
         uiStore.flush();
 
         expect(uiStore.getState().sidebarMode).toBe("dms");
-        expect(q(result, "dm-requests-entry")?.textContent).toBe("Message Requests (1)");
+        const entry = q(result, "dm-requests-entry");
+        expect(entry?.textContent).toBe("Message Requests (1)");
+        // The badge left with channel mode; focus lands on the entry, not <body>.
+        expect(document.activeElement).toBe(entry);
         cleanup(result);
       });
     });
