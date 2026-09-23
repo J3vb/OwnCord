@@ -192,7 +192,8 @@ RI-08 implementation (2026-09-23), based on `dev` commit
   when a value changes back within the same second.
 - The panel requires preview followed by confirmation, discards canceled or
   failed previews and displays apply failures without silently retrying.
-- Regression coverage: `Server/service/retention_preview_test.go`,
+- Regression coverage: `Server/db/retention_preview_test.go`,
+  `Server/service/retention_preview_test.go`,
   `Server/admin/retention_test.go` and the executable admin-panel contract in
   `Client/tests/contract/server-admin-static-panel.test.ts` cover preview/sweep
   maths, indefinite override removal, concurrent writes, stale edits, token
