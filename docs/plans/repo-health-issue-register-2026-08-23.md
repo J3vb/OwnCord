@@ -77,10 +77,10 @@ together as if each row were a unique defect:
 | Status    |   Count |
 | --------- | ------: |
 | Fixed     |     442 |
-| Open      |       4 |
+| Open      |       5 |
 | Declined  |       4 |
 | Duplicate |       1 |
-| **Total** | **451** |
+| **Total** | **452** |
 
 As of 2026-09-23, `OC-0451` (N14's back-to-back presence-status finding) is
 fixed by PR #1707.
