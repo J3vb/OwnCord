@@ -9,8 +9,8 @@
 }
 /* The header wraps its buttons onto a second, right-aligned row rather than
    squeezing the server icon and name to nothing: Invite and Audit Log beside
-   a server name are already wider than the sidebar in English, and longer
-   labels more so. */
+   a server name are already wider than the sidebar in English, Moderation
+   beside them more so, and longer labels further still. */
 .unified-sidebar-header {
   min-height: 44px;
   padding: 8px 14px;
@@ -29,18 +29,6 @@
   flex: 1 1 6em;
   min-width: 0;
   overflow: hidden;
-}
-/* Invite, Audit Log and Moderation are wider together than the sidebar, so
-   with the Moderation entry shown the header wraps the buttons that do not
-   fit onto a second, right-aligned row instead of pushing one under the chat
-   column. */
-.unified-sidebar-header.with-moderation {
-  height: auto;
-  min-height: 44px;
-  padding: 8px 14px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  row-gap: 6px;
 }
 .unified-sidebar-header .server-icon-sm {
   flex-shrink: 0;
