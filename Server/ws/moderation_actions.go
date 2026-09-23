@@ -77,7 +77,7 @@ const timeoutExpiryRefreshSlack = time.Second
 // or mid-reconnect right now resumes onto a fresh ready instead of replaying
 // past the change with stale verdicts.
 func (h *Hub) RefreshUserChannels(userID int64) {
-	h.bumpVisibilityWatermark()
+	h.MarkVisibilityChanged()
 	defer h.bumpVisibilityWatermark()
 	if h.db == nil || h.GetClient(userID) == nil {
 		return

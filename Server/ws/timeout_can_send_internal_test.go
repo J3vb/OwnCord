@@ -3,9 +3,12 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -115,5 +118,71 @@ func TestTimeout_ExpiryPushesCanSend(t *testing.T) {
 	}
 	if !waitCanSend(t, f.send, f.chID, 5*time.Second) {
 		t.Fatal("can_send = false after the timeout expired, want true")
+	}
+}
+
+// A refresh landing inside reconnectRegister, after its watermark re-check
+// and before registerNow, must wait for the registration rather than find no
+// client and return, which would leave the resumed client on stale can_send.
+func TestRefreshUserChannels_WaitsForMidHandshakeRegistration(t *testing.T) {
+	database := newTeardownTestDB(t)
+	ctx := context.Background()
+	uid, err := database.CreateUser(ctx, "refresh-race-user", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	chID, err := database.CreateChannel(ctx, "refresh-race-channel", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if _, err := database.CreateSession(ctx, uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+
+	rb := hub.ReplayBuffer()
+	rb.Push(96, chID, []byte(`{"seq":96,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"a"}}`))
+	rb.Push(97, chID, []byte(`{"seq":97,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"b"}}`))
+	rb.Push(98, chID, []byte(`{"seq":98,"type":"chat_message","payload":{"channel_id":`+itoaTest(chID)+`,"content":"c"}}`))
+	hub.SeedSeq(98)
+
+	done := make(chan struct{})
+	var returnedEarly atomic.Bool
+	t.Cleanup(func() { handleReconnectPostCheckPreRegisterRaceHook = nil })
+	handleReconnectPostCheckPreRegisterRaceHook = func() {
+		hookFinished := make(chan struct{})
+		entering := make(chan struct{})
+		go func() {
+			close(entering)
+			hub.RefreshUserChannels(uid)
+			select {
+			case <-hookFinished:
+			default:
+				returnedEarly.Store(true)
+			}
+			close(done)
+		}()
+		<-entering
+		for range 1000 {
+			runtime.Gosched()
+		}
+		close(hookFinished)
+	}
+
+	dialAndResume(t, hub, token, 97)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RefreshUserChannels never completed after the reconnect finished — deadlock?")
+	}
+	if returnedEarly.Load() {
+		t.Fatal("RefreshUserChannels returned while reconnectRegister still held h.seqMu — it must wait for the registration")
 	}
 }
