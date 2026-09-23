@@ -1,0 +1,15 @@
+/* ═══ Responsive ═══ */
+@media (max-width: 1200px) {
+  .member-list {
+    width: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+}
+@media (max-width: 800px) {
+  .channel-sidebar,
+  .unified-sidebar {
+    width: 0;
+    overflow: hidden;
+  }
+}

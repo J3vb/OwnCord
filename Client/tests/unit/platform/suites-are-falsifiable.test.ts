@@ -383,6 +383,8 @@ describeNativeVoiceSuite(async () => {
     disconnect: async () => undefined,
     setMicrophone: async () => undefined,
     setSubscribed: async () => undefined,
+    setVolume: async () => undefined,
+    setScreenshareVolume: async () => undefined,
     debugInfo: async () => undefined,
     listDevices: async () => undefined,
     setDevice: async () => undefined,
@@ -392,6 +394,7 @@ describeNativeVoiceSuite(async () => {
     connectsAs: () => undefined,
     publishesCameraAs: () => undefined,
     hasDevices: () => undefined,
+    sharesScreenAs: () => undefined,
     commands: () => [],
     emits: async () => undefined,
   };

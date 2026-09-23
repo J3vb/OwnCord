@@ -8,12 +8,11 @@
 // stylesheet: the modal rendered as unstyled text on a dark backdrop, the
 // results list had no max-height/scroller, and — the functional break — the
 // roving `--active` highlight ArrowUp/ArrowDown moves painted nothing at all.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readAppCss } from "../helpers/app-css";
 import { describe, it, expect } from "vitest";
 
 describe(".quick-switcher (Ctrl+K) has a stylesheet", () => {
-  const css = readFileSync(join(process.cwd(), "src/styles/app.css"), "utf8");
+  const css = readAppCss();
 
   it("styles the modal container", () => {
     expect(

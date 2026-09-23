@@ -14,8 +14,13 @@ commands and a twenty-first importer, so all twenty-one live under
 service (the twenty-second importer) and seven Linux-only `native_voice_*`
 commands, then phase 1b (same branch family, 2026-09-22), which added the two
 device commands, and phase 2 (branch `fm/linux-video-p2`, 2026-09-22), which
-added the two camera commands. The
-registration-based correction was measured at `0beee8e` (`dev`, 2026-09-23). The
+added the two camera commands, and audio parity (branch
+`fm/linux-audio-parity`, 2026-09-23), which added the per-user and
+screen-share audio volume commands, and phase 3 (branch
+`fm/linux-screenshare-p3`, 2026-09-23), which added the four screen-share
+commands. The registration-based correction was measured at `0beee8e` (`dev`,
+2026-09-23) and re-measured after the audio-parity and screen-share merges at
+`2ced3de` (`dev`, 2026-09-23). The
 three counts below are re-derived from the tree by
 `Client/tests/unit/platform-contracts-counts.test.ts`, and eslint rejects a
 static or dynamic native import anywhere else.
@@ -66,17 +71,17 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 22    |
-| Distinct `invoke` command names called from `Client/src/`  | 42    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 45    |
+| Distinct `invoke` command names called from `Client/src/`  | 48    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 51    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 47    |
 
-The handler count covers the 45 distinct registrations
+The handler count covers the 51 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
-`#[cfg(feature = "devtools")]` and the twelve `native_voice_*` commands behind
-`#[cfg(target_os = "linux")]`, so a default build registers 44 on Linux and 32
+`#[cfg(feature = "devtools")]` and the eighteen `native_voice_*` commands behind
+`#[cfg(target_os = "linux")]`, so a default build registers 50 on Linux and 32
 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
@@ -118,10 +123,16 @@ native_voice_debug_info
 native_voice_disconnect
 native_voice_list_devices
 native_voice_publish_camera
+native_voice_publish_screen
+native_voice_screen_sources
 native_voice_set_device
 native_voice_set_key
 native_voice_set_microphone
+native_voice_set_screenshare_volume
 native_voice_set_subscribed
+native_voice_set_volume
+native_voice_start_screen
+native_voice_stop_screen
 native_voice_unpublish_camera
 open_devtools
 ptt_listen_for_key

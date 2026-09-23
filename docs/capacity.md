@@ -179,6 +179,11 @@ K6_PEAK_VUS=100 K6_VOICE_VUS=25 K6_RAMP=60s K6_SUSTAIN=180s \
   taskset -c 2,3 k6 run --insecure-skip-tls-verify ws-load.js
 ```
 
+`node --test Server/scripts/k6/ws-load.test.mjs` executes the WebSocket harness
+with mocked k6 I/O, checking channel assignment, rate bounds, restart boundaries,
+summary samples and profile compatibility. It runs in the PR consistency job;
+it does not replace a real load run.
+
 `Server/scripts/voice-load.sh --selftest` checks the voice harness's own
 assertions offline, with no SFU and no `lk` binary.
 
@@ -292,6 +297,40 @@ during the hold: the 30 s ramp-in is the step's logins landing (paced at ~3/s
 against a four-slot bcrypt admission budget), and a step's published figure is
 the minute it was held at that count, not the bcrypt that got it there.
 
+The search uses **multiple pre-seeded text channels**, supplied through
+`K6_CEILING_CHANNELS`. A connection focuses and posts in its assigned channel
+for its lifetime. Each connection still sends once per `K6_SEND_INTERVAL_MS`:
+step N still offers `N × 1000 / interval_ms` messages/s in total. The fan-out
+is now within each channel, so these results are a multi-channel capacity
+shape and are not directly comparable to the old single-channel fan-out.
+
+The harness reserves **50% of the 100-message sliding one-second topic limit**.
+For interval I, each VU can schedule `ceil(1000 / I)` sends in that window,
+even when timers align. Each channel therefore gets at most
+`floor(50 / ceil(1000 / I))` VU slots. Provision at least
+`ceil((ceiling_max + 1) / slots_per_channel)` distinct, readable text channels;
+the extra slot covers the observer's arbitrary VU id. The workflow seeds these
+automatically at its default 2 s interval: **11 channels for 500 connections**.
+Manual runs must supply the ids; missing, duplicate, invalid or insufficient
+lists fail at init instead of silently measuring a topic cap. Faster custom
+send intervals need more channels. The server's rate limit is unchanged.
+
+The send interval itself is also bounded: each user may send at most 10
+messages/second (`Server/service/message_crud.go`), so `ceiling-search` rejects
+`K6_SEND_INTERVAL_MS` below 100 at init. A faster interval would be admitted
+only for the subscribed subset and would silently publish that subset's latency
+as the hardware ceiling — the same code-cap-masquerading-as-hardware defect
+OC-0447 closed, one layer up.
+
+`k6-summary.json` and stdout include `load_measurement.steps`: hold boundaries,
+planned total and mean per-channel message rates, a conservative per-channel
+one-second send bound, and **each channel's observed send-attempt count/rate**
+(count divided by the 60 s hold, excluding ramp sends). This is generator-side
+traffic evidence, not a server admission counter. Delayed processing can still
+bunch frames at the server: the workflow's existing server-log gate must find
+zero `topic rate limit exceeded` lines before any step is called a hardware
+measurement. Report held population and generator saturation alongside it.
+
 - **Publishes** the last step at which every budget above still held, plus the
   per-step table. The steps are informational and nothing is gated on them. The
   table's population column is `obs_connected_users{step:<n>}` — the server's
@@ -371,9 +410,10 @@ count==0`, and no replay gap across the restart. A message that was sent,
   published as "lost N of M" until it is fixed, not a number to round. The
   history is the only place to look: the post-restart resume is a full re-sync
   (next point), so no replay will ever carry a drain-window send.
-- **Delivery and acknowledgement are tagged `pre-restart` / `post-restart`**,
-  so a budget missed under this profile can be placed on one side of the stop
-  or the other rather than averaged across it.
+- **Delivery and acknowledgement keep their `phase:pre-restart` and
+  `phase:post-restart` tags**, with a separate `phase:recovery` for the stop,
+  drain, outage and reconnects. The explicit windows below separate recovery
+  from settled load; neither ramp is included in the steady comparison.
 - **Post-restart resume is always the `none` tier, by design.** A restart
   renumbers the sequence space and marks visibility changed, so a connection
   that resumes after one cannot be served from the `events` table and the server
@@ -382,6 +422,47 @@ count==0`, and no replay gap across the restart. A message that was sent,
 - **The 20 s figure above is not this gate.** That is the idle smoke's drain;
   this drill's hard bound is the 30 s stop timeout, after which the container is
   killed and the run fails.
+
+#### Restart measurement windows
+
+All boundaries are seconds from the executor's scenario start, inclusive at
+the start and exclusive at the end. Samples are assigned **at receipt**;
+a delayed delivery sent in recovery but received after its boundary belongs
+to the settled window. Defaults (`K6_RAMP=60s`, `K6_SUSTAIN=180s`,
+`K6_RESTART_RECOVERY_S=30`) are:
+
+| Existing phase tag | Window                                  | What it measures                                     |
+| ------------------ | --------------------------------------- | ---------------------------------------------------- |
+| `ramp`             | [0, 60) s                               | Growing population; excluded from steady comparison  |
+| `pre-restart`      | [60, 135) s                             | 75 s of steady load before the scheduled stop        |
+| `recovery`         | [135, 165) s                            | Stop, drain, outage and reconnect activity           |
+| `post-restart`     | [165, 240) s                            | 75 s of planned settled load after recovery          |
+| `ramp-down`        | [240, 260) s and any graceful-stop tail | Draining population; excluded from steady comparison |
+
+`K6_RESTART_AT` defaults to `(2 × ramp + sustain − recovery) / 2`, rounded to
+a whole second; the workflow uses 135 s. Manual runs must schedule the actual
+stop to match this knob. The summary's `load_measurement.windows` gives the
+configured boundaries/durations and **delivery and acknowledgement p95 and
+sample counts** for every phase. Existing tagged metrics remain in place.
+Empty windows report `sample_count: 0, p95_ms: null`, never a zero-latency
+success. The steady-window delivery floors scale separately with each window's
+duration, so explicit asymmetric `K6_RESTART_AT` overrides still work. Empty or
+reversed steady/recovery windows fail configuration validation.
+
+The recovery window is fixed, not proof that all connections recovered within
+30 s. No receipts during an outage means no latency samples: read its sample
+count with drain duration, resume timings and losses. Check the actual stop
+against the planned boundary and verify the cohort recovered before calling
+`post-restart` settled. A full load run is still needed to compare recovery
+with settled and pre-stop p95s; a remaining steady-state gap is not automatically
+caused by the restart. Historical numbers used different windows and must be
+read with their original boundaries, even though the pre/post tag names survive.
+
+The observer uses the same scenario clock and phases. After a detected reboot
+(`uptime_seconds` decreases), counter deltas start from the new boot rather
+than subtracting the old process's totals. Polls remain 5 s apart, and deltas
+crossing a boundary are booked at the poll's end; they are supporting evidence,
+not exact per-message attribution.
 
 ### Reproducing an operational scenario by hand
 
@@ -732,7 +813,9 @@ it.** Three things changed, none of which re-measures anything published here:
   when a window did not carry the workload — a comparison between two windows
   is worthless if either was empty.
 
-The next restart run will publish an attributable post-restart figure. The
+The next restart run must validate these windows and publish the recovery and
+settled p95s with their counts; the harness correction alone establishes no
+new latency result. The
 34/51 ms and 393/452 ms above remain what that run measured, and remain not an
 equal-load comparison.
 
@@ -773,7 +856,7 @@ acknowledgement (378 ms against 150 ms).
 
 **From step 200 up, this search is not measuring the hardware.** All
 connections are in one channel sending one message every 2 s, so step 200 is
-exactly 200 messages/s into a single channel — and
+exactly 100 messages/s into a single channel — and
 `topicRateLimitPerSecond = 100` (`Server/ws/hub_stats.go:73`, enforced at
 `Server/ws/hub_broadcast.go:402`) caps any single channel at 100 messages/s.
 The server log for this run carries **24,893 "hub: topic rate limit exceeded,
@@ -803,13 +886,14 @@ The rest of what the run says, for whoever re-runs it:
 **The harness has since been corrected (OC-0447), and the figures above predate
 it.** The search no longer walks into the limiter:
 
-- **The cohort is spread across channels.** The workflow seeds
-  `ceil(ceiling_max / 150)` text channels and passes their ids to k6, and each
-  connection picks one by its own VU slot. One message per connection per 2 s
-  over 4 channels is 62.5 messages/s per channel at step 500 — a third of the
-  limiter left unused — instead of 250/s on one. Connections now
-  `channel_focus` the channel they post in, so a VU's subscription matches its
-  traffic.
+- **The cohort is spread across channels with enforced headroom.** The earlier
+  correction seeded `ceil(ceiling_max / 150)` channels but allowed missing or
+  insufficient lists and did not bound aligned sends. The completed correction
+  uses the sliding-window calculation above: 11 channels at max 500 and a 2 s
+  send interval, no more than 46 VU slots per channel (23 messages/s scheduled
+  mean, at most 46 scheduled sends in one second). The total remains 250
+  messages/s at step 500. The summary publishes the planned rate and observed
+  send-attempt rate for every channel and hold. Sender and focus use the same id.
 - **Shedding is now a hard failure, not a footnote.** A post-run step greps
   the server log for `topic rate limit exceeded` on the ceiling leg and fails
   the run if it finds any, with the same posture as the run's own
@@ -818,6 +902,9 @@ it.** The search no longer walks into the limiter:
   are **inconclusive rather than a ceiling**. `CEILING_CHANNELS` is printed in
   the failure so the fix is one input away.
 
-The table above remains what that run measured. The step-100 figure is
-unaffected by any of this — it was never near the limiter — and is still the
-last step at which every budget held.
+The table above remains historical evidence from the single-channel run.
+The new spread changes recipient fan-out at **every** step, including 100;
+none of the old latency figures qualifies this multi-channel shape. The next
+constrained run must hold each requested population, show the unchanged total
+send rate and per-channel headroom, and pass the zero-shedding log gate before
+publishing a new per-step budget table or a hardware-ceiling claim.

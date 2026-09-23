@@ -4,7 +4,11 @@
 
 import type { ServerMessage, ClientMessage } from "./types";
 import { desktop } from "../platform/desktop";
-import type { SocketConnection, SocketConnectionState } from "../platform/contracts/socket";
+import type {
+  SocketConnection,
+  SocketConnectionState,
+  SocketRetryHint,
+} from "../platform/contracts/socket";
 import { createLogger } from "./logger";
 import { PROTOCOL_EPOCH } from "./protocolTypes";
 
@@ -160,7 +164,20 @@ export function wsUrlFor(host: string): string {
 // state machine, the reconnect policy, the heartbeat, frame parsing and the
 // send-failure codes.
 
-export function createWsClient() {
+/** Dependencies for the backoff policy only; session/heartbeat clocks are unchanged. */
+interface ReconnectDependencies {
+  /** Uniform sample in [0, 1]. */
+  readonly random?: () => number;
+  readonly clock?: {
+    setTimeout(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
+    clearTimeout(timer: ReturnType<typeof setTimeout>): void;
+  };
+}
+
+export function createWsClient({
+  random = Math.random,
+  clock = globalThis,
+}: ReconnectDependencies = {}) {
   // One transport per client: the certificate listener it registers is
   // app-lifetime state, and a second client (a fresh login, a test) must not
   // inherit a registration the first one made.
@@ -217,9 +234,19 @@ export function createWsClient() {
     }
   }
 
-  function getReconnectDelay(): number {
+  function getReconnectDelay(retryAfterMs?: number): number {
     const maxDelay = config?.maxReconnectDelayMs ?? DEFAULT_MAX_RECONNECT_DELAY;
-    return Math.min(1000 * Math.pow(2, reconnectAttempt), maxDelay);
+    const ceiling = Math.min(1000 * Math.pow(2, reconnectAttempt), maxDelay);
+    // Equal jitter retains a quiet period and keeps spreading even at the cap.
+    // Transport hints are minimum waits, bounded by the configured hard cap.
+    // Ignore absent/malformed hints; never interpret native error text as one.
+    const serverDelay =
+      retryAfterMs !== undefined && Number.isFinite(retryAfterMs) && retryAfterMs >= 0
+        ? Math.min(retryAfterMs, maxDelay)
+        : 0;
+    const lower = Math.max(ceiling / 2, serverDelay);
+    const upper = Math.max(ceiling, serverDelay);
+    return lower + random() * (upper - lower);
   }
 
   function startHeartbeat(): void {
@@ -242,9 +269,9 @@ export function createWsClient() {
     }
   }
 
-  function scheduleReconnect(): void {
+  function scheduleReconnect(retryAfterMs?: number): void {
     if (intentionalClose || certMismatchBlock || !config) return;
-    const delay = getReconnectDelay();
+    const delay = getReconnectDelay(retryAfterMs);
     log.info("WebSocket reconnecting", {
       delayMs: delay,
       attempt: reconnectAttempt + 1,
@@ -252,7 +279,7 @@ export function createWsClient() {
       lastSeq,
     });
     setState("reconnecting");
-    reconnectTimer = setTimeout(() => {
+    reconnectTimer = clock.setTimeout(() => {
       reconnectAttempt++;
       const nextConfig = config;
       if (!nextConfig) {
@@ -266,7 +293,7 @@ export function createWsClient() {
 
   function cancelReconnect(): void {
     if (reconnectTimer !== null) {
-      clearTimeout(reconnectTimer);
+      clock.clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
   }
@@ -420,7 +447,7 @@ export function createWsClient() {
   // The transport's proxy lifecycle, turned into the app's reaction: an open
   // proxy is still unauthenticated until `auth_ok` arrives, and a closed one
   // starts the reconnect policy unless the close was intentional.
-  function handleTransportState(next: SocketConnectionState): void {
+  function handleTransportState(next: SocketConnectionState, retryHint?: SocketRetryHint): void {
     if (next === "connected") {
       proxyOpen = true;
       log.info("WebSocket open, sending auth", {
@@ -453,7 +480,7 @@ export function createWsClient() {
       });
       stopHeartbeat();
       if (!intentionalClose) {
-        scheduleReconnect();
+        scheduleReconnect(retryHint?.retryAfterMs);
       } else {
         setState("disconnected");
       }

@@ -10,6 +10,7 @@
 //   Main → Worklet:  { type: "stop" }
 //   Worklet → Main:  { type: "gate", gated: boolean }
 //   Worklet → Main:  { type: "rms", value: number }  (optional, for VAD indicator)
+//   Worklet → Main:  { type: "stopped" }  (from the final process() call)
 // =============================================================================
 
 class VadProcessor extends AudioWorkletProcessor {
@@ -51,7 +52,13 @@ class VadProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs) {
-    if (!this._active) return false; // Returning false stops the processor
+    if (!this._active) {
+      // Returning false stops the processor. The main thread waits for this
+      // before closing the AudioContext: a context closed first never calls
+      // process() again, and Chromium then keeps the node alive for good.
+      this.port.postMessage({ type: "stopped" });
+      return false;
+    }
 
     const input = inputs[0];
     if (input === undefined || input.length === 0 || input[0] === undefined) return true;

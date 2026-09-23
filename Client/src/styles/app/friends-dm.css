@@ -1,0 +1,174 @@
+/* ── DM Back Header ── */
+.dm-back-header {
+  height: 44px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-glow, var(--border));
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.dm-back-header:hover {
+  background: var(--bg-hover);
+}
+.dm-back-arrow {
+  color: var(--accent-primary, var(--accent));
+  font-size: 16px;
+}
+.dm-back-info {
+  flex: 1;
+}
+.dm-back-title {
+  color: var(--accent-primary, var(--accent));
+  font-weight: 600;
+  font-size: 12px;
+}
+.dm-back-subtitle {
+  color: var(--text-micro);
+  font-size: 9px;
+}
+
+/* ── Friends / DM View ── */
+.dm-sidebar-header {
+  padding: 8px;
+  flex-shrink: 0;
+}
+.dm-search {
+  width: 100%;
+  background: var(--bg-tertiary);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text-normal);
+  font-size: 13px;
+}
+.dm-search::placeholder {
+  color: var(--text-micro);
+}
+
+.dm-section-label {
+  padding: 16px 16px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.dm-section-label .dm-add {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.1s;
+}
+.dm-section-label .dm-add:hover {
+  color: var(--text-normal);
+}
+
+.dm-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  margin: 1px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all 0.1s;
+}
+.dm-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+.dm-item.active {
+  background: var(--bg-active);
+  color: white;
+}
+.dm-item .dm-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-circle);
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+  color: white;
+}
+.dm-item .dm-avatar .dm-status {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-circle);
+  border: 3px solid var(--bg-secondary);
+}
+.dm-item.active .dm-avatar .dm-status {
+  border-color: var(--bg-active);
+}
+.dm-item .dm-name {
+  font-size: 14px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dm-item .dm-close {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-micro);
+  font-size: 14px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.dm-item:hover .dm-close {
+  display: flex;
+}
+.dm-item .dm-close:hover {
+  color: var(--text-normal);
+}
+.dm-item .dm-unread {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: white;
+  flex-shrink: 0;
+}
+/* Numeric unread / mention badges — same shape as the channel list's. */
+.dm-item .dm-unread-badge,
+.dm-item .dm-mention-badge {
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+.dm-item .dm-unread-badge {
+  background: var(--accent);
+}
+.dm-item .dm-mention-badge {
+  background: var(--red);
+}

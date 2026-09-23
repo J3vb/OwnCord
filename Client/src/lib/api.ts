@@ -98,6 +98,27 @@ export interface RecoveryKitStatus {
   readonly used_at: string | null;
 }
 
+/** One row of GET /users/me/moderation: the caller's own warning, timeout,
+ *  removal or (lapsed) ban, read from the server's ledger, so it survives a
+ *  restart. `id` is the `action_id` an appeal takes. Mirrors
+ *  Server/api/moderation_handler.go's ownModerationActionResponse. */
+export interface OwnModerationAction {
+  readonly id: number;
+  readonly kind: "warning" | "timeout" | "removal" | "ban";
+  readonly reason: string;
+  readonly created_at: string;
+  readonly expires_at: string | null;
+  readonly lifted_at: string | null;
+  readonly acknowledged_at: string | null;
+  /** An appealable kind with no appeal filed against it yet. */
+  readonly appealable: boolean;
+  /** The appeal filed against this row: its opaque public id and state. */
+  readonly appeal: {
+    readonly id: string;
+    readonly state: "open" | "assigned" | "upheld" | "overturned" | "withdrawn";
+  } | null;
+}
+
 interface SessionsListResponse {
   readonly sessions: SessionInfo[];
 }
@@ -128,10 +149,14 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-    opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean },
+    opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean; detached?: boolean },
   ): Promise<T> {
     const snapshot = config;
-    const owner = session.fork(signal);
+    // A detached request is owned by its caller's signal alone, so ending the
+    // session it was sent from does not cancel it.
+    const owner = opts?.detached
+      ? new SessionScope({ host: snapshot.host, generation }, signal ? [signal] : [])
+      : session.fork(signal);
     // Tauri keeps abort listeners after a response body has been consumed.
     // Detach transport cancellation when that work settles, while still
     // disposing the logical request scope and all of its parent listeners.
@@ -195,7 +220,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-    opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean },
+    opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean; detached?: boolean },
   ): Promise<T> {
     return doFetch<T>("API", "/api/v1", method, path, body, signal, opts);
   }
@@ -286,8 +311,14 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       );
     },
 
+    /** Revokes this session's token. It runs outside the session's scope, so the
+     *  session teardown that follows a logout cannot cancel it, and a 401 (the
+     *  token is already gone) does not start a second logout. */
     logout(signal?: AbortSignal): Promise<void> {
-      return request<void>("POST", "/auth/logout", undefined, signal);
+      return request<void>("POST", "/auth/logout", undefined, signal, {
+        detached: true,
+        skipUnauthorized: true,
+      });
     },
 
     verifyTotp(code: string, partialToken: string, signal?: AbortSignal): Promise<AuthResponse> {
@@ -426,6 +457,10 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     getRecoveryKitStatus(signal?: AbortSignal): Promise<RecoveryKitStatus> {
       return request<RecoveryKitStatus>("GET", "/users/me/recovery-kit", undefined, signal);
+    },
+
+    getOwnModeration(signal?: AbortSignal): Promise<OwnModerationAction[]> {
+      return request<OwnModerationAction[]>("GET", "/users/me/moderation", undefined, signal);
     },
 
     getSessions(signal?: AbortSignal): Promise<SessionInfo[]> {

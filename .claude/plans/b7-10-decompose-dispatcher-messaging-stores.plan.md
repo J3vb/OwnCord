@@ -1,5 +1,28 @@
 # Plan: B7-10 — Decompose dispatcher, messaging and stores
 
+> **Status:** complete 2026-09-22. 10a (Tasks 0–8) merged in
+> [#1670](https://github.com/J3vb/OwnCord/pull/1670), 10b (Tasks 9–14) in
+> [#1672](https://github.com/J3vb/OwnCord/pull/1672) and 10c (Tasks 15–20) in
+> [#1677](https://github.com/J3vb/OwnCord/pull/1677). Every acceptance item is
+> met, with three deviations documented in those PRs:
+>
+> - **D1 (acceptance item 6):** 10a's mutant total rose 8.7 %, outside the 3 %
+>   band — new call-list and registration mutants from the composition, not
+>   rewritten code; no module's score dropped
+>   (`docs/plans/b7-8-mutation-baseline-2026-09-20.md`, 10a section).
+> - **D2 (acceptance item 2):** 10c added `onAuthCleared(cleanupNotificationAudio)`
+>   to `main.ts` instead of self-registering in `notifications.ts`, which would
+>   have meant editing `session-isolation.test.ts`'s mock. 10a left `main.ts`
+>   untouched as the item requires.
+> - **D3 (acceptance item 9):** the startup-closure budget was raised
+>   90 000 → 91 000 B in 10a by owner decision (`Client/bundle-budgets.json`
+>   note); after 10c the closure measures about 86 KB.
+>
+> `madge` still reports 11 cycles: five close only through the lazy
+> `import("@lib/livekitSession")` and six through `import type` back-edges, so
+> the oxlint `lint:cycles` gate at `--max-warnings=0` is the zero (owner
+> answer to open question 2).
+
 > **Milestone:** B7-10 of
 > [b7-shared-client-platform-desktop-parity.prd](../../docs/plans/b7-shared-client-platform-desktop-parity.prd.md).
 > **Branches:** `feat/b7-10a-dispatcher` (Tasks 0–8),
