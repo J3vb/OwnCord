@@ -6,6 +6,11 @@ import { freePort, freeUdpPort, startProcess, stopProcess, waitForHttp } from ".
 
 export const TEST_PASSWORD = "OwnCord-E2E-pass-123!";
 
+/** The vite preview origin the fullstack suites load. A long local run (the
+ *  soak) can move off the shared default with OWNCORD_E2E_PREVIEW_PORT. */
+export const PREVIEW_PORT = Number(process.env.OWNCORD_E2E_PREVIEW_PORT ?? 4173);
+export const PREVIEW_ORIGIN = `http://localhost:${PREVIEW_PORT}`;
+
 /** No database shortcuts: setup, accounts and channels use production HTTP routes. */
 export async function startTestServer(
   options: {
@@ -53,7 +58,7 @@ export async function startTestServer(
       restart_mode: "spawn",
       allowed_origins: [
         "http://localhost:1420",
-        "http://localhost:4173",
+        PREVIEW_ORIGIN,
         "http://127.0.0.1:1420",
         "http://tauri.localhost",
         "tauri://localhost",
