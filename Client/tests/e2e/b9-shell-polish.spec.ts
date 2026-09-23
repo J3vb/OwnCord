@@ -229,4 +229,19 @@ test.describe("B9-21 DM preview list", () => {
     await page.keyboard.press("ArrowDown");
     await expect(entries.nth(1)).toBeFocused();
   });
+
+  test("the embedded DM section collapses and expands from the keyboard", async ({ page }) => {
+    const arrow = page.locator(".sidebar-dm-section button.category-arrow");
+    const entries = page.locator(".sidebar-dm-section [data-testid='dm-entry']");
+    await expect(entries.first()).toBeVisible();
+
+    await arrow.focus();
+    await page.keyboard.press("Enter");
+    await expect(arrow).toHaveAttribute("aria-expanded", "false");
+    await expect(entries.first()).toBeHidden();
+
+    await page.keyboard.press("Space");
+    await expect(arrow).toHaveAttribute("aria-expanded", "true");
+    await expect(entries.first()).toBeVisible();
+  });
 });

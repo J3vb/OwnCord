@@ -3,7 +3,12 @@ import {
   createSidebarDmSection,
   type SidebarDmSectionOptions,
 } from "../../src/pages/main-page/SidebarDmSection";
-import { dmStore, addDmChannel, updateDmParticipant } from "../../src/stores/dm.store";
+import {
+  dmStore,
+  addDmChannel,
+  updateDmParticipant,
+  updateDmLastMessagePreview,
+} from "../../src/stores/dm.store";
 import { uiStore } from "../../src/stores/ui.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { muteChannel, invalidateMuteCache } from "../../src/lib/channel-mutes";
@@ -278,6 +283,24 @@ describe("SidebarDmSection", () => {
 
       const badge = container.querySelector(".dm-unread-badge");
       expect(badge).toBeNull();
+
+      section.destroy();
+    });
+
+    it("passes onSelectDm the current DM, not the one the reused row was built from", () => {
+      addDmChannel(makeDm({ channelId: 100 }));
+
+      const onSelectDm = vi.fn();
+      const section = createSidebarDmSection(defaultOpts({ onSelectDm }));
+      container.appendChild(section.element);
+      const entry = container.querySelector("[data-testid='dm-entry']") as HTMLElement;
+
+      updateDmLastMessagePreview(100, 900, "latest", "2026-09-23T12:00:00Z");
+      dmStore.flush();
+      expect(container.querySelector("[data-testid='dm-entry']")).toBe(entry);
+      entry.click();
+
+      expect(onSelectDm.mock.calls[0]![0].lastMessageId).toBe(900);
 
       section.destroy();
     });
@@ -576,6 +599,29 @@ describe("SidebarDmSection", () => {
       expect(dmList.style.display).not.toBe("none");
 
       expect(header.classList.contains("collapsed")).toBe(false);
+
+      section.destroy();
+    });
+
+    it("exposes the collapse control as a button whose expanded state follows the list", () => {
+      addDmChannel(makeDm({ channelId: 100 }));
+
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+
+      const arrow = container.querySelector<HTMLButtonElement>("button.category-arrow")!;
+      const dmList = container.querySelector(".sidebar-dm-list") as HTMLElement;
+      expect(arrow.getAttribute("aria-expanded")).toBe("true");
+      expect(arrow.getAttribute("aria-labelledby")).toBe("sidebar-dm-heading");
+
+      // A button's keyboard activation (Enter/Space) is its click.
+      arrow.click();
+      expect(arrow.getAttribute("aria-expanded")).toBe("false");
+      expect(dmList.style.display).toBe("none");
+
+      arrow.click();
+      expect(arrow.getAttribute("aria-expanded")).toBe("true");
+      expect(dmList.style.display).not.toBe("none");
 
       section.destroy();
     });

@@ -61,13 +61,26 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   const dmSection = createElement("div", { class: "sidebar-dm-section" });
 
   // --- Header ---
-  // The header is a pointer disclosure only: it contains its own buttons (the
-  // "+" and the requests badge), and a focusable/button role around interactive
-  // descendants would be an invalid, screen-reader-confusing nesting. The DM
-  // rows themselves are the keyboard-reachable navigation (B9-21).
+  // The header contains its own buttons (the "+" and the requests badge), so it
+  // stays a plain div with a mouse click handler; the arrow is the keyboard
+  // collapse control, a real <button> named by the heading, as on the channel
+  // categories (B9-21).
   const dmHeader = createElement("div", { class: "category" });
-  const dmArrow = createElement("span", { class: "category-arrow" }, "\u25BC");
-  const dmLabelEl = createElement("span", { class: "category-name" }, shellText("dm.heading"));
+  const dmLabelEl = createElement(
+    "span",
+    { class: "category-name", id: "sidebar-dm-heading" },
+    shellText("dm.heading"),
+  );
+  const dmArrow = createElement(
+    "button",
+    {
+      type: "button",
+      class: "category-arrow",
+      "aria-expanded": "true",
+      "aria-labelledby": "sidebar-dm-heading",
+    },
+    "\u25BC",
+  );
   const dmUnreadBadge = createElement("span", { class: "dm-header-unread-badge" });
   const dmAddBtn = createElement(
     "button",
@@ -182,7 +195,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     }
     appendChildren(dmItem, ...parts);
     dmItem.addEventListener("click", () => {
-      opts.onSelectDm(dm);
+      opts.onSelectDm(dmStore.getState().channels.find((c) => c.channelId === dm.channelId) ?? dm);
     });
     return dmItem;
   }
@@ -247,6 +260,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     dmCollapsed = !dmCollapsed;
     dmHeader.classList.toggle("collapsed", dmCollapsed);
     dmArrow.textContent = dmCollapsed ? "\u25B6" : "\u25BC";
+    dmArrow.setAttribute("aria-expanded", String(!dmCollapsed));
     dmList.style.display = dmCollapsed ? "none" : "";
     viewAllBtn.style.display = dmCollapsed
       ? "none"

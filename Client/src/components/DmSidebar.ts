@@ -301,6 +301,9 @@ export interface DmSidebar extends MountableComponent {
   update(conversations: readonly DmConversation[]): void;
 }
 
+/** A row the search filter has not hidden: the only rows the keyboard visits. */
+const VISIBLE_ROW = ".dm-item:not([hidden])";
+
 /** The unread-first order the conversation list renders in. */
 function sortConversations(conversations: readonly DmConversation[]): DmConversation[] {
   return [...conversations].toSorted((a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0));
@@ -344,8 +347,9 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
       const el = rows[i] as HTMLElement | undefined;
       if (el === undefined) return;
       const match = q === "" || convo.username.toLowerCase().includes(q);
-      el.style.display = match ? "" : "none";
+      el.hidden = !match;
     });
+    setRovingTabindex(list, VISIBLE_ROW);
   }
 
   function update(conversations: readonly DmConversation[]): void {
@@ -365,7 +369,6 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
         rowOwners.delete(el);
       },
     });
-    setRovingTabindex(list, ".dm-item");
     applyFilter();
   }
 
@@ -440,7 +443,7 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
     );
 
     // One Tab stop for the list; ArrowUp/Down step, Enter/Space open.
-    enableRovingNavigation(list, ".dm-item", disposable.signal, "vertical");
+    enableRovingNavigation(list, VISIBLE_ROW, disposable.signal, "vertical");
 
     appendChildren(root, header, sectionLabel, list);
     container.appendChild(root);

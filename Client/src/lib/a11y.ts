@@ -93,17 +93,23 @@ export function trapFocus(container: HTMLElement, signal: AbortSignal): void {
 }
 
 /**
- * Make exactly one cell in `container` tabbable (the first) and the rest
- * focusable only programmatically. Call after every render that replaces the
- * cell set — search results swap the cells out from under the tabindex, and a
- * grid with zero (or many) Tab stops breaks the "Tab enters the grid once"
- * contract.
+ * Make exactly one cell in `container` tabbable and the rest focusable only
+ * programmatically. Call after every render that replaces the cell set —
+ * search results swap the cells out from under the tabindex, and a grid with
+ * zero (or many) Tab stops breaks the "Tab enters the grid once" contract.
+ *
+ * The Tab stop survives a re-render: it stays on the focused cell, else the
+ * cell that already held it, else the current one (`.active` or
+ * `aria-current="page"`), and only then falls back to the first cell.
  */
 export function setRovingTabindex(container: HTMLElement, cellSelector: string): void {
-  const cells = container.querySelectorAll<HTMLElement>(cellSelector);
-  cells.forEach((cell, i) => {
-    cell.setAttribute("tabindex", i === 0 ? "0" : "-1");
-  });
+  const cells = Array.from(container.querySelectorAll<HTMLElement>(cellSelector));
+  const stop =
+    cells.find((c) => c === document.activeElement) ??
+    cells.find((c) => c.getAttribute("tabindex") === "0") ??
+    cells.find((c) => c.matches(".active, [aria-current='page']")) ??
+    cells[0];
+  for (const cell of cells) cell.setAttribute("tabindex", cell === stop ? "0" : "-1");
 }
 
 /**

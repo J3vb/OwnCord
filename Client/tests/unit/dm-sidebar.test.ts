@@ -70,18 +70,41 @@ describe("DmSidebar", () => {
     searchInput.value = "ali";
     searchInput.dispatchEvent(new Event("input", { bubbles: true }));
 
-    const visibleNames = [...container.querySelectorAll(".dm-item")]
-      .filter((el) => (el as HTMLElement).style.display !== "none")
+    const visibleNames = [...container.querySelectorAll<HTMLElement>(".dm-item")]
+      .filter((el) => !el.hidden)
       .map((el) => el.querySelector(".dm-name")?.textContent);
     expect(visibleNames).toEqual(["Alice"]);
 
     // Clearing the query shows every conversation again.
     searchInput.value = "";
     searchInput.dispatchEvent(new Event("input", { bubbles: true }));
-    const allVisible = [...container.querySelectorAll(".dm-item")].every(
-      (el) => (el as HTMLElement).style.display !== "none",
+    const allVisible = [...container.querySelectorAll<HTMLElement>(".dm-item")].every(
+      (el) => !el.hidden,
     );
     expect(allVisible).toBe(true);
+
+    sidebar.destroy?.();
+  });
+
+  it("keeps the list's Tab stop on a row the search filter leaves visible", () => {
+    const sidebar = createDmSidebar({
+      conversations: [
+        makeConvo({ channelId: 1, username: "Alice" }),
+        makeConvo({ channelId: 2, username: "Bob" }),
+      ],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+
+    const searchInput = container.querySelector(".dm-search") as HTMLInputElement;
+    searchInput.value = "bob";
+    searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const stops = [...container.querySelectorAll<HTMLElement>(".dm-item:not([hidden])")].filter(
+      (el) => el.tabIndex === 0,
+    );
+    expect(stops.map((el) => el.dataset.channelId)).toEqual(["2"]);
 
     sidebar.destroy?.();
   });
@@ -473,7 +496,7 @@ describe("DmSidebar", () => {
     });
     sidebar.mount(container);
 
-    const statusDots = container.querySelectorAll(".dm-status") as NodeListOf<HTMLSpanElement>;
+    const statusDots = container.querySelectorAll(".dm-status");
     const colors = Array.from(statusDots).map((dot) => dot.style.background);
 
     expect(colors).toContain("var(--green)");

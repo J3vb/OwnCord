@@ -1200,6 +1200,33 @@ describe("ChannelSidebar", () => {
     expect(document.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
   });
 
+  it("offers Purge Messages once a live role update grants MANAGE_MESSAGES", () => {
+    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
+      async () => {},
+    );
+    sidebar.destroy?.();
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: 0 }]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onPurgeChannel });
+    setChannels(testChannels);
+    sidebar.mount(container);
+    openChannelCtxMenu();
+    expect(document.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
+    document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
+
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_MESSAGES }]);
+    channelsStore.flush();
+
+    expect(openChannelCtxMenu()).not.toBeNull();
+    expect(document.querySelector('[data-testid="ctx-purge-messages"]')).not.toBeNull();
+  });
+
   it("purge prompt clamps the count and calls onPurgeChannel with the channel", async () => {
     const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
       async () => {},
@@ -2111,7 +2138,7 @@ describe("ChannelSidebar voice identity badge", () => {
 
     const own = container.querySelector(
       `.voice-user-item[data-voice-uid="7"] .vu-session-fp`,
-    ) as HTMLElement | null;
+    );
     expect(own).not.toBeNull();
     expect(own!.getAttribute("title")).toContain("0123 4567 89AB CDEF");
   });

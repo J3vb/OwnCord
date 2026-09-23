@@ -32,7 +32,7 @@ import { rePinPeerIdentity } from "@lib/livekitSession";
 import { createIdentityMismatchModal } from "./IdentityMismatchModal";
 import { createLogger } from "@lib/logger";
 import { membersStore, memberDisplayName } from "@stores/members.store";
-import { roleHasPermission, canManageChannels } from "@lib/permissions";
+import { roleHasPermission, canManageChannels, currentUserPermissions } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { importIdentityPublicKey, computeKeyFingerprint } from "@lib/e2eeCrypto";
 import { shellText } from "../i18n/shell";
@@ -848,8 +848,9 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     }
     channelList.querySelector(".channel-list-empty")?.remove();
 
-    const canCreate = onCreateChannel !== undefined && canManageChannels();
+    const canManage = canManageChannels();
     const canModerate = canModerateVoice();
+    const permissions = currentUserPermissions();
 
     // One entry per category, in the map's order; the null key is the
     // uncategorized group.
@@ -901,8 +902,9 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         [
           g.name ?? "",
           g.name !== null && isCategoryCollapsed(g.name) ? "c" : "e",
-          canCreate ? "C" : "",
+          canManage ? "C" : "",
           canModerate ? "M" : "",
+          permissions,
         ].join("|"),
       create: (g) => buildCategoryGroup(g, reconcileRows),
       update: (el, g) => {

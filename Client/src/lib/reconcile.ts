@@ -36,9 +36,9 @@ export interface ReconcileOptions<T> {
  * Make `container`'s element children exactly one row per item, in order.
  * Returns the number of rows built.
  *
- * If a replaced row held focus (itself or a control inside it), focus moves
- * to the same control in its replacement, so an async update never drops the
- * user mid-list. "The same control" is the first element in the new row with
+ * If a row held focus (itself or a control inside it), focus stays on it
+ * when it is only moved, and moves to the same control in its replacement when
+ * it is rebuilt, so an async update never drops the user mid-list. "The same control" is the first element in the new row with
  * the focused one's tag, first class and `data-testid`.
  */
 export function reconcileChildren<T>(
@@ -84,7 +84,12 @@ export function reconcileChildren<T>(
   wanted.forEach((el, i) => {
     if (container.children[i] !== el) container.insertBefore(el, container.children[i] ?? null);
   });
-  if (active !== null && !active.isConnected) {
+  if (active === null || focusedKey === undefined || document.activeElement === active) {
+    return built;
+  }
+  if (active.isConnected) {
+    (active as HTMLElement).focus();
+  } else {
     const next = wanted.find((el) => META.get(el)!.key === focusedKey);
     const same = (el: Element): boolean =>
       el.tagName === active.tagName &&

@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import { applyDialogSemantics, trapFocus, focusDialog, enableRovingNavigation } from "@lib/a11y";
+import {
+  applyDialogSemantics,
+  trapFocus,
+  focusDialog,
+  enableRovingNavigation,
+  setRovingTabindex,
+} from "@lib/a11y";
 
 let container: HTMLDivElement;
 
@@ -339,5 +345,38 @@ describe("enableRovingNavigation", () => {
     expect(onItself.defaultPrevented).toBe(true);
     expect(onCell).toHaveBeenCalledTimes(1);
     ac.abort();
+  });
+});
+
+describe("setRovingTabindex", () => {
+  function cells(n: number): HTMLElement[] {
+    return Array.from({ length: n }, () => {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      container.appendChild(cell);
+      return cell;
+    });
+  }
+  const stops = (): Element[] => Array.from(container.querySelectorAll(".cell[tabindex='0']"));
+
+  it("puts the first Tab stop on the current cell, else the first", () => {
+    const [first, , third] = cells(3);
+    setRovingTabindex(container, ".cell");
+    expect(stops()).toEqual([first]);
+
+    first!.removeAttribute("tabindex");
+    third!.classList.add("active");
+    setRovingTabindex(container, ".cell");
+    expect(stops()).toEqual([third]);
+  });
+
+  it("keeps the Tab stop where it was across a re-render", () => {
+    const [first, second] = cells(3);
+    setRovingTabindex(container, ".cell");
+    first!.setAttribute("tabindex", "-1");
+    second!.setAttribute("tabindex", "0");
+
+    setRovingTabindex(container, ".cell");
+    expect(stops()).toEqual([second]);
   });
 });

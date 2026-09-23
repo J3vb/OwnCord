@@ -95,6 +95,9 @@
   color: var(--text-muted);
   transition: all 0.1s;
 }
+.dm-item[hidden] {
+  display: none;
+}
 .dm-item:hover {
   background: var(--bg-hover);
   color: var(--text-normal);
