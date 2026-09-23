@@ -177,9 +177,7 @@ function measureClock(rows: readonly OwnModerationAction[]): void {
   if (confirmed === null) return;
   const { at, id } = confirmed;
   confirmed = null;
-  const timeouts = rows.filter(
-    (r) => r.kind === "timeout" && r.lifted_at === null && r.expires_at !== null,
-  );
+  const timeouts = rows.filter((r) => r.kind === "timeout");
   // A live frame is sent as its row is written: the row's issue time is the server's "now".
   const live = timeouts.find((r) => r.id === id);
   if (live !== undefined) {
@@ -190,7 +188,7 @@ function measureClock(rows: readonly OwnModerationAction[]): void {
     (a, r) => (a === undefined || serverTime(r.created_at) > serverTime(a.created_at) ? r : a),
     undefined,
   );
-  if (newest !== undefined && newest.expires_at !== null) {
+  if (newest !== undefined && newest.lifted_at === null && newest.expires_at !== null) {
     assumeInForce(at, newest.expires_at);
   }
 }

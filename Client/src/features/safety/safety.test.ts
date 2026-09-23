@@ -272,6 +272,46 @@ describe("safety ws handlers", () => {
       });
     }
 
+    it("a refusal whose timeout is lifted before the history read sets no skew", async () => {
+      vi.useFakeTimers({ now: SERVER_NOW });
+      const old = row({
+        id: 1,
+        kind: "timeout",
+        created_at: at(-3 * 24 * 60 * MIN),
+        expires_at: at(-3 * 24 * 60 * MIN + 10 * MIN),
+      });
+      const lifted = row({
+        id: 2,
+        kind: "timeout",
+        created_at: at(-MIN),
+        expires_at: at(9 * MIN),
+        lifted_at: at(0),
+      });
+      const getOwnModeration = vi.fn().mockResolvedValue([lifted, old]);
+      handleTimedOutRefusal(
+        { listBlocks: vi.fn(), getOwnModeration },
+        {
+          code: "TIMED_OUT",
+          message: "you are timed out",
+        },
+      );
+      await settle();
+      expect(safetyStore.getState().timeout).toBeNull();
+
+      // A later timeout learned from history ends at its own expiry, not days later.
+      const until = at(10 * MIN);
+      getOwnModeration.mockResolvedValue([
+        row({ id: 3, kind: "timeout", created_at: at(0), expires_at: until }),
+        lifted,
+        old,
+      ]);
+      refreshOwnModeration();
+      await settle();
+      expect(safetyStore.getState().timeout).toEqual({ expiresAt: until });
+      await vi.advanceTimersByTimeAsync(10 * MIN + 1);
+      expect(safetyStore.getState().timeout).toBeNull();
+    });
+
     it("a TIMED_OUT refusal keeps a timeout a fast clock reads as expired", async () => {
       vi.useFakeTimers({ now: SERVER_NOW + 15 * MIN });
       const until = at(10 * MIN);
