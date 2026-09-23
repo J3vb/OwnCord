@@ -310,6 +310,11 @@
   min-height: 72px;
   resize: vertical;
 }
+/* The shared close button is 22px wide; Q1 asks 24x24 (2.5.8). */
+.report-dialog .modal-close {
+  min-width: 24px;
+  min-height: 24px;
+}
 .report-dialog .btn-modal-save[aria-disabled="true"] {
   cursor: progress;
 }

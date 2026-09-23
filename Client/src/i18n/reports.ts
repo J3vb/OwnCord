@@ -8,7 +8,7 @@ export const reportsText = defineCatalog("reports", {
     "Your report goes only to this server's moderators. The person you report is not told who reported them.",
   "dialog.target": "What are you reporting?",
   "dialog.targetMessage": "This message",
-  "dialog.targetAttachment": "Attachment: {name}",
+  "dialog.targetAttachment": "The attachment {name}",
   "dialog.reason": "Reason",
   "dialog.detail": "Details (optional)",
   "dialog.detailHint": "Up to {max} characters.",

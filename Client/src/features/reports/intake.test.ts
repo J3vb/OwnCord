@@ -137,7 +137,7 @@ describe("report dialog", () => {
   it("reports an attachment by its upload id when the user picks it", async () => {
     openMessage([{ id: "up-7", filename: "cat.png" }]);
     expect(radio("This message").checked).toBe(true);
-    radio("Attachment: cat.png").checked = true;
+    radio("The attachment cat.png").checked = true;
     radio("Spam").checked = true;
     submit();
     expect(calls[0]?.body).toMatchObject({ target_type: "attachment", target_id: "up-7" });
