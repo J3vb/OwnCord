@@ -25,7 +25,7 @@ static UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 // owncord:// link, autostart): doing so puts the old UI back for the whole gap.
 static INSTALLER_LAUNCHING: AtomicBool = AtomicBool::new(false);
 
-/// True between `install()` being called and process exit. Read by the
+/// True while `install()` runs (on Windows, until the process exits). Read by the
 /// single-instance callback (`lib.rs`) to ignore forwarded launches.
 pub(crate) fn installer_launching() -> bool {
     INSTALLER_LAUNCHING.load(Ordering::SeqCst)
@@ -300,13 +300,13 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
                 "[update] installer launching for version {} (old window will ignore forwarded launches)",
                 u.version
             );
-            if let Err(e) = u.install(&bytes) {
-                // The installer never launched (e.g. ShellExecuteW refused), so
-                // the guard releases for a retry; clear the flag too or every
-                // later forwarded launch would be swallowed until restart.
-                INSTALLER_LAUNCHING.store(false, Ordering::SeqCst);
-                return Err(format!("download/install failed: {e}"));
-            }
+            // A successful Windows install exits the process and never returns.
+            // Any return (an error, or Linux/macOS success awaiting the
+            // frontend relaunch) leaves this process serving the user, so clear
+            // the flag or every later forwarded launch is swallowed until restart.
+            let installed = u.install(&bytes);
+            INSTALLER_LAUNCHING.store(false, Ordering::SeqCst);
+            installed.map_err(|e| format!("download/install failed: {e}"))?;
             install_guard.installed();
             Ok(())
         }
