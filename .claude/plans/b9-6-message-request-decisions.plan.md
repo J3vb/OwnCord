@@ -197,8 +197,9 @@ moved (through the Refined Neon tokens, #1764). The server contract is on
     resume gets no `ready` to carry it). `confirmDecision` is the
     DeleteChannelModal-shaped destructive confirm on `createModal`.
   - `Inbox.ts`: each request gets a named group of Accept, Ignore, Delete…,
-    Block…; rows are keyed by id so a frame never re-renders a row holding
-    focus; one extra `role="status"` region speaks each outcome.
+    Block…; rows are keyed by id so a frame never replaces a row holding
+    focus (a newer copy of a request redraws only its sender line and
+    preview); one extra `role="status"` region speaks each outcome.
   - `sync.ts` (new): the snapshot fetch moved out of `wsHandlers.ts`, plus the
     session's client for the inbox (forgotten on sign-out). The inbox cannot
     import a `wsHandlers` module (`dispatcherDoor.test.ts`).
@@ -241,7 +242,8 @@ Node 26.9.0, vitest 4.1.11, Playwright 1.63.0 Chromium, Linux, head
 `0cc53ab6` (pre-squash; the PR's CI run is the exact-SHA record). The
 removal focus moved from the next request's Accept to its row after that
 head; the unit, mocked and fullstack assertions for the row (and its focus
-ring) are recorded by the PR's CI run, not by the counts below.
+ring), and the unit test that a newer snapshot redraws a kept row's sender
+and preview, are recorded by the PR's CI run, not by the counts below.
 
 | Check                                                                                                                                                                                               | Result                                   |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
