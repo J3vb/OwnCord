@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { CAPABILITIES, classify, parseNameStatus } from "./ci-select.mjs";
+import { CAPABILITIES, K6_HARNESS_PATHS, classify, parseNameStatus } from "./ci-select.mjs";
 
 // A path list is the only input; everything below goes through the same
 // `git diff --name-status -M` shape the workflow feeds it, so the parser and
@@ -179,6 +179,18 @@ test("the Linux native-voice build scripts run the Rust suite", () => {
   ]) {
     const sel = picked(`M\t${p}`);
     assert.equal(sel.rust, true, `${p} must run rust-tests, which executes it`);
+  }
+});
+
+test("the k6 load harness runs the server job, where its offline test lives", () => {
+  // Both paths live under `Server/`, so the prefix branch already selects
+  // `server` today and a behaviour-only assertion here would pass with this
+  // entry deleted. Asserting the traced-dependency set itself is what pins the
+  // intent: if the `Server/` prefix is ever narrowed, this entry is what keeps
+  // the change selecting the job whose offline test executes the harness.
+  for (const p of ["Server/scripts/k6/ws-load.js", "Server/scripts/k6/ws-load.test.mjs"]) {
+    assert.equal(K6_HARNESS_PATHS.has(p), true, `${p} must stay a traced dependency`);
+    assert.equal(runs(`M\t${p}`, "server"), true, `${p} is executed by the offline test`);
   }
 });
 
