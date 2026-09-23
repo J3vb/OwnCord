@@ -61,6 +61,15 @@ export function replaceKeepingFocus(
   (same ?? fallback).focus();
 }
 
+/** The server reads at most this many bytes of an appeal request. */
+const MAX_APPEAL_REQUEST_BYTES = 8192;
+
+/** Whether the request fileAppeal sends stays within the server's byte limit. */
+export function fitsAppealLimit(actionId: number, text: string): boolean {
+  const json = JSON.stringify({ action_id: actionId, body: text });
+  return new TextEncoder().encode(json).length <= MAX_APPEAL_REQUEST_BYTES;
+}
+
 type Panel =
   | { readonly mode: "file"; readonly actionId: number; readonly opener: string }
   | { readonly mode: "withdraw"; readonly appealId: string; readonly opener: string };
@@ -138,7 +147,7 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
   root.append(
     heading,
     createElement("p", { class: "setting-desc" }, at("appeals.hint")),
-    createElement("p", { class: "setting-desc" }, at("appeals.unavailable")),
+    createElement("p", { class: "setting-desc" }, t("appeals.unavailable")),
     panel,
     status,
     retry,
@@ -217,10 +226,15 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
 
   async function submit(p: Extract<Panel, { mode: "file" }>): Promise<void> {
     if (api === null) return;
+    const text = appealBody(body.value);
+    if (!fitsAppealLimit(p.actionId, text)) {
+      showError(at("form.tooLong"), true);
+      return;
+    }
     setPending(true);
     showError("");
     try {
-      await api.fileAppeal(p.actionId, appealBody(body.value), signal);
+      await api.fileAppeal(p.actionId, text, signal);
     } catch (err) {
       if (signal.aborted || open !== p) return;
       setPending(false);

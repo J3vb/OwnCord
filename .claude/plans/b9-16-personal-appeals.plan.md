@@ -255,7 +255,11 @@ render path as a fallback; fail closed and record a blocker instead.
   navigation, MainPage or `destinations.ts` change.
 - The appeals strings are their own catalog, `i18n/appeals.ts`, loaded with
   the tab: `i18n/safety.ts` is on the startup path (the dispatcher's
-  handlers), and putting them there cost ~650 B of the startup budget.
+  handlers), and putting them there cost ~650 B of the startup budget. The
+  one exception is `appeals.unavailable`, the operator-contact guidance: it
+  lives in `i18n/safety.ts` because the BANNED refusal
+  (`connection/wsHandlers.ts`) also appends it to the server's message, a
+  banned user never reaching the Safety tab.
 - Outside the file table, each minimal: `styles/app/overlays.css` (rules
   beside the B9-15 safety rules; no import-order change),
   `features/safety/safety.test.ts` (the banner's API mock gains the two
@@ -267,7 +271,11 @@ render path as a fallback; fail closed and record a blocker instead.
 
 ### Evidence
 
-At `fm/b9-16-impl` (exact-SHA CI in the PR):
+At `2f59d93ad21bfd00ae34e1982d2f891e3ad86aa0` (`fm/b9-16-impl`), the tested
+client code: every command below ran on that content. The review fixes that
+followed (neutral withdraw-409 text, the appeal byte limit, the BANNED
+refusal's operator-contact guidance) are covered by the PR's CI at its final
+head.
 
 | Check           | Command                                                                                                                                                                          | Result                                                                                         |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |

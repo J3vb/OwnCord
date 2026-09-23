@@ -4,7 +4,7 @@ vi.mock("@stores/ui.store", () => ({ openSettings: vi.fn() }));
 
 import { expectConsole } from "../../../tests/helpers/console";
 import { ApiClientError, type MyAppeal, type OwnModerationAction } from "../../lib/api";
-import { appealBody } from "./Appeals";
+import { appealBody, fitsAppealLimit } from "./Appeals";
 import { renderSafetyTab } from "./SafetyTab";
 import { applyAppealStatus, refreshOwnModeration, resetSafetyStore, safetyStore } from "./store";
 import { handleAppealStatus } from "./wsHandlers";
@@ -262,6 +262,33 @@ describe("filing an appeal", () => {
     expect(bodyOf(pane).getAttribute("aria-invalid")).toBe("true");
     expect(document.activeElement).toBe(bodyOf(pane));
     ac.abort();
+  });
+
+  it("keeps a draft over the server's byte limit, says so and sends nothing", async () => {
+    const { pane, ac, api } = await mount([row({ id: 7 })]);
+    q<HTMLButtonElement>(pane, "[data-testid='safety-appeal-open-7']").click();
+    const draft = "誤".repeat(3000);
+    expect(draft.length).toBeLessThanOrEqual(4000);
+    bodyOf(pane).value = draft;
+    primaryOf(pane).focus();
+    primaryOf(pane).click();
+    await flush();
+    expect(api.fileAppeal).not.toHaveBeenCalled();
+    expect(errorOf(pane).textContent).toBe(
+      "Your appeal is too long to send. Shorten it and try again.",
+    );
+    expect(bodyOf(pane).value).toBe(draft);
+    expect(bodyOf(pane).getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(bodyOf(pane));
+    ac.abort();
+  });
+
+  it("measures the request the server reads, in UTF-8 bytes of its JSON", () => {
+    expect(fitsAppealLimit(7, "a".repeat(4000))).toBe(true);
+    expect(fitsAppealLimit(7, "誤".repeat(2720))).toBe(true);
+    expect(fitsAppealLimit(7, "誤".repeat(2740))).toBe(false);
+    expect(fitsAppealLimit(7, '"'.repeat(4000))).toBe(true);
+    expect(fitsAppealLimit(7, '"'.repeat(4096))).toBe(false);
   });
 
   it("Cancel hides the form and returns focus to its Appeal", async () => {

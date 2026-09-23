@@ -10,6 +10,7 @@ import {
 import { channelsStore } from "../../stores/channels.store";
 import { voiceStore, leaveVoiceChannel } from "../../stores/voice.store";
 import { PROTOCOL_EPOCH } from "../../lib/protocolTypes";
+import { safetyText } from "../../i18n/safety";
 import { livekitSession, log } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock } from "./dispatchContext";
 
@@ -96,7 +97,9 @@ export function handleConnectionError(ws: DispatchWs, payload: Payload<"error">)
     // token via scheduleReconnect() forever (OC-0107). Disconnect here
     // directly: it's idempotent with that subscriber's own
     // ws.disconnect() and covers every router state, not just "main".
-    setTransientError(payload.message || "You have been banned");
+    setTransientError(
+      `${payload.message || "You have been banned"} ${safetyText("appeals.unavailable")}`,
+    );
     ws.disconnect();
     clearAuth();
     return true;

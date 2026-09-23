@@ -2,15 +2,13 @@ import { defineCatalog } from "./format";
 
 /**
  * Filing, withdrawing and tracking an own appeal (B9-16). Its own catalog so
- * it loads with the Safety tab, not at startup; kinds and appeal states stay
- * in safety.ts, which the history also reads.
+ * it loads with the Safety tab, not at startup; kinds, appeal states and the
+ * ban guidance the BANNED refusal also shows stay in safety.ts.
  */
 export const appealsText = defineCatalog("appeals", {
   "appeals.heading": "Appeals",
   "appeals.hint":
     "Your appeal goes only to this server's moderators. You can appeal each action once, and file up to 3 appeals in 24 hours.",
-  "appeals.unavailable":
-    "Kicks can't be appealed. While a ban is in effect you can't sign in to appeal here: contact the server's operator directly. Once a ban ends, it appears in your history and can be appealed.",
   "appeals.loading": "Loading your appeals…",
   "appeals.loadFailed": "Your appeals couldn't be loaded.",
   "appeals.empty": "You haven't filed any appeals.",
@@ -28,7 +26,8 @@ export const appealsText = defineCatalog("appeals", {
   "appeals.erasedKind": "Deleted action",
   "form.title": "Appeal: {kind}, {date}",
   "form.body": "Why should the moderators reconsider this? (optional)",
-  "form.bodyHint": "Up to 4,000 characters. Line breaks are sent as spaces.",
+  "form.bodyHint":
+    "Up to 4,000 characters, or fewer in some scripts and with many symbols. Line breaks are sent as spaces.",
   "form.send": "Send appeal",
   "form.sending": "Sending…",
   "form.cancel": "Cancel",
@@ -38,6 +37,7 @@ export const appealsText = defineCatalog("appeals", {
   "form.rateLimited": "You've filed 3 appeals in the last 24 hours. Try again later.",
   "form.gone": "This action can't be appealed any more.",
   "form.invalid": "Your appeal wasn't accepted: {message}",
+  "form.tooLong": "Your appeal is too long to send. Shorten it and try again.",
   "withdraw.title": "Withdraw your appeal ({kind}, {date})?",
   "withdraw.warning": "You can't appeal this action again after withdrawing.",
   "withdraw.confirm": "Withdraw appeal",
