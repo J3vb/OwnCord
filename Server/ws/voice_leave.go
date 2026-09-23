@@ -23,7 +23,7 @@ func (h *Hub) clearVoiceAndUnsubscribe(c *Client) (int64, string) {
 // handleVoiceLeave processes an explicit voice_leave message or a disconnect.
 // 1. Gets old voiceChID from clearVoiceAndUnsubscribe.
 // 2. If was in voice: remove from DB (with retry), broadcast voice_leave.
-// 3. Call livekit.RemoveParticipant (ignore errors — participant may already be gone).
+// 3. Remove the LiveKit participant in the background (best-effort).
 func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 	oldChID, oldJoinToken := h.clearVoiceAndUnsubscribe(c)
 	if oldChID == 0 {
@@ -83,13 +83,36 @@ func (h *Hub) finishVoiceLeave(ctx context.Context, c *Client, oldChID int64, ol
 	// When a participant leaves, remaining clients rotate the room key
 	// automatically — the server has no key material to clear.
 
-	// Remove from LiveKit (best-effort).
-	if h.livekit != nil {
-		if err := h.livekit.RemoveParticipant(ctx, oldChID, c.userID, oldJoinToken); err != nil {
-			slog.Warn("handleVoiceLeave RemoveParticipant failed (may already be gone)",
-				"err", err, "user_id", c.userID, "channel_id", oldChID)
-		}
+	h.removeLiveKitParticipantAsync(ctx, oldChID, c.userID, oldJoinToken, "handleVoiceLeave")
+}
+
+// removeLiveKitParticipantAsync removes one exact LiveKit participant
+// (best-effort) without blocking the caller. The caller is usually the
+// client's read loop, and LiveKit can take seconds to answer for a
+// participant that is closing its own session at the same moment (a client
+// leave does both): it answers "no response from servers" after its 3 s
+// routing timeout. Waiting on that in the read loop queued the client's next
+// voice_join behind it, so an immediate rejoin stalled 3-6 s (OC-0453).
+// The identity carries the join token, so a removal still in flight can never
+// hit the session a quick rejoin creates. The removal must complete even if
+// the connection drops, so it detaches from cancellation (values kept);
+// shutdown is handled via h.stop and the call is bounded by lkTimeout.
+func (h *Hub) removeLiveKitParticipantAsync(ctx context.Context, channelID, userID int64, joinToken, caller string) {
+	if h.livekit == nil {
+		return
 	}
+	lkCtx := context.WithoutCancel(ctx)
+	go func() {
+		select {
+		case <-h.stop:
+			return
+		default:
+		}
+		if err := h.livekit.RemoveParticipant(lkCtx, channelID, userID, joinToken); err != nil {
+			slog.Warn(caller+" RemoveParticipant failed (may already be gone)",
+				"err", err, "user_id", userID, "channel_id", channelID)
+		}
+	}()
 }
 
 // leaveVoiceChannelWithRetry attempts to remove the voice state from the DB
