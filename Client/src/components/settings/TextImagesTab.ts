@@ -2,7 +2,9 @@
  * Text & Images settings tab — link previews, embeds, inline media, GIF/emoji animation, spoilers.
  */
 
-import { createElement } from "@lib/dom";
+import { appendChildren, createElement, setText } from "@lib/dom";
+import { resetExternalConsent } from "../../features/content-consent/external";
+import { externalConsentText as t } from "../../i18n/externalConsent";
 import { appendToggleRows } from "./helpers";
 
 export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
@@ -36,6 +38,36 @@ export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
   ];
 
   appendToggleRows(section, toggles, signal);
+  section.appendChild(buildConsentResetRow(signal));
 
   return section;
+}
+
+/** B9-8 (Q3): forget every server's external-content choice. Turning off one
+ *  of the toggles above does the same. */
+function buildConsentResetRow(signal: AbortSignal): HTMLDivElement {
+  const row = createElement("div", { class: "setting-row" });
+  const info = createElement("div", {});
+  const status = createElement("div", { class: "setting-desc", role: "status" });
+  appendChildren(
+    info,
+    createElement("div", { class: "setting-label" }, t("reset.label")),
+    createElement("div", { class: "setting-desc" }, t("reset.desc")),
+    status,
+  );
+  const btn = createElement(
+    "button",
+    { class: "ac-btn", type: "button", "aria-label": t("reset.label") },
+    t("reset.button"),
+  );
+  btn.addEventListener(
+    "click",
+    () => {
+      resetExternalConsent();
+      setText(status, t("reset.done"));
+    },
+    { signal },
+  );
+  appendChildren(row, info, btn);
+  return row;
 }

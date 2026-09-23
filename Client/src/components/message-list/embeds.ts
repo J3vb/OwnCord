@@ -7,12 +7,12 @@ import { createElement, setText } from "@lib/dom";
 import { observeMedia } from "@lib/media-visibility";
 import { createLogger } from "@lib/logger";
 import {
-  externalPartition,
   isExternalGif,
   loadExternalImage,
+  previewExternal,
   recoverEvictedImage,
 } from "./attachments";
-import { desktop } from "../../platform/desktop";
+import { admitDerived } from "../../features/content-consent/external";
 import type { ExternalImageHandle } from "../../platform/contracts/externalContent";
 
 const log = createLogger("embeds");
@@ -68,8 +68,12 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
 
   log.debug("fetchOgMeta START", url.slice(0, 100));
   const promise = (async (): Promise<OgMeta> => {
-    const result = await desktop.externalContent.preview(externalPartition(), url);
+    const result = await previewExternal(url);
     if (!result.ok) log.debug("fetchOgMeta refused", { failure: result.failure });
+    // The preview image belongs to the same consented item as its page.
+    if (result.ok && result.value.image !== null) {
+      admitDerived(`url:${url}`, `handle:${result.value.image}`);
+    }
     const meta: OgMeta = result.ok
       ? {
           title: result.value.title,

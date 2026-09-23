@@ -17,10 +17,16 @@ import { desktop } from "../../platform/desktop";
 import type {
   ExternalContentResult,
   ExternalImageSource,
+  ExternalPreview,
 } from "../../platform/contracts/externalContent";
 
 const log = createLogger("attachments");
 import type { Attachment } from "@lib/types";
+import {
+  externalAllowed,
+  forgetAdmittedItems,
+  setExternalConsentScope,
+} from "../../features/content-consent/external";
 
 /** Cached value of the animateGifs preference. Invalidated on pref change
  *  (same pattern as roleColors in formatting.ts). */
@@ -61,6 +67,7 @@ export function setServerHost(host: string): void {
       ? host.slice(0, -4)
       : host;
   serverHost = bracketBareIPv6Host(withoutPort).toLowerCase();
+  setExternalConsentScope(serverHost);
 }
 
 /** Resolve a potentially relative URL to a full URL using the server host. */
@@ -571,6 +578,21 @@ export function clearExternalImageCache(): void {
   externalObjectUrls.clear();
   externalGifUrls.clear();
   externalInFlight.clear();
+  forgetAdmittedItems();
+}
+
+/** The broker cache and consent admission key for an image source. */
+export function externalKey(source: ExternalImageSource): string {
+  return "handle" in source ? `handle:${source.handle}` : `url:${source.url}`;
+}
+
+/** A link preview (or oEmbed title) through the broker, refused before any
+ *  network work unless the viewer consented to `url` (B9-8). */
+export function previewExternal(url: string): Promise<ExternalContentResult<ExternalPreview>> {
+  if (!externalAllowed(externalKey({ url }))) {
+    return Promise.resolve({ ok: false, failure: "unavailable" });
+  }
+  return desktop.externalContent.preview(externalPartition(), url);
 }
 
 /** Whether a URL from `fetchExternalImage` holds a GIF. */
@@ -619,7 +641,9 @@ export function fetchExternalImage(source: ExternalImageSource): Promise<string 
 export function loadExternalImage(
   source: ExternalImageSource,
 ): Promise<ExternalContentResult<string>> {
-  const key = "handle" in source ? `handle:${source.handle}` : `url:${source.url}`;
+  const key = externalKey(source);
+  // B9-8: nothing is fetched for an item the viewer has not consented to.
+  if (!externalAllowed(key)) return Promise.resolve({ ok: false, failure: "unavailable" });
   const cached = externalObjectUrls.get(key);
   if (cached !== undefined) return Promise.resolve({ ok: true, value: cached });
   const existing = externalInFlight.get(key);
