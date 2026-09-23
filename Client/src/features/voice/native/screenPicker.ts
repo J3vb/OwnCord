@@ -19,7 +19,7 @@ export async function pickScreenSource(): Promise<string | null> {
     let picked: string | null = null;
     const content = createElement("div", {
       class: "native-screen-picker",
-      style: "padding:20px;width:min(720px,90vw);",
+      style: "padding:20px;",
     });
     content.appendChild(
       createElement("h3", { id: "native-screen-picker-title" }, "Share your screen"),
@@ -35,6 +35,9 @@ export async function pickScreenSource(): Promise<string | null> {
       overlayAttrs: { "data-testid": "native-screen-picker" },
       onClose: () => resolve(picked),
     });
+    // The shared .modal is a fixed 440px; widen this one so the grid's
+    // columns fit instead of scrolling sideways out of view.
+    modal.modal.style.width = "min(720px, 90vw)";
     for (const source of listed.sources) {
       const card = sourceCard(source);
       card.addEventListener("click", () => {
