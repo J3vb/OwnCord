@@ -119,3 +119,44 @@ jobs:
         run: go test -race -count=1 -run '^TestHubSimulation$' ./ws/
       # No fuzz output/corpus artifact: this repository is public. A generated
       # reproducer is committed only with its fix (Server/Makefile policy).
+
+  long-session-soak:
+    # B7-11: the long run of the long-session soak (Client/playwright.config.soak.ts:
+    # 200 cycles, then 30 idle-connected minutes). The PR soak (20 cycles) gates
+    # every client-fullstack run; this is the same spec at length. Setup mirrors
+    # ci.yml's client-fullstack job.
+    name: Nightly long-session soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: Client/
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: dev
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: Server/go.sum
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: Client/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/e2e/scripts/install-livekit.mjs
+      - name: Long-session soak, real server and encrypted decoded media
+        env:
+          OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server
+        run: npm run test:e2e:soak
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: long-session-soak-report
+          path: |
+            Client/playwright-report/
+            Client/test-results/
+          retention-days: 7
