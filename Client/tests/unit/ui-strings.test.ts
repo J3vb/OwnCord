@@ -82,6 +82,8 @@ describe("the scan", () => {
         const c = cond ? "Online" : "Offline";
         throw new Error("Upload failed");
         const d = \`Loading…\`;
+        setStatus("Uploading...");
+        const profile = { name: "Local Server", host: "localhost:8443" };
       `),
     ).toEqual([
       "Are you sure?",
@@ -90,6 +92,8 @@ describe("the scan", () => {
       "Offline",
       "Upload failed",
       "Loading…",
+      "Uploading...",
+      "Local Server",
     ]);
   });
 
@@ -109,6 +113,7 @@ describe("the scan", () => {
         const css = "opacity 0.2s ease";
         const media = "(prefers-reduced-motion: reduce)";
         const map = { "Content-Type": "application/json" };
+        const field = { name: "display_name", type: "Submit", key: "Enter" };
       `),
     ).toEqual([]);
   });

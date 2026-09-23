@@ -10,10 +10,12 @@
       "Ban": 1,
       "Banning...": 1,
       "Block": 1,
+      "Blocking...": 1,
       "Change Role": 1,
       "Confirm Ban": 2,
       "Create Channel": 1,
       "Delete Channel": 1,
+      "Deleting...": 1,
       "Edit Channel": 1,
       "Force Logout": 1,
       "Forever": 1,
@@ -21,7 +23,8 @@
       "Logging out...": 1,
       "Reason (optional)": 1,
       "Unblock": 2,
-      "Unblocking...": 1
+      "Unblocking...": 1,
+      "Working...": 1
     }
   },
   "src/components/CertMismatchModal.ts": {
@@ -212,9 +215,16 @@
     "owner": "B9-19",
     "strings": {
       "Emoji": 1,
+      "Food": 1,
+      "Nature": 1,
       "No emoji found": 1,
+      "Objects": 1,
+      "People": 1,
+      "Recent": 2,
       "Search emoji...": 1,
       "Server": 1,
+      "Smileys": 1,
+      "Symbols": 1,
       "anger symbol mad": 1,
       "angry mad": 1,
       "astonished shocked wow": 1,
@@ -443,7 +453,9 @@
     "strings": {
       " Copy": 1,
       " Create Invite": 2,
+      " Creating...": 1,
       " Revoke": 3,
+      " Revoking...": 1,
       " Sure?": 1,
       "Close": 1,
       "Created by {…} · {…}": 1,
@@ -555,6 +567,7 @@
       "Search failed": 1,
       "Search messages": 1,
       "Search messages...": 1,
+      "Searching...": 1,
       "Type at least {…} characters": 1
     }
   },
@@ -1063,6 +1076,7 @@
       "Create": 1,
       "Create recovery kit": 2,
       "Creating a new kit replaces the old one, and a kit works once.": 1,
+      "Creating...": 1,
       "Done": 1,
       "Emergency recovery codes let you sign in without your authenticator app. ": 1,
       "Enrolled": 1,
@@ -1074,6 +1088,7 @@
       "Recovery Kit": 1,
       "Regenerate": 1,
       "Regenerate recovery codes": 1,
+      "Regenerating...": 1,
       "Replace recovery kit": 1,
       "Request failed.": 1,
       "Save these recovery codes now — you won't see them again:": 1,
@@ -1379,6 +1394,7 @@
   "src/lib/notifications.ts": {
     "owner": "B9-20",
     "strings": {
+      "Channel {…}": 1,
       "{…} mentioned you in {…}": 1
     }
   },
@@ -1504,6 +1520,7 @@
       "Could not remove the saved password — it is still stored": 1,
       "Could not save credentials — auto-login won't work": 1,
       "Could not save server profiles": 1,
+      "Local Server": 1,
       "Missing #app element": 1,
       "Registration received. An admin has to approve your account before you can sign in.": 1,
       "Saved-password login is unavailable here — please type your password.": 1,
@@ -1514,6 +1531,7 @@
   "src/pages/ConnectPage.ts": {
     "owner": "B9-18",
     "strings": {
+      "Local Server": 1,
       "Not authenticated": 1,
       "OC": 2,
       "OwnCord": 1,

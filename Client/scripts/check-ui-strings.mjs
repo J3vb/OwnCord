@@ -144,7 +144,6 @@ const NON_TEXT_PROPERTIES = new Set([
   "rel",
   "target",
   "for",
-  "name",
   "key",
   "style",
   "cssText",
@@ -187,7 +186,7 @@ const CODE_TOKEN = /^[a-z0-9._%-]+$|[()[\]{}<>=$#@/\\|`]/;
 export function looksLikeProse(text) {
   const t = text.replaceAll("{…}", " ").trim();
   if (!/[A-Za-z]{2}/.test(t)) return false;
-  if (t.includes("…")) return true;
+  if (t.includes("…") || /[A-Za-z]\.\.\.$/.test(t)) return true;
   const words = t.split(/\s+/);
   if (words.length === 1) {
     return /^[A-Z][a-z]+[.!?:]?$/.test(t) || /^[A-Za-z]+[.!?]$/.test(t);

@@ -13,7 +13,7 @@ unchanged at merge base `3c7dd486`) and before/after evidence.
 [b9-shared-a11y-evidence-2026-09-23.md](b9-shared-a11y-evidence-2026-09-23.md) records the Q1/Q8 token matrix, the shared-controls
 fixture and the keyboard, motion and reflow checks; [b9-ui-contract.md](../architecture/b9-ui-contract.md) is the usage contract.
 **B9-3 implemented — native AT recordings and OS-zoom check pending owner — 2026-09-23**:
-[b9-text-inventory-2026-09-23.md](b9-text-inventory-2026-09-23.md) records the text seam, the 1,409-literal inventory with owners, the
+[b9-text-inventory-2026-09-23.md](b9-text-inventory-2026-09-23.md) records the text seam, the 1,428-literal inventory with owners, the
 Q7 native/server boundary, the exclusions and the English and expansion checks; `Client/scripts/check-ui-strings.mjs` is the shrink-only gate.
 
 > **Drafted:** 2026-09-23. **Planning branch:** `docs/b9-unified-experience-plan`.

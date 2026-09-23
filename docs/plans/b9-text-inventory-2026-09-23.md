@@ -47,12 +47,12 @@ template literal when either:
   assignments, a `setAttribute` of an ARIA or title/placeholder/alt attribute,
   or a `label`/`desc`/`description`/`tooltip`/ARIA property; or
 - its **shape** is prose: words separated by spaces, a capitalised word, `…`
-  or sentence punctuation, and not a class list, CSS value, path or selector.
+  or a trailing `...`, sentence punctuation, and not a class list, CSS value, path or selector.
 
 It skips positions that never display text: imports and types, object keys,
 comparisons and `case` labels, logger and `console` calls, DOM query,
-listener, storage, class-list and style calls, and `class`/`id`/`role`/`data-*`
-style properties. `// i18n-exempt: <reason>` exempts one literal; an empty
+listener, storage, class-list and style calls, and `class`/`id`/`role`/`type`/`key`/`data-*`
+style properties (a `name` value is still judged by its shape). `// i18n-exempt: <reason>` exempts one literal; an empty
 reason fails the scan. The comment counts on the literal's own line, or on the
 line above only when that line holds nothing but the comment, so a trailing
 exemption never carries over to the next line.
@@ -75,7 +75,7 @@ baseline file exists and carries the owner the scanner's rules assign.
 
 ## Totals at the base
 
-1,409 unextracted literals in 114 files; 105 of them are templates with
+1,428 unextracted literals in 114 files; 106 of them are templates with
 interpolated values (shown with `{…}` in the baseline).
 
 | Category        | Literals | Meaning                                                            |
@@ -84,13 +84,13 @@ interpolated values (shown with `{…}` in the baseline).
 | accessible-name |      125 | `aria-*`, `title` or `alt` text                                    |
 | toast           |       40 | `showToast` / `showChangeOutcomeToast` message                     |
 | error           |       54 | thrown or rejected `Error` text; some is shown, some internal-only |
-| other           |      625 | prose by shape elsewhere: option labels, status maps, messages     |
+| other           |      644 | prose by shape elsewhere: option labels, status maps, messages     |
 
 | Owner | Files | Literals |
 | ----- | ----: | -------: |
-| B9-18 |    31 |      381 |
-| B9-19 |    22 |      407 |
-| B9-20 |    61 |      621 |
+| B9-18 |    31 |      388 |
+| B9-19 |    22 |      416 |
+| B9-20 |    61 |      624 |
 
 Owners come from the B9-18/19/20 plans' file tables. A file no table names
 falls to B9-20, whose Task 4 merges the final inventory of every `Client/src`

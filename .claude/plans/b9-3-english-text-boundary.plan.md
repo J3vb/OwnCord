@@ -44,8 +44,8 @@ Re-read at `4830b23cd96c6ca3874054e214104b3869e3b359`. `git diff 0beee8e4 4830b2
 over the three rows' files changes only `AccessibilityTab.ts`: B9-2 replaced
 two `false` defaults with `SYNC_OS_MOTION_DEFAULT` (three lines, no copy). Every
 cited line range still holds. The inventory itself is larger than three rows:
-1,409 unextracted literals in 114 files, owned B9-18 (381), B9-19 (407) and
-B9-20 (621); detail in the inventory document.
+1,428 unextracted literals in 114 files, owned B9-18 (388), B9-19 (416) and
+B9-20 (624); detail in the inventory document.
 
 ### Implementation decisions and file-table amendments
 
