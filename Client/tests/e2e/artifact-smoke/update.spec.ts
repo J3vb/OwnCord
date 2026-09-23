@@ -95,13 +95,9 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
     await installArtifact(PREVIOUS, installation);
     await relaunch();
     expect(await appVersion(app!)).toBe(previous);
-    await waitFor(app!, "[data-testid='app-layout'], #host", "", 60_000);
-    if (
-      !(await app!.evaluate<boolean>(
-        `() => !!document.querySelector("[data-testid='app-layout']")`,
-      ))
-    )
-      await artifactLogin(app!, host, "alice", TEST_PASSWORD);
+    // The previous version auto-connects from the profile the update kept
+    // (its connect form sits disabled meanwhile): rollback keeps the account.
+    await waitFor(app!, "[data-testid='app-layout']", "", 60_000);
     await waitFor(app!, ".msg-text", text);
   } catch (error) {
     if (app)
