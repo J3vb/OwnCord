@@ -418,10 +418,10 @@ export interface ChannelCreatePayload {
   /**
    * This viewer's composer affordance — see ReadyChannel.can_send.
    *
-   * Present only on the per-client channel_create the server sends when a
-   * role or override edit changes who may post (RefreshChannelVisibility);
-   * absent on the shared-buffer broadcast, which encodes one frame for many
-   * recipients, and absent from older servers. Treat absent as "unchanged",
+   * Every channel_create is addressed to one client — at channel creation
+   * and when a role or override edit changes who may post
+   * (RefreshChannelVisibility) — and carries this viewer's verdict. Older
+   * servers sent a shared broadcast without it. Treat absent as "unchanged",
    * never as false.
    */
   readonly can_send?: boolean;
