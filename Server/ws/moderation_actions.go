@@ -74,7 +74,7 @@ func (h *Hub) RearmTimeoutExpiries(ctx context.Context) {
 	if h.db == nil {
 		return
 	}
-	active, err := h.db.ListActiveTimeoutExpiries(ctx)
+	active, err := h.readers.Dispatch.ListActiveTimeoutExpiries(ctx)
 	if err != nil {
 		slog.Warn("hub: RearmTimeoutExpiries could not list active timeouts", "err", err)
 		return
