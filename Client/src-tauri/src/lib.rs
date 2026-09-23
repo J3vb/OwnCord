@@ -173,6 +173,10 @@ pub fn run() {
             native_voice::native_voice_list_devices,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_device,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_publish_camera,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_unpublish_camera,
             #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])

@@ -390,6 +390,7 @@ describeNativeVoiceSuite(async () => {
   } as unknown as NativeVoice;
   const native: NativeVoiceNativeControl = {
     connectsAs: () => undefined,
+    publishesCameraAs: () => undefined,
     hasDevices: () => undefined,
     commands: () => [],
     emits: async () => undefined,

@@ -1,20 +1,25 @@
 //! One native LiveKit room: connect over the loopback proxy URL, E2EE with the
 //! room key the TypeScript key exchange hands over, microphone publish and
-//! remote playout through libwebrtc's audio device module (ADM), and a stream
-//! of room events for the webview. No Tauri types here so the interop example
+//! remote playout through libwebrtc's audio device module (ADM), camera
+//! publish and remote video through the session's frame socket
+//! (`video.rs`), and a stream of room events for the webview. No Tauri types here so the interop example
 //! (`examples/native_voice_interop.rs`) drives exactly the code the app runs.
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
-use livekit::options::TrackPublishOptions;
+use livekit::options::{TrackPublishOptions, VideoEncoding};
 use livekit::prelude::*;
 use livekit::rtc_engine::lk_runtime::LkRuntime;
 use livekit::webrtc::audio_source::RtcAudioSource;
 use livekit::webrtc::native::frame_cryptor::EncryptionState;
 use livekit::webrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
+use livekit::webrtc::video_source::native::NativeVideoSource;
+use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
 use serde::Serialize;
 use tokio::sync::mpsc::UnboundedReceiver;
+
+use super::video::{FrameServer, Observer};
 
 /// The only key index OwnCord ever uses. livekit-client's
 /// `ExternalE2EEKeyProvider.setKey(key)` writes index 0, and rust-sdks #1280
@@ -240,6 +245,8 @@ pub struct Resources {
     pub rooms: usize,
     pub local_tracks: usize,
     pub adm_refs: usize,
+    /// Open frame-socket connections (remote renderers plus camera upload).
+    pub video_sockets: usize,
     /// Process thread count, the observable for rust-sdks #1408 (a leaked
     /// FrameCryptor thread per cryptor) across repeated joins.
     pub threads: usize,
@@ -357,6 +364,18 @@ impl DeviceKind {
     }
 }
 
+/// How the camera is published, from the same presets the web path hands
+/// `publishTrack` (`CAMERA_PRESETS`, `CAMERA_PUBLISH_BITRATES`).
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraOptions {
+    pub width: u32,
+    pub height: u32,
+    pub max_bitrate: u64,
+    pub max_framerate: f64,
+    pub simulcast: bool,
+}
+
 pub fn process_threads() -> usize {
     std::fs::read_to_string("/proc/self/status")
         .ok()
@@ -368,11 +387,38 @@ pub fn process_threads() -> usize {
         .unwrap_or(0)
 }
 
+/// The published camera. `issued` is the sid the webview was handed and must
+/// name to unpublish; `live` follows the SDK's republish after a full
+/// reconnect, which re-issues the sid of the same track.
+struct CameraPublication {
+    issued: String,
+    live: TrackSid,
+}
+
+impl CameraPublication {
+    fn new(sid: TrackSid) -> Self {
+        Self {
+            issued: sid.to_string(),
+            live: sid,
+        }
+    }
+
+    fn republished(&mut self, previous: &TrackSid, sid: TrackSid) {
+        if self.live == *previous {
+            self.live = sid;
+        }
+    }
+}
+
+type CameraSlot = Arc<Mutex<Option<CameraPublication>>>;
+
 pub struct NativeSession {
     room: Room,
     key_provider: KeyProvider,
     audio: Option<PlatformAudio>,
     mic: Option<LocalTrackPublication>,
+    camera: CameraSlot,
+    frames: FrameServer,
     input: Selection,
     output: Selection,
     forwarder: tokio::task::JoinHandle<()>,
@@ -399,16 +445,25 @@ impl NativeSession {
                 key_provider: key_provider.clone(),
             });
         }
+        let frames = FrameServer::bind().await?;
         let (room, events) = Room::connect(url, token, options)
             .await
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
-        let forwarder = tokio::spawn(forward_events(events, on_event));
+        let camera = CameraSlot::default();
+        let forwarder = tokio::spawn(forward_events(
+            events,
+            on_event,
+            frames.observer(),
+            camera.clone(),
+        ));
         Ok(Self {
             room,
             key_provider,
             audio: None,
             mic: None,
+            camera,
+            frames,
             input: Selection::default(),
             output: Selection::default(),
             forwarder,
@@ -426,6 +481,12 @@ impl NativeSession {
     /// webview-facing `Event`s deliberately leave out).
     pub fn subscribe_room_events(&self) -> UnboundedReceiver<RoomEvent> {
         self.room.subscribe()
+    }
+
+    /// The frame socket's base URL, token included: only the webview (via
+    /// the connect result) and the interop example may see it.
+    pub fn frames_url(&self) -> &str {
+        self.frames.url()
     }
 
     pub fn local_identity(&self) -> String {
@@ -550,6 +611,77 @@ impl NativeSession {
         Ok(())
     }
 
+    /// Publish the camera. Its frames arrive on the frame socket's `camera`
+    /// route (the webview's `getUserMedia` track, uploaded by
+    /// `cameraUplink.ts`); E2EE covers the track exactly as it covers the
+    /// microphone, through the room's one key provider. A camera already
+    /// published is replaced. Returns the publication's sid, which
+    /// [`Self::unpublish_camera`] takes.
+    pub async fn publish_camera(&mut self, opts: CameraOptions) -> Result<String, String> {
+        self.release_camera().await;
+        let source = NativeVideoSource::new(
+            VideoResolution {
+                width: opts.width,
+                height: opts.height,
+            },
+            false,
+        );
+        let track =
+            LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(source.clone()));
+        let publication = self
+            .room
+            .local_participant()
+            .publish_track(
+                LocalTrack::Video(track),
+                TrackPublishOptions {
+                    source: TrackSource::Camera,
+                    simulcast: opts.simulcast,
+                    video_encoding: Some(VideoEncoding {
+                        max_bitrate: opts.max_bitrate,
+                        max_framerate: opts.max_framerate,
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let sid = publication.sid();
+        self.frames.set_camera(Some(source));
+        *self.camera.lock().unwrap() = Some(CameraPublication::new(sid.clone()));
+        Ok(sid.to_string())
+    }
+
+    /// Unpublish camera `sid` (the web path unpublishes rather than mutes, so
+    /// remote tiles close the same way). A stale sid, one a later publish
+    /// already replaced, is a no-op: it must not remove the newer camera.
+    pub async fn unpublish_camera(&mut self, sid: &str) {
+        let issued = self
+            .camera
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|c| c.issued == sid);
+        if issued {
+            self.release_camera().await;
+        }
+    }
+
+    /// Unpublish whatever camera is published. The upload socket ends with it.
+    async fn release_camera(&mut self) {
+        self.frames.set_camera(None);
+        let camera = self.camera.lock().unwrap().take();
+        if let Some(camera) = camera {
+            if let Err(e) = self
+                .room
+                .local_participant()
+                .unpublish_track(&camera.live)
+                .await
+            {
+                log::warn!("[native_voice] camera unpublish: {e}");
+            }
+        }
+    }
+
     /// Deafen support: (un)subscribe one remote publication.
     pub fn set_subscribed(
         &mut self,
@@ -639,15 +771,19 @@ impl NativeSession {
     pub fn resources(&self) -> Resources {
         Resources {
             rooms: 1,
-            local_tracks: usize::from(self.mic.is_some()),
+            local_tracks: usize::from(self.mic.is_some())
+                + usize::from(self.camera.lock().unwrap().is_some()),
             adm_refs: self.audio.as_ref().map_or(0, PlatformAudio::ref_count),
+            video_sockets: self.frames.sockets(),
             threads: process_threads(),
         }
     }
 
     /// Leave the room and release every native handle. Dropping the last
-    /// `PlatformAudio` disables the ADM.
+    /// `PlatformAudio` disables the ADM; dropping the frame server closes
+    /// its listener and every frame socket.
     pub async fn close(mut self) {
+        self.release_camera().await;
         if let Some(publication) = self.mic.take() {
             let _ = self
                 .room
@@ -663,11 +799,75 @@ impl NativeSession {
     }
 }
 
-async fn forward_events(mut events: UnboundedReceiver<RoomEvent>, on_event: EventSink) {
+async fn forward_events(
+    mut events: UnboundedReceiver<RoomEvent>,
+    on_event: EventSink,
+    frames: Observer,
+    camera: CameraSlot,
+) {
     while let Some(ev) = events.recv().await {
+        if let RoomEvent::LocalTrackRepublished {
+            previous_sid,
+            publication,
+            participant,
+            ..
+        } = &ev
+        {
+            let orphan = {
+                let mut slot = camera.lock().unwrap();
+                apply_republish(
+                    &mut slot,
+                    publication.source(),
+                    previous_sid,
+                    &publication.sid(),
+                )
+            };
+            if let Some(sid) = orphan {
+                // The camera was disabled (slot emptied) or replaced while the
+                // SDK was between its unpublish and publish during a full
+                // reconnect: this fresh publication (a new sid) found nothing
+                // to attach to, so no frames are driven for it and the webview
+                // already considers the camera off. Unpublish it, or it lingers
+                // beside the next camera.
+                let participant = participant.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = participant.unpublish_track(&sid).await {
+                        log::warn!("[native_voice] orphan camera unpublish: {e}");
+                    }
+                });
+            }
+        }
+        // Before the webview hears of a video track, so its frame socket
+        // finds it.
+        frames.observe(&ev);
         if let Some(mapped) = map_event(ev) {
             on_event(mapped);
         }
+    }
+}
+
+/// The camera slot's response to a local track's `LocalTrackRepublished`:
+/// adopt the new sid when the event continues the slot's live camera, or
+/// return the sid to unpublish when it does not — the camera was disabled
+/// (slot emptied) or a newer one replaced it while the SDK was between its
+/// unpublish and publish, leaving a publication nobody can drive. A non-camera
+/// republish returns `None`: the microphone is tracked by `NativeSession`
+/// itself, not here.
+fn apply_republish(
+    camera: &mut Option<CameraPublication>,
+    source: TrackSource,
+    previous_sid: &TrackSid,
+    sid: &TrackSid,
+) -> Option<TrackSid> {
+    if source != TrackSource::Camera {
+        return None;
+    }
+    match camera.as_mut() {
+        Some(c) if c.live == *previous_sid => {
+            c.republished(previous_sid, sid.clone());
+            None
+        }
+        _ => Some(sid.clone()),
     }
 }
 
@@ -832,6 +1032,85 @@ mod tests {
         );
         assert!(result.is_ok());
         assert_eq!(*calls.borrow(), ["stop", "select", "init", "start"]);
+    }
+
+    #[test]
+    fn camera_unpublish_follows_its_republished_sid() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut camera = CameraPublication::new(sid("TR_a"));
+        camera.republished(&sid("TR_mic"), sid("TR_mic2"));
+        assert_eq!(camera.live, sid("TR_a"), "another track's republish");
+        camera.republished(&sid("TR_a"), sid("TR_b"));
+        camera.republished(&sid("TR_b"), sid("TR_c"));
+        assert_eq!(camera.live, sid("TR_c"));
+        assert_eq!(camera.issued, "TR_a", "the webview still names TR_a");
+    }
+
+    /// A disable can land while the SDK is between its unpublish of the old
+    /// sid and the dispatch of `LocalTrackRepublished` during a full
+    /// reconnect: `release_camera` empties the slot, then the event arrives
+    /// carrying a fresh publication sid nobody can drive. The slot must hand
+    /// that sid back so the forwarder unpublishes it — the alternative is a
+    /// camera published with no frames (frozen remote tiles) beside the next
+    /// one the webview enables.
+    #[test]
+    fn a_camera_republished_after_a_disable_is_orphaned_not_adopted() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut slot = Some(CameraPublication::new(sid("TR_a")));
+        // The disable arrives inside the await, before the republish event,
+        // emptying the slot.
+        assert!(slot.take().is_some());
+        assert_eq!(
+            apply_republish(&mut slot, TrackSource::Camera, &sid("TR_a"), &sid("TR_b")),
+            Some(sid("TR_b")),
+            "a republish with no live camera to continue must be unpublished"
+        );
+        assert!(slot.is_none(), "the orphan must not occupy the slot");
+
+        // The later enable publishes one camera, and its own republish is
+        // adopted rather than orphaned: exactly one camera remains.
+        let mut slot = Some(CameraPublication::new(sid("TR_c")));
+        assert_eq!(
+            apply_republish(&mut slot, TrackSource::Camera, &sid("TR_c"), &sid("TR_d")),
+            None
+        );
+        let live = slot.expect("the enabled camera stays published").live;
+        assert_eq!(live, sid("TR_d"));
+    }
+
+    #[test]
+    fn a_republished_camera_replaced_under_its_old_sid_is_orphaned() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        // A newer camera owns the slot; the stale publication's republish
+        // arrives with the old sid and must not be attached to it.
+        let mut slot = Some(CameraPublication::new(sid("TR_new")));
+        assert_eq!(
+            apply_republish(
+                &mut slot,
+                TrackSource::Camera,
+                &sid("TR_old"),
+                &sid("TR_old2")
+            ),
+            Some(sid("TR_old2"))
+        );
+        assert_eq!(slot.unwrap().live, sid("TR_new"));
+    }
+
+    #[test]
+    fn a_non_camera_republish_is_never_orphaned() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        // The microphone is tracked by the session, not the camera slot; an
+        // empty slot must not make its republish look like a stray camera.
+        let mut slot = None;
+        assert_eq!(
+            apply_republish(
+                &mut slot,
+                TrackSource::Microphone,
+                &sid("TR_mic"),
+                &sid("TR_mic2")
+            ),
+            None
+        );
     }
 
     #[test]

@@ -91,12 +91,19 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   only switch, `RoomLifecycle.createRoom` builds a `NativeRoom` adapter there,
   `E2EEWorker.applyRoomKey` sends the key over the `NativeVoice` platform
   contract, and audio device lists come from `native/devices.ts` (the device
-  module's device names, not the webview's). Keep the state machine platform-blind:
+  module's device names, not the webview's). Video frames never cross IPC:
+  each native session serves them on a token-authenticated `127.0.0.1`
+  WebSocket (`src-tauri/src/native_voice/video.rs`); remote tracks render
+  through `native/videoRenderer.ts` (WebGL, exposed as a canvas
+  `MediaStreamTrack` so the grid stays MediaStream-based) and the camera is
+  the webview's own `getUserMedia` track, pumped up the socket by
+  `native/cameraUplink.ts`. Keep the state machine platform-blind:
   a Linux-only behaviour belongs in the adapter or the Rust session, never as
   a branch in `joinOrchestration`/`mediaControl`. The interop proof is
   `npm run test:e2e:native-voice` with `OWNCORD_E2E_LIVEKIT_BINARY` and
   `OWNCORD_NATIVE_VOICE_PEER=src-tauri/target/debug/examples/native_voice_interop`
-  (built with `cargo build --example native_voice_interop`).
+  (built with `cargo build --example native_voice_interop`); it covers audio
+  and video, each with a wrong-key control.
 - **Lifecycle ownership is enforced, not assumed (B7-11).** `Disposable`
   (`src/lib/disposable.ts`) owns component, overlay and render lifetimes;
   `SessionScope` (`src/lib/sessionScope.ts`) owns session-bound async work.
