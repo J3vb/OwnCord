@@ -1,0 +1,1220 @@
+/* ── Channel welcome (empty state) ── */
+.channel-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 16px 32px;
+  margin-bottom: 16px;
+}
+.channel-welcome-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-circle);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 68px;
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 16px;
+  flex-shrink: 0;
+}
+.channel-welcome-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: white;
+  margin: 0 0 8px;
+}
+.channel-welcome-text {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* ── Message history fetch states (loading / inline error + Retry) ── */
+.messages-loading,
+.messages-load-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 0;
+  color: var(--text-muted);
+}
+.messages-loading .spinner {
+  width: 24px;
+  height: 24px;
+}
+.messages-loading-text,
+.messages-load-error-text {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+.messages-retry-btn {
+  background: transparent;
+  border: 1px solid currentColor;
+  color: var(--text-muted);
+  border-radius: 4px;
+  padding: 4px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.messages-retry-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.msg-day-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 16px;
+  margin-bottom: 8px;
+}
+.msg-day-divider .line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.msg-day-divider .date {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+/* New-messages divider — same shape as the day divider, accented red so the
+   reader's resume point is findable at a glance. */
+.msg-new-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px 8px;
+}
+.msg-new-divider .line {
+  flex: 1;
+  height: 1px;
+  background: var(--red);
+}
+.msg-new-divider .label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: white;
+  background: var(--red);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.message {
+  padding: 2px var(--message-content-right) 2px var(--message-content-left);
+  position: relative;
+  min-height: 2.75rem;
+  margin-top: var(--message-group-spacing);
+  contain: layout style;
+  transition: background 0.1s ease;
+  border-left: 2px solid transparent;
+}
+.message:first-child,
+.msg-day-divider + .message {
+  margin-top: 0;
+}
+.message:hover {
+  background: var(--bg-modifier-hover);
+}
+.message.grouped {
+  min-height: 1.375rem;
+  margin-top: var(--message-inline-spacing);
+}
+.message .msg-avatar {
+  position: absolute;
+  left: var(--avatar-offset-left);
+  top: 4px;
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+  border-radius: var(--radius-circle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 16px;
+  color: white;
+  cursor: pointer;
+  overflow: hidden;
+}
+.message .msg-avatar:hover {
+  opacity: 0.8;
+}
+.message.grouped .msg-avatar {
+  display: none;
+}
+.message .msg-hover-time {
+  position: absolute;
+  left: var(--avatar-offset-left);
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--avatar-size);
+  text-align: center;
+  font-size: 0.6875rem;
+  color: var(--text-micro);
+  font-variant-numeric: tabular-nums;
+  display: none;
+}
+.message.grouped:hover .msg-hover-time {
+  display: block;
+}
+.message .msg-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.message.grouped .msg-header {
+  display: none;
+}
+.message .msg-author {
+  font-weight: 600;
+  font-size: var(--font-size-lg);
+  cursor: pointer;
+  text-decoration-color: currentColor;
+}
+.message .msg-author:hover {
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+}
+.message .msg-time {
+  font-size: var(--font-size-xs);
+  color: var(--text-micro);
+  font-variant-numeric: tabular-nums;
+}
+.message .msg-edited {
+  font-size: 10px;
+  color: var(--text-micro);
+}
+.message .msg-text {
+  line-height: 1.45;
+  word-break: break-word;
+}
+.message .msg-text code {
+  font-family: var(--font-mono);
+  background: var(--bg-tertiary);
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+
+/* Custom emoji — inline images that stand in for a :shortcode: token.
+   Sized in a way that keeps the line height of ordinary text: 22px matches the
+   cap height of the 16px message font closely enough that a line with emoji
+   does not jump taller than the one above it. */
+.custom-emoji {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  vertical-align: -0.3em;
+  margin: 0 1px;
+  /* An emoji whose bytes have not arrived (or never will) falls back to its
+     alt text, so the box must not clip the shortcode. */
+  min-width: 22px;
+}
+
+/* A message that is nothing but emoji renders them large, Discord-style. The
+   class sits on .msg-text so it sizes the unicode glyphs and the custom-emoji
+   images together — nothing downstream needs to know. */
+.message .msg-text-jumbo {
+  font-size: 48px;
+  line-height: 1.15;
+}
+.message .msg-text-jumbo .custom-emoji {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  vertical-align: -0.1em;
+  margin: 0 2px;
+}
+
+/* In a reaction pill the emoji sits next to the count, so it follows the
+   pill's own 14px scale rather than the message body's. */
+.reaction-chip .custom-emoji {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  vertical-align: middle;
+  margin: 0;
+}
+
+/* @mention highlights */
+.mention {
+  background: rgba(88, 101, 242, 0.3);
+  color: var(--text-link);
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+}
+.mention:hover {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+/* A mention of the signed-in user (or an honoured @everyone/@here) reads
+   louder than a mention of someone else. */
+.mention.mention-self {
+  background: color-mix(in srgb, var(--yellow) 28%, transparent);
+  color: var(--yellow);
+  font-weight: 600;
+}
+.mention.mention-self:hover {
+  background: var(--yellow);
+  color: var(--bg-tertiary);
+}
+/* Whole-row highlight: Discord-style left accent + tinted background. */
+.message.mentioned {
+  background: color-mix(in srgb, var(--yellow) 8%, transparent);
+  box-shadow: inset 2px 0 0 var(--yellow);
+}
+.message.mentioned:hover {
+  background: color-mix(in srgb, var(--yellow) 12%, transparent);
+}
+
+/* #channel links inside message text */
+.channel-mention {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  color: var(--text-link);
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+}
+.channel-mention:hover,
+.channel-mention:focus-visible {
+  background: var(--accent);
+  color: var(--on-accent);
+  outline: none;
+}
+/* owncord://message/… permalinks pasted into chat, rendered as a compact chip
+   instead of a raw URL. Unresolvable links stay plain text and never get here. */
+.message-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 0.9em;
+  cursor: pointer;
+  vertical-align: baseline;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.message-link-chip .mlc-channel {
+  color: var(--text-link);
+  font-weight: 500;
+}
+
+.message-link-chip .mlc-action {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.message-link-chip:hover,
+.message-link-chip:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+
+.message-link-chip:hover .mlc-channel,
+.message-link-chip:focus-visible .mlc-channel,
+.message-link-chip:hover .mlc-action,
+.message-link-chip:focus-visible .mlc-action {
+  color: var(--on-accent);
+}
+
+/* Reply */
+.msg-reply-ref {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  margin-left: -36px;
+  padding-left: 36px;
+  position: relative;
+  cursor: pointer;
+}
+.msg-reply-ref::before {
+  content: "";
+  position: absolute;
+  left: 20px;
+  bottom: 50%;
+  width: 24px;
+  height: 12px;
+  border-left: 2px solid var(--text-micro);
+  border-top: 2px solid var(--text-micro);
+  border-radius: 6px 0 0 0;
+}
+.msg-reply-ref .rr-author {
+  color: var(--text-normal);
+  font-weight: 600;
+}
+.msg-reply-ref .rr-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
+}
+.msg-reply-ref:hover .rr-text {
+  color: var(--text-normal);
+}
+/* The bar is a jump control, so it needs a visible keyboard focus ring. */
+.msg-reply-ref:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.rr-avatar {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-circle);
+  font-size: 8px;
+  font-weight: 700;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* URL links in messages */
+.msg-link {
+  color: var(--text-link, #00aff4);
+  text-decoration: none;
+}
+.msg-link:hover {
+  text-decoration: underline;
+}
+
+/* URL embeds */
+.msg-embed {
+  margin-top: 8px;
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  overflow: hidden;
+  max-width: 420px;
+}
+.msg-embed-youtube {
+  width: 420px;
+  max-width: 100%;
+}
+.msg-embed-yt-header {
+  padding: 10px 12px 6px;
+}
+.msg-embed-yt-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-link, #00aff4);
+  text-decoration: none;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg-embed-yt-title:hover {
+  text-decoration: underline;
+}
+.msg-embed-yt-player {
+  position: relative;
+  cursor: pointer;
+}
+.msg-embed-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.msg-embed-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-circle);
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transition: background 0.15s;
+}
+.msg-embed-yt-player:hover .msg-embed-play {
+  background: var(--red);
+}
+.msg-embed-iframe {
+  width: 100%;
+  height: 236px;
+  border: none;
+}
+.msg-embed-link {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+  max-width: 520px;
+}
+.msg-embed-link-content {
+  min-width: 0;
+}
+.msg-embed-host {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+.msg-embed-link-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-link, #00aff4);
+  text-decoration: none;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.3;
+}
+.msg-embed-link-title:hover {
+  text-decoration: underline;
+}
+.msg-embed-link-desc {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  line-height: 1.45;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.msg-embed-link-image {
+  margin-top: 10px;
+}
+.msg-embed-link-img {
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+
+/* Reactions */
+.msg-reactions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.reaction-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+  background: rgba(88, 101, 242, 0.15);
+  border: 1px solid rgba(88, 101, 242, 0.3);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.reaction-chip:hover {
+  background: rgba(88, 101, 242, 0.3);
+}
+.reaction-chip.me {
+  border-color: var(--accent);
+}
+.reaction-chip .rc-count {
+  font-size: 12px;
+  color: var(--text-normal);
+}
+.reaction-chip.add-reaction {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-micro);
+  font-size: 14px;
+  padding: 2px 6px;
+}
+.reaction-chip.add-reaction:hover {
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+}
+
+/* Who-reacted tooltip — anchored above the pill it belongs to. */
+.reaction-chip {
+  position: relative;
+}
+.reaction-tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 260px;
+  padding: 6px 10px;
+  background: var(--bg-floating, var(--bg-tertiary));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  cursor: default;
+}
+.reaction-tooltip-names {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+  overflow-wrap: anywhere;
+}
+.reaction-tooltip-emoji {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Code block */
+.msg-codeblock-wrap {
+  position: relative;
+}
+.msg-codeblock {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+}
+.msg-codeblock-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.15s ease,
+    background 0.1s ease;
+}
+.msg-codeblock-wrap:hover .msg-codeblock-copy {
+  opacity: 1;
+  pointer-events: auto;
+}
+.msg-codeblock-copy:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+/* Language label for a tagged fence (```ts). */
+.msg-codeblock-lang {
+  position: absolute;
+  top: 4px;
+  left: 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-micro);
+  pointer-events: none;
+  user-select: none;
+}
+
+.msg-codeblock-lang + .msg-codeblock {
+  padding-top: 20px;
+}
+
+/* Syntax highlighting — hues come from theme tokens so custom themes and the
+   light theme recolour along with everything else. */
+.msg-codeblock .tok-comment {
+  color: var(--text-micro);
+  font-style: italic;
+}
+
+.msg-codeblock .tok-string {
+  color: var(--green);
+}
+
+.msg-codeblock .tok-number {
+  color: var(--yellow);
+}
+
+.msg-codeblock .tok-keyword {
+  color: var(--text-link);
+}
+
+/* Markdown blocks */
+/* Paragraph runs keep their newlines; block children handle their own layout. */
+.message .msg-text .md-p {
+  white-space: pre-wrap;
+}
+
+.message .msg-text > *:first-child {
+  margin-top: 0;
+}
+
+.message .msg-text > *:last-child {
+  margin-bottom: 0;
+}
+
+.md-bold {
+  font-weight: 700;
+}
+
+.md-italic {
+  font-style: italic;
+}
+
+.md-underline {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.md-strike {
+  text-decoration: line-through;
+}
+
+.md-heading {
+  margin: 8px 0 4px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--header-primary);
+}
+
+.md-h1 {
+  font-size: 1.5em;
+}
+
+.md-h2 {
+  font-size: 1.25em;
+}
+
+.md-h3 {
+  font-size: 1.1em;
+}
+
+.md-quote {
+  margin: 2px 0;
+  padding: 0 8px 0 12px;
+  border-left: 4px solid var(--border-strong);
+  border-radius: 2px;
+  color: var(--text-normal);
+}
+
+.md-list {
+  margin: 2px 0;
+  padding-left: 22px;
+  list-style-position: outside;
+}
+
+ul.md-list {
+  list-style-type: disc;
+}
+
+ol.md-list {
+  list-style-type: decimal;
+}
+
+.md-list-nested {
+  margin: 0;
+  padding-left: 20px;
+}
+
+ul.md-list-nested {
+  list-style-type: circle;
+}
+
+.md-li {
+  margin: 1px 0;
+}
+
+.md-li::marker {
+  color: var(--text-muted);
+}
+
+/* Spoilers: obscured until asked for, one span at a time. */
+.msg-spoiler {
+  border-radius: 3px;
+  padding: 0 2px;
+  background: var(--bg-tertiary);
+  color: transparent;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.msg-spoiler * {
+  visibility: hidden;
+}
+
+.msg-spoiler:hover {
+  background: color-mix(in srgb, var(--text-normal) 24%, var(--bg-tertiary));
+}
+
+.msg-spoiler:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.msg-spoiler.revealed {
+  background: color-mix(in srgb, var(--text-normal) 10%, transparent);
+  color: inherit;
+  cursor: auto;
+}
+
+.msg-spoiler.revealed * {
+  visibility: visible;
+}
+
+/* Image attachment */
+.msg-image {
+  position: relative;
+  margin-top: 4px;
+  max-width: 550px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  contain: layout style;
+}
+.msg-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+}
+.msg-image .placeholder-img {
+  width: 100%;
+  height: 200px;
+  background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-micro);
+  font-size: 12px;
+}
+.msg-image .placeholder-img.loading {
+  opacity: 0.6;
+}
+
+/* GIF play/pause overlay */
+.gif-play-btn {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 32px;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 2;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.msg-image:hover .gif-play-btn,
+.gif-paused .gif-play-btn {
+  opacity: 1;
+}
+.gif-play-btn:hover {
+  background: rgba(0, 0, 0, 0.9);
+}
+.gif-play-btn.playing {
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+.gif-paused::after {
+  content: "GIF";
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+}
+
+/* Image lightbox overlay */
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-in;
+  animation: fadeIn 0.2s ease;
+}
+.image-lightbox.dragging {
+  cursor: grabbing;
+}
+.image-lightbox-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+}
+.image-lightbox img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 48px rgba(0, 0, 0, 0.5);
+  transition: transform 0.1s ease;
+  cursor: zoom-in;
+  user-select: none;
+}
+.image-lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-circle);
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+.image-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* File attachment */
+.msg-file {
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  max-width: 400px;
+}
+.msg-file-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-secondary);
+}
+.msg-file-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.msg-file-meta {
+  min-width: 0;
+  flex: 1;
+}
+.msg-file-name {
+  font-size: 13px;
+  color: var(--text-link);
+  cursor: pointer;
+}
+.msg-file-name:hover {
+  text-decoration: underline;
+}
+.msg-file-size {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.msg-file-download {
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.msg-file-download:hover {
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+
+/* Inline video attachment — shares the .msg-image box so a video is capped to
+   the same max width/height as an image and never widens the message column. */
+.msg-video {
+  cursor: default;
+  background: #000;
+}
+.msg-video video {
+  display: block;
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: var(--radius-md);
+}
+.msg-media-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.msg-video:hover .msg-media-overlay {
+  opacity: 1;
+}
+.msg-media-overlay .msg-file-download {
+  margin-left: 0;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+.msg-media-overlay .msg-file-download:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+/* Inline audio attachment — the file chip layout with a player under the name. */
+.msg-audio {
+  max-width: 400px;
+}
+.msg-audio audio {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  height: 32px;
+}
+
+/* A media attachment whose authenticated fetch failed keeps its download
+   affordance; the player is just dimmed so it does not read as loading. */
+.msg-media-failed video,
+.msg-media-failed audio {
+  opacity: 0.4;
+}
+.msg-media-failed .msg-media-overlay {
+  opacity: 1;
+}
+
+/* ── Update Banner ── */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 13px;
+  font-weight: 500;
+  flex-shrink: 0;
+  z-index: 100;
+}
+.update-banner-text {
+  flex: 1;
+}
+.update-banner-btn {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.15s;
+}
+.update-banner-btn:hover {
+  opacity: 0.85;
+}
+.update-banner-install {
+  /* Inverted accent pair: the same contrast as --on-accent text on --accent. */
+  background: var(--on-accent);
+  color: var(--accent);
+}
+.update-banner-later {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+/* System message */
+.system-msg {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px var(--message-content-right) 4px var(--message-content-left);
+  margin-top: 4px;
+  position: relative;
+}
+.system-msg .sm-icon {
+  color: var(--green);
+  display: inline-flex;
+  align-items: center;
+}
+.system-msg .sm-text {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.system-msg .sm-text strong {
+  color: var(--text-normal);
+}
+.system-msg .sm-time {
+  font-size: 11px;
+  color: var(--text-micro);
+  margin-left: auto;
+}
+
+/* Message hover actions */
+.msg-actions-bar {
+  position: absolute;
+  top: -16px;
+  right: 16px;
+  display: flex;
+  gap: 2px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 5;
+}
+.message:hover .msg-actions-bar,
+.message:focus-within .msg-actions-bar {
+  opacity: 1;
+  pointer-events: auto;
+  animation: actionBarPop 0.1s ease;
+}
+.msg-actions-bar button {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  transition: all 0.1s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.msg-actions-bar button:hover {
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+
+/* Reply compose bar */
+.reply-bar {
+  display: none;
+  padding: 8px 16px 0;
+  flex-shrink: 0;
+}
+.reply-bar.visible {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.reply-bar-inner {
+  flex: 1;
+  background: var(--bg-input);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.reply-bar-inner strong {
+  color: var(--text-normal);
+}
+.reply-bar .reply-close {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+}
+.reply-bar .reply-close:hover {
+  color: var(--text-normal);
+}
+
+/* Typing indicator */
+.typing-bar {
+  height: 24px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.typing-bar:empty {
+  height: 0;
+}
+.typing-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.typing-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: typingAnim 1.4s infinite;
+}
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}

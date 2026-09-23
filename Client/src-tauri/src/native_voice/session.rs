@@ -1,8 +1,11 @@
 //! One native LiveKit room: connect over the loopback proxy URL, E2EE with the
-//! room key the TypeScript key exchange hands over, microphone publish and
-//! remote playout through libwebrtc's audio device module (ADM), camera
+//! room key the TypeScript key exchange hands over, microphone capture and
+//! processing through our own input stream (`capture.rs`, for RNNoise),
+//! remote playout through our own mixer (`playout.rs`, for per-user
+//! volume), camera
 //! publish and remote video through the session's frame socket
-//! (`video.rs`), and a stream of room events for the webview. No Tauri types here so the interop example
+//! (`video.rs`), screen share (`screen.rs`), and a stream of room events for
+//! the webview. No Tauri types here so the interop example
 //! (`examples/native_voice_interop.rs`) drives exactly the code the app runs.
 use std::sync::{Arc, Mutex};
 
@@ -10,15 +13,17 @@ use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
 use livekit::options::{TrackPublishOptions, VideoEncoding};
 use livekit::prelude::*;
-use livekit::rtc_engine::lk_runtime::LkRuntime;
-use livekit::webrtc::audio_source::RtcAudioSource;
+use livekit::webrtc::audio_source::native::NativeAudioSource;
+use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
 use livekit::webrtc::native::frame_cryptor::EncryptionState;
-use livekit::webrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
 use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
 use serde::Serialize;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use super::capture::{self, Apm, Capture};
+use super::playout::{self, Playout};
+use super::screen::{self, CaptureOptions, ScreenCapture, Started, Target};
 use super::video::{FrameServer, Observer};
 
 /// The only key index OwnCord ever uses. livekit-client's
@@ -105,6 +110,13 @@ pub enum Event {
     EncryptionStatus {
         identity: String,
         encrypted: bool,
+    },
+    /// Screen capture `capture` stopped on its own after it had started:
+    /// the user ended it from the desktop's sharing indicator, or the shared
+    /// window went away. The webview stops the share as the web path does
+    /// when a browser capture track ends.
+    ScreenCaptureEnded {
+        capture: u64,
     },
     Reconnecting,
     Reconnected,
@@ -228,13 +240,15 @@ fn map_event(ev: RoomEvent) -> Option<Event> {
 }
 
 /// Microphone audio processing, from the same preferences the web path feeds
-/// `audioCaptureDefaults` (libwebrtc's APM stands in for RNNoise on Linux).
+/// `audioCaptureDefaults`, plus its Enhanced Noise Suppression (RNNoise).
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioOptions {
     pub echo_cancellation: bool,
     pub noise_suppression: bool,
     pub auto_gain_control: bool,
+    #[serde(default)]
+    pub enhanced_noise_suppression: bool,
 }
 
 /// Rust-side resource counts for the facade's debug surface (B7-11: the
@@ -244,9 +258,16 @@ pub struct AudioOptions {
 pub struct Resources {
     pub rooms: usize,
     pub local_tracks: usize,
-    pub adm_refs: usize,
-    /// Open frame-socket connections (remote renderers plus camera upload).
+    /// Open microphone input streams (0 while muted).
+    pub capture_streams: usize,
+    /// Remote audio tracks being read into the playout mixer.
+    pub audio_streams: usize,
+    /// Open frame-socket connections (remote renderers, camera upload and
+    /// screen preview).
     pub video_sockets: usize,
+    /// Screen capture threads alive, each holding a capturer (and, on
+    /// Wayland, a portal session): zero once every share is stopped.
+    pub screen_captures: usize,
     /// Process thread count, the observable for rust-sdks #1408 (a leaked
     /// FrameCryptor thread per cryptor) across repeated joins.
     pub threads: usize,
@@ -255,16 +276,16 @@ pub struct Resources {
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
-    /// The device name: the Linux device modules leave the GUID empty.
+    /// The audio host's stable device id.
     pub id: String,
     pub name: String,
-    /// The device module's index, what a switch selects by.
+    /// The device's position in its list, what a switch selects by.
     #[serde(skip)]
     pub index: u16,
 }
 
-/// The platform's capture and playout devices, in the device module's order
-/// (the first entry is what it uses by default).
+/// The platform's capture and playout devices; the first entry of each is
+/// what is used by default.
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Devices {
@@ -272,79 +293,23 @@ pub struct Devices {
     pub outputs: Vec<DeviceInfo>,
 }
 
-fn devices_of(audio: &PlatformAudio) -> Devices {
-    Devices {
-        inputs: audio
-            .recording_devices()
-            .map(|d| DeviceInfo {
-                id: d.name.clone(),
-                name: d.name,
-                index: d.index as u16,
-            })
-            .collect(),
-        outputs: audio
-            .playout_devices()
-            .map(|d| DeviceInfo {
-                id: d.name.clone(),
-                name: d.name,
-                index: d.index as u16,
-            })
-            .collect(),
-    }
-}
-
 /// The index to switch to: the first device whose id is `requested`,
-/// otherwise the module's default (the first listed), flagged as a fallback
+/// otherwise the default (the first listed), flagged as a fallback
 /// unless the default was what was asked for (an empty id). `None` when
 /// nothing is listed.
-fn resolve_device(requested: &str, listed: &[DeviceInfo]) -> (Option<u16>, bool) {
+pub(super) fn resolve_device(requested: &str, listed: &[DeviceInfo]) -> (Option<u16>, bool) {
     match listed.iter().find(|d| d.id == requested) {
         Some(d) => (Some(d.index), false),
         None => (listed.first().map(|d| d.index), !requested.is_empty()),
     }
 }
 
-/// A selected device: its name (empty: the default) and the device-module
-/// index last applied for it, which a hot-plug can shift.
-#[derive(Default)]
-struct Selection {
-    name: String,
-    index: Option<u16>,
-}
-
-/// Select device `index` the way `PlatformAudio`'s hot-swap does (stop,
-/// select, re-init and restart a stream that was running), but by index. The
-/// stream is restarted even when the selection fails, and left untouched when
-/// `index` is the one already `applied`.
-fn switch_stream(
-    applied: Option<u16>,
-    index: u16,
-    running: bool,
-    stop: impl Fn() -> bool,
-    select: impl Fn() -> bool,
-    init: impl Fn() -> bool,
-    start: impl Fn() -> bool,
-) -> Result<(), String> {
-    if applied == Some(index) {
-        return Ok(());
+/// The audio host's capture and playout devices, in or out of a call.
+pub fn list_devices() -> Devices {
+    Devices {
+        inputs: capture::list_inputs(),
+        outputs: playout::list_outputs(),
     }
-    if running && !stop() {
-        return Err("stopping the audio stream failed".into());
-    }
-    let selected = select();
-    if running && !(init() && start()) {
-        return Err("restarting the audio stream failed".into());
-    }
-    if !selected {
-        return Err("selecting the audio device failed".into());
-    }
-    Ok(())
-}
-
-/// Enumerate with a device module that lives only for the call (no session).
-pub fn list_devices_transient() -> Result<Devices, String> {
-    let audio = PlatformAudio::new().map_err(|e| e.to_string())?;
-    Ok(devices_of(&audio))
 }
 
 /// The device kinds the web path's `switchActiveDevice` names.
@@ -362,6 +327,18 @@ impl DeviceKind {
             other => Err(format!("unsupported device kind {other}")),
         }
     }
+}
+
+/// How the screen share is published: the capture's size and the web
+/// path's `publishTrack` options for it (`getScreenShareMaxBitrate`, the
+/// effective frame rate).
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenOptions {
+    pub width: u32,
+    pub height: u32,
+    pub max_bitrate: u64,
+    pub max_framerate: f64,
 }
 
 /// How the camera is published, from the same presets the web path hands
@@ -387,15 +364,15 @@ pub fn process_threads() -> usize {
         .unwrap_or(0)
 }
 
-/// The published camera. `issued` is the sid the webview was handed and must
-/// name to unpublish; `live` follows the SDK's republish after a full
-/// reconnect, which re-issues the sid of the same track.
-struct CameraPublication {
+/// A published camera or screen share. `issued` is the sid the webview was
+/// handed and must name to unpublish; `live` follows the SDK's republish
+/// after a full reconnect, which re-issues the sid of the same track.
+struct VideoPublication {
     issued: String,
     live: TrackSid,
 }
 
-impl CameraPublication {
+impl VideoPublication {
     fn new(sid: TrackSid) -> Self {
         Self {
             issued: sid.to_string(),
@@ -410,17 +387,32 @@ impl CameraPublication {
     }
 }
 
-type CameraSlot = Arc<Mutex<Option<CameraPublication>>>;
+type VideoSlot = Arc<Mutex<Option<VideoPublication>>>;
+
+/// The running screen capture: its id (what the webview names to publish or
+/// stop it) and the capturer thread.
+struct ScreenShare {
+    id: u64,
+    capture: ScreenCapture,
+}
 
 pub struct NativeSession {
     room: Room,
     key_provider: KeyProvider,
-    audio: Option<PlatformAudio>,
+    /// Set by `enable_audio`: the processing capture and playout share.
+    apm: Option<Arc<Apm>>,
     mic: Option<LocalTrackPublication>,
-    camera: CameraSlot,
+    /// The published microphone's source, fed by `capture` (none when the
+    /// interop example published a synthetic one).
+    mic_source: Option<NativeAudioSource>,
+    camera: VideoSlot,
+    screen: Option<ScreenShare>,
+    screen_publication: VideoSlot,
+    next_capture: u64,
+    on_event: EventSink,
     frames: FrameServer,
-    input: Selection,
-    output: Selection,
+    playout: Playout,
+    capture: Capture,
     forwarder: tokio::task::JoinHandle<()>,
 }
 
@@ -450,22 +442,30 @@ impl NativeSession {
             .await
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
-        let camera = CameraSlot::default();
+        let camera = VideoSlot::default();
+        let screen_publication = VideoSlot::default();
+        let playout = Playout::default();
         let forwarder = tokio::spawn(forward_events(
             events,
-            on_event,
+            on_event.clone(),
             frames.observer(),
-            camera.clone(),
+            playout.listener(),
+            [camera.clone(), screen_publication.clone()],
         ));
         Ok(Self {
             room,
             key_provider,
-            audio: None,
+            apm: None,
             mic: None,
+            mic_source: None,
             camera,
+            screen: None,
+            screen_publication,
+            next_capture: 0,
+            on_event,
             frames,
-            input: Selection::default(),
-            output: Selection::default(),
+            playout,
+            capture: Capture::default(),
             forwarder,
         })
     }
@@ -483,6 +483,12 @@ impl NativeSession {
         self.room.subscribe()
     }
 
+    /// The playout mixer, for the interop example: CI has no output device,
+    /// so it pulls the mix itself to measure per-user volume end to end.
+    pub fn playout_mixer(&self) -> Arc<playout::Mixer> {
+        self.playout.mixer().clone()
+    }
+
     /// The frame socket's base URL, token included: only the webview (via
     /// the connect result) and the interop example may see it.
     pub fn frames_url(&self) -> &str {
@@ -493,24 +499,26 @@ impl NativeSession {
         self.room.local_participant().identity().to_string()
     }
 
-    /// Bring up the platform ADM: remote audio only plays out while one
-    /// exists, so the app calls this right after connect, independent of
-    /// whether the microphone is ever published.
-    pub fn enable_platform_audio(&mut self, opts: AudioOptions) -> Result<(), String> {
-        if self.audio.is_some() {
-            return Ok(());
+    /// Set up the audio processing and open playout on the default output
+    /// device. The app calls this right after connect, independent of
+    /// whether the microphone is ever published. The SDK's device module is
+    /// never acquired, so its playout stays in the synthetic mode that keeps
+    /// the decode pipeline running without a device, and remote audio plays
+    /// only through the gained mix in `playout.rs`, which is also what the
+    /// echo canceller hears. A box with no sound server logs and carries on
+    /// listen-only.
+    pub fn enable_audio(&mut self, opts: AudioOptions) {
+        if self.apm.is_some() {
+            return;
         }
-        let audio = PlatformAudio::new().map_err(|e| e.to_string())?;
-        audio
-            .configure_audio_processing(AudioProcessingOptions {
-                echo_cancellation: opts.echo_cancellation,
-                noise_suppression: opts.noise_suppression,
-                auto_gain_control: opts.auto_gain_control,
-                ..Default::default()
-            })
-            .map_err(|e| e.to_string())?;
-        self.audio = Some(audio);
-        Ok(())
+        let apm = Apm::new(&opts);
+        self.playout.set_reference(apm.clone());
+        self.capture
+            .configure(apm.clone(), opts.enhanced_noise_suppression);
+        self.apm = Some(apm);
+        if let Err(e) = self.playout.set_device("") {
+            log::warn!("[native_voice] playout unavailable: {e}");
+        }
     }
 
     /// Enable or disable the microphone. The first enable publishes; after
@@ -519,80 +527,38 @@ impl NativeSession {
     /// while muted so the system's in-use indicator goes out — the same
     /// contract as `stopMicTrackOnMute` on the web path.
     pub async fn set_microphone(&mut self, enabled: bool) -> Result<(), String> {
-        if enabled {
-            self.reselect(DeviceKind::Input);
-        }
         let Some(publication) = &self.mic else {
             if !enabled {
                 return Ok(());
             }
-            let source = self
-                .audio
-                .as_ref()
-                .ok_or("no audio device module — platform audio unavailable")?
-                .rtc_source();
-            return self.publish_audio(source).await;
+            // Unbuffered (queue 0): the capture callback hands over whole
+            // 10 ms frames and never waits.
+            let source =
+                NativeAudioSource::new(AudioSourceOptions::default(), capture::SAMPLE_RATE, 1, 0);
+            self.capture.start(source.clone())?;
+            self.mic_source = Some(source.clone());
+            let published = self.publish_audio(RtcAudioSource::Native(source)).await;
+            if published.is_err() {
+                self.capture.stop();
+                self.mic_source = None;
+            }
+            return published;
         };
         if enabled {
-            if let Some(audio) = &self.audio {
-                audio.start_recording().map_err(|e| e.to_string())?;
+            // The interop example publishes its own source and captures nothing.
+            if let Some(source) = &self.mic_source {
+                self.capture.start(source.clone())?;
             }
             publication.unmute();
         } else {
             publication.mute();
-            if let Some(audio) = &self.audio {
-                if let Err(e) = audio.stop_recording() {
-                    log::warn!("[native_voice] stop_recording failed: {e}");
-                }
-            }
+            self.capture.stop();
         }
         Ok(())
     }
 
-    /// Point a stopped capture or playout stream at the selected device's
-    /// current index before it starts again.
-    fn reselect(&mut self, kind: DeviceKind) {
-        let Some(audio) = &self.audio else { return };
-        let runtime = LkRuntime::instance();
-        let f = runtime.pc_factory();
-        let listed = devices_of(audio);
-        let (running, selection, devices, what) = match kind {
-            DeviceKind::Input => (
-                f.recording_is_initialized(),
-                &mut self.input,
-                listed.inputs,
-                "capture",
-            ),
-            DeviceKind::Output => (
-                f.playout_is_initialized(),
-                &mut self.output,
-                listed.outputs,
-                "playout",
-            ),
-        };
-        if running {
-            return;
-        }
-        let (index, fell_back) = resolve_device(&selection.name, &devices);
-        if fell_back {
-            log::warn!(
-                "[native_voice] {what} device {} not found; using the default",
-                selection.name
-            );
-        }
-        let Some(index) = index else { return };
-        let selected = match kind {
-            DeviceKind::Input => f.set_recording_device(index),
-            DeviceKind::Output => f.set_playout_device(index),
-        };
-        selection.index = selected.then_some(index);
-        if !selected {
-            log::warn!("[native_voice] selecting {what} device {index} failed");
-        }
-    }
-
-    /// Publish any audio source as the microphone track. The app passes the
-    /// ADM source; the interop example passes a synthetic sine.
+    /// Publish any audio source as the microphone track. The app passes its
+    /// capture's source; the interop example passes a synthetic sine.
     pub async fn publish_audio(&mut self, source: RtcAudioSource) -> Result<(), String> {
         let track = LocalAudioTrack::create_audio_track("microphone", source);
         let publication = self
@@ -647,7 +613,7 @@ impl NativeSession {
             .map_err(|e| e.to_string())?;
         let sid = publication.sid();
         self.frames.set_camera(Some(source));
-        *self.camera.lock().unwrap() = Some(CameraPublication::new(sid.clone()));
+        *self.camera.lock().unwrap() = Some(VideoPublication::new(sid.clone()));
         Ok(sid.to_string())
     }
 
@@ -682,6 +648,111 @@ impl NativeSession {
         }
     }
 
+    /// Start capturing `target` for a screen share, replacing any capture
+    /// already running. Returns the capture's id and a receiver that resolves
+    /// with the first frame's size — on Wayland only once the user has
+    /// completed the portal's dialog — or with why capture never began
+    /// ([`screen::CANCELLED`] for a cancelled dialog). The caller awaits it
+    /// without holding the session, so a leave or a stop is never blocked
+    /// behind the dialog: either drops the capture, which resolves it.
+    pub async fn start_screen(
+        &mut self,
+        target: Target,
+        options: CaptureOptions,
+    ) -> Result<(u64, Started), String> {
+        self.release_screen().await;
+        self.next_capture += 1;
+        let id = self.next_capture;
+        let on_event = self.on_event.clone();
+        let (capture, started) = ScreenCapture::start(target, options, move || {
+            on_event(Event::ScreenCaptureEnded { capture: id })
+        })?;
+        self.frames.set_screen(Some(capture.preview()));
+        self.screen = Some(ScreenShare { id, capture });
+        Ok((id, started))
+    }
+
+    /// Publish capture `capture` as the screen share (replacing an earlier
+    /// publish of it). E2EE covers it through the room's one key provider,
+    /// exactly as the camera. Returns the publication's sid.
+    pub async fn publish_screen(
+        &mut self,
+        capture: u64,
+        opts: ScreenOptions,
+    ) -> Result<String, String> {
+        if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
+            return Err(format!("screen capture {capture} is not running"));
+        }
+        self.unpublish_screen().await;
+        let source = NativeVideoSource::new(
+            VideoResolution {
+                width: opts.width,
+                height: opts.height,
+            },
+            true,
+        );
+        let track = LocalVideoTrack::create_video_track(
+            "screen_share",
+            RtcVideoSource::Native(source.clone()),
+        );
+        let publication = self
+            .room
+            .local_participant()
+            .publish_track(
+                LocalTrack::Video(track),
+                TrackPublishOptions {
+                    source: TrackSource::Screenshare,
+                    simulcast: false,
+                    video_encoding: Some(VideoEncoding {
+                        max_bitrate: opts.max_bitrate,
+                        max_framerate: opts.max_framerate,
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let sid = publication.sid();
+        if let Some(screen) = &self.screen {
+            screen.capture.set_source(Some(source));
+        }
+        *self.screen_publication.lock().unwrap() = Some(VideoPublication::new(sid.clone()));
+        Ok(sid.to_string())
+    }
+
+    /// Stop capture `capture` if it is still the running one (a stale id is
+    /// a no-op): unpublish it, and release the capturer and, on Wayland, the
+    /// portal session.
+    pub async fn stop_screen(&mut self, capture: u64) {
+        if self.screen.as_ref().is_some_and(|s| s.id == capture) {
+            self.release_screen().await;
+        }
+    }
+
+    async fn unpublish_screen(&mut self) {
+        if let Some(screen) = &self.screen {
+            screen.capture.set_source(None);
+        }
+        let publication = self.screen_publication.lock().unwrap().take();
+        if let Some(publication) = publication {
+            if let Err(e) = self
+                .room
+                .local_participant()
+                .unpublish_track(&publication.live)
+                .await
+            {
+                log::warn!("[native_voice] screen unpublish: {e}");
+            }
+        }
+    }
+
+    async fn release_screen(&mut self) {
+        self.unpublish_screen().await;
+        self.frames.set_screen(None);
+        // Dropping joins the capture thread.
+        self.screen.take();
+    }
+
     /// Deafen support: (un)subscribe one remote publication.
     pub fn set_subscribed(
         &mut self,
@@ -698,92 +769,56 @@ impl NativeSession {
         let publication = participant
             .get_track_publication(&track_sid)
             .ok_or_else(|| format!("unknown track {sid}"))?;
-        if subscribed {
-            self.reselect(DeviceKind::Output);
-        }
         publication.set_subscribed(subscribed);
         Ok(())
     }
 
-    pub fn devices(&self) -> Result<Devices, String> {
-        self.audio
-            .as_ref()
-            .map(devices_of)
-            .ok_or_else(|| "no audio device module — platform audio unavailable".to_string())
+    /// Per-user volume: the gain for `identity`'s microphone, 1.0 is unity
+    /// (the web path's `RemoteParticipant.setVolume`, 0 to 2 in practice).
+    pub fn set_volume(&self, identity: &str, volume: f32) {
+        self.playout
+            .mixer()
+            .set_gain(identity, playout::Volume::Microphone, volume);
     }
 
-    /// Switch the capture or playout device in place (the module restarts
-    /// the stream if it is running). An empty id selects the module's
-    /// default, its first enumerated device.
+    /// The gain for `identity`'s screen-share audio, 1.0 is unity (the web
+    /// path's screen-share element volume, 0 to 1, 0 when muted).
+    pub fn set_screenshare_volume(&self, identity: &str, volume: f32) {
+        self.playout
+            .mixer()
+            .set_gain(identity, playout::Volume::ScreenShare, volume);
+    }
+
+    /// Switch the capture or playout device (a running stream moves to it).
+    /// An empty id selects the default, the first listed device.
     pub fn set_device(&mut self, kind: &str, device_id: &str) -> Result<(), String> {
-        let kind = DeviceKind::parse(kind)?;
-        let audio = self
-            .audio
-            .as_ref()
-            .ok_or("no audio device module — platform audio unavailable")?;
-        let listed = devices_of(audio);
-        let (devices, what, selection) = match kind {
-            DeviceKind::Input => (listed.inputs, "capture", &mut self.input),
-            DeviceKind::Output => (listed.outputs, "playout", &mut self.output),
-        };
-        let (index, fell_back) = resolve_device(device_id, &devices);
-        let index = index.ok_or(format!("no {what} device"))?;
-        // PlatformAudio only switches by GUID, which is empty on Linux; the
-        // runtime its device module lives in exposes the index-based calls.
-        let runtime = LkRuntime::instance();
-        let f = runtime.pc_factory();
-        let applied = selection.index;
-        let switched = match kind {
-            DeviceKind::Input => switch_stream(
-                applied,
-                index,
-                f.recording_is_initialized(),
-                || f.stop_recording(),
-                || f.set_recording_device(index),
-                || f.init_recording(),
-                || f.start_recording(),
-            ),
-            DeviceKind::Output => switch_stream(
-                applied,
-                index,
-                f.playout_is_initialized(),
-                || f.stop_playout(),
-                || f.set_playout_device(index),
-                || f.init_playout(),
-                || f.start_playout(),
-            ),
-        };
-        selection.index = switched.is_ok().then_some(index);
-        switched?;
-        selection.name = if fell_back {
-            String::new()
-        } else {
-            device_id.to_string()
-        };
-        if fell_back {
-            return Err(format!(
-                "{what} device {device_id} not found; switched to the default"
-            ));
+        match DeviceKind::parse(kind)? {
+            DeviceKind::Output => self.playout.set_device(device_id),
+            DeviceKind::Input => self.capture.set_device(device_id),
         }
-        Ok(())
     }
 
     pub fn resources(&self) -> Resources {
         Resources {
             rooms: 1,
             local_tracks: usize::from(self.mic.is_some())
-                + usize::from(self.camera.lock().unwrap().is_some()),
-            adm_refs: self.audio.as_ref().map_or(0, PlatformAudio::ref_count),
+                + usize::from(self.camera.lock().unwrap().is_some())
+                + usize::from(self.screen_publication.lock().unwrap().is_some()),
+            capture_streams: self.capture.streams(),
+            audio_streams: self.playout.readers(),
             video_sockets: self.frames.sockets(),
+            screen_captures: screen::active_captures(),
             threads: process_threads(),
         }
     }
 
-    /// Leave the room and release every native handle. Dropping the last
-    /// `PlatformAudio` disables the ADM; dropping the frame server closes
-    /// its listener and every frame socket.
+    /// Leave the room and release every native handle: the capture and
+    /// playout streams close with the session, and dropping the frame server
+    /// closes its listener and every frame socket.
     pub async fn close(mut self) {
+        self.capture.stop();
         self.release_camera().await;
+        self.release_screen().await;
         if let Some(publication) = self.mic.take() {
             let _ = self
                 .room
@@ -795,7 +830,6 @@ impl NativeSession {
             log::warn!("[native_voice] room close: {e}");
         }
         self.forwarder.abort();
-        self.audio.take();
     }
 }
 
@@ -803,25 +837,78 @@ async fn forward_events(
     mut events: UnboundedReceiver<RoomEvent>,
     on_event: EventSink,
     frames: Observer,
-    camera: CameraSlot,
+    playout: playout::Listener,
+    published: [VideoSlot; 2],
 ) {
     while let Some(ev) = events.recv().await {
         if let RoomEvent::LocalTrackRepublished {
             previous_sid,
             publication,
+            participant,
             ..
         } = &ev
         {
-            if let Some(c) = camera.lock().unwrap().as_mut() {
-                c.republished(previous_sid, publication.sid());
+            let source = publication.source();
+            let slot = match source {
+                TrackSource::Camera => Some(&published[0]),
+                TrackSource::Screenshare => Some(&published[1]),
+                _ => None,
+            };
+            let orphan = slot.and_then(|slot| {
+                apply_republish(
+                    &mut slot.lock().unwrap(),
+                    source,
+                    previous_sid,
+                    &publication.sid(),
+                )
+            });
+            if let Some(sid) = orphan {
+                // The video was stopped (slot emptied) or replaced while the
+                // SDK was between its unpublish and publish during a full
+                // reconnect: this fresh publication (a new sid) found nothing
+                // to attach to, so no frames are driven for it and the webview
+                // already considers it off. Unpublish it, or it lingers beside
+                // the next one.
+                let participant = participant.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = participant.unpublish_track(&sid).await {
+                        log::warn!("[native_voice] orphan video unpublish: {e}");
+                    }
+                });
             }
         }
         // Before the webview hears of a video track, so its frame socket
         // finds it.
         frames.observe(&ev);
+        playout.observe(&ev);
         if let Some(mapped) = map_event(ev) {
             on_event(mapped);
         }
+    }
+}
+
+/// A video slot's (camera or screen share) response to a local track's
+/// `LocalTrackRepublished`: adopt the new sid when the event continues the
+/// slot's live publication, or return the sid to unpublish when it does not —
+/// the video was stopped (slot emptied) or a newer one replaced it while the
+/// SDK was between its unpublish and publish, leaving a publication nobody can
+/// drive. A non-video republish returns `None`: the microphone is tracked by
+/// `NativeSession` itself, not here.
+fn apply_republish(
+    slot: &mut Option<VideoPublication>,
+    source: TrackSource,
+    previous_sid: &TrackSid,
+    sid: &TrackSid,
+) -> Option<TrackSid> {
+    if !matches!(source, TrackSource::Camera | TrackSource::Screenshare) {
+        return None;
+    }
+    match slot.as_mut() {
+        Some(c) if c.live == *previous_sid => {
+            c.republished(previous_sid, sid.clone());
+            None
+        }
+        _ => Some(sid.clone()),
     }
 }
 
@@ -916,88 +1003,82 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_selection_still_restarts_the_running_stream() {
-        use std::cell::RefCell;
-        let calls = RefCell::new(Vec::new());
-        let step = |name: &'static str, ok: bool| {
-            let calls = &calls;
-            move || {
-                calls.borrow_mut().push(name);
-                ok
-            }
-        };
-        let result = switch_stream(
-            None,
-            2,
-            true,
-            step("stop", true),
-            step("select", false),
-            step("init", true),
-            step("start", true),
-        );
-        assert!(result.is_err());
-        assert_eq!(*calls.borrow(), ["stop", "select", "init", "start"]);
-
-        calls.borrow_mut().clear();
-        let result = switch_stream(
-            None,
-            2,
-            false,
-            step("stop", true),
-            step("select", true),
-            step("init", true),
-            step("start", true),
-        );
-        assert!(result.is_ok());
-        assert_eq!(*calls.borrow(), ["select"]);
-    }
-
-    #[test]
-    fn an_unchanged_index_leaves_the_running_stream_alone() {
-        use std::cell::RefCell;
-        let calls = RefCell::new(Vec::new());
-        let step = |name: &'static str| {
-            let calls = &calls;
-            move || {
-                calls.borrow_mut().push(name);
-                true
-            }
-        };
-        let result = switch_stream(
-            Some(2),
-            2,
-            true,
-            step("stop"),
-            step("select"),
-            step("init"),
-            step("start"),
-        );
-        assert!(result.is_ok());
-        assert!(calls.borrow().is_empty());
-
-        let result = switch_stream(
-            Some(3),
-            2,
-            true,
-            step("stop"),
-            step("select"),
-            step("init"),
-            step("start"),
-        );
-        assert!(result.is_ok());
-        assert_eq!(*calls.borrow(), ["stop", "select", "init", "start"]);
-    }
-
-    #[test]
     fn camera_unpublish_follows_its_republished_sid() {
         let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
-        let mut camera = CameraPublication::new(sid("TR_a"));
+        let mut camera = VideoPublication::new(sid("TR_a"));
         camera.republished(&sid("TR_mic"), sid("TR_mic2"));
         assert_eq!(camera.live, sid("TR_a"), "another track's republish");
         camera.republished(&sid("TR_a"), sid("TR_b"));
         camera.republished(&sid("TR_b"), sid("TR_c"));
         assert_eq!(camera.live, sid("TR_c"));
         assert_eq!(camera.issued, "TR_a", "the webview still names TR_a");
+    }
+
+    /// A disable can land while the SDK is between its unpublish of the old
+    /// sid and the dispatch of `LocalTrackRepublished` during a full
+    /// reconnect: `release_camera` empties the slot, then the event arrives
+    /// carrying a fresh publication sid nobody can drive. The slot must hand
+    /// that sid back so the forwarder unpublishes it — the alternative is a
+    /// camera published with no frames (frozen remote tiles) beside the next
+    /// one the webview enables.
+    #[test]
+    fn a_camera_republished_after_a_disable_is_orphaned_not_adopted() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut slot = Some(VideoPublication::new(sid("TR_a")));
+        // The disable arrives inside the await, before the republish event,
+        // emptying the slot.
+        assert!(slot.take().is_some());
+        assert_eq!(
+            apply_republish(&mut slot, TrackSource::Camera, &sid("TR_a"), &sid("TR_b")),
+            Some(sid("TR_b")),
+            "a republish with no live camera to continue must be unpublished"
+        );
+        assert!(slot.is_none(), "the orphan must not occupy the slot");
+
+        // The later enable publishes one camera, and its own republish is
+        // adopted rather than orphaned: exactly one camera remains.
+        let mut slot = Some(VideoPublication::new(sid("TR_c")));
+        assert_eq!(
+            apply_republish(&mut slot, TrackSource::Camera, &sid("TR_c"), &sid("TR_d")),
+            None
+        );
+        let live = slot.expect("the enabled camera stays published").live;
+        assert_eq!(live, sid("TR_d"));
+    }
+
+    #[test]
+    fn a_republished_camera_replaced_under_its_old_sid_is_orphaned() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        // A newer camera owns the slot; the stale publication's republish
+        // arrives with the old sid and must not be attached to it.
+        let mut slot = Some(VideoPublication::new(sid("TR_new")));
+        assert_eq!(
+            apply_republish(
+                &mut slot,
+                TrackSource::Camera,
+                &sid("TR_old"),
+                &sid("TR_old2")
+            ),
+            Some(sid("TR_old2"))
+        );
+        assert_eq!(slot.unwrap().live, sid("TR_new"));
+    }
+
+    #[test]
+    fn a_non_camera_republish_is_never_orphaned() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        // The microphone is tracked by the session, not the camera slot; an
+        // empty slot must not make its republish look like a stray camera.
+        let mut slot = None;
+        assert_eq!(
+            apply_republish(
+                &mut slot,
+                TrackSource::Microphone,
+                &sid("TR_mic"),
+                &sid("TR_mic2")
+            ),
+            None
+        );
     }
 
     #[test]

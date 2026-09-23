@@ -512,7 +512,8 @@ describe("getReconnectDelay boundary and arithmetic", () => {
     mockInvoke.mockResolvedValue(undefined);
     mockListen.mockClear();
     eventHandlers.clear();
-    client = createWsClient();
+    // Pin the upper jitter endpoint so the exact exponential ceilings stay tested.
+    client = createWsClient({ random: () => 1 });
   });
 
   afterEach(() => {

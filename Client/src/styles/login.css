@@ -337,11 +337,11 @@
   color: var(--text-micro);
 }
 .srv-btn.auto-login.active {
-  color: var(--accent);
+  color: var(--accent-text);
   opacity: 1;
 }
 .srv-btn.auto-login:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* Online users count */
@@ -357,7 +357,7 @@
 /* Auto-connect indicator */
 .srv-auto {
   font-size: 10px;
-  color: var(--accent);
+  color: var(--accent-text);
   margin-left: 4px;
 }
 
@@ -644,17 +644,31 @@
     box-shadow 0.2s;
 }
 .form-input::placeholder {
-  color: var(--text-micro);
+  color: var(--text-muted);
 }
 .form-input:hover {
   border-color: var(--border-strong);
 }
 .form-input:focus {
-  border-color: var(--accent);
+  border-color: var(--focus-ring);
   box-shadow: 0 0 0 3px rgba(88, 101, 242, 0.2);
 }
-.form-input.error {
-  border-color: var(--red);
+.form-input.error,
+.form-input[aria-invalid="true"] {
+  border-color: var(--text-danger);
+}
+/* Shared field messages (B9-2 UI contract): an error is linked to its input
+   with aria-describedby and announced by role="alert"; a success or pending
+   note uses role="status". Colour is never the only signal — the text says it. */
+.form-error {
+  color: var(--text-danger);
+  font-size: 13px;
+  margin-top: 6px;
+}
+.form-status {
+  color: var(--text-positive);
+  font-size: 13px;
+  margin-top: 6px;
 }
 
 /* Password field */
@@ -877,7 +891,7 @@
 .auto-connect-server {
   display: block;
   font-size: 14px;
-  color: var(--accent);
+  color: var(--accent-text);
   margin-bottom: 24px;
 }
 .auto-connect-cancel {
@@ -910,7 +924,7 @@
 .totp-icon svg {
   width: 32px;
   height: 32px;
-  color: white;
+  color: var(--on-accent);
 }
 .totp-title {
   text-align: center;
@@ -946,7 +960,7 @@
   font-family: var(--font-mono);
 }
 .totp-digit:focus {
-  border-color: var(--accent);
+  border-color: var(--focus-ring);
 }
 .totp-digit.filled {
   border-color: var(--accent);
@@ -1008,7 +1022,7 @@
 .modal-header h3 {
   font-size: 18px;
   font-weight: 700;
-  color: white;
+  color: var(--header-primary);
 }
 .modal-close {
   background: transparent;
@@ -1048,7 +1062,7 @@
   padding: 8px 20px;
   border-radius: var(--radius-sm);
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
   font-size: 13px;
   font-weight: 600;
   transition: background 0.15s;
@@ -1063,19 +1077,19 @@
   margin-bottom: 8px;
 }
 .modal-danger-text strong {
-  color: white;
+  color: var(--header-primary);
 }
 .btn-danger {
   padding: 8px 20px;
   border-radius: var(--radius-sm);
-  background: var(--red);
+  background: var(--danger-fill);
   color: white;
   font-size: 13px;
   font-weight: 600;
   transition: background 0.15s;
 }
 .btn-danger:hover {
-  background: #d83135;
+  background: var(--danger-fill-hover);
 }
 
 /* ═══════════════════════════════════════════

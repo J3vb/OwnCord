@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Fail when an active document states a finding count the ledger contradicts
+// Fail when an explicitly current summary states a count the ledger contradicts
 // (the automated half of G-04).
 //
 //   node scripts/check-doc-counts.mjs
 //   node --test scripts/check-doc-counts.test.mjs
 //
 // Scope, deliberately small: this counts ledger statuses and compares them to
-// the numbers active documents assert. It is not a document-status framework,
+// the numbers current summaries assert. It is not a document-status framework,
 // and it does not check that FINDINGS.md is in sync with the ledger — that was
 // RL-07, and B1-6 answered it by not tracking FINDINGS.md at all, so there is
 // no committed rendering left to drift. `npm run check:docs` runs this script
@@ -34,10 +34,8 @@
 //   3. "<n> records" / "<n> findings", but only where the ledger is named
 //      within the preceding few lines.
 //
-// Dated docs/audit-*.md are reported, never failed: they are point-in-time
-// snapshots that are deliberately not maintained, and editing them is out of
-// scope for the repository-layout work. audit-2026-08-19.md does claim zero
-// open findings — true when written, false now, and left alone on purpose.
+// Dated baselines, plans, scorecards and docs/audit-*.md are not checked against
+// today's ledger. Their measurements belong to the cited source revisions.
 
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -45,30 +43,23 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-// Active documents whose counts are meant to track the LIVE ledger. Adding
-// such a count to a document means adding the document here — an unlisted
-// document is not checked, and the CI job says so.
+// Explicit allow-list of current guidance and summaries whose counts track
+// the LIVE ledger. Adding a current summary means opting its document in here;
+// an unlisted document is not checked. Being an active plan is not enough.
 //
-// Deliberately excluded: plan and scorecard evidence blocks. Their counts are
-// dated records of a run ("check:docs (336 fixed / 43 open)", "totals 315
-// fixed / 59 open -> 320 fixed / 54 open"), correct as written and wrong to
-// rewrite when the ledger moves. Watching them today would fail thirteen
-// claims across b3, b4, hp-3 and hp-4 and the only way to green would be to
-// falsify signed evidence.
+// Deliberately excluded: B0/B1, HP-0/HP-1 and all other dated plan/scorecard
+// evidence. Do not add them to make a new measurement agree with today's
+// ledger. Keep live totals in the summaries below, and preserve as-measured
+// observations independently (B10 qualification item 1 / B1/G-04).
+// The issue register has a dated filename but an explicitly current summary;
+// document intent, not a filename-date heuristic, determines this list.
 const WATCHED = [
   "docs/README.md",
   "docs/plans/README.md",
-  "docs/plans/hp-0-scorecard-2026-08-25.md",
-  "docs/plans/hp-1-scorecard-2026-08-27.md",
   "docs/plans/repo-health-issue-register-2026-08-23.md",
-  "docs/plans/b0-baseline-2026-08-25.md",
-  "docs/plans/b1-repository-foundation-2026-08-25.md",
   "CLAUDE.md",
   "README.md",
 ];
-
-// Reported but never failed — dated snapshots, see the header.
-const REPORT_ONLY = ["docs/audit-"];
 
 const STATUSES = ["open", "fixed", "declined", "duplicate", "refuted", "blocked"];
 const S = STATUSES.join("|");
@@ -150,7 +141,6 @@ function main() {
   console.log(`ledger: ${STATUSES.map((s) => `${counts[s]} ${s}`).join(" / ")} = ${counts.total}`);
 
   const failures = [];
-  const notes = [];
   let claimCount = 0;
 
   for (const rel of WATCHED) {
@@ -167,19 +157,16 @@ function main() {
       claimCount++;
       if (c.value === actual) continue;
       const entry = `${rel}:${c.line}  claims "${c.text}"  — ledger says ${c.kind} = ${actual}`;
-      if (REPORT_ONLY.some((prefix) => rel.startsWith(prefix))) notes.push(entry);
-      else failures.push(entry);
+      failures.push(entry);
     }
   }
-
-  for (const n of notes) console.log(`NOTE  ${n}`);
 
   if (failures.length) {
     console.error(`\n${failures.length} document claim(s) contradict the ledger:\n`);
     for (const f of failures) console.error(`  ${f}`);
     console.error(
-      "\nThe ledger is the source of truth. Update the document, or if the ledger is\n" +
-        "wrong, fix .superpowers/findings-ledger.json and re-render FINDINGS.md.",
+      "\nThe ledger is the source of truth for current summaries. Update the current\n" +
+        "summary, or correct the ledger if it is wrong. Do not rewrite dated evidence.",
     );
     process.exit(1);
   }

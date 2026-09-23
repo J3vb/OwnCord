@@ -26,7 +26,7 @@ RETURNING id;
 -- name: GetReportByID :one
 SELECT id, public_id, reporter_id, reporter_token, subject_id, subject_token, target_type,
        target_ref, channel_id, reason, detail, state, assignee_id, outcome,
-       created_at, updated_at, closed_at
+       created_at, updated_at, closed_at, source_nsfw
   FROM reports WHERE id = ?;
 
 -- name: GetReportByPublicID :one
@@ -34,7 +34,7 @@ SELECT id, public_id, reporter_id, reporter_token, subject_id, subject_token, ta
 -- public_id is the sole externally-visible identifier (Codex review).
 SELECT id, public_id, reporter_id, reporter_token, subject_id, subject_token, target_type,
        target_ref, channel_id, reason, detail, state, assignee_id, outcome,
-       created_at, updated_at, closed_at
+       created_at, updated_at, closed_at, source_nsfw
   FROM reports WHERE public_id = ?;
 
 -- name: FindOpenOrAssignedReport :one

@@ -158,6 +158,9 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, st
 		}
 
 		r.Get("/sessions", handleListSessions(svc))
+
+		r.With(RateLimitMiddleware(limiter, "own_moderation:", ownModerationRateLimitPerMinute, time.Minute, trustedProxies)).
+			Get("/moderation", handleOwnModeration(svc))
 		r.Delete("/sessions", handleRevokeAllSessions(svc, limiter, broadcaster))
 		r.Delete("/sessions/{id}", handleRevokeSession(svc))
 	})

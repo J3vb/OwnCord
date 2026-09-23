@@ -165,14 +165,25 @@ export function enableRovingNavigation(
  * else the container itself) and return a restorer that puts focus back on
  * whatever held it before — call the restorer on close. Capturing happens NOW,
  * so call this before anything inside the dialog grabs focus.
+ *
+ * `fallback` names a safe target for when the opener is gone by close time (a
+ * re-render replaced it, or the dialog deleted the row that opened it);
+ * without one, focus would drop to <body> and a screen reader to the top of
+ * the document.
  */
-export function focusDialog(container: HTMLElement): () => void {
+export function focusDialog(
+  container: HTMLElement,
+  fallback?: () => HTMLElement | null,
+): () => void {
   const previous = document.activeElement;
   const firstFocusable = queryFocusable(container)[0];
   (firstFocusable ?? container).focus();
   return () => {
     if (previous instanceof HTMLElement && previous.isConnected) {
       previous.focus();
+      return;
     }
+    const target = fallback?.();
+    if (target?.isConnected === true) target.focus();
   };
 }

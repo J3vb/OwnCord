@@ -14,6 +14,17 @@ vi.mock("@lib/themes", async (importOriginal) => ({
 }));
 
 import { applyStoredAppearance } from "@lib/appearance";
+import { syncOsMotionListener } from "@lib/os-motion";
+
+/** jsdom has no matchMedia; startup syncs with the OS by default (B9-2, Q1). */
+function stubOsReducedMotion(matches: boolean): void {
+  vi.stubGlobal("matchMedia", (media: string) => ({
+    matches,
+    media,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
+}
 
 describe("applyStoredAppearance", () => {
   beforeEach(() => {
@@ -23,9 +34,12 @@ describe("applyStoredAppearance", () => {
     localStorage.clear();
     vi.clearAllMocks();
     mockGetActiveThemeName.mockReturnValue("neon-glow");
+    stubOsReducedMotion(false);
   });
 
   afterEach(() => {
+    syncOsMotionListener(false);
+    vi.unstubAllGlobals();
     document.documentElement.className = "";
     document.documentElement.removeAttribute("style");
     document.body.removeAttribute("style");
@@ -51,5 +65,14 @@ describe("applyStoredAppearance", () => {
     expect(document.documentElement.classList.contains("compact-mode")).toBe(true);
     expect(document.documentElement.classList.contains("high-contrast")).toBe(true);
     expect(document.documentElement.classList.contains("large-font")).toBe(true);
+    expect(document.documentElement.classList.contains("reduced-motion")).toBe(false);
+  });
+
+  it("follows the OS reduced-motion setting when nothing is stored (B9-2, Q1)", () => {
+    stubOsReducedMotion(true);
+
+    applyStoredAppearance();
+
+    expect(document.documentElement.classList.contains("reduced-motion")).toBe(true);
   });
 });

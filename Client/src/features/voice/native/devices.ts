@@ -1,9 +1,9 @@
 // Audio device listing for the native backend, in the browser's
 // `MediaDeviceInfo` shape the settings tab and the device manager consume.
-// On Linux the ids are the host device module's device names (what
-// `NativeRoom.switchActiveDevice` forwards), not the webview's, so
-// enumerating through the webview there would offer devices the session
-// cannot select and treat every saved id as "removed". Off Linux this
+// On Linux the ids are the audio host's (`cpal`'s) stable capture and
+// playout device ids (what `NativeRoom.switchActiveDevice` forwards), not
+// the webview's, so enumerating through the webview there would offer devices
+// the session cannot select and treat every saved id as "removed". Off Linux this
 // returns null and the caller keeps its own web enumeration unchanged.
 import { desktop } from "../../../platform/desktop";
 import { isLinuxDesktop } from "./platform";

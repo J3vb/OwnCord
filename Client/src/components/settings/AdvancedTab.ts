@@ -256,6 +256,7 @@ function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
   let touched = false;
   const toggle = createToggle(false, {
     signal,
+    label: "Launch on Login",
     onChange: (nowOn) => {
       touched = true;
       void (async () => {

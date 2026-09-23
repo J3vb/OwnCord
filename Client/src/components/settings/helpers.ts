@@ -64,6 +64,14 @@ export const THEMES = {
     "--border-strong": "#cbccd1",
     "--scrollbar-thin-thumb": "#cdcfd4",
     "--scrollbar-auto-thumb": "#cdcfd4",
+    // B9-2: the dark defaults for these read below 4.5:1 (text) or 3:1
+    // (focus) on light surfaces. Tested values; see docs/architecture/b9-ui-contract.md.
+    "--text-link": "#006a9f",
+    "--text-positive": "#18733f",
+    "--text-warning": "#7f5e1a",
+    "--text-danger": "#ba3134",
+    "--accent-text": "#4752c4",
+    "--focus-ring": "#4752c4",
   },
 } as const;
 
@@ -83,17 +91,20 @@ const THEME_KEYS: ReadonlySet<string> = new Set(
 
 /**
  * Create an accessible toggle switch element with proper ARIA attributes
- * and keyboard support (Enter/Space to toggle).
+ * and keyboard support (Enter/Space to toggle). `label` is its accessible
+ * name: the visible label beside it is a sibling, not a <label>, so without
+ * it a screen reader announces an unnamed "switch" (B9-2).
  */
 export function createToggle(
   isOn: boolean,
-  opts: { signal: AbortSignal; onChange: (nowOn: boolean) => void },
+  opts: { signal: AbortSignal; onChange: (nowOn: boolean) => void; label: string },
 ): HTMLDivElement {
   const toggle = createElement("div", {
     class: isOn ? "toggle on" : "toggle",
     role: "switch",
     tabindex: "0",
     "aria-checked": isOn ? "true" : "false",
+    "aria-label": opts.label,
   });
 
   function doToggle(): void {
@@ -143,6 +154,7 @@ export function appendToggleRows(
     const isOn = loadPref<boolean>(item.key, item.fallback);
     const toggle = createToggle(isOn, {
       signal,
+      label: item.label,
       onChange: (nowOn) => {
         savePref(item.key, nowOn);
         item.sideEffect?.(nowOn);

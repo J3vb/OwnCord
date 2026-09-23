@@ -220,3 +220,53 @@ func handleModerationAckNotice(svc *service.Services) http.HandlerFunc {
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
+
+// ownModerationAppeal is the appeal filed against an own ledger row.
+type ownModerationAppeal struct {
+	ID    string `json:"id"`
+	State string `json:"state"`
+}
+
+// ownModerationActionResponse is one row of GET /api/v1/users/me/moderation.
+// Member-safe by construction: no actor, lifted_by, report link, evidence or
+// note — the fields ready.notices and the appeal DTOs already disclose, plus
+// the row's own timing.
+type ownModerationActionResponse struct {
+	ID             int64                `json:"id"`
+	Kind           string               `json:"kind"`
+	Reason         string               `json:"reason"`
+	CreatedAt      string               `json:"created_at"`
+	ExpiresAt      *string              `json:"expires_at"`
+	LiftedAt       *string              `json:"lifted_at"`
+	AcknowledgedAt *string              `json:"acknowledged_at"`
+	Appealable     bool                 `json:"appealable"`
+	Appeal         *ownModerationAppeal `json:"appeal"`
+}
+
+func handleOwnModeration(svc *service.Services) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
+		rows, err := svc.Moderation.ListOwnActions(r.Context(), user.ID)
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+		resp := make([]ownModerationActionResponse, 0, len(rows))
+		for i := range rows {
+			row := &rows[i]
+			item := ownModerationActionResponse{
+				ID: row.ID, Kind: row.Kind, Reason: row.Reason, CreatedAt: row.CreatedAt,
+				ExpiresAt: row.ExpiresAt, LiftedAt: row.LiftedAt, AcknowledgedAt: row.AcknowledgedAt,
+				Appealable: row.Appealable,
+			}
+			if row.AppealID != nil && row.AppealState != nil {
+				item.Appeal = &ownModerationAppeal{ID: *row.AppealID, State: *row.AppealState}
+			}
+			resp = append(resp, item)
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}

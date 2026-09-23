@@ -151,6 +151,14 @@ export async function installMediaProbe(page: Page) {
       }
       originalPost.call(this, message, options);
     };
+    // A terminated worker can never receive a restored key, and holding it
+    // would retain its E2EE manager and Room for the page's lifetime, which
+    // the long-session soak would read as the app's leak.
+    const originalTerminate = Worker.prototype.terminate;
+    Worker.prototype.terminate = function () {
+      keys.delete(this);
+      originalTerminate.call(this);
+    };
   });
 }
 
