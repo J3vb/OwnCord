@@ -147,7 +147,14 @@ func TestRetentionStoreFailuresAreInternal(t *testing.T) {
 		}},
 		{"apply", func(f *retentionFixture) error {
 			change := RetentionChange{Scope: "server", Days: &days}
-			preview := previewChange(t, f.svc, f.owner, change)
+			p, err := f.svc.Policy(ctx)
+			if err != nil {
+				return err
+			}
+			preview, err := f.svc.PreviewChange(ctx, f.owner, change, p.Revision)
+			if err != nil {
+				return err
+			}
 			return f.svc.ApplyChange(ctx, f.owner, change, preview.Token)
 		}},
 	} {
