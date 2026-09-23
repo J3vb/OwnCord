@@ -1,5 +1,5 @@
 {
-  "nextId": 453,
+  "nextId": 454,
   "findings": [
     {
       "id": "OC-0001",
@@ -10485,6 +10485,28 @@
         "test": "Client/tests/unit/room-event-handlers.test.ts",
         "revertProof": "pass"
       }
+    },
+    {
+      "id": "OC-0453",
+      "title": "Rejoining voice straight after leaving, on the same socket, stalls 3-6 s behind the leave's LiveKit removal",
+      "file": "Server/ws/voice_leave.go",
+      "line": 88,
+      "severity": "medium",
+      "why": "finishVoiceLeave called livekit.RemoveParticipant synchronously on the client's read loop. A widget disconnect closes the client's own LiveKit session and sends voice_leave at the same moment; for a participant that is closing itself, LiveKit often answers the removal only after its 3 s routing timeout (\"twirp error unavailable: no response from servers\"), and the next frame on the socket - the rejoin's voice_join, or a channel switch, which runs the same leave path - waited behind it. A first join takes ~0.5 s; an immediate rejoin took 3.2-5.5 s in roughly a quarter of attempts.",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "b7-voice-join-budget",
+      "lens": "run-the-thing",
+      "finder": "voice-rejoin-stall",
+      "repro": "Client/tests/e2e/fullstack/voice-rejoin.spec.ts: alice leaves through the widget and rejoins voice-one at once, ten times on one socket, while bob publishes; each rejoin is timed from the click to 'Voice Connected' with bob's audio decoding.",
+      "evidence": "Local full-stack runs on the unfixed server: rejoin samples [266,928,385,392,343,371,239,439,3316,397] and [277,691,549,5193,444,257,543,5347,636,3282] ms; the server log shows 'voice leave' at 11:22:41.692, 'handleVoiceLeave RemoveParticipant failed ... no response from servers' at 11:22:44.695 and the queued 'voice join' at 11:22:44.696. With the fix, three runs: max rejoin 1,514 ms, typically 0.3-0.5 s, and bob's room held exactly one alice after the rejoins and none after her final leave.",
+      "suggestedFix": "Run the leave's LiveKit removal off the read loop; the participant identity carries the join token, so it cannot remove the new session.",
+      "fix": {
+        "commit": "9fc4b776e2288b03de2760f16d9137fb391b7aa1",
+        "test": "Server/ws/oc_0453_voice_leave_livekit_async_test.go",
+        "revertProof": "pass"
+      },
+      "fixedDate": "2026-09-23"
     }
   ]
 }
