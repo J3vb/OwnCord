@@ -150,7 +150,7 @@ impl Mixer {
         let MixerState { queues, gains } = &mut *state;
         for q in queues.values_mut() {
             if !q.primed {
-                if q.samples.len() < PRIME {
+                if q.frames() < PRIME {
                     continue;
                 }
                 q.primed = true;
@@ -601,6 +601,16 @@ mod tests {
         assert!(mono.iter().all(|&s| s == 0.25), "{mono:?}");
         // Stereo queues prime and count in frames, not samples.
         assert_eq!(lock(&m.0).queues["TR_s"].frames(), PRIME - 8);
+    }
+
+    #[test]
+    fn a_stereo_queue_primes_on_30_ms_of_frames_not_samples() {
+        let m = Mixer::default();
+        m.add("TR_s", "user-1", Some(Volume::ScreenShare), 2);
+        m.push("TR_s", &vec![1000; PRIME * 2 - 2]);
+        assert!(mixed(&m, 10).iter().all(|&s| s == 0.0), "not primed yet");
+        m.push("TR_s", &[1000, 1000]);
+        assert!(mixed(&m, 10).iter().all(|&s| s > 0.0), "primed");
     }
 
     /// One device period of steady playout: the sender's 20 ms arrives as
