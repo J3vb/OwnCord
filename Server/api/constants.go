@@ -53,6 +53,10 @@ const (
 	// stays under this; it exists to bound abuse of the operator's Klipy quota.
 	gifRateLimitPerMinute = 30
 
+	// ownModerationRateLimitPerMinute is the maximum GET
+	// /api/v1/users/me/moderation reads per IP per minute.
+	ownModerationRateLimitPerMinute = 30
+
 	// profilePasswordRateLimitPerMinute is the maximum password change attempts
 	// per IP per minute.
 	profilePasswordRateLimitPerMinute = 5
