@@ -1,4 +1,4 @@
-import { serverTime } from "../features/safety/store";
+import { serverNow, serverTime } from "../features/safety/store";
 import { defineCatalog, formatDate } from "./format";
 
 /** Moderation notices and restrictions (B9-15, owner decision Q4). */
@@ -14,7 +14,6 @@ export const safetyText = defineCatalog("safety", {
   "notice.viewSafety": "View in Safety settings",
   "toast.warning": "You received a warning from the moderators: {reason}",
   "toast.timeout": "You're timed out until {time}.",
-  "toast.lifted": "Your timeout has ended.",
   "toast.acknowledged": "Warning acknowledged.",
   "timeout.composer": "You can't send messages until {time}",
   "timeout.react": "You can't add reactions until {time}",
@@ -53,7 +52,7 @@ export function formatWhen(raw: string): string {
 }
 
 /** An expiry: only the time when it is today, else the date and time. */
-export function formatUntil(raw: string, now: number = Date.now()): string {
+export function formatUntil(raw: string, now: number = serverNow()): string {
   const at = serverTime(raw);
   const sameDay = new Date(at).toDateString() === new Date(now).toDateString();
   return sameDay ? formatDate(at, { timeStyle: "short" }) : formatWhen(raw);

@@ -47,6 +47,10 @@ function row(over: Partial<OwnModerationAction> & { id: number }): OwnModeration
 
 /** Settle store notifications (microtasks) and any resolved fetches. */
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+/** The same under fake timers. */
+async function settle(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(0);
+}
 
 function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
   let resolve!: (v: T) => void;
@@ -213,7 +217,7 @@ describe("safety ws handlers", () => {
     expect(showToast).not.toHaveBeenCalled();
   });
 
-  it("a live timeout sets the server expiry; its lift clears it", () => {
+  it("a live timeout sets the server expiry; its lift clears it without an announcement", () => {
     const until = later();
     handleModAction(undefined, { id: 4, kind: "timeout", reason: "cool off", expires_at: until });
     expect(safetyStore.getState().timeout).toEqual({ expiresAt: until });
@@ -224,7 +228,7 @@ describe("safety ws handlers", () => {
 
     handleModAction(undefined, { id: 0, kind: "timeout", reason: "", expires_at: null });
     expect(safetyStore.getState().timeout).toBeNull();
-    expect(showToast).toHaveBeenLastCalledWith("Your timeout has ended.", "info");
+    expect(showToast).toHaveBeenCalledTimes(1);
   });
 
   it("a resumed connection (no ready) re-reads the history; a fresh one waits for ready", () => {
@@ -236,6 +240,65 @@ describe("safety ws handlers", () => {
     refreshSafetyOnResume(api, authOk("buffer"));
     refreshSafetyOnResume(api, authOk("db"));
     expect(getOwnModeration).toHaveBeenCalledTimes(2);
+  });
+
+  describe("on a skewed local clock", () => {
+    const MIN = 60_000;
+    const SERVER_NOW = Date.UTC(2026, 8, 23, 12, 0, 0);
+    const at = (ms: number): string => new Date(SERVER_NOW + ms).toISOString();
+    afterEach(() => vi.useRealTimers());
+
+    for (const [clock, skew] of [
+      ["fast", 15 * MIN],
+      ["slow", -15 * MIN],
+    ] as const) {
+      it(`a live timeout ends at the server's expiry on a ${clock} clock`, async () => {
+        vi.useFakeTimers({ now: SERVER_NOW + skew });
+        const until = at(10 * MIN);
+        const getOwnModeration = vi.fn().mockResolvedValue([
+          // The ledger's zone-less issue time: the server's clock as the frame was sent.
+          row({ id: 4, kind: "timeout", created_at: "2026-09-23 12:00:00", expires_at: until }),
+        ]);
+        handleModAction(
+          { listBlocks: vi.fn(), getOwnModeration },
+          { id: 4, kind: "timeout", reason: "cool off", expires_at: until },
+        );
+        expect(safetyStore.getState().timeout).toEqual({ expiresAt: until });
+        await settle();
+        await vi.advanceTimersByTimeAsync(10 * MIN - 1_000);
+        expect(safetyStore.getState().timeout).toEqual({ expiresAt: until });
+        await vi.advanceTimersByTimeAsync(1_001);
+        expect(safetyStore.getState().timeout).toBeNull();
+      });
+    }
+
+    it("a TIMED_OUT refusal keeps a timeout a fast clock reads as expired", async () => {
+      vi.useFakeTimers({ now: SERVER_NOW + 15 * MIN });
+      const until = at(10 * MIN);
+      const api = {
+        listBlocks: vi.fn(),
+        getOwnModeration: vi
+          .fn()
+          .mockResolvedValue([
+            row({ id: 4, kind: "timeout", created_at: at(-MIN), expires_at: until }),
+          ]),
+      };
+      // The local clock alone drops it...
+      applyReadySafety(api, ready([]));
+      await settle();
+      expect(safetyStore.getState().timeout).toBeNull();
+      // ...but the server just refused a send because of it.
+      handleTimedOutRefusal(api, { code: "TIMED_OUT", message: "you are timed out" });
+      await settle();
+      expect(safetyStore.getState().timeout).toEqual({ expiresAt: until });
+      // With no server clock to read, it stays advisory: it lapses after a minute
+      // and the next refusal revalidates it.
+      await vi.advanceTimersByTimeAsync(MIN + 1);
+      expect(safetyStore.getState().timeout).toBeNull();
+      handleTimedOutRefusal(api, { code: "TIMED_OUT", message: "you are timed out" });
+      await settle();
+      expect(safetyStore.getState().timeout).toEqual({ expiresAt: until });
+    });
   });
 
   it("a TIMED_OUT refusal revalidates against the server; other errors do not", () => {

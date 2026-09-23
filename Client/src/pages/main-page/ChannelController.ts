@@ -517,11 +517,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }
       },
       onReactionClick: (msgId: number, emoji: string) => {
-        const timeout = safetyStore.getState().timeout;
-        if (timeout !== null) {
-          showToast(safetyText("timeout.react", { time: formatUntil(timeout.expiresAt) }), "error");
-          return;
-        }
         reactionCtrl.handleReaction(msgId, emoji);
       },
       onPinClick: (msgId: number, chId: number, currentlyPinned: boolean) => {

@@ -8,7 +8,7 @@
 import type { OwnModerationAction } from "@lib/api";
 import { createElement, setText } from "@lib/dom";
 import { formatUntil, formatWhen, safetyText as t } from "../../i18n/safety";
-import { refreshOwnModeration, safetyStore, serverTime } from "./store";
+import { refreshOwnModeration, safetyStore, serverNow, serverTime } from "./store";
 
 function historyStatus(row: OwnModerationAction): string[] {
   const parts: string[] = [];
@@ -18,7 +18,7 @@ function historyStatus(row: OwnModerationAction): string[] {
     parts.push(t("status.lifted", { date: formatWhen(row.lifted_at) }));
   } else if (row.expires_at !== null) {
     parts.push(
-      serverTime(row.expires_at) > Date.now()
+      serverTime(row.expires_at) > serverNow()
         ? t("status.activeUntil", { time: formatUntil(row.expires_at) })
         : t("status.ended", { date: formatWhen(row.expires_at) }),
     );

@@ -4,8 +4,8 @@ import { formatUntil, safetyText } from "../../i18n/safety";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import {
   addNotice,
+  confirmTimeout,
   refreshOwnModeration,
-  safetyStore,
   setActiveTimeout,
   setReadyNotices,
 } from "./store";
@@ -38,9 +38,9 @@ export function handleModAction(api: SafetyApi, payload: Payload<"mod_action">):
       showToast(safetyText("toast.warning", { reason: payload.reason }), "warning");
     }
   } else if (payload.expires_at === null) {
-    if (safetyStore.getState().timeout !== null) showToast(safetyText("toast.lifted"), "info");
     setActiveTimeout(null);
   } else {
+    confirmTimeout(payload.id, payload.expires_at);
     setActiveTimeout(payload.expires_at);
     showToast(safetyText("toast.timeout", { time: formatUntil(payload.expires_at) }), "warning");
   }
@@ -49,5 +49,7 @@ export function handleModAction(api: SafetyApi, payload: Payload<"mod_action">):
 
 /** The server refused an action with TIMED_OUT: learn or revalidate the expiry. */
 export function handleTimedOutRefusal(api: SafetyApi, payload: Payload<"error">): void {
-  if (payload.code === "TIMED_OUT") refresh(api);
+  if (payload.code !== "TIMED_OUT") return;
+  confirmTimeout(null);
+  refresh(api);
 }

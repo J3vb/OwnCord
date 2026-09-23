@@ -358,11 +358,11 @@ function renderVoiceChannelItem(
   const connectionStatus = uiStore.getState().connectionStatus;
   // A timeout refuses a join (TIMED_OUT) but never a leave (B9-15, Q4).
   const timeout = isJoined ? null : safetyStore.getState().timeout;
-  const frozen = connectionStatus !== "connected" || timeout !== null;
+  const timeoutReason =
+    timeout === null ? null : safetyText("timeout.voice", { time: formatUntil(timeout.expiresAt) });
+  const frozen = connectionStatus !== "connected" || timeoutReason !== null;
   let frozenReason = connectionStatus === "reconnecting" ? "Reconnecting…" : "Not connected";
-  if (connectionStatus === "connected" && timeout !== null) {
-    frozenReason = safetyText("timeout.voice", { time: formatUntil(timeout.expiresAt) });
-  }
+  if (connectionStatus === "connected" && timeoutReason !== null) frozenReason = timeoutReason;
 
   const wrapper = createElement("div", {});
 
@@ -415,6 +415,15 @@ function renderVoiceChannelItem(
   );
 
   wrapper.appendChild(item);
+  if (timeoutReason !== null) {
+    wrapper.appendChild(
+      createElement(
+        "div",
+        { class: "ch-restriction", "data-testid": `voice-timeout-${channel.id}` },
+        timeoutReason,
+      ),
+    );
+  }
 
   // Render connected voice users below the channel
   if (voiceUsers.length > 0) {

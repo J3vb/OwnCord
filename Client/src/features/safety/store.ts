@@ -7,8 +7,9 @@
  * - `notices` are unacknowledged warnings, oldest first, deduped by action
  *   id. One leaves only when the server confirms the acknowledgement (Q4).
  * - `timeout` is the active timeout's server-supplied expiry. The local
- *   expiry timer is advisory: a refused send (TIMED_OUT) revalidates it
- *   against the server.
+ *   expiry timer is advisory and runs on the server's clock as far as the
+ *   client can tell: a live timeout frame measures the offset, and a refused
+ *   send (TIMED_OUT) revalidates it against the server.
  * - `history` is the latest GET /users/me/moderation answer; null until one
  *   lands.
  */
@@ -54,9 +55,27 @@ type HistorySource = Pick<ApiClient, "getOwnModeration">;
 let source: HistorySource | null = null;
 let refreshSeq = 0;
 let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+/** The local clock minus the server's. */
+let clockSkewMs = 0;
+/** The server said a timeout was in force at local time `at`; `id` names a live frame's action. */
+let confirmed: { readonly at: number; readonly id: number | null } | null = null;
 
 /** setTimeout's delay is a signed 32-bit int; longer timeouts re-arm. */
 const MAX_DELAY_MS = 2 ** 31 - 1;
+
+/**
+ * How long a server-confirmed timeout that the local clock already reads as
+ * expired is assumed to have left.
+ * ponytail: the server's clock is never read directly, so a fast clock the
+ * server contradicts is only corrected to this margin; the next refusal
+ * revalidates it.
+ */
+const REVALIDATE_MS = 60_000;
+
+/** The server's clock, as far as the client can tell. */
+export function serverNow(): number {
+  return Date.now() - clockSkewMs;
+}
 
 function byCreated(a: ModerationNotice, b: ModerationNotice): number {
   return serverTime(a.createdAt) - serverTime(b.createdAt) || a.id - b.id;
@@ -109,26 +128,22 @@ function clearExpiryTimer(): void {
 }
 
 function armExpiry(expiresAt: string): void {
-  const delay = serverTime(expiresAt) - Date.now();
+  const delay = serverTime(expiresAt) - serverNow();
   expiryTimer = setTimeout(
     () => {
       expiryTimer = null;
       if (safetyStore.getState().timeout?.expiresAt !== expiresAt) return;
-      if (serverTime(expiresAt) > Date.now()) armExpiry(expiresAt);
+      if (serverTime(expiresAt) > serverNow()) armExpiry(expiresAt);
       else setActiveTimeout(null);
     },
     Math.min(delay, MAX_DELAY_MS),
   );
 }
 
-/**
- * Set (expiry from the server) or clear the active timeout.
- * ponytail: the expiry check uses the local clock, so a skewed clock can end
- * the notice early; the next refused send revalidates it against the server.
- */
+/** Set (expiry from the server) or clear the active timeout. */
 export function setActiveTimeout(expiresAt: string | null): void {
   clearExpiryTimer();
-  const active = expiresAt !== null && serverTime(expiresAt) > Date.now();
+  const active = expiresAt !== null && serverTime(expiresAt) > serverNow();
   if (active) armExpiry(expiresAt);
   safetyStore.setState((prev) => ({ ...prev, timeout: active ? { expiresAt } : null }));
 }
@@ -138,13 +153,54 @@ export function activeTimeoutIn(rows: readonly OwnModerationAction[]): string | 
   let latest: string | null = null;
   for (const r of rows) {
     if (r.kind !== "timeout" || r.lifted_at !== null || r.expires_at === null) continue;
-    if (serverTime(r.expires_at) <= Date.now()) continue;
+    if (serverTime(r.expires_at) <= serverNow()) continue;
     if (latest === null || serverTime(r.expires_at) > serverTime(latest)) latest = r.expires_at;
   }
   return latest;
 }
 
+/** A clock reading past a timeout the server said was in force at `at` is fast: pull it back inside. */
+function assumeInForce(at: number, expiresAt: string, createdAt?: string): void {
+  const end = serverTime(expiresAt);
+  if (at - clockSkewMs < end) return;
+  const start = createdAt === undefined ? -Infinity : serverTime(createdAt);
+  clockSkewMs = at - Math.max(start, end - REVALIDATE_MS);
+}
+
+/**
+ * The server says a timeout is in force now: a live frame (its action id and
+ * expiry) or a TIMED_OUT refusal (null). The next history read measures the
+ * clock offset from it.
+ */
+export function confirmTimeout(id: number | null, expiresAt?: string): void {
+  confirmed = { at: Date.now(), id };
+  if (expiresAt !== undefined) assumeInForce(confirmed.at, expiresAt);
+}
+
+function measureClock(rows: readonly OwnModerationAction[]): void {
+  if (confirmed === null) return;
+  const { at, id } = confirmed;
+  confirmed = null;
+  const timeouts = rows.filter(
+    (r) => r.kind === "timeout" && r.lifted_at === null && r.expires_at !== null,
+  );
+  // A live frame is sent as its row is written: the row's issue time is the server's "now".
+  const live = timeouts.find((r) => r.id === id);
+  if (live !== undefined) {
+    clockSkewMs = at - serverTime(live.created_at);
+    return;
+  }
+  const newest = timeouts.reduce<OwnModerationAction | undefined>(
+    (a, r) => (a === undefined || serverTime(r.created_at) > serverTime(a.created_at) ? r : a),
+    undefined,
+  );
+  if (newest !== undefined && newest.expires_at !== null) {
+    assumeInForce(at, newest.expires_at, newest.created_at);
+  }
+}
+
 function applyHistory(rows: readonly OwnModerationAction[]): void {
+  measureClock(rows);
   const acknowledged = new Set(rows.filter((r) => r.acknowledged_at !== null).map((r) => r.id));
   const created = new Map(rows.map((r) => [r.id, r.created_at]));
   safetyStore.setState((prev) => {
@@ -196,6 +252,8 @@ export function refreshOwnModeration(api?: HistorySource): void {
 export function resetSafetyStore(): void {
   source = null;
   refreshSeq++;
+  clockSkewMs = 0;
+  confirmed = null;
   clearExpiryTimer();
   safetyStore.setState(() => INITIAL);
 }

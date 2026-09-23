@@ -486,6 +486,10 @@ describe("ChannelSidebar", () => {
     let voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
     expect(voiceItem.getAttribute("aria-disabled")).toBe("true");
     expect(voiceItem.title).toMatch(/^You can't join voice until /);
+    // The expiry is visible text in the row, not only a tooltip.
+    expect(container.querySelector("[data-testid='voice-timeout-3']")?.textContent).toMatch(
+      /^You can't join voice until /,
+    );
     voiceItem.click();
     expect(onVoiceJoin).not.toHaveBeenCalled();
 
@@ -494,6 +498,7 @@ describe("ChannelSidebar", () => {
     voiceStore.flush();
     voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
     expect(voiceItem.hasAttribute("aria-disabled")).toBe(false);
+    expect(container.querySelector("[data-testid='voice-timeout-3']")).toBeNull();
     voiceItem.click();
     expect(onVoiceLeave).toHaveBeenCalled();
 
@@ -504,6 +509,7 @@ describe("ChannelSidebar", () => {
     safetyStore.flush();
     voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
     expect(voiceItem.hasAttribute("aria-disabled")).toBe(false);
+    expect(container.querySelector("[data-testid='voice-timeout-3']")).toBeNull();
     resetSafetyStore();
   });
 

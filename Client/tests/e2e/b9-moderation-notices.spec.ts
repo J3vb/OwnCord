@@ -178,7 +178,7 @@ test.describe("B9-15 moderation notices", () => {
     expect(error.ratio).toBeGreaterThanOrEqual(Q1.text);
   });
 
-  test("live warning, timeout and lift: announced once, restrictions inline with the server expiry", async ({
+  test("live warning and timeout announced once; restrictions inline with the server expiry until the lift", async ({
     page,
   }) => {
     // The mock's history cannot follow the live frames, so it stays down here:
@@ -210,6 +210,12 @@ test.describe("B9-15 moderation notices", () => {
     const voice = page.locator("[data-channel-id='3']");
     await expect(voice).toHaveAttribute("aria-disabled", "true");
     await expect(voice).toHaveAttribute("title", /^You can't join voice until /);
+    await expect(page.locator("[data-testid='voice-timeout-3']")).toHaveText(
+      /^You can't join voice until /,
+    );
+    const react = page.locator("[data-testid='msg-react-101']");
+    await expect(react).toHaveAttribute("aria-disabled", "true");
+    await expect(react).toHaveAttribute("title", /^You can't add reactions until /);
     // Timeouts are not banners (Q4).
     await expect(page.locator("[data-testid='moderation-notice-31']")).toHaveCount(0);
 
@@ -219,7 +225,8 @@ test.describe("B9-15 moderation notices", () => {
     });
     await expect(textarea).toBeEnabled();
     await expect(voice).not.toHaveAttribute("aria-disabled", "true");
-    await expect(toasts.filter({ hasText: "Your timeout has ended." })).toHaveCount(1);
+    await expect(page.locator("[data-testid='voice-timeout-3']")).toHaveCount(0);
+    await expect(react).not.toHaveAttribute("aria-disabled", "true");
   });
 
   test("the banner links to the Safety tab, which shows only member-safe history", async ({
