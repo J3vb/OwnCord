@@ -15,9 +15,7 @@ import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
 import type { MessageInputComponent } from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
-import { createNsfwConsentBar, createNsfwGate } from "@components/NsfwGate";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
-import { nsfwConsentText } from "../../i18n/nsfwConsent";
 import {
   getChannelMessages,
   setMessagePinned,
@@ -134,6 +132,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   // An NSFW channel's consent UI: the gate mounted instead of its content, or
   // the withdraw bar above content the reader has consented to.
   let nsfwConsentUi: MountableComponent | null = null;
+  // Bumped whenever that UI is torn down, so a lazy load that resolves late
+  // cannot mount a gate or bar that no longer belongs to the channel.
+  let nsfwConsentUiGen = 0;
   // Store/ws subscriptions that keep the composer's disabled state in sync.
   let composerGatingUnsubs: (() => void)[] = [];
 
@@ -206,6 +207,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelAbort = null;
     }
 
+    nsfwConsentUiGen++;
     if (nsfwConsentUi !== null) {
       nsfwConsentUi.destroy?.();
       nsfwConsentUi = null;
@@ -285,20 +287,41 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       (api.getConfig?.().host ?? "") === owner.host;
     const ownsSession = (): boolean => !signal.aborted && ownsAccountSession();
 
+    /**
+     * Mount the gate or the withdraw bar. Their module (with its catalog) is
+     * loaded on first use so only a labelled channel pays for it (B9 shared
+     * MainPage budget); the gated path mounts no content while it loads.
+     */
+    function mountConsentUi(
+      build: (ui: typeof import("@components/NsfwGate")) => MountableComponent,
+    ): void {
+      const gen = ++nsfwConsentUiGen;
+      import("@components/NsfwGate").then(
+        (ui) => {
+          if (signal.aborted || gen !== nsfwConsentUiGen) return;
+          nsfwConsentUi = build(ui);
+          nsfwConsentUi.mount(slots.messagesSlot);
+        },
+        (err: unknown) =>
+          log.error("NSFW consent UI failed to load", { channelId, error: String(err) }),
+      );
+    }
+
     function mountConsentBar(): void {
-      nsfwConsentUi = createNsfwConsentBar({
-        onRevoke: () =>
-          api.revokeNsfw(channelId).then(
-            () => {
-              if (ownsAccountSession()) setNsfwAcknowledged(channelId, false);
-            },
-            (err: unknown) => {
-              log.error("NSFW consent revoke failed", { channelId, error: String(err) });
-              if (ownsSession()) showToast(nsfwConsentText("bar.revokeFailed"), "error");
-            },
-          ),
-      });
-      nsfwConsentUi.mount(slots.messagesSlot);
+      mountConsentUi((ui) =>
+        ui.createNsfwConsentBar({
+          onRevoke: () =>
+            api.revokeNsfw(channelId).then(
+              () => {
+                if (ownsAccountSession()) setNsfwAcknowledged(channelId, false);
+              },
+              (err: unknown) => {
+                log.error("NSFW consent revoke failed", { channelId, error: String(err) });
+                if (ownsSession()) showToast(ui.nsfwConsentText("bar.revokeFailed"), "error");
+              },
+            ),
+        }),
+      );
     }
 
     function performSend(
@@ -584,6 +607,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         (state) => {
           if (currentChannelId !== channelId) return;
           if ((state === "gated") === gated) {
+            nsfwConsentUiGen++;
             nsfwConsentUi?.destroy?.();
             nsfwConsentUi = null;
             if (state === "consented") mountConsentBar();
@@ -607,23 +631,24 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     );
     if (gated) {
       clearChannelContent(channelId);
-      nsfwConsentUi = createNsfwGate({
-        channelName,
-        focusOnMount: focusGate,
-        onAccept: () =>
-          api.acknowledgeNsfw(channelId).then(() => {
-            if (ownsAccountSession()) setNsfwAcknowledged(channelId, true);
-          }),
-        onCancel: () => {
-          // Leave the channel entirely: keeping the gate up over a channel the
-          // reader declined would strand them on a screen with no way out that
-          // is not also "continue".
-          destroyChannel();
-          setActiveChannel(null);
-          focusFallback?.();
-        },
-      });
-      nsfwConsentUi.mount(slots.messagesSlot);
+      mountConsentUi((ui) =>
+        ui.createNsfwGate({
+          channelName,
+          focusOnMount: focusGate,
+          onAccept: () =>
+            api.acknowledgeNsfw(channelId).then(() => {
+              if (ownsAccountSession()) setNsfwAcknowledged(channelId, true);
+            }),
+          onCancel: () => {
+            // Leave the channel entirely: keeping the gate up over a channel the
+            // reader declined would strand them on a screen with no way out that
+            // is not also "continue".
+            destroyChannel();
+            setActiveChannel(null);
+            focusFallback?.();
+          },
+        }),
+      );
       return;
     }
 

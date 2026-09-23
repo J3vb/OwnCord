@@ -18,6 +18,9 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { nsfwConsentText } from "../i18n/nsfwConsent";
 
+// Re-exported so the lazy caller reads the catalog from this chunk, not its own.
+export { nsfwConsentText };
+
 export interface NsfwGateOptions {
   /** Channel name, shown without the leading '#'. */
   readonly channelName: string;
