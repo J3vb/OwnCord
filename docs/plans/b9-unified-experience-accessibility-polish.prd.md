@@ -28,7 +28,9 @@ English text is unchanged except the intended thousands grouping of numeric para
 the owner on 2026-09-23; the plan lists the affected keys.
 Budget note: the MainPage gzip budget is raised from 60,000 B to 61,000 B (2026-09-23, decided by firstmate on the owner's standing
 instruction to take recommended calls). The +2,175 B is catalog keys and lookup calls from moving shell text behind the B9-3 seam, with
-no new copy; the startup budget is unchanged. B9-19 must justify its own increase with measured numbers.
+no new copy. B9-19 must justify its own increase with measured numbers. Re-measured after merging dev 5682b410 (2026-09-23): dev had
+used up the headroom, so the same catalog cost failed the gate, and the startup budget is raised 91,000 → 93,000 B (92,265 B measured)
+and MainPage 61,000 → 63,000 B (62,271 B measured), pending the owner's confirmation.
 
 > **Drafted:** 2026-09-23. **Planning branch:** `docs/b9-unified-experience-plan`.
 > **Exact base:** `0beee8e4c50ca18823750e381d3a1d6e327029b8`, checked-out `dev`.

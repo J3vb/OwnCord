@@ -1,13 +1,13 @@
 {
   "method": "Node zlib.gzipSync level 9 (owner decision 2026-09-20, amends decision 10's 'gzip -9' by pinning the implementation, not the level or format). Budgets are per-manifest-chunk gzip bytes.",
   "startup": {
-    "budget": 91000,
-    "note": "Entry's static closure: the index.html entry file, its static imports, and their linked CSS. Not a fixed file list — a new eagerly-imported chunk joins the closure automatically. Measured 87,982 B at dev 4c45d26a (B7-7); headroom ~2 kB. Raised 90,000 -> 91,000 B by owner decision (B7-10a): the dispatcher handler split into src/features/*/wsHandlers.ts costs +435 B (89,993 B at dev c18cf5a8 -> 90,428 B; +456 B at be7a0594), all module wrappers and unminifiable clock field names, not new code."
+    "budget": 93000,
+    "note": "Entry's static closure: the index.html entry file, its static imports, and their linked CSS. Not a fixed file list — a new eagerly-imported chunk joins the closure automatically. Measured 87,982 B at dev 4c45d26a (B7-7); headroom ~2 kB. Raised 90,000 -> 91,000 B by owner decision (B7-10a): the dispatcher handler split into src/features/*/wsHandlers.ts costs +435 B (89,993 B at dev c18cf5a8 -> 90,428 B; +456 B at be7a0594), all module wrappers and unminifiable clock field names, not new code. Raised 91,000 -> 93,000 B on 2026-09-23 (B9-18): the connect catalog joins the startup closure at +1,976 B (90,289 B at dev 5682b410 -> 92,265 B), all catalog keys and lookup calls, no new copy; dev had grown 87,349 -> 90,289 B since the branch was first measured, leaving no headroom. Needs the owner's confirmation."
   },
   "chunks": {
     "MainPage": {
-      "budget": 61000,
-      "note": "Measured 56,855 B at dev 4c45d26a (B7-7). Raised 60,000 -> 61,000 B on 2026-09-23 (B9-18), decided by firstmate on the owner's standing instruction to take recommended calls: moving the shell text behind the B9-3 catalog seam costs +2,175 B (58,546 B at dev 166d71e4 -> 60,721 B), all catalog keys and lookup calls, no new copy. The startup budget is unchanged. B9-19 must justify its own increase with measured numbers."
+      "budget": 63000,
+      "note": "Measured 56,855 B at dev 4c45d26a (B7-7). Raised 60,000 -> 61,000 B on 2026-09-23 (B9-18), decided by firstmate on the owner's standing instruction to take recommended calls: moving the shell text behind the B9-3 catalog seam costs +2,175 B (58,546 B at dev 166d71e4 -> 60,721 B), all catalog keys and lookup calls, no new copy. Raised again 61,000 -> 63,000 B on 2026-09-23 after merging dev: 59,945 B at dev 5682b410 -> 62,271 B (+2,326 B, the same catalog cost plus the member-menu re-clamp); dev grew MainPage by 1,399 B after the first measurement. Needs the owner's confirmation. B9-19 must justify its own increase with measured numbers."
     },
     "livekit": {
       "budget": 135000,

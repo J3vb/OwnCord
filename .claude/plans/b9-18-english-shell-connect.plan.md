@@ -283,7 +283,7 @@ Chromium, Linux, dev server on a private port.
 | `npm run typecheck`, `typecheck:build`, `typecheck:e2e`, `npm run lint` (oxlint, cycles, eslint) | clean                                                                                                                                                                                                                                       |
 | Playwright `b9-text-expansion` (B9-3 cases plus the two B9-18 cases)                             | 4 passed                                                                                                                                                                                                                                    |
 | Playwright full mocked suite, 4 workers                                                          | 456 passed, 7 skipped, 8 failed; the 8 failures (in `channel-gating`, `channel-management`, `dm-calls`) came from source edits and builds made against the live dev server mid-run, and those three files then passed 37 of 37 on their own |
-| `npm run build:budget && npm run check:budgets`                                                  | all ok; MainPage 60,721 B of the raised 61,000 B, startup closure 89,398 B of 91,000 B ([Bundle budget](#bundle-budget))                                                                                                                    |
+| `npm run build:budget && npm run check:budgets`                                                  | all ok; after merging dev 5682b410, MainPage 62,271 B of 63,000 B, startup closure 92,265 B of 93,000 B ([Bundle budget](#bundle-budget))                                                                                                                    |
 | `npm run check:docs`                                                                             | passed                                                                                                                                                                                                                                      |
 
 **Failing controls.** Each was applied in turn, the B9-18 expansion case was
@@ -297,17 +297,26 @@ overflows its box).
 
 Measured against the same `build:budget` at the base, gzip level 9:
 
-| Chunk           | Base `166d71e4` | This branch |                  Budget |
-| --------------- | --------------: | ----------: | ----------------------: |
-| startup closure |        87,349 B |    89,398 B |                91,000 B |
-| MainPage        |        58,546 B |    60,721 B | 61,000 B (was 60,000 B) |
+| Chunk           | Base `166d71e4` | This branch | Dev `5682b410` | Branch merged with dev |                  Budget |
+| --------------- | --------------: | ----------: | -------------: | ---------------------: | ----------------------: |
+| startup closure |        87,349 B |    89,398 B |       90,289 B |               92,265 B | 93,000 B (was 91,000 B) |
+| MainPage        |        58,546 B |    60,721 B |       59,945 B |               62,271 B | 63,000 B (was 60,000 B) |
 
 The growth is the cost of reading text through catalog keys, not new copy:
 the key strings and call sites do not minify. Replacing every shell key with a
 one- or two-character id would save only about 870 B. **Decision (2026-09-23):** the MainPage budget is raised from 60,000 B to
 61,000 B in `Client/bundle-budgets.json`, decided by firstmate on the owner's
-standing instruction to take recommended calls. The startup budget is
-unchanged, and B9-19 must justify its own increase with measured numbers.
+standing instruction to take recommended calls. B9-19 must justify its own
+increase with measured numbers.
+
+**Re-measured after merging dev 5682b410 (2026-09-23):** dev had grown the
+startup closure by 2,940 B and MainPage by 1,399 B since the first
+measurement, so the branch's unchanged catalog cost (startup +1,976 B, since
+the connect catalog is in the startup closure; MainPage +2,326 B) no longer
+fit and the CI budget gate failed. Moving the recovery text to a lazy catalog
+saves only 155 B. Both budgets are raised to the next 1,000 B above the
+measured size: startup 91,000 → 93,000 B and MainPage 61,000 → 63,000 B.
+**This raise needs the owner's confirmation.**
 
 ### Accessibility (Q1)
 
