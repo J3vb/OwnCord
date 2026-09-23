@@ -51,6 +51,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PUT     | `/admin/*`                                                           |
 | QUERY   | `/admin/*`                                                           |
 | TRACE   | `/admin/*`                                                           |
+| GET     | `/admin/api/attention`                                               |
 | GET     | `/admin/api/audit-log`                                               |
 | POST    | `/admin/api/backup`                                                  |
 | GET     | `/admin/api/backups`                                                 |
@@ -3021,6 +3022,7 @@ Authorization is two-layered:
 | `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                      | `MANAGE_SERVER`                                                                              |
 | `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |
 | `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                           | `ADMINISTRATOR`                                                                              |
+| `GET /admin/api/attention`                                                                                      | `ADMINISTRATOR` — RI-07                                                                      |
 | `/api/v1/admin/plugins…`                                                                                        | `ADMINISTRATOR`                                                                              |
 | `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                                            | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
 
@@ -3163,6 +3165,78 @@ Aggregate counts for the admin dashboard.
   "online_count": 3
 }
 ```
+
+---
+
+### GET /admin/api/attention
+
+The dashboard's attention panel (RI-07): server-side health signals and the
+deduplicated warnings raised from them. The server samples once a minute
+(the free space on the data volume, the SQLite writer pool's cumulative wait,
+reconnect resumes, dropped deliveries plus slow-client disconnects, the newest
+backup file and each maintenance job's last run); this route only reads that
+state. Thresholds and hysteresis are in
+[server-configuration.md](server-configuration.md#admin-attention-panel-attention).
+Nothing here is exported off the host.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Response 200 OK
+
+```json
+{
+  "evaluated_at": "2026-09-23T12:00:00Z",
+  "signals": [
+    {
+      "id": "disk",
+      "label": "Disk space",
+      "status": "unknown",
+      "detail": "disk space is not measured on this server",
+      "observed_at": "2026-09-23T12:00:00Z"
+    },
+    {
+      "id": "backup",
+      "label": "Last successful backup",
+      "status": "ok",
+      "value": "2026-09-23 03:00 UTC",
+      "threshold": "daily schedule: warn after 36h0m0s",
+      "detail": "9h0m0s old",
+      "observed_at": "2026-09-23T12:00:00Z"
+    }
+  ],
+  "warnings": [
+    {
+      "id": "job:Backups",
+      "severity": "warning",
+      "title": "Maintenance job failing: Backups",
+      "detail": "2 consecutive failed runs · disk I/O error",
+      "action": "Search Server Logs for …",
+      "first_observed": "2026-09-23T11:30:00Z",
+      "last_observed": "2026-09-23T12:00:00Z",
+      "occurrences": 1,
+      "recovered_at": null
+    }
+  ]
+}
+```
+
+- `status` is `ok`, `warning`, `critical` or `unknown`. `unknown` means the
+  server could not take the measurement (an unsupported platform, a failed
+  read, a rate with one sample so far, a job that has not run since start).
+  It is never reported as healthy and neither raises nor clears a warning.
+- `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `backup`,
+  and `job:<name>` for each maintenance step.
+- A warning's `id` is its signal's id. A signal that keeps failing updates
+  `last_observed`. One that recovers gets `recovered_at` and is listed for 24
+  hours; if it fails again in that window, the same entry reopens and
+  `occurrences` increments. Active warnings are listed first, critical before
+  warning. The state is in memory, so a restart starts it afresh.
+- `evaluated_at` is `null` until the first sample.
+
+#### Response 500
+
+`INTERNAL_ERROR` "attention service unavailable" when the server was built
+without the attention service (partial wirings in tests).
 
 ---
 

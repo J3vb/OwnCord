@@ -2,9 +2,9 @@
 
 **Status:** 2026-09-08 — owner approved recording all eight ideas and starting
 the first four. RI-01 through RI-04 are implemented and merged into `dev` in
-PR #1573 (commit `3221fe9e`). RI-05 and RI-08 are implemented on
-2026-09-23; RI-06 and RI-07 remain backlog ideas. The validation record and
-remaining limits are below.
+PR #1573 (commit `3221fe9e`). RI-05, RI-07 and RI-08 are implemented on
+2026-09-23; RI-06 remains a backlog idea. The validation record and remaining
+limits are below.
 
 **Base:** `dev` at `c900953651088120c62ff05d67abc2ffc74c2701`.
 
@@ -23,7 +23,7 @@ remains B6/B10. Implementing one item does not close those phases.
 | RI-04 | Retry-safe messaging and pending-send recovery | Preserve user intent across lost acknowledgments and restarts       | Merged      | Protocol/persistence contracts; B9 messaging     |
 | RI-05 | Spread reconnect attempts                      | Reduce synchronized retry pressure after a shared outage            | Implemented | B6 capacity; B7 reconnect behavior               |
 | RI-06 | Explain permissions and preview access changes | Help admins understand and safely change effective access           | Backlog     | B9 administration                                |
-| RI-07 | Admin attention panel                          | Surface failed maintenance and capacity pressure early              | Backlog     | B6 operations; B9 administration                 |
+| RI-07 | Admin attention panel                          | Surface failed maintenance and capacity pressure early              | Implemented | B6 operations; B9 administration                 |
 | RI-08 | Preview destructive policy changes             | Show the impact of proposed retention settings before applying them | Implemented | B9; existing BPR-054 retention controls          |
 
 ## First implementation batch
@@ -194,6 +194,38 @@ from configuration and measured baselines, with hysteresis to avoid noisy
 alerts. Keep diagnostics local unless the operator explicitly configures
 otherwise.
 
+Implemented 2026-09-23 against `dev` at
+`22f2c8841f4c7a526e73ccd8655055198e4bd4f6`:
+
+- `service.AttentionService` samples once a minute, reusing counters the server
+  already keeps: data-volume free space, the writer pool's cumulative
+  `WaitDuration`, the reconnect-tier totals, and broadcast drops plus
+  slow-client disconnects and low-priority drops. It adds the newest backup
+  file as the last successful backup, since a failed backup leaves no file.
+  Each maintenance step reports its outcome under a job name. The Dashboard
+  shows the result to `ADMINISTRATOR` holders through
+  `GET /admin/api/attention`.
+- Each signal is `ok`, `warning`, `critical` or `unknown`. Unknown covers an
+  unsupported platform, a failed read, a first rate sample, or a job or backup
+  that has not run yet. It neither raises nor clears a warning.
+- Thresholds come from the new `attention.*` config floors and
+  `server.min_free_disk_mb`. Each rate learns a baseline over ten samples and
+  raises nothing meanwhile. After that it raises at the floor or three times
+  the baseline, and learns only from healthy samples. Hysteresis: a level must
+  hold for two samples; a rate clears below half its threshold, disk 10% above
+  its floor. A job warns after two consecutive failures and clears on one
+  success. Backups warn at 1.5× the schedule interval and go critical at 3×.
+- Warnings are deduplicated per signal and record first and last observation,
+  occurrences, an action and `recovered_at`. Recovered entries are listed for
+  24 hours and reopen in place. The state is in memory and served only to the
+  admin API; nothing is exported to telemetry. Limit: a restart forgets
+  recovered history, though the next samples re-raise any active condition.
+- Tests: `Server/service/attention_test.go` covers unknown handling, first
+  samples, hysteresis, warm-up, baseline, deduplication, expiry, dispatch,
+  jobs and backups. The route has `Server/admin/handlers_attention_test.go`,
+  the maintenance recording has `TestMaintenance_TickRecordsJobHealth`, and the
+  panel has `Client/tests/contract/server-admin-static-attention.test.ts`.
+
 ### RI-08 — Destructive policy preview
 
 Calculate the effect of a proposed retention policy before saving it. Show
@@ -228,8 +260,8 @@ RI-08 implementation (2026-09-23), based on `dev` commit
 
 The first batch is implemented and merged into `dev` in
 [PR #1573](https://github.com/J3vb/OwnCord/pull/1573) (commit `3221fe9e`).
-RI-05 and RI-08 are implemented as described above; RI-06 and RI-07 remain
-backlog ideas. This does not close a broader roadmap phase.
+RI-05, RI-07 and RI-08 are implemented as described above; RI-06 remains a
+backlog idea. This does not close a broader roadmap phase.
 
 Verified in the Linux development environment:
 

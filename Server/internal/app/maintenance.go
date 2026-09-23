@@ -33,10 +33,15 @@ type maintenance struct {
 	// actionRetentionDays is moderation.action_retention_days (0 = never).
 	actionRetentionDays int
 	push                *service.PushService
+	// attention records each step's outcome for the admin attention panel
+	// (RI-07); nil-safe, so partial wirings skip it.
+	attention *service.AttentionService
 }
 
-// maintenanceStep is one sweep: name is the warning logged when run fails.
+// maintenanceStep is one sweep: job is its name on the admin attention
+// panel, name is the warning logged when run fails.
 type maintenanceStep struct {
+	job  string
 	name string
 	run  func(ctx context.Context) error
 }
@@ -55,6 +60,7 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 		m.reports = svc.Reports
 		m.moderation = svc.Moderation
 		m.push = svc.Push
+		m.attention = svc.Attention
 	}
 	// Periodically purge expired sessions and orphaned attachments.
 	files, err := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
@@ -84,7 +90,25 @@ func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.C
 	maintenanceDone := make(chan struct{})
 	go m.loop(bgCtx, stopMaintenance, maintenanceDone)
 
+	// The attention sampler (RI-07) lists every job before its first run and
+	// samples on its own minute cadence, independent of a long tick.
+	attentionCtx, stopAttention := context.WithCancel(bgCtx)
+	attentionDone := make(chan struct{})
+	if m.attention != nil {
+		for _, step := range m.steps() {
+			m.attention.RegisterJob(step.job, step.name)
+		}
+		go func() {
+			defer close(attentionDone)
+			m.attention.Run(attentionCtx, service.AttentionInterval)
+		}()
+	} else {
+		close(attentionDone)
+	}
+
 	return func() {
+		stopAttention()
+		<-attentionDone
 		// Backstop for early returns below (see hub.GracefulStop defer above),
 		// and a bounded join so an in-flight tick (which can hold the writer —
 		// scheduled backups run VACUUM INTO) isn't still using the database
@@ -160,22 +184,22 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 // retention sweeps stranded this tick.
 func (m *maintenance) steps() []maintenanceStep {
 	return []maintenanceStep{
-		{"failed to delete expired sessions", m.sweepSessions},
-		{"failed to delete expired message delivery receipts", m.sweepMessageDeliveryReceipts},
-		{"failed to clean up expired second-factor state", m.sweepSecondFactor},
-		{"push subscription sweep failed", m.sweepPushSubscriptions},
-		{"backup maintenance failed", m.maintainBackups},
-		{"failed to delete orphaned attachments", m.sweepOrphans},
-		{"retention sweep failed", m.sweepRetention},
-		{"report content retention failed", m.pruneReportContent},
-		{"moderation action retention failed", m.retireModerationActions},
-		{"orphaned voice mute reconciliation failed", m.reconcileOrphanedVoiceMutes},
-		{"erasure jobs still pending", m.resumeErasure},
-		{"storage reconciliation failed", m.reconcileFiles},
+		{"Expired sessions", "failed to delete expired sessions", m.sweepSessions},
+		{"Delivery receipts", "failed to delete expired message delivery receipts", m.sweepMessageDeliveryReceipts},
+		{"Second-factor cleanup", "failed to clean up expired second-factor state", m.sweepSecondFactor},
+		{"Push subscriptions", "push subscription sweep failed", m.sweepPushSubscriptions},
+		{service.AttentionBackupJob, "backup maintenance failed", m.maintainBackups},
+		{"Orphaned attachments", "failed to delete orphaned attachments", m.sweepOrphans},
+		{"Message retention", "retention sweep failed", m.sweepRetention},
+		{"Report content retention", "report content retention failed", m.pruneReportContent},
+		{"Moderation action retention", "moderation action retention failed", m.retireModerationActions},
+		{"Voice mute reconciliation", "orphaned voice mute reconciliation failed", m.reconcileOrphanedVoiceMutes},
+		{"Account erasure", "erasure jobs still pending", m.resumeErasure},
+		{"Storage reconciliation", "storage reconciliation failed", m.reconcileFiles},
 		// Last on purpose: every sweep above that deletes attachment rows
 		// (orphans, retention, erasure) has run, so this tick's recount
 		// already returns the bytes they freed.
-		{"storage recount failed", m.recountStorage},
+		{"Storage recount", "storage recount failed", m.recountStorage},
 	}
 }
 
@@ -183,7 +207,9 @@ func (m *maintenance) steps() []maintenanceStep {
 func (m *maintenance) tick(ctx context.Context) bool {
 	failed := false
 	for _, step := range m.steps() {
-		if err := step.run(ctx); err != nil {
+		err := step.run(ctx)
+		m.attention.RecordJob(step.job, err, time.Now())
+		if err != nil {
 			m.log.Warn(step.name, "error", err)
 			failed = true
 		}

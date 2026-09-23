@@ -162,6 +162,14 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service
 	return nil
 }
 
+// NewestBackup returns the newest backup's mtime — the last successful
+// backup, since a failed one never leaves a file behind — or the zero time
+// when there is none. The admin attention panel reads it.
+func NewestBackup() (time.Time, error) {
+	newest, _, err := scanBackups()
+	return newest, err
+}
+
 type backupFile struct {
 	path  string
 	mtime time.Time

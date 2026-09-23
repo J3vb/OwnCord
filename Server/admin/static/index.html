@@ -897,6 +897,41 @@ function renderContent(){
   }
 }
 
+/* ═══ Attention (RI-07) ═══ */
+/* The server samples disk space, writer wait, reconnects, delivery pressure,
+   the newest backup and every maintenance job once a minute, and keeps one
+   deduplicated warning per signal with hysteresis; this only renders what
+   GET /attention reports. Unknown is a measurement the server could not take
+   and is never drawn as healthy. */
+const ATTN_STATUS={ok:['badge-green','Healthy'],warning:['badge-yellow','Warning'],critical:['badge-red','Critical'],unknown:['badge-muted','Unknown']};
+function attnBadge(s){const b=ATTN_STATUS[s]||ATTN_STATUS.unknown;return'<span class="badge '+b[0]+'">'+b[1]+'</span>'}
+function attnTime(iso){if(!iso)return'';const d=new Date(iso);return isNaN(d.getTime())?'':d.toLocaleString()}
+function renderAttention(rep){
+  const warnings=(rep&&rep.warnings)||[],signals=(rep&&rep.signals)||[];
+  const active=warnings.filter(w=>!w.recovered_at);
+  let html='<div class="section-card" id="attentionPanel"><div class="section-card-header"><h3>Attention'+(active.length?' ('+active.length+')':'')+'</h3><button class="btn btn-ghost" onclick="renderContent()">Refresh</button></div><div class="section-card-body">';
+  if(!rep||!rep.evaluated_at)html+='<p class="attn-pending" style="color:var(--text-faint)">The server has not evaluated its health yet.</p>';
+  else{
+    html+='<div class="activity-time">Evaluated '+esc(attnTime(rep.evaluated_at))+'</div>';
+    if(!active.length)html+='<p class="attn-none" style="margin-top:8px">No active warnings.</p>';
+  }
+  warnings.forEach(w=>{
+    const rec=!!w.recovered_at;
+    html+='<div class="activity-item attn-warning" data-id="'+esc(w.id)+'"><div>'+(rec?'<span class="badge badge-green">Recovered</span>':attnBadge(w.severity))+'</div><div>'
+      +'<div class="activity-text"><strong>'+esc(w.title)+'</strong>'+(w.detail?' — '+esc(w.detail):'')+'</div>'
+      +'<div class="activity-text attn-action">'+esc(w.action)+'</div>'
+      +'<div class="activity-time">First seen '+esc(attnTime(w.first_observed))+' · last seen '+esc(attnTime(w.last_observed))
+      +(w.occurrences>1?' · '+w.occurrences+' occurrences':'')+(rec?' · recovered '+esc(attnTime(w.recovered_at)):'')+'</div></div></div>';
+  });
+  html+='</div>';
+  if(signals.length){
+    html+='<div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Signal</th><th>Status</th><th>Measured</th><th>Detail</th></tr></thead><tbody>';
+    signals.forEach(g=>{html+='<tr data-signal="'+esc(g.id)+'"><td>'+esc(g.label)+'</td><td>'+attnBadge(g.status)+'</td><td>'+esc(g.value||'—')+'</td><td>'+esc([g.threshold,g.detail].filter(Boolean).join(' · '))+'</td></tr>'});
+    html+='</tbody></table></div>';
+  }
+  return html+'</div>';
+}
+
 /* ═══ Dashboard ═══ */
 async function renderDashboard(){
   try{state.cachedStats=await api('GET','/stats')}catch(e){return'<div class="page-title">Dashboard</div><p style="color:var(--red)">Failed to load stats: '+esc(e.message)+'</p>'}
@@ -906,6 +941,11 @@ async function renderDashboard(){
   const s=state.cachedStats;const u=state.cachedUpdate;
   let html='<div class="page-title">Dashboard</div><div class="page-desc">Server overview and statistics</div>';
   if(u&&u.update_available)html+='<div class="update-card" style="border-color:var(--accent);margin-bottom:20px"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">Update Available: '+esc(u.latest)+'</div><div class="update-notes">Current: '+esc(u.current)+' &mdash; <button class="btn btn-accent" style="margin-left:8px" onclick="navigateTo(\'updates\')">View Update</button></div></div></div>';
+  /* Attention is server health detail: ADMINISTRATOR, like the route. */
+  if(can(PERM.ADMINISTRATOR)){
+    try{html+=renderAttention(await api('GET','/attention'))}
+    catch(e){html+='<div class="section-card" id="attentionPanel"><div class="section-card-header"><h3>Attention</h3></div><div class="section-card-body"><p style="color:var(--red)">Could not load attention state: '+esc(e.message)+'</p></div></div>'}
+  }
   html+='<div class="stat-grid">';
   html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Total Users</span><div class="stat-card-icon" style="background:rgba(35,165,90,.15);color:var(--green)">'+I.users+'</div></div><div class="stat-card-value">'+(s.user_count||0)+'</div><div class="stat-card-sub">registered</div></div>';
   html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Messages</span><div class="stat-card-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.megaphone+'</div></div><div class="stat-card-value">'+(s.message_count||0).toLocaleString()+'</div><div class="stat-card-sub">total</div></div>';
