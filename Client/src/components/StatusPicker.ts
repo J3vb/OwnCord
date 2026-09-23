@@ -10,6 +10,7 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { MAX_CUSTOM_STATUS_LEN } from "@lib/userStatus";
+import { shellText } from "../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,7 +39,7 @@ export type StatusPickerComponent = MountableComponent & {
 
 interface StatusDef {
   readonly value: UserStatus;
-  readonly label: string;
+  readonly labelKey: "status.online" | "status.idle" | "status.dnd" | "status.invisible";
   readonly color: string;
 }
 
@@ -49,10 +50,10 @@ interface StatusDef {
  * instead of flashing back to online.
  */
 const STATUS_DEFS: readonly StatusDef[] = [
-  { value: "online", label: "Online", color: "#3ba55d" },
-  { value: "idle", label: "Idle", color: "#faa61a" },
-  { value: "dnd", label: "Do Not Disturb", color: "#ed4245" },
-  { value: "invisible", label: "Invisible", color: "#747f8d" },
+  { value: "online", labelKey: "status.online", color: "#3ba55d" },
+  { value: "idle", labelKey: "status.idle", color: "#faa61a" },
+  { value: "dnd", labelKey: "status.dnd", color: "#ed4245" },
+  { value: "invisible", labelKey: "status.invisible", color: "#747f8d" },
 ];
 
 function colorForStatus(status: UserStatus): string {
@@ -130,7 +131,11 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     const optDot = createElement("span", { class: "status-picker-option-dot" });
     optDot.style.background = def.color;
 
-    const label = createElement("span", { class: "status-picker-option-label" }, def.label);
+    const label = createElement(
+      "span",
+      { class: "status-picker-option-label" },
+      shellText(def.labelKey),
+    );
 
     const check = createElement("span", { class: "status-picker-option-check" });
     check.style.display = def.value === currentStatus ? "" : "none";
@@ -173,9 +178,9 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     const input = createElement("input", {
       class: "status-picker-custom-input",
       type: "text",
-      placeholder: "Set a custom status",
+      placeholder: shellText("status.customPlaceholder"),
       maxlength: String(MAX_CUSTOM_STATUS_LEN),
-      "aria-label": "Custom status",
+      "aria-label": shellText("status.customLabel"),
       "data-testid": "custom-status-input",
     });
     input.value = options.currentCustomStatus ?? "";
@@ -226,7 +231,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
       class: "status-picker-dot",
       role: "button",
       tabindex: "0",
-      "aria-label": "Change status",
+      "aria-label": shellText("status.change"),
       "aria-haspopup": "true",
       "aria-expanded": "false",
     });

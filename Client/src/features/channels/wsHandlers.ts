@@ -29,6 +29,7 @@ import { markChannelRead } from "../../lib/read-state";
 import { showToast } from "../../lib/toast";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
+import { connectText } from "../../i18n/connect";
 
 /** The channel/role/member snapshot of `ready`. */
 export function applyReadyChannels(payload: Payload<"ready">): void {
@@ -151,7 +152,7 @@ export function handleChannelDelete(payload: Payload<"channel_delete">): void {
     setActiveChannel(firstTextId);
     // The redirect alone reads as the app spontaneously changing channels;
     // say why (ux/channels-members-dms §1.2).
-    showToast("This channel was deleted", "info");
+    showToast(connectText("app.channelDeleted"), "info");
     log.info("Active channel deleted, redirected", { deletedId: payload.id });
   }
 }

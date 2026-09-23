@@ -1,133 +1,4 @@
 {
-  "src/components/AdminActions.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "1 day": 1,
-      "1 hour": 1,
-      "30 days": 1,
-      "7 days": 1,
-      "Are you sure?": 2,
-      "Ban": 1,
-      "Banning...": 1,
-      "Block": 1,
-      "Blocking...": 1,
-      "Change Role": 1,
-      "Confirm Ban": 2,
-      "Create Channel": 1,
-      "Delete Channel": 1,
-      "Deleting...": 1,
-      "Edit Channel": 1,
-      "Force Logout": 1,
-      "Forever": 1,
-      "Log them out?": 1,
-      "Logging out...": 1,
-      "Reason (optional)": 1,
-      "Unblock": 2,
-      "Unblocking...": 1,
-      "Working...": 1
-    }
-  },
-  "src/components/CertMismatchModal.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Accept New Certificate": 1,
-      "Cancel": 2,
-      "Certificate Changed": 1,
-      "Certificate Warning": 1,
-      "Close": 3,
-      "Confirm the certificate fingerprint": 1,
-      "Current": 1,
-      "Disconnect": 1,
-      "Fingerprint": 1,
-      "Host": 2,
-      "Identity Key Changed": 1,
-      "Identity Warning": 1,
-      "New Server Certificate": 1,
-      "New key": 1,
-      "Participant": 1,
-      "Previous": 1,
-      "The server's TLS certificate fingerprint has changed. ": 1,
-      "This could mean the server regenerated its certificate, ": 1,
-      "This is the first connection to this server, so its certificate is not ": 1,
-      "This participant's end-to-end encryption identity key no longer matches ": 1,
-      "Trust New Key": 1,
-      "Trust This Certificate": 1,
-      "Unknown": 1,
-      "attacker could present a fake certificate.": 1,
-      "key. Verify the new key out-of-band before trusting it.": 1,
-      "or it could indicate a security issue.": 1,
-      "server operator) before trusting it — on an untrusted network an ": 1,
-      "switched device, but it could also indicate that the server swapped their ": 1,
-      "the one pinned on first contact. This usually means they reinstalled or ": 1,
-      "yet trusted. Verify the fingerprint below out-of-band (e.g. with the ": 1
-    }
-  },
-  "src/components/ChannelSidebar.ts": {
-    "owner": "B9-18",
-    "strings": {
-      " Session fingerprint (changes every call — not an identity): {…}": 1,
-      "Age restricted": 1,
-      "Age-restricted channel": 1,
-      "Could not check this participant's identity — key storage is unavailable, ": 1,
-      "Create Channel": 1,
-      "Deafened by a moderator": 1,
-      "Identity key changed — click to review and re-pin": 1,
-      "Identity not verified — this participant published no key.": 1,
-      "Identity verified": 1,
-      "Identity verified · Safety number: {…}": 1,
-      "LIVE": 1,
-      "Mark All as Read": 2,
-      "Muted by a moderator": 2,
-      "No channels yet": 1,
-      "Not connected": 1,
-      "Reconnecting…": 1,
-      "Right-click a category to create one": 1,
-      "Server Name": 2,
-      "Unknown": 4,
-      "Your session fingerprint (changes every call — not an identity): {…}": 1,
-      "so they are blocked for E2EE until it recovers": 1,
-      "{…} mention{…}": 1,
-      "{…} of {…} connected": 1
-    }
-  },
-  "src/components/ConnectedOverlay.ts": {
-    "owner": "B9-18",
-    "strings": {
-      " Ready!": 1,
-      "Connected!": 1,
-      "Loading server data...": 1,
-      "Logged in as {…}": 1
-    }
-  },
-  "src/components/CreateChannelModal.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Cancel": 1,
-      "Category": 1,
-      "Channel name is required": 1,
-      "Close": 1,
-      "Create Channel": 3,
-      "Creating...": 1,
-      "Failed to create channel": 1,
-      "Leave blank for no category": 1,
-      "Name": 1,
-      "Type": 1,
-      "general": 1,
-      "lounge": 1
-    }
-  },
-  "src/components/DeleteChannelModal.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "? This action cannot be undone and all messages in this channel will be lost.": 1,
-      "Are you sure you want to delete ": 1,
-      "Cancel": 1,
-      "Close": 1,
-      "Delete Channel": 3,
-      "Deleting...": 1,
-      "Failed to delete channel": 1
-    }
-  },
   "src/components/DmProfileSidebar.ts": {
     "owner": "B9-19",
     "strings": {
@@ -162,46 +33,6 @@
       "{…} members": 1,
       "{…} mention{…}": 1,
       "{…} unread message{…}": 1
-    }
-  },
-  "src/components/EditChannelModal.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "1 hour": 1,
-      "1 minute": 1,
-      "10 minutes": 1,
-      "10 seconds": 1,
-      "15 minutes": 1,
-      "15 seconds": 1,
-      "2 hours": 1,
-      "2 minutes": 1,
-      "30 minutes": 1,
-      "30 seconds": 1,
-      "5 minutes": 1,
-      "5 seconds": 1,
-      "6 hours": 1,
-      "Age-restricted (NSFW)": 1,
-      "Cancel": 1,
-      "Category": 1,
-      "Channel name is required": 1,
-      "Close": 1,
-      "Edit Channel": 1,
-      "Failed to update channel": 1,
-      "How many may have a camera or screen share on at once. 0 = unlimited.": 1,
-      "How many members may be connected at once. 0 = unlimited.": 1,
-      "Leave blank for no category": 1,
-      "Members must wait this long between messages. Holders of Manage Messages are exempt.": 1,
-      "Name": 1,
-      "Off": 1,
-      "Save Changes": 2,
-      "Saving...": 1,
-      "Slow Mode": 1,
-      "Topic": 1,
-      "Type": 1,
-      "User Limit": 1,
-      "Video Limit": 1,
-      "Voice Limits": 1,
-      "What's this channel about? (optional)": 1
     }
   },
   "src/components/EmojiAutocomplete.ts": {
@@ -447,33 +278,6 @@
       "{…} is calling": 1
     }
   },
-  "src/components/InviteManager.ts": {
-    "owner": "B9-18",
-    "strings": {
-      " Copy": 1,
-      " Create Invite": 2,
-      " Creating...": 1,
-      " Revoke": 3,
-      " Revoking...": 1,
-      " Sure?": 1,
-      "Close": 1,
-      "Created by {…} · {…}": 1,
-      "Failed to create invite": 1,
-      "Failed to revoke invite": 1,
-      "No active invites": 1,
-      "Server Invites": 1
-    }
-  },
-  "src/components/MemberList.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "ADMIN": 1,
-      "MEMBER": 1,
-      "MODERATOR": 1,
-      "No members online": 1,
-      "OWNER": 1
-    }
-  },
   "src/components/MentionAutocomplete.ts": {
     "owner": "B9-19",
     "strings": {
@@ -530,25 +334,6 @@
       "Unpin message": 2
     }
   },
-  "src/components/QuickSwitchOverlay.ts": {
-    "owner": "B9-18",
-    "strings": {
-      " · Connected": 1,
-      "Add new server": 1,
-      "Connect to another OwnCord server": 1,
-      "Press Escape to cancel": 1,
-      "Switch Server": 1,
-      "Switch server": 1,
-      "You’ll disconnect from the current server.": 1
-    }
-  },
-  "src/components/QuickSwitcher.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Quick switcher": 1,
-      "Where do you want to go?": 1
-    }
-  },
   "src/components/SearchOverlay.ts": {
     "owner": "B9-19",
     "strings": {
@@ -558,16 +343,6 @@
       "Search messages...": 1,
       "Searching...": 1,
       "Type at least {…} characters": 1
-    }
-  },
-  "src/components/ServerBanner.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Disconnected": 1,
-      "Reconnecting...": 1,
-      "Server restarting in {…} seconds...": 2,
-      "Signed in elsewhere ": 1,
-      "Use here": 1
     }
   },
   "src/components/SettingsOverlay.ts": {
@@ -590,18 +365,6 @@
       "Unknown": 2,
       "User Settings": 1,
       "Voice & Audio": 1
-    }
-  },
-  "src/components/StatusPicker.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Change status": 1,
-      "Custom status": 1,
-      "Do Not Disturb": 1,
-      "Idle": 1,
-      "Invisible": 1,
-      "Online": 1,
-      "Set a custom status": 1
     }
   },
   "src/components/TypingIndicator.ts": {
@@ -628,19 +391,6 @@
       "Update installed. Please restart OwnCord to finish.": 1,
       "Update installed. Restarting…": 1,
       "Update v{…} available": 1
-    }
-  },
-  "src/components/UserBar.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Do Not Disturb": 1,
-      "Idle": 1,
-      "Invisible": 1,
-      "Offline": 3,
-      "Online": 2,
-      "Settings": 2,
-      "Switch server": 2,
-      "Unknown": 1
     }
   },
   "src/components/UserProfilePopup.ts": {
@@ -701,16 +451,6 @@
       "{…} ms": 1,
       "⚠️ Unsecured": 1,
       "🔒 Secured": 2
-    }
-  },
-  "src/components/channel-sidebar/context-menu.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Delete Channel": 1,
-      "Edit Channel": 1,
-      "Mark as Read": 1,
-      "Mute Channel": 1,
-      "Unmute Channel": 1
     }
   },
   "src/components/channel-sidebar/volume-menu.ts": {
@@ -806,15 +546,6 @@
       "You don't have permission to post here": 1,
       "You're sending too fast — try again in a moment": 1,
       "[message deleted]": 1
-    }
-  },
-  "src/components/purge-prompt.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Confirm Purge": 2,
-      "Deletes the newest {…}–{…} messages.": 1,
-      "Purge Messages…": 1,
-      "Purging…": 1
     }
   },
   "src/components/settings/AccountTab.ts": {
@@ -1141,12 +872,6 @@
       "{…}. Applies when you next join a voice channel.": 1
     }
   },
-  "src/features/channels/wsHandlers.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "This channel was deleted": 1
-    }
-  },
   "src/features/connection/wsHandlers.ts": {
     "owner": "B9-20",
     "strings": {
@@ -1298,13 +1023,6 @@
       "{…} Mbps": 1
     }
   },
-  "src/lib/credentials.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Login failed ({…})": 1,
-      "Login failed: the server returned an unreadable response.": 1
-    }
-  },
   "src/lib/deviceManager.ts": {
     "owner": "B9-20",
     "strings": {
@@ -1436,12 +1154,6 @@
       "Voice connection lost — disconnected": 1
     }
   },
-  "src/lib/safe-render.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Something went wrong rendering this section.": 1
-    }
-  },
   "src/lib/screenShare.ts": {
     "owner": "B9-20",
     "strings": {
@@ -1469,16 +1181,6 @@
       "Session work was cancelled": 2
     }
   },
-  "src/lib/streamPreview.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Join channel to preview stream": 1,
-      "Join to preview": 1,
-      "Showing stream preview for {…}": 1,
-      "Stream preview for {…}": 1,
-      "Stream unavailable": 2
-    }
-  },
   "src/lib/supportBundle.ts": {
     "owner": "B9-20",
     "strings": {
@@ -1499,32 +1201,6 @@
       "No heartbeat response arrived.": 1,
       "The application connection changed.": 2,
       "The application connection is not ready.": 1
-    }
-  },
-  "src/main.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Auto-login failed": 1,
-      "Auto-login failed: {…}": 1,
-      "Could not remove the saved password — it is still stored": 1,
-      "Could not save credentials — auto-login won't work": 1,
-      "Could not save server profiles": 1,
-      "Local Server": 1,
-      "Missing #app element": 1,
-      "Registration received. An admin has to approve your account before you can sign in.": 1,
-      "Saved-password login is unavailable here — please type your password.": 1,
-      "Unknown": 1,
-      "Your session expired — sign in again.": 1
-    }
-  },
-  "src/pages/ConnectPage.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Local Server": 1,
-      "Not authenticated": 1,
-      "OC": 2,
-      "OwnCord": 1,
-      "Self-hosted chat — Your server, your rules": 1
     }
   },
   "src/pages/MainPage.ts": {
@@ -1549,100 +1225,6 @@
       "User {…} (Screen)": 1,
       "You": 1,
       "Your Screen": 1
-    }
-  },
-  "src/pages/connect-page/IncompatibleNotice.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Choose another server": 1,
-      "Update client": 1,
-      "{…}: this client cannot speak to this server — the protocol epochs differ.": 1,
-      "{…}: this client speaks protocol epoch {…} but the server needs {…}; update the client.": 1,
-      "{…}: this client speaks protocol epoch {…} but the server only speaks {…}; update the server.": 1
-    }
-  },
-  "src/pages/connect-page/LoginForm.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "000000 or XXXXX-XXXXX": 1,
-      "Account recovery is unavailable.": 1,
-      "Already have an account? Login": 1,
-      "Authentication or recovery code": 1,
-      "Auto connect": 1,
-      "Auto-connecting...": 1,
-      "Cancel": 2,
-      "Connect to your server": 1,
-      "Connecting…": 1,
-      "Enter the 6-digit code from your authenticator app, or an emergency recovery code.": 1,
-      "Invite Code": 1,
-      "Invite code is required for registration.": 1,
-      "Logging in…": 1,
-      "Login": 5,
-      "Lost your password or 2FA device? Recover your account": 1,
-      "Need an account? Register": 2,
-      "OC": 1,
-      "OwnCord": 1,
-      "Password": 1,
-      "Password is required.": 1,
-      "Password must be at least {…} characters.": 1,
-      "Register": 3,
-      "Registering…": 1,
-      "Registration closed": 1,
-      "Registration is closed on this server.": 2,
-      "Registration requires admin approval. You can register now, but an admin must approve your account before you can sign in.": 1,
-      "Remember password": 1,
-      "Server Address": 1,
-      "Server address is required.": 1,
-      "Settings": 1,
-      "That is the saved-password placeholder, not a password. Choose a different one.": 1,
-      "Toggle password visibility": 1,
-      "Two-Factor Authentication": 1,
-      "Username": 1,
-      "Username is required.": 1,
-      "Verification failed.": 1,
-      "Verify": 2,
-      "Verifying…": 1
-    }
-  },
-  "src/pages/connect-page/RecoverOverlay.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Account Recovery": 1,
-      "Cancel": 1,
-      "Enter your recovery kit secret or recovery credential.": 1,
-      "New password": 1,
-      "New password must be at least {…} characters.": 1,
-      "Recover account": 2,
-      "Recovering…": 1,
-      "Recovery failed.": 1,
-      "Recovery kit secret or a recovery credential from your server owner": 1,
-      "Server address is required.": 1,
-      "Sign back in without your password or two-factor device. This sets a new password and signs out every other device.": 1,
-      "That is the saved-password placeholder, not a password. Choose a different one.": 1,
-      "Username": 1,
-      "Username is required.": 1
-    }
-  },
-  "src/pages/connect-page/ServerPanel.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "+ Add Server": 1,
-      "Add Server": 2,
-      "Auto-login enabled": 1,
-      "Cancel": 1,
-      "Client update needed": 1,
-      "Delete server": 1,
-      "Disable auto-login": 1,
-      "Enable auto-login": 2,
-      "Host Address": 1,
-      "Invalid server address (expected host or host:port)": 1,
-      "My Server": 1,
-      "Server Name": 1,
-      "Server update needed": 1,
-      "Servers": 1,
-      "example.com:8443": 1,
-      "{…} online": 1,
-      "{…}ms": 1
     }
   },
   "src/pages/main-page/ChannelController.ts": {
@@ -1704,87 +1286,10 @@
       "That message no longer exists": 1
     }
   },
-  "src/pages/main-page/OverlayManagers.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Couldn't copy the invite code": 1,
-      "Failed to load invites": 1,
-      "Failed to load pinned messages": 2,
-      "Failed to open invite manager": 1,
-      "Failed to unpin message": 1,
-      "Invite code copied": 1,
-      "Search failed": 1
-    }
-  },
   "src/pages/main-page/ReactionController.ts": {
     "owner": "B9-20",
     "strings": {
       "Slow down! Please wait before reacting again.": 1
-    }
-  },
-  "src/pages/main-page/SidebarArea.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Audit Log": 1,
-      "Could not leave that conversation": 1,
-      "Could not open the admin panel": 1,
-      "Failed to create channel": 1,
-      "Failed to delete channel": 1,
-      "Failed to purge messages": 1,
-      "Failed to rename group": 1,
-      "Failed to save channel order": 1,
-      "Failed to update channel": 1,
-      "Group name": 1,
-      "Invite": 1,
-      "Invite people": 1,
-      "Leave it empty to go back to listing the members.": 1,
-      "No messages to purge in #{…}": 1,
-      "Not connected to a server": 1,
-      "OC": 1,
-      "Open the audit log in the admin panel (opens in your browser)": 1,
-      "Purged {…} message{…} from #{…}": 1,
-      "Rename Group": 1,
-      "Server": 3,
-      "{…} online": 2
-    }
-  },
-  "src/pages/main-page/SidebarDmHelpers.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "Failed to create DM": 1,
-      "Failed to create group DM": 1,
-      "No messages yet": 1
-    }
-  },
-  "src/pages/main-page/SidebarDmSection.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "DIRECT MESSAGES": 1,
-      "New DM": 1,
-      "View all messages": 1,
-      "View all messages ({…})": 1
-    }
-  },
-  "src/pages/main-page/SidebarMemberSection.ts": {
-    "owner": "B9-18",
-    "strings": {
-      "BANNED": 1,
-      "Banned {…}": 1,
-      "Banned {…} for {…}h": 1,
-      "Blocked {…}": 1,
-      "Changed {…}'s role to {…}": 1,
-      "Failed to ban member": 1,
-      "Failed to block user": 1,
-      "Failed to change role": 1,
-      "Failed to force logout": 1,
-      "Failed to unban member": 1,
-      "Failed to unblock user": 1,
-      "Forced {…} to log out": 1,
-      "MEMBERS": 1,
-      "Unban": 1,
-      "Unbanned {…}": 1,
-      "Unblocked {…}": 1,
-      "Unknown role \"{…}\" — try reconnecting": 1
     }
   },
   "src/pages/main-page/VideoModeController.ts": {

@@ -232,10 +232,13 @@
 .server-item.active .srv-name {
   color: var(--header-primary);
 }
+/* Wraps, so long or expanded latency/online/compat text stays inside the row
+   instead of running under the status dot and out of the panel. */
 .server-item .srv-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 2px 6px;
   margin-top: 2px;
 }
 .server-item .srv-host {
@@ -316,7 +319,6 @@
   font-size: var(--font-size-xxs);
   font-weight: 600;
   color: var(--yellow);
-  white-space: nowrap;
 }
 
 /* Action buttons on server item */

@@ -26,6 +26,7 @@ import {
 } from "@components/message-list/attachments";
 import type { WsClient } from "@lib/ws";
 import type { PresenceSender } from "@lib/presence";
+import { shellText } from "../i18n/shell";
 
 export interface UserBarOptions {
   readonly onDisconnect?: () => void;
@@ -56,13 +57,13 @@ function serverCustomStatus(): string | null {
 }
 
 /** Status labels for the line under the username. */
-const STATUS_TEXT: Readonly<Record<UserStatus, string>> = {
-  online: "Online",
-  idle: "Idle",
-  dnd: "Do Not Disturb",
-  invisible: "Invisible",
-  offline: "Offline",
-};
+const STATUS_TEXT = {
+  online: "status.online",
+  idle: "status.idle",
+  dnd: "status.dnd",
+  invisible: "status.invisible",
+  offline: "status.offline",
+} as const satisfies Readonly<Record<UserStatus, string>>;
 
 export function createUserBar(options?: UserBarOptions): MountableComponent {
   const disposable = new Disposable();
@@ -122,7 +123,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     const state = authStore.getState();
     const user = state.user;
     const subject = {
-      username: user?.username ?? "Unknown",
+      username: user?.username ?? shellText("common.unknown"),
       displayName: user?.display_name ?? null,
       avatar: user?.avatar ?? null,
     };
@@ -135,7 +136,11 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       // The bar shows the user's own chosen status, invisible included —
       // everyone else is told offline, but lying to the owner about their own
       // state is exactly the bug real invisible exists to fix.
-      const text = state.isAuthenticated ? (STATUS_TEXT[loadUserStatus()] ?? "Online") : "Offline";
+      const text = shellText(
+        state.isAuthenticated
+          ? (STATUS_TEXT[loadUserStatus()] ?? "status.online")
+          : "status.offline",
+      );
       setText(statusEl, text);
     }
   }
@@ -232,7 +237,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       const enabled = canSetStatus();
       statusPickerWrap.classList.toggle("ub-status-picker--disabled", !enabled);
       if (!enabled) {
-        statusPickerWrap.title = "Offline";
+        statusPickerWrap.title = shellText("status.offline");
       } else {
         statusPickerWrap.title = "";
       }
@@ -249,7 +254,10 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
 
     const buttons = createElement("div", { class: "ub-controls" });
 
-    const settingsBtn = createElement("button", { title: "Settings", "aria-label": "Settings" });
+    const settingsBtn = createElement("button", {
+      title: shellText("common.settings"),
+      "aria-label": shellText("common.settings"),
+    });
     settingsBtn.appendChild(createIcon("settings", 18));
 
     disposable.onEvent(settingsBtn, "click", () => {
@@ -262,8 +270,8 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       const disconnectFn = options.onDisconnect;
       const disconnectBtn = createElement("button", {
         class: "ub-ctrl-btn",
-        title: "Switch server",
-        "aria-label": "Switch server",
+        title: shellText("quickSwitch.label"),
+        "aria-label": shellText("quickSwitch.label"),
         "data-testid": "disconnect-btn",
       });
       disconnectBtn.appendChild(createIcon("log-out", 18));
