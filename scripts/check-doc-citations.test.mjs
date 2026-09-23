@@ -93,7 +93,7 @@ test("a directory citation is stat'd without its trailing slash", () => {
 
 test("regression: renaming a cited Client/ file is caught (ci-select selects no server job for it)", () => {
   const cited = citedPaths(realDoc());
-  const renamed = "Client/src/lib/nsfw-gate.ts";
+  const renamed = "Client/src/features/content-consent/nsfw.ts";
   assert.ok(
     cited.includes(renamed),
     `${WATCHED[0]} no longer cites ${renamed}; point this regression at a path it does cite`,
@@ -101,7 +101,10 @@ test("regression: renaming a cited Client/ file is caught (ci-select selects no 
 
   const problems = evaluate(WATCHED[0], cited, (p) => p !== renamed && onDisk(p), {});
   assert.equal(problems.length, 1);
-  assert.match(problems[0], /cites `Client\/src\/lib\/nsfw-gate\.ts`, which does not exist/);
+  assert.match(
+    problems[0],
+    /cites `Client\/src\/features\/content-consent\/nsfw\.ts`, which does not exist/,
+  );
 });
 
 test("regression: renaming a cited docs/ file is caught (a docs-only diff selects nothing at all)", () => {
