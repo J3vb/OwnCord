@@ -5,6 +5,7 @@ import { createElement, setText, appendChildren, qs, setOwnedTimeout } from "@li
 import { createIcon } from "@lib/icons";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
+import { connectText } from "../../i18n/connect";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,10 +42,10 @@ const TOTP_OR_RECOVERY_CODE = /^(?:\d{6}|[A-Za-z0-9]{5}-?[A-Za-z0-9]{5})$/;
  */
 function registrationNoticeText(mode: RegistrationMode | null): string | null {
   if (mode === "closed") {
-    return "Registration is closed on this server.";
+    return connectText("registration.closedNotice");
   }
   if (mode === "approval") {
-    return "Registration requires admin approval. You can register now, but an admin must approve your account before you can sign in.";
+    return connectText("registration.approvalNotice");
   }
   return null;
 }
@@ -208,7 +209,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     const settingsBtn = createElement("button", {
       class: "settings-gear",
       type: "button",
-      "aria-label": "Settings",
+      "aria-label": connectText("common.settings"),
     });
     settingsBtn.textContent = "";
     settingsBtn.appendChild(createIcon("settings", 16));
@@ -274,15 +275,16 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         t.setAttribute("class", "oc-glow-layer");
       }
       if (filterAttr) t.setAttribute("filter", filterAttr);
-      t.textContent = "OC";
+      t.textContent = "OC"; // i18n-exempt: logo monogram, not copy
       logoSvg.appendChild(t);
     }
+    // i18n-exempt: product name, never translated
     const logoTitle = createElement("h1", {}, "OwnCord");
-    const logoSubtitle = createElement("p", {}, "Connect to your server");
+    const logoSubtitle = createElement("p", {}, connectText("login.subtitle"));
     appendChildren(formLogo, logoSvg, logoTitle, logoSubtitle);
 
     // Form title
-    formTitle = createElement("h1", {}, "Login");
+    formTitle = createElement("h1", {}, connectText("login.title"));
 
     // Error banner (hidden by default via CSS display:none, shown with .visible)
     errorBanner = createElement("div", {
@@ -295,18 +297,33 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     form.setAttribute("novalidate", "");
 
     // Host
-    const hostGroup = buildFormGroup("host", "Server Address", "text", "localhost:8443");
+    const hostGroup = buildFormGroup(
+      "host",
+      connectText("login.hostLabel"),
+      "text",
+      "localhost:8443",
+    );
     hostInput = qs("input", hostGroup)!;
     // Registration policy is per host, so a manually edited address re-derives
     // the mode (and the invite requirement) as the user types.
     hostInput.addEventListener("input", updateRegistrationUi, { signal });
 
     // Username
-    const usernameGroup = buildFormGroup("username", "Username", "text", "");
+    const usernameGroup = buildFormGroup(
+      "username",
+      connectText("login.usernameLabel"),
+      "text",
+      "",
+    );
     usernameInput = qs("input", usernameGroup)!;
 
     // Password
-    const passwordGroup = buildFormGroup("password", "Password", "password", "");
+    const passwordGroup = buildFormGroup(
+      "password",
+      connectText("login.passwordLabel"),
+      "password",
+      "",
+    );
     passwordInput = qs("input", passwordGroup)!;
 
     // Remember password checkbox
@@ -321,7 +338,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         for: "remember-password",
         class: "remember-password-label",
       },
-      "Remember password",
+      connectText("login.rememberPassword"),
     );
     appendChildren(rememberGroup, rememberPasswordCheckbox, rememberLabel);
 
@@ -334,7 +351,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         for: "auto-connect",
         class: "remember-password-label",
       },
-      "Auto connect",
+      connectText("login.autoConnect"),
     );
     appendChildren(autoConnectGroup, autoConnectCheckbox, autoConnectLabel);
 
@@ -363,7 +380,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     );
 
     // Invite code (register only, hidden by default)
-    inviteGroup = buildFormGroup("invite", "Invite Code", "text", "");
+    inviteGroup = buildFormGroup("invite", connectText("login.inviteLabel"), "text", "");
     inviteGroup.classList.add("form-group--hidden");
     inviteInput = qs("input", inviteGroup)!;
 
@@ -381,7 +398,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       class: "btn-primary",
       type: "submit",
     });
-    submitBtnText = createElement("span", { class: "btn-text" }, "Login");
+    submitBtnText = createElement("span", { class: "btn-text" }, connectText("login.title"));
     const spinnerWrapper = createElement("span", { class: "btn-spinner" });
     const spinner = createElement("div", { class: "spinner" });
     spinnerWrapper.appendChild(spinner);
@@ -389,7 +406,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     // Toggle mode link
     const formSwitch = createElement("div", { class: "form-switch" });
-    toggleModeBtn = createElement("a", {}, "Need an account? Register");
+    toggleModeBtn = createElement("a", {}, connectText("login.toRegister"));
     formSwitch.appendChild(toggleModeBtn);
     // Outside .form-switch: that link is the login/register toggle.
     let recoverLink: HTMLAnchorElement | null = null;
@@ -397,7 +414,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       recoverLink = createElement(
         "a",
         { class: "totp-backup-link", "data-testid": "recover-account-link" },
-        "Lost your password or 2FA device? Recover your account",
+        connectText("login.recoverLink"),
       );
       recoverLink.addEventListener("click", openRecover, { signal });
     }
@@ -453,7 +470,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       const toggle = createElement("button", {
         class: "password-toggle",
         type: "button",
-        "aria-label": "Toggle password visibility",
+        "aria-label": connectText("login.togglePassword"),
       });
       toggle.appendChild(createIcon("eye", 16));
       toggle.addEventListener(
@@ -478,13 +495,13 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   function buildTotpOverlay(): HTMLDivElement {
     const overlay = createElement("div", { class: "totp-overlay totp-overlay--hidden" });
     const card = createElement("div", { class: "totp-card" });
-    const title = createElement("h2", { class: "totp-title" }, "Two-Factor Authentication");
+    const title = createElement("h2", { class: "totp-title" }, connectText("totp.title"));
     const description = createElement(
       "p",
       {
         class: "totp-subtitle",
       },
-      "Enter the 6-digit code from your authenticator app, or an emergency recovery code.",
+      connectText("totp.description"),
     );
 
     // Not numeric-only: an emergency recovery code is letters and digits,
@@ -493,11 +510,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       class: "form-input",
       type: "text",
       maxlength: "11",
-      placeholder: "000000 or XXXXX-XXXXX",
+      placeholder: connectText("totp.placeholder"),
       inputmode: "text",
       pattern: "[0-9]{6}|[A-Za-z0-9]{5}-?[A-Za-z0-9]{5}",
       autocomplete: "one-time-code",
-      "aria-label": "Authentication or recovery code",
+      "aria-label": connectText("totp.inputLabel"),
     });
 
     totpSubmitBtn = createElement(
@@ -506,7 +523,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         class: "btn-primary",
         type: "button",
       },
-      "Verify",
+      connectText("totp.verify"),
     );
 
     const cancelBtn = createElement(
@@ -515,7 +532,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         class: "totp-back",
         type: "button",
       },
-      "Cancel",
+      connectText("common.cancel"),
     );
 
     totpSubmitBtn.addEventListener("click", handleTotpSubmit, { signal });
@@ -548,7 +565,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     const spinnerEl = createElement("div", { class: "spinner" });
     spinner.appendChild(spinnerEl);
 
-    const title = createElement("h2", { class: "auto-connect-title" }, "Auto-connecting...");
+    const title = createElement(
+      "h2",
+      { class: "auto-connect-title" },
+      connectText("login.autoConnecting"),
+    );
     autoConnectServerName = createElement("span", { class: "auto-connect-server" });
 
     const cancelBtn = createElement(
@@ -557,7 +578,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         class: "btn-ghost auto-connect-cancel",
         type: "button",
       },
-      "Cancel",
+      connectText("common.cancel"),
     );
 
     cancelBtn.addEventListener(
@@ -618,13 +639,19 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     submitBtn.classList.toggle("loading", isLoading);
 
     if (formState === "connecting" || formState === "auto-connecting") {
-      setText(submitBtnText, "Connecting\u2026");
+      setText(submitBtnText, connectText("login.connecting"));
     } else if (formState === "loading") {
-      setText(submitBtnText, formMode === "login" ? "Logging in\u2026" : "Registering\u2026");
+      setText(
+        submitBtnText,
+        connectText(formMode === "login" ? "login.loggingIn" : "login.registering"),
+      );
     } else if (refused) {
-      setText(submitBtnText, "Registration closed");
+      setText(submitBtnText, connectText("login.registrationClosed"));
     } else {
-      setText(submitBtnText, formMode === "login" ? "Login" : "Register");
+      setText(
+        submitBtnText,
+        connectText(formMode === "login" ? "login.title" : "login.registerTitle"),
+      );
     }
   }
 
@@ -756,11 +783,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // `usingSavedPassword`.
     clearSavedPasswordPlaceholder();
 
-    setText(formTitle, formMode === "login" ? "Login" : "Register");
-    setText(submitBtnText, formMode === "login" ? "Login" : "Register");
+    const title = connectText(formMode === "login" ? "login.title" : "login.registerTitle");
+    setText(formTitle, title);
+    setText(submitBtnText, title);
     setText(
       toggleModeBtn,
-      formMode === "login" ? "Need an account? Register" : "Already have an account? Login",
+      connectText(formMode === "login" ? "login.toRegister" : "login.toLogin"),
     );
 
     updateRegistrationUi();
@@ -777,20 +805,20 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     const password = passwordInput.value;
 
     if (!host) {
-      return "Server address is required.";
+      return connectText("validation.hostRequired");
     }
     if (!username) {
-      return "Username is required.";
+      return connectText("validation.usernameRequired");
     }
     // A saved password is already known-good; it is never re-validated here
     // because its plaintext is not available to this process. The bypass is
     // login-only: registration always needs a real, freshly typed password.
     if (!usingSavedPassword || formMode !== "login") {
       if (!password) {
-        return "Password is required.";
+        return connectText("validation.passwordRequired");
       }
       if (password.length < MIN_PASSWORD_LENGTH) {
-        return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+        return connectText("validation.passwordTooShort", { min: MIN_PASSWORD_LENGTH });
       }
     }
     if (formMode === "register") {
@@ -803,18 +831,18 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // history (whether the field had shown the placeholder before) was
       // wrong in both directions.
       if (password === SAVED_PASSWORD_PLACEHOLDER) {
-        return "That is the saved-password placeholder, not a password. Choose a different one.";
+        return connectText("validation.placeholderPassword");
       }
       const mode = currentRegistrationMode();
       if (mode === "closed") {
-        return "Registration is closed on this server.";
+        return connectText("registration.closedNotice");
       }
       // `invite` and an unknown mode (older server / failed read) both require
       // a code. Never widen registration because the mode could not be read.
       if (mode === "invite" || mode === null) {
         const inviteCode = inviteInput.value.trim();
         if (!inviteCode) {
-          return "Invite code is required for registration.";
+          return connectText("validation.inviteRequired");
         }
       }
     }
@@ -892,7 +920,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
 
     totpSubmitBtn.disabled = true;
-    setText(totpSubmitBtn, "Verifying\u2026");
+    setText(totpSubmitBtn, connectText("totp.verifying"));
 
     try {
       await onTotpSubmit(code);
@@ -903,11 +931,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // partial token has already been consumed by main.ts.
       totpPending = false;
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Verification failed.";
+      const message = err instanceof Error ? err.message : connectText("totp.failed");
       transitionTo("error", message);
     } finally {
       totpSubmitBtn.disabled = false;
-      setText(totpSubmitBtn, "Verify");
+      setText(totpSubmitBtn, connectText("totp.verify"));
     }
   }
 
@@ -938,7 +966,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     const ctx = recoverCtx;
     void import("./RecoverOverlay")
       .then((m) => m.openRecoverOverlay(ctx))
-      .catch(() => transitionTo("error", "Account recovery is unavailable."));
+      .catch(() => transitionTo("error", connectText("login.recoveryUnavailable")));
   }
 
   // ---------------------------------------------------------------------------

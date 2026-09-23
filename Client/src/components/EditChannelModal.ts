@@ -22,6 +22,8 @@ import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 import { getKnownCategories } from "@stores/channels.store";
+import { shellText } from "../i18n/shell";
+import { channelTypeLabel } from "./CreateChannelModal";
 
 /** The server's ceiling for `slow_mode`, mirrored so the UI cannot exceed it. */
 export const MAX_SLOW_MODE_SECONDS = 21600;
@@ -29,36 +31,16 @@ export const MAX_SLOW_MODE_SECONDS = 21600;
 export const MAX_VOICE_LIMIT = 99;
 
 /** Slow-mode presets, in seconds. 0 = off. */
-const SLOW_MODE_PRESETS: readonly { readonly seconds: number; readonly label: string }[] = [
-  { seconds: 0, label: "Off" },
-  { seconds: 5, label: "5 seconds" },
-  { seconds: 10, label: "10 seconds" },
-  { seconds: 15, label: "15 seconds" },
-  { seconds: 30, label: "30 seconds" },
-  { seconds: 60, label: "1 minute" },
-  { seconds: 120, label: "2 minutes" },
-  { seconds: 300, label: "5 minutes" },
-  { seconds: 600, label: "10 minutes" },
-  { seconds: 900, label: "15 minutes" },
-  { seconds: 1800, label: "30 minutes" },
-  { seconds: 3600, label: "1 hour" },
-  { seconds: 7200, label: "2 hours" },
-  { seconds: 21600, label: "6 hours" },
-] as const;
+const SLOW_MODE_PRESETS: readonly number[] = [
+  0, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21600,
+];
 
-/** Human label for a second count, for a value that is off the preset list. */
+/** Human label for a slow-mode second count, preset or not. */
 export function formatSlowMode(seconds: number): string {
-  const preset = SLOW_MODE_PRESETS.find((p) => p.seconds === seconds);
-  if (preset !== undefined) return preset.label;
-  if (seconds % 3600 === 0) {
-    const hours = seconds / 3600;
-    return `${hours} hour${hours === 1 ? "" : "s"}`;
-  }
-  if (seconds % 60 === 0) {
-    const minutes = seconds / 60;
-    return `${minutes} minute${minutes === 1 ? "" : "s"}`;
-  }
-  return `${seconds} seconds`;
+  if (seconds === 0) return shellText("slowMode.off");
+  if (seconds % 3600 === 0) return shellText("slowMode.hours", { count: seconds / 3600 });
+  if (seconds % 60 === 0) return shellText("slowMode.minutes", { count: seconds / 60 });
+  return shellText("slowMode.seconds", { count: seconds });
 }
 
 /**
@@ -131,8 +113,9 @@ function buildVoiceLimitField(
   value: number,
 ): { group: HTMLDivElement; input: HTMLInputElement } {
   const group = createElement("div", { class: "form-group" });
-  const label = createElement("label", { class: "form-label" }, labelText);
+  const label = createElement("label", { class: "form-label", for: testId }, labelText);
   const input = createElement("input", {
+    id: testId,
     class: "form-input",
     type: "number",
     min: "0",
@@ -165,12 +148,12 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
   function mount(container: Element): void {
     // Header
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", { id: "edit-channel-title" }, "Edit Channel");
+    const title = createElement("h3", { id: "edit-channel-title" }, shellText("channel.edit"));
     // Icon-only button: without a label a screen reader announces just "button".
     const closeBtn = createElement("button", {
       class: "modal-close",
       type: "button",
-      "aria-label": "Close",
+      "aria-label": shellText("common.close"),
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
@@ -182,18 +165,27 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
 
     // Channel type (read-only)
     const typeGroup = createElement("div", { class: "form-group" });
-    const typeLabel = createElement("label", { class: "form-label" }, "Type");
+    const typeLabel = createElement(
+      "label",
+      { class: "form-label" },
+      shellText("channelForm.type"),
+    );
     const typeDisplay = createElement("div", {
       class: "form-input",
       style: "opacity: 0.7; cursor: default;",
     });
-    setText(typeDisplay, channelType.charAt(0).toUpperCase() + channelType.slice(1));
+    setText(typeDisplay, channelTypeLabel(channelType));
     appendChildren(typeGroup, typeLabel, typeDisplay);
 
     // Channel name
     const nameGroup = createElement("div", { class: "form-group" });
-    const nameLabel = createElement("label", { class: "form-label" }, "Name");
+    const nameLabel = createElement(
+      "label",
+      { class: "form-label", for: "edit-channel-name" },
+      shellText("channelForm.name"),
+    );
     const nameInput = createElement("input", {
+      id: "edit-channel-name",
       class: "form-input",
       type: "text",
       value: channelName,
@@ -204,11 +196,16 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
 
     // Channel topic (optional, shown in the chat header)
     const topicGroup = createElement("div", { class: "form-group" });
-    const topicLabel = createElement("label", { class: "form-label" }, "Topic");
+    const topicLabel = createElement(
+      "label",
+      { class: "form-label", for: "edit-channel-topic" },
+      shellText("channelForm.topic"),
+    );
     const topicInput = createElement("input", {
+      id: "edit-channel-topic",
       class: "form-input",
       type: "text",
-      placeholder: "What's this channel about? (optional)",
+      placeholder: shellText("channelForm.topicPlaceholder"),
       maxlength: "1024",
       "data-testid": "edit-channel-topic-input",
     });
@@ -217,13 +214,18 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
 
     // Channel category (free text, suggestions from the categories in use)
     const categoryGroup = createElement("div", { class: "form-group" });
-    const categoryLabel = createElement("label", { class: "form-label" }, "Category");
+    const categoryLabel = createElement(
+      "label",
+      { class: "form-label", for: "edit-channel-category" },
+      shellText("channelForm.category"),
+    );
     const categoryInput = createElement("input", {
+      id: "edit-channel-category",
       class: "form-input",
       type: "text",
       list: "edit-channel-categories",
       autocomplete: "off",
-      placeholder: "Leave blank for no category",
+      placeholder: shellText("channelForm.categoryPlaceholder"),
       "data-testid": "edit-channel-category-input",
     });
     categoryInput.value = channelCategory ?? "";
@@ -236,26 +238,28 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     // Slow mode (presets; a stored off-preset value keeps its own option)
     const currentSlowMode = clampSlowMode(channelSlowMode ?? 0);
     const slowGroup = createElement("div", { class: "form-group" });
-    const slowLabel = createElement("label", { class: "form-label" }, "Slow Mode");
+    const slowLabel = createElement(
+      "label",
+      { class: "form-label", for: "edit-channel-slowmode" },
+      shellText("channelForm.slowMode"),
+    );
     const slowSelect = createElement("select", {
+      id: "edit-channel-slowmode",
       class: "form-input",
       "data-testid": "edit-channel-slowmode-select",
     });
-    const choices = SLOW_MODE_PRESETS.some((p) => p.seconds === currentSlowMode)
-      ? [...SLOW_MODE_PRESETS]
-      : [
-          ...SLOW_MODE_PRESETS,
-          { seconds: currentSlowMode, label: formatSlowMode(currentSlowMode) },
-        ];
-    for (const choice of choices.toSorted((a, b) => a.seconds - b.seconds)) {
-      const opt = createElement("option", { value: String(choice.seconds) }, choice.label);
-      if (choice.seconds === currentSlowMode) opt.selected = true;
+    const choices = SLOW_MODE_PRESETS.includes(currentSlowMode)
+      ? SLOW_MODE_PRESETS
+      : [...SLOW_MODE_PRESETS, currentSlowMode];
+    for (const seconds of choices.toSorted((a, b) => a - b)) {
+      const opt = createElement("option", { value: String(seconds) }, formatSlowMode(seconds));
+      if (seconds === currentSlowMode) opt.selected = true;
       slowSelect.appendChild(opt);
     }
     const slowHint = createElement(
       "div",
       { class: "form-hint" },
-      "Members must wait this long between messages. Holders of Manage Messages are exempt.",
+      shellText("channelForm.slowModeHint"),
     );
     appendChildren(slowGroup, slowLabel, slowSelect, slowHint);
 
@@ -268,12 +272,12 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       "data-testid": "edit-channel-nsfw-checkbox",
     });
     nsfwInput.checked = channelNsfw === true;
-    const nsfwText = createElement("span", {}, "Age-restricted (NSFW)");
+    const nsfwText = createElement("span", {}, shellText("channelForm.nsfw"));
     appendChildren(nsfwLabelRow, nsfwInput, nsfwText);
     const nsfwHint = createElement(
       "div",
       { class: "form-hint" },
-      "Members see a one-time warning each session before opening the channel, and the channel is marked in the sidebar. Nothing is filtered.",
+      shellText("channelForm.nsfwHint"),
     );
     appendChildren(nsfwGroup, nsfwLabelRow, nsfwHint);
 
@@ -289,16 +293,20 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
         class: "form-section",
         "data-testid": "edit-channel-voice-section",
       });
-      const voiceHeading = createElement("div", { class: "form-section-title" }, "Voice Limits");
+      const voiceHeading = createElement(
+        "div",
+        { class: "form-section-title" },
+        shellText("channelForm.voiceLimits"),
+      );
       const users = buildVoiceLimitField(
-        "User Limit",
-        "How many members may be connected at once. 0 = unlimited.",
+        shellText("channelForm.userLimit"),
+        shellText("channelForm.userLimitHint"),
         "edit-channel-max-users-input",
         channelVoiceMaxUsers ?? 0,
       );
       const video = buildVoiceLimitField(
-        "Video Limit",
-        "How many may have a camera or screen share on at once. 0 = unlimited.",
+        shellText("channelForm.videoLimit"),
+        shellText("channelForm.videoLimitHint"),
         "edit-channel-max-video-input",
         channelVoiceMaxVideo ?? 0,
       );
@@ -321,7 +329,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     const cancelBtn = createElement(
       "button",
       { class: "btn-modal-cancel", type: "button" },
-      "Cancel",
+      shellText("common.cancel"),
     );
     cancelBtn.addEventListener("click", onClose, { signal: disposable.signal });
 
@@ -332,7 +340,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
         type: "button",
         "data-testid": "edit-channel-submit",
       },
-      "Save Changes",
+      shellText("channelForm.save"),
     );
 
     saveBtn.addEventListener(
@@ -341,7 +349,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
         const name = nameInput.value.trim();
         if (name === "") {
           errorEl.style.display = "block";
-          setText(errorEl, "Channel name is required");
+          setText(errorEl, shellText("channelForm.nameRequired"));
           nameInput.classList.add("error");
           return;
         }
@@ -349,7 +357,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
         errorEl.style.display = "none";
         nameInput.classList.remove("error");
         saveBtn.setAttribute("disabled", "true");
-        setText(saveBtn, "Saving...");
+        setText(saveBtn, shellText("channelForm.saving"));
 
         const data: EditChannelData = {
           name,
@@ -369,9 +377,9 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
           await onSave(data);
         } catch (err) {
           errorEl.style.display = "block";
-          setText(errorEl, err instanceof Error ? err.message : "Failed to update channel");
+          setText(errorEl, err instanceof Error ? err.message : shellText("channel.updateFailed"));
           saveBtn.removeAttribute("disabled");
-          setText(saveBtn, "Save Changes");
+          setText(saveBtn, shellText("channelForm.save"));
         }
       },
       { signal: disposable.signal },

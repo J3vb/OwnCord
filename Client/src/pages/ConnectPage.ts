@@ -23,6 +23,7 @@ const log = createLogger("ConnectPage");
 export type { SimpleProfile } from "./connect-page/ServerPanel";
 
 import type { SimpleProfile } from "./connect-page/ServerPanel";
+import { connectText } from "../i18n/connect";
 
 /** Callbacks for external wiring (API integration added later). */
 export interface ConnectPageCallbacks {
@@ -50,10 +51,11 @@ export interface ConnectPageCallbacks {
 // ---------------------------------------------------------------------------
 
 /** Account actions offered by the settings overlay before sign-in. */
-const notAuthenticated = (): Promise<never> => Promise.reject(new Error("Not authenticated"));
+const notAuthenticated = (): Promise<never> =>
+  Promise.reject(new Error(connectText("settings.notAuthenticated")));
 
-const DEFAULT_PROFILES: readonly SimpleProfile[] = [
-  { name: "Local Server", host: "localhost:8443" },
+const defaultProfiles = (): readonly SimpleProfile[] => [
+  { name: connectText("profiles.defaultName"), host: "localhost:8443" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -62,7 +64,7 @@ const DEFAULT_PROFILES: readonly SimpleProfile[] = [
 
 export function createConnectPage(
   callbacks: ConnectPageCallbacks,
-  initialProfiles: readonly SimpleProfile[] = DEFAULT_PROFILES,
+  initialProfiles: readonly SimpleProfile[] = defaultProfiles(),
 ): MountableComponent & {
   showTotp(): void;
   showConnecting(): void;
@@ -221,7 +223,7 @@ export function createConnectPage(
     glowText.setAttribute("opacity", "0.4");
     glowText.setAttribute("filter", "url(#oc-glow)");
     glowText.setAttribute("class", "oc-glow-layer");
-    glowText.textContent = "OC";
+    glowText.textContent = "OC"; // i18n-exempt: logo monogram, not copy
     logoSvg.appendChild(glowText);
 
     const sharpText = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -233,17 +235,14 @@ export function createConnectPage(
     sharpText.setAttribute("font-weight", "900");
     sharpText.setAttribute("fill", "url(#oc-grad)");
     sharpText.setAttribute("letter-spacing", "-4");
-    sharpText.textContent = "OC";
+    sharpText.textContent = "OC"; // i18n-exempt: logo monogram, not copy
     logoSvg.appendChild(sharpText);
 
     branding.appendChild(logoSvg);
 
+    // i18n-exempt: product name, never translated
     const brandName = createElement("div", { class: "brand-name" }, "OwnCord");
-    const brandTag = createElement(
-      "div",
-      { class: "brand-tagline" },
-      "Self-hosted chat \u2014 Your server, your rules",
-    );
+    const brandTag = createElement("div", { class: "brand-tagline" }, connectText("brand.tagline"));
     appendChildren(branding, brandName, brandTag);
 
     serverPanel.element.insertBefore(branding, serverPanel.element.firstChild);
