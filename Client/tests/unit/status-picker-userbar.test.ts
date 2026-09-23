@@ -162,8 +162,10 @@ describe("StatusPicker wired to UserBar", () => {
       // sent straight down the socket and lost if it's rejected.
       expect(ws.send).not.toHaveBeenCalled();
 
-      // Once the window reopens, the queued change must still go out.
-      vi.advanceTimersByTime(10_000);
+      // Once the window reopens (plus the OC-0451 margin that clears the
+      // server's receipt-measured window), the queued change must still go
+      // out.
+      vi.advanceTimersByTime(11_000);
 
       expect(ws.send).toHaveBeenCalledOnce();
       const sentMsg = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
