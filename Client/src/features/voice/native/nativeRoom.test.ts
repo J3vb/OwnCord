@@ -23,7 +23,7 @@ vi.mock("../../../lib/logger", () => ({
 interface FakeMedia {
   url: string;
   disposed: boolean;
-  mediaStreamTrack?: { id: string };
+  mediaStreamTrack?: { id: string; events: string[] };
   track?: unknown;
   maxFramerate?: number;
 }
@@ -37,6 +37,8 @@ const host = vi.hoisted(() => ({
     frames: "ws://127.0.0.1:9/tok",
   }),
   publishCamera: (): Promise<string> => Promise.resolve("TR_cam"),
+  pick: (): Promise<string | null> => Promise.resolve("screen:7"),
+  startScreen: (): Promise<unknown> => Promise.resolve({ capture: 4, width: 1280, height: 720 }),
   unsubscribed: 0,
   renderers: [] as FakeMedia[],
   uplinks: [] as FakeMedia[],
@@ -44,7 +46,18 @@ const host = vi.hoisted(() => ({
 vi.mock("./videoRenderer", () => ({
   NativeVideoRenderer: class {
     disposed = false;
-    readonly mediaStreamTrack = { id: `canvas-${host.renderers.length}` };
+    readonly mediaStreamTrack = {
+      id: `canvas-${host.renderers.length}`,
+      events: [] as string[],
+      readyState: "live",
+      stop() {
+        this.readyState = "ended";
+      },
+      dispatchEvent(e: Event) {
+        this.events.push(e.type);
+        return true;
+      },
+    };
     constructor(readonly url: string) {
       host.renderers.push(this);
     }
@@ -68,6 +81,7 @@ vi.mock("./cameraUplink", () => ({
     }
   },
 }));
+vi.mock("./screenPicker", () => ({ pickScreenSource: () => host.pick() }));
 vi.mock("../../../platform/desktop", () => ({
   desktop: {
     nativeVoice: {
@@ -87,6 +101,14 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["setSubscribed", args]);
         return Promise.resolve();
       },
+      setVolume: (...args: unknown[]) => {
+        host.calls.push(["setVolume", args]);
+        return Promise.resolve();
+      },
+      setScreenshareVolume: (...args: unknown[]) => {
+        host.calls.push(["setScreenshareVolume", args]);
+        return Promise.resolve();
+      },
       setDevice: (...args: unknown[]) => {
         host.calls.push(["setDevice", args]);
         return Promise.resolve();
@@ -97,6 +119,18 @@ vi.mock("../../../platform/desktop", () => ({
       },
       unpublishCamera: (...args: unknown[]) => {
         host.calls.push(["unpublishCamera", args]);
+        return Promise.resolve();
+      },
+      startScreen: (...args: unknown[]) => {
+        host.calls.push(["startScreen", args]);
+        return host.startScreen();
+      },
+      publishScreen: (...args: unknown[]) => {
+        host.calls.push(["publishScreen", args]);
+        return Promise.resolve("TR_screen");
+      },
+      stopScreen: (...args: unknown[]) => {
+        host.calls.push(["stopScreen", args]);
         return Promise.resolve();
       },
       onEvent: (handler: (e: NativeVoiceEnvelope) => void) => {
@@ -135,6 +169,9 @@ beforeEach(() => {
     frames: "ws://127.0.0.1:9/tok",
   });
   host.publishCamera = () => Promise.resolve("TR_cam");
+  host.pick = () => Promise.resolve("screen:7");
+  host.startScreen = () => Promise.resolve({ capture: 4, width: 1280, height: 720 });
+  nativeCounters.screenTracks = 0;
   host.renderers.length = 0;
   host.uplinks.length = 0;
   nativeCounters.openRooms = 0;
@@ -296,6 +333,57 @@ describe("NativeRoom room surface", () => {
     const pubs = room.remoteParticipants.get("user-3")!.audioTrackPublications;
     expect(pubs.get("TR_mic")!.isSubscribed).toBe(false);
     expect(pubs.get("TR_stream")!.isSubscribed).toBe(true);
+  });
+
+  it("starts each participant at its saved volume and forwards volume changes", async () => {
+    const room = createNativeRoom(audio, (identity) => (identity === "user-2" ? 0.5 : 1));
+    await room.connect("u", "t");
+    emit({
+      session: 1,
+      event: { type: "connected", participants: [{ identity: "user-2", tracks: [] }] },
+    });
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+    expect(host.calls.filter(([n]) => n === "setVolume")).toEqual([
+      ["setVolume", [1, "user-2", 0.5]],
+      ["setVolume", [1, "user-3", 1]],
+    ]);
+    const p = room.remoteParticipants.get("user-3")!;
+    p.setVolume(1.8);
+    expect(p.getVolume()).toBe(1.8);
+    expect(host.calls.at(-1)).toEqual(["setVolume", [1, "user-3", 1.8]]);
+    await room.disconnect();
+    p.setVolume(0.2);
+    expect(host.calls.at(-1)).toEqual(["disconnect", [1]]);
+  });
+
+  it("sends each participant's screen-share audio volume, again after a rejoin", async () => {
+    const volumes = new Map([["user-2", 0.4]]);
+    const room = createNativeRoom(audio, undefined, (identity) => volumes.get(identity) ?? 1);
+    await room.connect("u", "t");
+    emit({
+      session: 1,
+      event: { type: "connected", participants: [{ identity: "user-2", tracks: [] }] },
+    });
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+    const sent = () => host.calls.filter(([n]) => n === "setScreenshareVolume");
+    expect(sent()).toEqual([
+      ["setScreenshareVolume", [1, "user-2", 0.4]],
+      ["setScreenshareVolume", [1, "user-3", 1]],
+    ]);
+    host.calls.length = 0;
+    volumes.set("user-3", 0);
+    room.applyScreenshareVolumes();
+    expect(sent()).toEqual([
+      ["setScreenshareVolume", [1, "user-2", 0.4]],
+      ["setScreenshareVolume", [1, "user-3", 0]],
+    ]);
+    // The backend keeps a gain for the session: a participant who left while
+    // it changed is sent the current one when they return.
+    emit({ session: 1, event: { type: "participantDisconnected", identity: "user-2" } });
+    volumes.set("user-2", 1);
+    host.calls.length = 0;
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
+    expect(sent()).toEqual([["setScreenshareVolume", [1, "user-2", 1]]]);
   });
 
   it("maps native events onto livekit RoomEvents", async () => {
@@ -503,7 +591,7 @@ describe("NativeRoom camera", () => {
     expect(host.calls.filter(([n]) => n === "unpublishCamera")).toHaveLength(2);
   });
 
-  it("refuses screen share (a later phase) and a publish without a session", async () => {
+  it("refuses a browser screen track and a publish without a session", async () => {
     const room = createNativeRoom(audio);
     await expect(room.localParticipant.publishTrack(cameraTrack(), cameraOptions)).rejects.toThrow(
       /not connected/,
@@ -609,3 +697,131 @@ describe("NativeRoom camera", () => {
 function track2() {
   return track("TR_a", "microphone");
 }
+
+const screenOptions = {
+  source: "screen_share",
+  simulcast: false,
+  videoEncoding: { maxBitrate: 6_000_000, maxFramerate: 30 },
+};
+const share = async (room: ReturnType<typeof createNativeRoom>) => {
+  const [screen] = await room.localParticipant.createScreenTracks({
+    resolution: { width: 1920, height: 1080, frameRate: 30 },
+  });
+  return screen!;
+};
+
+describe("NativeRoom screen share", () => {
+  it("captures the picked source natively and previews it on the frame socket", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    expect(host.calls.at(-1)).toEqual([
+      "startScreen",
+      [1, "screen:7", { fps: 30, maxWidth: 1920, maxHeight: 1080 }],
+    ]);
+    expect(screen).toMatchObject({ kind: "video", source: "screen_share", capture: 4 });
+    expect(host.renderers.map((r) => r.url)).toEqual(["ws://127.0.0.1:9/tok/screen"]);
+    expect(screen.mediaStreamTrack).toBe(host.renderers[0]!.mediaStreamTrack);
+    expect(nativeCounters.screenTracks).toBe(1);
+  });
+
+  it("publishes the capture at its size and unpublishes it by its preview track", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    const pub = await room.localParticipant.publishTrack(screen, screenOptions);
+    expect(host.calls.at(-1)).toEqual([
+      "publishScreen",
+      [1, 4, { width: 1280, height: 720, maxBitrate: 6_000_000, maxFramerate: 30 }],
+    ]);
+    expect(pub).toMatchObject({ trackSid: "TR_screen", source: "screen_share" });
+    // getLocalScreenshareStream reads it by source.
+    expect(room.localParticipant.getTrackPublication("screen_share")!.track).toBe(screen);
+    await room.localParticipant.unpublishTrack(screen.mediaStreamTrack);
+    expect(host.calls.at(-1)).toEqual(["stopScreen", [1, 4]]);
+    expect(room.localParticipant.getTrackPublication("screen_share")).toBeUndefined();
+    expect(host.renderers[0]!.disposed).toBe(true);
+    // The shared code stops the track next: nothing more reaches the host.
+    screen.stop();
+    expect(host.calls.filter(([n]) => n === "stopScreen")).toHaveLength(1);
+    expect(nativeCounters.screenTracks).toBe(0);
+  });
+
+  it("maps a closed picker and a cancelled portal dialog to NotAllowedError", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    host.pick = () => Promise.resolve(null);
+    await expect(share(room)).rejects.toMatchObject({ name: "NotAllowedError" });
+    expect(host.calls.filter(([n]) => n === "startScreen")).toHaveLength(0);
+    host.pick = () => Promise.resolve("portal");
+    host.startScreen = () => Promise.reject("screen capture was cancelled or refused");
+    await expect(share(room)).rejects.toMatchObject({ name: "NotAllowedError" });
+    host.startScreen = () => Promise.reject("that screen or window is no longer available");
+    await expect(share(room)).rejects.toBe("that screen or window is no longer available");
+    expect(host.renderers).toHaveLength(0);
+  });
+
+  it("raises ended on the preview when the desktop ends its capture, not a stale one", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    await share(room);
+    emit({ session: 1, event: { type: "screenCaptureEnded", capture: 3 } });
+    expect(host.renderers[0]!.mediaStreamTrack!.events).toEqual([]);
+    emit({ session: 1, event: { type: "screenCaptureEnded", capture: 4 } });
+    expect(host.renderers[0]!.mediaStreamTrack!.events).toEqual(["ended"]);
+  });
+
+  it("ends a track whose capture ended before its start result arrived", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    host.startScreen = () => {
+      emit({ session: 1, event: { type: "screenCaptureEnded", capture: 4 } });
+      return Promise.resolve({ capture: 4, width: 1280, height: 720 });
+    };
+    const screen = await share(room);
+    expect(screen.mediaStreamTrack.readyState).toBe("ended");
+    expect(host.renderers[0]!.mediaStreamTrack!.events).toEqual(["ended"]);
+    host.startScreen = () => Promise.resolve({ capture: 5, width: 1280, height: 720 });
+    const next = await share(room);
+    expect(next.mediaStreamTrack.readyState).toBe("live");
+  });
+
+  it("stops the previous capture's track when a new capture replaces it", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const first = await share(room);
+    host.startScreen = () => Promise.resolve({ capture: 5, width: 800, height: 600 });
+    const second = await share(room);
+    expect(host.renderers.map((r) => r.disposed)).toEqual([true, false]);
+    expect(host.calls.filter(([n]) => n === "stopScreen")).toEqual([["stopScreen", [1, 4]]]);
+    first.stop();
+    expect(second.capture).toBe(5);
+    expect(nativeCounters.screenTracks).toBe(1);
+  });
+
+  it("releases the screen track on disconnect and refuses one without a session", async () => {
+    const room = createNativeRoom(audio);
+    await expect(share(room)).rejects.toThrow(/not connected/);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    await room.disconnect();
+    expect(host.renderers[0]!.disposed).toBe(true);
+    expect(room.localParticipant.getTrackPublication("screen_share")).toBeUndefined();
+    expect(nativeCounters.screenTracks).toBe(0);
+  });
+
+  it("drops a capture that finished starting after the room disconnected", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    let finish: (() => void) | undefined;
+    host.startScreen = () =>
+      new Promise((r) => (finish = () => r({ capture: 4, width: 1, height: 1 })));
+    const sharing = share(room);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    await room.disconnect();
+    finish!();
+    await expect(sharing).rejects.toThrow(/disconnected/);
+    expect(host.renderers).toHaveLength(0);
+  });
+});

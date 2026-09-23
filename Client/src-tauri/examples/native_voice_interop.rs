@@ -31,6 +31,18 @@
 //! frames to someone else: it prints the frame socket's URL, token included,
 //! so a webview harness can run the app's own renderer and camera pump
 //! against this session (the CPU measurement in docs/architecture/voice-e2ee.md).
+//! `--screen WxH` also shares the screen the way the app does, through the
+//! same capture thread and publish, from a synthetic source (moving bars:
+//! CI has no display, so neither the X11 capturer nor the Wayland portal
+//! runs here). It reads the capture's local preview back through the frame
+//! socket (reported as the `preview` identity).
+//! `--screen-cycles N` (with `--screen`) first stops and restarts the share
+//! N times, printing the thread and file-descriptor counts before and after
+//! and checking that a stale stop leaves the live share alone.
+//! `--volume G` sets every remote participant's volume to G the way the
+//! per-user volume menu does, pulls the session's own playout mix at the
+//! device cadence (CI has no sound device to play it on) and reports its RMS
+//! once per second, next to the direct decode's `audio` events.
 #[cfg(target_os = "linux")]
 mod linux {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -43,8 +55,10 @@ mod linux {
     use livekit::webrtc::audio_source::native::NativeAudioSource;
     use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
     use livekit::webrtc::audio_stream::native::NativeAudioStream;
+    use owncord_client_lib::native_voice::playout::{Mixer, SAMPLE_RATE as PLAYOUT_RATE};
+    use owncord_client_lib::native_voice::screen::{self, CaptureOptions, Target};
     use owncord_client_lib::native_voice::session::{
-        process_threads, shared_key_material, CameraOptions, Event, NativeSession,
+        process_threads, shared_key_material, CameraOptions, Event, NativeSession, ScreenOptions,
     };
     use tokio_tungstenite::tungstenite::Message;
 
@@ -122,6 +136,31 @@ mod linux {
         }
     }
 
+    /// Pull the playout mix every 10 ms, as the output device would, and
+    /// report its RMS once per second.
+    async fn meter_playout(mixer: Arc<Mixer>) {
+        let mut buf = vec![0.0f32; PLAYOUT_RATE as usize / 100];
+        let mut ticker = tokio::time::interval(Duration::from_millis(10));
+        let (mut sum_sq, mut count, mut ticks) = (0.0f64, 0u64, 0u32);
+        loop {
+            ticker.tick().await;
+            mixer.mix(&mut buf, 1);
+            // The same scale as the direct meter's i16 samples.
+            sum_sq += buf
+                .iter()
+                .map(|&s| (s as f64 * 32768.0).powi(2))
+                .sum::<f64>();
+            count += buf.len() as u64;
+            ticks += 1;
+            if ticks == 100 {
+                emit(serde_json::json!({
+                    "event": { "type": "playout", "rms": (sum_sq / count as f64).sqrt() }
+                }));
+                (sum_sq, count, ticks) = (0.0, 0, 0);
+            }
+        }
+    }
+
     /// Upload moving bars as the camera over the frame socket, the way
     /// `cameraUplink.ts` uploads an RGBA `VideoFrame` (format 1), until the
     /// socket closes or the task is aborted.
@@ -195,6 +234,55 @@ mod linux {
         }
     }
 
+    /// Open file descriptors: sockets, pipes and device handles a capture or
+    /// sender could leak.
+    fn open_fds() -> usize {
+        std::fs::read_dir("/proc/self/fd").map_or(0, |d| d.count())
+    }
+
+    fn size_arg(name: &str) -> Result<Option<(u32, u32)>, String> {
+        let Some(v) = arg(name) else { return Ok(None) };
+        let bad = || format!("{name} WxH");
+        let (w, h) = v.split_once('x').ok_or_else(bad)?;
+        Ok(Some((
+            w.parse().map_err(|_| bad())?,
+            h.parse().map_err(|_| bad())?,
+        )))
+    }
+
+    /// Start a synthetic screen capture and publish it, as the app's
+    /// `native_voice_start_screen` then `native_voice_publish_screen` do.
+    /// Returns the capture id.
+    async fn share_screen(
+        session: &mut NativeSession,
+        width: u32,
+        height: u32,
+    ) -> Result<u64, String> {
+        let (capture, started) = session
+            .start_screen(
+                Target::Synthetic { width, height },
+                CaptureOptions {
+                    fps: 15.0,
+                    max_width: 1920,
+                    max_height: 1080,
+                },
+            )
+            .await?;
+        let (w, h) = started.await.map_err(|_| "screen capture dropped")??;
+        session
+            .publish_screen(
+                capture,
+                ScreenOptions {
+                    width: w,
+                    height: h,
+                    max_bitrate: 3_000_000,
+                    max_framerate: 15.0,
+                },
+            )
+            .await?;
+        Ok(capture)
+    }
+
     /// Whether a WebSocket handshake to `url` is refused.
     async fn refused(url: &str) -> bool {
         tokio_tungstenite::connect_async(url).await.is_err()
@@ -219,16 +307,11 @@ mod linux {
             .unwrap_or("0")
             .parse()
             .map_err(|_| "--mute-cycles")?;
-        let video: Option<(u32, u32)> = match arg("--video") {
-            None => None,
-            Some(v) => {
-                let (w, h) = v.split_once('x').ok_or("--video WxH")?;
-                Some((
-                    w.parse().map_err(|_| "--video")?,
-                    h.parse().map_err(|_| "--video")?,
-                ))
-            }
-        };
+        let volume: Option<f32> = arg("--volume")
+            .map(|v| v.parse().map_err(|_| "--volume"))
+            .transpose()?;
+        let video = size_arg("--video")?;
+        let screen_size = size_arg("--screen")?;
 
         if cycles > 0 {
             emit(
@@ -335,6 +418,41 @@ mod linux {
             } }));
         }
 
+        let mut preview = None;
+        if let Some((width, height)) = screen_size {
+            let mut capture = share_screen(&mut session, width, height).await?;
+            let screen_cycles: u32 = arg("--screen-cycles")
+                .as_deref()
+                .unwrap_or("0")
+                .parse()
+                .map_err(|_| "--screen-cycles")?;
+            if screen_cycles > 0 {
+                emit(
+                    serde_json::json!({ "event": { "type": "threads", "phase": "screen-before", "count": process_threads(), "fds": open_fds(), "captures": screen::active_captures() } }),
+                );
+                for _ in 0..screen_cycles {
+                    session.stop_screen(capture).await;
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    let stale = std::mem::replace(
+                        &mut capture,
+                        share_screen(&mut session, width, height).await?,
+                    );
+                    // A late stop of the replaced capture must leave the
+                    // new one running and published.
+                    session.stop_screen(stale).await;
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                emit(
+                    serde_json::json!({ "event": { "type": "threads", "phase": "screen-after", "cycles": screen_cycles, "count": process_threads(), "fds": open_fds(), "captures": screen::active_captures() } }),
+                );
+            }
+            preview = Some(tokio::spawn(watch(
+                "preview".into(),
+                format!("{frames_url}/screen"),
+            )));
+        }
+
         if mute_cycles > 0 {
             emit(
                 serde_json::json!({ "event": { "type": "threads", "phase": "mute-before", "count": process_threads() } }),
@@ -352,6 +470,9 @@ mod linux {
         }
 
         let mut meters = Vec::new();
+        if volume.is_some() {
+            meters.push(tokio::spawn(meter_playout(session.playout_mixer())));
+        }
         let deadline = tokio::time::sleep(Duration::from_secs(secs));
         tokio::pin!(deadline);
         loop {
@@ -359,6 +480,9 @@ mod linux {
                 _ = &mut deadline => break,
                 ev = room_events.recv() => match ev {
                     Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Audio(track), participant, .. }) => {
+                        if let Some(v) = volume {
+                            session.set_volume(participant.identity().as_str(), v);
+                        }
                         meters.push(tokio::spawn(meter(participant.identity().to_string(), track)));
                     }
                     Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Video(_), publication, participant }) => {
@@ -380,10 +504,14 @@ mod linux {
         if let Some(bars) = bars {
             bars.abort();
         }
+        if let Some(preview) = preview {
+            preview.abort();
+        }
         session.close().await;
         emit(serde_json::json!({ "event": {
             "type": "closed",
             "threads": process_threads(),
+            "screenCaptures": screen::active_captures(),
             "frameSocketGone": refused(&format!("{frames_url}/camera")).await,
         } }));
         Ok(())
