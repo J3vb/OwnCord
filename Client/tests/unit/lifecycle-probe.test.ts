@@ -145,7 +145,7 @@ describe("lifecycle soak pass bars", () => {
     expect(bar(evaluateBars(perPage, { listeners: 2 }), "listeners").pass).toBe(false);
   });
 
-  it("leaves samples taken right after a reconnect or logout out of the page pair", () => {
+  it("leaves the samples at the 5-cycle marks (reconnect, logout) out of the page pair", () => {
     const bars = evaluateBars([
       sample(5, { nodes: 101 }),
       sample(6),

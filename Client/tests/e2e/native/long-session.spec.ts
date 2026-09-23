@@ -9,8 +9,8 @@
  * timer ledger (an init script) is not installed and the timer counts read 0;
  * the fullstack soak covers timers for the same TypeScript.
  *
- * Ten cycles; the reconnect every 5th cycle goes through the fixture's TCP
- * gate. The within-page pair (cycles 6 and 9, after the reconnect) is what the
+ * Ten cycles; the reconnect at the start of every 5th cycle goes through the
+ * fixture's TCP gate. The within-page pair (cycles 6 and 9, after the reconnect) is what the
  * bars compare, at the plan's 0.05 per cycle.
  */
 import type { Page } from "@playwright/test";
@@ -128,7 +128,8 @@ test("the desktop shell does not grow its lifecycle footprint within a session",
     await quiesce(page);
     samples.push(await sampleLifecycle(page, cdp, 0));
     for (let cycle = 1; cycle <= CYCLES; cycle++) {
-      await runCycle(page, cycle, purge);
+      // Every 5th cycle starts with a reconnect, so each sample follows a full
+      // cycle of use (as in the fullstack soak).
       if (cycle % 5 === 0) {
         server.network.offline();
         try {
@@ -138,6 +139,7 @@ test("the desktop shell does not grow its lifecycle footprint within a session",
         }
         await expect(page.locator(".reconnecting-banner")).not.toBeVisible({ timeout: 30_000 });
       }
+      await runCycle(page, cycle, purge);
       if (SAMPLED.has(cycle)) {
         await quiesce(page);
         samples.push(await sampleLifecycle(page, cdp, cycle));
