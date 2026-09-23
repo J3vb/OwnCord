@@ -171,7 +171,12 @@ vi.mock("../../src/platform/desktop", () => ({
 // track raises events like a real one.
 vi.mock("../../src/features/voice/native/videoRenderer", () => ({
   NativeVideoRenderer: class {
-    readonly mediaStreamTrack = Object.assign(new EventTarget(), { readyState: "live" });
+    readonly mediaStreamTrack = Object.assign(new EventTarget(), {
+      readyState: "live",
+      stop() {
+        this.readyState = "ended";
+      },
+    });
     constructor(readonly url: string) {}
     dispose() {}
   },

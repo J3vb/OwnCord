@@ -163,7 +163,8 @@ fn thumbnail(ty: DesktopCaptureSourceType, source: CaptureSource) -> Option<Stri
         }
     });
     capturer.capture_frame();
-    slot.lock().unwrap_or_else(|p| p.into_inner()).take()
+    let url = slot.lock().unwrap_or_else(|p| p.into_inner()).take();
+    url
 }
 
 /// Small enough that an incompressible thumbnail stays within
