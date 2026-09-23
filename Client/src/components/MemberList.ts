@@ -337,25 +337,36 @@ function createMemberItem(
       // Position at mouse, kept on screen: a member low in the list at the
       // 940x500 minimum window opened the menu past the bottom edge, leaving
       // Force Logout, Ban and Block unreachable. When it does not fit below
-      // the pointer it is anchored by its bottom edge instead, so the ban
-      // form expanding later grows upward rather than off-screen.
+      // the pointer it is anchored by its bottom edge instead. The placement
+      // is re-run whenever the menu resizes, so the ban form expanding later
+      // cannot push Confirm Ban and Block off-screen from either anchor.
       const menuEl = activeMenu.element;
       menuEl.style.position = "fixed";
       menuEl.style.zIndex = "1000";
       document.body.appendChild(menuEl);
       const margin = 8;
-      const { innerWidth: vw, innerHeight: vh } = window;
-      const left = Math.min(e.clientX, vw - menuEl.offsetWidth - margin);
-      menuEl.style.left = `${Math.max(margin, left)}px`;
-      if (e.clientY + menuEl.offsetHeight > vh - margin) {
-        menuEl.style.bottom = `${Math.max(margin, vh - e.clientY)}px`;
-      } else {
-        menuEl.style.top = `${e.clientY}px`;
-      }
+      const place = (): void => {
+        const { innerWidth: vw, innerHeight: vh } = window;
+        const height = menuEl.offsetHeight;
+        const left = Math.min(e.clientX, vw - menuEl.offsetWidth - margin);
+        menuEl.style.left = `${Math.max(margin, left)}px`;
+        if (e.clientY + height > vh - margin) {
+          const bottom = Math.min(vh - e.clientY, vh - height - margin);
+          menuEl.style.top = "";
+          menuEl.style.bottom = `${Math.max(margin, bottom)}px`;
+        } else {
+          menuEl.style.bottom = "";
+          menuEl.style.top = `${e.clientY}px`;
+        }
+      };
+      place();
 
       // Close on outside click (deferred so this click doesn't close it)
       const dismiss = new Disposable();
       menuDismiss = dismiss;
+      const resizeObserver = new ResizeObserver(place);
+      resizeObserver.observe(menuEl);
+      dismiss.addCleanup(() => resizeObserver.disconnect());
       setOwnedTimeout(
         dismiss.signal,
         () => {

@@ -215,8 +215,17 @@ render path as a fallback; fail closed and record a blocker instead.
   seconds stay "{count} seconds" to avoid changing text for a stored 1-second
   value. The delete-channel warning is one message with the channel name as a
   parameter; the name renders in `<strong>` by splitting at a marker the
-  parameter cannot contain. Numbers now go through `formatNumber`, so a count
-  or latency of 1,000 or more is grouped ("1,234ms"). The slow-mode preset
+  parameter cannot contain. English text is unchanged except the intended
+  thousands grouping: numbers now go through `formatNumber`, so a value of
+  1,000 or more is grouped ("1,234 online", "1,234ms"). The owner accepted the
+  grouped form on 2026-09-23; it is what the B9-3 number seam is for. Keys
+  whose numeric parameter can reach 1,000: `servers.online`, `common.online`,
+  `members.groupHeader`, `servers.latency`, `invite.uses`, `invite.usesOfMax`,
+  an off-preset `slowMode.seconds`, `channel.mentions`,
+  `channel.voiceCapacity`, `dm.viewAllCount` and `banner.restarting`. The
+  other numeric parameters (protocol epochs, password minimums, HTTP status,
+  ban hours, purge counts and bounds, slow-mode hours and minutes) stay below
+  1,000. The slow-mode preset
   list is derived from `formatSlowMode` rather than a second table of labels,
   and channel-type labels (`channelTypeLabel`) replace capitalising the wire
   value.
@@ -253,7 +262,9 @@ Found in gate testing after the record above (2026-09-23):
 - **Member admin context menu** (`MemberList.ts`). Opened low in the list at
   940×500, it ran past the bottom edge, leaving Force Logout, Ban and Block
   unreachable; it is now clamped to the viewport and anchored by its bottom
-  edge when it does not fit below the pointer (`member-list.test.ts`).
+  edge when it does not fit below the pointer. The clamp re-runs whenever the
+  menu resizes, so opening the ban form cannot push Confirm Ban and Block off
+  either edge (`member-list.test.ts`).
 - **Channel dialog labels** (`CreateChannelModal.ts`, `EditChannelModal.ts`).
   The Create Channel type select and the Edit Channel name and type controls
   had no accessible name; each `.form-label` is now linked to its control

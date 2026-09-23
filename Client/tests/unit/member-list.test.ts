@@ -7,6 +7,18 @@ import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
 import { Permission, type UserStatus } from "../../src/lib/types";
 
+// jsdom has no ResizeObserver; the member menu re-clamps itself through one.
+// The fake hands the latest observer's callback to tests that resize the menu.
+let lastResizeCallback: (() => void) | null = null;
+globalThis.ResizeObserver = class {
+  constructor(callback: () => void) {
+    lastResizeCallback = callback;
+  }
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+} as unknown as typeof ResizeObserver;
+
 function resetStore(): void {
   membersStore.setState(() => ({
     members: new Map(),
@@ -388,6 +400,55 @@ describe("MemberList", () => {
       expect(menu.style.top).toBe("100px");
       expect(menu.style.bottom).toBe("");
       expect(menu.style.left).toBe("100px");
+    } finally {
+      document.body.querySelector(".context-menu")?.remove();
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  // Opening Ban swaps one item for the reason/duration/Confirm Ban row, about
+  // 90 px taller. A menu opened top-anchored in the band just above the fit
+  // limit then ran past the bottom of the 940x500 window, taking Confirm Ban
+  // and Block with it; a bottom-anchored one can likewise grow past the top.
+  it("re-clamps the context menu into the viewport when the ban form expands", () => {
+    let menuHeight = 144;
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(() => menuHeight);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(180);
+    vi.stubGlobal("innerWidth", 940);
+    vi.stubGlobal("innerHeight", 500);
+    setRoles([{ id: 7, name: "admin", color: null, permissions: Permission.ADMINISTRATOR }]);
+    try {
+      setTestMembers(testMembers);
+      memberList.mount(container);
+      const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
+
+      memberItem.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 320 }),
+      );
+      let menu = document.body.querySelector<HTMLElement>(".context-menu")!;
+      expect(menu.style.top).toBe("320px");
+
+      const banItem = Array.from(menu.children).find((el) => el.textContent === "Ban")!;
+      banItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(menu.querySelector('[data-testid="ban-confirm"]')).not.toBeNull();
+      menuHeight = 234;
+      lastResizeCallback!();
+      // Re-anchored by its bottom edge at the pointer: spans y 86..320.
+      expect(menu.style.top).toBe("");
+      expect(menu.style.bottom).toBe("180px");
+
+      menuHeight = 144;
+      memberItem.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 430 }),
+      );
+      menu = document.body.querySelector<HTMLElement>(".context-menu")!;
+      expect(menu.style.bottom).toBe("70px");
+      menuHeight = 470;
+      lastResizeCallback!();
+      // Too tall to hang above the pointer: pulled down so its top stays at 8.
+      expect(menu.style.top).toBe("");
+      expect(menu.style.bottom).toBe("22px");
     } finally {
       document.body.querySelector(".context-menu")?.remove();
       vi.unstubAllGlobals();

@@ -24,6 +24,8 @@ code (`Client/src/features/navigation/`), the plug-in and shared-file reservatio
 **B9-18 implemented — native AT recordings pending owner — 2026-09-23**:
 [the plan's implementation record](../../.claude/plans/b9-18-english-shell-connect.plan.md#implementation-record-2026-09-23) records the
 connect and shell catalogs, the 388-literal extraction, the sidebar-header reflow fix and the budget measurement.
+English text is unchanged except the intended thousands grouping of numeric parameters of 1,000 or more ("1,234 online"), accepted by
+the owner on 2026-09-23; the plan lists the affected keys.
 Budget note: the MainPage gzip budget is raised from 60,000 B to 61,000 B (2026-09-23, decided by firstmate on the owner's standing
 instruction to take recommended calls). The +2,175 B is catalog keys and lookup calls from moving shell text behind the B9-3 seam, with
 no new copy; the startup budget is unchanged. B9-19 must justify its own increase with measured numbers.
