@@ -106,6 +106,8 @@ page. Status has owners:
 | Current measured baseline  | [plans/b0-baseline-2026-08-25.md](plans/b0-baseline-2026-08-25.md)                 |
 | Generated-code contracts   | `CLAUDE.md`, "Generated code — never hand-edit"                                    |
 
-A CI job checks that documents on this page do not contradict the ledger's
-counts. Adding a count to a document means adding it to that check's allow-list
-in `scripts/check-doc-counts.mjs`.
+A CI job checks explicitly current summaries against the live ledger's counts.
+Adding a current summary means opting its document into the allow-list in
+`scripts/check-doc-counts.mjs`. Dated baselines and signed scorecards retain
+their as-measured numbers at the cited source commits; never refresh them to
+make the live count check pass.
