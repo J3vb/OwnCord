@@ -370,8 +370,8 @@ func TestAttention_RecoveredWarningsExpire(t *testing.T) {
 func TestAttention_DeadDispatchIsCritical(t *testing.T) {
 	f := newAttentionFixture(t)
 	f.step()
+	wantStatus(t, f.step(), "delivery", AttentionStatusOK)
 	f.alive = false
-	f.step()
 	rep := f.step()
 	wantStatus(t, rep, "delivery", AttentionStatusCritical)
 	if len(rep.Warnings) == 0 || rep.Warnings[0].ID != "delivery" {
@@ -482,4 +482,14 @@ func TestAttention_RunStopsWithContext(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+func TestBackupScheduleInterval(t *testing.T) {
+	for schedule, want := range map[string]time.Duration{
+		"daily": 24 * time.Hour, " Weekly ": 7 * 24 * time.Hour, "off": 0, "": 0, "hourly": 0,
+	} {
+		if got := BackupScheduleInterval(schedule); got != want {
+			t.Errorf("BackupScheduleInterval(%q) = %v, want %v", schedule, got, want)
+		}
+	}
 }

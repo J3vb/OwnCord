@@ -32,9 +32,9 @@ const AttentionInterval = time.Minute
 
 const (
 	// attentionSustain is how many consecutive samples a new disk or rate
-	// level must repeat before it is committed (the first disk level and a
-	// stopped dispatch loop commit at once), so one noisy minute neither
-	// raises nor clears a warning.
+	// level must repeat before it is committed (the first disk level commits
+	// at once, and a stopped dispatch loop as soon as it is seen), so one
+	// noisy minute neither raises nor clears a warning.
 	attentionSustain = 2
 	// Rate signals learn a baseline (an exponentially weighted mean of their
 	// healthy samples, skipping the first measured interval) and raise at the

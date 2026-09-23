@@ -107,11 +107,11 @@ func (s *AttentionService) evalRate(st *attentionRate, total *float64, now time.
 	// sample and raises nothing; any other signal learns only samples at or
 	// below its floor and raises at the floor, so pressure present at boot is
 	// raised rather than learned. After warm-up only healthy samples are
-	// learned, so sustained pressure never becomes the normal. Only a stopped
-	// dispatch loop commits on the first measured interval; any other rate
-	// level starts healthy and needs attentionSustain samples to raise.
+	// learned, so sustained pressure never becomes the normal. A stopped
+	// dispatch loop commits as soon as it is seen; any other rate level
+	// starts healthy and needs attentionSustain samples to change.
 	first := st.level.status == ""
-	if first && !spec.dead {
+	if first {
 		st.level.status = AttentionStatusOK
 	}
 	warm := st.samples >= attentionBaselineWarmup
@@ -127,7 +127,11 @@ func (s *AttentionService) evalRate(st *attentionRate, total *float64, now time.
 	case (warm || !spec.quietWarmup) && (rate >= threshold || cur != AttentionStatusOK && rate >= threshold*attentionRateClearRatio):
 		raw = AttentionStatusWarning
 	}
-	sig.Status = st.level.settle(raw, attentionSustain)
+	sustain := attentionSustain
+	if spec.dead {
+		sustain = 1
+	}
+	sig.Status = st.level.settle(raw, sustain)
 	st.learn(rate, first, warm, sig.Status == AttentionStatusOK && raw == AttentionStatusOK, spec)
 	sig.Value = fmt.Sprintf("%.1f %s", rate, spec.unit)
 	sig.Threshold = fmt.Sprintf("raise at %.1f %s", threshold, spec.unit)
@@ -169,7 +173,10 @@ func (st *attentionRate) learn(rate float64, first, warm, healthy bool, spec rat
 	st.samples++
 }
 
-func attentionScheduleInterval(schedule string) time.Duration {
+// BackupScheduleInterval is the scheduled-backup interval for a
+// backup_schedule setting value; "off" or anything unrecognised is 0,
+// scheduling disabled.
+func BackupScheduleInterval(schedule string) time.Duration {
 	switch strings.ToLower(strings.TrimSpace(schedule)) {
 	case "daily":
 		return 24 * time.Hour
@@ -188,7 +195,7 @@ func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 		s.settle(sig, title, action)
 		return
 	}
-	interval := attentionScheduleInterval(r.schedule)
+	interval := BackupScheduleInterval(r.schedule)
 	if !r.lastBackup.IsZero() {
 		sig.Value = r.lastBackup.UTC().Format("2006-01-02 15:04 UTC")
 	}

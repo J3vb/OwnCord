@@ -3228,8 +3228,9 @@ Nothing here is exported off the host.
   It is never reported as healthy and neither raises nor clears a warning.
 - `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `backup`,
   and `job:<name>` for each maintenance step.
-- The first disk level and a stopped dispatch loop are reported at once; every
-  other level change, including a rate's first warning, holds for two samples.
+- The first disk level is reported at once, and a stopped dispatch loop as
+  soon as it is seen; every other level change, including a rate's first
+  warning, holds for two samples.
   A rate's `threshold` is its `attention.*` floor until it has learned a
   baseline, then the higher of the floor and three times that baseline.
   While learning, `reconnects` raises nothing and `db_writer_wait`
@@ -3238,7 +3239,9 @@ Nothing here is exported off the host.
   `last_observed`. One that recovers gets `recovered_at` and is listed for 24
   hours; if it fails again in that window, the same entry reopens and
   `occurrences` increments. Active warnings are listed first, critical before
-  warning. The state is in memory, so a restart starts it afresh.
+  warning. The state is in memory, so a restart resets warning history;
+  active problems re-raise within the next sample intervals, about two
+  minutes (a rate needs a first sample plus two sustained ones).
 - `evaluated_at` is `null` until the first sample.
 
 #### Response 500

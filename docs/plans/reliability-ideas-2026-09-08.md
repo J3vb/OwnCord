@@ -243,7 +243,8 @@ Implemented 2026-09-23 against `dev` at
   the floor and learn only samples at or below it, so pressure present at boot
   is raised, not learned. After that each rate raises at the floor or three
   times the baseline, and learns only from healthy samples. Hysteresis: the
-  first disk level and a stopped dispatch loop commit at once, and every other
+  first disk level commits at once and a stopped dispatch loop as soon as it
+  is seen, and every other
   change, including a rate's first warning, must hold for two samples; a rate
   clears below half its threshold, disk 10% above its floor. A job warns after
   two consecutive failures and clears on one success. Backups warn at 1.5× the

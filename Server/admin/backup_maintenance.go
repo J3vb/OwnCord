@@ -15,13 +15,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// Scheduled-backup intervals for the backup_schedule setting values the admin
-// UI offers. "off" (or anything unrecognised) disables scheduling.
-const (
-	backupIntervalDaily  = 24 * time.Hour
-	backupIntervalWeekly = 7 * 24 * time.Hour
-)
-
 // MaintainBackups implements the backup_schedule / backup_retention settings
 // the admin panel has always offered. It is driven by main.go's 15-minute
 // maintenance loop, mirroring the expired-session sweep: read the settings
@@ -45,14 +38,7 @@ func MaintainBackups(ctx context.Context, database *db.DB, settings *service.Set
 		return fmt.Errorf("MaintainBackups: reading backup_schedule: %w", err)
 	}
 
-	var interval time.Duration
-	switch strings.ToLower(strings.TrimSpace(schedule)) {
-	case "daily":
-		interval = backupIntervalDaily
-	case "weekly":
-		interval = backupIntervalWeekly
-	}
-
+	interval := service.BackupScheduleInterval(schedule)
 	var firstErr error
 	if interval > 0 {
 		if err := runScheduledBackup(ctx, database, interval); err != nil {
