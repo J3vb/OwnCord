@@ -163,6 +163,8 @@ func TestAttention_SingleSpikeDoesNotRaise(t *testing.T) {
 func TestAttention_RateBaselineAndClearBand(t *testing.T) {
 	f := newAttentionFixture(t)
 	f.step()
+	f.resumes += 3000 // every client's resume right after a restart: not learned
+	f.step()
 	for range attentionBaselineWarmup {
 		f.resumes += 100 // a busy server's normal: well above the floor of 30
 		f.step()
@@ -199,26 +201,58 @@ func TestAttention_RateBaselineAndClearBand(t *testing.T) {
 	}
 }
 
-// warmUp primes every rate and folds attentionBaselineWarmup quiet samples.
+// warmUp primes every rate, measures the unlearned first interval and folds
+// attentionBaselineWarmup quiet samples.
 func (f *attentionFixture) warmUp() {
 	f.step()
-	for range attentionBaselineWarmup {
+	for range attentionBaselineWarmup + 1 {
 		f.step()
 	}
 }
 
-// Warm-up learns and raises nothing, however high the rate.
-func TestAttention_WarmUpDoesNotRaise(t *testing.T) {
+// Reconnect warm-up learns and raises nothing, however high the rate.
+func TestAttention_ReconnectWarmUpDoesNotRaise(t *testing.T) {
 	f := newAttentionFixture(t)
 	f.step()
-	for range attentionBaselineWarmup {
+	for range attentionBaselineWarmup + 1 {
 		f.resumes += 1000
-		f.waitMs += 60_000
-		f.drops += 50
 		if rep := f.step(); len(rep.Warnings) != 0 {
 			t.Fatalf("warm-up raised %+v", rep.Warnings)
 		}
 	}
+}
+
+// Writer wait saturated at boot raises at the floor during warm-up and is
+// not learned, so it raises again once the baseline is established.
+func TestAttention_BootPressureIsRaisedNotLearned(t *testing.T) {
+	f := newAttentionFixture(t)
+	f.step()
+	for range attentionBaselineWarmup + 1 {
+		f.waitMs += 20_000 // 4x the 5000 ms/min floor
+		wantStatus(t, f.step(), "db_writer_wait", AttentionStatusWarning)
+	}
+	for range attentionBaselineWarmup {
+		f.step()
+	}
+	rep := f.step()
+	wantStatus(t, rep, "db_writer_wait", AttentionStatusOK)
+	if sig := signal(t, rep, "db_writer_wait"); sig.Detail != "baseline 0.0 ms/min" || sig.Threshold != "raise at 5000.0 ms/min" {
+		t.Fatalf("after warm-up = %+v, want the quiet baseline and the floor", sig)
+	}
+	for range 2 {
+		f.waitMs += 20_000
+		rep = f.step()
+	}
+	wantStatus(t, rep, "db_writer_wait", AttentionStatusWarning)
+}
+
+// The first measured level commits at once rather than reading as healthy.
+func TestAttention_FirstMeasuredLevelCommits(t *testing.T) {
+	f := newAttentionFixture(t)
+	f.free = 100 << 20
+	f.alive = false
+	wantStatus(t, f.step(), "disk", AttentionStatusCritical)
+	wantStatus(t, f.step(), "delivery", AttentionStatusCritical)
 }
 
 // Over a quiet baseline the configured floor is the threshold.

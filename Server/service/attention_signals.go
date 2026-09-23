@@ -10,8 +10,10 @@ import (
 // The per-signal evaluators behind AttentionService.Evaluate (RI-07). Each
 // runs under the service's lock and ends in settle.
 
-// attentionLevel commits a new level only after it repeats attentionSustain
-// samples (sustain 1 commits immediately).
+// attentionLevel commits the first measured level immediately, so a reading
+// is never shown as healthy before one is established, and every later new
+// level only after it repeats attentionSustain samples (sustain 1 commits
+// immediately).
 type attentionLevel struct {
 	status, pending string
 	streak          int
@@ -25,6 +27,9 @@ func (l *attentionLevel) current() string {
 }
 
 func (l *attentionLevel) settle(raw string, sustain int) string {
+	if l.status == "" {
+		l.status = raw
+	}
 	if raw == l.current() {
 		l.pending, l.streak = "", 0
 		return raw
@@ -79,6 +84,7 @@ type rateSpec struct {
 	id, label, unit, title, action string
 	floor                          float64
 	dead                           bool // the producer itself stopped: critical
+	quietWarmup                    bool // bursts right after a restart are expected: warm-up raises nothing
 }
 
 func (s *AttentionService) evalRate(st *attentionRate, total *float64, now time.Time, spec rateSpec) {
@@ -96,9 +102,13 @@ func (s *AttentionService) evalRate(st *attentionRate, total *float64, now time.
 	}
 	rate := (*total - st.last) / now.Sub(st.lastAt).Minutes()
 	st.last, st.lastAt = *total, now
-	// Warm-up learns every sample and raises nothing (the reconnect burst
-	// right after a restart is not an incident); after it, only healthy
-	// samples are learned, so sustained pressure never becomes the normal.
+	// The first measured interval holds the post-restart resume burst and is
+	// never learned. During warm-up a quietWarmup signal learns every later
+	// sample and raises nothing; any other signal learns only samples at or
+	// below its floor and raises at the floor, so pressure present at boot is
+	// raised rather than learned. After warm-up only healthy samples are
+	// learned, so sustained pressure never becomes the normal.
+	first := st.level.status == ""
 	warm := st.samples >= attentionBaselineWarmup
 	threshold := spec.floor
 	if warm {
@@ -109,11 +119,21 @@ func (s *AttentionService) evalRate(st *attentionRate, total *float64, now time.
 	switch {
 	case spec.dead:
 		raw = AttentionStatusCritical
-	case warm && (rate >= threshold || cur != AttentionStatusOK && rate >= threshold*attentionRateClearRatio):
+	case (warm || !spec.quietWarmup) && (rate >= threshold || cur != AttentionStatusOK && rate >= threshold*attentionRateClearRatio):
 		raw = AttentionStatusWarning
 	}
 	sig.Status = st.level.settle(raw, attentionSustain)
-	if !warm || sig.Status == AttentionStatusOK && raw == AttentionStatusOK {
+	learn := false
+	switch {
+	case first:
+	case warm:
+		learn = sig.Status == AttentionStatusOK && raw == AttentionStatusOK
+	case spec.quietWarmup:
+		learn = true
+	default:
+		learn = rate <= spec.floor
+	}
+	if learn {
 		if st.samples == 0 {
 			st.baseline = rate
 		} else {
@@ -126,7 +146,10 @@ func (s *AttentionService) evalRate(st *attentionRate, total *float64, now time.
 	if warm {
 		sig.Detail = fmt.Sprintf("baseline %.1f %s", st.baseline, spec.unit)
 	} else {
-		sig.Detail = fmt.Sprintf("learning the baseline (%d of %d samples); warnings start after it", st.samples, attentionBaselineWarmup)
+		sig.Detail = fmt.Sprintf("learning the baseline (%d of %d samples); raising at the floor until then", st.samples, attentionBaselineWarmup)
+		if spec.quietWarmup {
+			sig.Detail = fmt.Sprintf("learning the baseline (%d of %d samples); warnings start after it", st.samples, attentionBaselineWarmup)
+		}
 	}
 	if spec.dead {
 		sig.Detail = "the message dispatch loop has stopped"
