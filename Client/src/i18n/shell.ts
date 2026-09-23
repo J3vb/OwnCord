@@ -41,6 +41,9 @@ export const shellText = defineCatalog("shell", {
 
   "channel.edit": "Edit Channel",
   "channel.create": "Create Channel",
+  "channel.createInCategory": "Create a channel in {category}",
+  "channel.expandCategory": "Expand {category}",
+  "channel.collapseCategory": "Collapse {category}",
   "channel.delete": "Delete Channel",
   "channel.markRead": "Mark as Read",
   "channel.mute": "Mute Channel",

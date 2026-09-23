@@ -3,7 +3,7 @@ import {
   createSidebarDmSection,
   type SidebarDmSectionOptions,
 } from "../../src/pages/main-page/SidebarDmSection";
-import { dmStore, addDmChannel } from "../../src/stores/dm.store";
+import { dmStore, addDmChannel, updateDmParticipant } from "../../src/stores/dm.store";
 import { uiStore } from "../../src/stores/ui.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { muteChannel, invalidateMuteCache } from "../../src/lib/channel-mutes";
@@ -157,6 +157,63 @@ describe("SidebarDmSection", () => {
 
       const entries = container.querySelectorAll("[data-testid='dm-entry']");
       expect(entries.length).toBe(2);
+
+      section.destroy();
+    });
+
+    // B9-21: the preview list is keyed — a changed row is rebuilt but the
+    // list element and its keyboard wiring survive, and unrelated rows keep
+    // their node identity.
+    it("keeps unrelated rows' nodes across a presence-only change", () => {
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        }),
+      );
+      addDmChannel(
+        makeDm({
+          channelId: 101,
+          recipient: { id: 11, username: "Bob", avatar: "", status: "online" },
+        }),
+      );
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+
+      const rowOf = (id: number): HTMLElement =>
+        container.querySelector<HTMLElement>(`[data-testid='dm-entry'][data-channel-id='${id}']`)!;
+      const changed = rowOf(100);
+      const untouched = rowOf(101);
+
+      updateDmParticipant(10, { status: "offline" });
+      dmStore.flush();
+
+      // The changed row is rebuilt; the unrelated row keeps its node.
+      expect(rowOf(100)).not.toBe(changed);
+      expect(rowOf(101)).toBe(untouched);
+      expect(container.querySelectorAll("[data-testid='dm-entry'][tabindex='0']").length).toBe(1);
+
+      section.destroy();
+    });
+
+    it("exposes one Tab stop and arrow-navigates the preview list", () => {
+      addDmChannel(makeDm({ channelId: 100 }));
+      addDmChannel(
+        makeDm({
+          channelId: 101,
+          recipient: { id: 11, username: "Bob", avatar: "", status: "online" },
+        }),
+      );
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+
+      const entries = container.querySelectorAll("[data-testid='dm-entry']");
+      expect(container.querySelectorAll("[data-testid='dm-entry'][tabindex='0']").length).toBe(1);
+
+      const first = entries[0] as HTMLElement;
+      first.focus();
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      expect(document.activeElement).toBe(entries[1]);
 
       section.destroy();
     });

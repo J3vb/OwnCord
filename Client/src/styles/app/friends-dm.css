@@ -75,12 +75,21 @@
   color: var(--text-normal);
 }
 
+/* The scroll container for the conversation rows: keyed updates keep the node
+   (and its scrollTop) across a re-render (B9-21). */
+.dm-conversation-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
 .dm-item {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
   margin: 1px 8px;
+  /* Keyboard-reachable rows meet the 24px pointer-target floor (Q1). */
+  min-height: 24px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-muted);
@@ -127,8 +136,8 @@
   white-space: nowrap;
 }
 .dm-item .dm-close {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-micro);
@@ -138,10 +147,14 @@
   justify-content: center;
   cursor: pointer;
 }
-.dm-item:hover .dm-close {
+/* Reveal on hover OR keyboard focus — the close action must not be hover-only
+   (B9-21, WCAG 2.1.1). */
+.dm-item:hover .dm-close,
+.dm-item:focus-within .dm-close {
   display: flex;
 }
-.dm-item .dm-close:hover {
+.dm-item .dm-close:hover,
+.dm-item .dm-close:focus-visible {
   color: var(--text-normal);
 }
 .dm-item .dm-unread {

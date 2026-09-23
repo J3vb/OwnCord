@@ -117,11 +117,17 @@ export function setRovingTabindex(container: HTMLElement, cellSelector: string):
  * The listener lives on the container (which survives re-renders) and the
  * cell set is queried per keystroke, so callers may rebuild cells freely as
  * long as they re-run setRovingTabindex afterwards.
+ *
+ * `orientation` picks the stepping axis: the horizontal default (the picker
+ * grids) keeps ArrowLeft/Right; `"vertical"` is for a stacked navigation list
+ * (the B9-21 shell sidebars) and uses ArrowUp/ArrowDown instead. Home/End and
+ * Enter/Space are the same either way.
  */
 export function enableRovingNavigation(
   container: HTMLElement,
   cellSelector: string,
   signal: AbortSignal,
+  orientation: "horizontal" | "vertical" = "horizontal",
 ): void {
   container.addEventListener(
     "keydown",
@@ -141,9 +147,11 @@ export function enableRovingNavigation(
         return;
       }
 
+      const nextKey = orientation === "vertical" ? "ArrowDown" : "ArrowRight";
+      const prevKey = orientation === "vertical" ? "ArrowUp" : "ArrowLeft";
       let to: number;
-      if (e.key === "ArrowRight") to = Math.min(from + 1, cells.length - 1);
-      else if (e.key === "ArrowLeft") to = Math.max(from - 1, 0);
+      if (e.key === nextKey) to = Math.min(from + 1, cells.length - 1);
+      else if (e.key === prevKey) to = Math.max(from - 1, 0);
       else if (e.key === "Home") to = 0;
       else if (e.key === "End") to = cells.length - 1;
       else return;

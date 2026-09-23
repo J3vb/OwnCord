@@ -16,6 +16,7 @@ import type { ToastContainer } from "@components/Toast";
 import { createLogger } from "@lib/logger";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
+import type { DmSidebar } from "@components/DmSidebar";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
 import { createEditChannelModal } from "@components/EditChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
@@ -600,7 +601,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     if (current !== undefined && current.type !== "dm") channelBeforeDm = current.id;
   }
 
-  function buildDmSidebar(): MountableComponent {
+  function buildDmSidebar(): DmSidebar {
     const serverName = authStore.getState().serverName ?? shellText("common.serverFallback");
     const activeChannelId = channelsStore.getState().activeChannelId;
     const dmChannels = dmStore.getState().channels;
@@ -744,46 +745,17 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       /**
        * Re-render the DM sidebar from fresh store data.
        *
-       * TODO(H16): This is an O(n) DOM thrash — it destroys and recreates the
-       * entire DM sidebar on every store change. For a small number of DMs this
-       * is acceptable, but should be optimized to diff/patch individual DM items
-       * once the DM list grows or store updates become more frequent.
-       *
-       * dmStore.channels changes far more often than "the DM list changed" —
-       * a DM partner's presence flip or a new message rebuilds it too — so the
-       * "Find a conversation" filter text and input focus (state that lives
-       * only in the destroyed subtree) are captured here and restored onto
-       * the freshly-mounted input rather than silently dropped (OC-0280).
+       * dmStore.channels changes far more often than "the DM list changed" — a
+       * DM partner's presence flip or a new message reaches it too. The sidebar
+       * updates its rows in place (keyed on the DM channel), so the "Find a
+       * conversation" filter text/focus and the list scroll position all
+       * survive an unrelated update (B9-21, replacing OC-0280's capture/restore
+       * of a full destroy+recreate).
        */
       function refreshDmSidebar(): void {
-        const oldSearchInput = contentSlot.querySelector<HTMLInputElement>(".dm-search");
-        const savedQuery = oldSearchInput?.value ?? "";
-        const hadFocus = oldSearchInput !== null && document.activeElement === oldSearchInput;
-        const savedCaret = oldSearchInput?.selectionStart ?? null;
-
-        if (activeSidebarContent !== null) {
-          activeSidebarContent.destroy?.();
-        }
-        // Only the DM list is rebuilt; the requests entry above it keeps its
-        // element, and with it any focus.
-        clearChildren(innerSlot);
-        const freshDm = buildDmSidebar();
-        freshDm.mount(innerSlot);
-        activeSidebarContent = freshDm;
-
-        const newSearchInput = innerSlot.querySelector<HTMLInputElement>(".dm-search");
-        if (newSearchInput !== null) {
-          if (savedQuery !== "") {
-            newSearchInput.value = savedQuery;
-            newSearchInput.dispatchEvent(new Event("input"));
-          }
-          if (hadFocus) {
-            newSearchInput.focus();
-            if (savedCaret !== null) {
-              newSearchInput.setSelectionRange(savedCaret, savedCaret);
-            }
-          }
-        }
+        if (activeSidebarContent === null) return;
+        const conversations = buildDmConversations(channelsStore.getState().activeChannelId);
+        (activeSidebarContent as DmSidebar).update(conversations);
       }
 
       refreshDmSidebarRef = refreshDmSidebar;
