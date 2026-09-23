@@ -984,31 +984,31 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 ]
 ```
 
-| Field             | Type   | Description                                                                                                                   |
-| ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `id`              | int64  | Channel ID                                                                                                                    |
-| `name`            | string | Channel name                                                                                                                  |
-| `type`            | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post)     |
-| `topic`           | string | Channel topic/description                                                                                                     |
-| `category`        | string | Category grouping                                                                                                             |
-| `position`        | int    | Sort order within category                                                                                                    |
-| `slow_mode`       | int    | Slow-mode delay in seconds (0 = disabled)                                                                                     |
-| `archived`        | bool   | Whether the channel is archived                                                                                               |
-| `nsfw`            | bool   | Age-restriction label. **Stored and shipped only** — the server applies no content behaviour to a flagged channel (see below) |
-| `voice_max_users` | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                              |
-| `voice_max_video` | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                        |
+| Field             | Type   | Description                                                                                                               |
+| ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | int64  | Channel ID                                                                                                                |
+| `name`            | string | Channel name                                                                                                              |
+| `type`            | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
+| `topic`           | string | Channel topic/description                                                                                                 |
+| `category`        | string | Category grouping                                                                                                         |
+| `position`        | int    | Sort order within category                                                                                                |
+| `slow_mode`       | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
+| `archived`        | bool   | Whether the channel is archived                                                                                           |
+| `nsfw`            | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
+| `voice_max_users` | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
+| `voice_max_video` | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
 
 #### The `nsfw` flag
 
-`nsfw` is metadata and nothing else. The server stores it, ships it in `ready`
-and in the `channel_create` / `channel_update` broadcasts, and audits an
-operator flipping it — and does **not** filter content, check anyone's age, or
-restrict who may read or post in a flagged channel. Every consequence is the
-client's: the desktop client shows a one-time-per-session "may contain
-sensitive content" gate before rendering a flagged channel's messages
-(remembered in `sessionStorage`, so a new session asks again) and marks the
-channel in its sidebar. A client that ignores the field behaves exactly as it
-did before the field existed.
+The server stores `nsfw`, ships it in `ready` and in the `channel_create` /
+`channel_update` broadcasts, and audits an operator flipping it. Since B5-7 it
+also enforces it: a member who has not acknowledged a labelled channel gets
+none of its content on any path, whatever their role — see
+[NSFW Acknowledgement](#nsfw-acknowledgement) for the paths and the
+acknowledge/revoke routes. The server checks no one's age. The desktop client
+also shows a one-time-per-session "may contain sensitive content" gate before
+rendering a flagged channel's messages (remembered in `sessionStorage`) and
+marks the channel in its sidebar; the client consent UI is B9's.
 
 ---
 
@@ -4023,8 +4023,8 @@ refused body writes nothing at all:
 | `voice_max_users` | 0…99    | Voice capacity; 0 = unlimited                             |
 | `voice_max_video` | 0…99    | Simultaneous cameras/screen shares; 0 = unlimited         |
 
-`nsfw` is a bool and is stored, broadcast and audited only — the server applies
-no content behaviour to a flagged channel (see `GET /api/v1/channels`). The
+`nsfw` is a bool; the server stores, broadcasts and audits it, and enforces it
+on every content path (see "NSFW Acknowledgement"). The
 audit detail names the transition: `updated #foo (marked NSFW)` /
 `(unmarked NSFW)`, and plain `updated #foo` when the flag did not move.
 

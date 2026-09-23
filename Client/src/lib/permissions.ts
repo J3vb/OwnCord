@@ -101,3 +101,13 @@ export function canViewAuditLog(): boolean {
   const roleName = authStore.getState().user?.role ?? "";
   return roleHasPermission(roleName, Permission.VIEW_AUDIT_LOG);
 }
+
+/**
+ * Whether the signed-in user's role holds MODERATE_MEMBERS. Gates the
+ * Moderation Center entry (B9-4, Q2); the server re-checks the bit on every
+ * queue read and action.
+ */
+export function canModerateMembers(): boolean {
+  const roleName = authStore.getState().user?.role ?? "";
+  return roleHasPermission(roleName, Permission.MODERATE_MEMBERS);
+}

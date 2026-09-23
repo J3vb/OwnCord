@@ -16,6 +16,18 @@
   border-bottom: 1px solid var(--border-glow, var(--border));
   flex-shrink: 0;
 }
+/* Invite, Audit Log and Moderation are wider together than the sidebar, so
+   with the Moderation entry shown the header wraps the buttons that do not
+   fit onto a second, right-aligned row instead of pushing one under the chat
+   column. */
+.unified-sidebar-header.with-moderation {
+  height: auto;
+  min-height: 44px;
+  padding: 8px 14px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 6px;
+}
 .unified-sidebar-header .server-icon-sm {
   width: 28px;
   height: 28px;

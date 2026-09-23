@@ -10494,13 +10494,35 @@
       }
     },
     {
+      "id": "OC-0453",
+      "title": "Rejoining voice straight after leaving, on the same socket, stalls 3-6 s behind the leave's LiveKit removal",
+      "file": "Server/ws/voice_leave.go",
+      "line": 88,
+      "severity": "medium",
+      "why": "finishVoiceLeave called livekit.RemoveParticipant synchronously on the client's read loop. A widget disconnect closes the client's own LiveKit session and sends voice_leave at the same moment; for a participant that is closing itself, LiveKit often answers the removal only after its 3 s routing timeout (\"twirp error unavailable: no response from servers\"), and the next frame on the socket - the rejoin's voice_join, or a channel switch, which runs the same leave path - waited behind it. A first join takes ~0.5 s; an immediate rejoin took 3.2-5.5 s in roughly a quarter of attempts.",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "b7-voice-join-budget",
+      "lens": "run-the-thing",
+      "finder": "voice-rejoin-stall",
+      "repro": "Client/tests/e2e/fullstack/voice-rejoin.spec.ts: alice leaves through the widget and rejoins voice-one at once, ten times on one socket, while bob publishes; each rejoin is timed from the click to 'Voice Connected' with bob's audio decoding.",
+      "evidence": "Local full-stack runs on the unfixed server: rejoin samples [266,928,385,392,343,371,239,439,3316,397] and [277,691,549,5193,444,257,543,5347,636,3282] ms; the server log shows 'voice leave' at 11:22:41.692, 'handleVoiceLeave RemoveParticipant failed ... no response from servers' at 11:22:44.695 and the queued 'voice join' at 11:22:44.696. With the fix, three runs: max rejoin 1,514 ms, typically 0.3-0.5 s, and bob's room held exactly one alice after the rejoins and none after her final leave.",
+      "suggestedFix": "Run the leave's LiveKit removal off the read loop; the participant identity carries the join token, so it cannot remove the new session.",
+      "fix": {
+        "commit": "9fc4b776e2288b03de2760f16d9137fb391b7aa1",
+        "test": "Server/ws/oc_0453_voice_leave_livekit_async_test.go",
+        "revertProof": "pass"
+      },
+      "fixedDate": "2026-09-23"
+    },
+    {
       "id": "OC-0454",
       "title": "A simultaneous burst of N chat sends acknowledges the last sender ~N x 6 ms later on 2 vCPUs",
       "file": "Server/db/db.go",
       "line": 271,
       "severity": "low",
       "why": "Every chat send takes the single SQLite writer connection twice (the message transaction, then UpdateReadState) and each checkout is held only 0.4-0.6 ms, but the pool handoff to the next waiter takes ~5.5-6 ms because the woken sender competes for the two vCPUs with the previous send's 100-recipient TLS fan-out (writePump wakeups) and the per-statement helper goroutines. Under spread-out arrivals the queue is empty and a send acknowledges in ~5 ms; when N senders hit the writer in the same instant they serialize and the last one waits ~N x 6 ms. The operational profile's storm made all 100 senders phase-locked (OC-0445) and measured exactly that (~600 ms). A real population rarely synchronizes 100 keystrokes, but a burst of 20-30 (a shared reaction to one event) would cost the last sender 120-180 ms on the reference hardware, so the shape is worth knowing rather than a defect to fix blind.",
-      "repro": "Run the operational profile with the phase-preserving timers removed (git show 17787c97:Server/scripts/k6/ws-load.js, or any k6 script that restarts a 2 s setInterval on every socket from one shared instant) and read ws_broadcast_latency_ms{phase:upload}: ~500-750 ms p95 at 50 sends/s against 40-90 ms with the same throughput spread out. Locally, count writer checkouts (sql.DBStats) and time the driver conn between ResetSession and IsValid: hold 0.4 ms, gap ~6 ms, both unchanged by the burst.",
+      "repro": "Remove the phase preservation from Server/scripts/k6/ws-load.js: replace the three phasedInterval(socket, name, period, fn) calls with plain socket.setInterval(fn, period), so every socket's timers restart from the storm instant, then run the operational profile and read ws_broadcast_latency_ms{phase:upload}: about 500-750 ms p95 at 50 sends/s, against 40-90 ms with the same throughput spread out. Locally, count writer checkouts (sql.DBStats) and time the driver connection between ResetSession and IsValid: hold 0.4 ms, gap ~6 ms, both unchanged by the burst.",
       "evidence": "Runs 35852682786 (10 s buckets: 573/520/524/554/582/506/557/531 ms p95 from t=180 s on self_signed, 3-69 ms before) and 35856013841/35856019988 (phase-preserved: 41-96 ms p95). Local 2-core measurements 2026-09-23: checkout hold 0.40-0.60 ms, idle gap 5.5-6.1 ms, ~5000 checkouts per 30 s, before and after the storm; chat_send arrival histogram 10 vs 100 per 50 ms slot. runtime/metrics sched latency p50 0.4-0.65 ms, p99 5-25 ms, unchanged.",
       "status": "open",
       "found": "2026-09-23",

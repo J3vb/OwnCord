@@ -31,9 +31,13 @@ vi.mock("@lib/logger", () => ({
 
 // Mock stores
 const mockSetTheme = vi.fn();
+const mockUiState = vi.hoisted(() => ({
+  settingsOpen: false,
+  settingsTab: null as "Safety" | null,
+}));
 vi.mock("@stores/ui.store", () => ({
   uiStore: {
-    getState: () => ({ settingsOpen: false }),
+    getState: () => mockUiState,
     subscribe: () => () => {},
     subscribeSelector: vi.fn((_sel: unknown, _listener: unknown) => () => {}),
   },
@@ -113,6 +117,8 @@ describe("SettingsOverlay", () => {
     localStorage.clear();
     vi.clearAllMocks();
     mockAuthState.user = { id: 1, username: "testuser", totp_enabled: false, display_name: null };
+    mockUiState.settingsOpen = false;
+    mockUiState.settingsTab = null;
   });
 
   afterEach(() => {
@@ -1266,6 +1272,97 @@ describe("SettingsOverlay", () => {
     expect(container.querySelector(".settings-overlay")).not.toBeNull();
     overlay.destroy?.();
     expect(container.querySelector(".settings-overlay")).toBeNull();
+  });
+
+  // B9-4 (Q2): the Safety tab is a seam. It shows only once a feature passes
+  // its builder, and a Q4 notice can open Settings straight onto it.
+  describe("Safety tab", () => {
+    const safetyBody = (): HTMLDivElement => {
+      const el = document.createElement("div");
+      el.dataset["testid"] = "inert-safety";
+      return el;
+    };
+
+    function tabNames(): (string | null)[] {
+      return Array.from(
+        container.querySelectorAll(".settings-sidebar > button.settings-nav-item[role='tab']"),
+      ).map((t) => t.textContent);
+    }
+
+    it("is absent until its feature ships", () => {
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      expect(tabNames()).not.toContain("Safety");
+      overlay.destroy?.();
+    });
+
+    it("sits under User Settings after Account and renders the feature's tab", () => {
+      const signals: AbortSignal[] = [];
+      const overlay = createSettingsOverlay({
+        ...defaultOptions,
+        safetyTab: (signal) => {
+          signals.push(signal);
+          return safetyBody();
+        },
+      });
+      overlay.mount(container);
+      expect(tabNames().slice(0, 3)).toEqual(["Account", "Safety", "Appearance"]);
+
+      const tab = container.querySelector<HTMLButtonElement>("#settings-tab-safety")!;
+      tab.click();
+
+      expect(tab.getAttribute("aria-selected")).toBe("true");
+      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Safety");
+      expect(container.querySelector("[data-testid='inert-safety']")).not.toBeNull();
+      expect(container.querySelector(".settings-content")?.getAttribute("aria-labelledby")).toBe(
+        "settings-tab-safety",
+      );
+
+      // Leaving the tab aborts the build that owned its listeners.
+      getTab(container, 0).click();
+      expect(signals.at(-1)?.aborted).toBe(true);
+      overlay.destroy?.();
+    });
+
+    it("is reachable with the arrow keys like every other tab", () => {
+      const overlay = createSettingsOverlay({ ...defaultOptions, safetyTab: safetyBody });
+      overlay.mount(container);
+      const account = container.querySelector<HTMLButtonElement>("#settings-tab-account")!;
+      account.focus();
+      account.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      expect(document.activeElement?.id).toBe("settings-tab-safety");
+      overlay.destroy?.();
+    });
+
+    it("is not offered on the connect page", () => {
+      const overlay = createSettingsOverlay({
+        ...defaultOptions,
+        isAuthenticated: false,
+        safetyTab: safetyBody,
+      });
+      overlay.mount(container);
+      expect(tabNames()).not.toContain("Safety");
+      overlay.destroy?.();
+    });
+
+    it("opens straight onto Safety when asked", () => {
+      mockUiState.settingsOpen = true;
+      mockUiState.settingsTab = "Safety";
+      const overlay = createSettingsOverlay({ ...defaultOptions, safetyTab: safetyBody });
+      overlay.mount(container);
+      expect(container.querySelector(".settings-nav-item.active")?.id).toBe("settings-tab-safety");
+      expect(container.querySelector("[data-testid='inert-safety']")).not.toBeNull();
+      overlay.destroy?.();
+    });
+
+    it("ignores a request for a tab it does not show", () => {
+      mockUiState.settingsOpen = true;
+      mockUiState.settingsTab = "Safety";
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      expect(container.querySelector(".settings-nav-item.active")?.textContent).toBe("Account");
+      overlay.destroy?.();
+    });
   });
 });
 

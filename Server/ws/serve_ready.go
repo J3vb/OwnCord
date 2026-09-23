@@ -664,26 +664,8 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 	}
 	h.updateKeyHolder(vs.ChannelID)
 	h.broadcastVoiceEvent(ctx, vs.ChannelID, c.userID, buildVoiceLeave(vs.ChannelID, c.userID))
-	if h.livekit == nil {
-		return
-	}
-	// BUG-089: Capture stale join token so the goroutine only removes
-	// the exact stale participant. The identity includes joinedAt, so
-	// even if the user rejoins voice quickly, the new session has a
-	// different identity and won't be removed. The removal must
-	// complete even if this connection drops mid-handshake, so detach
-	// from cancellation (values kept); shutdown is handled via h.stop.
-	staleChID, staleUserID, staleJoinToken := vs.ChannelID, c.userID, vs.JoinedAt
-	lkCtx := context.WithoutCancel(ctx)
-	go func() {
-		select {
-		case <-h.stop:
-			return
-		default:
-		}
-		if err := h.livekit.RemoveParticipant(lkCtx, staleChID, staleUserID, staleJoinToken); err != nil {
-			slog.Warn("ws fresh connect: RemoveParticipant failed (may already be gone)",
-				"err", err, "user_id", staleUserID, "channel_id", staleChID)
-		}
-	}()
+	// BUG-089: pass the stale join token so the removal only hits the exact
+	// stale participant — the identity includes joinedAt, so a quick rejoin's
+	// new session has a different identity and won't be removed.
+	h.removeLiveKitParticipantAsync(ctx, vs.ChannelID, c.userID, vs.JoinedAt, "ws fresh connect:")
 }
