@@ -619,3 +619,48 @@
   font-size: 12px;
   color: var(--text-normal);
 }
+
+/* ── Safety: My reports (B9-10) ── */
+.my-reports h2 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--header-primary);
+  margin: 0 0 4px;
+}
+.my-reports-status {
+  margin: 12px 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+.my-reports-status:empty {
+  margin: 0;
+}
+.my-reports-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.my-reports-item {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  overflow-wrap: anywhere;
+}
+.my-reports-what {
+  font-size: 14px;
+  color: var(--text-normal);
+}
+.my-reports-state {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--header-primary);
+}
+.my-reports-when {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--text-muted);
+}

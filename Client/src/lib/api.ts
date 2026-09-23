@@ -119,6 +119,35 @@ export interface OwnModerationAction {
   } | null;
 }
 
+/** POST /reports target kinds and reason codes: B5's finite, server-owned
+ *  sets (Server/service/report.go). */
+export type ReportTargetType = "message" | "user" | "attachment";
+export type ReportReason = "spam" | "harassment" | "nsfw_unlabelled" | "illegal" | "other";
+
+/** POST /reports body. The server derives the subject from the target. */
+export interface FileReportRequest {
+  readonly target_type: ReportTargetType;
+  readonly target_id: string;
+  readonly reason: ReportReason;
+  readonly detail: string;
+}
+
+/** One row of GET /reports/mine: the reporter's own summary, never evidence,
+ *  assignee or notes. `id` is the opaque public id. Mirrors
+ *  Server/api/report_handler.go's reportSummaryResponse; kept apart from any
+ *  moderator shape so the two can never share a cache or a field. */
+export interface OwnReportSummary {
+  readonly id: string;
+  readonly target_type: string;
+  readonly reason: string;
+  /** open, assigned, resolved, dismissed or subject_erased. */
+  readonly state: string;
+  /** "" while open; actioned, no_action, duplicate or subject_erased once closed. */
+  readonly outcome: string;
+  readonly created_at: string;
+  readonly closed_at: string | null;
+}
+
 interface SessionsListResponse {
   readonly sessions: SessionInfo[];
 }
@@ -461,6 +490,15 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     getOwnModeration(signal?: AbortSignal): Promise<OwnModerationAction[]> {
       return request<OwnModerationAction[]>("GET", "/users/me/moderation", undefined, signal);
+    },
+
+    /** File a local report; resolves to its opaque public id. */
+    fileReport(body: FileReportRequest, signal?: AbortSignal): Promise<{ id: string }> {
+      return request<{ id: string }>("POST", "/reports", body, signal);
+    },
+
+    getMyReports(signal?: AbortSignal): Promise<OwnReportSummary[]> {
+      return request<OwnReportSummary[]>("GET", "/reports/mine", undefined, signal);
     },
 
     getSessions(signal?: AbortSignal): Promise<SessionInfo[]> {

@@ -713,6 +713,36 @@ describe("MemberList profile fields", () => {
     expect(container.querySelector('[data-testid="member-custom-status-2"]')).toBeNull();
   });
 
+  it("opens the profile from the keyboard, where Report names the user (B9-10)", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice", displayName: "Alice A." }),
+      makeMember({ id: 2, username: "me" }),
+    ]);
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 2, username: "me", avatar: null, role: "member" },
+    }));
+    const onReportUser = vi.fn();
+    list = createMemberList({ ...opts, onReportUser });
+    list.mount(container);
+
+    const row = container.querySelector<HTMLElement>('[data-testid="member-1"]')!;
+    expect(row.getAttribute("role")).toBe("button");
+    expect(row.getAttribute("tabindex")).toBe("0");
+    expect(row.getAttribute("aria-label")).toBe("Alice A.");
+    row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const report = document.querySelector<HTMLButtonElement>('[data-testid="upp-report-btn"]');
+    expect(report).not.toBeNull();
+    report!.click();
+    expect(onReportUser).toHaveBeenCalledWith(1, "Alice A.");
+
+    // Your own profile has nothing to report.
+    const self = container.querySelector<HTMLElement>('[data-testid="member-2"]')!;
+    self.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="upp-report-btn"]')).toBeNull();
+  });
+
   it("renders an invisible member the way it renders an offline one", () => {
     // Only ever the signed-in user's own row — everyone else is mapped to
     // offline server-side — but it has to look like what others see.

@@ -272,3 +272,44 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ── Report dialog (B9-10) ── */
+.report-dialog .report-note {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.report-dialog .form-group .report-note {
+  margin: 6px 0 0;
+}
+.report-choice {
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.report-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: 14px;
+  color: var(--text-normal);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.report-option input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent-text);
+}
+.report-detail {
+  min-height: 72px;
+  resize: vertical;
+}
+.report-dialog .btn-modal-save[aria-disabled="true"] {
+  cursor: progress;
+}

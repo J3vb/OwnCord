@@ -13,6 +13,7 @@ import { showToast } from "@lib/toast";
 import { formatMessageLink } from "@lib/deep-link";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
+import { reportEntryText } from "../../i18n/reportEntry";
 
 /** Cached value of the developerMode preference. Invalidated on pref change. */
 let developerModeEnabled = loadPref<boolean>("developerMode", false);
@@ -377,6 +378,20 @@ export function renderMessage(
       { signal },
     );
     actionsBar.appendChild(copyLinkBtn);
+
+    // Someone else's message: report it, or one of its attachments (B9-10).
+    const onReport = opts.onReportClick;
+    if (onReport !== undefined && msg.user.id !== opts.currentUserId) {
+      const reportBtn = createElement("button", {
+        "data-testid": `msg-report-${msg.id}`,
+        "aria-label": reportEntryText("reportMessage"),
+        "aria-haspopup": "dialog",
+      });
+      reportBtn.appendChild(createIcon("flag", 16));
+      reportBtn.title = reportEntryText("reportMessage");
+      reportBtn.addEventListener("click", () => onReport(msg.id), { signal });
+      actionsBar.appendChild(reportBtn);
+    }
 
     if (developerModeEnabled) {
       const copyIdBtn = createElement("button", {

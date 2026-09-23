@@ -272,6 +272,14 @@ export function createSidebarMemberSection(
   const memberList = createMemberList({
     currentUserRole: authStore.getState().user?.role ?? "member",
     ...(onMessageUser !== undefined ? { onMessageUser } : {}),
+    onReportUser: (userId, name) => {
+      // The dialog lives as long as this section (resizeOwner is its lifetime).
+      void import("../../features/reports/openers").then(({ openUserReport }) => {
+        if (!resizeOwner.signal.aborted) {
+          openUserReport({ api, userId, name, signal: resizeOwner.signal });
+        }
+      });
+    },
     // "Force Logout", not "Kick": the endpoint revokes the target's sessions
     // and nothing stops them signing back in — there is no membership to remove.
     onKick: async (userId, username) => {

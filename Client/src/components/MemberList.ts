@@ -42,6 +42,8 @@ export interface MemberListOptions {
   readonly onToggleBlock: (userId: number, username: string, block: boolean) => Promise<void>;
   /** Start a DM with a user (wires the profile popup's Message button). */
   readonly onMessageUser?: (userId: number) => void;
+  /** Report a user to this server's moderators (the profile popup's Report button, B9-10). */
+  readonly onReportUser?: (userId: number, name: string) => void;
 }
 
 /** Roles offered in the "Change Role" submenu when the server hasn't sent any. */
@@ -205,6 +207,10 @@ function createMemberItem(
   const item = createElement("div", {
     class: isAwayStatus(member.status) ? "member-item offline" : "member-item",
     "data-testid": `member-${member.id}`,
+    role: "button",
+    tabindex: "0",
+    "aria-haspopup": "dialog",
+    "aria-label": memberDisplayName(member),
   });
 
   const avatar = createAvatarElement(
@@ -238,38 +244,50 @@ function createMemberItem(
 
   appendChildren(item, avatar, nameWrap);
 
-  // Left-click opens the profile popup (previously dead code — built and
-  // tested but never mounted from anywhere).
+  // Left-click, Enter or Space opens the profile popup (previously dead code —
+  // built and tested but never mounted from anywhere). The row is a button so
+  // the profile, and its Report action, is reachable from the keyboard.
+  const openProfile = (anchorX: number, anchorY: number): void => {
+    closeActiveMenu();
+    closeActivePopup();
+    const currentUserId = authStore.getState().user?.id ?? 0;
+    const isSelf = member.id === currentUserId;
+    const onMessageUser = opts.onMessageUser;
+    const onReportUser = opts.onReportUser;
+    // `member` is the row's render-time snapshot; a presence-only update
+    // (see patchPresence) recolors the dot in place without rebuilding the
+    // row, so that snapshot's `status` can be stale. Re-resolve against the
+    // live store so the popup always agrees with the dot it was opened from.
+    const live = membersStore.getState().members.get(member.id) ?? member;
+    activePopup = createUserProfilePopup({
+      user: {
+        id: live.id,
+        username: live.username,
+        avatar: live.avatar,
+        role: live.role,
+        status: live.status,
+        displayName: live.displayName,
+        customStatus: live.customStatus,
+      },
+      anchorX,
+      anchorY,
+      ...(isSelf || onMessageUser === undefined
+        ? {}
+        : { onMessage: (userId: number) => onMessageUser(userId) }),
+      ...(isSelf || onReportUser === undefined
+        ? {}
+        : { onReport: (userId: number) => onReportUser(userId, memberDisplayName(live)) }),
+    });
+    activePopup.mount(document.body);
+  };
+  item.addEventListener("click", (e) => openProfile(e.clientX, e.clientY), { signal });
   item.addEventListener(
-    "click",
+    "keydown",
     (e) => {
-      closeActiveMenu();
-      closeActivePopup();
-      const currentUserId = authStore.getState().user?.id ?? 0;
-      const isSelf = member.id === currentUserId;
-      const onMessageUser = opts.onMessageUser;
-      // `member` is the row's render-time snapshot; a presence-only update
-      // (see patchPresence) recolors the dot in place without rebuilding the
-      // row, so that snapshot's `status` can be stale. Re-resolve against the
-      // live store so the popup always agrees with the dot it was opened from.
-      const live = membersStore.getState().members.get(member.id) ?? member;
-      activePopup = createUserProfilePopup({
-        user: {
-          id: live.id,
-          username: live.username,
-          avatar: live.avatar,
-          role: live.role,
-          status: live.status,
-          displayName: live.displayName,
-          customStatus: live.customStatus,
-        },
-        anchorX: e.clientX,
-        anchorY: e.clientY,
-        ...(isSelf || onMessageUser === undefined
-          ? {}
-          : { onMessage: (userId: number) => onMessageUser(userId) }),
-      });
-      activePopup.mount(document.body);
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      const rect = item.getBoundingClientRect();
+      openProfile(rect.right, rect.top);
     },
     { signal },
   );

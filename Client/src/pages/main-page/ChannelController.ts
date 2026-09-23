@@ -531,6 +531,16 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
             showToast("Failed to pin/unpin message", "error");
           });
       },
+      onReportClick: (msgId: number) => {
+        const msg = getChannelMessages(channelId).find((m) => m.id === msgId);
+        if (msg === undefined) return;
+        // The dialog's closing restores focus to the Report button; the
+        // composer is the fallback when a re-render has replaced the row.
+        const fallbackFocus = () => slots.inputSlot.querySelector<HTMLElement>("textarea");
+        void import("../../features/reports/openers").then(({ openMessageReport }) => {
+          if (!signal.aborted) openMessageReport({ api, msg, signal, fallbackFocus });
+        });
+      },
       onRetry: (correlationId: string) => retrySend(correlationId),
       onDeleteDraft: (correlationId: string) => deleteDraft(correlationId),
     });
