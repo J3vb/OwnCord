@@ -107,7 +107,7 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     event: "devicechange",
     category: "per-mount",
     reason:
-      "device-change listener with a start/stop pair (startDeviceChangeListener); stays hand-paired because device-manager.test.ts pins the bare add/remove call shape, and 11b edits no assertion",
+      "device-change listener with a start/stop pair (startDeviceChangeListener); stays hand-paired because device-manager.test.ts pins the bare add/remove call shape and no assertion is edited. Not a leak: stop removes it, and the soak's listener count is flat across voice joins. Kept by owner decision in 11c, so R1's floor is 17",
   },
   {
     file: "lib/logger.ts",
@@ -249,7 +249,7 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     fn: "mountChannel",
     category: "cancellation-token",
     reason:
-      "owner: the next channel switch (destroyChannel), which aborts the previous channel's work. Not forked from the SessionScope in 11b: a fork would also cancel in-flight channel loads at logout, where today they run to a guarded no-op (a Task 12 candidate)",
+      "owner: the next channel switch (destroyChannel), which aborts the previous channel's work. Not forked from the SessionScope in 11b: a fork would also cancel in-flight channel loads at logout, where today they run to a guarded no-op. Not a leak: MainPage teardown aborts it right after logout and the soak's AbortController count is flat. Kept a token by owner decision in 11c",
   },
 ];
 
