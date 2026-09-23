@@ -558,6 +558,12 @@
   border-color: var(--text-muted);
   color: var(--text-muted);
 }
+/* Timed out (B9-15, Q4): reacting is disabled inline. */
+.reaction-chip[aria-disabled="true"],
+.msg-actions-bar button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 /* Who-reacted tooltip — anchored above the pill it belongs to. */
 .reaction-chip {

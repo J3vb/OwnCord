@@ -41,6 +41,7 @@ import {
 } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
+import { resetSafetyStore, safetyStore, setActiveTimeout } from "../../src/features/safety/store";
 import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
 import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
@@ -475,6 +476,41 @@ describe("ChannelSidebar", () => {
 
     voiceItem.click();
     expect(onVoiceLeave).not.toHaveBeenCalled();
+  });
+
+  it("a timeout disables joining voice with the server expiry, never leaving (B9-15)", () => {
+    setChannels(testChannels);
+    setActiveTimeout(new Date(Date.now() + 3_600_000).toISOString());
+    sidebar.mount(container);
+
+    let voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
+    expect(voiceItem.getAttribute("aria-disabled")).toBe("true");
+    expect(voiceItem.title).toMatch(/^You can't join voice until /);
+    // The expiry is visible text in the row, not only a tooltip.
+    expect(container.querySelector("[data-testid='voice-timeout-3']")?.textContent).toMatch(
+      /^You can't join voice until /,
+    );
+    voiceItem.click();
+    expect(onVoiceJoin).not.toHaveBeenCalled();
+
+    // Already in the channel: leaving stays available.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
+    voiceStore.flush();
+    voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
+    expect(voiceItem.hasAttribute("aria-disabled")).toBe(false);
+    expect(container.querySelector("[data-testid='voice-timeout-3']")).toBeNull();
+    voiceItem.click();
+    expect(onVoiceLeave).toHaveBeenCalled();
+
+    // The lift re-enables the row.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+    voiceStore.flush();
+    setActiveTimeout(null);
+    safetyStore.flush();
+    voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
+    expect(voiceItem.hasAttribute("aria-disabled")).toBe(false);
+    expect(container.querySelector("[data-testid='voice-timeout-3']")).toBeNull();
+    resetSafetyStore();
   });
 
   it("re-enables voice channel join when the connection returns to connected", () => {

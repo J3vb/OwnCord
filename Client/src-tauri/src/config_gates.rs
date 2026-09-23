@@ -7,7 +7,7 @@
 //! Scope, stated honestly: these cover the **Rust backend and the updater
 //! block**, not the whole client. The webview does contact third parties on
 //! purpose — YouTube thumbnails and OG previews (`src/components/message-list/`,
-//! and the `frame-src`/`connect-src` entries in `tauri.conf.json`'s CSP), which
+//! and the `frame-src` entry in `tauri.conf.json`'s CSP), which
 //! `Cargo.toml`'s note on `tauri-plugin-http` describes. What these gates hold
 //! is narrower and still worth holding: the Rust side, which owns the TOFU
 //! certificate pins and the update channel, names no remote of its own.

@@ -9,7 +9,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `src/pages/`, `src/components/` UI · `src/features/voice/` modules
   extracted from `lib/livekitSession.ts` and `lib/livekitE2EE.ts` (the
   facades; the `e2ee*.ts` files are `E2EEManager`'s), with colocated
-  `*.test.ts`; `src/features/{connection,direct-messages,channels,messaging,voice}/wsHandlers.ts`
+  `*.test.ts`; `src/features/{connection,direct-messages,channels,messaging,voice,safety}/wsHandlers.ts`
   hold the WebSocket handler bodies extracted from `lib/dispatcher.ts`;
   `src/features/messaging/` also holds `stores/messages.store.ts`'s pure
   reducers and message model — the store stays the facade, so import its

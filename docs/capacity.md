@@ -258,6 +258,15 @@ connection closes its socket and reconnects at once, carrying
   not invent one for it.
 - **Not `BenchmarkReconnectStorm`.** That is a Go microbenchmark with no sockets
   and no server; it shares a name with this scenario and nothing else.
+- **Client timers keep their phase across the storm (OC-0445).** Every socket
+  reopens at one instant, so a send, typing or presence timer restarted from
+  that instant would put all 100 users on the same beat for the rest of the run
+  — a metronome no population produces, and one that measured 500–750 ms
+  acknowledgement p95 from the storm to the drain on an unchanged server.
+  `phasedInterval` re-anchors each timer on the phase the connection's first
+  socket established, and a resumed socket's first phased tick waits for
+  `auth_ok`. `ws_broadcast_latency_ms` and `ws_delivery_latency_ms` carry
+  `phase=ramp|sustain|upload|storm` so a run says which phase missed a budget.
 
 ### Database waits
 
@@ -487,6 +496,17 @@ silently measures the default profile. Pass them with k6's own flag instead
 (`k6 run -e K6_PROFILE=operational …`), which works everywhere. These runs are
 made on Linux, which is where the form above applies.
 
+OC-0445's diagnosis profiled the constrained server with a one-off build, not
+a workflow input. To recreate it by hand, add a `net/http/pprof` listener on
+`127.0.0.1` to a scratch build of the server, with
+`runtime.SetBlockProfileRate` and `runtime.SetMutexProfileFraction` switched on
+(a CPU profile alone cannot see contention on the single SQLite writer). The
+container runs with `--network=host`, so the host reaches that listener
+directly. During the run, curl `goroutine?debug=2` dumps every 2 s and
+back-to-back 30 s CPU profiles, then block, mutex and heap profiles once at the
+end, with the sampler pinned to the generator CPUs (`taskset -c 2,3`) so it
+does not compete with the server it measures.
+
 ## Measured
 
 Every number below comes from the **constrained** leg and from nothing else.
@@ -565,24 +585,28 @@ movement is a few milliseconds, so the budgets are not sitting on the noise.
 
 ### The operational profiles
 
-The four runs named in [Operational measurements](#operational-measurements)
-were made on 2026-09-16 from commit `e57335c7`, on the branch that added them.
-Each block below is filled from its own **constrained** leg and from nothing
-else, and the `tls off` block publishes as a delta against the `self_signed`
-one rather than on its own.
+The operational blocks below were re-made on 2026-09-23 from commit `4b2ea56b`
+(run 35856013841), after OC-0445 found that the 2026-09-16 operational figures
+had measured a phase-locked load generator rather than the server — the
+`self_signed` block says how. The restart and ceiling-search blocks are still
+the 2026-09-16 runs from commit `e57335c7`, on the branch that added them. Each
+block is filled from its own **constrained** leg and from nothing else, and the
+`tls off` block publishes as a delta against the `self_signed` one rather than
+on its own.
 
-Two budget rows are missed under the operational profile and under the restart
-drill. They are published as missed, and each is a findings-ledger entry
-(OC-0445, OC-0446, OC-0447); neither was re-run on a bigger machine and no
-budget was loosened.
+The budget rows missed under the restart drill are published as missed and are
+findings-ledger entries (OC-0446, OC-0447); neither was re-run on a bigger
+machine and no budget was loosened. The operational profile's two misses were
+OC-0445, and the blocks below are its re-measurement, with the harness
+corrected and the server unchanged.
 
 #### Operational, `tls.mode: self_signed`
 
 ```
-commit:          e57335c7
-date (UTC):      2026-09-16
-workflow run:    35113946945  (.github/workflows/load-baseline.yml, profile=operational)
-job:             104854470744  (operational, constrained, tls self_signed)
+commit:          4b2ea56b
+date (UTC):      2026-09-23
+workflow run:    35856013841  (.github/workflows/load-baseline.yml, profile=operational)
+job:             107164548694  (operational, constrained, tls self_signed)
 runner:          ubuntu-latest, 4 CPU / 16 GB host
 cgroup as seen from inside the container (limits.txt):
                  nproc 2
@@ -595,61 +619,88 @@ lk:              2.18.6
 load generators: k6 and lk, pinned to CPUs 2-3 with taskset
 ```
 
-| Path                          | p95    | p99    | Budget (p95 / p99) | Met?                |
-| ----------------------------- | ------ | ------ | ------------------ | ------------------- |
-| REST login                    | 313 ms | 392 ms | 600 ms / 1 s       | Yes                 |
-| WebSocket open → `auth_ok`    | 16 ms  | 26 ms  | 200 ms / 500 ms    | Yes                 |
-| Send → sender acknowledgement | 228 ms | 348 ms | 150 ms / 300 ms    | **No** — both       |
-| Send → recipient delivery     | 250 ms | 361 ms | 200 ms / 400 ms    | **No** — p95 missed |
-| Voice join (OwnCord half)     | 239 ms | 292 ms | 250 ms / 500 ms    | Yes                 |
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 239 ms | 335 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 12 ms  | 19 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 45 ms  | 234 ms | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 48 ms  | 231 ms | 200 ms / 400 ms    | Yes  |
+| Voice join (OwnCord half)     | 157 ms | 204 ms | 250 ms / 500 ms    | Yes  |
 
-The two misses are the only thresholds the run crossed. They are OC-0445.
+Every threshold was met; this is the first operational run to conclude
+`success`. Per phase (the `phase` tag `ws_broadcast_latency_ms` and
+`ws_delivery_latency_ms` carry since OC-0445), send → acknowledgement p95 / p99
+was 68 / 299 ms in the ramp, 46 / 224 ms in the sustain, 44 / 186 ms under
+uploads and 37 / 282 ms in the storm window; delivery 93 / 355, 48 / 219,
+46 / 184 and 40 / 284 ms. A second run the same hour (35856019988) measured
+41 / 80 ms and 43 / 81 ms on this leg; two `dev` runs interleaved with the pair
+(35856016690, 35856022553) measured 287 / 427 and 330 / 467 ms for
+acknowledgement, with the same server.
+
+**The 2026-09-16 figures (run 35113946945: 228 / 348 ms and 250 / 361 ms,
+published as OC-0445) measured the load generator, not the server.** Per-10 s
+buckets on an unchanged server (run 35852682786) put send → acknowledgement
+p95 at 3–69 ms in every bucket up to the storm and at 506–582 ms in every
+bucket after it on the `self_signed` leg, and at 2–89 ms and 584–746 ms on the
+TLS-off leg. The storm closed every socket at one scenario instant, and each
+new socket's send timer was a plain `setInterval` from that instant, so from
+t=180 s all 100 senders sent in the same 50 ms slot
+every 2 s. A hundred simultaneous sends queue behind the single SQLite writer
+at about 6 ms a hop — the checkout itself is held 0.4 ms; the hop is the next
+sender waiting out the previous send's 100-recipient fan-out on two vCPUs —
+which is 600 ms for the last in line. The server did the same work at the same
+rate before and after the storm; only the arrival pattern changed. `ws-load.js`
+now keeps each connection's send, typing and presence phase across reconnects
+(`phasedInterval`): a reconnect changes when a user is connected, not when they
+type. OC-0445 records the diagnosis and OC-0454 the per-hop cost of a burst that
+is genuinely simultaneous.
 
 **Measurement-only rows — no budget is published for any of them, and this
 document does not invent one.**
 
 | Figure                                | p95    | p99    | Count               |
 | ------------------------------------- | ------ | ------ | ------------------- |
-| Storm resume, open → `auth_ok`        | 120 ms | 125 ms | 100                 |
-| `voice_state` reaching another socket | 367 ms | 450 ms | 58,243              |
-| Upload admitted (201)                 | 39 ms  | 48 ms  | 300                 |
-| Upload refused by quota (507)         | 26 ms  | 70 ms  | 995                 |
-| Authenticated download                | 16 ms  | 44 ms  | 300 (1 in 4 ranged) |
+| Storm resume, open → `auth_ok`        | 72 ms  | 77 ms  | 100                 |
+| `voice_state` reaching another socket | 175 ms | 214 ms | 58,396              |
+| Upload admitted (201)                 | 119 ms | 274 ms | 300                 |
+| Upload refused by quota (507)         | 9 ms   | 113 ms | 995                 |
+| Authenticated download                | 10 ms  | 19 ms  | 300 (1 in 4 ranged) |
 
 Storm: 100 of 100 sockets closed and resumed, **every one served from the
 in-memory buffer** (`ws_replay_source{tier:buffer}` 100, `db` 0, `none` 0),
 `ws_replay_gap` max 0, and the storm phase's `ws_conn_rejects` and all three
 `backpressure_*` deltas 0. Uploads: 300 admits, 995 quota refuses, 0
 `STORAGE_LOW_DISK`, 0 oversize, 75 MB of storage charged. 0 WebSocket errors,
-0 login give-ups, 1,129,611 cross-connection deliveries from 12,044 sends.
+0 login give-ups, 1,133,495 cross-connection deliveries from 12,078 sends.
 
 Database waits, **per phase, as deltas** — the figure this section exists for:
 
 | Phase   | Writer waits | Writer seconds | Reader waits | Reader seconds |
 | ------- | ------------ | -------------- | ------------ | -------------- |
-| ramp    | 893          | 4.4 s          | 9,106        | 8.4 s          |
-| sustain | 2,710        | 5.8 s          | 31,219       | 28.6 s         |
-| storm   | 2,043        | 12.0 s         | 13,282       | 10.2 s         |
-| upload  | 5,163        | 27.2 s         | 54,096       | 47.2 s         |
-| run     | 10,809       | 49.4 s         | 107,703      | 94.5 s         |
+| ramp    | 940          | 10.3 s         | 7,901        | 3.1 s          |
+| sustain | 3,428        | 23.5 s         | 29,880       | 9.9 s          |
+| storm   | 1,327        | 9.6 s          | 13,667       | 5.9 s          |
+| upload  | 4,394        | 47.5 s         | 43,324       | 14.2 s         |
+| run     | 10,666       | 98.6 s         | 102,413      | 35.2 s         |
 
-The storm's 30 s window carries more writer wait than the whole 60 s sustain
-before it, and the upload phase carries more than the rest of the run put
-together. The reader pool did wait: it is not a pool that never queues, which
-is the claim this document could not make before the pair was surfaced.
+With the senders spread out again, the writer's wait per waiting checkout is
+7–11 ms in every phase (6.9 ms in the sustain, 7.2 ms in the storm window,
+10.8 ms under uploads) instead of the 2026-09-16 run's 12 s inside a 30 s storm
+window. The upload phase still carries the most writer wait because it is half
+the run, not because it queues differently.
 
 Server CPU inside the cgroup, from `cpu.stat.log` (5 s samples of
-`usage_usec`): 0.41 CPUs of 2 on average over the run, 1.23 at the peak, in
-the upload phase. **The two CPUs were not the constraint on this run**, which
-is worth saying beside a missed latency budget.
+`usage_usec`): 0.26 CPUs of 2 on average over the run, 0.83 at the peak, in the
+uploads cohort's login ramp. **The two CPUs were not the constraint on this
+run.**
 
 #### Operational, `tls.mode: off`
 
 ```
-commit:          e57335c7
-date (UTC):      2026-09-16
-workflow run:    35113946945  (.github/workflows/load-baseline.yml, profile=operational)
-job:             104854471050  (operational, constrained, tls off)
+commit:          4b2ea56b
+date (UTC):      2026-09-23
+workflow run:    35856013841  (.github/workflows/load-baseline.yml, profile=operational)
+job:             107164548275  (operational, constrained, tls off)
 runner:          ubuntu-latest, 4 CPU / 16 GB host
 cgroup as seen from inside the container (limits.txt):
                  nproc 2
@@ -663,57 +714,66 @@ load generators: k6 and lk, pinned to CPUs 2-3 with taskset
 ```
 
 Same shape as the block above: 100 of 100 storm resumes all from the buffer,
-`ws_replay_gap` max 0, 0 WebSocket errors, 0 login give-ups, 1,129,876
-deliveries, 300 admits / 995 quota refuses / 300 downloads, 0
-`STORAGE_LOW_DISK`, 0 oversize. Server CPU 0.31 of 2 on average, 0.99 at the
-peak. The same two thresholds were crossed, and by more:
+`ws_replay_gap` max 0, 0 WebSocket errors, 0 login give-ups, 1,133,899
+deliveries from 12,084 sends, 300 admits / 993 quota refuses / 300 downloads,
+0 `STORAGE_LOW_DISK`, 0 oversize. Server CPU 0.31 of 2 on average, 0.98 at the
+peak. Every threshold was met:
 
-| Path                          | p95    | p99    | Budget (p95 / p99) | Met?          |
-| ----------------------------- | ------ | ------ | ------------------ | ------------- |
-| REST login                    | 263 ms | 413 ms | 600 ms / 1 s       | Yes           |
-| WebSocket open → `auth_ok`    | 9 ms   | 22 ms  | 200 ms / 500 ms    | Yes           |
-| Send → sender acknowledgement | 329 ms | 472 ms | 150 ms / 300 ms    | **No** — both |
-| Send → recipient delivery     | 333 ms | 470 ms | 200 ms / 400 ms    | **No** — both |
-| Voice join (OwnCord half)     | 136 ms | 243 ms | 250 ms / 500 ms    | Yes           |
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 307 ms | 544 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 5 ms   | 11 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 85 ms  | 266 ms | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 93 ms  | 270 ms | 200 ms / 400 ms    | Yes  |
+| Voice join (OwnCord half)     | 130 ms | 176 ms | 250 ms / 500 ms    | Yes  |
+
+Per phase, send → acknowledgement p95 / p99: ramp 35 / 151 ms, sustain
+51 / 176 ms, upload 110 / 301 ms, storm window 102 / 271 ms. The second run
+(35856019988) measured 96 / 267 ms and 98 / 266 ms on this leg and missed the
+voice-join p95 (335 ms against 250) — a row the interleaved `dev` runs missed
+too (437 ms on `self_signed` in 35856022553); voice join p95 moved between 130
+and 437 ms across the four runs of that hour and is not distinguishable from
+runner noise at one run per mode. The `dev` runs measured 373 / 452 and
+276 / 352 ms for acknowledgement on this leg.
 
 Per-phase database waits on this leg, for comparison with the table above:
 
 | Phase   | Writer waits | Writer seconds | Reader waits | Reader seconds |
 | ------- | ------------ | -------------- | ------------ | -------------- |
-| ramp    | 1,084        | 3.6 s          | 9,202        | 4.6 s          |
-| sustain | 3,343        | 58.4 s         | 30,074       | 14.0 s         |
-| storm   | 3,025        | 108.9 s        | 15,106       | 12.5 s         |
-| upload  | 8,356        | 318.3 s        | 52,505       | 25.8 s         |
-| run     | 15,808       | 489.1 s        | 106,887      | 56.9 s         |
+| ramp    | 694          | 7.6 s          | 8,712        | 3.3 s          |
+| sustain | 1,809        | 21.3 s         | 29,593       | 9.8 s          |
+| storm   | 1,334        | 20.3 s         | 13,184       | 6.6 s          |
+| upload  | 3,766        | 75.2 s         | 45,414       | 15.5 s         |
+| run     | 8,257        | 137.0 s        | 100,112      | 35.8 s         |
 
 #### TLS delta, `self_signed − off`
 
 A positive number means the TLS leg was slower.
 
-| Row                                 | self_signed p95 / p99 | off p95 / p99 | Delta p95 / p99    |
-| ----------------------------------- | --------------------- | ------------- | ------------------ |
-| REST login                          | 313 / 392 ms          | 263 / 413 ms  | **+50 / −21 ms**   |
-| WebSocket open → `auth_ok`          | 16 / 26 ms            | 9 / 22 ms     | **+7 / +4 ms**     |
-| Send → sender acknowledgement       | 228 / 348 ms          | 329 / 472 ms  | **−101 / −124 ms** |
-| Send → recipient delivery           | 250 / 361 ms          | 333 / 470 ms  | **−83 / −109 ms**  |
-| Voice join (OwnCord half)           | 239 / 292 ms          | 136 / 243 ms  | **+103 / +49 ms**  |
-| Storm resume                        | 120 / 125 ms          | 152 / 159 ms  | −32 / −34 ms       |
-| `voice_state` cross-socket delivery | 367 / 450 ms          | 190 / 287 ms  | +177 / +163 ms     |
-| Upload admitted                     | 39 / 48 ms            | 137 / 290 ms  | −98 / −242 ms      |
-| Upload refused by quota             | 26 / 70 ms            | 18 / 81 ms    | +8 / −11 ms        |
-| Authenticated download              | 16 / 44 ms            | 12 / 27 ms    | +4 / +17 ms        |
-| Writer wait, run total              | 49.4 s                | 489.1 s       | −439.7 s           |
+| Row                                 | self_signed p95 / p99 | off p95 / p99 | Delta p95 / p99   |
+| ----------------------------------- | --------------------- | ------------- | ----------------- |
+| REST login                          | 239 / 335 ms          | 307 / 544 ms  | **−68 / −209 ms** |
+| WebSocket open → `auth_ok`          | 12 / 19 ms            | 5 / 11 ms     | **+7 / +8 ms**    |
+| Send → sender acknowledgement       | 45 / 234 ms           | 85 / 266 ms   | **−40 / −32 ms**  |
+| Send → recipient delivery           | 48 / 231 ms           | 93 / 270 ms   | **−45 / −39 ms**  |
+| Voice join (OwnCord half)           | 157 / 204 ms          | 130 / 176 ms  | **+27 / +28 ms**  |
+| Storm resume                        | 72 / 77 ms            | 156 / 162 ms  | −84 / −85 ms      |
+| `voice_state` cross-socket delivery | 175 / 214 ms          | 155 / 174 ms  | +20 / +40 ms      |
+| Upload admitted                     | 119 / 274 ms          | 128 / 184 ms  | −9 / +90 ms       |
+| Upload refused by quota             | 9 / 113 ms            | 102 / 203 ms  | −93 / −90 ms      |
+| Authenticated download              | 10 / 19 ms            | 12 / 22 ms    | −2 / −3 ms        |
+| Writer wait, run total              | 98.6 s                | 137.0 s       | −38.4 s           |
 
-**Several rows come out negative: the plaintext leg measured slower on the two
-message paths, on uploads and on resume, and the writer queued ten times
-longer on it.** That is published as it was measured. It is also the reason no
-TLS cost is claimed from this pair: the two legs are two matrix jobs on two
-different runner VMs, so every row carries a full run's worth of runner noise,
-and the run-to-run movement B6-9 observed (a few milliseconds) is nowhere near
-±100 ms. The honest reading of this table is **"the TLS cost of this profile is
-not distinguishable from runner noise at one run per mode"**, not any of the
-individual signs in it. Nothing here recommends running with TLS off; the
-default remains `self_signed`.
+**Most rows still come out negative: the plaintext leg measured slower on the
+two message paths, on resume and on refusals.** That is published as it was
+measured, and no TLS cost is claimed from this pair for the same reason as
+before: the two legs are two matrix jobs on two different runner VMs, so every
+row carries a full run's worth of runner noise, and the second pair of the
+same hour (35856019988: 41 / 80 ms against 96 / 267 ms for acknowledgement)
+moved the message rows by more than this delta. The honest reading remains
+**"the TLS cost of this profile is not distinguishable from runner noise at
+one run per mode"**. Nothing here recommends running with TLS off; the default
+remains `self_signed`.
 
 #### Restart under load
 

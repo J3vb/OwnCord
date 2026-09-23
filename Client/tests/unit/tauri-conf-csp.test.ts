@@ -36,12 +36,21 @@ describe("tauri.conf.json — CSP", () => {
     }
   });
 
-  // connect-src keeps its bare https: deliberately: the LiveKit SDK fetches
-  // over https from the renderer (the network-reconnect HEAD, /rtc/validate on
-  // a signalling failure, and LiveKit Cloud's /settings/regions) whenever the
-  // voice URL is the operator's direct wss:// LiveKit URL. See the B7-16 plan,
-  // "Open items". Pinned so a change to it is a decision, not a drift.
-  it("connect-src still carries the https: LiveKit's renderer fetches need", () => {
-    expect(directive("connect-src")).toContain("https:");
+  // connect-src is loopback only. REST, the chat socket, the updater and the
+  // external-content broker all go through IPC; LiveKit and the native frame
+  // sockets reach the renderer through loopback tunnels. A local server's
+  // LiveKit direct URL is used only when it is itself loopback ws:/http:
+  // (platform/desktop/nativeProxies.ts), so no https:/wss: source is needed.
+  it("connect-src allows only self, IPC and loopback http/ws", () => {
+    expect(directive("connect-src").sort()).toEqual(
+      [
+        "'self'",
+        "http://ipc.localhost",
+        "http://localhost:*",
+        "ws://localhost:*",
+        "http://127.0.0.1:*",
+        "ws://127.0.0.1:*",
+      ].sort(),
+    );
   });
 });

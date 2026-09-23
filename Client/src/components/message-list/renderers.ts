@@ -53,7 +53,7 @@ import { renderMentions, renderMessageContent } from "./content-parser";
 import { highlightsCurrentUser } from "@lib/mentions";
 import { renderUrlEmbeds } from "./media";
 import { renderAttachment } from "./attachments";
-import { renderReactions } from "./reactions";
+import { reactionLockReason, renderReactions, wireReactionControl } from "./reactions";
 
 // -- Composite rendering functions --------------------------------------------
 
@@ -312,7 +312,12 @@ export function renderMessage(
     });
     reactBtn.appendChild(createIcon("smile", 16));
     reactBtn.title = "React";
-    reactBtn.addEventListener("click", () => opts.onReactionClick(msg.id, ""), { signal });
+    wireReactionControl(
+      reactBtn,
+      () => opts.onReactionClick(msg.id, ""),
+      reactionLockReason(),
+      signal,
+    );
     actionsBar.appendChild(reactBtn);
 
     const replyBtn = createElement("button", {
