@@ -92,7 +92,7 @@ Planning documents are not trackers. Do not read a defect count out of one.
 Current ledger summary (updated 2026-09-23): **447 fixed / 1 open / 4 declined / 1 duplicate = 453**
 (OC-0445, the operational delivery budgets, was a phase-locked load generator after the
 reconnect storm and is fixed in the harness, with the server's per-hop burst cost recorded
-as OC-0453; PR #1707's presence retry fix closed OC-0451, the N14 back-to-back status
+as OC-0454; PR #1707's presence retry fix closed OC-0451, the N14 back-to-back status
 change; OC-0448 was fixed by verifying container digests before moving release
 tags; the OC-0446/OC-0447 harness corrections completed channel spreading and
 restart measurement; B3-9, PR #1454, closed the five B3-tagged records; OC-0379 records and fixes

@@ -647,7 +647,7 @@ which is 600 ms for the last in line. The server did the same work at the same
 rate before and after the storm; only the arrival pattern changed. `ws-load.js`
 now keeps each connection's send, typing and presence phase across reconnects
 (`phasedInterval`): a reconnect changes when a user is connected, not when they
-type. OC-0445 records the diagnosis and OC-0453 the per-hop cost of a burst that
+type. OC-0445 records the diagnosis and OC-0454 the per-hop cost of a burst that
 is genuinely simultaneous.
 
 **Measurement-only rows — no budget is published for any of them, and this
