@@ -1,7 +1,4 @@
-// Read from disk rather than `import ... ?raw`: vitest stubs CSS modules
-// (its `css: false` default), which wins over the `?raw` suffix and yields an
-// empty string. A .ts source can use `?raw`; a stylesheet cannot.
-import { readAppCss } from "../helpers/app-css";
+import { cascadedDeclaration, hasRule, keyword } from "../helpers/app-css";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore } from "@stores/auth.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
@@ -308,34 +305,37 @@ describe("StatusPicker wired to UserBar", () => {
   });
 
   // jsdom never applies app.css, so a computed-style assertion here would
-  // pass whether or not the rules exist. Instead this pins the CSS *source*
-  // to the classes StatusPicker.ts actually emits, so a future edit that
-  // renames/deletes one side without the other goes red immediately (this
-  // is exactly how the trigger dot went invisible: the rules were deleted
-  // but the component still emitted the old names).
+  // pass whether or not the rules exist. Instead this checks the parsed
+  // stylesheet (tests/helpers/app-css.ts) against the classes StatusPicker.ts
+  // actually emits, so a future edit that renames/deletes one side without
+  // the other goes red immediately (this is exactly how the trigger dot went
+  // invisible: the rules were deleted but the component still emitted the
+  // old names).
   it("every class StatusPicker.ts emits has a rule in app.css, and both dots have an explicit size", () => {
-    const css = readAppCss();
-
-    const ruleBody = (selector: string): string => {
-      const match = new RegExp(`\\.${selector}\\s*\\{([^}]*)\\}`).exec(css);
-      expect(match, `expected a \`.${selector} { ... }\` rule in app.css`).not.toBeNull();
-      return match![1]!;
-    };
-
-    ruleBody("status-picker-option");
-    ruleBody("status-picker-option-label");
-    ruleBody("status-picker-option-check");
+    for (const selector of [
+      ".status-picker-option",
+      ".status-picker-option-label",
+      ".status-picker-option-check",
+    ]) {
+      expect(hasRule(selector), `expected a \`${selector} { ... }\` rule in app.css`).toBe(true);
+    }
 
     // The dot and option-dot are bare elements whose only inline style is
     // `background` (StatusPicker.ts) -- without an explicit size in CSS
     // they collapse to 0x0 and are invisible/unclickable.
-    for (const dotSelector of ["status-picker-dot", "status-picker-option-dot"]) {
-      const body = ruleBody(dotSelector);
-      expect(body, `${dotSelector} needs an explicit width`).toMatch(/width\s*:/);
-      expect(body, `${dotSelector} needs an explicit height`).toMatch(/height\s*:/);
-      expect(body, `${dotSelector} needs a border-radius to render as a dot`).toMatch(
-        /border-radius\s*:/,
-      );
+    for (const dotSelector of [".status-picker-dot", ".status-picker-option-dot"]) {
+      expect(
+        cascadedDeclaration(dotSelector, "width"),
+        `${dotSelector} needs an explicit width`,
+      ).toBeDefined();
+      expect(
+        cascadedDeclaration(dotSelector, "height"),
+        `${dotSelector} needs an explicit height`,
+      ).toBeDefined();
+      expect(
+        cascadedDeclaration(dotSelector, "border-radius"),
+        `${dotSelector} needs a border-radius to render as a dot`,
+      ).toBeDefined();
     }
   });
 
@@ -347,14 +347,14 @@ describe("StatusPicker wired to UserBar", () => {
   // now, never re-sent on reconnect since restoreSavedPresence only re-sends
   // `status`, not `custom_status`).
   it("ub-status-picker--disabled actually disables the picker in app.css", () => {
-    const css = readAppCss();
-    const match = /\.ub-status-picker--disabled\s*\{([^}]*)\}/.exec(css);
     expect(
-      match,
-      "expected a `.ub-status-picker--disabled { ... }` rule in app.css",
-    ).not.toBeNull();
-    expect(match![1], "disabled state must reject pointer input").toMatch(
-      /pointer-events\s*:\s*none/,
-    );
+      keyword(
+        cascadedDeclaration(
+          ".user-bar .ub-status-picker-wrap.ub-status-picker--disabled",
+          "pointer-events",
+        ),
+      ),
+      "disabled state must reject pointer input",
+    ).toBe("none");
   });
 });

@@ -1,6 +1,5 @@
-// jsdom never applies app.css (see base-font-size-css.test.ts /
-// msg-actions-bar-focus-css.test.ts for the same pattern), so this pins the
-// CSS *source* rather than computed style.
+// jsdom never applies app.css, so this asserts the parsed stylesheet rules
+// (tests/helpers/app-css.ts) rather than computed style.
 //
 // createQuickSwitcher (Ctrl+K) builds its whole UI out of `quick-switcher`,
 // `quick-switcher__input`, `quick-switcher__results`, `quick-switcher__item`
@@ -8,42 +7,39 @@
 // stylesheet: the modal rendered as unstyled text on a dark backdrop, the
 // results list had no max-height/scroller, and — the functional break — the
 // roving `--active` highlight ArrowUp/ArrowDown moves painted nothing at all.
-import { readAppCss } from "../helpers/app-css";
+import { cascadedDeclaration, hasRule, keyword } from "../helpers/app-css";
 import { describe, it, expect } from "vitest";
 
 describe(".quick-switcher (Ctrl+K) has a stylesheet", () => {
-  const css = readAppCss();
-
   it("styles the modal container", () => {
-    expect(
-      /\.quick-switcher\s*\{/.test(css),
-      "expected a `.quick-switcher { ... }` rule in app.css",
-    ).toBe(true);
+    expect(hasRule(".quick-switcher"), "expected a `.quick-switcher { ... }` rule in app.css").toBe(
+      true,
+    );
   });
 
   it("styles the search input", () => {
     expect(
-      /\.quick-switcher__input\s*\{/.test(css),
+      hasRule(".quick-switcher__input"),
       "expected a `.quick-switcher__input { ... }` rule in app.css",
     ).toBe(true);
   });
 
   it("gives the results list a bounded height and a scroller", () => {
-    const match = /\.quick-switcher__results\s*\{([^}]*)\}/.exec(css);
-    expect(match, "expected a `.quick-switcher__results { ... }` rule in app.css").not.toBeNull();
-    const body = match![1]!;
-    expect(body, "results list must clamp its height").toMatch(/max-height\s*:/);
-    expect(body, "results list must scroll once clamped").toMatch(/overflow-y\s*:\s*auto\b/);
+    expect(
+      cascadedDeclaration(".quick-switcher__results", "max-height"),
+      "results list must clamp its height",
+    ).toBeDefined();
+    expect(
+      keyword(cascadedDeclaration(".quick-switcher__results", "overflow-y")),
+      "results list must scroll once clamped",
+    ).toBe("auto");
   });
 
   it("paints the roving keyboard highlight ArrowUp/ArrowDown moves onto --active", () => {
-    const match = /\.quick-switcher__item--active\s*\{([^}]*)\}/.exec(css);
     expect(
-      match,
-      "expected a `.quick-switcher__item--active { ... }` rule in app.css so the " +
+      cascadedDeclaration(".quick-switcher__item--active", "background"),
+      "expected `.quick-switcher__item--active` to set a background so the " +
         "arrow-key selection renderResults() moves is actually visible",
-    ).not.toBeNull();
-    const body = match![1]!;
-    expect(body, "the active row must set a background").toMatch(/background\s*:/);
+    ).toBeDefined();
   });
 });

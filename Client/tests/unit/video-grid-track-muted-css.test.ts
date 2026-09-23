@@ -1,26 +1,24 @@
 // jsdom never applies app.css, so a computed-style assertion against the
-// rendered tile would pass whether or not the rule exists (see
-// appearance-high-contrast.test.ts / status-picker-userbar.test.ts for the
-// same pattern). This pins the CSS *source* instead.
+// rendered tile would pass whether or not the rule exists. This asserts the
+// parsed stylesheet rules (tests/helpers/app-css.ts) instead.
 //
 // VideoGrid.ts's onTrackMute toggles `.track-muted` on the `.video-cell` to
 // hide a stalled remote camera's last frame. If app.css has no rule for that
 // class, the toggle is a no-op and the viewer keeps seeing a frozen frame
 // with no indication the track stalled.
-import { readAppCss } from "../helpers/app-css";
+import { cascadedDeclaration, keyword } from "../helpers/app-css";
 import { describe, it, expect } from "vitest";
 
 describe("VideoGrid track-muted CSS", () => {
   it("app.css hides the video element while .video-cell.track-muted is active", () => {
-    const css = readAppCss();
-
-    // Look for a rule targeting the video (or the cell itself) scoped under
-    // .video-cell.track-muted -- accept either ordering / whitespace.
-    const match = /\.video-cell\.track-muted[^{]*\{([^}]*)\}/.exec(css);
+    const selector = ".video-cell.track-muted video";
+    const hidden =
+      keyword(cascadedDeclaration(selector, "visibility")) === "hidden" ||
+      keyword(cascadedDeclaration(selector, "display")) === "none";
     expect(
-      match,
-      "expected a `.video-cell.track-muted { ... }` (or descendant `video`) rule in app.css " +
+      hidden,
+      "expected `.video-cell.track-muted video` to set visibility: hidden (or display: none) " +
         "so the mute handler's class toggle actually hides the stalled frame",
-    ).not.toBeNull();
+    ).toBe(true);
   });
 });

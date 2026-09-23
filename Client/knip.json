@@ -1,5 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["tests/helpers/app-css.ts"],
   "project": ["src/**/*.ts"],
   "ignore": ["src/lib/protocolTypes.ts"],
   "ignoreExportsUsedInFile": true,

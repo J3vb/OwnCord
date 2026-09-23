@@ -18,7 +18,8 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
 - `src/styles/app.css` is an `@import` manifest over `src/styles/app/*.css`;
   its import order is the cascade, so add rules to the owning fragment and
   never reorder imports or move rules between fragments in a visual PR.
-  Unit tests that pin CSS source read it through `tests/helpers/app-css.ts`
+  Unit tests that pin CSS rules assert on the Lightning CSS parse of it
+  through `tests/helpers/app-css.ts`, never on its source text
 - `src/lib/protocolTypes.ts` is generated — see the root CLAUDE.md
 - `tests/unit`, `tests/integration`, `tests/contract` (vitest, jsdom) ·
   `tests/e2e`, `tests/e2e/admin`, `tests/e2e/native` (Playwright) ·
