@@ -46,6 +46,8 @@ export interface MessageListOptions {
   readonly onDeleteClick: (messageId: number) => void;
   readonly onReactionClick: (messageId: number, emoji: string) => void;
   readonly onPinClick: (messageId: number, channelId: number, currentlyPinned: boolean) => void;
+  /** Report someone else's message or one of its attachments (B9-10). No button without it. */
+  readonly onReportClick?: (messageId: number) => void;
   /** Retry a failed optimistic send (by its correlation id). */
   readonly onRetry?: (correlationId: string) => void;
   /** Discard a failed optimistic send without retrying. */

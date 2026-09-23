@@ -20,6 +20,8 @@ vi.mock("@components/MemberList", () => ({
   })),
 }));
 
+vi.mock("../../src/features/reports/openers", () => ({ openUserReport: vi.fn() }));
+
 import {
   createSidebarMemberSection,
   type SidebarMemberSectionOptions,
@@ -28,6 +30,7 @@ import { authStore } from "../../src/stores/auth.store";
 import { addMember, membersStore, removeMember } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { createMemberList } from "@components/MemberList";
+import { openUserReport } from "../../src/features/reports/openers";
 import { Permission, type UserStatus } from "../../src/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -706,6 +709,44 @@ describe("SidebarMemberSection", () => {
       expect(lastCall.currentUserRole).toBe("member");
 
       section.destroy();
+    });
+  });
+
+  describe("user report (B9-10)", () => {
+    it("opens the report for that user with the live member list for focus fallback", async () => {
+      const section = createSidebarMemberSection(defaultOpts());
+      container.appendChild(section.element);
+      const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
+      calls[calls.length - 1]![0].onReportUser(7, "bob");
+      const open = openUserReport as ReturnType<typeof vi.fn>;
+      await vi.waitFor(() => expect(open).toHaveBeenCalled());
+      const { userId, name, list } = open.mock.calls[open.mock.calls.length - 1]![0];
+      expect({ userId, name }).toEqual({ userId: 7, name: "bob" });
+      expect(list).toBe(container.querySelector(".sidebar-members-content"));
+
+      section.destroy();
+    });
+
+    it("shows an error toast when the report form fails to load", async () => {
+      vi.doMock("../../src/features/reports/openers", () =>
+        Promise.reject(new Error("chunk failed")),
+      );
+      try {
+        const show = vi.fn();
+        const section = createSidebarMemberSection({
+          ...defaultOpts(),
+          getToast: vi.fn().mockReturnValue({ show }),
+        });
+        container.appendChild(section.element);
+        const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
+        calls[calls.length - 1]![0].onReportUser(7, "bob");
+        await vi.waitFor(() =>
+          expect(show).toHaveBeenCalledWith("Couldn't open the report form. Try again.", "error"),
+        );
+        section.destroy();
+      } finally {
+        vi.doUnmock("../../src/features/reports/openers");
+      }
     });
   });
 

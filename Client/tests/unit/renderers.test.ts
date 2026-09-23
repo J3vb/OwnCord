@@ -276,6 +276,36 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("offers Report on someone else's message only, and passes its id (B9-10)", () => {
+      const onReportClick = vi.fn();
+      const ac = new AbortController();
+      const theirs = renderMessage(
+        makeMessage({ id: 5, user: { id: 11, username: "Bob", avatar: null } }),
+        false,
+        [],
+        makeOpts({ onReportClick }),
+        ac.signal,
+      );
+      const btn = theirs.querySelector<HTMLButtonElement>("[data-testid='msg-report-5']");
+      expect(btn?.getAttribute("aria-label")).toBe("Report message");
+      expect(btn?.getAttribute("aria-haspopup")).toBe("dialog");
+      btn?.click();
+      expect(onReportClick).toHaveBeenCalledWith(5);
+
+      const mine = renderMessage(makeMessage(), false, [], makeOpts({ onReportClick }), ac.signal);
+      expect(mine.querySelector("[data-testid^='msg-report-']")).toBeNull();
+      // No handler, no dead button.
+      const unwired = renderMessage(
+        makeMessage({ id: 6, user: { id: 11, username: "Bob", avatar: null } }),
+        false,
+        [],
+        makeOpts(),
+        ac.signal,
+      );
+      expect(unwired.querySelector("[data-testid^='msg-report-']")).toBeNull();
+      ac.abort();
+    });
+
     it("renders grouped messages with grouped class", () => {
       const msg = makeMessage();
       const ac = new AbortController();

@@ -20,6 +20,9 @@ function useDarkSurfaces(): void {
   html.setProperty("--bg-input", "#383a40");
   applyThemeByName("dark");
 }
+// MemberList loads the profile popup on first open. Load it up front so its
+// modules' load-time listeners are not counted against the test that opens it.
+import "@components/UserProfilePopup";
 
 // jsdom has no ResizeObserver; the member menu re-clamps itself through one.
 // The fake hands the latest observer's callback to tests that resize the menu.
@@ -684,7 +687,7 @@ describe("MemberList", () => {
     expect(eveRow.classList.contains("offline")).toBe(false);
   });
 
-  it("opens the profile popup with live status after a presence-only patch", () => {
+  it("opens the profile popup with live status after a presence-only patch", async () => {
     setTestMembers(testMembers);
     memberList.mount(container);
 
@@ -699,8 +702,11 @@ describe("MemberList", () => {
 
     eveRow.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
 
+    // The popup module loads on first open.
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
     const popup = document.querySelector('[data-testid="user-profile-popup"]');
-    expect(popup).not.toBeNull();
     const statusDot = popup!.querySelector(".upp-status-dot") as HTMLDivElement;
     // Bug: createMemberItem's click handler closes over the render-time
     // `member` snapshot, which patchPresence never replaces, so the popup
@@ -830,6 +836,119 @@ describe("MemberList profile fields", () => {
     const withStatus = container.querySelector('[data-testid="member-custom-status-1"]');
     expect(withStatus?.textContent).toBe("shipping phase 6");
     expect(container.querySelector('[data-testid="member-custom-status-2"]')).toBeNull();
+  });
+
+  it("opens the profile from the keyboard, where Report names the user (B9-10)", async () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice", displayName: "Alice A." }),
+      makeMember({ id: 2, username: "me" }),
+    ]);
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 2, username: "me", avatar: null, role: "member" },
+    }));
+    const onReportUser = vi.fn();
+    list = createMemberList({ ...opts, onReportUser });
+    list.mount(container);
+
+    const row = container.querySelector<HTMLElement>('[data-testid="member-1"]')!;
+    expect(row.getAttribute("role")).toBe("button");
+    expect(row.getAttribute("tabindex")).toBe("0");
+    expect(row.getAttribute("aria-label")).toBe("Alice A.");
+    row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const report = await vi.waitFor(() => {
+      const btn = document.querySelector<HTMLButtonElement>('[data-testid="upp-report-btn"]');
+      expect(btn).not.toBeNull();
+      return btn!;
+    });
+    report.click();
+    expect(onReportUser).toHaveBeenCalledWith(1, "Alice A.");
+
+    // Your own profile has nothing to report.
+    const self = container.querySelector<HTMLElement>('[data-testid="member-2"]')!;
+    self.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
+    expect(document.querySelector('[data-testid="upp-report-btn"]')).toBeNull();
+  });
+
+  it("returns focus to the row that opened the profile after an earlier one closed (B9-10)", async () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice" }),
+      makeMember({ id: 3, username: "carol" }),
+    ]);
+    list = createMemberList(opts);
+    list.mount(container);
+    const rowA = container.querySelector<HTMLElement>('[data-testid="member-1"]')!;
+    const rowB = container.querySelector<HTMLElement>('[data-testid="member-3"]')!;
+    const openFrom = async (row: HTMLElement): Promise<void> => {
+      row.focus();
+      row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await vi.waitFor(() =>
+        expect(document.activeElement?.getAttribute("data-testid")).toBe("user-profile-popup"),
+      );
+    };
+    const escape = (): void => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    };
+
+    await openFrom(rowA);
+    escape();
+    expect(document.activeElement).toBe(rowA);
+
+    await openFrom(rowB);
+    escape();
+    expect(document.activeElement).toBe(rowB);
+  });
+
+  it("returns focus to the user's rebuilt row when the list re-rendered while the profile was open (B9-10)", async () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice" }),
+      makeMember({ id: 3, username: "carol" }),
+    ]);
+    list = createMemberList(opts);
+    list.mount(container);
+    const before = container.querySelector<HTMLElement>('[data-testid="member-3"]')!;
+    before.focus();
+    before.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() =>
+      expect(document.activeElement?.getAttribute("data-testid")).toBe("user-profile-popup"),
+    );
+
+    updateMemberRole(3, "admin");
+    membersStore.flush();
+    const after = container.querySelector<HTMLElement>('[data-testid="member-3"]')!;
+    expect(after).not.toBe(before);
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.activeElement).toBe(after);
+  });
+
+  it("describes each row by its custom status and presence, kept current (B9-10)", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice", customStatus: "shipping" }),
+      makeMember({ id: 2, username: "bob", status: "idle" }),
+    ]);
+    list = createMemberList(opts);
+    list.mount(container);
+
+    const description = (testId: string): string =>
+      container
+        .querySelector(`[data-testid="${testId}"]`)!
+        .getAttribute("aria-describedby")!
+        .split(" ")
+        .map((id) => {
+          const el = document.getElementById(id)!;
+          return el.getAttribute("aria-label") ?? el.textContent;
+        })
+        .join(" ");
+    expect(description("member-1")).toBe("shipping online");
+    expect(description("member-2")).toBe("idle");
+
+    updatePresence(1, "dnd");
+    membersStore.flush();
+    expect(description("member-1")).toBe("shipping dnd");
   });
 
   it("renders an invisible member the way it renders an offline one", () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createUserProfilePopup, type UserProfileData } from "@components/UserProfilePopup";
 
 function makeUser(overrides?: Partial<UserProfileData>): UserProfileData {
@@ -106,6 +106,29 @@ describe("UserProfilePopup", () => {
     expect(container.querySelector('[data-testid="upp-call-btn"]')).toBeNull();
 
     popup.destroy?.();
+  });
+
+  it("Report closes the popup, returns focus, then reports the user (B9-10)", () => {
+    const opener = document.createElement("button");
+    container.appendChild(opener);
+    opener.focus();
+    const onReport = vi.fn(() => {
+      // The report dialog opens from where the popup put focus back.
+      expect(document.activeElement).toBe(opener);
+      expect(container.querySelector(".upp-popup")).toBeNull();
+    });
+    const popup = createUserProfilePopup({
+      user: makeUser({ id: 9 }),
+      anchorX: 100,
+      anchorY: 100,
+      onReport,
+    });
+    popup.mount(container);
+    const btn = container.querySelector<HTMLButtonElement>('[data-testid="upp-report-btn"]');
+    expect(btn?.textContent?.trim()).toBe("Report");
+    expect(btn?.getAttribute("aria-haspopup")).toBe("dialog");
+    btn?.click();
+    expect(onReport).toHaveBeenCalledWith(9);
   });
 
   it("outside click closes the popup", () => {

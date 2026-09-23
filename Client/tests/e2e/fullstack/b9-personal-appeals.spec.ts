@@ -34,6 +34,10 @@ const historyRow = (pane: Locator, reason: string) =>
 const appealRow = (pane: Locator, reason: string) =>
   pane.locator(".safety-appeals-list > .safety-history-row", { hasText: `Reason: ${reason}` });
 
+// The Safety tab also holds My reports, whose section has its own alert.
+const appealAlert = (pane: Locator) =>
+  pane.getByRole("region", { name: "Appeals" }).getByRole("alert");
+
 /** Open the form on the history row for `reason`, type, and send. */
 async function fileAppeal(pane: Locator, reason: string, text: string): Promise<void> {
   await historyRow(pane, reason).locator(".safety-appeal-open").click();
@@ -78,7 +82,7 @@ test.describe("B9-16 personal appeals (real server)", () => {
       return method === "POST" && path === "/api/v1/appeals/";
     });
     await fileAppeal(pane, "Appeal me", "I was quoting\nthe rules.");
-    await expect(pane.getByRole("alert")).toHaveText("Your appeal wasn't sent. Try again.");
+    await expect(appealAlert(pane)).toHaveText("Your appeal wasn't sent. Try again.");
     await expect(pane.locator("#safety-appeal-body")).toHaveValue("I was quoting\nthe rules.");
     await bob.waitForTimeout(500);
     expect(paths.filter((p) => p === "POST /api/v1/appeals/")).toHaveLength(1);
@@ -169,7 +173,7 @@ test.describe("B9-16 personal appeals (real server)", () => {
     await fileAppeal(pane, "W3", "third");
     await expect(appealRow(pane, "W3")).toContainText("Status: open");
     await fileAppeal(pane, "W4", "fourth");
-    await expect(pane.getByRole("alert")).toHaveText(
+    await expect(appealAlert(pane)).toHaveText(
       "You've filed 3 appeals in the last 24 hours. Try again later.",
     );
     await expect(pane.locator("#safety-appeal-body")).toHaveValue("fourth");
