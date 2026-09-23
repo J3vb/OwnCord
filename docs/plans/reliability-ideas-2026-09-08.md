@@ -235,8 +235,9 @@ Implemented 2026-09-23 against `dev` at
   shows the result to `ADMINISTRATOR` holders through
   `GET /admin/api/attention`.
 - Each signal is `ok`, `warning`, `critical` or `unknown`. Unknown covers an
-  unsupported platform, a failed read, a first rate sample, or a job or backup
-  that has not run yet. It neither raises nor clears a warning.
+  unsupported platform, a failed read, a first rate sample, a job or backup
+  that has not run yet, or disk space with both disk floors at `0`. It
+  neither raises nor clears a warning.
 - Thresholds come from the new `attention.*` config floors and
   `server.min_free_disk_mb`. Each rate learns a baseline over ten samples,
   skipping the first measured minute (the post-restart resume burst). During
@@ -258,7 +259,8 @@ Implemented 2026-09-23 against `dev` at
 - Tests: `Server/service/attention_test.go` covers unknown handling, first
   samples, hysteresis, warm-up, boot pressure, baseline, deduplication,
   expiry, dispatch, jobs and backups. The route has `Server/admin/handlers_attention_test.go`,
-  the maintenance recording has `TestMaintenance_TickRecordsJobHealth`, and the
+  the maintenance recording has `TestMaintenance_TickRecordsJobHealth` and
+  `TestMaintenance_StartupRunsRecordJobHealth`, and the
   panel has `Client/tests/contract/server-admin-static-attention.test.ts`.
 
 ### RI-08 — Destructive policy preview

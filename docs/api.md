@@ -3224,7 +3224,9 @@ Nothing here is exported off the host.
 
 - `status` is `ok`, `warning`, `critical` or `unknown`. `unknown` means the
   server could not take the measurement (an unsupported platform, a failed
-  read, a rate with one sample so far, a job that has not run since start).
+  read, a rate with one sample so far, a job that has not run since start,
+  disk space with `attention.disk_warn_free_mb` and `server.min_free_disk_mb`
+  both `0`).
   It is never reported as healthy and neither raises nor clears a warning.
 - `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `backup`,
   and `job:<name>` for each maintenance step.
