@@ -1286,7 +1286,7 @@ function renderChannelPermsModal(){
   opts+='</optgroup>';
   let memberOpts='<option value="">— pick a member —</option>';
   picked.forEach(u=>{memberOpts+='<option value="'+u.id+'">'+esc(u.username)+'</option>'});
-  let actionOpts='<option value="">All actions</option>';
+  let actionOpts='';
   ACCESS_ACTIONS.forEach(a=>{actionOpts+='<option value="'+a[0]+'">'+esc(a[1])+'</option>'});
 
   openModal('<div class="modal-header"><h3>Channel Permissions — #'+esc(pc.name)+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
@@ -1385,11 +1385,11 @@ async function explainAccess(){
   const pc=state.permChannel;if(!pc)return;
   const box=document.getElementById('permExplain');
   const uid=(document.getElementById('explainUser')||{}).value;
-  const action=(document.getElementById('explainAction')||{}).value||'';
+  const action=(document.getElementById('explainAction')||{}).value;
   if(!uid){showToast('Pick a member first','error');return}
   let r;
   try{
-    r=await api('GET','/channels/'+pc.id+'/access/explain?user_id='+encodeURIComponent(uid)+(action?'&action='+encodeURIComponent(action):''));
+    r=await api('GET','/channels/'+pc.id+'/access/explain?user_id='+encodeURIComponent(uid)+'&action='+encodeURIComponent(action));
   }catch(e){showToast(e.message,'error');return}
   const rs=r.restrictions||{};
   const facts=['Role: '+esc(r.role_name||'none')];

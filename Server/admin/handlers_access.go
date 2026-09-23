@@ -25,7 +25,12 @@ func handleExplainAccess(channels *service.ChannelService) http.HandlerFunc {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
 			return
 		}
-		res, err := channels.ExplainAccess(r.Context(), actorFromContext(r), userID, ch, r.URL.Query().Get("action"))
+		actorRole := actorRoleFromContext(r)
+		if actorRole == nil {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			return
+		}
+		res, err := channels.ExplainAccess(r.Context(), actorFromContext(r), actorRole, userID, ch, r.URL.Query().Get("action"))
 		if err != nil {
 			writeSvcErr(w, err, "", "", "failed to explain access")
 			return
@@ -54,7 +59,12 @@ func handlePreviewAccess(channels *service.ChannelService) http.HandlerFunc {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 			return
 		}
-		res, err := channels.PreviewOverride(r.Context(), actorFromContext(r), ch, req.RoleID, req.UserID, req.Allow, req.Deny)
+		actorRole := actorRoleFromContext(r)
+		if actorRole == nil {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			return
+		}
+		res, err := channels.PreviewOverride(r.Context(), actorFromContext(r), actorRole, ch, req.RoleID, req.UserID, req.Allow, req.Deny)
 		if err != nil {
 			writeSvcErr(w, err, "", "", "failed to preview access")
 			return

@@ -44,8 +44,9 @@ func TestAccessExplainAndPreview_Routes(t *testing.T) {
 	}{
 		{"", http.StatusBadRequest},
 		{"?user_id=abc", http.StatusBadRequest},
+		{"?user_id=" + itoa(target), http.StatusBadRequest},
 		{"?user_id=" + itoa(target) + "&action=fly", http.StatusBadRequest},
-		{"?user_id=999999", http.StatusNotFound},
+		{"?user_id=999999&action=view_channel", http.StatusNotFound},
 	} {
 		if w := doRequest(t, handler, http.MethodGet, base+"explain"+c.query, token, nil); w.Code != c.want {
 			t.Errorf("explain%s = %d, want %d", c.query, w.Code, c.want)
@@ -70,7 +71,7 @@ func TestAccessExplainAndPreview_Routes(t *testing.T) {
 	if w := doRequest(t, handler, http.MethodPost, base+"preview", token, map[string]any{}); w.Code != http.StatusBadRequest {
 		t.Errorf("preview without a target = %d, want 400", w.Code)
 	}
-	if w := doRequest(t, handler, http.MethodGet, "/channels/999999/access/explain?user_id="+itoa(target), token, nil); w.Code != http.StatusNotFound {
+	if w := doRequest(t, handler, http.MethodGet, "/channels/999999/access/explain?user_id="+itoa(target)+"&action=view_channel", token, nil); w.Code != http.StatusNotFound {
 		t.Errorf("unknown channel = %d, want 404", w.Code)
 	}
 }
@@ -90,5 +91,32 @@ func TestAccessExplainAndPreview_RequireManageChannels(t *testing.T) {
 	}
 	if w := doRequest(t, handler, http.MethodPost, base+"preview", token, map[string]any{"user_id": uid}); w.Code != http.StatusForbidden {
 		t.Errorf("preview = %d, want 403", w.Code)
+	}
+}
+
+// A MANAGE_CHANNELS holder below Administrator may explain or preview only a
+// member ranked below them — the override editor's rank rule.
+func TestAccessExplainAndPreview_RefuseHigherRankedMember(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "mod-explain")
+	seniorID, _ := createRoleUser(t, database, 11, "Senior", permissions.ReadMessages, 80, "senior-explain")
+	lowID, _ := createRoleUser(t, database, 12, "Junior", permissions.ReadMessages, 20, "junior-explain")
+	chID, err := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	base := "/channels/" + itoa(chID) + "/access/"
+
+	for _, c := range []struct {
+		target int64
+		want   int
+	}{{lowID, http.StatusOK}, {seniorID, http.StatusForbidden}} {
+		if w := doRequest(t, handler, http.MethodGet, base+"explain?action=view_channel&user_id="+itoa(c.target), modToken, nil); w.Code != c.want {
+			t.Errorf("explain user %d = %d, want %d; body = %s", c.target, w.Code, c.want, w.Body.String())
+		}
+		if w := doRequest(t, handler, http.MethodPost, base+"preview", modToken, map[string]any{"user_id": c.target}); w.Code != c.want {
+			t.Errorf("preview user %d = %d, want %d; body = %s", c.target, w.Code, c.want, w.Body.String())
+		}
 	}
 }

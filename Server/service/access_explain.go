@@ -111,22 +111,24 @@ func (m *accessMember) decisions(o permissions.ChannelOverride) []permissions.De
 	return out
 }
 
-// ExplainAccess reports userID's effective decision for each action in the
-// guild channel ch (or only action, when non-empty) and the rules behind it.
-// The read is audited: it discloses a member's restriction state.
-func (s *ChannelService) ExplainAccess(ctx context.Context, actorID, userID int64, ch *db.Channel, action string) (AccessExplanation, error) {
-	if action != "" {
-		if _, err := permissions.Explain(permissions.Action(action), permissions.Subject{}); err != nil {
-			return AccessExplanation{}, fmt.Errorf("%w%.0w", err, ErrBadRequest)
-		}
+// ExplainAccess reports userID's effective decision for action in the guild
+// channel ch and the rules behind it. The read is audited: it discloses a
+// member's restriction state, so like editing that member's override it is
+// refused for a member ranked at or above the actor.
+func (s *ChannelService) ExplainAccess(ctx context.Context, actorID int64, actorRole *db.Role, userID int64, ch *db.Channel, action string) (AccessExplanation, error) {
+	if _, err := permissions.Explain(permissions.Action(action), permissions.Subject{}); err != nil {
+		return AccessExplanation{}, fmt.Errorf("%w%.0w", err, ErrBadRequest)
 	}
 	m, err := s.loadAccessMember(ctx, userID, ch, nil)
 	if err != nil {
 		return AccessExplanation{}, err
 	}
+	if err := s.requireOutranks(ctx, actorRole, m.user); err != nil {
+		return AccessExplanation{}, err
+	}
 	var ds []permissions.Decision
 	for _, d := range m.decisions(m.subject.Override) {
-		if action == "" || string(d.Action) == action {
+		if string(d.Action) == action {
 			ds = append(ds, d)
 		}
 	}
@@ -176,12 +178,13 @@ type AccessPreview struct {
 // PreviewOverride evaluates a proposed override on ch — the role layer for
 // roleID, or the member layer for userID (exactly one is non-zero) — against
 // the same predicates as ExplainAccess, and returns every member whose
-// decision for any action changes. Nothing is written except the audit row;
-// the save path re-checks its own authority (escalation, hierarchy) on PUT.
+// decision for any action changes. The member layer is refused for a member
+// ranked at or above the actor, as editing it is. Nothing is written except
+// the audit row; the save path re-checks its own authority on PUT.
 //
 // ponytail: one live Subject per member of the role (a few indexed reads
 // each); batch the reads if a role grows to tens of thousands of members.
-func (s *ChannelService) PreviewOverride(ctx context.Context, actorID int64, ch *db.Channel, roleID, userID, allowRaw, denyRaw int64) (AccessPreview, error) {
+func (s *ChannelService) PreviewOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, roleID, userID, allowRaw, denyRaw int64) (AccessPreview, error) {
 	if (roleID == 0) == (userID == 0) {
 		return AccessPreview{}, fmt.Errorf("exactly one of role_id or user_id is required%.0w", ErrBadRequest)
 	}
@@ -210,6 +213,9 @@ func (s *ChannelService) PreviewOverride(ctx context.Context, actorID int64, ch 
 			return AccessPreview{}, err
 		}
 		if roleID == 0 {
+			if err := s.requireOutranks(ctx, actorRole, m.user); err != nil {
+				return AccessPreview{}, err
+			}
 			target = "user " + m.user.Username
 		}
 		proposed := m.subject.Override

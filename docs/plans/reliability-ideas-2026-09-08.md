@@ -191,16 +191,22 @@ Implemented 2026-09-23:
   `AuthorizeVoiceModerator`) and traces the bits it consulted through base
   role, role override and member override. A test pins that its verdict and
   reason equal the predicate's for every action over a table of subjects.
-- `GET /admin/api/channels/{id}/access/explain` resolves the member's Subject
-  live through `permissions.Checker.Subject` (role, both layers, active
-  timeout) plus NSFW acknowledgement, and applies session admission (effective
-  ban, unapproved registration) on top. No session is created or used.
+- `GET /admin/api/channels/{id}/access/explain` takes one required action and
+  resolves the member's Subject live through `permissions.Checker.Subject`
+  (role, both layers, active timeout) plus NSFW acknowledgement, and applies
+  session admission (effective ban, unapproved registration) on top. No
+  session is created or used.
 - `POST /admin/api/channels/{id}/access/preview` substitutes the proposed role
   or member layer into each reachable member's live Subject, evaluates every
   action before and after, and lists only the members whose decision flips.
   It writes nothing; the save path keeps its own escalation and hierarchy
   checks. Both routes sit under `MANAGE_CHANNELS` beside the override editor
-  and are audited (`permission_explain`, `permission_preview`).
+  and are audited (`permission_explain`, `permission_preview`). Explain and a
+  member-layer preview follow the editor's rank rule: below Administrator, a
+  member ranked at or above the caller is refused, so no one reads a
+  higher-ranked member's ban, timeout, registration or NSFW consent state.
+- An Administrator's decision carries no bit trace, since the predicate
+  consults no bit or override layer for it.
 - The admin panel's channel-permissions modal gains "Explain access" and
   "Preview matrix change"; both only render the server's answer. The quick
   "Can access" toggles are not previewed, and role base-permission edits

@@ -59,12 +59,13 @@ type BitRule struct {
 
 // Decision is the verdict of one action's predicate for a Subject, with the
 // bit trace that fed it. Reason is the predicate's own error text when denied.
+// An Administrator's decision carries no trace: no bit or layer is consulted.
 type Decision struct {
 	Action              Action    `json:"action"`
 	Allowed             bool      `json:"allowed"`
 	Reason              string    `json:"reason,omitempty"`
 	AdministratorBypass bool      `json:"administrator_bypass"`
-	Bits                []BitRule `json:"bits"`
+	Bits                []BitRule `json:"bits,omitempty"`
 }
 
 func layerState(allow, deny, bit int64) string {
@@ -89,6 +90,9 @@ func Explain(a Action, s Subject) (Decision, error) {
 		d.Reason = err.Error()
 	} else {
 		d.Allowed = true
+	}
+	if d.AdministratorBypass {
+		return d, nil
 	}
 	for bits != 0 {
 		bit := bits & -bits

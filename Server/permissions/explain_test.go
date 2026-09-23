@@ -57,7 +57,7 @@ func TestExplainTracesLayers(t *testing.T) {
 			t.Errorf("bit %d = %+v, want %+v", i, d.Bits[i], want[i])
 		}
 	}
-	if d, _ := Explain(ActionViewChannel, Subject{RolePerms: Administrator, Channel: text(false)}); !d.AdministratorBypass || !d.Allowed {
+	if d, _ := Explain(ActionViewChannel, Subject{RolePerms: Administrator, Override: deny(ReadMessages), Channel: text(false)}); !d.AdministratorBypass || !d.Allowed || d.Bits != nil {
 		t.Errorf("admin = %+v", d)
 	}
 }

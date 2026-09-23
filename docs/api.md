@@ -4161,8 +4161,8 @@ cache/fan-out behavior as the writes; audits as `channel_perms_clear` /
 ### GET /admin/api/channels/{id}/access/explain
 
 Explain one member's effective access in a channel (RI-06). Query:
-`user_id` (required) and `action` (optional; omit for every action). Actions
-map one-to-one onto the server's authorization predicates:
+`user_id` and `action`, both required. Actions map one-to-one onto the
+server's authorization predicates:
 
 | `action`         | Predicate                                                 |
 | ---------------- | --------------------------------------------------------- |
@@ -4179,7 +4179,14 @@ never the 30-second permission cache. An effectively banned account, or one
 whose registration is not `active`, holds no session, so every action is
 denied with that reason. Nothing here creates or uses a session for the
 member. `bits` traces each bit the predicate consulted through the layers
-(`""` means the layer has no opinion).
+(`""` means the layer has no opinion). It is omitted when
+`administrator_bypass` is true: an Administrator's decision consults no bit
+and no override layer.
+
+Like editing a member's override, explaining one is refused for a member
+whose role ranks at or above the caller's own, unless the caller holds
+`ADMINISTRATOR`: the answer discloses that member's ban, registration,
+timeout and NSFW consent state.
 
 ```json
 {
@@ -4234,8 +4241,9 @@ matching `PUT` would take (clamped the same way). Every member the override
 could reach — each holder of the role, or the one member — is evaluated for
 every action with the current and the proposed layer, through the same
 predicates as `explain`; `members` lists only those whose decision changes.
-Nothing is written. The save path still applies its own escalation and
-hierarchy checks.
+Nothing is written. A `user_id` preview follows the same rank rule as
+`explain`; a `role_id` preview does not. The save path still applies its own
+escalation and hierarchy checks.
 
 ```json
 {
@@ -4262,11 +4270,11 @@ hierarchy checks.
 
 Audited as `permission_preview`, target `channel`.
 
-| Status | Code          | When                                                           |
-| ------ | ------------- | -------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | Bad `user_id`, unknown `action`, or not exactly one of the ids |
-| 403    | `FORBIDDEN`   | Missing `MANAGE_CHANNELS`                                      |
-| 404    | `NOT_FOUND`   | Unknown or DM channel, unknown role or user                    |
+| Status | Code          | When                                                                      |
+| ------ | ------------- | ------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Bad `user_id`, missing or unknown `action`, or not exactly one of the ids |
+| 403    | `FORBIDDEN`   | Missing `MANAGE_CHANNELS`, or the member ranks at or above you            |
+| 404    | `NOT_FOUND`   | Unknown or DM channel, unknown role or user                               |
 
 ---
 
