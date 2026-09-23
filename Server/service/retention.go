@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,6 +16,9 @@ import (
 // RetentionStore is the slice of Store the retention sweep needs.
 type RetentionStore interface {
 	db.Auditor
+	RetentionPolicySnapshot(ctx context.Context) (*db.RetentionPolicySnapshot, error)
+	PreviewRetentionChange(ctx context.Context, change db.RetentionChange, revision string, observed time.Time) (*db.RetentionChangeEffect, error)
+	ApplyRetentionChange(ctx context.Context, actorID int64, change db.RetentionChange, revision string) (string, error)
 	ServerRetentionDays(ctx context.Context) (int, error)
 	ListChannelRetention(ctx context.Context) ([]db.ChannelRetention, error)
 	GetChannelRetention(ctx context.Context, channelID int64) (*db.ChannelRetention, error)
@@ -70,17 +74,20 @@ type RetentionHub interface {
 // messages-scoped deletion marker per channel so a restored backup is
 // swept again to the same cutoff (HP-4 decision 6).
 type RetentionService struct {
-	mu      syncutil.Mutex
-	st      RetentionStore
-	files   FileRemover
-	hub     RetentionHub
-	markers *db.MarkerStore
-	now     func() time.Time
+	previewKey [32]byte
+	mu         syncutil.Mutex
+	st         RetentionStore
+	files      FileRemover
+	hub        RetentionHub
+	markers    *db.MarkerStore
+	now        func() time.Time
 }
 
 // NewRetentionService wires the sweep over st.
 func NewRetentionService(st RetentionStore) *RetentionService {
-	return &RetentionService{st: st, now: time.Now}
+	s := &RetentionService{st: st, now: time.Now}
+	_, _ = rand.Read(s.previewKey[:])
+	return s
 }
 
 // SetFiles installs the upload storage the sweep removes files through.
@@ -100,10 +107,7 @@ func (s *RetentionService) SetClock(now func() time.Time) { s.now = now }
 
 // RetentionPolicy is what the admin panel reads: the server window and
 // every channel override.
-type RetentionPolicy struct {
-	ServerDays int                   `json:"server_days"`
-	Channels   []db.ChannelRetention `json:"channels"`
-}
+type RetentionPolicy = db.RetentionPolicySnapshot
 
 // ServerDays returns only the server-default message window. Zero means keep
 // indefinitely; channel overrides remain on the admin-only Policy path.
@@ -113,15 +117,20 @@ func (s *RetentionService) ServerDays(ctx context.Context) (int, error) {
 
 // Policy returns the current policy.
 func (s *RetentionService) Policy(ctx context.Context) (*RetentionPolicy, error) {
-	days, err := s.st.ServerRetentionDays(ctx)
+	p, err := s.st.RetentionPolicySnapshot(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
-	channels, err := s.st.ListChannelRetention(ctx)
+	return p, nil
+}
+
+// ChannelPolicy preserves the channel-write response, including audit metadata.
+func (s *RetentionService) ChannelPolicy(ctx context.Context, channelID int64) (*db.ChannelRetention, error) {
+	p, err := s.st.GetChannelRetention(ctx, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
-	return &RetentionPolicy{ServerDays: days, Channels: channels}, nil
+	return p, nil
 }
 
 // SetChannelPolicy sets a channel's window (days >= RetentionMinDays, or 0

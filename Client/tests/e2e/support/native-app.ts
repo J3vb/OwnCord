@@ -60,8 +60,12 @@ export async function startNativeApp(
     // Returning that page made any spec that asserts immediately (title,
     // __TAURI_INTERNALS__) race the navigation. index.html's <title> is static
     // markup, so the app document is present as soon as its title is "OwnCord" —
-    // wait for that, across the navigation, before handing the page out.
-    await expect(page).toHaveTitle("OwnCord");
+    // wait for that, across the navigation, before handing the page out. The
+    // navigation can stall past the 15s expect default on a busy runner, so it
+    // shares the startup deadline too.
+    await expect(page).toHaveTitle("OwnCord", {
+      timeout: Math.max(1, startupDeadline - Date.now()),
+    });
     console.log(`native app ready: CDP after ${cdpReady}ms, page after ${Date.now() - started}ms`);
     return {
       cdpURL: `http://127.0.0.1:${port}`,

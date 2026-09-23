@@ -155,6 +155,14 @@ export interface ReadyChannel {
    */
   readonly can_send?: boolean;
   /**
+   * Whether the current user may mute, deafen, move or disconnect voice
+   * participants in this channel — server-computed from the same authorizer
+   * voice moderation enforces (base MUTE_MEMBERS, then effective
+   * READ|MUTE_MEMBERS after channel overrides). Target rank and move capacity
+   * stay server-side refusals. Absent from older servers.
+   */
+  readonly can_moderate_voice?: boolean;
+  /**
    * Per-channel cooldown in seconds (0 = off). Drives the composer's
    * slow-mode countdown; the server still enforces. Absent from older servers.
    */
@@ -410,13 +418,19 @@ export interface ChannelCreatePayload {
   /**
    * This viewer's composer affordance — see ReadyChannel.can_send.
    *
-   * Present only on the per-client channel_create the server sends when a
-   * role or override edit changes who may post (RefreshChannelVisibility);
-   * absent on the shared-buffer broadcast, which encodes one frame for many
-   * recipients, and absent from older servers. Treat absent as "unchanged",
+   * Every channel_create is addressed to one client — at channel creation
+   * and when a role or override edit changes who may post
+   * (RefreshChannelVisibility) — and carries this viewer's verdict. Older
+   * servers sent a shared broadcast without it. Treat absent as "unchanged",
    * never as false.
    */
   readonly can_send?: boolean;
+  /**
+   * This viewer's voice-moderation affordance — see
+   * ReadyChannel.can_moderate_voice. Same targeted-only, absent-means-
+   * unchanged rules as can_send.
+   */
+  readonly can_moderate_voice?: boolean;
 }
 
 export interface ChannelUpdatePayload {

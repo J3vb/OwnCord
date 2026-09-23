@@ -93,6 +93,7 @@ func mountRetentionRoutes(r chi.Router, retention *service.RetentionService) {
 		r.Use(requirePerm(permissions.ManageServer))
 		r.Get("/retention", handleGetRetention(retention))
 		r.Get("/retention/preview", handleGetRetentionPreview(retention))
+		r.Post("/retention/preview", handlePostRetentionPreview(retention))
 		r.Put("/channels/{id}/retention", handlePutChannelRetention(retention))
 		r.Delete("/channels/{id}/retention", handleDeleteChannelRetention(retention))
 	})
@@ -260,6 +261,10 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			// gated on the same MANAGE_CHANNELS bit as the role layer.
 			r.Put("/channels/{id}/user-permissions/{userId}", handlePutChannelUserPermission(channels, hub, permInvalidator))
 			r.Delete("/channels/{id}/user-permissions/{userId}", handleDeleteChannelUserPermission(channels, hub, permInvalidator))
+			// RI-06: explain a member's effective access and preview a
+			// proposed override — read-only, same bit as editing overrides.
+			r.Get("/channels/{id}/access/explain", handleExplainAccess(channels))
+			r.Post("/channels/{id}/access/preview", handlePreviewAccess(channels))
 		})
 
 		// Role CRUD. MANAGE_ROLES gates the group; RoleService additionally
@@ -286,7 +291,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageServer))
 			r.Get("/settings", handleGetSettings(settings))
-			r.Patch("/settings", handlePatchSettings(settings))
+			r.Patch("/settings", handlePatchSettings(settings, svc.Retention))
 		})
 		ownerOnly(r, http.MethodPost, "/backup", handleBackup(database))
 		ownerOnly(r, http.MethodGet, "/backups", handleListBackups())

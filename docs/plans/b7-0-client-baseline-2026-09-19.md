@@ -805,3 +805,60 @@ The job's measured added time is recorded in the PR.
 - `typecheck`, `typecheck:build`, `typecheck:e2e`, `lint`, `knip`, the mutation
   shard union (106 files), `actionlint` and `zizmor` on the nightly workflow,
   `check:docs` and `check:hygiene` are clean.
+
+## B7 voice-join budget baseline (2026-09-23)
+
+Closes item 2 of the
+[B7-18 reconciliation](b7-shared-client-platform-desktop-parity.prd.md#b7-18-reconciliation-2026-09-23):
+the exit gate asked for a client voice-join budget, and no B7 milestone had
+recorded one.
+
+**Measure.** Wall clock from clicking a voice channel to the widget reading
+"Voice Connected" with the peer's remote audio decoding and advancing. This is
+the bar `expectDecodedMedia` sets, so a connected badge or RTP bytes alone do
+not count. It covers the `voice_join` → `voice_token` round trip, the lazy
+LiveKit chunk on the first join, the room connect, the E2EE key exchange and
+the first decoded audio. `Client/tests/e2e/fullstack/voice-join-budget.spec.ts`
+has bob join first and publish. Alice then joins seven times, polled every
+50 ms, and every sample is attached to the report. Each join is the first on a
+fresh application socket: after the first, alice disconnects, the fixture
+drops and restores her socket (as `media.spec.ts`'s reconnect test does), and
+she joins again. The spec runs in the `client-fullstack` job
+(`npm run test:e2e:fullstack`) on every PR that runs that job, so it needs no
+job of its own.
+
+Why a fresh socket: the server handles one socket's messages in order, and
+`handleVoiceLeave` ends with a best-effort LiveKit `RemoveParticipant` call
+(`Server/ws/voice_leave.go`). A first draft rejoined on the same socket
+straight after leaving. About one rejoin in six waited 3–6 s, because the
+`voice_join` queued behind a `RemoveParticipant` that LiveKit answered slowly
+or with `twirp error unavailable` (CI run
+[35850743720](https://github.com/J3vb/OwnCord/actions/runs/35850743720),
+confirmed in the server log locally). That measures a server leave, not a
+client join. A user who joins after opening the app, or after a reconnect,
+does not wait behind it.
+
+**Baseline.** Measured at `dev` `56055d86` on `ubuntu-latest` in the
+`client-fullstack` job's setup (headless Chromium, real server, LiveKit
+1.13.5, E2EE on). The CI calibration run is
+[35852239736](https://github.com/J3vb/OwnCord/actions/runs/35852239736),
+`--repeat-each=4`, 28 samples:
+
+| Run | Samples (ms)                       | Median (ms) |
+| --- | ---------------------------------- | ----------- |
+| 1   | 533, 337, 487, 420, 434, 462, 534  | 462         |
+| 2   | 607, 677, 680, 598, 670, 2406, 434 | 670         |
+| 3   | 615, 667, 692, 312, 329, 421, 726  | 615         |
+| 4   | 680, 634, 657, 443, 330, 678, 425  | 634         |
+
+The first join of each run, which also loads the lazy LiveKit chunk, took
+533–680 ms. 27 of the 28 samples fell between 312 and 726 ms. Locally, three
+runs had medians of 358–452 ms.
+
+**Budget.** The median of seven joins must be 1,500 ms or less
+(`Client/voice-join-budget.json`). That is the worst run median, 670 ms, × 2.2,
+rounded up to the next 500 ms. The headroom is wider than the bundle budgets'
+10 % because runner timing noise is wider. The median of seven fails only when
+four joins are over budget, so one slow join (one in 28 here) does not trip it,
+while a regression that slows every join does. Change the budget only with a
+new CI measurement recorded here.

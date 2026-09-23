@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/J3vb/OwnCord/Server/service"
 )
@@ -29,7 +31,7 @@ func handleGetSettings(settings *service.SettingsService) http.HandlerFunc {
 	}
 }
 
-func handlePatchSettings(settings *service.SettingsService) http.HandlerFunc {
+func handlePatchSettings(settings *service.SettingsService, retention *service.RetentionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if settings == nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "settings service unavailable")
@@ -38,6 +40,24 @@ func handlePatchSettings(settings *service.SettingsService) http.HandlerFunc {
 		var updates map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+			return
+		}
+
+		if value, changing := updates["retention_days"]; changing {
+			if retention == nil {
+				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention service unavailable")
+				return
+			}
+			days, err := strconv.Atoi(strings.TrimSpace(value))
+			if err != nil || len(updates) != 1 {
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "preview and apply retention_days separately from other settings")
+				return
+			}
+			if err := retention.ApplyChange(r.Context(), actorFromContext(r), service.RetentionChange{Scope: "server", Days: &days}, r.Header.Get("X-Retention-Preview")); err != nil {
+				writeRetentionErr(w, err)
+				return
+			}
+			handleGetSettings(settings)(w, r)
 			return
 		}
 

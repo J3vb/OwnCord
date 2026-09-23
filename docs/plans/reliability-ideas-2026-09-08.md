@@ -2,9 +2,9 @@
 
 **Status:** 2026-09-08 — owner approved recording all eight ideas and starting
 the first four. RI-01 through RI-04 are implemented and merged into `dev` in
-PR #1573 (commit `3221fe9e`). RI-05 is implemented on 2026-09-23; RI-06
-through RI-08 remain backlog ideas. The validation record and remaining limits
-are below.
+PR #1573 (commit `3221fe9e`). RI-05, RI-06 and RI-08 are implemented on
+2026-09-23; RI-07 remains a backlog idea. The validation record and remaining
+limits are below.
 
 **Base:** `dev` at `c900953651088120c62ff05d67abc2ffc74c2701`.
 
@@ -22,9 +22,9 @@ remains B6/B10. Implementing one item does not close those phases.
 | RI-03 | Guided connection and voice test               | Identify the failed connection stage with useful next steps         | Merged      | B6 connectivity; B9 diagnostics                  |
 | RI-04 | Retry-safe messaging and pending-send recovery | Preserve user intent across lost acknowledgments and restarts       | Merged      | Protocol/persistence contracts; B9 messaging     |
 | RI-05 | Spread reconnect attempts                      | Reduce synchronized retry pressure after a shared outage            | Implemented | B6 capacity; B7 reconnect behavior               |
-| RI-06 | Explain permissions and preview access changes | Help admins understand and safely change effective access           | Backlog     | B9 administration                                |
+| RI-06 | Explain permissions and preview access changes | Help admins understand and safely change effective access           | Implemented | B9 administration                                |
 | RI-07 | Admin attention panel                          | Surface failed maintenance and capacity pressure early              | Backlog     | B6 operations; B9 administration                 |
-| RI-08 | Preview destructive policy changes             | Show the impact of proposed retention settings before applying them | Backlog     | B9; existing BPR-054 retention controls          |
+| RI-08 | Preview destructive policy changes             | Show the impact of proposed retention settings before applying them | Implemented | B9; existing BPR-054 retention controls          |
 
 ## First implementation batch
 
@@ -184,6 +184,35 @@ changes against the same rules before saving and show whose access changes.
 Do not build a second permission engine in the client or use preview to
 impersonate another user's session.
 
+Implemented 2026-09-23:
+
+- `permissions.Explain` runs the named canonical predicate (`CanViewChannel`,
+  `CanReadContent`, `CanSendMessage`, `CanAddReaction`, `CanJoinVoice`,
+  `AuthorizeVoiceModerator`) and traces the bits it consulted through base
+  role, role override and member override. A test pins that its verdict and
+  reason equal the predicate's for every action over a table of subjects.
+- `GET /admin/api/channels/{id}/access/explain` takes one required action and
+  resolves the member's Subject live through `permissions.Checker.Subject`
+  (role, both layers, active timeout) plus NSFW acknowledgement, and applies
+  session admission (effective ban, unapproved registration) on top. No
+  session is created or used.
+- `POST /admin/api/channels/{id}/access/preview` substitutes the proposed role
+  or member layer into each reachable member's live Subject, evaluates every
+  action before and after, and lists only the members whose decision flips.
+  It writes nothing; the save path keeps its own escalation and hierarchy
+  checks. Both routes sit under `MANAGE_CHANNELS` beside the override editor
+  and are audited (`permission_explain`, `permission_preview`). Both follow
+  the editor's rank rules: below Administrator, a member ranked at or above
+  the caller is refused, and a role-layer preview is refused for a role at or
+  above the caller's rank, so no route reads a peer's or higher-ranked
+  member's ban, timeout, registration or NSFW consent state.
+- An Administrator's decision carries no bit trace, since the predicate
+  consults no bit or override layer for it.
+- The admin panel's channel-permissions modal gains "Explain access" and
+  "Preview matrix change"; both only render the server's answer. The quick
+  "Can access" toggles are not previewed, and role base-permission edits
+  (server-wide) have no preview yet.
+
 ### RI-07 — Admin attention panel
 
 Reuse disk, writer-wait, reconnect and delivery-pressure metrics. Add last
@@ -204,12 +233,32 @@ and policy revision on apply; concurrent changes must not silently overwrite
 another admin's work. Existing confirmation and current-policy previews
 remain useful parts of this workflow.
 
+RI-08 implementation (2026-09-23), based on `dev` commit
+`0beee8e4c50ca18823750e381d3a1d6e327029b8`:
+
+- Proposed server windows, channel overrides and override removal receive a
+  read-only snapshot with per-channel counts, protected exclusions and UTC
+  observation time. The existing saved-policy preview stays available.
+- A 15-minute signed preview binds the exact edit, actor and durable revision.
+  Apply resolves the current bearer permissions again; a transaction rejects
+  stale revisions with HTTP 409 and a reload/preview message. Server settings,
+  override writes and cascade deletions invalidate outstanding previews, even
+  when a value changes back within the same second.
+- The panel requires preview followed by confirmation, discards canceled or
+  failed previews and displays apply failures without silently retrying.
+- Regression coverage: `Server/db/retention_preview_test.go`,
+  `Server/service/retention_preview_test.go`,
+  `Server/admin/retention_test.go` and the executable admin-panel contract in
+  `Client/tests/contract/server-admin-static-panel.test.ts` cover preview/sweep
+  maths, indefinite override removal, concurrent writes, stale edits, token
+  binding, expiry, permission revocation and confirmation state.
+
 ## Delivery evidence
 
 The first batch is implemented and merged into `dev` in
 [PR #1573](https://github.com/J3vb/OwnCord/pull/1573) (commit `3221fe9e`).
-RI-05 is implemented as described above; RI-06 through RI-08 remain backlog
-ideas. This does not close a broader roadmap phase.
+RI-05, RI-06 and RI-08 are implemented as described above; RI-07 remains a
+backlog idea. This does not close a broader roadmap phase.
 
 Verified in the Linux development environment:
 

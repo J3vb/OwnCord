@@ -353,6 +353,11 @@ type ReportNote struct {
 	CreatedAt   string  `json:"createdAt"`
 }
 
+type RetentionRevision struct {
+	ID       int64 `json:"id"`
+	Revision int64 `json:"revision"`
+}
+
 type RetentionRun struct {
 	ID              int64   `json:"id"`
 	StartedAt       string  `json:"startedAt"`

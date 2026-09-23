@@ -135,16 +135,33 @@ func (h *Hub) BroadcastServerRestart(reason string, delaySeconds int) {
 // channel that channel_overrides hides from their role — metadata the ready
 // payload (buildReady/VisibleChannelIDs) deliberately withholds.
 //
+// Each recipient gets its own frame carrying its can_send and
+// can_moderate_voice verdicts for the new channel, the same targeted form
+// RefreshChannelVisibility sends: a brand-new channel has no earlier verdict
+// for an absent field to leave unchanged. Like RefreshChannelVisibility the
+// sends bypass the sequenced replay path, so the watermark is bumped on both
+// sides to force a client that missed them onto a full ready.
+//
 // The admin HubBroadcaster interface carries no context, so — like
 // RefreshChannelVisibility — the audience is resolved against Background: the
 // fan-out must complete regardless of the triggering request.
 func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
-	h.broadcastChannelScoped(context.Background(), ch.ID, buildChannelCreate(ch), "channel_create")
+	h.bumpVisibilityWatermark()
+	ctx := context.Background()
+	for _, uid := range h.channelReadAudience(ctx, ch.ID) {
+		live := h.GetClient(uid)
+		if live == nil {
+			continue
+		}
+		canSend, canModerateVoice := h.refreshChannelVisibilityAffordances(ctx, ch, uid)
+		live.sendMsg(buildChannelCreateFor(ch, canSend, canModerateVoice))
+	}
+	h.bumpVisibilityWatermark()
 }
 
 // BroadcastChannelUpdate sends a channel_update message to the connected
 // clients whose current role may READ ch. Same disclosure as
-// BroadcastChannelCreate; same filtered fan-out.
+// BroadcastChannelCreate, as one shared sequenced frame.
 func (h *Hub) BroadcastChannelUpdate(ch *db.Channel) {
 	h.broadcastChannelScoped(context.Background(), ch.ID, buildChannelUpdate(ch), "channel_update")
 }

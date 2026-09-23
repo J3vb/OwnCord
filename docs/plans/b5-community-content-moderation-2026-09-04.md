@@ -10,7 +10,9 @@ merged; B5-12's initial reconciliation is merged.** B5-10 is being finished
 and is not assessed as complete by this audit. HP-5 was accepted 2026-09-06
 at #1547, with the signature record completed by #1550; it is not awaiting a
 new signature. The existing exit gate remains open for B5-10, the acceptance
-follow-ups below, final reconciliation and the required exit evidence.
+follow-ups below, final reconciliation and the required exit evidence. The
+moderation-evidence consent follow-up (Conditions 3 and 4) was accepted by the
+owner on 2026-09-23 ([#1735](https://github.com/J3vb/OwnCord/pull/1735)).
 **All fourteen decisions were settled 2026-09-04** (the owner delegated them;
 thirteen as drafted, decision 7 strengthened). Private advisory disposition
 is still an exit obligation; this source audit does not certify its closure.
@@ -2945,7 +2947,13 @@ audit implements none of them, and it does not judge B5-10's unfinished work.
   authorized and refused cases. This is the existing server-side consent
   contract and must close before the B9 interface is built.
 
-  **Evidence, 2026-09-23 — ready for owner acceptance, not accepted.**
+  **Accepted by the owner, 2026-09-23.** Conditions 3 and 4's consent
+  follow-up is accepted on the evidence below, merged as
+  [#1735](https://github.com/J3vb/OwnCord/pull/1735). This accepts this
+  follow-up only: it does not close Condition 6 (B5-11's push follow-up),
+  B5-12's final reconciliation, or the B5 exit.
+
+  **Evidence, 2026-09-23.**
   `ReportService.Get` (`Server/service/report.go`, `evidenceWithheld`), the
   only read of the snapshot, applies decision 13 to it: a labelled source
   channel's evidence reaches a caller only with their own acknowledgement,
@@ -2989,6 +2997,31 @@ audit implements none of them, and it does not judge B5-10's unfinished work.
   no subsequent delivery uses the withdrawn authority. Preserve the
   existing trust, NSFW, membership and online-state checks. This belongs to
   B5's revocable push service, alongside B8's already-planned client UX.
+
+  **Evidence, 2026-09-23 — ready for owner acceptance, not accepted.** No
+  production change was needed: `PushDispatcher.attemptOne`
+  (`Server/service/push_dispatch.go`) runs `subscriptionStillCurrent` and
+  `stillEligible` immediately before every attempt, the first included
+  (`Server/service/push_dispatch_revalidate.go`). The first re-reads the
+  subscription row the saved request was encrypted for, so a revoked,
+  re-keyed or rotated-away device is refused. The second asks the
+  recipient-blocks-author pair, then re-checks DM trust, online state,
+  channel access and NSFW acknowledgement. Both fail closed on a lookup
+  error. `TestPushDispatch_Condition6_WithdrawnAuthorityGovernsEveryAttempt`
+  (`Server/service/push_dispatch_consent_test.go`) sends through the real
+  `SendMessage` hook and withdraws through the paths a user reaches,
+  `PushService.Revoke` and `BlockService.BlockUser`. It withdraws at every
+  point a delivery can be pending: queued before its first attempt, and
+  after each of the first and second attempts. The withdrawn recipient's
+  endpoint sees exactly as many fetches as it had before the withdrawal and
+  none after. An untouched recipient in the same dispatch still gets its
+  whole retry budget and is delivered, so the refusal is not a blanket stop.
+  The existing R3 tests in `push_dispatch_test.go` (`RecheckBeforeEachAttempt_*`:
+  trust, NSFW acknowledgement, channel access, online state, credential and
+  VAPID-key rotation, lookup failures, unchanged work still retries) are
+  unchanged and pass. Revert-proof: skipping either per-attempt check turns
+  all three of its boundary cases red. Security-review status stays in the
+  private review trail. B5-12's final reconciliation is not claimed here.
 
 Keep security validation and advisory disposition in the private review
 trail. Close these items and B5-12's final reconciliation on the measured

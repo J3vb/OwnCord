@@ -39,8 +39,10 @@ maps. Where today's code diverges from the target, the UX docs carry dated
 
 [platform-contracts.md](platform-contracts.md) is a third kind again: a _target
 seam_ map. It records where the desktop/browser boundary will be drawn and what
-crosses it, measured against today's code. The seam does not exist yet — B7
-builds it — so read that document as a decision record, not as structure.
+crosses it, measured against today's code. B7 built the desktop side
+(`Client/src/platform/contracts/` and `Client/src/platform/desktop/`). The
+browser side is deferred with B8, so that half of the document is still a
+decision record, not structure.
 
 ## Maintenance rule
 
