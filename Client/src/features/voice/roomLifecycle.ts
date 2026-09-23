@@ -155,7 +155,8 @@ export class RoomLifecycle {
     // still captures the Room, so the Room is never collected and every join
     // leaked a whole Room (engine, participants, E2EE manager) for the page's
     // lifetime. Without the registry it registers `handleDeviceChange`, which
-    // disconnect() removes, and leaveVoice always disconnects.
+    // disconnect() removes from a Room that connected, and releaseRoom()
+    // removes from one discarded before it connected.
     Room.cleanupRegistry = false;
     const newRoom = new Room({
       // Adaptive features reduce quality based on subscriber viewport —
