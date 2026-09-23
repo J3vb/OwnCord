@@ -41,6 +41,8 @@ import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
+import { safetyStore } from "../../features/safety/store";
+import { formatUntil, safetyText } from "../../i18n/safety";
 import { markChannelRead } from "@lib/read-state";
 import {
   newClientMessageId,
@@ -633,6 +635,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       const status = uiStore.getState().connectionStatus;
       if (status === "reconnecting") return "Reconnecting…";
       if (status === "disconnected") return "Not connected";
+      const timeout = safetyStore.getState().timeout;
+      if (timeout !== null)
+        return safetyText("timeout.composer", { time: formatUntil(timeout.expiresAt) });
       if (dmRecipientId !== null) {
         const blockReason = dmComposerBlockReason(blocksStore.getState(), dmRecipientId);
         if (blockReason !== null) return blockReason;
@@ -755,6 +760,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     composerGatingUnsubs.push(
       channelsStore.subscribeSelector(
         (s) => s.channels.get(channelId)?.canSend ?? true,
+        () => refreshComposerState(),
+      ),
+    );
+    composerGatingUnsubs.push(
+      safetyStore.subscribeSelector(
+        (s) => s.timeout,
         () => refreshComposerState(),
       ),
     );

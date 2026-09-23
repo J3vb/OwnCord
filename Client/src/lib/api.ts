@@ -501,6 +501,12 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<OwnReportSummary[]>("GET", "/reports/mine", undefined, signal);
     },
 
+    /** Records that the caller read their own warning. 404 when it is already
+     *  acknowledged (or not theirs). */
+    acknowledgeNotice(actionId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("POST", `/users/me/notices/${actionId}/ack`, undefined, signal);
+    },
+
     getSessions(signal?: AbortSignal): Promise<SessionInfo[]> {
       const owner = session;
       return request<SessionsListResponse>("GET", "/users/me/sessions", undefined, signal).then(

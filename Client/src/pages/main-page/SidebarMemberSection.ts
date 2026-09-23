@@ -276,15 +276,7 @@ export function createSidebarMemberSection(
       // The dialog lives as long as this section (resizeOwner is its lifetime).
       void import("../../features/reports/openers").then(({ openUserReport }) => {
         if (!resizeOwner.signal.aborted) {
-          openUserReport({
-            api,
-            userId,
-            name,
-            signal: resizeOwner.signal,
-            fallbackFocus: () =>
-              memberContent.querySelector<HTMLElement>(`[data-testid="member-${userId}"]`) ??
-              memberContent.querySelector<HTMLElement>(".member-item"),
-          });
+          openUserReport({ api, userId, name, signal: resizeOwner.signal, list: memberContent });
         }
       });
     },

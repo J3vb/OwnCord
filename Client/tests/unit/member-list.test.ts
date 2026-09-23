@@ -6,6 +6,9 @@ import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
 import { Permission, type UserStatus } from "../../src/lib/types";
+// MemberList loads the profile popup on first open. Load it up front so its
+// modules' load-time listeners are not counted against the test that opens it.
+import "@components/UserProfilePopup";
 
 function resetStore(): void {
   membersStore.setState(() => ({
@@ -565,7 +568,7 @@ describe("MemberList", () => {
     expect(eveRow.classList.contains("offline")).toBe(false);
   });
 
-  it("opens the profile popup with live status after a presence-only patch", () => {
+  it("opens the profile popup with live status after a presence-only patch", async () => {
     setTestMembers(testMembers);
     memberList.mount(container);
 
@@ -580,8 +583,11 @@ describe("MemberList", () => {
 
     eveRow.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
 
+    // The popup module loads on first open.
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
     const popup = document.querySelector('[data-testid="user-profile-popup"]');
-    expect(popup).not.toBeNull();
     const statusDot = popup!.querySelector(".upp-status-dot") as HTMLDivElement;
     // Bug: createMemberItem's click handler closes over the render-time
     // `member` snapshot, which patchPresence never replaces, so the popup
@@ -713,7 +719,7 @@ describe("MemberList profile fields", () => {
     expect(container.querySelector('[data-testid="member-custom-status-2"]')).toBeNull();
   });
 
-  it("opens the profile from the keyboard, where Report names the user (B9-10)", () => {
+  it("opens the profile from the keyboard, where Report names the user (B9-10)", async () => {
     setTestMembers([
       makeMember({ id: 1, username: "alice", displayName: "Alice A." }),
       makeMember({ id: 2, username: "me" }),
@@ -731,15 +737,20 @@ describe("MemberList profile fields", () => {
     expect(row.getAttribute("tabindex")).toBe("0");
     expect(row.getAttribute("aria-label")).toBe("Alice A.");
     row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    const report = document.querySelector<HTMLButtonElement>('[data-testid="upp-report-btn"]');
-    expect(report).not.toBeNull();
-    report!.click();
+    const report = await vi.waitFor(() => {
+      const btn = document.querySelector<HTMLButtonElement>('[data-testid="upp-report-btn"]');
+      expect(btn).not.toBeNull();
+      return btn!;
+    });
+    report.click();
     expect(onReportUser).toHaveBeenCalledWith(1, "Alice A.");
 
     // Your own profile has nothing to report.
     const self = container.querySelector<HTMLElement>('[data-testid="member-2"]')!;
     self.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
-    expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull();
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
     expect(document.querySelector('[data-testid="upp-report-btn"]')).toBeNull();
   });
 

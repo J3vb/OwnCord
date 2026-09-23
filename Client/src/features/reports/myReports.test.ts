@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OwnReportSummary } from "@lib/api";
 import { buildMyReportsSection, reportStateKey } from "./myReports";
 import { buildSafetyPane } from "./safetyPane";
-import { expectConsole } from "../../../tests/helpers/console";
 
 interface Deferred {
   resolve: (rows: OwnReportSummary[]) => void;
@@ -140,10 +139,11 @@ describe("My reports", () => {
     expect(section.getAttribute("aria-busy")).toBe("true");
   });
 
-  it("is the Safety tab's first section, loaded on open", async () => {
+  it("follows the restrictions and history in the Safety tab, loaded on open", async () => {
     const pane = buildSafetyPane(tab.signal, api);
-    expect(pane.className).toBe("settings-pane active");
+    expect(pane.className).toBe("settings-pane active safety-tab");
     await vi.waitFor(() => expect(pane.querySelector("section.my-reports")).not.toBeNull());
+    expect(pane.lastElementChild?.matches("section.my-reports")).toBe(true);
     expect(signals).toEqual([tab.signal]);
   });
 
@@ -157,7 +157,6 @@ describe("My reports", () => {
         ),
       );
       expect(signals).toEqual([]);
-      expectConsole("error", /\[safety-tab\] Safety tab failed to load/);
     } finally {
       vi.doUnmock("./myReports");
     }
@@ -168,7 +167,8 @@ describe("My reports", () => {
     tab.abort();
     await import("./myReports");
     await flush();
-    expect(pane.childElementCount).toBe(0);
+    expect(pane.querySelector("section.my-reports")).toBeNull();
+    expect(pane.textContent).toBe("");
     expect(signals).toEqual([]);
   });
 });

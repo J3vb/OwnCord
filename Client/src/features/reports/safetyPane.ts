@@ -1,34 +1,32 @@
 import type { ApiClient } from "@lib/api";
 import { createElement } from "@lib/dom";
-import { createLogger } from "@lib/logger";
 import { reportEntryText } from "../../i18n/reportEntry";
-
-const log = createLogger("safety-tab");
+import { buildSafetyTab } from "../safety/Notices";
 
 /**
- * The Settings Safety tab's pane (Q2). B9-10's My reports is its first
- * section; B9-15/16 add notices, restrictions and appeals beside it. The
- * sections load on first open, keeping them out of the main bundle.
+ * The Settings Safety tab's pane (Q2): B9-15's restrictions and history, then
+ * B9-10's My reports; B9-16 adds appeals. The sections load on first open,
+ * keeping them out of the main bundle; a section that cannot load says so.
  */
 export function buildSafetyPane(
   signal: AbortSignal,
   api: Pick<ApiClient, "getMyReports">,
 ): HTMLDivElement {
-  const pane = createElement("div", { class: "settings-pane active" });
+  const pane = buildSafetyTab(signal);
   import("./myReports").then(
     ({ buildMyReportsSection }) => {
       if (!signal.aborted) pane.appendChild(buildMyReportsSection(signal, api));
     },
-    (err: unknown) => {
-      log.error("Safety tab failed to load", { error: String(err) });
-      if (signal.aborted) return;
-      pane.appendChild(
-        createElement(
-          "div",
-          { class: "form-error", role: "alert" },
-          reportEntryText("safetyLoadFailed"),
-        ),
-      );
+    () => {
+      if (!signal.aborted) {
+        pane.appendChild(
+          createElement(
+            "div",
+            { class: "form-error", role: "alert" },
+            reportEntryText("safetyLoadFailed"),
+          ),
+        );
+      }
     },
   );
   return pane;

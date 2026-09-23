@@ -58,6 +58,15 @@ const submit = () =>
     .dispatchEvent(new Event("submit", { cancelable: true }));
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
+/** A focusable member row, as MemberList renders it. */
+function row(id: number): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "member-item";
+  el.tabIndex = 0;
+  el.dataset["testid"] = `member-${id}`;
+  return el;
+}
+
 function openMessage(attachments: { id: string; filename: string }[] = []) {
   modal = openMessageReport({
     api,
@@ -144,13 +153,40 @@ describe("report dialog", () => {
   });
 
   it("reports a user by id", () => {
-    modal = openUserReport({ api, signal: owner.signal, userId: 9, name: "bob" });
+    modal = openUserReport({
+      api,
+      signal: owner.signal,
+      userId: 9,
+      name: "bob",
+      list: document.body,
+    });
     expect(document.getElementById(dialog()!.getAttribute("aria-labelledby")!)?.textContent).toBe(
       "Report bob",
     );
     radio("Spam").checked = true;
     submit();
     expect(calls[0]?.body).toMatchObject({ target_type: "user", target_id: "9" });
+  });
+
+  it("returns focus to the user's rebuilt row, else the list's first row", () => {
+    const list = document.createElement("div");
+    const first = row(3);
+    const bob = row(9);
+    list.append(first, bob);
+    document.body.appendChild(list);
+    bob.focus();
+    modal = openUserReport({ api, signal: owner.signal, userId: 9, name: "bob", list });
+    // The list rebuilds while the form is open: the opener is gone.
+    const rebuilt = row(9);
+    bob.replaceWith(rebuilt);
+    document.querySelector<HTMLButtonElement>(".btn-modal-cancel")!.click();
+    expect(document.activeElement).toBe(rebuilt);
+
+    rebuilt.focus();
+    modal = openUserReport({ api, signal: owner.signal, userId: 9, name: "bob", list });
+    rebuilt.remove();
+    document.querySelector<HTMLButtonElement>(".btn-modal-cancel")!.click();
+    expect(document.activeElement).toBe(first);
   });
 
   it.each([

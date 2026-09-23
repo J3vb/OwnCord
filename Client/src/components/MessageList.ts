@@ -16,6 +16,7 @@ import {
 } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
+import { safetyStore } from "../features/safety/store";
 import { unobserveMedia } from "@lib/media-visibility";
 
 const log = createLogger("message-list");
@@ -1033,6 +1034,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     unsubscribers.push(
       membersStore.subscribeSelector(
         (s) => s.roleRevision ?? 0,
+        () => {
+          renderAll();
+        },
+      ),
+    );
+
+    // A timeout starting or ending re-renders the reaction controls (B9-15).
+    unsubscribers.push(
+      safetyStore.subscribeSelector(
+        (s) => s.timeout,
         () => {
           renderAll();
         },

@@ -30,8 +30,8 @@ is the implementation supplement for the B3, B7 and B9 structural workstreams
 everything and HP-7 is signed, but the phase exit is open.** B7-0 through B7-17
 are merged, and the owner signed HP-7 on 2026-09-23. Three items kept the exit
 open: C-10's B7 half, the client voice-join budget, and the decision on
-`tauri-build` for PRs into `dev`. The voice-join budget was recorded and
-enforced on 2026-09-23, so two remain. The
+`tauri-build` for PRs into `dev`. C-10's B7 half closed and the voice-join
+budget was recorded and enforced on 2026-09-23, so one remains. The
 [B7 PRD](b7-shared-client-platform-desktop-parity.prd.md#b7-18-reconciliation-2026-09-23)
 records them, and the B7 section below summarizes them.
 [README.md](README.md) is the status authority when this header and a README
@@ -944,10 +944,10 @@ three stated limits, which carry forward:
   leg is N/A;
 - the owner still has to run the real-desktop Linux device check.
 
-The exit gate is **not yet met**, because two items are open:
+The exit gate is **not yet met**. C-10's B7 half closed on 2026-09-23 (the
+register's C-10 row), as did the client voice-join budget. One item is still
+open:
 
-- C-10's B7 half: the desktop CSP's `connect-src` still allows `https:` and
-  `wss:`;
 - the 2026-09-19 decision to run `tauri-build` on PRs into `dev` was not
   implemented.
 

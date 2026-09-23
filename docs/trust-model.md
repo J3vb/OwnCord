@@ -287,10 +287,10 @@ handle, and image bytes as a same-origin `blob:` URL. Its cache is
 byte-weighted and keyed by the server partition, and a page teardown drops
 it. The HTTP plugin's capability now allows only the loopback TOFU proxies
 (clause 8), and the CSP's `img-src` no longer allows `https:`, so an image the
-broker did not fetch cannot load. Two residuals are deliberate: the YouTube
-player is a frame load, which cannot be brokered into bytes, and keeps its
-fixed host (`frame-src`) and sandbox; and `connect-src` keeps `https:` because
-the LiveKit SDK makes its own renderer fetches to the operator's LiveKit host.
+broker did not fetch cannot load; `connect-src` allows no `https:` or `wss:`
+source either, only loopback. One residual is deliberate: the YouTube player
+is a frame load, which cannot be brokered into bytes, and keeps its fixed host
+(`frame-src`) and sandbox.
 
 **Clause 1 and the server's own files.** Attachments, avatars and custom
 emoji hosted by the connected OwnCord server are automatic fetches too, and
@@ -578,8 +578,9 @@ redirects, content types and concurrency (`Server/safefetch/classify.go`,
 
 The **desktop client** reaches, on its own: the server; LiveKit **signalling**
 through the server's `/livekit/*` proxy for remote servers, or **directly** to
-the LiveKit URL the server hands out when the server is local
-(`Client/src/lib/livekitUrlResolver.ts` `resolve`, `direct_url`); LiveKit **media**
+the LiveKit URL the server hands out when the server is local and that URL is
+itself loopback `ws:`/`http:` (on Linux, where voice is native, whatever
+URL it is) (`Client/src/lib/livekitUrlResolver.ts` `resolve`, `direct_url`); LiveKit **media**
 always directly, to the SFU's advertised ICE endpoints on TCP 7881 / UDP
 50000–60000 (`Server/ws/livekit_process.go:130-133`; `docs/deployment.md`
 §Firewall and Ports); `www.youtube.com` and `img.youtube.com` for video

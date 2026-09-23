@@ -712,30 +712,17 @@ describe("SidebarMemberSection", () => {
     });
   });
 
-  describe("user report focus (B9-10)", () => {
-    it("falls back to the member's rebuilt row, else the list's first row", async () => {
+  describe("user report (B9-10)", () => {
+    it("opens the report for that user with the live member list for focus fallback", async () => {
       const section = createSidebarMemberSection(defaultOpts());
       container.appendChild(section.element);
       const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
       calls[calls.length - 1]![0].onReportUser(7, "bob");
       const open = openUserReport as ReturnType<typeof vi.fn>;
       await vi.waitFor(() => expect(open).toHaveBeenCalled());
-      const { fallbackFocus, userId } = open.mock.calls[open.mock.calls.length - 1]![0];
-      expect(userId).toBe(7);
-
-      const content = container.querySelector(".sidebar-members-content")!;
-      const row = (id: number): HTMLElement => {
-        const el = document.createElement("div");
-        el.className = "member-item";
-        el.dataset.testid = `member-${id}`;
-        return el;
-      };
-      const first = row(3);
-      const bob = row(7);
-      content.prepend(first, bob);
-      expect(fallbackFocus()).toBe(bob);
-      bob.remove();
-      expect(fallbackFocus()).toBe(first);
+      const { userId, name, list } = open.mock.calls[open.mock.calls.length - 1]![0];
+      expect({ userId, name }).toEqual({ userId: 7, name: "bob" });
+      expect(list).toBe(container.querySelector(".sidebar-members-content"));
 
       section.destroy();
     });

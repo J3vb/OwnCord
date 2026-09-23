@@ -17,10 +17,7 @@ import { authStore } from "@stores/auth.store";
 import { blocksStore } from "@stores/blocks.store";
 import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { createMemberContextMenu } from "@components/AdminActions";
-import {
-  createUserProfilePopup,
-  type UserProfilePopupComponent,
-} from "@components/UserProfilePopup";
+import type { UserProfilePopupComponent } from "@components/UserProfilePopup";
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
 import { roleHasPermission } from "@lib/permissions";
 import { createAvatarElement } from "@lib/avatar";
@@ -167,6 +164,9 @@ function isAwayStatus(status: UserStatus): boolean {
 
 let activeMenu: { element: HTMLDivElement; destroy(): void } | null = null;
 let activePopup: UserProfilePopupComponent | null = null;
+/** Bumped by every open and close, so a popup still loading when the user
+ *  moves on (or the list is destroyed) is dropped instead of mounted. */
+let popupSeq = 0;
 
 function closeActiveMenu(): void {
   if (activeMenu !== null) {
@@ -176,6 +176,7 @@ function closeActiveMenu(): void {
 }
 
 function closeActivePopup(): void {
+  popupSeq++;
   if (activePopup !== null) {
     activePopup.destroy?.();
     activePopup = null;
@@ -266,26 +267,32 @@ function createMemberItem(
     // row, so that snapshot's `status` can be stale. Re-resolve against the
     // live store so the popup always agrees with the dot it was opened from.
     const live = membersStore.getState().members.get(member.id) ?? member;
-    activePopup = createUserProfilePopup({
-      user: {
-        id: live.id,
-        username: live.username,
-        avatar: live.avatar,
-        role: live.role,
-        status: live.status,
-        displayName: live.displayName,
-        customStatus: live.customStatus,
-      },
-      anchorX,
-      anchorY,
-      ...(isSelf || onMessageUser === undefined
-        ? {}
-        : { onMessage: (userId: number) => onMessageUser(userId) }),
-      ...(isSelf || onReportUser === undefined
-        ? {}
-        : { onReport: (userId: number) => onReportUser(userId, memberDisplayName(live)) }),
+    // Loaded on first open: the popup is only ever needed after a click, so
+    // it stays out of the main-page bundle.
+    const seq = ++popupSeq;
+    void import("@components/UserProfilePopup").then(({ createUserProfilePopup }) => {
+      if (seq !== popupSeq || signal.aborted) return;
+      activePopup = createUserProfilePopup({
+        user: {
+          id: live.id,
+          username: live.username,
+          avatar: live.avatar,
+          role: live.role,
+          status: live.status,
+          displayName: live.displayName,
+          customStatus: live.customStatus,
+        },
+        anchorX,
+        anchorY,
+        ...(isSelf || onMessageUser === undefined
+          ? {}
+          : { onMessage: (userId: number) => onMessageUser(userId) }),
+        ...(isSelf || onReportUser === undefined
+          ? {}
+          : { onReport: (userId: number) => onReportUser(userId, memberDisplayName(live)) }),
+      });
+      activePopup.mount(document.body);
     });
-    activePopup.mount(document.body);
   };
   item.addEventListener("click", (e) => openProfile(e.clientX, e.clientY), { signal });
   item.addEventListener(

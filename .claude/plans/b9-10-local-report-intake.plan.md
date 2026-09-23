@@ -221,12 +221,20 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   had no way to reach the server, so it is now `build(signal, api)`, and
   `MainPage.ts` passes its `api` in the one line that hands the builder to the
   Settings overlay. That is this milestone's only single-writer edit besides
-  `api.ts`; `destinations.ts` registers `safety`. B9-15/16 add their sections to
-  `features/reports/safetyPane.ts`'s pane (or move it to a shared home).
+  `api.ts`; `destinations.ts` registers `safety`.
+- **One Safety tab with B9-15.** B9-15 (#1757) merged its own Safety tab
+  first. Merging `dev` in, `features/reports/safetyPane.ts` builds B9-15's
+  pane (`buildSafetyTab`, whose body now renders into a slot of its own so it
+  stays first) and appends My reports after it; B9-16 adds appeals to the
+  same pane.
 - **Budget.** The form, the openers and My reports load on first use
   (`import()`), and the two entry labels and the Safety tab's load error live
   in their own small catalog (`i18n/reportEntry.ts`), so MainPage stays inside
-  its 60,000 B budget.
+  its 60,000 B budget. After B9-15 merged, `dev` alone measured 59,968 B, so
+  the profile popup (only ever needed after a click, and imported only by
+  `MemberList`) now loads on first open too, and the member report's focus
+  fallback moved into the lazy openers. Merged, MainPage is 59,997 B: the
+  budget holds, with 3 B left for the next lane.
 - **Keyboard reach for users.** Member rows were click-only, so the profile,
   and its Report button, could not be reached from the keyboard. A row is now a
   named `role="button"` with `tabindex="0"` that opens the profile on Enter or
@@ -256,15 +264,15 @@ round's fixes (member-row description, user-report fallback focus, Safety load
 error), whose tests are in `member-list`, `sidebar-member-section` and
 `myReports`.
 
-| Check                                                                                                                                                                                                                                                     | Result                                                   |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `npx vitest run --maxWorkers=4` (whole client)                                                                                                                                                                                                            | 293 files, 6,418 passed, 149 expected-fail               |
-| `src/features/reports/intake.test.ts`, `myReports.test.ts`                                                                                                                                                                                                | 31 passed                                                |
-| `npm run typecheck`, `typecheck:build`, `typecheck:e2e`, `npm run lint` (oxlint, cycles, eslint)                                                                                                                                                          | clean                                                    |
-| `npm run build:budget && npm run check:budgets`                                                                                                                                                                                                           | all ok; MainPage 59,639 B of 60,000 B (58,491 B at base) |
-| Playwright (dev server): `b9-reports`                                                                                                                                                                                                                     | 12 passed                                                |
-| Playwright (dev server): `b9-navigation`, `message-actions`, `member-list`, `user-profile`, `settings-overlay`, `settings-tabs-extra`, `a11y-smoke`, `b9-text-expansion`, `sidebar-menus`, `main-layout`, `message-list`, `logout-flow`, `profile-switch` | 95 passed                                                |
-| Playwright fullstack (real Go server): `fullstack/b9-reports`                                                                                                                                                                                             | 2 passed                                                 |
+| Check                                                                                                                                                                                                                                                     | Result                                                                                                                  |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `npx vitest run --maxWorkers=4` (whole client)                                                                                                                                                                                                            | 293 files, 6,418 passed, 149 expected-fail                                                                              |
+| `src/features/reports/intake.test.ts`, `myReports.test.ts`                                                                                                                                                                                                | 31 passed                                                                                                               |
+| `npm run typecheck`, `typecheck:build`, `typecheck:e2e`, `npm run lint` (oxlint, cycles, eslint)                                                                                                                                                          | clean                                                                                                                   |
+| `npm run build:budget && npm run check:budgets`                                                                                                                                                                                                           | all ok; MainPage 59,639 B of 60,000 B (58,491 B at base); after merging `dev` with B9-15, 59,997 B (dev alone 59,968 B) |
+| Playwright (dev server): `b9-reports`                                                                                                                                                                                                                     | 12 passed                                                                                                               |
+| Playwright (dev server): `b9-navigation`, `message-actions`, `member-list`, `user-profile`, `settings-overlay`, `settings-tabs-extra`, `a11y-smoke`, `b9-text-expansion`, `sidebar-menus`, `main-layout`, `message-list`, `logout-flow`, `profile-switch` | 95 passed                                                                                                               |
+| Playwright fullstack (real Go server): `fullstack/b9-reports`                                                                                                                                                                                             | 2 passed                                                                                                                |
 
 The real-server journey uses four synthetic accounts: alice is the subject
 (her message, her attachment, her account), bob the reporter in the client,
