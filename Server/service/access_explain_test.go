@@ -249,8 +249,8 @@ func TestExplainAccess_AdministratorHasNoBitTrace(t *testing.T) {
 	}
 }
 
-// Explain and the member-layer preview disclose a member's restriction
-// state, so they follow the override editor's rank rule.
+// Explain and the preview disclose members' restriction state, so they
+// follow the override editor's rank rules.
 func TestExplainAndUserPreview_RefuseTargetsRankedAtOrAbove(t *testing.T) {
 	svc, database, ch := seedExplainFixture(t)
 	ctx := context.Background()
@@ -274,6 +274,11 @@ func TestExplainAndUserPreview_RefuseTargetsRankedAtOrAbove(t *testing.T) {
 		}
 		if _, err := svc.PreviewOverride(ctx, peer, mod, ch, 0, target, 0, 0); !errors.Is(err, ErrForbidden) {
 			t.Errorf("preview user %d err = %v, want ErrForbidden", target, err)
+		}
+	}
+	for _, role := range []int64{mod.ID, permissions.OwnerRoleID} {
+		if _, err := svc.PreviewOverride(ctx, peer, mod, ch, role, 0, 0, permissions.ReadMessages); !errors.Is(err, ErrForbidden) {
+			t.Errorf("preview role %d err = %v, want ErrForbidden", role, err)
 		}
 	}
 }

@@ -4242,8 +4242,9 @@ could reach — each holder of the role, or the one member — is evaluated for
 every action with the current and the proposed layer, through the same
 predicates as `explain`; `members` lists only those whose decision changes.
 Nothing is written. A `user_id` preview follows the same rank rule as
-`explain`; a `role_id` preview does not. The save path still applies its own
-escalation and hierarchy checks.
+`explain`. A `role_id` preview is refused for a role at or above the caller's
+own rank, with no Administrator bypass, as saving that role's override is. The
+save path still applies its own escalation and hierarchy checks.
 
 ```json
 {
@@ -4273,7 +4274,7 @@ Audited as `permission_preview`, target `channel`.
 | Status | Code          | When                                                                      |
 | ------ | ------------- | ------------------------------------------------------------------------- |
 | 400    | `BAD_REQUEST` | Bad `user_id`, missing or unknown `action`, or not exactly one of the ids |
-| 403    | `FORBIDDEN`   | Missing `MANAGE_CHANNELS`, or the member ranks at or above you            |
+| 403    | `FORBIDDEN`   | Missing `MANAGE_CHANNELS`, or the member or role ranks at or above you    |
 | 404    | `NOT_FOUND`   | Unknown or DM channel, unknown role or user                               |
 
 ---

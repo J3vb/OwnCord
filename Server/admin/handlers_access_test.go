@@ -95,7 +95,7 @@ func TestAccessExplainAndPreview_RequireManageChannels(t *testing.T) {
 }
 
 // A MANAGE_CHANNELS holder below Administrator may explain or preview only a
-// member ranked below them — the override editor's rank rule.
+// member or role ranked below them — the override editor's rank rules.
 func TestAccessExplainAndPreview_RefuseHigherRankedMember(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
@@ -109,14 +109,17 @@ func TestAccessExplainAndPreview_RefuseHigherRankedMember(t *testing.T) {
 	base := "/channels/" + itoa(chID) + "/access/"
 
 	for _, c := range []struct {
-		target int64
-		want   int
-	}{{lowID, http.StatusOK}, {seniorID, http.StatusForbidden}} {
+		target, role int64
+		want         int
+	}{{lowID, 12, http.StatusOK}, {seniorID, 11, http.StatusForbidden}} {
 		if w := doRequest(t, handler, http.MethodGet, base+"explain?action=view_channel&user_id="+itoa(c.target), modToken, nil); w.Code != c.want {
 			t.Errorf("explain user %d = %d, want %d; body = %s", c.target, w.Code, c.want, w.Body.String())
 		}
 		if w := doRequest(t, handler, http.MethodPost, base+"preview", modToken, map[string]any{"user_id": c.target}); w.Code != c.want {
 			t.Errorf("preview user %d = %d, want %d; body = %s", c.target, w.Code, c.want, w.Body.String())
+		}
+		if w := doRequest(t, handler, http.MethodPost, base+"preview", modToken, map[string]any{"role_id": c.role}); w.Code != c.want {
+			t.Errorf("preview role %d = %d, want %d; body = %s", c.role, w.Code, c.want, w.Body.String())
 		}
 	}
 }

@@ -201,10 +201,11 @@ Implemented 2026-09-23:
   action before and after, and lists only the members whose decision flips.
   It writes nothing; the save path keeps its own escalation and hierarchy
   checks. Both routes sit under `MANAGE_CHANNELS` beside the override editor
-  and are audited (`permission_explain`, `permission_preview`). Explain and a
-  member-layer preview follow the editor's rank rule: below Administrator, a
-  member ranked at or above the caller is refused, so no one reads a
-  higher-ranked member's ban, timeout, registration or NSFW consent state.
+  and are audited (`permission_explain`, `permission_preview`). Both follow
+  the editor's rank rules: below Administrator, a member ranked at or above
+  the caller is refused, and a role-layer preview is refused for a role at or
+  above the caller's rank, so no route reads a peer's or higher-ranked
+  member's ban, timeout, registration or NSFW consent state.
 - An Administrator's decision carries no bit trace, since the predicate
   consults no bit or override layer for it.
 - The admin panel's channel-permissions modal gains "Explain access" and

@@ -178,8 +178,8 @@ type AccessPreview struct {
 // PreviewOverride evaluates a proposed override on ch — the role layer for
 // roleID, or the member layer for userID (exactly one is non-zero) — against
 // the same predicates as ExplainAccess, and returns every member whose
-// decision for any action changes. The member layer is refused for a member
-// ranked at or above the actor, as editing it is. Nothing is written except
+// decision for any action changes. A role or member ranked at or above the
+// actor is refused, as editing its override is. Nothing is written except
 // the audit row; the save path re-checks its own authority on PUT.
 //
 // ponytail: one live Subject per member of the role (a few indexed reads
@@ -198,6 +198,9 @@ func (s *ChannelService) PreviewOverride(ctx context.Context, actorID int64, act
 		}
 		if role == nil {
 			return AccessPreview{}, fmt.Errorf("role not found%.0w", ErrNotFound)
+		}
+		if role.Position >= actorRole.Position {
+			return AccessPreview{}, fmt.Errorf("cannot manage a role at or above your own rank%.0w", ErrForbidden)
 		}
 		if ids, err = s.st.ListUserIDsByRole(ctx, roleID); err != nil {
 			return AccessPreview{}, fmt.Errorf("%w: failed to list role members: %w", ErrInternal, err)
