@@ -2603,18 +2603,21 @@ describe("LiveKitSession", () => {
       expect(url).toBe("ws://127.0.0.1:7880/livekit");
     });
 
-    it("returns directUrl when serverHost is bare ::1", async () => {
+    it("tunnels an IPv6 loopback directUrl when serverHost is bare ::1", async () => {
       session.setServerHost("::1");
       const url = await (session as any).resolveLiveKitUrl("/livekit", "ws://[::1]:7880/livekit");
-      // Bare IPv6 with multiple colons — detected as local, returns directUrl
-      expect(url).toBe("ws://[::1]:7880/livekit");
+      // Detected as local, but CSP host-sources cannot name an IPv6 literal,
+      // so connect-src has no ws://[::1] entry: the direct URL would be
+      // refused, and it goes through the loopback tunnel instead.
+      expect(url).toBe("ws://127.0.0.1:7881/livekit");
     });
 
-    it("returns directUrl when serverHost is bracketed [::1]:7880", async () => {
+    it("tunnels an IPv6 loopback directUrl when serverHost is bracketed [::1]:7880", async () => {
       session.setServerHost("[::1]:7880");
       const url = await (session as any).resolveLiveKitUrl("/livekit", "ws://[::1]:7880/livekit");
-      // Bracketed IPv6 — host extracted as "::1", detected as local
-      expect(url).toBe("ws://[::1]:7880/livekit");
+      // Bracketed IPv6 — host extracted as "::1", detected as local, and
+      // tunnelled for the same connect-src reason as the bare form.
+      expect(url).toBe("ws://127.0.0.1:7881/livekit");
     });
 
     it("calls ensureLiveKitProxy and returns proxy URL for remote host with slash path", async () => {

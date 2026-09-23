@@ -6,7 +6,7 @@
 // nothing.
 //
 // The server host is module state, so each test needs a fresh module instance.
-import { vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { LiveKitProxiesSeam } from "./livekitProxies.suite";
 import { describeLiveKitProxiesSuite } from "./livekitProxies.suite";
 
@@ -36,4 +36,28 @@ describeLiveKitProxiesSuite(async () => {
       },
     },
   };
+});
+
+// Linux voice is native (Rust), so its LiveKit socket is outside the
+// webview's connect-src: a local server's non-loopback direct URL stays
+// direct there. The tunnel would drop the native SDK's Authorization header.
+describe("nativeProxies on the Linux desktop (native voice)", () => {
+  afterEach(() => {
+    vi.doUnmock("../../../src/features/voice/native/platform");
+  });
+
+  for (const directUrl of ["ws://my-host:7880", "wss://localhost:7880", "ws://[::1]:7880"]) {
+    test(`keeps a local server's direct URL ${directUrl}`, async () => {
+      vi.resetModules();
+      vi.doMock("../../../src/features/voice/native/platform", () => ({
+        isLinuxDesktop: () => true,
+      }));
+      invoke.mockReset().mockResolvedValue(40123);
+      const { nativeProxies } = await import("../../../src/platform/desktop/nativeProxies");
+      nativeProxies.setLiveKitServerHost("localhost:8443");
+      await expect(nativeProxies.resolveLiveKitUrl("/livekit/rtc", directUrl)).resolves.toBe(
+        directUrl,
+      );
+    });
+  }
 });
