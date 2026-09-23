@@ -49,8 +49,11 @@ import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { dmStore, closeDmLocally } from "@stores/dm.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
-import { canViewAuditLog } from "@lib/permissions";
+import { canModerateMembers, canViewAuditLog } from "@lib/permissions";
 import type { ProfileManager } from "@lib/profiles";
+import type { ContentViewId, NavigationDestinations } from "../../features/navigation/destinations";
+import { trackCurrentView } from "../../features/navigation/contentView";
+import { navigationText } from "../../i18n/navigation";
 
 const log = createLogger("SidebarArea");
 
@@ -70,6 +73,10 @@ export interface SidebarAreaOptions {
   readonly getRoot: () => HTMLDivElement | null;
   readonly getToast: () => ToastContainer | null;
   readonly onWatchStream?: (userId: number) => void;
+  /** B9-4: the destinations this build ships. An absent one gets no entry. */
+  readonly destinations?: NavigationDestinations;
+  /** Open a content view; `opener` gets focus back when it closes. */
+  readonly onOpenView?: (id: ContentViewId, opener: HTMLElement) => void;
 }
 
 export interface SidebarAreaResult {
@@ -81,6 +88,10 @@ export interface SidebarAreaResult {
   readonly unsubscribers: readonly (() => void)[];
   /** Open the quick-switch overlay (used for disconnect flow). */
   readonly openQuickSwitch: () => void;
+  /** Remember the channel on screen as the one a content view returns to. */
+  readonly rememberChannel: () => void;
+  /** The Q2 back path: leave DM mode for the channel the user came from. */
+  readonly returnToChannel: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -220,11 +231,34 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     });
   });
 
+  // The Moderation Center entry (B9-4, Q2): beside Audit Log, only with
+  // MODERATE_MEMBERS, and only once the Moderation Center ships.
+  let moderationBtn: HTMLButtonElement | null = null;
+  if (opts.destinations?.moderation !== undefined) {
+    const btn = createElement(
+      "button",
+      {
+        type: "button",
+        class: "sidebar-audit-btn",
+        title: navigationText("moderation.entryHint"),
+        "data-testid": "moderation-btn",
+      },
+      navigationText("moderation.title"),
+    );
+    btn.addEventListener("click", () => opts.onOpenView?.("moderation", btn));
+    unsubscribers.push(trackCurrentView(btn, "moderation"));
+    moderationBtn = btn;
+  }
+
   const syncAuditBtn = (): void => {
     auditBtn.style.display = canViewAuditLog() ? "" : "none";
+    if (moderationBtn !== null) {
+      moderationBtn.style.display = canModerateMembers() ? "" : "none";
+    }
   };
   syncAuditBtn();
   serverHeader.appendChild(auditBtn);
+  if (moderationBtn !== null) serverHeader.appendChild(moderationBtn);
   // The permission is derived from the signed-in user's role plus the role
   // list, so both have to be watched.
   unsubscribers.push(
@@ -525,6 +559,40 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     activePrompt = prompt;
   }
 
+  /**
+   * Leave DM mode for the channel the user came from. The DM sidebar's back
+   * arrow and a content view's Close/Escape (B9-4, Q2) both take this path.
+   */
+  function returnToChannel(): void {
+    setSidebarMode("channels");
+    if (channelBeforeDm !== null) {
+      setActiveChannel(channelBeforeDm);
+      channelBeforeDm = null;
+      return;
+    }
+    // No saved channel — this happens when DM mode was entered without
+    // going through selectDmConversation (e.g. SidebarDmSection's "View
+    // all messages" button, which does a bare setSidebarMode). If a real
+    // non-DM channel is already active, leave it alone instead of
+    // silently jumping to the first text channel in Map order.
+    const st = channelsStore.getState();
+    const current = st.activeChannelId !== null ? st.channels.get(st.activeChannelId) : undefined;
+    if (current !== undefined && current.type !== "dm") return;
+    for (const ch of channelsStore.getState().channels.values()) {
+      if (isTextLikeChannel(ch)) {
+        setActiveChannel(ch.id);
+        break;
+      }
+    }
+  }
+
+  /** Remember the channel on screen as the one returnToChannel goes back to. */
+  function rememberChannel(): void {
+    const st = channelsStore.getState();
+    const current = st.activeChannelId !== null ? st.channels.get(st.activeChannelId) : undefined;
+    if (current !== undefined && current.type !== "dm") channelBeforeDm = current.id;
+  }
+
   function buildDmSidebar(): MountableComponent {
     const serverName = authStore.getState().serverName ?? "Server";
     const activeChannelId = channelsStore.getState().activeChannelId;
@@ -549,29 +617,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       onNewDm: () => {
         showMemberPicker();
       },
-      onBack: () => {
-        setSidebarMode("channels");
-        if (channelBeforeDm !== null) {
-          setActiveChannel(channelBeforeDm);
-          channelBeforeDm = null;
-          return;
-        }
-        // No saved channel — this happens when DM mode was entered without
-        // going through selectDmConversation (e.g. SidebarDmSection's "View
-        // all messages" button, which does a bare setSidebarMode). If a real
-        // non-DM channel is already active, leave it alone instead of
-        // silently jumping to the first text channel in Map order.
-        const st = channelsStore.getState();
-        const current =
-          st.activeChannelId !== null ? st.channels.get(st.activeChannelId) : undefined;
-        if (current !== undefined && current.type !== "dm") return;
-        for (const ch of channelsStore.getState().channels.values()) {
-          if (isTextLikeChannel(ch)) {
-            setActiveChannel(ch.id);
-            break;
-          }
-        }
-      },
+      onBack: returnToChannel,
       serverName,
     });
   }
@@ -610,6 +656,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       // --- DM section (above channels, below server header) ---
       // --- DM section (above channels, below server header) ---
       const dmSectionResult = createSidebarDmSection({
+        pendingRequests: opts.destinations?.requests?.pending,
         onSelectDm: (dm) => {
           selectDmConversation(dm, dmDeps);
         },
@@ -651,6 +698,33 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       channelModeExtras.push(memberSection.memberListComponent);
       channelModeUnsubs.push(memberSection.destroy);
     } else {
+      // "Message Requests (N)" at the top of DM mode (B9-4, Q2). N is the
+      // pending-request count and is never folded into unread.
+      const requests = opts.destinations?.requests;
+      if (requests !== undefined) {
+        const section = createElement("div", { class: "dm-requests-section" });
+        const entry = createElement("button", {
+          type: "button",
+          class: "sidebar-dm-view-all dm-requests-entry",
+          "data-testid": "dm-requests-entry",
+        });
+        const renderEntry = (): void => {
+          const count = requests.pending.get();
+          setText(
+            entry,
+            count > 0
+              ? navigationText("requests.entry", { count })
+              : navigationText("requests.title"),
+          );
+        };
+        renderEntry();
+        entry.addEventListener("click", () => opts.onOpenView?.("requests", entry));
+        channelModeUnsubs.push(requests.pending.subscribe(renderEntry));
+        channelModeUnsubs.push(trackCurrentView(entry, "requests"));
+        section.appendChild(entry);
+        contentSlot.appendChild(section);
+      }
+
       const dmSidebar = buildDmSidebar();
       dmSidebar.mount(innerSlot);
       activeSidebarContent = dmSidebar;
@@ -679,16 +753,14 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         if (activeSidebarContent !== null) {
           activeSidebarContent.destroy?.();
         }
-        clearChildren(contentSlot);
-        const freshSlot = createElement("div", {
-          style: "flex:1;overflow:hidden;display:flex;flex-direction:column;",
-        });
+        // Only the DM list is rebuilt; the requests entry above it keeps its
+        // element, and with it any focus.
+        clearChildren(innerSlot);
         const freshDm = buildDmSidebar();
-        freshDm.mount(freshSlot);
+        freshDm.mount(innerSlot);
         activeSidebarContent = freshDm;
-        contentSlot.appendChild(freshSlot);
 
-        const newSearchInput = freshSlot.querySelector<HTMLInputElement>(".dm-search");
+        const newSearchInput = innerSlot.querySelector<HTMLInputElement>(".dm-search");
         if (newSearchInput !== null) {
           if (savedQuery !== "") {
             newSearchInput.value = savedQuery;
@@ -874,5 +946,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     children,
     unsubscribers,
     openQuickSwitch,
+    rememberChannel,
+    returnToChannel,
   };
 }

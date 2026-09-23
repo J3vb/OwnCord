@@ -1,6 +1,6 @@
 /**
  * SettingsOverlay component — full-screen overlay with tabbed settings panels.
- * Tabs: Account, Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds, Advanced, Logs.
+ * Tabs: Account, Safety (once its feature ships), Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds, Advanced, Logs.
  * Subscribes to uiStore for settingsOpen state.
  */
 
@@ -18,6 +18,7 @@ import type {
   SessionInfo,
 } from "@lib/api";
 import { uiStore } from "@stores/ui.store";
+import { settingsText } from "../i18n/settings";
 import { authStore } from "@stores/auth.store";
 import { buildAccountTab } from "./settings/AccountTab";
 import { buildAppearanceTab } from "./settings/AppearanceTab";
@@ -85,10 +86,13 @@ export interface SettingsOverlayOptions {
   onRevokeAllSessions(): Promise<RevokeAllSessionsResponse>;
   /** When false, the Account tab is hidden (e.g. on the connect page). Defaults to true. */
   isAuthenticated?: boolean;
+  /** Builds the Safety tab (B9-4, Q2). Absent until its feature ships, and then no tab shows. */
+  safetyTab?: (signal: AbortSignal) => HTMLDivElement;
 }
 
 export type TabName =
   | "Account"
+  | "Safety"
   | "Appearance"
   | "Notifications"
   | "Text & Images"
@@ -100,6 +104,7 @@ export type TabName =
 
 const TAB_ICONS: Record<TabName, IconName> = {
   Account: "user",
+  Safety: "shield",
   Appearance: "palette",
   Notifications: "bell",
   "Text & Images": "image",
@@ -109,6 +114,14 @@ const TAB_ICONS: Record<TabName, IconName> = {
   Advanced: "settings",
   Logs: "scroll-text",
 };
+
+// i18n-exempt: tab key; its label is settingsText("tabs.safety")
+const SAFETY = "Safety" satisfies TabName;
+
+/** What a tab is called on screen. The older tabs are still named by their key (B9-20). */
+function tabLabel(name: TabName): string {
+  return name === SAFETY ? settingsText("tabs.safety") : name;
+}
 
 /** Stable DOM id for a tab button (aria-labelledby target), e.g. "settings-tab-text-images". */
 function tabId(name: TabName): string {
@@ -154,6 +167,8 @@ export function createSettingsOverlay(
 
   const TAB_BUILDERS: Readonly<Record<TabName, (signal: AbortSignal) => HTMLDivElement>> = {
     Account: (signal) => buildAccountTab(options, signal),
+    // Only reachable through its tab button, which exists only with the option.
+    Safety: (signal) => options.safetyTab?.(signal) ?? createElement("div"),
     Appearance: (signal) => buildAppearanceTab(signal),
     Notifications: (signal) => buildNotificationsTab(signal),
     "Text & Images": (signal) => buildTextImagesTab(signal),
@@ -175,7 +190,7 @@ export function createSettingsOverlay(
     const buildSignal = AbortSignal.any([disposable.signal, renderOwner.signal]);
     clearChildren(contentArea);
     if (pageTitle === null) return;
-    pageTitle.textContent = activeTab;
+    pageTitle.textContent = tabLabel(activeTab);
     contentArea.appendChild(pageTitle);
     const builder = TAB_BUILDERS[activeTab];
     contentArea.appendChild(builder(buildSignal));
@@ -208,6 +223,12 @@ export function createSettingsOverlay(
   function show(): void {
     const wasOpen = root?.classList.contains("open") ?? false;
     root?.classList.add("open");
+    // Another surface asked for a tab (a Q4 notice links to Safety). A tab
+    // that is not shown here is ignored.
+    const requested = uiStore.getState().settingsTab;
+    if (requested !== null && requested !== activeTab && tabButtons.has(requested)) {
+      setActiveTab(requested);
+    }
     // Closing tore down the live parts of the active tab (mic meter, camera
     // preview, log listener). Rebuild it so a reopened panel shows live state
     // instead of a frozen snapshot — and so every tab re-reads current prefs.
@@ -334,6 +355,23 @@ export function createSettingsOverlay(
       });
       tabButtons.set("Account", accountBtn);
       sidebar.appendChild(accountBtn);
+
+      if (options.safetyTab !== undefined) {
+        const safetyBtn = createElement("button", {
+          class: "settings-nav-item",
+          id: tabId(SAFETY),
+          role: "tab",
+          "aria-selected": "false",
+          tabindex: "-1",
+        });
+        safetyBtn.prepend(createIcon(TAB_ICONS[SAFETY], 18));
+        safetyBtn.appendChild(document.createTextNode(tabLabel(SAFETY)));
+        safetyBtn.addEventListener("click", () => setActiveTab(SAFETY), {
+          signal: disposable.signal,
+        });
+        tabButtons.set(SAFETY, safetyBtn);
+        sidebar.appendChild(safetyBtn);
+      }
     }
 
     // "App Settings" category — remaining tabs

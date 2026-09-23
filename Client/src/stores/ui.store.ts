@@ -4,6 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
+import type { ContentViewId } from "../features/navigation/destinations";
 
 export interface UiState {
   readonly settingsOpen: boolean;
@@ -25,7 +26,18 @@ export interface UiState {
   readonly collapsedCategories: ReadonlySet<string>;
   readonly sidebarMode: "channels" | "dms";
   readonly activeDmUserId: number | null;
+  /**
+   * The B9-4 content view open in place of the chat column, or null. Written
+   * only by the page's content navigator (features/navigation/contentView.ts),
+   * which also owns the view's lifetime and focus.
+   */
+  readonly activeView: ContentViewId | null;
+  /** The Settings tab the next open should land on (a Q4 notice links to Safety). */
+  readonly settingsTab: SettingsTabRequest | null;
 }
+
+/** Settings tabs another surface may open directly. */
+export type SettingsTabRequest = "Safety";
 
 /**
  * The one `ui.store` fact a protocol-epoch refusal leaves behind (Decision 2):
@@ -49,15 +61,18 @@ const INITIAL_STATE: UiState = {
   collapsedCategories: new Set(),
   sidebarMode: "channels",
   activeDmUserId: null,
+  activeView: null,
+  settingsTab: null,
 };
 
 export const uiStore = createStore<UiState>(INITIAL_STATE);
 
-/** Open the settings panel. */
-export function openSettings(): void {
+/** Open the settings panel, on `tab` when given and shown. */
+export function openSettings(tab?: SettingsTabRequest): void {
   uiStore.setState((prev) => ({
     ...prev,
     settingsOpen: true,
+    settingsTab: tab ?? null,
   }));
 }
 
@@ -66,6 +81,7 @@ export function closeSettings(): void {
   uiStore.setState((prev) => ({
     ...prev,
     settingsOpen: false,
+    settingsTab: null,
   }));
 }
 
@@ -173,4 +189,9 @@ export function setActiveDmUser(userId: number | null): void {
     ...prev,
     activeDmUserId: userId,
   }));
+}
+
+/** Record the open content view. Only the content navigator calls this. */
+export function setActiveView(view: ContentViewId | null): void {
+  uiStore.setState((prev) => ({ ...prev, activeView: view }));
 }

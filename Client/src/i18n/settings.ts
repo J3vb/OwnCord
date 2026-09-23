@@ -2,6 +2,7 @@ import { defineCatalog } from "./format";
 
 /** Settings copy. B9-3 moved the Accessibility tab here; B9-20 extends it with the other tabs. */
 export const settingsText = defineCatalog("settings", {
+  "tabs.safety": "Safety",
   "accessibility.reducedMotion.label": "Reduce Motion",
   "accessibility.reducedMotion.desc": "Disable animations and transitions",
   "accessibility.highContrast.label": "High Contrast",

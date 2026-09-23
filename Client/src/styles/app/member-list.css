@@ -65,6 +65,22 @@
   margin-left: 4px;
   flex-shrink: 0;
 }
+/* Pending Message Requests (B9-4): a neutral badge, apart from the red unread one. */
+.dm-header-requests-badge {
+  position: relative;
+  background: var(--bg-tertiary);
+  color: var(--text-normal);
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 10px;
+  padding: 0 6px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  min-width: 16px;
+  text-align: center;
+  line-height: 14px;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
 .sidebar-dm-view-all {
   display: block;
   width: 100%;
