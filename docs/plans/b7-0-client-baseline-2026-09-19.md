@@ -645,3 +645,149 @@ one level change is live `AbortController`s, +2 and flat. `GlobalKeybinds` and
 page-lifetime `Disposable` now, where before they hand-paired a
 `removeEventListener`. The heap slope is inside 11a's recorded run-to-run range
 (9 250–12 431).
+
+## B7-11c long-session evidence (Tasks 12–16, 2026-09-23)
+
+PR 11c's evidence append: what the soak found and the fixes, the within-page
+coverage, the at-head calibration, and the recorded long run. Base is `dev`
+`233b93f4` (11b merged). It is an evidence append, not a status row.
+
+### Findings and fixes (Task 12)
+
+11a's open question was whether the within-page growth it measured (listeners
+about 211 → 251, nodes about 227 per cycle, between cycles 5 and 9 of one page)
+was a leak or state a reconnect resets. It was real, and the reconnect did not
+reset it: sampling every cycle showed a straight line, about +216 nodes, +10
+listeners and +4 live `AbortController`s per cycle. Bisecting the cycle's steps
+and tracing retainers in heap snapshots split it into:
+
+| Source                                                                                                                                                                                                                    | Per cycle                                  | Resolution                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| livekit-client 2.22's `Room` constructor registers a `navigator.mediaDevices` `devicechange` listener whose closure still captures the Room, so its FinalizationRegistry cleanup never runs: every voice join kept a Room | +1 listener, +4 live controllers, a Room   | **Fixed** (`roomLifecycle.ts`): `Room.cleanupRegistry = false`, so the Room registers `handleDeviceChange`, which `disconnect()` removes. Regression test in `roomLifecycle.test.ts` |
+| The audio pipeline closed its `AudioContext` in the same task that told the VAD worklet to stop, so the processor never returned `false` and Chromium kept the node, and the closed context, for the page's life          | +1 closed `AudioContext` and worklet node  | **Fixed** (`audioPipeline.ts`, `public/vad-worklet.js`): the worklet acknowledges `stop` from its last `process()`, and teardown closes on that (1 s fallback). Tests in both suites |
+| The Account tab's session list gained a row per logout/login (11a's cross-login growth, about one listener and 1.6 nodes per logout)                                                                                      | +1 row per login                           | **Fixed** (`api.ts`): the logout revocation is sent outside the ending session's scope. Regression test in `api-session.test.ts`                                                     |
+| The Logs tab renders the logger's ring buffer and stayed mounted, since the settings tour ended on it                                                                                                                     | about +72 elements until the 500-entry cap | Bounded, not a leak. The tour ends on Account                                                                                                                                        |
+| V8 keeps console arguments alive while an inspector is attached (livekit logs its E2EE worker, which reaches the Room), and the media probe keeps every peer, socket and track                                            | +7 listeners and more, observer-only       | Measurement: the probe discards console entries and prunes the media probe's dead entries before GC; the media probe forgets a terminated worker                                     |
+| The reconnect banner's text node, created by a page's first reconnect                                                                                                                                                     | +1 once per page                           | Bounded; the within-page pair samples after it                                                                                                                                       |
+| The first login in a fresh browser has no saved profile, so the Account tab's retention notice is absent on page 0 only                                                                                                   | +10 nodes, page 0 only                     | Not a leak; the run relogs once before cycle 0                                                                                                                                       |
+
+After the fixes every count is exactly flat within a page (listeners 163, live
+`AbortController`s 24 at every cycle). Within-page heap still rises as a page
+ages; a heap-snapshot diff between cycles 4 and 9 is about 1 MB of V8 compiled
+code, so heap is compared only at equal page age. `PENDING_METRICS` is empty:
+every count holds the plan's 0.05 per cycle in every series.
+
+The two Task 12 candidates 11b recorded stay as they are, by owner decision,
+and neither leaks: the `deviceManager` `devicechange` pair (moving it would edit
+`device-manager.test.ts` assertions, so R1's floor is 17, not the plan's 16) and
+`ChannelController`'s channel token (a session fork would change when channel
+loads are cancelled at logout; MainPage teardown already aborts it).
+
+One "misbehave" finding is outside lifecycle scope and recorded open as
+**OC-0452**: in one of the long runs a receive-side E2EE key race at voice join
+logged `InvalidKey: Decryption failed` three times, which the client reports as a
+possibly unsecured call. The soak's console check stays strict.
+
+### Within-page coverage and the planted control (Task 3, owed by 11a)
+
+Every tenth cycle ends with a logout, which navigates, so each page is ten
+cycles. Every fifth cycle starts with the application reconnect. Samples are
+taken at cycle 0, every five cycles, and at cycles 6 and 9 of every page; the 6/9
+pair is like-for-like within a page (both after that page's reconnect, neither
+directly after one). The planted unowned `window` `resize` listener in the
+Account tab's mount fails the listener bar at `966e3301`
+(`page 0: 176→182; page 1: 176→182`, 2 per cycle) and the node bar. Timers are
+read twice a second apart and the lower read counts, so a timer the app is
+running at that instant is not read as accumulation.
+
+### At-head calibration: five 20-cycle runs at `966e3301`
+
+Linux x86_64 Chromium, `OWNCORD_SOAK_CYCLES=20`, about 2.5 minutes each. All
+five passed; every count was identical across them:
+
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | live AbortControllers | heap slope (B/cycle) |
+| --- | -------------------------- | ------------------------------ | --------------------- | -------------------: |
+| 1   | 2693 → 2693 (0)            | 163 → 163 (0)                  | 24                    |               10 484 |
+| 2   | 2693 → 2693 (0)            | 163 → 163 (0)                  | 24                    |                8 534 |
+| 3   | 2693 → 2693 (0)            | 163 → 163 (0)                  | 24                    |                4 591 |
+| 4   | 2693 → 2693 (0)            | 163 → 163 (0)                  | 24                    |               11 399 |
+| 5   | 2693 → 2693 (0)            | 163 → 163 (0)                  | 24                    |                7 132 |
+
+`documents`, `intervals` and `timeouts` were 1 and sockets, peer connections,
+tracks and `AudioContext`s 0 in every run. Two earlier five-run attempts (at
+`d8ebafd9` and `8efd7803`) each failed one run on something that was not a
+leak, and each changed the soak, not the bars: a two-point heap series at cycle 9 (V8 tier-up;
+heap now compares only at the reset phases) and one extra node read seconds
+after a reconnect (the reconnect now starts its cycle).
+
+### The recorded long run (Tasks 13 and 15)
+
+Command: `cd Client && OWNCORD_E2E_LIVEKIT_BINARY=tests/e2e/.bin/livekit-server npm run test:e2e:soak`
+(`playwright.config.soak.ts`: 200 cycles, then 30 idle-connected minutes sampled
+every 5 minutes; one attempt, no trace). Commit `09c3d6d6`, Linux x86_64
+Chromium on a 16-core developer machine. Wall time 52.5 minutes: 200 cycles in
+22.3 minutes (6.7 s per cycle including sampling), then the idle phase. 300
+cycles plus the idle phase would not fit the 60 minutes the run is sized to, so
+it runs the plan's floor of 200.
+
+| Metric                 | Cycle 0 | Warm (c5) |    c199 | c200 (post-logout) | Worst slope, all series | Bar                                          |
+| ---------------------- | ------: | --------: | ------: | -----------------: | ----------------------: | -------------------------------------------- |
+| documents              |       1 |         1 |       1 |                  1 |                       0 | exactly flat                                 |
+| nodes                  |     789 |      1355 |    1355 |                796 |                       0 | ≤ 0.05/cycle                                 |
+| listeners              |     187 |       160 |     160 |                188 |                       0 | ≤ 0.05/cycle                                 |
+| live AbortControllers  |      22 |        24 |      24 |                 22 |                       0 | ≤ 0.05/cycle                                 |
+| intervals              |       1 |         1 |       1 |                  1 |                       0 | exactly flat                                 |
+| timeouts               |       3 |         1 |       1 |                  1 |                       0 | ≤ 0.05/cycle                                 |
+| sockets, peers, tracks |       0 |         0 |       0 |                  0 |                       0 | exactly 0 outside a call                     |
+| open AudioContexts     |       0 |         0 |       0 |                  0 |                       0 | ≤ warm                                       |
+| heap used (B)          | 4155672 |   7643624 | 8295952 |            4364592 |             395 B/cycle | ≤ 1.10 × and ≤ 25 KB/cycle at equal page age |
+
+Idle phase (after c200, logged in, no activity): the samples at 5 and 10
+minutes precede the app's own auto-idle status change (ten quiet minutes) and are
+recorded only; the four from 15 to 30 minutes held every count exactly (nodes 796,
+listeners 188, live controllers 22, intervals 1, timeouts 1, and 0 sockets, peers,
+tracks and contexts), and heap moved about 5 B per minute (4 330 328 → 4 330 416).
+
+**Every lifecycle bar passed.** The run as a whole reported a failure, by design:
+the soak's strict console check caught one more occurrence of OC-0452 (the E2EE
+over-warning at voice join, about seven seconds after the cycle-180 sample).
+That check stays strict until OC-0452 is fixed, so a long run can show it.
+
+The absolute node and listener levels are lower here than in the 20-cycle runs
+(1355 against 2693 nodes, 160 against 163 listeners), and equally flat. The long
+run's config turns Playwright's trace recorder off, and that recorder adds its
+own listeners and nodes to the page (`__playwright_snapshotter_*` listeners show in
+the live-listener dump); the bars compare within a run.
+
+Earlier long runs on this branch, each at a head since superseded:
+
+- `80939fe2`: every count flat for 200 cycles except one extra pending timeout in
+  one of 80 samples (timers are now read twice), and one node in the idle phase
+  from the auto-idle change (idle samples now start after it); its 926 MB failure
+  trace overran teardown (the long run now records none).
+- `763f4627`: stopped at cycle 10 when the composer's 200 ms double-send guard
+  swallowed the cycle's edit (the soak now presses Enter until the edit lands).
+- `fe3ec508`: every lifecycle bar passed (heap 480 B/cycle, idle counts equal);
+  the console check caught OC-0452 three times.
+
+### Native soak (Task 14)
+
+`tests/e2e/native/long-session.spec.ts` soaks the Windows desktop shell over
+WebView2 in the `native-core` project of `client-native`: 10 cycles over the
+real Rust transport (message send, edit and reaction, the settings tour,
+overlays, a voice join and leave, a reconnect through the fixture's TCP gate at
+cycles 5 and 10), held to the same bars on the within-page pair. It is one user,
+so decoded two-party media stays the fullstack soak's, and timers are the
+fullstack soak's too (the persistent page loads before an init script could).
+The job's measured added time is recorded in the PR.
+
+### Ratchet and gates (Task 16)
+
+- Coverage: 94.3 % statements (284 files, 6 225 passed + 148 expected fail), so
+  `Client/coverage-floor.json` moves 92.0 → 93.0 (decision 9).
+- Bundle: startup closure 85 970 / 91 000 B; `MainPage` 57 165 / 60 000 B.
+- Inventory: R1 17 (16 app-lifetime + the `deviceManager` pair), R3 3, R4 8, all
+  unchanged from 11b; the guard baseline is 1 file.
+- `typecheck`, `typecheck:build`, `typecheck:e2e`, `lint`, `knip`, the mutation
+  shard union (106 files), `actionlint` and `zizmor` on the nightly workflow,
+  `check:docs` and `check:hygiene` are clean.
