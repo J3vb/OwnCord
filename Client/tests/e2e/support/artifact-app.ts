@@ -241,7 +241,11 @@ async function launchLinux(
   };
 }
 
-/** Ends every process running the installed binary, including an updater relaunch. */
+/**
+ * Ends every process running the installed binary, including an updater
+ * relaunch. taskkill fails for a tree member that exited between the query and
+ * the kill; that process is gone either way, so the exit status is not the check.
+ */
 export async function killInstalled(binary: string) {
   if (process.platform === "win32") {
     await exec(
@@ -250,7 +254,7 @@ export async function killInstalled(binary: string) {
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:OWNCORD_ARTIFACT_EXE } | ForEach-Object { taskkill /pid $_.ProcessId /t /f | Out-Null }",
+        "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:OWNCORD_ARTIFACT_EXE } | ForEach-Object { taskkill /pid $_.ProcessId /t /f 2>$null | Out-Null }; exit 0",
       ],
       { env: { ...process.env, OWNCORD_ARTIFACT_EXE: binary }, timeout: 30_000 },
     );

@@ -41,9 +41,12 @@ if (createHash("sha256").update(bytes).digest("hex") !== digest)
   throw new Error("LiveKit archive checksum mismatch");
 await writeFile(archive, bytes);
 try {
-  // Windows runners ship bsdtar, which also reads zip archives.
+  // Windows ships bsdtar, which also reads zip archives. Named by path: under
+  // Git Bash a bare `tar` is GNU tar, which reads `D:\...` as a remote host.
   const result = spawnSync(
-    "tar",
+    process.platform === "win32"
+      ? resolve(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
+      : "tar",
     [
       "-xf",
       archive,

@@ -269,6 +269,12 @@ jobs:
           dbus-run-session -- bash -c 'printf "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
             xvfb-run -a npx playwright test --config playwright.config.artifact.ts --project artifact-journey'
 
+      # A native crash of the app leaves nothing in the driver log; the
+      # kernel's segfault line names the faulting library.
+      - name: Kernel log on failure (Linux)
+        if: failure() && runner.os == 'Linux'
+        run: sudo dmesg | tail -n 60
+
       # Installer descendants must not hold Actions' output pipes, the same
       # reason the native lane runs its updater through this wrapper.
       - name: Update from the previous release, then roll back (Windows)
