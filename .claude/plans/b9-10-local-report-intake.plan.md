@@ -234,7 +234,10 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   the profile popup (only ever needed after a click, and imported only by
   `MemberList`) now loads on first open too, and the member report's focus
   fallback moved into the lazy openers. Merged, MainPage is 59,997 B: the
-  budget holds, with 3 B left for the next lane.
+  budget holds, with 3 B left for the next lane. Merging `dev` again after
+  B9-5 (#1761) applied Firstmate's shared B9 lane budgets of 2026-09-23
+  (MainPage 64,000 B, startup 93,000 B; re-baselined at B9-26): merged,
+  MainPage is 60,133 B and the startup closure 91,282 B.
 - **Keyboard reach for users.** Member rows were click-only, so the profile,
   and its Report button, could not be reached from the keyboard. A row is now a
   named `role="button"` with `tabindex="0"` that opens the profile on Enter or

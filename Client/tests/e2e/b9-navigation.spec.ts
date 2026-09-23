@@ -1,11 +1,12 @@
 /**
  * B9-4: the shared navigation seams in the real shell.
  *
- * Message Requests (B9-5) and the Moderation Center (B9-11) add their own
- * entries later; the Safety tab ships with B9-15 and B9-10 (their journeys
- * are in b9-moderation-notices.spec.ts and b9-reports.spec.ts). What the running app must show is the
- * owner's Q2 rule: no empty or nonfunctional destination, and the familiar channel, DM and
- * settings routes unchanged with the content-view column in place. The
+ * Message Requests (B9-5) and the Safety tab (B9-15 and B9-10) ship in this
+ * build; their journeys are b9-message-requests.spec.ts,
+ * b9-moderation-notices.spec.ts and b9-reports.spec.ts. The Moderation Center
+ * (B9-11) still has no entry, so what the running app must show for it is the
+ * owner's Q2 rule: no empty or nonfunctional destination, and the familiar
+ * channel, DM and settings routes unchanged with the content-view column in place. The
  * transitions through a destination (open, Close/Escape back to the channel,
  * replacement, permission loss, sign-out) run against inert views in
  * src/features/navigation/navigation.test.ts, because this spec also runs
@@ -67,20 +68,17 @@ test.describe("B9-4 shared navigation", () => {
     await signIn(page);
   });
 
-  test("shows no Requests or Moderation entry before their features ship (Q2)", async ({
-    page,
-  }) => {
+  test("shows no Moderation entry before its feature ships (Q2)", async ({ page }) => {
     // Moderation would sit beside Audit Log; Audit Log is there, Moderation is not.
     await expect(page.locator("[data-testid='audit-log-btn']")).toBeVisible();
     await expect(page.locator("[data-testid='moderation-btn']")).toHaveCount(0);
-    // No pending-request badge on the DM header.
-    await expect(page.locator("[data-testid='dm-requests-badge']")).toHaveCount(0);
+    // No pending requests (the mock server has no inbox): no badge on the DM header.
+    await expect(page.locator("[data-testid='dm-requests-badge']")).toBeHidden();
     await expectNoView(page);
 
-    // DM mode has no Message Requests section at its top.
+    // DM mode: opening it opens no view by itself.
     await page.locator("[data-testid='dm-entry']").first().click();
     await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible();
-    await expect(page.locator("[data-testid='dm-requests-entry']")).toHaveCount(0);
     await expectNoView(page);
 
     // Settings has the Safety tab (B9-10/15) after Account, in the arrow-key order.

@@ -481,6 +481,9 @@ describe("Server/admin/static/index.html — panel behaviour", () => {
       true,
     );
 
+    // Each apply re-renders #content without awaiting it; let that settle so
+    // it cannot replace the input below mid-preview.
+    await new Promise((resolve) => booted.dom.window.setTimeout(resolve, 0));
     doc.getElementById("content")!.innerHTML = '<input id="retentionDays" value="90">';
     await booted.bridge.openApplyRetention();
     await booted.bridge.applyRetention();

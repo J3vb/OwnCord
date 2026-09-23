@@ -3073,6 +3073,26 @@ describe("SidebarArea", () => {
         expect(badge?.style.display).toBe("none");
         cleanup(result);
       });
+
+      it("opens DM mode from the badge for a user with no DMs", () => {
+        pending = 1;
+        const result = mount({ destinations: destinations() });
+        expect(result.sidebarWrapper.querySelectorAll("[data-testid='dm-entry']")).toHaveLength(0);
+
+        const badge = q(result, "dm-requests-badge");
+        expect(badge?.tagName).toBe("BUTTON");
+        badge?.focus();
+        expect(document.activeElement).toBe(badge);
+        badge?.click();
+        uiStore.flush();
+
+        expect(uiStore.getState().sidebarMode).toBe("dms");
+        const entry = q(result, "dm-requests-entry");
+        expect(entry?.textContent).toBe("Message Requests (1)");
+        // The badge left with channel mode; focus lands on the entry, not <body>.
+        expect(document.activeElement).toBe(entry);
+        cleanup(result);
+      });
     });
 
     describe("the back path", () => {

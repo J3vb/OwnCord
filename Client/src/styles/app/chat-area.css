@@ -237,3 +237,65 @@
   min-height: 0;
   overflow-y: auto;
 }
+
+/* ── B9-5 Message Requests inbox: plain text, nothing fetched ── */
+.requests-inbox {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: 12px 16px;
+  box-sizing: border-box;
+}
+.requests-intro,
+.requests-status {
+  margin: 0;
+  color: var(--text-muted);
+}
+.requests-status:empty {
+  position: absolute;
+}
+.requests-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* Inside the scroller, so the ring is never clipped by it. */
+.requests-list:focus-visible {
+  outline-offset: -2px;
+}
+.requests-item {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.requests-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+}
+.requests-sender {
+  margin: 0;
+  font-size: var(--font-size-md);
+  color: var(--header-primary);
+  overflow-wrap: anywhere;
+}
+.requests-username,
+.requests-time {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+.requests-preview {
+  margin: 4px 0 0;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.requests-preview-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}

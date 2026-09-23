@@ -23,6 +23,8 @@
  */
 
 import type { ApiClient } from "@lib/api";
+import { pendingRequestCount } from "../message-requests/store";
+import { buildInbox } from "../message-requests/view";
 import { buildSafetyPane } from "../reports/safetyPane";
 
 /** A destination that opens in the content area, in place of the chat column. */
@@ -65,5 +67,6 @@ export interface NavigationDestinations {
 
 /** The destinations this build ships. */
 export const NAVIGATION_DESTINATIONS: NavigationDestinations = {
+  requests: { build: buildInbox, pending: pendingRequestCount },
   safety: { build: buildSafetyPane },
 };
