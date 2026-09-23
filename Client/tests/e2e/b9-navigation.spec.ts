@@ -91,6 +91,38 @@ test.describe("B9-4 shared navigation", () => {
     await expect(page.getByRole("tab", { name: "Appearance" })).toBeFocused();
   });
 
+  test("the header fits a Moderation entry beside Audit Log (Q2)", async ({ page }) => {
+    // The entry B9-11 turns on is the same button SidebarArea renders beside
+    // Audit Log, with the header class it sets while the entry is shown. No
+    // destination can be registered in the production bundle, so add both to
+    // the real header and measure the real stylesheet.
+    const sidebar = page.locator("[data-testid='unified-sidebar']");
+    const header = sidebar.locator(".unified-sidebar-header");
+    await page.locator("[data-testid='audit-log-btn']").evaluate((audit) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "sidebar-audit-btn";
+      btn.dataset.testid = "moderation-btn";
+      btn.textContent = "Moderation";
+      audit.after(btn);
+      audit.parentElement!.classList.add("with-moderation");
+    });
+    const moderation = page.locator("[data-testid='moderation-btn']");
+    await expect(moderation).toBeVisible();
+
+    const overflow = await header.evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(overflow).toBe(0);
+    const bar = await sidebar.boundingBox();
+    const box = await moderation.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(bar!.x);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(bar!.x + bar!.width);
+
+    // Focusing it scrolls nothing sideways under the chat column.
+    await moderation.focus();
+    expect(await sidebar.evaluate((el) => el.scrollLeft)).toBe(0);
+    expect(await header.evaluate((el) => el.scrollLeft)).toBe(0);
+  });
+
   test("channel → DM → back → settings → logout → sign in again keeps the shell whole", async ({
     page,
   }) => {
