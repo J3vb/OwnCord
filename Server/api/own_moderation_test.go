@@ -212,3 +212,43 @@ func TestOwnModeration_RateLimited(t *testing.T) {
 		t.Fatalf("request 31: status = %d, want 429", status)
 	}
 }
+
+// TestOwnModeration_OmitsOwnPurge: a moderator's own channel purge is
+// recorded against the moderator but is not a sanction, so their own read
+// omits it, while a warning a higher-ranked moderator issued them still
+// appears.
+func TestOwnModeration_OmitsOwnPurge(t *testing.T) {
+	database := newModQueueActTestDB(t)
+	h := buildOwnModerationRouter(database)
+	ctx := context.Background()
+
+	seniorID := mintModerator(t, database, "own-senior", 95, permissions.ModerateMembers)
+	seniorToken, _ := mintSession(t, database, seniorID)
+	modID := mintModerator(t, database, "own-purger", 90, permissions.ModerateMembers|permissions.ManageMessages)
+	modToken, _ := mintSession(t, database, modID)
+	authorID := mintUser(t, database, "own-author")
+
+	chID, err := database.CreateChannel(ctx, "own-purge", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	if _, err := database.CreateMessage(ctx, chID, authorID, "purge me", nil); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	ids, err := database.PurgeChannelMessagesWithAction(ctx, chID, 0, 10, modID, nil)
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("PurgeChannelMessagesWithAction = %v, %v; want one purged message", ids, err)
+	}
+	ledger, err := database.ListModerationActionsForTarget(ctx, modID)
+	if err != nil || len(ledger) != 1 || ledger[0].Kind != "removal" {
+		t.Fatalf("moderator ledger after purge = %+v, %v; want one self-targeted removal", ledger, err)
+	}
+
+	warnID := postAction(t, h, "/api/v1/moderation/users/"+itoa(modID)+"/warn", seniorToken,
+		`{"reason":"slow down"}`)
+
+	rows := getOwnModeration(t, h, modToken)
+	if len(rows) != 1 || field[int64](t, rows[0], "id") != warnID || field[string](t, rows[0], "kind") != "warning" {
+		t.Fatalf("moderator's own rows = %v, want only warning %d (purge row %d must not appear)", rows, warnID, ledger[0].ID)
+	}
+}

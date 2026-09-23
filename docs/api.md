@@ -2517,8 +2517,10 @@ Acknowledge a warning — own rows only. `{id}` is the ledger row id from
 
 The caller's own sanctions, read from the ledger, so they survive a restart
 that live `mod_action` frames and `ready.notices` do not cover: every
-`warning`, `timeout`, `removal` and `ban` row that targets the caller, newest
-first. Kicks are left out because nothing persists to appeal. A `ban` row can
+`warning`, `timeout`, `removal` and `ban` row that another moderator applied
+to the caller, newest first. Kicks are left out because nothing persists to
+appeal. Self-targeted rows are left out too: a moderator's own channel purge
+is recorded against the moderator but is not a sanction against them. A `ban` row can
 only reach a caller whose ban has lapsed or been reversed, since a currently
 banned caller cannot authenticate. A currently banned user still appeals out
 of band, as [Appeals](#appeals) describes. Rows leave this list when the
