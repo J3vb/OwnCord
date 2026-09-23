@@ -105,7 +105,7 @@ test.describe("Saved-password login", () => {
     const totpOverlay = page.locator(".totp-overlay");
     await expect(totpOverlay).not.toHaveClass(/totp-overlay--hidden/, { timeout: 10000 });
 
-    await page.locator(".totp-overlay input[inputmode='numeric']").fill("123456");
+    await page.locator(".totp-overlay input[autocomplete='one-time-code']").fill("123456");
     await page.locator(".totp-overlay button.btn-primary").click();
 
     // Verifying completes the session and the client moves on to connecting,

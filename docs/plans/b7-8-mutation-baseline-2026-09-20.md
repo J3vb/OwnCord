@@ -283,3 +283,284 @@ lines 403, 434, 495, 1031, 1116, 1291, 2442, 2808, 2887, 2998, 3330, 3389,
 `joinOrchestration.ts`; a deliberately re-introduced `leaveVoice()` inside its
 `!isStateConnected()` checkpoint was reported red, then reverted. The
 `livekitE2EE` oracle and its three rules are 9b's.
+
+## B7-9b post-split measurement (evidence append, 2026-09-21)
+
+B7-9b (plan `.claude/plans/b7-9-decompose-voice.plan.md`, Tasks 7–12) split
+`src/lib/livekitE2EE.ts` into the `E2EEManager` facade plus five ownership
+modules under `src/features/voice/`: `e2eeIdentity.ts`, `e2eeEpoch.ts`,
+`e2eePeerState.ts`, `e2eeWorker.ts` and `e2eeOffer.ts`. Same machine, Node
+26.9.0 and Stryker 10.0.0 as 9a, from `Client/`:
+
+```bash
+# before: dev at c4f01161 (9a merged, livekitE2EE.ts not yet split)
+npx stryker run --mutate "src/lib/livekitE2EE.ts" --reporters clear-text,json
+# after: fm/b7-9b-impl at 66b18f51 (60 m 40 s) — the whole livekit shard,
+# a superset of the facade + extracted files
+STRYKER_SHARD=livekit npx stryker run stryker.shard.config.mjs --reporters clear-text,json,progress --ignorePatterns src-tauri
+```
+
+`--ignorePatterns src-tauri` only keeps the Rust `target/` directory (~11 GB
+on a machine that has built the Tauri app) out of Stryker's sandbox copy; it
+changes neither the mutated files nor the tests. The before report's embedded
+source is byte-identical to `livekitE2EE.ts` at `c4f01161`.
+
+| Scope                                       | Before: mutants / errors / score | After: mutants / errors / score |
+| ------------------------------------------- | -------------------------------: | ------------------------------: |
+| `livekitE2EE` (facade + extracted files)    |              896 / 229 / 57.27 % |           1 005 / 304 / 65.34 % |
+| `livekitSession` (facade + extracted files) |           1 198 / 486 / 58.29 %¹ |           1 198 / 486 / 58.71 % |
+| **Two-module total**                        |       **2 094 / 715 / 57.80 %**¹ |       **2 203 / 790 / 62.00 %** |
+| `livekit` shard (17 files)                  |                                — |         3 103 / 1 031 / 61.25 % |
+
+¹ 9a's after-run, above. The before `livekitE2EE` row is identical across
+B7-8, 9a's two runs and this before-run (896 / 229 / 57.27 %).
+
+**The pass rule holds:** the after-score over the `E2EEManager` facade and the
+extracted `livekitE2EE` files is 65.34 %, 8.07 points above 57.27 %, not
+more than 1 point below it. `livekitSession.ts` and its five 9a modules are
+byte-identical to 9a. Four of the modules score exactly as 9a recorded
+(`joinOrchestration` 45.61, `mediaControl` 69.06, `roomLifecycle` 56.18,
+`remoteTracks`/`sessionState` 100). The facade kills 156 of 238 valid mutants
+here against 153 in 9a (65.55 % vs 64.29 %). That is 3 mutants on unchanged
+code, run-to-run variance outside this pass rule's scope.
+
+Per module, each extracted file compared with the **same code** in the
+pre-split file. The before-run's mutants are bucketed by their enclosing
+class member, and each member by the module that now holds its body:
+
+| Module (after)                 | Before, same code |    After |     Δ |
+| ------------------------------ | ----------------: | -------: | ----: |
+| `features/voice/e2eeIdentity`  |           41.67 % |  80.00 % | +38.3 |
+| `features/voice/e2eeEpoch`     |           63.64 % |  81.63 % | +18.0 |
+| `features/voice/e2eePeerState` |           69.01 % |  78.08 % |  +9.1 |
+| `features/voice/e2eeWorker`    |           66.67 % | 100.00 % | +33.3 |
+| `features/voice/e2eeOffer`     |           50.38 % |  68.53 % | +18.2 |
+| `lib/livekitE2EE` (facade)     |           57.26 % |  57.25 % | −0.01 |
+
+- **The rises are the colocated tests.** `tests/unit/livekit-e2ee.test.ts` is
+  unchanged. Every gain comes from the new `src/features/voice/e2ee*.test.ts`
+  files, which kill mutants the frozen suite never reached. Examples: the
+  `ConditionalExpression` guards in `ensureIdentityKeyPair` (2/8 → 8/8), the
+  `applyRoomKey` staleness checks in `e2eeWorker` (6/9 → 9/9) and the
+  offer-path `ConditionalExpression`s in `e2eeOffer` (17/38 → 27/38).
+- **The one drop is the facade's −0.01, and none of it is lost coverage.**
+  The facade gained 57 mutants (495 → 552). Five survivors are new, and
+  every one sits on wiring that did not exist before the split:
+  `BlockStatement` on the `setRoomKeyResolver` and `setRoomKeyRejector`
+  host setters, `ArrowFunction` on the `clearKeyRotationTimer: () => …`
+  host closure, and `CallExpression` on the one-line delegates
+  `this._identity.clearIdentityKeyPair()` and `this._offers.clearState()`.
+  Before the split these were direct field writes or inline bodies, whose
+  mutants now live (and are counted) in `e2eeIdentity`/`e2eeOffer`. Every
+  other facade survivor is the same mutant, surviving the same way, as on
+  the pre-split line. For example, the `ConditionalExpression` on
+  `if (isCurrent()) this._peers.retirePeerKey(…)` was line 1385's.
+- **The errored count rises by 75** (229 → 304; facade +43). The typed host
+  object literals and accessor pairs are rejected by the TypeScript checker
+  when mutated, the same `CompileError` class as caveat 2 above. Errors stay
+  excluded from the denominator.
+
+The oracle named before the move and unchanged after it:
+`tests/unit/livekit-e2ee.test.ts` (77 `it`s) was not edited. It passes at
+HEAD together with the ten colocated `src/features/voice/*.test.ts` suites
+(177 tests in all). Its supersession/staleness cases are at lines 401, 444,
+554, 597, 631, 721, 800, 1095, 1137, 1367, 1508, 1739, 1837 and 2122. The three
+E2EE rules are armed on the new homes. Each probe below was reported red,
+then reverted:
+
+- `local/e2ee-epoch-needs-keypair-check`: dropping
+  `|| this._ecdhKeyPair !== keypair` from `e2eeOffer.ts`'s unwrap guard.
+- `local/e2ee-verified-status-literal`: a computed `status` in an
+  `e2eePeerState.ts` `setPeerVerificationIfCurrent` call.
+- `local/no-identity-scope-fallback`: `myUserId ?? 0` passed to
+  `getOrCreateIdentityKeyPair` in `e2eeIdentity.ts`.
+
+## B7-10a post-split measurement (evidence append, 2026-09-21)
+
+B7-10a (plan `.claude/plans/b7-10-decompose-dispatcher-messaging-stores.plan.md`,
+Tasks 0–8) moved the WebSocket handler bodies out of `src/lib/dispatcher.ts`
+into plain functions in `src/features/{connection,direct-messages,channels,messaging,voice}/wsHandlers.ts`
+plus `src/features/connection/dispatchContext.ts`. `dispatcher.ts` keeps every
+`ws.on(...)` registration and the `ready`/`error` ordering. Same machine, Node
+26.9.0 and Stryker 10.0.0 as B7-9, from `Client/`:
+
+```bash
+# before: dev at be7a0594 (B7-14 and B7-9b merged) (13 m 41 s)
+npx stryker run --mutate "src/lib/dispatcher.ts" --reporters clear-text,json,progress --ignorePatterns src-tauri
+# after: fm/b7-10a-impl after Task 7 (5 m 59 s)
+npx stryker run --mutate "src/lib/dispatcher.ts,src/features/connection/*.ts,src/features/direct-messages/*.ts,src/features/channels/*.ts,src/features/messaging/wsHandlers.ts,src/features/voice/wsHandlers.ts,!src/**/*.test.ts" --reporters clear-text,json,progress --ignorePatterns src-tauri
+```
+
+| Scope                                   | Before: mutants / errors / score | After: mutants / errors / score |
+| --------------------------------------- | -------------------------------: | ------------------------------: |
+| `dispatcher` (facade + extracted files) |              864 / 231 / 79.46 % |             939 / 233 / 81.73 % |
+
+The before run is at `be7a0594`, not the plan's base `92242f4a`: B7-14 added
+the `SESSION_REPLACED` branch in between (851 → 864 mutants; the plan
+re-measured 80.23 % on the older file). **The pass rule holds** against both:
+81.73 % is 2.27 points above this run's before-number and 1.50 above the
+plan's, not more than 1 point below either.
+
+**The mutant total rose 8.7 %, outside the plan's 3 % band**, and none of it
+is rewritten code. The valid (non-error) mutants rose by 73, and they are
+wiring that did not exist before the split. Stryker's `CallExpression`
+mutator removes a statement-level call. The `ready` and `error` handlers are
+now ordered call lists (`applyReadyChannels(payload);`,
+`handleVoiceJoinRollback();`, …), and every registration is now
+`unsubs.push(ws.on(S.X, handleX))`. `dispatcher.ts` alone went 22 → 72
+mutants, 39 of them `CallExpression`. Each extracted function also adds one
+`BlockStatement` mutant, and each `handle…Error` adds its `return true` /
+`return false` `BooleanLiteral`s.
+
+Per module, each extracted file compared with the **same code** in the
+pre-split file. The before run's mutants are bucketed by the original line
+range each moved block came from:
+
+| Module (after)                        | Before, same code |    After |     Δ |
+| ------------------------------------- | ----------------: | -------: | ----: |
+| `features/connection/wsHandlers`      |           80.85 % |  82.69 % |  +1.8 |
+| `features/connection/dispatchContext` |          100.00 % | 100.00 % |     0 |
+| `features/direct-messages/wsHandlers` |           68.75 % |  76.00 % |  +7.3 |
+| `features/channels/wsHandlers`        |           74.38 % |  76.42 % |  +2.0 |
+| `features/messaging/wsHandlers`       |           78.57 % |  79.68 % |  +1.1 |
+| `features/voice/wsHandlers`           |           85.39 % |  85.53 % |  +0.1 |
+| `lib/dispatcher` (composition)        |           71.43 % |  87.30 % | +15.9 |
+
+- **No module dropped.** The rises are the colocated
+  `src/features/*/wsHandlers.test.ts` suites. `tests/unit/dispatcher.test.ts`
+  (188 cases) is unchanged, and so are `tests/integration/stores.test.ts` (22)
+  and `tests/unit/session-replaced.test.ts` (3). Examples: `mapDmPayload`'s
+  pre-group fallback, and `applyReadyDms` keeping state identity when nothing
+  changed.
+- **The composition's new survivors are all wiring.** They are the
+  `CallExpression` removal of `activateReadyPendingMessages(api, payload)` and
+  of the `voice_e2ee_announce`/`voice_e2ee_offer` registrations. The frozen
+  suite never asserted those paths before the split either: the pending
+  activation block's 5 valid mutants all survived, and the announce/offer
+  bodies had no coverage. The other survivors are the same mutants, surviving
+  the same way, as on the pre-split lines: the `setActiveChannelProvider(null)`
+  cleanup arrow and the two log-payload literals.
+- **Errors stay excluded from the denominator** (231 → 233), the same
+  `CompileError` class as caveat 2 above.
+
+`stryker.ci.config.mjs` is unchanged. The new modules are in the
+`transport-auth` shard list, and `check-mutation-shards.mjs` reports the union
+exact (93 files). Client suite: 257 files / 5 911 passed + 140 expected fail
+at `be7a0594`; 264 / 5 955 + 140 after.
+
+## B7-10b post-split measurement (evidence append, 2026-09-22)
+
+B7-10b (plan `.claude/plans/b7-10-decompose-dispatcher-messaging-stores.plan.md`,
+Tasks 9–14) moved `src/stores/messages.store.ts`'s reducer bodies into pure
+`(prev, …) => next` functions under `src/features/messaging/`:
+`messageModel.ts` (types, converters, cap, initial state), `echoReconcile.ts`,
+`liveMessages.ts`, `historyWindows.ts`, `messageEdits.ts` and
+`reactionState.ts`. The store keeps the instance, every mutator name and
+signature (each now `messagesStore.setState((prev) => reduceX(prev, …))`, still
+22 sites), the selectors and the re-exported types. Same machine, Node 26.9.0
+and Stryker 10.0.0 as B7-10a, from `Client/`:
+
+```bash
+# before: dev at b6a5360f (B7-10a merged; messages.store.ts unchanged since 92242f4a) (20 m 25 s)
+npx stryker run --mutate "src/stores/messages.store.ts" --reporters clear-text,json,progress --ignorePatterns src-tauri
+# after: fm/b7-10b-impl after Task 13 (11 m 17 s)
+npx stryker run --mutate "src/stores/messages.store.ts,src/features/messaging/*.ts,!src/features/messaging/wsHandlers.ts,!src/**/*.test.ts" --reporters clear-text,json,progress --ignorePatterns src-tauri
+```
+
+| Scope                                       | Before: mutants / errors / score | After: mutants / errors / score |
+| ------------------------------------------- | -------------------------------: | ------------------------------: |
+| `messages.store` (facade + extracted files) |              788 / 244 / 83.64 % |             811 / 269 / 91.88 % |
+
+The before-number reproduces the plan's re-measured 83.64 % exactly (451
+killed, 4 timeout, 89 survived). **The pass rule holds:** 91.88 % is 8.24
+points above it, and the mutant total rose 2.9 %, inside the plan's 3 % band.
+The 23 extra mutants are not rewritten code. Each mutator is now an arrow
+that passes its arguments to a reducer, and each reducer has its own function
+block, so the wrappers add `CompileError`s (an emptied argument list or a
+removed call is ill-typed): errors rose 244 → 269, while valid mutants went
+544 → 542 (killed 451 → 494, survived 89 → 44).
+
+Per module, each extracted file compared with the **same code** in the
+pre-split file (the before run's mutants bucketed by the original line range
+each moved block came from; a mutator's own signature block, the
+`bulkDeleteMessages` empty-ids guard and `rollbackReaction`'s `found` flag
+stayed in the facade and are bucketed there):
+
+| Module (after)                      | Before, same code |    After |     Δ |
+| ----------------------------------- | ----------------: | -------: | ----: |
+| `features/messaging/messageModel`   |          100.00 % | 100.00 % |     0 |
+| `features/messaging/echoReconcile`  |           68.12 % |  89.86 % | +21.7 |
+| `features/messaging/liveMessages`   |           81.09 % |  88.83 % |  +7.7 |
+| `features/messaging/historyWindows` |           88.16 % |  91.22 % |  +3.1 |
+| `features/messaging/messageEdits`   |          100.00 % | 100.00 % |     0 |
+| `features/messaging/reactionState`  |           85.29 % | 100.00 % | +14.7 |
+| `stores/messages.store` (facade)    |           96.55 % |  94.12 % |  −2.4 |
+
+- **The rises are the colocated `src/features/messaging/*.test.ts` suites**
+  (six files, 101 cases), which drive each reducer directly — for example the
+  `echoNormalize` entity/tag table, `prev`-identity returns on every no-op
+  path, and the reaction rollback's inverse delta. The oracle suites are
+  unedited: `tests/unit/messages.store.test.ts` (131 cases),
+  `messages-store-detached.test.ts` (21) and `dispatcher.test.ts` (188).
+- **The facade's drop is two surviving mutants, neither new behaviour left
+  untested.** `if (payload.ids.length === 0) return;` → `false` in
+  `bulkDeleteMessages` survived before the split as well: without the guard the
+  reducer still returns `prev`, so it is equivalent. `let found = false` → `true`
+  in `rollbackReaction` was killed before and survives now, because the reducer
+  returns `{ next, found }` and the wrapper always overwrites the initial value
+  inside the updater. It is dead unless `setState` defers the updater
+  (a re-entrant call from a subscriber), which the store has never had a test
+  for. The remaining new facade mutants are wiring, all killed or
+  `CompileError`.
+- **Errors stay excluded from the denominator**, the same `CompileError` class
+  as caveat 2 above.
+
+Jev triage of the after report (typesafe.ai `jev-latest`, used as a sorting
+aid and not as a gate; 313 requests, 0 errors, 272 556 input tokens, 26 s):
+
+| Status       | Jev category   | conf ≥ 0.8 | conf < 0.8 |
+| ------------ | -------------- | ---------: | ---------: |
+| CompileError | `type-invalid` |        269 |          0 |
+| Survived     | `test-gap`     |         38 |          3 |
+| Survived     | `equivalent`   |          0 |          3 |
+
+All 269 `CompileError`s and the 38 high-confidence `test-gap`s are
+auto-accepted; 6 survivors are left for review. The high-confidence `test-gap`
+list, by module:
+
+- `echoReconcile.ts`: the `&#39;` replacement string (`:13`), the `"<"`
+  probe in `stripTags` (`:24`), the fixpoint loop's `i++` (`:55`) and its
+  `next === cur` exit (`:57`), the `failed`+`OFFLINE` clause (`:94`) and the
+  exact-content short-circuit (`:97`).
+- `historyWindows.ts`: the cap comparisons in `reduceSetMessages` (`:40`),
+  `reduceSetAroundMessages` (`:123`) and `reducePrependMessages` (`:225`);
+  `snapshotIds.has` (`:62`); the `carried.length > 0` ternaries (`:69`,
+  `:137`, `:229`); `m.id > maxWindowId` (`:135`); `if (wasTrimmed)` (`:226`).
+- `liveMessages.ts`: the client-id twin guard in `reduceAddMessage` (`:26`, ×2);
+  `reduceMarkSendFailed`'s fallback scan (`:116`, `:118`);
+  `reduceRemoveOptimistic`'s registered branch (`:148`); `reduceConfirmSend`'s
+  fallback lookup and match predicates (`:181`, `:186`–`:188`, `:205`,
+  `:209`–`:211`, 15 mutants); `findSendChannel`'s `rows.some` (`:253`).
+- `messages.store.ts`: the empty-ids guard (`:276`), which is equivalent (see
+  above) — a Jev false positive.
+
+For review: `echoReconcile.ts:55` `i <= 20` (test-gap 0.67),
+`historyWindows.ts:123` `>=` (test-gap 0.78), the three `carried.length >= 0`
+mutants at `historyWindows.ts:69,137,229` (equivalent 0.60 / 0.29 / 0.70) and
+`messages.store.ts:353` `found = true` (test-gap 0.45). Most of the
+`carried.length > 0 ? … : trimmed` and `m.status !== "sent"` mutants Jev calls
+`test-gap` produce an equal array or match only rows that cannot occur, so
+several are likely equivalent; they are recorded here, not fixed, since B7-10b
+moves code and adds no behaviour.
+
+The `stores` shard after the split, `STRYKER_SHARD=stores npx stryker run
+stryker.shard.config.mjs --reporters clear-text,json,progress --ignorePatterns src-tauri`
+(23 m 13 s): 15 files, 1 950 mutants, 1 091 killed, 4 timeout, 114 survived,
+4 no coverage, 737 errors — **90.27 %**, against 86.60 % over 9 files and
+1 918 mutants in the B7-8 table above.
+
+`stryker.ci.config.mjs` is unchanged. The six new modules are in the `stores`
+shard list, and `check-mutation-shards.mjs` reports the union exact (99 files).
+The startup closure is 90 428 B at `b6a5360f` and 90 565 B after (+137 B,
+budget 91 000 B). Client suite after: 272 files / 6 090 passed + 140 expected fail — the six new
+colocated files (101 cases) on top of `b6a5360f`.

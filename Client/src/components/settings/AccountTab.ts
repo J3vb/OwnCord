@@ -6,8 +6,13 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { UserStatus } from "@lib/types";
+import type { SessionInfo } from "@lib/api";
 import { createLogger } from "@lib/logger";
+import { showToast } from "@lib/toast";
+import { sessionDeviceLabel } from "@lib/session-notice";
+import { formatMessageTimestamp } from "@components/message-list/formatting";
 import { authStore } from "@stores/auth.store";
+import { uiStore } from "@stores/ui.store";
 import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
 import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
 import {
@@ -16,6 +21,7 @@ import {
   resolveServerUrl,
 } from "@components/message-list/attachments";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
+import { buildRecoveryKitSection, buildRegenerateCodes, buildShownOnce } from "./RecoverySections";
 
 const log = createLogger("AccountTab");
 
@@ -565,54 +571,17 @@ function buildTotpConfirmArea(
   if (result.backup_codes.length > 0) {
     // These codes are shown exactly once — the confirm step replaces this view.
     // Say so, and give a one-click way to keep them.
-    const backupLabel = createElement(
-      "div",
+    const reveal = buildShownOnce(
       {
-        style: "color:var(--yellow, #faa61a);font-size:13px;margin-bottom:8px;font-weight:600",
+        warning: "Save these backup codes now — you won't see them again:",
+        text: result.backup_codes.join("\n"),
+        codeTestId: "totp-backup-codes",
+        copyTestId: "totp-copy-backup-codes",
+        copyLabel: "Copy Codes",
       },
-      "Save these backup codes now — you won't see them again:",
+      signal,
     );
-    const codesText = result.backup_codes.join("\n");
-    const backupList = createElement(
-      "code",
-      {
-        style:
-          "display:block;background:var(--bg-active);padding:8px 12px;border-radius:6px;" +
-          "font-family:monospace;font-size:12px;white-space:pre-wrap;margin-bottom:8px;" +
-          "color:var(--text-primary);user-select:all",
-        "data-testid": "totp-backup-codes",
-      },
-      codesText,
-    );
-    const copyBtn = createElement(
-      "button",
-      {
-        class: "ac-btn",
-        style: "margin-bottom:12px",
-        "data-testid": "totp-copy-backup-codes",
-      },
-      "Copy Codes",
-    );
-    let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
-    copyBtn.addEventListener(
-      "click",
-      () => {
-        const restore = (label: string): void => {
-          setText(copyBtn, label);
-          if (copyResetTimer !== null) clearTimeout(copyResetTimer);
-          copyResetTimer = setTimeout(() => {
-            setText(copyBtn, "Copy Codes");
-            copyResetTimer = null;
-          }, 1500);
-        };
-        void navigator.clipboard
-          .writeText(codesText)
-          .then(() => restore("Copied!"))
-          .catch(() => restore("Copy failed"));
-      },
-      { signal },
-    );
-    elements.push(backupLabel, backupList, copyBtn);
+    elements.push(reveal.element);
   }
 
   const codeInput = createElement("input", {
@@ -823,6 +792,7 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
 
     if (enabled) {
       contentArea.appendChild(buildTotpDisableView(options, signal, render));
+      contentArea.appendChild(buildRegenerateCodes(options, signal));
     } else {
       contentArea.appendChild(buildTotpEnrollForm(options, signal, render));
     }
@@ -941,8 +911,207 @@ function buildStatusSelector(options: SettingsOverlayOptions, signal: AbortSigna
 }
 
 // ---------------------------------------------------------------------------
+// Devices (sessions) builder
+// ---------------------------------------------------------------------------
+
+function buildSessionRow(
+  s: SessionInfo,
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const row = createElement("div", {
+    class: "session-row",
+    "data-testid": "session-row",
+    "data-session-id": String(s.id),
+  });
+  const info = createElement("div", { class: "session-info" });
+  const name = createElement("div", { class: "session-device" }, sessionDeviceLabel(s.device));
+  if (s.is_current) {
+    name.appendChild(createElement("span", { class: "session-current" }, "This device"));
+  }
+  const detail = createElement(
+    "div",
+    { class: "session-detail" },
+    `${s.ip === "" ? "Unknown IP" : s.ip} \u00b7 Last used ${formatMessageTimestamp(s.last_used)}`,
+  );
+  appendChildren(info, name, detail);
+  row.appendChild(info);
+
+  // The current device has no per-row action: "Sign out everywhere" covers it.
+  if (s.is_current) return row;
+
+  const revokeBtn = createElement(
+    "button",
+    { class: "ac-btn", "data-testid": "session-revoke" },
+    "Sign out",
+  );
+  revokeBtn.addEventListener(
+    "click",
+    () => {
+      const list = row.parentElement;
+      const next = row.nextSibling;
+      row.remove();
+      void options
+        .onRevokeSession(s.id)
+        .then(() => {
+          showToast(
+            uiStore.getState().sessionReplaced
+              ? "Device signed out. Its requests are refused now, and its current connection closes within about 30 seconds."
+              : "Device signed out. It can no longer connect.",
+            "success",
+          );
+        })
+        .catch((err: unknown) => {
+          // The server kept the session, so the row comes back.
+          if (next?.parentNode === list) list?.insertBefore(row, next);
+          else list?.appendChild(row);
+          showToast(err instanceof Error ? err.message : "Failed to sign out the device.", "error");
+        });
+    },
+    { signal },
+  );
+  row.appendChild(revokeBtn);
+  return row;
+}
+
+function buildSessionsSection(
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const wrapper = createElement("div", { "data-testid": "sessions-section" });
+  const separator = createElement("div", { class: "settings-separator" });
+  const header = createElement("div", { class: "settings-section-title" }, "Devices");
+  const description = createElement(
+    "div",
+    { style: "color:var(--text-muted);font-size:13px;margin-bottom:12px" },
+    "Every device signed in to your account. A device you sign out can no longer connect.",
+  );
+  const list = createElement("div", { class: "session-list", "data-testid": "sessions-list" });
+  const status = createElement(
+    "div",
+    { style: "color:var(--text-muted);font-size:13px" },
+    "Loading devices...",
+  );
+
+  function load(): void {
+    list.replaceChildren(status);
+    setText(status, "Loading devices...");
+    void options
+      .onListSessions()
+      .then((sessions) => {
+        if (signal.aborted) return;
+        list.replaceChildren(...sessions.map((s) => buildSessionRow(s, options, signal)));
+      })
+      .catch((err: unknown) => {
+        if (signal.aborted) return;
+        log.warn("Failed to list sessions", err);
+        setText(status, "Could not load your devices.");
+      });
+  }
+
+  const revokeAllBtn = createElement(
+    "button",
+    {
+      class: "ac-btn account-delete-btn",
+      style: "margin-top:12px",
+      "data-testid": "sessions-revoke-all",
+    },
+    "Sign out everywhere",
+  );
+  const confirmArea = createElement("div", {
+    style: "display:none;margin-top:12px",
+    "data-testid": "sessions-revoke-all-confirm-area",
+  });
+  const warning = createElement(
+    "div",
+    { style: "color:var(--red);font-size:13px;margin-bottom:12px;line-height:1.4" },
+    "This signs out every device, including this one. You will need to sign in again here.",
+  );
+  const errorEl = createElement("div", {
+    style: "color:var(--red);font-size:13px;margin-bottom:8px",
+  });
+  const btnRow = createElement("div", { style: "display:flex;gap:8px" });
+  const confirmBtn = createElement(
+    "button",
+    { class: "ac-btn account-delete-btn", "data-testid": "sessions-revoke-all-confirm" },
+    "Sign out everywhere",
+  );
+  const cancelBtn = createElement(
+    "button",
+    { class: "ac-btn", style: "background:var(--bg-active)" },
+    "Cancel",
+  );
+  appendChildren(btnRow, confirmBtn, cancelBtn);
+  appendChildren(confirmArea, warning, errorEl, btnRow);
+
+  const closeConfirm = (): void => {
+    confirmArea.style.display = "none";
+    revokeAllBtn.style.display = "";
+    setText(errorEl, "");
+  };
+  revokeAllBtn.addEventListener(
+    "click",
+    () => {
+      revokeAllBtn.style.display = "none";
+      confirmArea.style.display = "block";
+    },
+    { signal },
+  );
+  cancelBtn.addEventListener("click", closeConfirm, { signal });
+  confirmBtn.addEventListener(
+    "click",
+    () => {
+      confirmBtn.disabled = true;
+      setText(errorEl, "");
+      void options
+        .onRevokeAllSessions()
+        .then((result) => {
+          // A revoked current session is handled by the page: auth is
+          // cleared and the app leaves. Otherwise refresh what is left.
+          if (result.current_session_revoked || signal.aborted) return;
+          closeConfirm();
+          load();
+        })
+        .catch((err: unknown) => {
+          setText(errorEl, err instanceof Error ? err.message : "Failed to sign out everywhere.");
+        })
+        .finally(() => {
+          confirmBtn.disabled = false;
+        });
+    },
+    { signal },
+  );
+
+  appendChildren(wrapper, separator, header, description, list, revokeAllBtn, confirmArea);
+  load();
+  return wrapper;
+}
+
+// ---------------------------------------------------------------------------
+// Message retention (B7-15c)
+// ---------------------------------------------------------------------------
+
+/** The server-default retention window, when the server reported one. */
+function buildRetentionSection(notice: string): HTMLDivElement {
+  const wrapper = createElement("div", { "data-testid": "account-retention" });
+  appendChildren(
+    wrapper,
+    createElement("div", { class: "settings-separator" }),
+    createElement("div", { class: "settings-section-title" }, "Message Retention"),
+    createElement("div", { style: "color:var(--text-muted);font-size:13px" }, notice),
+  );
+  return wrapper;
+}
+
+// ---------------------------------------------------------------------------
 // Delete account (danger zone) builder
 // ---------------------------------------------------------------------------
+
+/** What deletion does and does not reach (Server/service/erasure.go). */
+const DELETE_ACCOUNT_WARNING =
+  "Deletion is immediate and permanent: your account, messages and attachments are erased now and cannot be recovered. " +
+  "Server backups made before you delete keep a copy until they rotate out; if one is restored, your deletion is applied again. " +
+  "Images you shared may stay cached on other people's devices. Enter your password to confirm.";
 
 function buildDeleteAccountSection(
   options: SettingsOverlayOptions,
@@ -989,7 +1158,10 @@ function buildDeleteAccountSection(
     {
       style: "color:var(--red);font-size:13px;margin-bottom:12px;line-height:1.4",
     },
-    "This action is permanent and cannot be undone. All your data will be deleted. Enter your password to confirm.",
+    // B7-15c owner decision: no retention window here. Erasure hard-deletes
+    // the account's messages and attachments at once (Server/db/erasure.go),
+    // so a "kept N days" line would imply a grace period that does not exist.
+    DELETE_ACCOUNT_WARNING,
   );
 
   const passwordInput = createElement("input", {
@@ -1213,6 +1385,15 @@ export function buildAccountTab(
 
   // Two-factor authentication section
   section.appendChild(buildTotpSection(options, signal));
+
+  // Recovery kit
+  section.appendChild(buildRecoveryKitSection(options, signal));
+
+  // Signed-in devices
+  section.appendChild(buildSessionsSection(options, signal));
+
+  const retention = options.getRetentionNotice?.() ?? null;
+  if (retention !== null) section.appendChild(buildRetentionSection(retention));
 
   // Delete account (danger zone)
   section.appendChild(buildDeleteAccountSection(options, signal));

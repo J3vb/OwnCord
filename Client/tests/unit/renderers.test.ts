@@ -26,7 +26,10 @@ import {
 } from "../../src/components/message-list/reaction-tooltip";
 import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
 import { expectConsole } from "../helpers/console";
-import { clearExternalImageCache } from "../../src/components/message-list/attachments";
+import {
+  clearExternalImageCache,
+  closeActiveLightbox,
+} from "../../src/components/message-list/attachments";
 
 // B7-16: every external image and oEmbed title comes from the native broker.
 const { previewMock, imageMock } = vi.hoisted(() => ({
@@ -135,6 +138,8 @@ describe("renderers", () => {
   });
 
   afterEach(() => {
+    // Close a lightbox a test left open, releasing its document listeners.
+    closeActiveLightbox();
     setServerHost("");
     container.remove();
   });

@@ -84,7 +84,7 @@ follow.
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
 | `idle`            | Enabled fields; Login/Register toggle                                                                                             | submit → validate               |
 | `loading`         | Submit shows spinner, fields disabled (`updateSubmitButton()` + `updateFormInputsDisabled()` in `LoginForm.ts`)                   | `auth.login` resolves           |
-| `totp`            | 6-digit overlay, Verify/Cancel                                                                                                    | code → `verifyTotp`             |
+| `totp`            | Code overlay (6-digit TOTP or `XXXXX-XXXXX` emergency code), Verify/Cancel                                                        | code → `verifyTotp`             |
 | `connecting`      | "Connecting…" while WS handshakes                                                                                                 | ws `connected`                  |
 | `auto-connecting` | Dedicated spinner card for saved-profile auto-login                                                                               | any key/click cancels to `idle` |
 | `error`           | Shake-animated banner, server message capped 200 chars (the `handleFormSubmit()` catch + `updateErrorBanner()` in `LoginForm.ts`) | user edits → `idle`             |
@@ -93,6 +93,22 @@ follow.
 username, password required; password ≥ 8; in register mode the invite code is
 required when the host's registration mode is `invite` or unknown (see §2.4).
 Validation failures never hit the network.
+
+The 2FA box takes either a six-digit authenticator code or an emergency
+recovery code (`XXXXX-XXXXX`, case-insensitive, separator optional); the server
+routes the one `code` field by shape. A wrong code of either kind keeps the
+overlay and the partial token, so the user can retry; the re-entrancy guard
+stops a double Enter spending a single-use code twice.
+
+**Account recovery (B7-15b).** "Lost your password or 2FA device? Recover your
+account" opens a recovery overlay (`pages/connect-page/RecoverOverlay.ts`,
+loaded on first use to keep it out of the startup bundle): username (carried over from the form), a
+field for the recovery kit secret or a recovery credential from the server
+owner, and a new password (≥ 8). It calls `POST /auth/recover` with the secret
+in `kit_secret` (the server tells a kit from an owner credential by shape), and
+the returned session is signed in through the same `completeLogin` tail as a
+login. A refusal keeps the overlay and shows the server's message; success or
+Cancel wipes the secret and the new password from the inputs.
 
 ### 2.3 Login sequence
 
@@ -109,7 +125,7 @@ sequenceDiagram
     alt requires_2fa
         API-->>F: 200 {partial_token, requires_2fa}
         F->>U: show TOTP overlay
-        U->>F: 6-digit code
+        U->>F: 6-digit code or emergency recovery code
         F->>API: POST /auth/verify-totp (Bearer partial_token)
         API-->>F: 200 {token, user}
     else banned
@@ -147,6 +163,10 @@ per-host `server-info` snapshot the 15 s preflight keeps (`serverInfoByHost` in
 | `approval`               | No invite field; pending-approval notice shown before submit              |
 | `closed`                 | Notice states registration is closed; submit disabled                     |
 | unknown (no/failed read) | Treated as `invite` — registration is never widened on an unreadable mode |
+
+Unless the mode is `closed`, the register notice also carries the server's
+default message-retention window from the same snapshot (`retentionNotice()`
+in `lib/types.ts`); nothing is shown when the server does not report one.
 
 The client mode is advisory; the server enforces its own. `POST /auth/register`
 returns a token directly → straight to WS connect (no separate login
@@ -198,17 +218,20 @@ stateDiagram-v2
     Reconnecting --> Resyncing: socket open → auth{last_seq}
     Resyncing --> Connected: replay (dedup) or full ready
     Reconnecting --> Connect: auth_error (fatal) → transient-error
+    Connected --> SignedInElsewhere: SESSION_REPLACED (no reconnect)
+    SignedInElsewhere --> Reconnecting: Use here
     Connected --> Restarting: server_restart{delay}
     Restarting --> Reconnecting: server drops us
 ```
 
-| Phase                | Target reaction                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reconnecting`       | `ServerBanner.showReconnecting()` (already `applyConnectionStatus()`, `components/ServerBanner.ts`, invoked from MainPage's connectionStatus subscription); **live-only controls disable** via connection status (§3 of README); drafted input preserved                                                                                                                                                                                 |
-| replay resync        | Silent when the ring buffer covers `last_seq`; replayed frames increment unread counts like live ones — the burst is exactly the messages missed while away (`lib/dispatcher.ts`). There is no replay-dedup block in `handleMessage()` and no unread suppression during replay: the local replay classifier (`isReplayFrame`, `lib/dispatcher.ts`) gates only the desktop notification/sound/taskbar flash and the `@here` mention badge |
-| full resync          | If `last_seq` predates buffer coverage, server replays from the events table or forces a full `ready`; the UI simply re-populates — no user action                                                                                                                                                                                                                                                                                       |
-| `server_restart`     | `ServerBanner.showRestart(delay_seconds)` with a live countdown (`showRestart()`, `components/ServerBanner.ts`)                                                                                                                                                                                                                                                                                                                          |
-| fatal (`auth_error`) | `intentionalClose`, transient-error store → connect page                                                                                                                                                                                                                                                                                                                                                                                 |
+| Phase                          | Target reaction                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reconnecting`                 | `ServerBanner.showReconnecting()` (already `applyConnectionStatus()`, `components/ServerBanner.ts`, invoked from MainPage's connectionStatus subscription); **live-only controls disable** via connection status (§3 of README); drafted input preserved                                                                                                                                                                                                                                    |
+| replay resync                  | Silent when the ring buffer covers `last_seq`; replayed frames increment unread counts like live ones — the burst is exactly the messages missed while away (`handleChatMessage`, `features/messaging/wsHandlers.ts`). There is no replay-dedup block in `handleMessage()` and no unread suppression during replay: the local replay classifier (`isReplayFrame`, `features/messaging/wsHandlers.ts`) gates only the desktop notification/sound/taskbar flash and the `@here` mention badge |
+| full resync                    | If `last_seq` predates buffer coverage, server replays from the events table or forces a full `ready`; the UI simply re-populates — no user action                                                                                                                                                                                                                                                                                                                                          |
+| `server_restart`               | `ServerBanner.showRestart(delay_seconds)` with a live countdown (`showRestart()`, `components/ServerBanner.ts`)                                                                                                                                                                                                                                                                                                                                                                             |
+| fatal (`auth_error`)           | `intentionalClose`, transient-error store → connect page                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| displaced (`SESSION_REPLACED`) | No reconnect; stay signed in with the "Signed in elsewhere" banner and its "Use here" action ([settings-and-admin.md](settings-and-admin.md) §2.4)                                                                                                                                                                                                                                                                                                                                          |
 
 **Target rule:** reconnection is invisible on the happy path and honest on the
 sad path. The user should never wonder whether the app is live — the banner and

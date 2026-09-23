@@ -91,6 +91,28 @@ next section, and using them directly is equally correct.
 | `npm run tauri dev`     | Launch Tauri app in dev mode                                              |
 | `npm run tauri build`   | Build release installer (NSIS on Windows, AppImage+deb on Linux)          |
 
+**Linux native voice build prerequisite.** The Linux client links LiveKit's
+Rust SDK (`livekit`), whose `webrtc-sys` crate compiles C++ against Chromium's
+hermetic libc++ and therefore needs **clang >= 21** plus a prebuilt
+**libwebrtc** (~148 MB download, ~800 MB extracted). GCC is refused. Run the
+installer in each shell you build from, before any Linux Rust build (`cargo
+test`, `cargo clippy`, `tauri build`):
+
+```bash
+eval "$(Client/scripts/linux-webrtc-toolchain.sh)"
+```
+
+It uses `CC`/`CXX` if both are already set, else an installed `clang++-21` or
+`clang++` reporting version 21 or newer; only if neither exists does it install
+clang-21 from apt.llvm.org (once, system-wide, on the Debian/Ubuntu releases
+apt.llvm.org publishes — elsewhere install clang >= 21 yourself). It downloads
+libwebrtc once into `~/.cache/owncord-linux-webrtc`, and prints the
+environment (`CC`, `CXX`, `LK_CUSTOM_WEBRTC`) for the current shell only, so a
+new terminal needs the `eval` again. In CI it writes them to `$GITHUB_ENV`;
+ci.yml caches the libwebrtc directory, and clang is installed fresh each run.
+Windows client builds and server-only work need none of this. Design and rationale:
+[docs/architecture/voice-e2ee.md](architecture/voice-e2ee.md).
+
 **Tests**
 
 | Command                    | Description                            |
@@ -298,8 +320,9 @@ no file paths.
 
 ## Testing
 
-The client suite enforces a **90% statement** floor plus 70% branch, function
-and line thresholds in `vitest.config.ts`, mirrored by
+The client suite enforces a 90% statement threshold plus 70% branch, function
+and line thresholds in `vitest.config.ts`, and `Client/scripts/coverage-floor.sh`
+holds the aggregate statement coverage to the **92%** floor in
 `Client/coverage-floor.json`.
 The Go suite has floors too, since B3-6: `Server/coverage-floor.json` names an
 aggregate and a per-package floor for the five core packages (`ws`, `service`,

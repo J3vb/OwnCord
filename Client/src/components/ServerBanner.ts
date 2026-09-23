@@ -10,6 +10,8 @@ export interface ServerBannerControl {
   showRestart(seconds: number): void;
   showReconnecting(): void;
   showDisconnected(): void;
+  /** Persistent "signed in elsewhere" notice with a "Use here" action. */
+  showSignedInElsewhere(onUseHere: () => void): void;
   hide(): void;
   destroy(): void;
 }
@@ -55,6 +57,18 @@ export function createServerBanner(): ServerBannerControl {
     setText(root, "Disconnected");
   }
 
+  function showSignedInElsewhere(onUseHere: () => void): void {
+    clearCountdown();
+    root.classList.add("visible");
+    const useHere = createElement(
+      "button",
+      { class: "reconnecting-banner-action", type: "button" },
+      "Use here",
+    );
+    useHere.addEventListener("click", onUseHere, { once: true });
+    root.replaceChildren("Signed in elsewhere ", useHere);
+  }
+
   function hide(): void {
     clearCountdown();
     root.classList.remove("visible");
@@ -65,7 +79,15 @@ export function createServerBanner(): ServerBannerControl {
     root.remove();
   }
 
-  return { element: root, showRestart, showReconnecting, showDisconnected, hide, destroy };
+  return {
+    element: root,
+    showRestart,
+    showReconnecting,
+    showDisconnected,
+    showSignedInElsewhere,
+    hide,
+    destroy,
+  };
 }
 
 /**

@@ -25,6 +25,9 @@ function member(id: number, username: string) {
 }
 
 let container: HTMLDivElement;
+// Every picker a test opens, destroyed in afterEach so its document keydown
+// listener does not outlive the test.
+const opened: { destroy?(): void }[] = [];
 
 beforeEach(() => {
   container = document.createElement("div");
@@ -37,6 +40,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const picker of opened.splice(0)) picker.destroy?.();
   container.remove();
   document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
 });
@@ -49,6 +53,7 @@ function open(opts: Partial<Parameters<typeof createMemberPickerModal>[0]> = {})
     ...opts,
   });
   picker.mount(container);
+  opened.push(picker);
   return picker;
 }
 

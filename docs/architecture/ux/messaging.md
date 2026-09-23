@@ -124,7 +124,7 @@ existing pending/sent row for that id and replace-in-place rather than append.
 > Failures are precise: the server now echoes the request id on error replies
 > (`ws/handlers.go` → `buildErrorMsgWithID`), so the dispatcher's `error` handler
 > maps `SLOW_MODE` / `FORBIDDEN` / `RATE_LIMITED` / `BAD_REQUEST` to the exact
-> row (`dispatcher.ts`), and an offline send is shown failed rather than dropped.
+> row (`handleMessagingError`, `features/messaging/wsHandlers.ts`), and an offline send is shown failed rather than dropped.
 > The transport-drop arm is wired too: `ws.ts` notifies `onSendFailure(id, code)`
 > when `ws_send` fails locally (channel full → `NETWORK`, closed/not-open →
 > `OFFLINE`), and the dispatcher fails the matching pending row — fire-and-forget
@@ -154,7 +154,8 @@ so surrounding context and reply references stay intact.
 
 > **✓ Implemented (2026-08).** The pill toggles on the click:
 > `ReactionController.sendReaction` applies the toggle locally
-> (`addOptimisticReaction`, `stores/messages.store.ts`) under the send's WS
+> (`addOptimisticReaction`, `stores/messages.store.ts`; its reducer is in
+> `features/messaging/reactionState.ts`) under the send's WS
 > envelope id — the same correlation scheme as §3's optimistic rows.
 > `updateReaction` consumes the matching self-echo instead of re-applying it
 > (the delta arithmetic would double-count), other users' echoes apply
@@ -217,18 +218,18 @@ string and park it in the LRU + IndexedDB caches.
 
 ## 7. Replies, pins, search, read/unread
 
-| Feature     | Target UX                                                                                                                                                                                                                                                                       |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Reply       | Reply target chip above the composer (`setReplyTo`/`clearReply`); `reply_to` sent; rendered as a quoted preview                                                                                                                                                                 |
-| Pin/unpin   | Optimistic (`setMessagePinned()`, already optimistic in `stores/messages.store.ts`); pinned panel lists them, empty state "This channel doesn't have any pinned messages… yet!" (already `renderEmptyState()`, `components/PinnedMessages.ts`)                                  |
-| Search      | Overlay with a status line cycling _type-N-chars → searching → results → no results → failed_ (already thorough: `doSearch()`/`setStatus()` in `components/SearchOverlay.ts`); abort in-flight on new query                                                                     |
-| Read/unread | Unread badge per channel; cleared on focus (`setActiveChannel`); incremented for non-active, non-own messages — replayed frames count like live ones (the `chat_message` handler in `wireDispatcher()`, `lib/dispatcher.ts`); focus emits `channel_focus` for server read-state |
+| Feature     | Target UX                                                                                                                                                                                                                                                         |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reply       | Reply target chip above the composer (`setReplyTo`/`clearReply`); `reply_to` sent; rendered as a quoted preview                                                                                                                                                   |
+| Pin/unpin   | Optimistic (`setMessagePinned()`, already optimistic in `stores/messages.store.ts`); pinned panel lists them, empty state "This channel doesn't have any pinned messages… yet!" (already `renderEmptyState()`, `components/PinnedMessages.ts`)                    |
+| Search      | Overlay with a status line cycling _type-N-chars → searching → results → no results → failed_ (already thorough: `doSearch()`/`setStatus()` in `components/SearchOverlay.ts`); abort in-flight on new query                                                       |
+| Read/unread | Unread badge per channel; cleared on focus (`setActiveChannel`); incremented for non-active, non-own messages — replayed frames count like live ones (`handleChatMessage`, `features/messaging/wsHandlers.ts`); focus emits `channel_focus` for server read-state |
 
 **Read-state target rule:** unread counts are **not** suppressed during
 reconnect replay — a replayed frame increments its channel exactly as a live one
 does, because catching up 500 buffered messages _did_ happen while the reader was
-away (`lib/dispatcher.ts`). The local replay classifier (`isReplayFrame`,
-`lib/dispatcher.ts`) gates only the desktop notification/sound/taskbar flash and
+away (`features/messaging/wsHandlers.ts`). The local replay classifier (`isReplayFrame`,
+`features/messaging/wsHandlers.ts`) gates only the desktop notification/sound/taskbar flash and
 the `@here` mention badge, never an unread count.
 
 **New-messages divider (✓ implemented 2026-08):** opening a channel that had
@@ -381,7 +382,7 @@ the same signal in future.
 `src/components/MessageList.ts` (+ `message-list/`), `src/components/MessageInput.ts`,
 `src/pages/main-page/ChannelController.ts`,
 `src/pages/main-page/MessageController.ts`, `src/pages/main-page/ReactionController.ts`,
-`src/stores/messages.store.ts`, `src/lib/dispatcher.ts`, `src/lib/ws.ts`,
+`src/stores/messages.store.ts` (+ its reducers in `src/features/messaging/`), `src/lib/dispatcher.ts`, `src/features/messaging/wsHandlers.ts`, `src/lib/ws.ts`,
 `src/components/SearchOverlay.ts`, `src/components/PinnedMessages.ts`,
 `src/components/MentionAutocomplete.ts`, `src/lib/mentions.ts`,
 `src/components/message-list/content-parser.ts` (+ `markdown.ts`,

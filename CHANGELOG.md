@@ -134,6 +134,12 @@ server's internals were reorganised behind service boundaries.
   verified the person — in person, voice call, video call, or trusted contact.
   There is no free-text field, so nothing about the conversation can end up in
   the audit log.
+- **Recovery from the desktop client.** Settings > Account creates or replaces
+  the recovery kit and regenerates the recovery codes, each shown once; the
+  connect page's "Recover your account" redeems a kit or an owner-issued
+  credential and signs you in.
+- The desktop 2FA box would only take six digits, so a recovery code could not
+  be typed at sign-in — it now accepts either.
 - **Sign out everywhere** revokes every session including the one you are
   using, and drops the live connections immediately rather than waiting for
   the next sweep.

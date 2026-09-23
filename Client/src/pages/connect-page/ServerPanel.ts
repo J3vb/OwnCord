@@ -1,6 +1,7 @@
 // ServerPanel — server profile list sub-component for ConnectPage.
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal } from "@lib/modalFactory";
@@ -113,9 +114,9 @@ export function createServerPanel(
   // signal's own retained abort-listener list until it fires, so every
   // re-render would otherwise leak the previous generation's rows (OC-0336),
   // the same defect already fixed in MemberList/ChannelSidebar/MessageList.
-  // renderAc is aborted and replaced at the top of every render, so only the
+  // renderOwner is aborted and replaced at the top of every render, so only the
   // CURRENT render's rows stay reachable.
-  let renderAc: AbortController | null = null;
+  let renderOwner: Disposable | null = null;
 
   // ---------------------------------------------------------------------------
   // DOM construction
@@ -147,10 +148,10 @@ export function createServerPanel(
   }
 
   function renderServerProfiles(profiles: readonly SimpleProfile[]): void {
-    renderAc?.abort();
-    const currentRenderAc = new AbortController();
-    renderAc = currentRenderAc;
-    const rowSignal = currentRenderAc.signal;
+    renderOwner?.destroy();
+    const currentRender = new Disposable();
+    renderOwner = currentRender;
+    const rowSignal = currentRender.signal;
 
     clearChildren(serverListEl);
     healthElements.clear();
@@ -366,20 +367,20 @@ export function createServerPanel(
     setText(saveBtn, "Add Server");
     appendChildren(footer, cancelBtn, saveBtn);
 
-    // Each open modal gets its own AbortController so closeModal() can
+    // Each open modal gets its own Disposable so closeModal() can
     // release its own button listeners; registering them on the
     // page-lifetime `signal` instead (which only aborts once, at page
     // teardown) would keep every discarded modal subtree reachable until
     // then (OC-0335). Chained to the page signal so an open modal is also
     // torn down on page teardown.
-    const modalAc = new AbortController();
-    signal.addEventListener("abort", () => modalAc.abort(), {
+    const modalOwner = new Disposable();
+    signal.addEventListener("abort", () => modalOwner.destroy(), {
       once: true,
-      signal: modalAc.signal,
+      signal: modalOwner.signal,
     });
 
     function closeModal(): void {
-      modalAc.abort();
+      modalOwner.destroy();
       instance.destroy();
     }
 
@@ -394,8 +395,8 @@ export function createServerPanel(
         ariaLabelledBy: "add-server-title",
         onClose: closeModal,
         // Also tears the modal down on page teardown (the chained abort of
-        // modalAc above), not just on backdrop click / Escape / Save.
-        signal: modalAc.signal,
+        // modalOwner above), not just on backdrop click / Escape / Save.
+        signal: modalOwner.signal,
       },
       root,
     );
@@ -420,9 +421,9 @@ export function createServerPanel(
       closeModal();
     }
 
-    closeBtn.addEventListener("click", closeModal, { signal: modalAc.signal });
-    cancelBtn.addEventListener("click", closeModal, { signal: modalAc.signal });
-    saveBtn.addEventListener("click", handleSave, { signal: modalAc.signal });
+    closeBtn.addEventListener("click", closeModal, { signal: modalOwner.signal });
+    cancelBtn.addEventListener("click", closeModal, { signal: modalOwner.signal });
+    saveBtn.addEventListener("click", handleSave, { signal: modalOwner.signal });
 
     // Enter key submits
     hostAddrInput.addEventListener(
@@ -430,7 +431,7 @@ export function createServerPanel(
       (e) => {
         if (e.key === "Enter") handleSave();
       },
-      { signal: modalAc.signal },
+      { signal: modalOwner.signal },
     );
 
     nameInput.focus();
@@ -448,8 +449,8 @@ export function createServerPanel(
     updateHealthStatus,
     updateCompatibility,
     destroy(): void {
-      renderAc?.abort();
-      renderAc = null;
+      renderOwner?.destroy();
+      renderOwner = null;
     },
   };
 }

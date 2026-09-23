@@ -35,6 +35,9 @@ describe("parseStoredFingerprint", () => {
 
 describe("CertMismatchModal", () => {
   let container: HTMLDivElement;
+  // Every modal a test mounts, destroyed in afterEach so its document keydown
+  // listener does not outlive the test.
+  const mounted: { destroy?(): void }[] = [];
 
   beforeEach(() => {
     container = document.createElement("div");
@@ -42,6 +45,7 @@ describe("CertMismatchModal", () => {
   });
 
   afterEach(() => {
+    for (const modal of mounted.splice(0)) modal.destroy?.();
     container.remove();
   });
 
@@ -57,6 +61,7 @@ describe("CertMismatchModal", () => {
       ...overrides,
     });
     modal.mount(container);
+    mounted.push(modal);
     return { modal, onAccept, onReject };
   }
 

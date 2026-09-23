@@ -98,6 +98,35 @@ test.describe("Connect Page", () => {
   });
 
   test("form shows loading state on submit", async ({ page }) => {
+    // Hold the login HTTP response open so the in-flight loading state is
+    // observable rather than a race against an instantly-resolving mock.
+    await page.addInitScript(() => {
+      const t = (
+        window as unknown as {
+          __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> };
+        }
+      ).__TAURI_INTERNALS__;
+      const orig = t.invoke.bind(t);
+      const urls = new Map<number, string>();
+      t.invoke = async (cmd: string, args?: unknown) => {
+        if (cmd === "plugin:http|fetch") {
+          const a = args as { rid?: number; clientConfig?: { url?: string } };
+          const rid = (await orig(cmd, args)) as number;
+          urls.set(rid, a.clientConfig?.url ?? "");
+          return rid;
+        }
+        if (cmd === "plugin:http|fetch_send") {
+          const rid = (args as { rid?: number }).rid ?? -1;
+          if (urls.get(rid)?.includes("/api/v1/auth/login")) {
+            await new Promise((r) => setTimeout(r, 800));
+          }
+        }
+        return orig(cmd, args);
+      };
+    });
+    // Re-navigate so the wrapper (registered after beforeEach's goto) is live.
+    await page.goto("/");
+
     await page.locator("#host").fill("localhost:8443");
     await page.locator("#username").fill("testuser");
     await page.locator("#password").fill("password123");
@@ -105,9 +134,13 @@ test.describe("Connect Page", () => {
     const submitBtn = page.locator("button.btn-primary[type='submit']");
     await submitBtn.click();
 
-    // Button should show loading state (spinner visible or loading class)
-    const spinner = page.locator("button.btn-primary .spinner");
-    await expect(spinner).toBeAttached();
+    // The button enters its real loading state (disabled + .loading, which is
+    // what reveals the spinner via CSS) — not merely that a spinner node is
+    // attached, which is true whenever the element exists.
+    await expect(submitBtn).toHaveClass(/loading/, { timeout: 3_000 });
+    await expect(submitBtn).toBeDisabled();
+    await expect(submitBtn.locator(".btn-text")).toHaveText(/Logging in/);
+    await expect(page.locator(".status-bar")).toHaveClass(/visible/);
   });
 
   test("settings gear button is visible", async ({ page }) => {
@@ -118,6 +151,8 @@ test.describe("Connect Page", () => {
   test("server panel header displays Servers title", async ({ page }) => {
     const header = page.locator(".server-panel-header");
     await expect(header).toBeVisible();
+    // Assert the title it names, not just that the header exists.
+    await expect(header.locator("h2")).toHaveText("Servers");
   });
 
   test("form logo shows OwnCord branding", async ({ page }) => {
@@ -135,6 +170,10 @@ test.describe("Connect Page", () => {
   test("status bar exists at bottom of form", async ({ page }) => {
     const statusBar = page.locator(".status-bar");
     await expect(statusBar).toBeAttached();
+    // A status bar at rest is not visible; it only shows while connecting.
+    // Asserting the idle state proves the CSS state machine, not node presence.
+    await expect(statusBar).not.toHaveClass(/visible/);
+    await expect(statusBar).not.toBeVisible();
   });
 });
 
@@ -178,7 +217,7 @@ test.describe("Connect Page — TOTP", () => {
       timeout: 10_000,
     });
 
-    const totpInput = totpOverlay.locator("input[inputmode='numeric']");
+    const totpInput = totpOverlay.locator("input[autocomplete='one-time-code']");
     await expect(totpInput).toBeVisible();
 
     const verifyBtn = totpOverlay.locator("button.btn-primary");

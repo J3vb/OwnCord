@@ -9,6 +9,7 @@ import { voiceStore } from "@stores/voice.store";
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import type { AudioPipeline } from "@lib/audioPipeline";
+import { nativeAudioDevices } from "../features/voice/native/devices";
 
 const log = createLogger("deviceManager");
 
@@ -126,7 +127,8 @@ export class DeviceManager {
     log.info("Device change detected");
 
     try {
-      const devices = await Room.getLocalDevices("audioinput");
+      const nativeInputs = await nativeAudioDevices("audioinput");
+      const devices = nativeInputs ?? (await Room.getLocalDevices("audioinput"));
       if (this.room !== room) return;
       const savedInput = loadPref<string>("audioInputDevice", "");
 
@@ -154,7 +156,8 @@ export class DeviceManager {
       }
 
       // Check output device
-      const outputDevices = await Room.getLocalDevices("audiooutput");
+      const outputDevices =
+        (await nativeAudioDevices("audiooutput")) ?? (await Room.getLocalDevices("audiooutput"));
       if (this.room !== room) return;
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput !== "" && !outputDevices.some((d) => d.deviceId === savedOutput)) {
@@ -173,6 +176,29 @@ export class DeviceManager {
           log.error("Failed to fallback to default output device", err);
           this.onErrorCallback?.("Failed to switch to default speaker");
         }
+      }
+
+      // The native backend selects by device-module index, which a hot-plug
+      // can shift; re-selecting the saved devices by name refreshes it. Its
+      // output stream is opened on a concrete sink, so a saved "System
+      // default" is re-applied too, moving playout to a hot-plugged default.
+      if (nativeInputs === null) return;
+      const saved = [
+        ["audioinput", "audioInputDevice", devices],
+        ["audiooutput", "audioOutputDevice", outputDevices],
+      ] as const;
+      for (const [kind, key, listed] of saved) {
+        const deviceId = loadPref<string>(key, "");
+        const reapply =
+          deviceId === "" ? kind === "audiooutput" : listed.some((d) => d.deviceId === deviceId);
+        if (!reapply) continue;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- sequential by design: the room-supersession check must run between the two switches
+          await room.switchActiveDevice(kind, deviceId);
+        } catch (err) {
+          log.warn("Failed to re-apply saved device after change", { kind, err });
+        }
+        if (this.room !== room) return;
       }
     } catch (err) {
       log.warn("Failed to enumerate devices after change", err);

@@ -10,7 +10,7 @@
 // session: this module owns it, and `lib/logPersistence.ts` only re-exports
 // the four names its callers already use.
 import { appLogDir, join } from "@tauri-apps/api/path";
-import { mkdir, writeTextFile, readDir, remove, exists } from "@tauri-apps/plugin-fs";
+import { mkdir, writeTextFile, readDir, readTextFile, remove, exists } from "@tauri-apps/plugin-fs";
 import { type LogEntry, addLogListener, createLogger, getLogBuffer } from "@lib/logger";
 import type { LogFiles } from "../contracts/logFiles";
 
@@ -219,6 +219,27 @@ async function clearAll(): Promise<void> {
   }
 }
 
+/** Every persisted log file, oldest first, read verbatim. */
+async function readAll(): Promise<{ name: string; text: string }[]> {
+  await flush();
+  try {
+    const dir = await join(await appLogDir(), LOG_SUBDIR);
+    const names = (await readDir(dir))
+      .filter((e) => e.name?.endsWith(".jsonl") && !e.isDirectory)
+      .map((e) => e.name)
+      .toSorted((a, b) => a.localeCompare(b));
+    const files = [];
+    for (const name of names) {
+      // oxlint-disable-next-line no-await-in-loop -- at most MAX_LOG_FILES reads, kept in order
+      files.push({ name, text: await readTextFile(`${dir}/${name}`) });
+    }
+    return files;
+  } catch (err) {
+    if (isMissingPathError(err)) return [];
+    throw err;
+  }
+}
+
 export const logFiles: LogFiles = {
   init,
   flush,
@@ -229,4 +250,5 @@ export const logFiles: LogFiles = {
    */
   getDir: () => logDir,
   clearAll,
+  readAll,
 };

@@ -1,5 +1,12 @@
-import { describe, it, expect } from "vitest";
-import { createElement, setText, appendChildren, clearChildren, qs } from "../../src/lib/dom";
+import { describe, it, expect, vi } from "vitest";
+import {
+  createElement,
+  setText,
+  appendChildren,
+  clearChildren,
+  qs,
+  setOwnedTimeout,
+} from "../../src/lib/dom";
 
 describe("createElement", () => {
   it("creates an element with the given tag", () => {
@@ -113,5 +120,66 @@ describe("qs", () => {
     const other = document.createElement("div");
     expect(qs(".scoped", other)).toBeNull();
     expect(qs(".scoped", parent)).toBe(child);
+  });
+});
+
+describe("setOwnedTimeout", () => {
+  it("runs the step after the delay while its owner is live", () => {
+    vi.useFakeTimers();
+    try {
+      const fn = vi.fn();
+      setOwnedTimeout(new AbortController().signal, fn, 100);
+      vi.advanceTimersByTime(99);
+      expect(fn).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(fn).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the pending step when its owner aborts", () => {
+    vi.useFakeTimers();
+    try {
+      const owner = new AbortController();
+      const fn = vi.fn();
+      setOwnedTimeout(owner.signal, fn, 100);
+      owner.abort();
+      vi.advanceTimersByTime(100);
+      expect(fn).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("schedules nothing once its owner has aborted", () => {
+    vi.useFakeTimers();
+    try {
+      const owner = new AbortController();
+      owner.abort();
+      const fn = vi.fn();
+      setOwnedTimeout(owner.signal, fn, 0);
+      expect(vi.getTimerCount()).toBe(0);
+      vi.runAllTimers();
+      expect(fn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops its abort registration when it fires, so re-arming never accumulates", () => {
+    vi.useFakeTimers();
+    try {
+      const owner = new AbortController();
+      const remove = vi.spyOn(owner.signal, "removeEventListener");
+      const fn = vi.fn();
+      setOwnedTimeout(owner.signal, fn, 10);
+      vi.advanceTimersByTime(10);
+      expect(fn).toHaveBeenCalledTimes(1);
+      expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

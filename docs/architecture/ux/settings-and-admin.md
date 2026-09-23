@@ -76,21 +76,38 @@ success message with a soft note, never a red error. (Server contract:
 
 ### 2.3 Two-factor (TOTP)
 
-| Flow    | Steps                                                                                                                                                                                                                    |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Enable  | Password prompt → `POST /totp/enable` → render QR URI + backup codes → 6-digit confirm → `POST /totp/confirm` → "Enabled" badge, `auth` user `totp_enabled:true`                                                         |
-| Disable | Password confirm → `DELETE /totp`; a `403`/"required" is rewritten to "2FA is required by this server and cannot be disabled" (already the 403 rewrite in `buildTotpDisableView()`, `components/settings/AccountTab.ts`) |
+| Flow             | Steps                                                                                                                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Enable           | Password prompt → `POST /totp/enable` → render QR URI + backup codes → 6-digit confirm → `POST /totp/confirm` → "Enabled" badge, `auth` user `totp_enabled:true`                                                         |
+| Disable          | Password confirm → `DELETE /totp`; a `403`/"required" is rewritten to "2FA is required by this server and cannot be disabled" (already the 403 rewrite in `buildTotpDisableView()`, `components/settings/AccountTab.ts`) |
+| Regenerate codes | With 2FA enabled: password confirm → `POST /totp/recovery-codes` → the new set is shown once (copy + Done); the old set is invalid server-side and never kept client-side                                                |
 
 **Target rule:** backup codes are shown exactly once, with an explicit "Save these
 now — you won't see them again" and a copy affordance.
 
+**Recovery kit (B7-15b).** A section beside 2FA shows the kit status from
+`GET /users/me/recovery-kit` — Enrolled, Used (spent by a recovery) or Not set
+up — and "Create"/"Replace recovery kit" behind a password confirm →
+`POST /users/me/recovery-kit`, which returns the server-generated secret once.
+
+**Shown-once secrets** (backup codes, regenerated codes, the kit secret) share
+one reveal (`buildShownOnce()` in `components/settings/RecoverySections.ts`):
+never logged, never written to any storage, and wiped from the DOM on Done, on
+a tab switch and on closing the overlay (closing aborts the tab's build
+signal). `tests/unit/recovery-secrets.test.ts` plants these values and proves
+none reaches a log entry, the console or browser storage.
+
 ### 2.4 Sessions & delete account
 
-| Action           | Reaction                                                                                                                          |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| List sessions    | `GET /users/me/sessions`; show device/IP/last-used; current session marked                                                        |
-| Revoke a session | `DELETE /users/me/sessions/{id}`; optimistic removal + toast                                                                      |
-| Delete account   | **Modal with password confirm** (irreversible — stronger than a two-click); `DELETE /auth/account` → `clearAuth()` → connect page |
+| Action                   | Reaction                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| List sessions            | `GET /users/me/sessions`; show device/IP/last-used; current session marked. Both desktop User-Agents read "OwnCord desktop"                                                                                                                                                                                                                                                                                                                       |
+| Revoke a session         | `DELETE /users/me/sessions/{id}`; optimistic removal + toast ("can no longer connect"); a refused revoke puts the row back. No per-row revoke on the current device. Revoke-one never drops a live socket: its REST requests fail at once, but when a device showing "Signed in elsewhere" revokes the device holding the live socket, that socket closes within the hub's 30 s session sweep (or the per-message recheck), and the toast says so |
+| Sign out everywhere      | Inline confirm stating this device is included → `DELETE /users/me/sessions`; when `current_session_revoked`, `clearAuth()` → connect page                                                                                                                                                                                                                                                                                                        |
+| Sign-in not yet reviewed | On connect and on window focus the main page lists sessions; a non-current row with `unseen` raises a toast naming its device, IP and time and pointing to Settings > Account. The listing is the acknowledgement — no WebSocket frame, no timer (`lib/session-notice.ts`)                                                                                                                                                                        |
+| Signed in elsewhere      | A second device connecting displaces this socket; the server sends `SESSION_REPLACED` first. The client does not reconnect and keeps the credential; the connection banner shows "Signed in elsewhere" with "Use here", which reconnects (last connect wins)                                                                                                                                                                                      |
+| Message retention        | Shown only when `server-info` reports a server-default window (`retentionNotice()` in `lib/types.ts`)                                                                                                                                                                                                                                                                                                                                             |
+| Delete account           | **Modal with password confirm** (irreversible — stronger than a two-click). The warning says erasure is immediate, earlier backups keep a copy until they rotate (a restore re-applies it), and other devices may keep cached images; no retention window. `DELETE /auth/account` → `clearAuth()` → the account's image-cache scope is pruned → connect page                                                                                      |
 
 ---
 

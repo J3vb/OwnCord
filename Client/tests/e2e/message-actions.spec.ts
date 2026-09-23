@@ -12,37 +12,33 @@ test.describe("Message Actions Bar", () => {
     await navigateToMainPage(page);
   });
 
-  test("hovering a message shows actions bar", async ({ page }) => {
+  test("hovering a message reveals its actions bar", async ({ page }) => {
     const firstMessage = page.locator("[data-testid='message-101']");
+    const actionsBar = firstMessage.locator(".msg-actions-bar");
+
+    // The bar is in the DOM but hidden by CSS (opacity:0 / pointer-events:none),
+    // so `toBeAttached` alone proves nothing. Assert the hidden state, then the
+    // hover reveal on the computed style.
+    await expect(actionsBar).toHaveCSS("opacity", "0");
+    await expect(actionsBar).toHaveCSS("pointer-events", "none");
+
     await firstMessage.hover();
 
-    const actionsBar = firstMessage.locator(".msg-actions-bar");
-    await expect(actionsBar).toBeAttached();
+    await expect(actionsBar).toHaveCSS("opacity", "1");
+    await expect(actionsBar).toHaveCSS("pointer-events", "auto");
   });
 
-  test("own message has Reply button", async ({ page }) => {
-    // Message id 101 is from testuser (id: 1) = own message
+  test("own message has Reply, Edit, Delete, and React actions", async ({ page }) => {
+    // Message id 101 is from testuser (id: 1) = own message. Assert the whole
+    // action set is present and usable, rather than four separate
+    // toBeAttached rows that are all true whenever the bar exists.
     const ownMessage = page.locator("[data-testid='message-101']");
     await ownMessage.hover();
 
-    const replyBtn = page.locator("[data-testid='msg-reply-101']");
-    await expect(replyBtn).toBeAttached();
-  });
-
-  test("own message has Edit button", async ({ page }) => {
-    const ownMessage = page.locator("[data-testid='message-101']");
-    await ownMessage.hover();
-
-    const editBtn = page.locator("[data-testid='msg-edit-101']");
-    await expect(editBtn).toBeAttached();
-  });
-
-  test("own message has Delete button", async ({ page }) => {
-    const ownMessage = page.locator("[data-testid='message-101']");
-    await ownMessage.hover();
-
-    const deleteBtn = page.locator("[data-testid='msg-delete-101']");
-    await expect(deleteBtn).toBeAttached();
+    await expect(page.locator("[data-testid='msg-reply-101']")).toBeVisible();
+    await expect(page.locator("[data-testid='msg-edit-101']")).toBeVisible();
+    await expect(page.locator("[data-testid='msg-delete-101']")).toBeVisible();
+    await expect(page.locator("[data-testid='msg-react-101']")).toBeVisible();
   });
 
   test("other user message does NOT have Edit button", async ({ page }) => {
@@ -78,12 +74,12 @@ test.describe("Message Actions Bar", () => {
     await expect(textarea).toHaveValue("Hello world!");
   });
 
-  test("React button exists on messages", async ({ page }) => {
+  test("clicking React opens the emoji picker", async ({ page }) => {
     const firstMessage = page.locator("[data-testid='message-101']");
     await firstMessage.hover();
 
-    const reactBtn = page.locator("[data-testid='msg-react-101']");
-    await expect(reactBtn).toBeAttached();
+    await page.locator("[data-testid='msg-react-101']").click();
+    await expect(page.locator(".reaction-picker-wrap .emoji-picker")).toBeVisible();
   });
 });
 

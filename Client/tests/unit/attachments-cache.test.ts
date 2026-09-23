@@ -99,6 +99,7 @@ import {
   renderAttachment,
   setAttachmentCacheScope,
   setServerHost,
+  pruneAttachmentCacheScope,
 } from "../../src/components/message-list/attachments";
 import { createAvatarElement } from "../../src/lib/avatar";
 
@@ -402,6 +403,23 @@ describe("attachment cache profile isolation (B7-13)", () => {
     expect(second).not.toBe(first);
     await vi.waitFor(() => expect(idbData.size).toBe(1));
     expect([...idbData.values()]).toEqual([second]);
+  });
+
+  // B7-15c: a self-deleted account's images leave the disk; other accounts'
+  // entries (including one whose id shares a prefix) stay.
+  it("prunes only the deleted account's entries", async () => {
+    idbData.set("example.com#1|https://example.com/api/v1/files/1", "data:a");
+    idbData.set("example.com#10|https://example.com/api/v1/files/2", "data:b");
+    idbData.set("other.example#1|https://other.example/api/v1/files/3", "data:c");
+
+    await pruneAttachmentCacheScope("example.com#1");
+
+    await vi.waitFor(() =>
+      expect([...idbData.keys()].toSorted()).toEqual([
+        "example.com#10|https://example.com/api/v1/files/2",
+        "other.example#1|https://other.example/api/v1/files/3",
+      ]),
+    );
   });
 
   it("keeps the same account's entries across a sign-out and back in", async () => {

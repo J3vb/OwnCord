@@ -736,7 +736,10 @@ or a property the architecture cannot have.
     the previous one's entries, but nothing evicts the _current_ account's
     copies: server-side erasure and retention remove the file from
     `upload.storage_dir`, and those copies stay until the viewer switches
-    account or clears the cache by hand. No milestone owns their TTL yet.
+    account or clears the cache by hand. A self-deletion from the desktop
+    client prunes the deleted account's own entries (B7-15c); other viewers'
+    copies remain, which the delete dialog discloses. No milestone owns their
+    TTL yet.
     Data class **S2-f**.
 18. **The client halves of exit conditions 2 and 3.** Decision 14 states
     both are met at the server only, with B7 and B9 owing the rest. This
