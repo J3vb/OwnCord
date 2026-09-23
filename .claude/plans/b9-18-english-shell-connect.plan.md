@@ -270,6 +270,9 @@ Found in gate testing after the record above (2026-09-23):
   had no accessible name; each `.form-label` is now linked to its control
   (`create-channel-modal.test.ts`, `edit-channel-modal.test.ts`). The fault
   predates B9-18.
+- **Ban duration select** (`AdminActions.ts`). The ban form's duration select
+  has no visible label, so it had no accessible name; it is now "Ban duration"
+  (`shell` catalog, `admin-actions.test.ts`).
 
 ### Evidence
 
