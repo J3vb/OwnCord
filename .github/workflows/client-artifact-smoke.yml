@@ -251,6 +251,8 @@ jobs:
           assets=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
           shipped=false
           while IFS= read -r name; do
+            # PATTERN is a glob, so it must stay unquoted to match as one.
+            # shellcheck disable=SC2053
             if [[ $name == $PATTERN ]]; then shipped=true; fi
           done <<< "$assets"
           if [ "$shipped" = false ]; then
