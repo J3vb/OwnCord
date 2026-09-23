@@ -218,4 +218,9 @@ export const shellText = defineCatalog("shell", {
   "pins.unpinFailed": "Failed to unpin message",
   "pins.loadFailed": "Failed to load pinned messages",
   "search.failed": "Search failed",
+
+  "typing.someone": "Someone",
+  "typing.one": "{name} is typing...",
+  "typing.two": "{first} and {second} are typing...",
+  "typing.many": "Several people are typing...",
 });

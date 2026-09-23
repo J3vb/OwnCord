@@ -9,6 +9,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import { membersStore, getTypingUsers, memberDisplayName } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
+import { shellText } from "../i18n/shell";
 
 export interface TypingIndicatorOptions {
   readonly channelId: number;
@@ -19,12 +20,15 @@ function formatTypingText(users: readonly Member[]): string {
   const name0 = users[0] ? memberDisplayName(users[0]) : undefined;
   const name1 = users[1] ? memberDisplayName(users[1]) : undefined;
   if (users.length === 1) {
-    return `${name0 ?? "Someone"} is typing...`;
+    return shellText("typing.one", { name: name0 ?? shellText("typing.someone") });
   }
   if (users.length === 2) {
-    return `${name0 ?? "Someone"} and ${name1 ?? "Someone"} are typing...`;
+    return shellText("typing.two", {
+      first: name0 ?? shellText("typing.someone"),
+      second: name1 ?? shellText("typing.someone"),
+    });
   }
-  return "Several people are typing...";
+  return shellText("typing.many");
 }
 
 export function createTypingIndicator(options: TypingIndicatorOptions): MountableComponent {

@@ -14,6 +14,7 @@ export const connectText = defineCatalog("connect", {
   "common.close": "Close",
   "common.unknown": "Unknown",
   "common.settings": "Settings",
+  "modal.save": "Save",
 
   "brand.tagline": "Self-hosted chat — Your server, your rules",
   "profiles.defaultName": "Local Server",

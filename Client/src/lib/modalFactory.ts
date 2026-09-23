@@ -15,6 +15,7 @@
 import { Disposable } from "./disposable";
 import { createElement } from "./dom";
 import { applyDialogSemantics, focusDialog, trapFocus } from "./a11y";
+import { connectText } from "../i18n/connect";
 
 export interface ModalOptions {
   /** The content element to place inside the modal container. */
@@ -224,12 +225,12 @@ export function createPromptModal(
   const confirm = createElement(
     "button",
     { class: "btn btn-primary", style: "flex:1;", "data-testid": "prompt-confirm" },
-    options.confirmLabel ?? "Save",
+    options.confirmLabel ?? connectText("modal.save"),
   );
   const cancel = createElement(
     "button",
     { class: "btn btn-secondary", style: "flex:1;", "data-testid": "prompt-cancel" },
-    "Cancel",
+    connectText("common.cancel"),
   );
   row.appendChild(confirm);
   row.appendChild(cancel);

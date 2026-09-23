@@ -16,6 +16,7 @@ import { getSessionDebugInfo } from "@lib/livekitSession";
 import { savePref, readMigratedStringPref } from "./helpers";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";
+import { settingsText as t } from "../../i18n/settings";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -102,7 +103,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
   function renderLogEntries(): void {
     const entries = getLogBuffer();
     if (countEl !== null) {
-      countEl.textContent = `${entries.length} entries`;
+      countEl.textContent = t("logs.entries", { count: entries.length });
     }
 
     if (logListEl === null) return;
@@ -130,16 +131,16 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       {
         style: "font-size: 12px; color: var(--text-muted); margin: -8px 0 12px 0;",
       },
-      "Client version: loading...",
+      t("logs.version.loading"),
     );
     section.appendChild(versionEl);
     void desktop.appMetadata
       .getVersion()
       .then((v) => {
-        versionEl.textContent = `Client version: v${v}`;
+        versionEl.textContent = t("logs.version.known", { version: v });
       })
       .catch(() => {
-        versionEl.textContent = "Client version: unknown";
+        versionEl.textContent = t("logs.version.unknown");
       });
 
     // Controls row
@@ -151,7 +152,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     const filterLabel = createElement(
       "span",
       { class: "setting-label", style: "margin: 0;" },
-      "Filter:",
+      t("logs.filter"),
     );
     const filterSelect = createElement("select", {
       style:
@@ -177,7 +178,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     const levelLabel = createElement(
       "span",
       { class: "setting-label", style: "margin: 0 0 0 16px;" },
-      "Min Level:",
+      t("logs.minLevel"),
     );
     const levelSelect = createElement("select", {
       style:
@@ -218,7 +219,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
         class: "ac-btn",
         style: "margin-left: auto;",
       },
-      "Copy All",
+      t("logs.copyAll"),
     );
     copyBtn.addEventListener(
       "click",
@@ -239,21 +240,21 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
         void navigator.clipboard
           .writeText(text)
           .then(() => {
-            copyBtn.textContent = "Copied!";
+            copyBtn.textContent = t("logs.copied");
             setOwnedTimeout(
               buildSignal,
               () => {
-                copyBtn.textContent = "Copy All";
+                copyBtn.textContent = t("logs.copyAll");
               },
               1500,
             );
           })
           .catch(() => {
-            copyBtn.textContent = "Failed to copy";
+            copyBtn.textContent = t("logs.copyFailed");
             setOwnedTimeout(
               buildSignal,
               () => {
-                copyBtn.textContent = "Copy All";
+                copyBtn.textContent = t("logs.copyAll");
               },
               1500,
             );
@@ -263,7 +264,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     );
 
     // Clear button
-    const clearBtn = createElement("button", { class: "ac-btn" }, "Clear Logs");
+    const clearBtn = createElement("button", { class: "ac-btn" }, t("logs.clear"));
     clearBtn.addEventListener(
       "click",
       () => {
@@ -274,7 +275,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     );
 
     // Refresh button
-    const refreshBtn = createElement("button", { class: "ac-btn" }, "Refresh");
+    const refreshBtn = createElement("button", { class: "ac-btn" }, t("logs.refresh"));
     refreshBtn.addEventListener("click", () => renderLogEntries(), { signal: buildSignal });
 
     appendChildren(
@@ -290,7 +291,11 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     section.appendChild(controls);
 
     // Voice diagnostics panel
-    const diagHeader = createElement("h3", { style: "margin: 12px 0 6px 0;" }, "Voice Diagnostics");
+    const diagHeader = createElement(
+      "h3",
+      { style: "margin: 12px 0 6px 0;" },
+      t("logs.voiceDiagnostics"),
+    );
     section.appendChild(diagHeader);
 
     const diagPanel = createElement("div", {
@@ -307,14 +312,14 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     const diagRefresh = createElement(
       "button",
       { class: "ac-btn", style: "margin-top: 6px;" },
-      "Refresh Diagnostics",
+      t("logs.refreshDiagnostics"),
     );
     diagRefresh.addEventListener("click", refreshDiag, { signal: buildSignal });
 
     const diagCopy = createElement(
       "button",
       { class: "ac-btn", style: "margin: 6px 0 0 6px;" },
-      "Copy Diagnostics",
+      t("logs.copyDiagnostics"),
     );
     diagCopy.addEventListener(
       "click",
@@ -322,21 +327,21 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
         void navigator.clipboard
           .writeText(diagPanel.textContent ?? "")
           .then(() => {
-            diagCopy.textContent = "Copied!";
+            diagCopy.textContent = t("logs.copied");
             setOwnedTimeout(
               buildSignal,
               () => {
-                diagCopy.textContent = "Copy Diagnostics";
+                diagCopy.textContent = t("logs.copyDiagnostics");
               },
               1500,
             );
           })
           .catch(() => {
-            diagCopy.textContent = "Failed to copy";
+            diagCopy.textContent = t("logs.copyFailed");
             setOwnedTimeout(
               buildSignal,
               () => {
-                diagCopy.textContent = "Copy Diagnostics";
+                diagCopy.textContent = t("logs.copyDiagnostics");
               },
               1500,
             );
@@ -350,12 +355,12 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     const bundleBtn = createElement(
       "button",
       { class: "ac-btn", style: "margin: 6px 0 0 6px;", "data-testid": "export-support-bundle" },
-      "Export Support Bundle",
+      t("logs.exportBundle"),
     );
     const bundleNote = createElement(
       "div",
       { style: "font-size: 12px; color: var(--text-muted); margin-top: 6px;" },
-      "Saves a zip on this computer with your log files, these diagnostics, your saved servers and display and voice settings. Nothing is uploaded, and passwords, tokens, recovery kits, recovery codes and 2FA secrets are never read into it. Log lines are exported verbatim, without redaction \u2014 read them before sharing.",
+      t("logs.bundleNote"),
     );
     const bundleStatus = createElement("div", {
       style: "font-size: 12px; margin-top: 4px;",
@@ -370,10 +375,12 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
         void import("@lib/supportBundle")
           .then(({ exportSupportBundle }) => exportSupportBundle(desktop, getSessionDebugInfo()))
           .then((saved) => {
-            bundleStatus.textContent = saved ? "Support bundle saved." : "";
+            bundleStatus.textContent = saved ? t("logs.bundleSaved") : "";
           })
           .catch((err: unknown) => {
-            bundleStatus.textContent = `Export failed: ${err instanceof Error ? err.message : String(err)}`;
+            bundleStatus.textContent = t("logs.exportFailed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
           })
           .finally(() => {
             bundleBtn.disabled = false;
@@ -394,7 +401,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       {
         style: "font-size: 12px; color: #888; margin: 12px 0 4px 0;",
       },
-      `${getLogBuffer().length} entries`,
+      t("logs.entries", { count: getLogBuffer().length }),
     );
     section.appendChild(countEl);
 

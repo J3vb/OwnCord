@@ -6,6 +6,7 @@ import { appendChildren, createElement, setText } from "@lib/dom";
 import { resetExternalConsent } from "../../features/content-consent/external";
 import { externalConsentText as t } from "../../i18n/externalConsent";
 import { appendToggleRows } from "./helpers";
+import { settingsText as t } from "../../i18n/settings";
 
 export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
@@ -13,26 +14,26 @@ export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
   const toggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
     {
       key: "showLinkPreviews",
-      label: "Link Preview",
-      desc: "Show website previews for links shared in chat",
+      label: t("images.linkPreview.label"),
+      desc: t("images.linkPreview.desc"),
       fallback: true,
     },
     {
       key: "showEmbeds",
-      label: "Show Embeds",
-      desc: "Display rich embeds in chat messages",
+      label: t("images.embeds.label"),
+      desc: t("images.embeds.desc"),
       fallback: true,
     },
     {
       key: "inlineMedia",
-      label: "Inline Attachment Preview",
-      desc: "Automatically display images, videos, and GIFs inline",
+      label: t("images.inline.label"),
+      desc: t("images.inline.desc"),
       fallback: true,
     },
     {
       key: "animateGifs",
-      label: "Animate GIFs",
-      desc: "Play GIF animations automatically. When disabled, GIFs show as static images",
+      label: t("images.animateGifs.label"),
+      desc: t("images.animateGifs.desc"),
       fallback: true,
     },
   ];

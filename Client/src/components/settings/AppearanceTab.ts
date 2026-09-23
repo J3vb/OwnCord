@@ -12,6 +12,7 @@ import {
   MIN_FONT_SIZE_PX,
   MAX_FONT_SIZE_PX,
 } from "@lib/appearance";
+import { settingsText as t } from "../../i18n/settings";
 
 const FALLBACK_ACCENT = "#5865f2";
 
@@ -31,7 +32,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const defaultAccent = getDefaultAccent(activeThemeName);
 
   // Theme selector
-  const themeHeader = createElement("h3", {}, "Theme");
+  const themeHeader = createElement("h3", {}, t("appearance.theme"));
   const themeRow = createElement("div", { class: "theme-options", role: "radiogroup" });
   for (const name of Object.keys(THEMES) as ThemeName[]) {
     const isActive = name === currentTheme;
@@ -83,7 +84,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   appendChildren(section, themeHeader, themeRow);
 
   // Font size slider
-  const fontHeader = createElement("h3", {}, "Font Size");
+  const fontHeader = createElement("h3", {}, t("appearance.fontSize"));
   const fontRow = createElement("div", { class: "slider-row" });
   const fontSlider = createElement("input", {
     class: "settings-slider",
@@ -95,7 +96,11 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   // The EFFECTIVE size, not the raw slider position: Large Font can floor it
   // above where the slider sits, and a label that disagrees with the rendered
   // text is the same "control that lies" bug in a different place (OC-0319).
-  const fontLabel = createElement("span", { class: "slider-val" }, `${effectiveFontSize()}px`);
+  const fontLabel = createElement(
+    "span",
+    { class: "slider-val" },
+    t("appearance.fontSize.value", { size: effectiveFontSize() }),
+  );
   fontSlider.addEventListener(
     "input",
     () => {
@@ -103,7 +108,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
       savePref("fontSize", size);
       // Both read the pref back, so save first (OC-0319).
       applyFontSize();
-      setText(fontLabel, `${effectiveFontSize()}px`);
+      setText(fontLabel, t("appearance.fontSize.value", { size: effectiveFontSize() }));
     },
     { signal },
   );
@@ -112,10 +117,14 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
   // Compact mode toggle
   const compactRow = createElement("div", { class: "setting-row" });
-  const compactLabel = createElement("span", { class: "setting-label" }, "Compact Mode");
+  const compactLabel = createElement(
+    "span",
+    { class: "setting-label" },
+    t("appearance.compactMode"),
+  );
   const compactToggle = createToggle(currentCompact, {
     signal,
-    label: "Compact Mode",
+    label: t("appearance.compactMode"),
     onChange: (isNowCompact) => {
       savePref("compactMode", isNowCompact);
       document.documentElement.classList.toggle("compact-mode", isNowCompact);
@@ -146,7 +155,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     applyAccent(color);
   }
 
-  const accentHeader = createElement("h3", {}, "Accent Color");
+  const accentHeader = createElement("h3", {}, t("appearance.accentColor"));
   const swatchesRow = createElement("div", { class: "accent-swatches" });
 
   // Declare hexInput early so swatch closures can reference it after construction
@@ -159,14 +168,14 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     placeholder: defaultAccent.replace("#", ""),
     value: currentAccent.replace("#", ""),
     style: "width:120px",
-    "aria-label": "Custom accent color (hex)",
+    "aria-label": t("appearance.accentAria"),
     "aria-describedby": "accent-contrast-note",
   });
   // Owner decision Q8 (B9-2): disclose the readable-colour fallback.
   const accentNote = createElement(
     "p",
     { class: "setting-desc", id: "accent-contrast-note" },
-    "Custom colours may reduce readability; text and focus indicators fall back to a readable colour when needed, and High Contrast restores tested colours.",
+    t("appearance.accentNote"),
   );
 
   function syncDisplayedAccent(color: string): void {
