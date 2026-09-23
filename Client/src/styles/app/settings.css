@@ -264,7 +264,8 @@
   background: var(--accent-hover);
 }
 .ac-btn.account-delete-btn {
-  background: var(--red);
+  background: var(--danger-fill);
+  color: var(--on-fill);
   margin-left: 0;
 }
 .ac-btn.account-delete-btn:hover {

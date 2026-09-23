@@ -171,5 +171,5 @@
   color: var(--on-accent);
 }
 .dm-item .dm-mention-badge {
-  background: var(--red);
+  background: var(--danger-fill);
 }
