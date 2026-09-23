@@ -77,11 +77,17 @@ func paritySubject(t *testing.T, database *db.DB, userID int64, ch *db.Channel) 
 	return sub
 }
 
-// TestRefreshChannelVisibilityCanSend_Parity: the composer refresh verdict is
-// CanSendMessage in both branches, for text and announcement channels.
-func TestRefreshChannelVisibilityCanSend_Parity(t *testing.T) {
+// TestRefreshChannelVisibilityAffordances_Parity: the targeted channel_create
+// verdicts are CanSendMessage and AuthorizeVoiceModerator in both branches,
+// for text, announcement and voice channels. The role holds MUTE_MEMBERS so
+// the override cases flip can_moderate_voice both ways.
+func TestRefreshChannelVisibilityAffordances_Parity(t *testing.T) {
 	ctx := context.Background()
 	database := newHarvestVoiceDB(t)
+	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = permissions | ? WHERE id = ?`,
+		permissions.MuteMembers, harvestVoiceRoleID); err != nil {
+		t.Fatalf("grant MUTE_MEMBERS: %v", err)
+	}
 	uid := seedHarvestVoiceUser(t, database, "refresh-parity-user")
 	textID := mustCreateVoiceChannel(t, database, "refresh-parity-text")
 	if _, err := database.ExecContext(ctx, `UPDATE channels SET type = 'text' WHERE id = ?`, textID); err != nil {
@@ -91,28 +97,45 @@ func TestRefreshChannelVisibilityCanSend_Parity(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `UPDATE channels SET type = 'announcement' WHERE id = ?`, newsID); err != nil {
 		t.Fatalf("retype: %v", err)
 	}
+	voiceID := mustCreateVoiceChannel(t, database, "refresh-parity-voice")
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	permSvc := service.NewPermissionService(database, h.permChecker)
 
-	for _, chID := range []int64{textID, newsID} {
+	sawModAllowed, sawModDenied := false, false
+	for _, chID := range []int64{textID, newsID, voiceID} {
 		ch, err := database.GetChannel(ctx, chID)
 		if err != nil || ch == nil {
 			t.Fatalf("GetChannel(%d): %v", chID, err)
 		}
 		for _, c := range parityOverrideCases {
 			setParityOverrides(t, database, permSvc, chID, harvestVoiceRoleID, uid, c)
-			want := permissions.CanSendMessage(paritySubject(t, database, uid, ch)) == nil
-
-			h.perms = nil
-			if got := h.refreshChannelVisibilityCanSend(ctx, ch, uid); got != want {
-				t.Errorf("%s/%s bare hub: refreshChannelVisibilityCanSend = %v, CanSendMessage = %v", ch.Type, c.name, got, want)
+			sub := paritySubject(t, database, uid, ch)
+			wantSend := permissions.CanSendMessage(sub) == nil
+			wantMod := permissions.AuthorizeVoiceModerator(sub) == nil
+			if wantMod {
+				sawModAllowed = true
+			} else {
+				sawModDenied = true
 			}
-			h.perms = permSvc
-			if got := h.refreshChannelVisibilityCanSend(ctx, ch, uid); got != want {
-				t.Errorf("%s/%s service: refreshChannelVisibilityCanSend = %v, CanSendMessage = %v", ch.Type, c.name, got, want)
+
+			for _, branch := range []struct {
+				name  string
+				perms *service.PermissionService
+			}{{"bare hub", nil}, {"service", permSvc}} {
+				h.perms = branch.perms
+				gotSend, gotMod := h.refreshChannelVisibilityAffordances(ctx, ch, uid)
+				if gotSend != wantSend {
+					t.Errorf("%s/%s %s: can_send = %v, CanSendMessage = %v", ch.Type, c.name, branch.name, gotSend, wantSend)
+				}
+				if gotMod != wantMod {
+					t.Errorf("%s/%s %s: can_moderate_voice = %v, AuthorizeVoiceModerator = %v", ch.Type, c.name, branch.name, gotMod, wantMod)
+				}
 			}
 		}
+	}
+	if !sawModAllowed || !sawModDenied {
+		t.Fatalf("fixture never flipped can_moderate_voice (allowed=%v denied=%v)", sawModAllowed, sawModDenied)
 	}
 }
 

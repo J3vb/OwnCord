@@ -429,6 +429,8 @@ option listed. Q11/Q12 are recorded again at HP-9.
 
 **Decided 2026-09-23 by the owner:** option (a). A separate small server PR (protocol-change skill) adds one boolean, `can_moderate_voice`, to each channel object in `ready` and in the per-user `channel_create` refresh, beside `can_send`. It is computed by the existing `permissions.CanModerateVoice` for the caller in that channel (effective READ | MUTE_MEMBERS after both override layers). It is refreshed on the same events that refresh `can_send` today, plus a per-user `channel_update` push when a role or user override on that channel changes. The client shows the four voice-moderation actions only when `can_moderate_voice` is true; target rank, timeouts and destination capacity remain server-side refusals and are surfaced as such. No override data is exposed to members; no server authorization is rewritten.
 
+Refresh carrier: the existing targeted channel_create / RefreshAllChannelVisibility paths (no separate channel_update frame)
+
 **Options and consequences:** Provide a narrow server-computed capability projection for the caller in each channel; or expose sufficient authorized overrides for a complete client derivation. The first keeps policy canonical and payload small; the second duplicates more permission logic and data. Role-only controls with eventual server refusal do not close SEC-02's effective-permission UI requirement.
 
 **Drafting recommendation (historical):** Approve a minimal server-derived projection as a separately planned prerequisite PR; settle its payload, refresh semantics and owner before B9-14. Do not silently widen B9-14 into a server authorization rewrite.
