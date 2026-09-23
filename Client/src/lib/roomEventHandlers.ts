@@ -20,6 +20,11 @@ import type { AudioElements } from "@lib/audioElements";
 
 const log = createLogger("roomEventHandlers");
 
+/** OC-0452: how long a remote sender's decrypt failures may last before they
+ *  count as a real E2EE failure, and the quiet gap that ends a streak. */
+const DECRYPT_GRACE_MS = 3000;
+const DECRYPT_STREAK_RESET_MS = 10_000;
+
 // --- Callback types ---
 
 type RemoteVideoCallback = (userId: number, stream: MediaStream, isScreenshare: boolean) => void;
@@ -215,8 +220,29 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
    *  can already read "connected" — this is the SDK's only signal that the
    *  encoder itself is not actually protecting frames, so it must reach the
    *  store the Secured badge reads rather than staying invisible.
+   *
+   *  OC-0452: the one exception is a remote sender's `InvalidKey` — the
+   *  worker raises it only from decryptFrame, when AES-GCM fails with a key
+   *  present. Every rotation installs the new key at index 0 before the peer
+   *  has it, so a short streak of these is expected; the frames are dropped,
+   *  never played in clear. A streak that outlasts the grace window (the
+   *  worker re-reports once a second) is a real failure and still degrades.
    */
+  const decryptStreaks = new WeakMap<Participant, { start: number; last: number }>();
   const handleEncryptionError = (error: Error, participant?: Participant): void => {
+    if (participant && !participant.isLocal && error.message.startsWith("InvalidKey:")) {
+      const now = Date.now();
+      const prev = decryptStreaks.get(participant);
+      const start = prev && now - prev.last <= DECRYPT_STREAK_RESET_MS ? prev.start : now;
+      decryptStreaks.set(participant, { start, last: now });
+      if (now - start < DECRYPT_GRACE_MS) {
+        log.warn("LiveKit E2EE receive-side decrypt failure — tolerating key rotation race", {
+          error,
+          participant: participant.identity,
+        });
+        return;
+      }
+    }
     log.error("LiveKit E2EE encryption error — call may not be secured", {
       error,
       participant: participant?.identity,
