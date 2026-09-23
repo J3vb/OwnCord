@@ -89,8 +89,10 @@ Planning documents are not trackers. Do not read a defect count out of one.
 | Phase order and gates      | [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md)             |
 | Current measured baseline  | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                             |
 
-Current ledger summary (updated 2026-09-23): **447 fixed / 1 open / 4 declined / 1 duplicate = 453**
-(OC-0453, a quick voice rejoin stalling behind the leave's LiveKit removal, is
+Current ledger summary (updated 2026-09-23): **448 fixed / 1 open / 4 declined / 1 duplicate = 454**
+(OC-0445, the operational delivery budgets, was a phase-locked load generator after the
+reconnect storm and is fixed in the harness, with the server's per-hop burst cost recorded
+as OC-0454; OC-0453, a quick voice rejoin stalling behind the leave's LiveKit removal, is
 recorded and fixed; PR #1707's presence retry fix closed OC-0451, the N14 back-to-back status
 change; OC-0448 was fixed by verifying container digests before moving release
 tags; the OC-0446/OC-0447 harness corrections completed channel spreading and
