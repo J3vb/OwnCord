@@ -78,8 +78,8 @@ export interface ChannelControllerOptions {
   };
   readonly chatHeaderName: HTMLSpanElement | null;
   readonly chatHeaderRefs: ChatHeaderRefs | null;
-  /** Close every overlay showing channel content (pins, search, lightbox)
-   *  when the mounted channel falls behind the NSFW gate. */
+  /** Close the image lightbox when the mounted channel falls behind the
+   *  NSFW gate (ChatArea closes the pins and search overlays itself). */
   readonly onContentGated?: () => void;
 }
 

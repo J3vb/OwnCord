@@ -10,6 +10,7 @@ import {
   NSFW_ACKNOWLEDGEMENT_REQUIRED,
   nsfwContentBlocked,
 } from "../features/content-consent/nsfw";
+import { setNsfwAcknowledged } from "../stores/channels.store";
 import type {
   AuthResponse,
   AdminUser,
@@ -240,7 +241,18 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     const refusal = (): ApiClientError =>
       new ApiClientError(403, NSFW_ACKNOWLEDGEMENT_REQUIRED, NSFW_ACKNOWLEDGEMENT_REQUIRED);
     if (nsfwContentBlocked(channelId)) throw refusal();
-    const result = await load();
+    let result: T;
+    try {
+      result = await load();
+    } catch (err) {
+      // The server's refusal outranks a stale local "consented". A resume
+      // that missed an nsfw_ack already gets a full ready (the revoke bumps
+      // the server's visibility watermark), so this is defence in depth.
+      if (err instanceof ApiClientError && err.code === NSFW_ACKNOWLEDGEMENT_REQUIRED) {
+        setNsfwAcknowledged(channelId, false);
+      }
+      throw err;
+    }
     if (nsfwContentBlocked(channelId)) throw refusal();
     return result;
   }

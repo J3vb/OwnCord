@@ -20,6 +20,7 @@ import {
   updateChannel,
 } from "../../stores/channels.store";
 import { handleNsfwAck } from "../channels/wsHandlers";
+import { expectConsole } from "../../../tests/helpers/console";
 import { NSFW_ACKNOWLEDGEMENT_REQUIRED, nsfwConsentRequired, nsfwContentBlocked } from "./nsfw";
 
 const SPICY = 7;
@@ -166,6 +167,26 @@ describe("content admission at the API client", () => {
     setNsfwAcknowledged(SPICY, false);
     respond(json({ messages: [{ id: 1 }], has_more: false }));
     expect((await refusal(read)).code).toBe(NSFW_ACKNOWLEDGEMENT_REQUIRED);
+  });
+
+  it("gates the channel when the server refuses a read the store thought consented", async () => {
+    ready(true);
+    mockFetch.mockResolvedValue(
+      json({ error: NSFW_ACKNOWLEDGEMENT_REQUIRED, message: "acknowledge first" }, 403),
+    );
+    expect((await refusal(api.getMessages(SPICY))).code).toBe(NSFW_ACKNOWLEDGEMENT_REQUIRED);
+    expect(nsfwContentBlocked(SPICY)).toBe(true);
+    await refusal(api.getPins(SPICY));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expectConsole("warn", /\[api\] API error/);
+  });
+
+  it("keeps consent when a read fails for another reason", async () => {
+    ready(true);
+    mockFetch.mockResolvedValue(json({ error: "FORBIDDEN", message: "no" }, 403));
+    await refusal(api.getMessages(SPICY));
+    expect(nsfwContentBlocked(SPICY)).toBe(false);
+    expectConsole("warn", /\[api\] API error/);
   });
 
   it("acknowledges and revokes through the B5-7 route", async () => {

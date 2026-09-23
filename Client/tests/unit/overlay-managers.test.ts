@@ -307,6 +307,23 @@ describe("createPinnedPanelController", () => {
     expect(mockShowToast).not.toHaveBeenCalled();
   });
 
+  it("closeFor closes the panel only for the channel it was opened for", async () => {
+    let current = 42;
+    const controller = createPinnedPanelController({
+      api: makeMockApi() as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => current,
+    });
+
+    await controller.toggle();
+    current = 7;
+    controller.closeFor(7);
+    expect(mockPinnedMessagesDestroy).not.toHaveBeenCalled();
+
+    controller.closeFor(42);
+    expect(mockPinnedMessagesDestroy).toHaveBeenCalledOnce();
+  });
+
   it("onUnpin catches API error, shows toast, and does NOT close the panel", async () => {
     const api = makeMockApi({
       unpinMessage: vi.fn().mockRejectedValue(new Error("unpin failed")),

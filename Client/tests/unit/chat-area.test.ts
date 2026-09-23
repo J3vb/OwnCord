@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const {
   mockPinnedToggle,
   mockPinnedCleanup,
+  mockPinnedCloseFor,
   mockSearchOpen,
   mockSearchCleanup,
   mockVideoMount,
@@ -15,6 +16,7 @@ const {
 } = vi.hoisted(() => ({
   mockPinnedToggle: vi.fn(),
   mockPinnedCleanup: vi.fn(),
+  mockPinnedCloseFor: vi.fn(),
   mockSearchOpen: vi.fn(),
   mockSearchCleanup: vi.fn(),
   mockVideoMount: vi.fn(),
@@ -50,6 +52,7 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
   createPinnedPanelController: vi.fn((_opts: unknown) => ({
     toggle: mockPinnedToggle,
     cleanup: mockPinnedCleanup,
+    closeFor: mockPinnedCloseFor,
   })),
   createSearchOverlayController: vi.fn((_opts: unknown) => ({
     open: mockSearchOpen,
@@ -77,6 +80,13 @@ vi.mock("@components/VideoGrid", () => ({
 import { createChatArea } from "../../src/pages/main-page/ChatArea";
 import type { ChatAreaOptions } from "../../src/pages/main-page/ChatArea";
 import { jumpToMessage, setMessageJumpHandler } from "@lib/message-navigation";
+import {
+  addChannel,
+  channelsStore,
+  resetChannelsStore,
+  setChannels,
+  setNsfwAcknowledged,
+} from "@stores/channels.store";
 import {
   createPinnedPanelController,
   createSearchOverlayController,
@@ -293,11 +303,11 @@ describe("createChatArea", () => {
 
   // --- Unsubscribers ---
 
-  it("includes cleanup functions for the jump handler and both controllers", () => {
+  it("includes cleanup functions for the jump handler, both controllers and the consent watch", () => {
     const result = createChatArea(makeOptions());
 
-    // jump-handler unregister + pinned + search
-    expect(result.unsubscribers.length).toBe(3);
+    // jump-handler unregister + pinned + search + NSFW consent subscription
+    expect(result.unsubscribers.length).toBe(4);
     for (const unsub of result.unsubscribers) {
       expect(typeof unsub).toBe("function");
     }
@@ -312,13 +322,40 @@ describe("createChatArea", () => {
     expect(mockSearchCleanup).toHaveBeenCalledTimes(1);
   });
 
-  it("closeOverlays closes the pinned panel and the search overlay", () => {
+  it("closes that channel's pins and the search overlay when any channel loses NSFW consent", () => {
+    resetChannelsStore();
+    setChannels([
+      {
+        id: 7,
+        name: "spicy",
+        type: "text",
+        category: null,
+        position: 0,
+        nsfw: true,
+        nsfw_acknowledged: true,
+      },
+      { id: 8, name: "plain", type: "text", category: null, position: 1 },
+    ]);
     const result = createChatArea(makeOptions());
 
-    result.closeOverlays();
+    addChannel({ id: 9, name: "new", type: "text", category: null, position: 2, nsfw: true });
+    channelsStore.flush();
+    expect(mockPinnedCloseFor).not.toHaveBeenCalled();
+    expect(mockSearchCleanup).not.toHaveBeenCalled();
 
-    expect(mockPinnedCleanup).toHaveBeenCalledTimes(1);
-    expect(mockSearchCleanup).toHaveBeenCalledTimes(1);
+    setNsfwAcknowledged(7, false);
+    channelsStore.flush();
+    expect(mockPinnedCloseFor).toHaveBeenCalledWith(7);
+    expect(mockSearchCleanup).toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    setNsfwAcknowledged(7, true);
+    channelsStore.flush();
+    expect(mockPinnedCloseFor).not.toHaveBeenCalled();
+    expect(mockSearchCleanup).not.toHaveBeenCalled();
+
+    for (const unsub of result.unsubscribers) unsub();
+    resetChannelsStore();
   });
 
   it("registers a global message-jump handler and unregisters it on cleanup", () => {

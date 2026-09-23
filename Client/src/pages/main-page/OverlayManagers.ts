@@ -271,6 +271,8 @@ export function createInviteManagerController(opts: {
 export interface PinnedPanelController {
   toggle(): Promise<void>;
   cleanup(): void;
+  /** Close the panel if it was opened for `channelId`. */
+  closeFor(channelId: number): void;
 }
 
 export function createPinnedPanelController(opts: {
@@ -343,7 +345,13 @@ export function createPinnedPanelController(opts: {
     await controller.open();
   }
 
-  return { toggle, cleanup: controller.close };
+  return {
+    toggle,
+    cleanup: controller.close,
+    closeFor: (id: number) => {
+      if (channelId === id) controller.close();
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
