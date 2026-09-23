@@ -204,8 +204,9 @@ render path as a fallback; fail closed and record a blocker instead.
   server host (`"auto"` or `"ask"`) in the `externalContentConsent` client
   preference, plus a session set of items admitted one by one. The scope is the
   host `attachments.ts` already normalises for the broker partition, so a
-  server switch changes it and forgets per-item admissions; a page teardown or
-  the manual cache clear forgets them too. It is loaded with the startup
+  server switch changes it and forgets per-item admissions; a page teardown
+  forgets them too, but the manual cache clear (Advanced) keeps them, so an
+  item already loaded under "Ask each time" can refetch. It is loaded with the startup
   closure (attachments.ts is), so the concealed control lives apart in
   `concealed.ts` and the dialog is lazy (`externalDialog.ts`).
 - **Dialog on first activation, not on render.** The owner's dialog appears the
