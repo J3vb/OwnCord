@@ -238,7 +238,7 @@ render path as a fallback; fail closed and record a blocker instead.
 | MainPage        |        63,162 B |    63,140 B | 64,000 B |
 
 Moving the diagnostics engine behind a lazy import and reading the lazy
-settings catalog there took the startup closure 3,055 B below the base, so no
+settings catalog there took the startup closure 3,049 B below the base, so no
 budget change was needed. `Client/bundle-budgets.json` is untouched.
 
 ### Evidence
@@ -255,7 +255,7 @@ Linux.
 | Playwright `b9-text-expansion` (B9-3, B9-18 and the new B9-20 cases), 8 tests                 | 8 passed                                                                                                            |
 | Playwright `settings-tabs-extra`, `settings-overlay`, `voice-channel`                         | 46 passed                                                                                                           |
 | Playwright `account-security`, `recovery-flow`, `sessions`, `updater`                         | 18 passed                                                                                                           |
-| `npm run build:budget && npm run check:budgets`                                               | all ok; startup 90,889 B of 94,000 B, MainPage 63,140 B of 64,000 B                                                 |
+| `npm run build:budget && npm run check:budgets`                                               | all ok; startup 90,895 B of 94,000 B, MainPage 63,143 B of 64,000 B                                                 |
 | `npm run check:docs`, `npm run check:hygiene` (prettier)                                      | passed                                                                                                              |
 
 The expanded cases need the dev server's modules and skip under the
