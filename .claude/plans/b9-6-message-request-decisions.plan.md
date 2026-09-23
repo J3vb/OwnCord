@@ -224,8 +224,9 @@ moved (through the Refined Neon tokens, #1764). The server contract is on
   block is not announced but a later message from them fails visibly, which
   is the server's documented behaviour.
 - **Focus on removal.** When the row holding focus (or its open confirm)
-  leaves, for any reason, focus moves to the next request, else the
-  previous, else the view heading; an open confirm for a request decided
+  leaves, for any reason, focus moves to the next request's row (not its
+  Accept, so a repeated Enter cannot decide another request), else the
+  previous row, else the view heading; an open confirm for a request decided
   elsewhere closes. After Accept, focus goes to the conversation's composer.
 - **Bundle.** A value import of `lib/api` (`ApiClientError`) from the lazy
   inbox chunk split shared chunks out of the startup closure (+1.1 kB); the
@@ -288,7 +289,7 @@ the `GET /dms` fallback existed.
   are owner-run and pending.**
 - **Focus:** every decision and confirm button's ring meets Q1 (2px, 3:1;
   e2e `focusIndicator`); Tab stays inside the confirm; removal moves focus to
-  the next request or the heading (unit and e2e); Accept lands on the
+  the next request's row or the heading (unit and e2e); Accept lands on the
   conversation's composer (fullstack).
 - **Contrast:** button labels, the help line, the outcome, the in-row error
   and the confirm's heading, body and buttons meet 4.5:1 in neon-glow, dark,
