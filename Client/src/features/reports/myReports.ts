@@ -46,7 +46,7 @@ export function reportStateKey(row: Pick<OwnReportSummary, "state" | "outcome">)
   return "state.unknown";
 }
 
-function targetLabel(type: string): string {
+export function targetLabel(type: string): string {
   switch (type) {
     case "message":
     case "user":
@@ -57,7 +57,7 @@ function targetLabel(type: string): string {
   return type;
 }
 
-function reasonLabel(reason: string): string {
+export function reasonLabel(reason: string): string {
   switch (reason) {
     case "spam":
     case "harassment":

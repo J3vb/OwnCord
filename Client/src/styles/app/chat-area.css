@@ -300,3 +300,143 @@
   color: var(--text-muted);
   font-style: italic;
 }
+
+/* ── B9-11 Moderation Center: the queue and one report's evidence, as text ── */
+.mod-center {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
+.mod-center-intro,
+.mod-center-status,
+.mod-evidence-status {
+  margin: 0;
+  color: var(--text-muted);
+}
+/* Empty live regions stay in the tree (so their next text is read) but take no space. */
+.mod-center-status:empty,
+.mod-center .form-error:empty {
+  position: absolute;
+}
+.mod-center-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.mod-center-toolbar .form-input {
+  width: auto;
+  max-width: 100%;
+  padding-block: var(--space-1);
+}
+.mod-queue {
+  max-height: 40vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mod-queue-row {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-inline-start: 3px solid transparent;
+  background: none;
+  color: var(--text-normal);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.mod-queue-row:hover {
+  background: var(--bg-modifier-hover);
+}
+.mod-queue-row[aria-current="true"] {
+  background: var(--bg-modifier-selected);
+  border-inline-start-color: var(--accent);
+}
+/* Inside the scroller, so the ring is never clipped by it. */
+.mod-queue-row:focus-visible {
+  outline-offset: -2px;
+}
+.mod-queue-what {
+  flex-basis: 100%;
+  color: var(--header-primary);
+}
+.mod-queue-who,
+.mod-queue-state,
+.mod-queue-when,
+.mod-report-facts dt {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.mod-report {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+}
+.mod-report h3,
+.mod-report h4 {
+  margin: var(--space-2) 0 var(--space-1);
+  color: var(--header-primary);
+}
+.mod-report-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+.mod-report-facts dd {
+  margin: 0;
+}
+.mod-report-facts dd,
+.mod-report-note,
+.mod-evidence-text,
+.mod-evidence-files {
+  overflow-wrap: anywhere;
+}
+.mod-report-note,
+.mod-evidence-text {
+  margin: var(--space-1) 0 0;
+  white-space: pre-wrap;
+}
+.mod-evidence {
+  margin: var(--space-2) 0;
+  padding: 0;
+  list-style: none;
+}
+.mod-evidence-item {
+  padding: var(--space-2);
+  border-inline-start: 3px solid var(--border);
+}
+.mod-evidence-reported {
+  border-inline-start-color: var(--accent);
+  background: var(--bg-modifier-hover);
+}
+.mod-evidence-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+.mod-evidence-marker {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.mod-evidence-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.mod-evidence-files {
+  margin: var(--space-1) 0 0;
+  padding-inline-start: var(--space-4);
+  color: var(--text-muted);
+}
+/* The B9-7 gate fills a positioned slot. */
+.mod-evidence-gate {
+  position: relative;
+  min-height: 18rem;
+}

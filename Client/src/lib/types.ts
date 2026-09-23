@@ -356,6 +356,17 @@ export interface AppealStatusPayload {
   readonly decision_note: string | null;
 }
 
+/**
+ * mod_queue (B5-8/B5-10): a report or appeal queue changed, to MODERATE_MEMBERS
+ * holders only, unsequenced and never replayed. Exactly one id is set; it is
+ * an invalidation signal, never the report itself.
+ */
+export interface ModQueuePayload {
+  readonly report_id?: string;
+  readonly appeal_id?: string;
+  readonly state: string;
+}
+
 export interface ChatMessagePayload {
   readonly client_message_id?: string;
   readonly id: number;
@@ -889,6 +900,7 @@ export type ServerMessage =
   | (WsEnvelope<MemberBanPayload> & { readonly type: "member_ban" })
   | (WsEnvelope<ModActionPayload> & { readonly type: "mod_action" })
   | (WsEnvelope<AppealStatusPayload> & { readonly type: "appeal_status" })
+  | (WsEnvelope<ModQueuePayload> & { readonly type: "mod_queue" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })

@@ -542,6 +542,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     contentNav = createContentNavigator({
       destinations: NAVIGATION_DESTINATIONS,
+      api,
       chatArea: chatAreaResult.chatArea,
       rememberChannel: sidebar.rememberChannel,
       forgetChannel: sidebar.forgetChannel,

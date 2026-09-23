@@ -82,6 +82,7 @@ import {
   handleTimedOutRefusal,
   refreshSafetyOnResume,
 } from "../features/safety/wsHandlers";
+import { handleModQueue } from "../features/moderation/wsHandlers";
 
 /** Unsubscribe all listeners. */
 export type DispatcherCleanup = () => void;
@@ -233,6 +234,8 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.MOD_ACTION, (payload) => handleModAction(api, payload)));
   // appeal_status: the caller's own appeal changed state (B9-16).
   unsubs.push(ws.on(S.APPEAL_STATUS, (payload) => handleAppealStatus(api, payload)));
+  // mod_queue: a report changed; an open Moderation Center re-reads (B9-11).
+  unsubs.push(ws.on(S.MOD_QUEUE, handleModQueue));
 
   unsubs.push(ws.on(S.MEMBER_UPDATE, handleMemberUpdate));
 
