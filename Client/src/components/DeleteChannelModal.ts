@@ -8,6 +8,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
+import { shellText } from "../i18n/shell";
 
 export interface DeleteChannelModalOptions {
   readonly channelId: number;
@@ -24,12 +25,12 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
   function mount(container: Element): void {
     // Header
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", { id: "delete-channel-title" }, "Delete Channel");
+    const title = createElement("h3", { id: "delete-channel-title" }, shellText("channel.delete"));
     // Icon-only button: without a label a screen reader announces just "button".
     const closeBtn = createElement("button", {
       class: "modal-close",
       type: "button",
-      "aria-label": "Close",
+      "aria-label": shellText("common.close"),
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
@@ -39,12 +40,13 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
     // Body
     const body = createElement("div", { class: "modal-body" });
     const warning = createElement("div", { class: "modal-danger-text" });
-    appendChildren(
-      warning,
-      "Are you sure you want to delete ",
-      createElement("strong", {}, `#${channelName}`),
-      "? This action cannot be undone and all messages in this channel will be lost.",
-    );
+    // One message around the emphasised channel name: split at a marker the
+    // parameter can never contain, so the name stays data and the sentence
+    // stays whole for translation.
+    const [before = "", after = ""] = shellText("channel.deleteWarning", {
+      channel: "\u0000",
+    }).split("\u0000");
+    appendChildren(warning, before, createElement("strong", {}, `#${channelName}`), after);
     body.appendChild(warning);
 
     // Error display
@@ -59,7 +61,7 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
     const cancelBtn = createElement(
       "button",
       { class: "btn-modal-cancel", type: "button" },
-      "Cancel",
+      shellText("common.cancel"),
     );
     cancelBtn.addEventListener("click", onClose, { signal: disposable.signal });
 
@@ -70,27 +72,27 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
         type: "button",
         "data-testid": "delete-channel-confirm",
       },
-      "Delete Channel",
+      shellText("channel.delete"),
     );
 
     deleteBtn.addEventListener(
       "click",
       async () => {
         deleteBtn.setAttribute("disabled", "true");
-        setText(deleteBtn, "Deleting...");
+        setText(deleteBtn, shellText("common.deleting"));
 
         try {
           await onConfirm();
         } catch (err) {
           errorEl.style.display = "block";
-          setText(errorEl, err instanceof Error ? err.message : "Failed to delete channel");
+          setText(errorEl, err instanceof Error ? err.message : shellText("channel.deleteFailed"));
         } finally {
           // Re-arm the button whether the caller rejected or handled the
           // failure itself and resolved. A successful delete destroys the
           // modal inside onConfirm, so the overlay is gone and this no-ops.
           if (instance?.overlay.isConnected === true) {
             deleteBtn.removeAttribute("disabled");
-            setText(deleteBtn, "Delete Channel");
+            setText(deleteBtn, shellText("channel.delete"));
           }
         }
       },

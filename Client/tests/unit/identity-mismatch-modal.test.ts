@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createIdentityMismatchModal } from "../../src/components/CertMismatchModal";
+import { createIdentityMismatchModal } from "../../src/components/IdentityMismatchModal";
 
 // ---------------------------------------------------------------------------
 // IdentityMismatchModal — the E2EE-identity analogue of the cert-mismatch

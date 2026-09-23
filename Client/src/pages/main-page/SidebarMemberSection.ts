@@ -17,6 +17,7 @@ import { roleHasPermission } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
 import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
+import { shellText } from "../../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -76,7 +77,11 @@ export function createSidebarMemberSection(
   // --- Header ---
   const memberHeader = createElement("div", { class: "category sidebar-members-header" });
   const memberArrow = createElement("span", { class: "category-arrow" }, "\u25BC");
-  const memberLabelEl = createElement("span", { class: "category-name" }, "MEMBERS");
+  const memberLabelEl = createElement(
+    "span",
+    { class: "category-name" },
+    shellText("members.heading"),
+  );
   appendChildren(memberHeader, memberArrow, memberLabelEl);
   memberListContainer.appendChild(memberHeader);
 
@@ -182,14 +187,16 @@ export function createSidebarMemberSection(
       return;
     }
     bannedSection.style.display = "";
-    bannedSection.appendChild(createElement("div", { class: "banned-header" }, "BANNED"));
+    bannedSection.appendChild(
+      createElement("div", { class: "banned-header" }, shellText("members.bannedHeading")),
+    );
     for (const user of bannedUsers) {
       const row = createElement("div", { class: "banned-row" });
       row.appendChild(createElement("span", { class: "banned-name" }, user.username));
       const unbanBtn = createElement(
         "button",
         { class: "banned-unban-btn", "data-testid": "unban-member" },
-        "Unban",
+        shellText("members.unban"),
       );
       unbanBtn.addEventListener("click", () => {
         void unbanMember(user.id, user.username);
@@ -257,13 +264,13 @@ export function createSidebarMemberSection(
   async function unbanMember(userId: number, username: string): Promise<void> {
     try {
       await api.adminUnbanMember(userId);
-      getToast()?.show(`Unbanned ${username}`, "success");
+      getToast()?.show(shellText("members.unbanned", { username }), "success");
       // No roster update needed: the server's member_join broadcast puts them
       // back, and that roster change refreshes this list too. Refresh anyway —
       // the REST call can succeed while the socket is down.
       await refreshBanned();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to unban member";
+      const msg = err instanceof Error ? err.message : shellText("members.unbanFailed");
       getToast()?.show(msg, "error");
     }
   }
@@ -285,9 +292,9 @@ export function createSidebarMemberSection(
     onKick: async (userId, username) => {
       try {
         await api.adminKickMember(userId);
-        getToast()?.show(`Forced ${username} to log out`, "success");
+        getToast()?.show(shellText("members.forcedLogout", { username }), "success");
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Failed to force logout";
+        const msg = err instanceof Error ? err.message : shellText("members.forceLogoutFailed");
         getToast()?.show(msg, "error");
       }
     },
@@ -295,14 +302,16 @@ export function createSidebarMemberSection(
       try {
         await api.adminBanMember(userId, reason, durationHours);
         getToast()?.show(
-          durationHours > 0 ? `Banned ${username} for ${durationHours}h` : `Banned ${username}`,
+          durationHours > 0
+            ? shellText("members.bannedFor", { username, hours: durationHours })
+            : shellText("members.banned", { username }),
           "success",
         );
         // The row is about to vanish from the roster; the ban has to appear
         // somewhere or it cannot be undone from here.
         await refreshBanned();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Failed to ban member";
+        const msg = err instanceof Error ? err.message : shellText("members.banFailed");
         getToast()?.show(msg, "error");
       }
     },
@@ -314,9 +323,12 @@ export function createSidebarMemberSection(
           await api.unblockUser(userId);
         }
         setUserBlockedByMe(userId, block);
-        getToast()?.show(block ? `Blocked ${username}` : `Unblocked ${username}`, "success");
+        getToast()?.show(
+          shellText(block ? "members.blocked" : "members.unblocked", { username }),
+          "success",
+        );
       } catch (err) {
-        const fallback = block ? "Failed to block user" : "Failed to unblock user";
+        const fallback = shellText(block ? "members.blockFailed" : "members.unblockFailed");
         const msg = err instanceof Error ? err.message : fallback;
         getToast()?.show(msg, "error");
       }
@@ -325,14 +337,14 @@ export function createSidebarMemberSection(
       const roleId = getRoleIdByName(newRole);
       if (roleId === undefined) {
         // No silent failures: the role vanished from the server's list.
-        getToast()?.show(`Unknown role "${newRole}" — try reconnecting`, "error");
+        getToast()?.show(shellText("members.unknownRole", { role: newRole }), "error");
         return;
       }
       try {
         await api.adminChangeRole(userId, roleId);
-        getToast()?.show(`Changed ${username}'s role to ${newRole}`, "success");
+        getToast()?.show(shellText("members.roleChanged", { username, role: newRole }), "success");
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Failed to change role";
+        const msg = err instanceof Error ? err.message : shellText("members.roleChangeFailed");
         getToast()?.show(msg, "error");
       }
     },

@@ -241,7 +241,8 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   MainPage is 60,133 B and the startup closure 91,282 B; after Refined Neon
   (#1764), 60,176 B and 91,816 B, with the report CSS on the new spacing and
   type-scale tokens; with B9-16 (#1763) appeals in the same Safety tab,
-  60,251 B and 92,144 B.
+  60,251 B and 92,144 B; with B9-18 (#1759) and the shared startup budget of
+  94,000 B, 63,115 B and 93,510 B.
 - **Keyboard reach for users.** Member rows were click-only, so the profile,
   and its Report button, could not be reached from the keyboard. A row is now a
   named `role="button"` with `tabindex="0"` that opens the profile on Enter or

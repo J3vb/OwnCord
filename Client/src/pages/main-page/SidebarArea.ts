@@ -54,6 +54,7 @@ import type { ProfileManager } from "@lib/profiles";
 import type { ContentViewId, NavigationDestinations } from "../../features/navigation/destinations";
 import { trackCurrentView } from "../../features/navigation/contentView";
 import { navigationText } from "../../i18n/navigation";
+import { shellText } from "../../i18n/shell";
 
 const log = createLogger("SidebarArea");
 
@@ -165,17 +166,19 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // ---------------------------------------------------------------------------
 
   const serverHeader = createElement("div", { class: "unified-sidebar-header" });
-  const serverIcon = createElement("div", { class: "server-icon-sm" }, "OC");
-  const serverInfoCol = createElement("div", {
-    style: "display:flex;flex-direction:column;overflow:hidden;",
-  });
+  const serverIcon = createElement("div", { class: "server-icon-sm" }, "OC"); // i18n-exempt: logo monogram, not copy
+  const serverInfoCol = createElement("div", { class: "server-info" });
   const serverNameEl = createElement(
     "span",
     { class: "server-name" },
-    authStore.getState().serverName ?? "Server",
+    authStore.getState().serverName ?? shellText("common.serverFallback"),
   );
   const onlineCount = getOnlineMembers().length;
-  const serverOnlineEl = createElement("span", { class: "server-online" }, `${onlineCount} online`);
+  const serverOnlineEl = createElement(
+    "span",
+    { class: "server-online" },
+    shellText("common.online", { count: onlineCount }),
+  );
   serverInfoCol.appendChild(serverNameEl);
   serverInfoCol.appendChild(serverOnlineEl);
   serverHeader.appendChild(serverIcon);
@@ -187,10 +190,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     "button",
     {
       class: "sidebar-invite-btn",
-      title: "Invite people",
+      title: shellText("invite.invitePeople"),
       "data-testid": "invite-btn",
     },
-    "Invite",
+    shellText("invite.invite"),
   );
   headerInviteBtn.addEventListener("click", () => {
     void headerInviteCtrl.open();
@@ -217,19 +220,19 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     "button",
     {
       class: "sidebar-audit-btn",
-      title: "Open the audit log in the admin panel (opens in your browser)",
+      title: shellText("audit.hint"),
       "data-testid": "audit-log-btn",
     },
-    "Audit Log",
+    shellText("audit.label"),
   );
   auditBtn.addEventListener("click", () => {
     const host = api.getConfig().host ?? "";
     if (host === "") {
-      getToast()?.show("Not connected to a server", "error");
+      getToast()?.show(shellText("audit.notConnected"), "error");
       return;
     }
     void openAdminPanel(host, "audit").catch(() => {
-      getToast()?.show("Could not open the admin panel", "error");
+      getToast()?.show(shellText("audit.openFailed"), "error");
     });
   });
 
@@ -289,7 +292,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const unsubServerName = authStore.subscribeSelector(
     (s) => s.serverName,
     (name) => {
-      setText(serverNameEl, name ?? "Server");
+      setText(serverNameEl, name ?? shellText("common.serverFallback"));
     },
   );
   unsubscribers.push(unsubServerName);
@@ -299,7 +302,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     (s) => s.members,
     () => {
       const count = getOnlineMembers().length;
-      setText(serverOnlineEl, `${count} online`);
+      setText(serverOnlineEl, shellText("common.online", { count }));
     },
   );
   unsubscribers.push(unsubOnlineCount);
@@ -334,7 +337,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
               modal.destroy?.();
               activeModal = null;
             } catch (err) {
-              const msg = err instanceof Error ? err.message : "Failed to create channel";
+              const msg = err instanceof Error ? err.message : shellText("channel.createFailed");
               getToast()?.show(msg, "error");
               // The modal's own catch re-enables its submit button and renders
               // the inline error, so the failure must propagate to it.
@@ -371,7 +374,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
               modal.destroy?.();
               activeModal = null;
             } catch (err) {
-              const msg = err instanceof Error ? err.message : "Failed to update channel";
+              const msg = err instanceof Error ? err.message : shellText("channel.updateFailed");
               getToast()?.show(msg, "error");
               // Propagate so the modal re-enables its save button and shows
               // the inline error.
@@ -397,7 +400,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
               modal.destroy?.();
               activeModal = null;
             } catch (err) {
-              const msg = err instanceof Error ? err.message : "Failed to delete channel";
+              const msg = err instanceof Error ? err.message : shellText("channel.deleteFailed");
               getToast()?.show(msg, "error");
               // Propagate so the modal re-enables its confirm button and shows
               // the inline error.
@@ -423,7 +426,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           reorders.map((r) => api.adminUpdateChannel(r.channelId, { position: r.newPosition })),
         ).then((results) => {
           if (results.some((r) => r.status === "rejected")) {
-            getToast()?.show("Failed to save channel order", "error");
+            getToast()?.show(shellText("channel.reorderFailed"), "error");
           }
         });
       },
@@ -434,12 +437,12 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           const result = await api.purgeMessages(channel.id, count);
           getToast()?.show(
             result.count === 0
-              ? `No messages to purge in #${channel.name}`
-              : `Purged ${result.count} message${result.count === 1 ? "" : "s"} from #${channel.name}`,
+              ? shellText("purge.none", { channel: channel.name })
+              : shellText("purge.done", { count: result.count, channel: channel.name }),
             result.count === 0 ? "info" : "success",
           );
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "Failed to purge messages";
+          const msg = err instanceof Error ? err.message : shellText("purge.failed");
           getToast()?.show(msg, "error");
         }
       },
@@ -531,7 +534,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   function closeOrLeaveDm(channelId: number): void {
     closeDmLocally(channelId, fallBackFromDm);
     void api.closeDm(channelId).catch(() => {
-      getToast()?.show("Could not leave that conversation", "error");
+      getToast()?.show(shellText("dm.leaveFailed"), "error");
     });
   }
 
@@ -540,17 +543,17 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
     if (dm === undefined || !dm.isGroup) return;
     const prompt = createPromptModal({
-      title: "Rename Group",
-      label: "Leave it empty to go back to listing the members.",
+      title: shellText("dm.renameGroup"),
+      label: shellText("dm.renameGroupHint"),
       initialValue: dm.name,
-      placeholder: "Group name",
+      placeholder: shellText("dm.groupNamePlaceholder"),
       maxLength: 100,
       testId: "dm-rename-input",
       onSubmit: (name) => {
         // The store is updated by the dm_channel_open the server fans out to
         // every participant, so the response is only used for the error path.
         void api.renameGroupDm(channelId, name).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : "Failed to rename group";
+          const msg = err instanceof Error ? err.message : shellText("dm.renameFailed");
           getToast()?.show(msg, "error");
         });
       },
@@ -598,7 +601,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   }
 
   function buildDmSidebar(): MountableComponent {
-    const serverName = authStore.getState().serverName ?? "Server";
+    const serverName = authStore.getState().serverName ?? shellText("common.serverFallback");
     const activeChannelId = channelsStore.getState().activeChannelId;
     const dmChannels = dmStore.getState().channels;
     const conversations = buildDmConversations(activeChannelId);

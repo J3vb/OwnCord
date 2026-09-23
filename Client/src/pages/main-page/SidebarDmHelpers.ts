@@ -14,6 +14,7 @@ import type { DmChannel, DmUser } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { isChannelMuted } from "@lib/channel-mutes";
 import type { DmChannelPayload } from "@lib/types";
+import { connectText } from "../../i18n/connect";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -133,7 +134,7 @@ export async function handleCreateDm(recipientId: number, deps: DmHelperDeps): P
     addDmChannel(dmChannel);
     selectDmConversation(dmChannel, deps);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to create DM";
+    const msg = err instanceof Error ? err.message : connectText("app.dmCreateFailed");
     deps.getToast()?.show(msg, "error");
   }
 }
@@ -194,7 +195,7 @@ export async function handleCreateGroupDm(
     addDmChannel(dmChannel);
     selectDmConversation(dmChannel, deps);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to create group DM";
+    const msg = err instanceof Error ? err.message : connectText("app.dmCreateGroupFailed");
     deps.getToast()?.show(msg, "error");
   }
 }
@@ -224,7 +225,7 @@ export function buildDmConversations(activeChannelId: number | null): readonly D
       username: (p.displayName ?? "") || p.username,
       avatar: p.avatar || null,
     })),
-    lastMessage: dm.lastMessage || "No messages yet",
+    lastMessage: dm.lastMessage || connectText("app.dmNoMessages"),
     timestamp: dm.lastMessageAt,
     unread: dm.unreadCount > 0 || dm.mentionCount > 0,
     unreadCount: dm.unreadCount,

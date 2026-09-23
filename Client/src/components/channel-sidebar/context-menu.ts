@@ -18,6 +18,7 @@ import { Permission } from "@lib/types";
 import { markChannelRead, hasUnread } from "@lib/read-state";
 import { isChannelMuted, toggleChannelMute } from "@lib/channel-mutes";
 import { appendPurgeSection } from "@components/purge-prompt";
+import { shellText } from "../../i18n/shell";
 
 /** Bubbles from a channel row when its mute is toggled. */
 export const CHANNEL_MUTE_CHANGED = "owncord:channel-mute-changed";
@@ -88,7 +89,7 @@ export function attachChannelContextMenu(
             class: unread ? "context-menu-item" : "context-menu-item disabled",
             "data-testid": "ctx-mark-read",
           },
-          "Mark as Read",
+          shellText("channel.markRead"),
         );
         if (unread) {
           markItem.addEventListener(
@@ -111,7 +112,7 @@ export function attachChannelContextMenu(
         const muteItem = createElement(
           "div",
           { class: "context-menu-item", "data-testid": "ctx-mute-channel" },
-          muted ? "Unmute Channel" : "Mute Channel",
+          shellText(muted ? "channel.unmute" : "channel.mute"),
         );
         muteItem.addEventListener(
           "click",
@@ -142,7 +143,7 @@ export function attachChannelContextMenu(
         const editItem = createElement(
           "div",
           { class: "context-menu-item", "data-testid": "ctx-edit-channel" },
-          "Edit Channel",
+          shellText("channel.edit"),
         );
         editItem.addEventListener(
           "click",
@@ -162,7 +163,7 @@ export function attachChannelContextMenu(
         const deleteItem = createElement(
           "div",
           { class: "context-menu-item danger", "data-testid": "ctx-delete-channel" },
-          "Delete Channel",
+          shellText("channel.delete"),
         );
         deleteItem.addEventListener(
           "click",

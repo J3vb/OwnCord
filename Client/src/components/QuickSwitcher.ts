@@ -8,6 +8,7 @@ import { createIcon } from "@lib/icons";
 import { channelsStore } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import type { MountableComponent } from "@lib/safe-render";
+import { shellText } from "../i18n/shell";
 
 export interface QuickSwitcherOptions {
   readonly onSelectChannel: (channelId: number) => void;
@@ -171,7 +172,7 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
 
     // Modal container
     const modal = createElement("div", { class: "quick-switcher" });
-    applyDialogSemantics(modal, { label: "Quick switcher" });
+    applyDialogSemantics(modal, { label: shellText("quickSwitcher.label") });
     trapFocus(modal, signal);
 
     // Search input — combobox over the results listbox: the input keeps DOM
@@ -181,7 +182,7 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
     input = createElement("input", {
       class: "quick-switcher__input",
       type: "text",
-      placeholder: "Where do you want to go?",
+      placeholder: shellText("quickSwitcher.placeholder"),
       role: "combobox",
       "aria-expanded": "true",
       "aria-autocomplete": "list",

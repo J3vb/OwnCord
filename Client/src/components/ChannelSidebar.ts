@@ -27,12 +27,13 @@ import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { rePinPeerIdentity } from "@lib/livekitSession";
-import { createIdentityMismatchModal } from "./CertMismatchModal";
+import { createIdentityMismatchModal } from "./IdentityMismatchModal";
 import { createLogger } from "@lib/logger";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { roleHasPermission, canManageChannels } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { importIdentityPublicKey, computeKeyFingerprint } from "@lib/e2eeCrypto";
+import { shellText } from "../i18n/shell";
 
 const log = createLogger("ChannelSidebar");
 
@@ -53,24 +54,22 @@ function verifyPresentation(v: PeerVerification): {
       color: "var(--green, #23a559)",
       title:
         v.safetyNumber !== null
-          ? `Identity verified · Safety number: ${v.safetyNumber}`
-          : "Identity verified",
+          ? shellText("identity.verifiedWithNumber", { safetyNumber: v.safetyNumber })
+          : shellText("identity.verified"),
     };
   }
   if (v.status === "mismatch") {
     return {
       icon: "shield-alert",
       color: "var(--red, #f23f43)",
-      title: "Identity key changed — click to review and re-pin",
+      title: shellText("identity.mismatch"),
     };
   }
   if (v.status === "unknown") {
     return {
       icon: "shield-question",
       color: "var(--yellow, #f0b232)",
-      title:
-        "Could not check this participant's identity — key storage is unavailable, " +
-        "so they are blocked for E2EE until it recovers",
+      title: shellText("identity.unknown"),
     };
   }
   // "unverified" — the remaining status: peer published no identity key (legacy).
@@ -80,10 +79,9 @@ function verifyPresentation(v: PeerVerification): {
     icon: "shield",
     color: "var(--text-muted, #949ba4)",
     title:
-      "Identity not verified — this participant published no key." +
-      (v.sessionFingerprint !== null
-        ? ` Session fingerprint (changes every call — not an identity): ${v.sessionFingerprint}`
-        : ""),
+      v.sessionFingerprint !== null
+        ? shellText("identity.unverifiedWithFingerprint", { fingerprint: v.sessionFingerprint })
+        : shellText("identity.unverified"),
   };
 }
 
@@ -227,9 +225,9 @@ function nsfwIndicator(channelId: number): HTMLSpanElement {
   const badge = createElement("span", {
     class: "ch-nsfw",
     "data-testid": `channel-nsfw-${channelId}`,
-    "aria-label": "Age restricted",
+    "aria-label": shellText("channel.ageRestricted"),
   });
-  badge.title = "Age-restricted channel";
+  badge.title = shellText("channel.ageRestrictedTitle");
   badge.appendChild(createIcon("shield-alert", 13));
   return badge;
 }
@@ -300,7 +298,7 @@ function renderTextChannelItem(
       { class: "mention-badge", "data-testid": `channel-mentions-${channel.id}` },
       String(channel.mentionCount),
     );
-    badge.title = `${channel.mentionCount} mention${channel.mentionCount === 1 ? "" : "s"}`;
+    badge.title = shellText("channel.mentions", { count: channel.mentionCount });
     item.appendChild(badge);
   } else if (channel.unreadCount > 0) {
     const badge = createElement(
@@ -361,7 +359,9 @@ function renderVoiceChannelItem(
   const timeoutReason =
     timeout === null ? null : safetyText("timeout.voice", { time: formatUntil(timeout.expiresAt) });
   const frozen = connectionStatus !== "connected" || timeoutReason !== null;
-  let frozenReason = connectionStatus === "reconnecting" ? "Reconnecting…" : "Not connected";
+  let frozenReason = shellText(
+    connectionStatus === "reconnecting" ? "channel.reconnecting" : "channel.notConnected",
+  );
   if (connectionStatus === "connected" && timeoutReason !== null) frozenReason = timeoutReason;
 
   const wrapper = createElement("div", {});
@@ -395,7 +395,10 @@ function renderVoiceChannelItem(
       { class: "ch-capacity", "data-testid": `channel-capacity-${channel.id}` },
       capacity,
     );
-    badge.title = `${voiceUsers.length} of ${channel.voiceMaxUsers} connected`;
+    badge.title = shellText("channel.voiceCapacity", {
+      connected: voiceUsers.length,
+      max: channel.voiceMaxUsers,
+    });
     item.appendChild(badge);
   }
 
@@ -448,7 +451,7 @@ function renderVoiceChannelItem(
       avatar.style.background = pickAvatarColor(resolved);
       row.appendChild(avatar);
 
-      const label = resolved || "Unknown";
+      const label = resolved || shellText("common.unknown");
       const nameEl = createElement("span", { class: "vu-name" }, label);
       row.appendChild(nameEl);
 
@@ -463,7 +466,11 @@ function renderVoiceChannelItem(
         screenIcon.appendChild(createIcon("monitor", 14));
         row.appendChild(screenIcon);
 
-        const liveBadge = createElement("span", { class: "vu-live-badge" }, "LIVE");
+        const liveBadge = createElement(
+          "span",
+          { class: "vu-live-badge" },
+          shellText("channel.live"),
+        );
         row.appendChild(liveBadge);
       }
 
@@ -473,12 +480,12 @@ function renderVoiceChannelItem(
         const muteIcon = createElement("span", {
           class: user.serverMuted === true ? "vu-muted vu-server-muted" : "vu-muted",
         });
-        if (user.serverMuted === true) muteIcon.title = "Muted by a moderator";
+        if (user.serverMuted === true) muteIcon.title = shellText("channel.mutedByModerator");
         muteIcon.appendChild(createIcon("mic-off", 14));
         const deafIcon = createElement("span", {
           class: user.serverDeafened === true ? "vu-muted vu-server-muted" : "vu-muted",
         });
-        if (user.serverDeafened === true) deafIcon.title = "Deafened by a moderator";
+        if (user.serverDeafened === true) deafIcon.title = shellText("channel.deafenedByModerator");
         deafIcon.appendChild(createIcon("headphones-off", 14));
         row.appendChild(muteIcon);
         row.appendChild(deafIcon);
@@ -486,7 +493,7 @@ function renderVoiceChannelItem(
         const muteIcon = createElement("span", {
           class: user.serverMuted === true ? "vu-muted vu-server-muted" : "vu-muted",
         });
-        if (user.serverMuted === true) muteIcon.title = "Muted by a moderator";
+        if (user.serverMuted === true) muteIcon.title = shellText("channel.mutedByModerator");
         muteIcon.appendChild(createIcon("mic-off", 14));
         row.appendChild(muteIcon);
       }
@@ -499,7 +506,7 @@ function renderVoiceChannelItem(
       if (currentUser !== null && currentUser.id === user.userId && ownFingerprint !== null) {
         const own = createElement("span", { class: "vu-verify vu-session-fp" });
         own.style.color = "var(--text-muted, #949ba4)";
-        own.title = `Your session fingerprint (changes every call — not an identity): ${ownFingerprint}`;
+        own.title = shellText("channel.ownSessionFingerprint", { fingerprint: ownFingerprint });
         own.appendChild(createIcon("shield", 14));
         row.appendChild(own);
       }
@@ -530,7 +537,7 @@ function renderVoiceChannelItem(
               // `signal` so it dies with this row (OC-0229).
               void openIdentityMismatchModal(
                 user.userId,
-                user.username || "Unknown",
+                user.username || shellText("common.unknown"),
                 lifetimeSignal,
               );
             },
@@ -549,7 +556,7 @@ function renderVoiceChannelItem(
             e.stopPropagation();
             showUserVolumeMenu(
               user.userId,
-              user.username || "Unknown",
+              user.username || shellText("common.unknown"),
               e.clientX,
               e.clientY,
               // lifetimeSignal (not the per-render `signal`): the menu is
@@ -595,7 +602,7 @@ function renderVoiceChannelItem(
         attachStreamPreview(
           row,
           user.userId,
-          user.username || "Unknown",
+          user.username || shellText("common.unknown"),
           user.screenshare,
           user.camera,
           signal,
@@ -714,7 +721,7 @@ function renderCategoryGroup(
           "span",
           {
             class: "category-add-btn",
-            title: "Create Channel",
+            title: shellText("channel.create"),
             "data-testid": `create-channel-${categoryName.toLowerCase().replace(/\s+/g, "-")}`,
           },
           "+",
@@ -865,11 +872,15 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
     if (grouped.size === 0) {
       const emptyState = createElement("div", { class: "channel-list-empty" });
-      const msg = createElement("p", { class: "channel-list-empty-text" }, "No channels yet");
+      const msg = createElement(
+        "p",
+        { class: "channel-list-empty-text" },
+        shellText("channel.empty"),
+      );
       const hint = createElement(
         "p",
         { class: "channel-list-empty-hint" },
-        "Right-click a category to create one",
+        shellText("channel.emptyHint"),
       );
       appendChildren(emptyState, msg, hint);
       channelList.appendChild(emptyState);
@@ -916,7 +927,11 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // Header
     const header = createElement("div", { class: "channel-sidebar-header" });
     const authState = authStore.getState();
-    serverNameEl = createElement("h2", {}, authState.serverName ?? "Server Name");
+    serverNameEl = createElement(
+      "h2",
+      {},
+      authState.serverName ?? shellText("common.serverNameFallback"),
+    );
     header.appendChild(serverNameEl);
 
     // Mark All as Read lives on the server header — it is a server-wide action,
@@ -924,8 +939,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // not carry a permanently dead button.
     markAllBtn = createElement("button", {
       class: "sidebar-mark-all-read",
-      title: "Mark All as Read",
-      "aria-label": "Mark All as Read",
+      title: shellText("channel.markAllRead"),
+      "aria-label": shellText("channel.markAllRead"),
       "data-testid": "mark-all-read",
     });
     markAllBtn.appendChild(createIcon("check", 16));
@@ -969,7 +984,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       (s) => s.serverName,
       (serverName) => {
         if (serverNameEl !== null) {
-          setText(serverNameEl, serverName ?? "Server Name");
+          setText(serverNameEl, serverName ?? shellText("common.serverNameFallback"));
         }
       },
     );

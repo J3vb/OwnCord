@@ -18,6 +18,7 @@ import { createModal, type ModalInstance } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 import type { ChannelType } from "@lib/types";
 import { getKnownCategories, UNCATEGORIZED_VOICE_CATEGORY } from "@stores/channels.store";
+import { shellText } from "../i18n/shell";
 
 export interface CreateChannelModalOptions {
   /** The category the create affordance was invoked from ("" = uncategorized). */
@@ -30,6 +31,20 @@ export interface CreateChannelModalOptions {
 
 /** Every channel type is creatable under every category. */
 export const CHANNEL_TYPES: readonly ChannelType[] = ["text", "voice", "announcement"] as const;
+
+const CHANNEL_TYPE_LABELS = {
+  text: "channel.type.text",
+  voice: "channel.type.voice",
+  announcement: "channel.type.announcement",
+  dm: "channel.type.dm",
+} as const;
+
+/** The display name of a channel type; an unrecognised wire value is shown capitalised. */
+export function channelTypeLabel(type: string): string {
+  return Object.hasOwn(CHANNEL_TYPE_LABELS, type)
+    ? shellText(CHANNEL_TYPE_LABELS[type as ChannelType])
+    : type.charAt(0).toUpperCase() + type.slice(1);
+}
 
 /**
  * The type pre-selected for a category. Only a hint for the dropdown's initial
@@ -50,12 +65,12 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
   function mount(container: Element): void {
     // Header
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", { id: "create-channel-title" }, "Create Channel");
+    const title = createElement("h3", { id: "create-channel-title" }, shellText("channel.create"));
     // Icon-only button: without a label a screen reader announces just "button".
     const closeBtn = createElement("button", {
       class: "modal-close",
       type: "button",
-      "aria-label": "Close",
+      "aria-label": shellText("common.close"),
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
@@ -67,13 +82,18 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
 
     // Category — free text, with the categories already in use as suggestions.
     const categoryGroup = createElement("div", { class: "form-group" });
-    const categoryLabel = createElement("label", { class: "form-label" }, "Category");
+    const categoryLabel = createElement(
+      "label",
+      { class: "form-label", for: "create-channel-category" },
+      shellText("channelForm.category"),
+    );
     const categoryInput = createElement("input", {
+      id: "create-channel-category",
       class: "form-input",
       type: "text",
       list: "create-channel-categories",
       autocomplete: "off",
-      placeholder: "Leave blank for no category",
+      placeholder: shellText("channelForm.categoryPlaceholder"),
       "data-testid": "channel-category-input",
     });
     categoryInput.value = category;
@@ -85,25 +105,39 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
 
     // Channel name
     const nameGroup = createElement("div", { class: "form-group" });
-    const nameLabel = createElement("label", { class: "form-label" }, "Name");
+    const nameLabel = createElement(
+      "label",
+      { class: "form-label", for: "create-channel-name" },
+      shellText("channelForm.name"),
+    );
     const nameInput = createElement("input", {
+      id: "create-channel-name",
       class: "form-input",
       type: "text",
-      placeholder: defaultTypeForCategory(category) === "voice" ? "lounge" : "general",
+      placeholder: shellText(
+        defaultTypeForCategory(category) === "voice"
+          ? "channelForm.namePlaceholder.voice"
+          : "channelForm.namePlaceholder.text",
+      ),
       "data-testid": "channel-name-input",
     });
     appendChildren(nameGroup, nameLabel, nameInput);
 
     // Channel type
     const typeGroup = createElement("div", { class: "form-group" });
-    const typeLabel = createElement("label", { class: "form-label" }, "Type");
+    const typeLabel = createElement(
+      "label",
+      { class: "form-label", for: "create-channel-type" },
+      shellText("channelForm.type"),
+    );
     const typeSelect = createElement("select", {
+      id: "create-channel-type",
       class: "form-input",
       "data-testid": "channel-type-select",
     });
 
     for (const t of CHANNEL_TYPES) {
-      const opt = createElement("option", { value: t }, t.charAt(0).toUpperCase() + t.slice(1));
+      const opt = createElement("option", { value: t }, channelTypeLabel(t));
       typeSelect.appendChild(opt);
     }
     typeSelect.value = defaultTypeForCategory(category);
@@ -123,7 +157,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     const cancelBtn = createElement(
       "button",
       { class: "btn-modal-cancel", type: "button" },
-      "Cancel",
+      shellText("common.cancel"),
     );
     cancelBtn.addEventListener("click", onClose, { signal: disposable.signal });
 
@@ -134,7 +168,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
         type: "button",
         "data-testid": "channel-create-submit",
       },
-      "Create Channel",
+      shellText("channel.create"),
     );
 
     createBtn.addEventListener(
@@ -143,7 +177,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
         const name = nameInput.value.trim();
         if (name === "") {
           errorEl.style.display = "block";
-          setText(errorEl, "Channel name is required");
+          setText(errorEl, shellText("channelForm.nameRequired"));
           nameInput.classList.add("error");
           return;
         }
@@ -152,7 +186,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
         errorEl.style.display = "none";
         nameInput.classList.remove("error");
         createBtn.setAttribute("disabled", "true");
-        setText(createBtn, "Creating...");
+        setText(createBtn, shellText("channelForm.creating"));
 
         try {
           await onCreate({
@@ -162,9 +196,9 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
           });
         } catch (err) {
           errorEl.style.display = "block";
-          setText(errorEl, err instanceof Error ? err.message : "Failed to create channel");
+          setText(errorEl, err instanceof Error ? err.message : shellText("channel.createFailed"));
           createBtn.removeAttribute("disabled");
-          setText(createBtn, "Create Channel");
+          setText(createBtn, shellText("channel.create"));
         }
       },
       { signal: disposable.signal },
