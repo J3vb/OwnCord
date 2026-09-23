@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
+  buildTauriMockScript,
   mockTauriFullSessionWithMessages,
   navigateToMainPageReady,
   openSettings,
@@ -289,5 +290,61 @@ test.describe("B9-18 connect and shell text", () => {
     });
     await page.keyboard.press("Escape");
     await expect(addDialog).toHaveCount(0);
+  });
+
+  test("keeps an incompatible server's expanded badge whole in its row at 940×500 with 20px text", async ({
+    page,
+  }, testInfo) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("owncord:settings:fontSize", "20");
+      localStorage.setItem("owncord:settings:largeFont", "true");
+    });
+    await page.addInitScript(
+      buildTauriMockScript({
+        httpRoutes: [
+          {
+            pattern: "/api/v1/health",
+            status: 200,
+            body: { status: "ok", uptime: 10, online_users: 3 },
+          },
+          {
+            pattern: "/api/v1/server-info",
+            status: 200,
+            body: { name: "Future Server", protocol_epoch: 2, browser_client_enabled: false },
+          },
+        ],
+        simulateWsFlow: false,
+      }),
+    );
+    await page.goto("/");
+    const badges = page.locator(".srv-compat-badge");
+    await expect(badges.first()).toHaveText("Client update needed", { timeout: 10_000 });
+    test.skip(!(await expandCatalogText(page)), "needs the dev server's modules");
+
+    // Adding a server rebuilds every row and re-probes it through the seam.
+    await page.locator(".btn-add-server").click();
+    const addDialog = page.getByRole("dialog", { name: expanded("Add Server") });
+    await addDialog.locator(".form-input").nth(0).fill("Future");
+    await addDialog.locator(".form-input").nth(1).fill("future.example:8443");
+    await addDialog.locator(".btn-primary").click();
+    await expect(addDialog).toHaveCount(0);
+
+    for (const row of await page.locator(".server-item").all()) {
+      const badge = row.locator(".srv-compat-badge");
+      await expect(badge).toHaveText(expanded("Client update needed"), { timeout: 10_000 });
+      await expect(row.locator(".srv-online-users")).toHaveText(expanded("3 online"));
+      await expectWhole(badge);
+      // The status dot sits beside the row's text, never over it.
+      const dot = (await row.locator(".srv-status-dot").boundingBox())!;
+      for (const meta of await row.locator(".srv-meta > *").all()) {
+        const box = await meta.boundingBox();
+        if (box !== null && box.width > 0) expect(box.x + box.width).toBeLessThanOrEqual(dot.x + 1);
+      }
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+    await testInfo.attach("server-row-expanded-940x500-20px.png", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
   });
 });
