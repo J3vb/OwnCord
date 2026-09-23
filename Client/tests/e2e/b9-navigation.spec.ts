@@ -95,9 +95,8 @@ test.describe("B9-4 shared navigation", () => {
 
   test("the header fits a Moderation entry beside Audit Log (Q2)", async ({ page }) => {
     // The entry B9-11 turns on is the same button SidebarArea renders beside
-    // Audit Log, with the header class it sets while the entry is shown. No
-    // destination can be registered in the production bundle, so add both to
-    // the real header and measure the real stylesheet.
+    // Audit Log. No destination can be registered in the production bundle, so
+    // add it to the real header and measure the real stylesheet.
     const sidebar = page.locator("[data-testid='unified-sidebar']");
     const header = sidebar.locator(".unified-sidebar-header");
     await page.locator("[data-testid='audit-log-btn']").evaluate((audit) => {
@@ -107,7 +106,6 @@ test.describe("B9-4 shared navigation", () => {
       btn.dataset.testid = "moderation-btn";
       btn.textContent = "Moderation";
       audit.after(btn);
-      audit.parentElement!.classList.add("with-moderation");
     });
     const moderation = page.locator("[data-testid='moderation-btn']");
     await expect(moderation).toBeVisible();

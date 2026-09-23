@@ -1,8 +1,9 @@
 # B9 shared UI contract
 
 **Status:** in force from B9-2, 2026-09-23.
-**Decisions:** owner Q1 (accessibility acceptance) and Q8 (theme and custom
-accent), with the 2026-09-23 Q8 clarification, in
+**Decisions:** owner Q1 (accessibility acceptance), Q8 (theme and custom
+accent), with the 2026-09-23 Q8 clarification, and Q13 (visual direction: Refined
+Neon), in
 [b9-unified-experience-accessibility-polish.prd.md](../plans/b9-unified-experience-accessibility-polish.prd.md#open-questions).
 **Evidence:** [b9-shared-a11y-evidence-2026-09-23.md](../plans/b9-shared-a11y-evidence-2026-09-23.md).
 
@@ -22,10 +23,10 @@ the owner on 2026-09-23:
 3. `--text-faint` and `--text-micro` are for incidental text only, and are
    measured but not qualified.
 4. The Q8 fallback target is the theme's tested `--accent-text`/`--focus-ring`
-   token. It equals the theme's default accent only where that accent passes
-   the threshold (neon-glow `#00c8ff`). On dark and midnight it is `#949cf7`
-   and on light `#4752c4`, because the default accent `#5865f2` is below Q1
-   there (2.74:1 on `#313338`).
+   token. Since Q13 it is `#2fd0ff` on neon-glow, `#a3aaf8` on dark and
+   midnight, and on light `#4150c4` as text and `#4752c4` as the focus ring.
+   The default fill accents (`#00c8ff`, `#5865f2`, light's `#4f5bd5`) are
+   below Q1 as text on at least one of their surfaces.
 
 ## Thresholds (Q1)
 
@@ -41,11 +42,13 @@ the only signal: an error says it is an error in words.
 
 ## Colour tokens
 
-`Client/src/styles/tokens.css` holds the dark defaults, which midnight also
-uses. `theme-neon-glow.css` and the light theme's entry in
-`components/settings/helpers.ts` `THEMES` override them.
+`Client/src/styles/tokens.css` holds the dark defaults, which midnight shares
+where its `THEMES` entry does not override them, and light's accent fills
+(`body.theme-light`). `theme-neon-glow.css` and the midnight and light entries
+in `components/settings/helpers.ts` `THEMES` override them.
 `app/accessibility.css` holds High Contrast. A "surface" is any of
-`--bg-primary`, `--bg-secondary`, `--bg-tertiary` and `--bg-input`.
+`--bg-primary`, `--bg-secondary`, `--bg-tertiary` and `--bg-input`. The values
+are the owner's Q13 direction A, Refined Neon.
 
 | Token                                                                     | Use                                                    | Qualified                                                  |
 | ------------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------- |
@@ -56,6 +59,8 @@ uses. `theme-neon-glow.css` and the light theme's entry in
 | `--focus-ring`                                                            | every focus indicator                                  | ≥ 3:1 on every surface                                     |
 | `--on-accent`                                                             | text or icons on an accent fill                        | ≥ 4.5:1 on `--accent`, `--accent-hover`, `--accent-active` |
 | `--danger-fill`, `--danger-fill-hover`                                    | destructive button fills (white text)                  | ≥ 4.5:1 with white                                         |
+| `--border-control`                                                        | the 1px edge of an input or other control              | ≥ 3:1 on `--bg-primary` and `--bg-secondary` (1.4.11)      |
+| `--on-fill`, `--on-warning`                                               | text on a theme-independent fill or media scrim        | white on `--danger-fill`; `--on-warning` on `--yellow`     |
 | `--text-faint`, `--text-micro`                                            | incidental text only: decoration, separators, disabled | **not qualified**                                          |
 
 Rules:
@@ -64,7 +69,22 @@ Rules:
 - The accent as text is `var(--accent-text)`, never `var(--accent)`.
 - A focus indicator is `var(--focus-ring)`, never `var(--accent)`.
 - `--red`, `--green` and `--yellow` are fill colours. For text, use the
-  `--text-*` status tokens.
+  `--text-*` status tokens. A badge or banner with white text fills with
+  `--danger-fill`, not `--red`.
+- An input's edge is `1px solid var(--border-control)`; a fill difference
+  alone is not a boundary. Placeholders are `--text-muted`.
+- A role colour (server-set) is text only through `readableRoleColor()` in
+  `lib/themes.ts`: the colour where it reads at 4.5:1 on every surface,
+  otherwise `--text-normal`, with the same math as `--accent-text`. The element
+  keeps the raw colour in `data-role-color`, and a theme switch re-clamps it.
+- Style sheets use tokens, not literals: colours from the tables above,
+  shadows `--shadow-sm/md/lg`, media scrims `--scrim`, `--bg-overlay`,
+  `--scrim-strong` and `--scrim-hover`, radii `--radius-sm/md/lg/pill/circle`
+  (4 / 8 / 12 / pill), spacing `--space-1..8` (4px steps), and text sizes
+  `--font-size-xxs..xxl` and `--font-size-display`, which follow the app text
+  scale. Kept literals are deliberate: true-black video letterbox, each theme
+  tile's own preview colours, and px glyph sizes in fixed boxes (avatar
+  initials, icon buttons, emoji).
 - Do not use `--text-faint` or `--text-micro` for text a user needs to read.
   Their ~78 existing uses predate B9-2, and the feature polish milestones
   (B9-21..B9-24) review them. Qualifying these tokens at 4.5:1 would make
@@ -93,6 +113,13 @@ accent's inline tokens. The math lives in `Client/src/lib/color-contrast.ts`.
   `--focus-ring`, even over a readable custom accent.
 - The Appearance tab discloses this under the accent input.
 
+## Typography
+
+`--font-body` and `--font-display` are Segoe UI Variable on Windows and the
+bundled Inter Variable (`Client/src/assets/fonts/`, SIL OFL 1.1, licence
+beside it) everywhere else. The `@font-face` is in `base.css`; font-src is
+`'self'`, and no font is ever fetched from a CDN.
+
 ## Focus
 
 - `base.css` draws a 2px `--focus-ring` outline, offset 2px, on
@@ -103,6 +130,9 @@ accent's inline tokens. The math lives in `Client/src/lib/color-contrast.ts`.
   The `[tabindex]` part is wrapped in `:where()`, so a component
   `.x:focus-visible` rule overrides it; for the same reason, never set
   `outline: none` outside a `:focus-visible` rule on a `[tabindex]` widget.
+- The composer draws one ring: `.message-input-box` takes the textarea's
+  `--focus-ring` outline around the whole box, and the textarea draws none.
+  Login fields likewise show only the base outline, with no focus glow.
 - Dialogs use `createModal` (`Client/src/lib/modalFactory.ts`). It applies
   `role="dialog"` and `aria-modal`, traps Tab, closes on Escape, and restores
   focus to the opener on close.

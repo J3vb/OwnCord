@@ -6,7 +6,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 4px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-md);
   min-width: 180px;
   animation: contextMenuPop 0.1s ease;
 }
@@ -17,7 +17,7 @@
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-normal);
   background: transparent;
   width: 100%;
@@ -34,8 +34,8 @@
   color: var(--red);
 }
 .context-menu-item.danger:hover {
-  background: var(--red);
-  color: white;
+  background: var(--danger-fill);
+  color: var(--on-fill);
 }
 .context-menu-item.disabled {
   color: var(--text-muted);
@@ -72,7 +72,7 @@
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-normal);
   background: transparent;
   width: 100%;
@@ -96,8 +96,8 @@
   color: var(--red);
 }
 .context-menu__item--danger:hover {
-  background: var(--red);
-  color: white;
+  background: var(--danger-fill);
+  color: var(--on-fill);
 }
 .context-menu__item--pending {
   opacity: 0.7;
@@ -117,7 +117,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 4px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-md);
   min-width: 140px;
   z-index: 1;
 }
@@ -144,9 +144,9 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 12px 20px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-normal);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-md);
   opacity: 0;
   transition: opacity 0.3s;
   pointer-events: none;
@@ -171,10 +171,10 @@
 /* ── Reconnecting Banner ── */
 .reconnecting-banner {
   background: var(--yellow);
-  color: #1e1f22;
+  color: var(--on-warning);
   text-align: center;
   padding: 6px 16px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   flex-shrink: 0;
   display: none;
@@ -185,8 +185,8 @@
 .reconnecting-banner-action {
   margin-left: 8px;
   padding: 1px 10px;
-  border: 1px solid #1e1f22;
-  border-radius: 4px;
+  border: 1px solid var(--on-warning);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -209,7 +209,7 @@
   padding: 8px 16px;
   border-left: 4px solid var(--yellow);
   color: var(--text-normal);
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 .moderation-notice + .moderation-notice {
   border-top: 1px solid var(--border);
@@ -244,7 +244,7 @@
 .safety-heading {
   margin: 16px 0 4px;
   color: var(--header-primary);
-  font-size: 16px;
+  font-size: var(--font-size-lg);
 }
 .safety-tab .safety-retry {
   margin: 8px 0 0;
@@ -282,7 +282,7 @@
   width: 540px;
   background: var(--bg-primary);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
 .search-overlay-input {
@@ -290,11 +290,11 @@
   padding: 16px 20px;
   background: transparent;
   color: var(--text-normal);
-  font-size: 16px;
+  font-size: var(--font-size-lg);
   border: none;
 }
 .search-overlay-input::placeholder {
-  color: var(--text-micro);
+  color: var(--text-muted);
 }
 .search-overlay-results {
   max-height: 400px;
@@ -304,7 +304,7 @@
 .search-overlay-status {
   padding: 12px 20px;
   color: var(--text-micro);
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 .search-result-item {
   padding: 10px 20px;
@@ -321,7 +321,7 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 .search-result-channel {
   color: var(--text-micro);
@@ -334,11 +334,11 @@
 .search-result-time {
   color: var(--text-micro);
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 .search-result-content {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

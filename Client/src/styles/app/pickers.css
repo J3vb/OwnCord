@@ -8,7 +8,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   width: 320px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-lg);
   display: none;
   overflow: hidden;
   margin-bottom: 4px;
@@ -27,7 +27,7 @@
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
   margin-bottom: 4px;
 }
@@ -41,7 +41,7 @@
   gap: 8px;
   padding: 6px 12px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 .ma-item--active,
 .ma-item:hover {
@@ -53,7 +53,7 @@
 }
 .ma-item .ma-detail {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -91,18 +91,18 @@
 .ep-search {
   width: 100%;
   background: var(--bg-tertiary);
-  border: none;
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   color: var(--text-normal);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 .ep-search::placeholder {
-  color: var(--text-micro);
+  color: var(--text-muted);
 }
 .ep-category-label {
   padding: 8px 12px 4px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--text-faint);
   text-transform: uppercase;
@@ -141,7 +141,7 @@
   border-radius: var(--radius-md);
   width: 320px;
   height: 400px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-lg);
   display: none;
   overflow: hidden;
   margin-bottom: 4px;
@@ -158,17 +158,17 @@
 .gp-search {
   width: 100%;
   background: var(--bg-tertiary);
-  border: none;
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   color: var(--text-normal);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 .gp-search::placeholder {
-  color: var(--text-micro);
+  color: var(--text-muted);
 }
 .gp-attribution {
-  font-size: 10px;
+  font-size: var(--font-size-xxs);
   color: var(--text-micro);
   padding: 4px 0 0;
   text-align: center;
@@ -214,11 +214,11 @@
   padding: 48px 0;
   text-align: center;
   color: var(--text-faint);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 .gp-empty {
   padding: 48px 0;
   text-align: center;
   color: var(--text-faint);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }

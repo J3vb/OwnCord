@@ -6,6 +6,20 @@ import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
 import { Permission, type UserStatus } from "../../src/lib/types";
+import { applyThemeByName } from "@lib/themes";
+
+/**
+ * Give the role clamp (B9 Q13) the dark theme's surfaces to measure names
+ * against; a theme switch is what empties its cache.
+ */
+function useDarkSurfaces(): void {
+  const html = document.documentElement.style;
+  html.setProperty("--bg-primary", "#313338");
+  html.setProperty("--bg-secondary", "#2b2d31");
+  html.setProperty("--bg-tertiary", "#1e1f22");
+  html.setProperty("--bg-input", "#383a40");
+  applyThemeByName("dark");
+}
 
 // jsdom has no ResizeObserver; the member menu re-clamps itself through one.
 // The fake hands the latest observer's callback to tests that resize the menu.
@@ -285,6 +299,7 @@ describe("MemberList", () => {
     // Role management makes the list mutable mid-session. Before this the list
     // only re-rendered on a member change, so a rename/recolor/delete sat
     // invisible until unrelated traffic arrived.
+    useDarkSurfaces();
     setRoles([
       { id: 1, name: "Owner", color: "#E74C3C", permissions: 0 },
       { id: 2, name: "Staff", color: "#00FF00", permissions: 0 },
@@ -304,11 +319,15 @@ describe("MemberList", () => {
     // Store notifications are batched onto a microtask.
     channelsStore.flush();
 
-    const stanName = container.querySelector('[data-testid="member-2"] .mi-name');
-    expect((stanName as HTMLSpanElement).style.color).toBe("rgb(0, 0, 255)");
+    // The new colour reaches the row; #0000ff reads 1.36:1 on #383a40, so the
+    // role clamp shows the name in --text-normal.
+    const stanName = container.querySelector<HTMLSpanElement>('[data-testid="member-2"] .mi-name')!;
+    expect(stanName.dataset["roleColor"]).toBe("#0000FF");
+    expect(stanName.style.color).toBe("var(--text-normal)");
   });
 
   it("renders groups for custom server roles, colored by the server's role color", () => {
+    useDarkSurfaces();
     setRoles([
       { id: 1, name: "Owner", color: "#E74C3C", permissions: 0 },
       { id: 2, name: "Staff", color: "#00FF00", permissions: 0 },
@@ -589,8 +608,10 @@ describe("MemberList", () => {
 
     const nameEl = container.querySelector(".mi-name") as HTMLSpanElement;
     expect(nameEl.textContent).toBe("OwnerUser");
-    // Owner role has specific color var
-    expect(nameEl.style.color).toBe("var(--role-owner, #e74c3c)");
+    // Owner role has specific color var, shown through the role clamp (B9 Q13).
+    // No theme surfaces are measurable here, so the clamp fails closed.
+    expect(nameEl.dataset["roleColor"]).toBe("var(--role-owner, #e74c3c)");
+    expect(nameEl.style.color).toBe("var(--text-normal)");
   });
 
   it("uses '?' as avatar fallback for empty username", () => {

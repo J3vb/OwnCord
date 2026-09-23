@@ -141,7 +141,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
           "span",
           {
             class: "dm-mention-badge",
-            style: `margin-left:auto;background:var(--red);color:white;border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
+            style: `margin-left:auto;background:var(--danger-fill);color:var(--on-fill);border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
           },
           String(dm.mentionCount),
         );
@@ -153,7 +153,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
           "span",
           {
             class: muted ? "dm-unread-badge muted" : "dm-unread-badge",
-            style: `margin-left:auto;background:${muted ? "var(--text-micro)" : "var(--red)"};color:white;border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
+            style: `margin-left:auto;background:${muted ? "var(--text-micro)" : "var(--danger-fill)"};color:var(--on-fill);border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
           },
           String(dm.unreadCount),
         );
