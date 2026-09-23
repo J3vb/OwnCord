@@ -270,7 +270,7 @@ async fn send_remote(ws: Ws, track: RemoteVideoTrack) {
     frames.close();
 }
 
-async fn send_preview(ws: Ws, preview: tokio::sync::watch::Receiver<Option<Arc<Vec<u8>>>>) {
+async fn send_preview(ws: Ws, preview: tokio::sync::watch::Receiver<Option<Arc<I420Buffer>>>) {
     // Ends when the capture drops its sender.
     let mut frames = Box::pin(futures_util::stream::unfold(preview, |mut rx| async move {
         rx.changed().await.ok()?;
@@ -278,7 +278,7 @@ async fn send_preview(ws: Ws, preview: tokio::sync::watch::Receiver<Option<Arc<V
         Some((frame, rx))
     }));
     send_acked(ws, &mut frames, |frame| {
-        frame.map(|f| f.as_ref().clone()).unwrap_or_default()
+        frame.map(|f| pack_i420(&f)).unwrap_or_default()
     })
     .await;
 }

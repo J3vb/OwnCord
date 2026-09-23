@@ -39,8 +39,6 @@ use livekit::webrtc::video_source::native::NativeVideoSource;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, watch};
 
-use super::video::pack_i420;
-
 /// Capture threads alive, for the debug surface: it drops to zero only once
 /// every capturer (and so every portal session) is released.
 static CAPTURES: AtomicUsize = AtomicUsize::new(0);
@@ -225,9 +223,9 @@ pub struct CaptureOptions {
     pub max_height: u32,
 }
 
-/// Packed I420 frames for the local preview (the frame socket's `screen`
-/// route); the latest only.
-pub type Preview = watch::Sender<Option<Arc<Vec<u8>>>>;
+/// I420 frames for the local preview (the frame socket's `screen` route),
+/// packed only when the socket sends one; the latest only.
+pub type Preview = watch::Sender<Option<Arc<I420Buffer>>>;
 
 /// Resolves with the first frame's size, or the reason capture never began.
 pub type Started = oneshot::Receiver<Result<(u32, u32), String>>;
@@ -484,29 +482,29 @@ fn run(
 }
 
 fn deliver(shared: &Shared, buffer: I420Buffer, started: Instant) {
-    if shared.preview.receiver_count() > 0 {
-        shared
-            .preview
-            .send_replace(Some(Arc::new(pack_i420(&buffer))));
-    }
+    let frame = VideoFrame {
+        rotation: VideoRotation::VideoRotation0,
+        timestamp_us: started.elapsed().as_micros() as i64,
+        frame_metadata: None,
+        buffer,
+    };
     let source = shared
         .source
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .clone();
     if let Some(source) = source {
-        source.capture_frame(&VideoFrame {
-            rotation: VideoRotation::VideoRotation0,
-            timestamp_us: started.elapsed().as_micros() as i64,
-            frame_metadata: None,
-            buffer,
-        });
+        source.capture_frame(&frame);
+    }
+    if shared.preview.receiver_count() > 0 {
+        shared.preview.send_replace(Some(Arc::new(frame.buffer)));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::native_voice::video::pack_i420;
 
     /// The capture count is process-wide: tests that start captures take
     /// turns.
@@ -579,7 +577,7 @@ mod tests {
         let mut preview = capture.preview().subscribe();
         rt.block_on(preview.changed()).unwrap();
         let frame = preview.borrow().clone().unwrap();
-        assert_eq!(&frame[..8], &[64, 1, 0, 0, 180, 0, 0, 0]);
+        assert_eq!(&pack_i420(&frame)[..8], &[64, 1, 0, 0, 180, 0, 0, 0]);
         assert_eq!(active_captures(), base + 1);
         drop(capture);
         assert_eq!(active_captures(), base);
