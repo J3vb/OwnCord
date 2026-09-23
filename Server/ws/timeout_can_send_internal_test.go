@@ -132,7 +132,7 @@ func TestTimeout_RearmedExpiryPushesCanSend(t *testing.T) {
 	if _, _, err := f.database.TimeoutUser(ctx, f.targetID, f.actorID, nil, "brief", expires); err != nil {
 		t.Fatalf("TimeoutUser: %v", err)
 	}
-	f.hub.RearmTimeoutExpiries(ctx)
+	f.hub.RearmTimeoutExpiries()
 	if !waitCanSend(t, f.send, f.chID, 5*time.Second) {
 		t.Fatal("can_send = false after the re-armed timeout expired, want true")
 	}

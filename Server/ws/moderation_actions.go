@@ -69,12 +69,13 @@ func (h *Hub) scheduleTimeoutExpiryRefresh(userID int64, expiresAt time.Time) {
 }
 
 // RearmTimeoutExpiries schedules the expiry refresh for every timeout active
-// right now, replacing the timers a previous process armed and lost.
-func (h *Hub) RearmTimeoutExpiries(ctx context.Context) {
+// right now, replacing the timers a previous process armed and lost. Called
+// once at startup (no context), so the list is read against Background.
+func (h *Hub) RearmTimeoutExpiries() {
 	if h.db == nil {
 		return
 	}
-	active, err := h.readers.Dispatch.ListActiveTimeoutExpiries(ctx)
+	active, err := h.readers.Dispatch.ListActiveTimeoutExpiries(context.Background())
 	if err != nil {
 		slog.Warn("hub: RearmTimeoutExpiries could not list active timeouts", "err", err)
 		return

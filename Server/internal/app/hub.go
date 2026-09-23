@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -95,7 +94,7 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 	}
 
 	go hub.Run()
-	hub.RearmTimeoutExpiries(context.Background())
+	hub.RearmTimeoutExpiries()
 
 	return api.Runtime{Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled}, nil
 }
