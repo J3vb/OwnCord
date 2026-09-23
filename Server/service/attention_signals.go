@@ -128,24 +128,7 @@ func (s *AttentionService) evalRate(st *attentionRate, total *float64, now time.
 		raw = AttentionStatusWarning
 	}
 	sig.Status = st.level.settle(raw, attentionSustain)
-	learn := false
-	switch {
-	case first:
-	case warm:
-		learn = sig.Status == AttentionStatusOK && raw == AttentionStatusOK
-	case spec.quietWarmup:
-		learn = true
-	default:
-		learn = rate <= spec.floor
-	}
-	if learn {
-		if st.samples == 0 {
-			st.baseline = rate
-		} else {
-			st.baseline += attentionBaselineAlpha * (rate - st.baseline)
-		}
-		st.samples++
-	}
+	st.learn(rate, first, warm, sig.Status == AttentionStatusOK && raw == AttentionStatusOK, spec)
 	sig.Value = fmt.Sprintf("%.1f %s", rate, spec.unit)
 	sig.Threshold = fmt.Sprintf("raise at %.1f %s", threshold, spec.unit)
 	if warm {
@@ -160,6 +143,30 @@ func (s *AttentionService) evalRate(st *attentionRate, total *float64, now time.
 		sig.Detail = "the message dispatch loop has stopped"
 	}
 	s.settle(sig, spec.title, spec.action)
+}
+
+// learn folds rate into the baseline under evalRate's learning rules; healthy
+// is whether this sample both settled and measured ok.
+func (st *attentionRate) learn(rate float64, first, warm, healthy bool, spec rateSpec) {
+	learn := false
+	switch {
+	case first:
+	case warm:
+		learn = healthy
+	case spec.quietWarmup:
+		learn = true
+	default:
+		learn = rate <= spec.floor
+	}
+	if !learn {
+		return
+	}
+	if st.samples == 0 {
+		st.baseline = rate
+	} else {
+		st.baseline += attentionBaselineAlpha * (rate - st.baseline)
+	}
+	st.samples++
 }
 
 func attentionScheduleInterval(schedule string) time.Duration {

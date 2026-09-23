@@ -3229,9 +3229,10 @@ Nothing here is exported off the host.
 - `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `backup`,
   and `job:<name>` for each maintenance step.
 - The first disk level and a stopped dispatch loop are reported at once; every
-  other level change, including a rate's first warning, holds for two samples. A rate's `threshold` is its `attention.*` floor until it has
-  learned a baseline, then the higher of the floor and three times that
-  baseline. While learning, `reconnects` raises nothing and `db_writer_wait`
+  other level change, including a rate's first warning, holds for two samples.
+  A rate's `threshold` is its `attention.*` floor until it has learned a
+  baseline, then the higher of the floor and three times that baseline.
+  While learning, `reconnects` raises nothing and `db_writer_wait`
   and `delivery` raise at the floor; samples above the floor are not learned.
 - A warning's `id` is its signal's id. A signal that keeps failing updates
   `last_observed`. One that recovers gets `recovered_at` and is listed for 24
