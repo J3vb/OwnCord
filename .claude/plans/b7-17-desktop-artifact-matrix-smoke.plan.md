@@ -12,45 +12,34 @@
 > was re-derived with the command shown except row 20, which is marked
 > **unverified** and is Task 0's first job.
 
-## Implementation status — HELD 2026-09-22
+## Implementation status — landed 2026-09-23
 
-**The owner has held B7-17 until Linux desktop voice/video works** (decision
-on the Linux media finding below, option C). Work stopped on branch
-`fm/b7-17-impl`; nothing was pushed or opened as a PR. Resume from here.
+Held 2026-09-22 (owner decision, option C) until Linux desktop voice/video
+worked — the webview has no WebRTC on any mainstream WebKitGTK — and resumed
+2026-09-23 once Linux voice, camera and screen share moved into the Rust
+backend (#1697, #1700, #1704, #1706, #1711, #1719). The manual real-desktop
+Linux device check (device switching, headset hot-plug) is an owner task
+outside this milestone; the smoke proves a join with working controls, not
+device handling.
 
 **Owner answers to the open questions** (they replace the recommendations
 below): (1) release-time before `publish` plus a nightly drift run, never per
 PR; (2) `tauri-driver` + `webkit2gtk-driver` under `xvfb-run` on both Linux
-arches; (3) **no signing in the nightly** — it builds unsigned bundles, skips
-update and rollback, references no signing secret and generates no key;
-update/rollback run only at release time on the real signed artifacts;
-(4) a declared cross-compile fallback would not fail the milestone — **not
-needed**, `windows-11-arm` builds natively (row 20).
+arches, driving the real UI — no fallback leg was needed; (3) **no signing in
+the nightly** — it builds unsigned bundles, skips update and rollback,
+references no signing secret and generates no key; update/rollback run only at
+release time on the real signed artifacts; (4) a declared cross-compile
+fallback would not fail the milestone — **not needed**, `windows-11-arm` builds
+and smokes natively (row 20).
 
-**The blocking finding — Linux has no WebRTC.** Driving a release build of
-`dev` through tauri-driver/WebKitWebDriver under xvfb-run on Ubuntu 24.04 x64
-(WebKitGTK 2.52.6), install, boot, version, TLS first-use trust, login, WS
-ready and the whole recovery journey pass through the real UI, but joining
-voice fails: `livekitSession` logs "Failed to connect to LiveKit … tried to
-setup end-to-end encryption on an unsupported browser". In the webview
-`typeof RTCPeerConnection`, `RTCRtpSender` and `RTCRtpScriptTransform` are all
-`"undefined"`: Ubuntu's WebKitGTK is built without WebRTC, so
-`linux_media.rs`'s `enable-webrtc` has nothing to enable. The AppImage bundles
-the ubuntu-22.04 build host's WebKitGTK (same packaging) and the `.deb` uses the
-system one. Not yet confirmed on the ubuntu-22.04 runners themselves — the
-four-target probe (below) was cancelled at the hold before its smoke jobs ran.
-The fix (a WebRTC-capable WebKitGTK shipped with the Linux client) is separate
-work; `journey.spec.ts` keeps the strict media assertion on every target, so
-the Linux legs stay red until it lands.
-
-**Done (committed):**
+**What landed, by task:**
 
 - Task 1 — `windows-aarch64-nsis` row in `Server/updater/assets.go`, with
   `coverage_boost_test.go` and two `client_update_test.go` cases (arm64 pair
   served; a `.sig`-only release yields 204); `docs/api.md` target list.
 - Task 2 — `release.yml`: `release-client-windows` is a two-leg matrix
   (`windows-latest` x64, `windows-11-arm` ARM64, artifact
-  `windows-arm64-release-assets`); all three client jobs stage through the new
+  `windows-arm64-release-assets`); all three client jobs stage through the
   shared `Client/scripts/stage-release-assets.sh`; `publish` downloads the ARM64
   assets and needs `client-artifact-smoke`.
 - Task 3 — `Client/tests/e2e/support/artifact-app.ts` (one `ArtifactDriver`
@@ -58,36 +47,48 @@ the Linux legs stay red until it lands.
   `playwright.config.artifact.ts`, `npm run test:e2e:artifact`. Plan
   correction: **the shipped artifact has no CDP port** (that is a test-build
   flag, `native-test-config.mjs`), so Windows attaches through a WebView2
-  `AdditionalBrowserArguments` policy for `owncord-client.exe` (HKLM) — **not
-  yet observed working on a runner**; Linux uses tauri-driver, which release
-  builds honour (`TAURI_WEBVIEW_AUTOMATION`, tauri-runtime-wry). `native-app.ts`
-  only gained an `identifier` option (default unchanged). Observed red on a
-  truncated artifact locally, green on the real binary (media excepted).
+  `AdditionalBrowserArguments` policy for `owncord-client.exe` (HKLM); Linux
+  uses tauri-driver, which release builds honour (`TAURI_WEBVIEW_AUTOMATION`).
   There is no `run-artifact-smoke.mjs`: the workflow calls Playwright directly.
 - Task 4 — LiveKit arm64 archives + digests (match LiveKit's
-  `checksums.txt`); a mutated digest was observed failing.
+  `checksums.txt`). Linux media runs in the native backend, which captures and
+  plays through the sound server, so the Linux smoke legs start a PulseAudio
+  null sink (its monitor is the source).
 - Task 5 — `update.spec.ts` and a target-filtering release mode in
   `native-update-server.ts`; `run-native-updater.mjs` accepts custom Playwright
-  args for the Windows step. **Never executed.** Before trusting it, run a
-  probe-only workflow that builds an "old" (`1.2.0-alpha.3`) and a "new" bundle
-  per target signed with a run-generated key pinned via `--config`, and runs
-  the `artifact-update` project on them (a draft existed; it is not committed
-  because a generated key must never land in the nightly).
-- Task 6 — recovery leg is in `journey.spec.ts` (issue kit in settings, log
-  out, recover, then the server proves the new password works, the old one is
-  refused and the kit reads used). Passed locally on Linux.
+  args for the Windows step. Rollback reinstalls the previous release and
+  requires it to auto-connect from the profile the update kept. Proven by a
+  probe-only workflow (never committed: it generates a key) that built an
+  "old" `1.2.0-alpha.3` and a "new" bundle per target, both trusting a
+  run-generated key.
+- Task 6 — recovery leg in `journey.spec.ts` (issue kit in settings, log out,
+  recover, then the server proves the new password works, the old one is
+  refused and the kit reads used).
 - Task 7 — `.github/workflows/client-artifact-smoke.yml`
   (`schedule`/`workflow_dispatch` build unsigned; `workflow_call` with
   `release-artifacts: true` smokes the caller's bundles and adds update +
-  rollback). actionlint and `zizmor --offline` clean. Its schedule is inert until
-  the file reaches `main`.
-- Task 8 (partial) — `docs/contributing.md` and `docs/architecture/client.md`.
+  rollback). The nightly build carries the release's native-voice toolchain
+  step and glibc-floor check. actionlint and `zizmor --offline` clean. Its
+  schedule is inert until the file reaches `main`.
+- Task 8 — BPR-010 evidence and the BG-04 B7-half note; `docs/contributing.md`
+  and `docs/architecture/client.md`.
 
-**Not done:** a green four-target probe of the workflow (run
-https://github.com/J3vb/OwnCord/actions/runs/35690380785 was cancelled at the
-hold; the probe branch is deleted), the update probe above, the BPR-010
-evidence block and BG-04 note (nothing to claim until the smoke is green),
-`ci-check`, and the PR.
+**Found by the smoke and fixed here:**
+
+- **The Linux app aborted at sign-in on X11** (`[xcb] Too much data requested
+from _XRead`, both arches, intermittent). libwebrtc's audio device module
+  (`audio_device_pulse_linux.o`, `audio_device_alsa_linux.o`) opens and queries
+  its own X display for typing detection from whichever thread creates it — a
+  Tokio worker listing devices at sign-in — racing GTK's main-thread Xlib use,
+  and nothing called `XInitThreads`. Bisected on the runners (PulseAudio and
+  keyring on/off), then `main.rs` calls `XInitThreads()` first: 3/3 journeys
+  green on each arch in the crashing environment, where the unpatched build
+  failed most runs. The unpatched binary passed locally on Ubuntu 24.04 — a
+  race, which is why this needed the runner.
+- Harness fixes the runners exposed: Git Bash's GNU `tar` read `D:\...` as a
+  remote host (`install-livekit.mjs` now names `System32\tar.exe`); WMI's
+  process query outlasted its budget on `windows-11-arm` (`killInstalled` now
+  kills by image name); the Linux driver's `press()` always sent Escape.
 
 ## Summary
 
