@@ -1211,7 +1211,10 @@ export default function () {
             const from = sentBy(content);
             const at = sentAt(content);
             if (at && from && from !== vuId && Date.now() - at < 30 * 1000) {
-              deliveryLatency.add(Date.now() - at, stepTags(true) ?? restartTags() ?? operationalTags());
+              deliveryLatency.add(
+                Date.now() - at,
+                stepTags(true) ?? restartTags() ?? operationalTags(),
+              );
               deliveries.add(1, restartTags());
             }
             break;
