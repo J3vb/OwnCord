@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -68,6 +69,39 @@ func TestDispatchAlive_FlipsOnStop(t *testing.T) {
 	}
 	if h.DispatchAlive() {
 		t.Fatal("hub must report dead after Run returns")
+	}
+}
+
+// TestDone_ClosesOnlyOnceDispatchHasExited locks the join the app's hub close
+// step relies on. GracefulStopContext only signals the loop: called before the
+// Run goroutine has been scheduled (an early start failure right after the hub
+// stage), it returns with the loop still to come, so DispatchAlive is still
+// true. Done is what closes only after Run has returned.
+func TestDone_ClosesOnlyOnceDispatchHasExited(t *testing.T) {
+	h := &Hub{
+		stop:         make(chan struct{}),
+		runDone:      make(chan struct{}),
+		clientEvents: make(chan clientEvent, 1),
+		broadcast:    make(chan broadcastMsg, 1),
+	}
+	h.GracefulStopContext(context.Background())
+	select {
+	case <-h.Done():
+		t.Fatal("Done closed before Run ever ran")
+	default:
+	}
+	if !h.DispatchAlive() {
+		t.Fatal("DispatchAlive is false before Run ran — GracefulStopContext is not what ends the loop")
+	}
+
+	go h.Run()
+	select {
+	case <-h.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("Done did not close after a stopped hub's Run")
+	}
+	if h.DispatchAlive() {
+		t.Fatal("Done closed while DispatchAlive was still true")
 	}
 }
 

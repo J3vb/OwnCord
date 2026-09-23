@@ -250,12 +250,11 @@ func pushDispatchEnabled(cfg *config.Config) bool {
 // wiring into ws.HubOptions, so an incomplete hub fails this start step
 // instead of panicking later.
 //
-// Its close step is GracefulStopContext, which calls StopLiveKit, the sole
-// caller of LiveKitProcess.Stop, and what closes the dispatch goroutine.
-// gracefulOnce
-// makes it idempotent alongside the stop the http step performs on the normal
-// path, so it is reached on every return from Run and a supervised
-// livekit-server process is never orphaned (OC-0027).
+// Its close step is stopHub: GracefulStopContext, which calls StopLiveKit,
+// the sole caller of LiveKitProcess.Stop, then a join on the dispatch
+// goroutine. gracefulOnce makes it idempotent alongside the stop the http
+// step performs on the normal path, so it is reached on every return from Run
+// and a supervised livekit-server process is never orphaned (OC-0027).
 func (a *App) startHub() error {
 	rt, err := StartRuntime(a.cfg, a.database, a.plugins)
 	if err != nil {
@@ -295,10 +294,30 @@ func (a *App) startHub() error {
 		rt.Services.PushDispatch = dispatcher
 	}
 	a.onClose("hub", func(ctx context.Context) error {
-		a.runtime.Hub.GracefulStopContext(ctx)
-		return nil
+		return stopHub(ctx, a.runtime.Hub)
 	})
 	return nil
+}
+
+// dispatchHub is the slice of *ws.Hub the hub close step drives.
+type dispatchHub interface {
+	GracefulStopContext(ctx context.Context)
+	Done() <-chan struct{}
+}
+
+// stopHub is the hub close step: GracefulStopContext, then wait for the
+// dispatch goroutine itself to exit. GracefulStopContext only signals the
+// loop, and on an early start failure the goroutine StartRuntime spawned may
+// not even have been scheduled yet — without the join, Run returned with the
+// loop still alive and Close went on to release what it reads.
+func stopHub(ctx context.Context, hub dispatchHub) error {
+	hub.GracefulStopContext(ctx)
+	select {
+	case <-hub.Done():
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("hub dispatch did not exit: %w", ctx.Err())
+	}
 }
 
 // startRouter mounts the HTTP handler over the already-built collaborators.
