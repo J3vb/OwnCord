@@ -52,6 +52,20 @@ describe("API session ownership", () => {
     },
   );
 
+  it("sends the logout revocation outside the ending session's scope", async () => {
+    // lib/logout.ts calls clearAuth() synchronously after api.logout(), and
+    // clearAuth ends the API session. The revocation must still go out, with
+    // the credential it was called with.
+    const api = createApiClient({ host: "same.example", token: "alice" });
+    const revoked = api.logout();
+    api.endSession();
+    await revoked;
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://same.example/api/v1/auth/logout");
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer alice");
+  });
+
   it("releases a consumed 401 body before onUnauthorized synchronously ends the session", async () => {
     let api: ApiClient;
     const unauthorized = vi.fn(() => api.endSession());

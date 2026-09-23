@@ -1,5 +1,5 @@
 {
-  "nextId": 452,
+  "nextId": 453,
   "findings": [
     {
       "id": "OC-0001",
@@ -10467,6 +10467,20 @@
         "test": "Client/tests/unit/presence-sender.test.ts",
         "revertProof": "pass"
       }
+    },
+    {
+      "id": "OC-0452",
+      "title": "A receive-side E2EE key race at voice join marks the call as not secured",
+      "file": "Client/src/lib/roomEventHandlers.ts",
+      "line": 219,
+      "severity": "low",
+      "why": "Over-warning, not a weakness. In 2 of 3 recorded B7-11 long-session soak runs (200 voice joins each), the E2EE worker logged `InvalidKey: Decryption failed` for the peer's frames near voice join (3 times in one run, once in the other), while decoded media still arrived every cycle; it did not appear in 20+ 20-cycle runs. The likely cause is a key-rotation race: the joiner briefly holds a different key at the frame's key index than the sender encrypts with. handleEncryptionError treats every RoomEvent.EncryptionError as the encoder failing (OC-0002) and calls setEncryptionDegraded(true), so the transient race shows the call as possibly unsecured. Fix direction: tell a receive-side InvalidKey during key distribution (clear the degraded state once that participant's frames decrypt, or ignore it inside the join or rotation window) apart from a worker failure or an unencrypted track, which must still degrade. The long-session soak's strict console check is the reproducer.",
+      "status": "open",
+      "found": "2026-09-23",
+      "hunt": "b7-11c-soak",
+      "lens": "long-session-soak",
+      "finder": "b7-11c",
+      "fix": null
     }
   ]
 }

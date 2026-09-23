@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 170 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 171 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -177,6 +177,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/uploads`                                                    |
 | PATCH   | `/api/v1/users/me/`                                                  |
 | POST    | `/api/v1/users/me/avatar`                                            |
+| GET     | `/api/v1/users/me/moderation`                                        |
 | POST    | `/api/v1/users/me/notices/{id}/ack`                                  |
 | PUT     | `/api/v1/users/me/password`                                          |
 | GET     | `/api/v1/users/me/recovery-kit`                                      |
@@ -2512,10 +2513,70 @@ Acknowledge a warning — own rows only. `{id}` is the ledger row id from
 
 ---
 
+### GET /api/v1/users/me/moderation
+
+The caller's own sanctions, read from the ledger, so they survive a restart
+that live `mod_action` frames and `ready.notices` do not cover: every
+`warning`, `timeout`, `removal` and `ban` row that another moderator applied
+to the caller, newest first. Kicks are left out because nothing persists to
+appeal. Self-targeted rows are left out too: a moderator's own channel purge
+is recorded against the moderator but is not a sanction against them. A `ban` row can
+only reach a caller whose ban has lapsed or been reversed, since a currently
+banned caller cannot authenticate. A currently banned user still appeals out
+of band, as [Appeals](#appeals) describes. Rows leave this list when the
+retention sweep retires them (`moderation.action_retention_days`).
+**Auth:** Required (session). Rate-limited: 30 per minute per IP.
+
+#### Response 200 OK
+
+```json
+[
+  {
+    "id": 42,
+    "kind": "timeout",
+    "reason": "cool off",
+    "created_at": "2026-09-23 10:00:00",
+    "expires_at": "2026-09-23 11:00:00",
+    "lifted_at": null,
+    "acknowledged_at": null,
+    "appealable": true,
+    "appeal": null
+  },
+  {
+    "id": 17,
+    "kind": "warning",
+    "reason": "be nice",
+    "created_at": "2026-09-20 09:12:44",
+    "expires_at": null,
+    "lifted_at": null,
+    "acknowledged_at": "2026-09-20 09:30:01",
+    "appealable": false,
+    "appeal": { "id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9", "state": "open" }
+  }
+]
+```
+
+`id` is the ledger id that [`POST /api/v1/appeals`](#post-apiv1appeals) takes
+as `action_id` and that the acknowledgement route above takes. `appealable`
+follows the rules the appeal route itself applies: an appealable kind with no
+appeal filed against it yet, in any state. `appeal` is the appeal filed
+against this row (its opaque public id and state), or `null`. The response
+never includes the acting moderator, who lifted the action, the linked
+report, evidence, or moderator notes.
+
+#### Errors
+
+| Status | Code           | Cause                       |
+| ------ | -------------- | --------------------------- |
+| 429    | `RATE_LIMITED` | more than 30 reads a minute |
+
+---
+
 ## Appeals
 
 Rate-limited appeals against a moderation action (BPR-073, plan decision 8).
-`action_id` is the moderator-action ledger's own id (`GET
+`action_id` is the moderator-action ledger's own id (the caller's own `GET
+/api/v1/users/me/moderation` row `id`, `GET
 /api/v1/moderation/users/{id}/actions`'s `id`, or the `id` a live
 `mod_action` frame or a `ready` notice already carried to the target) — not
 an opaque public id; only reports and appeals carry one of those.

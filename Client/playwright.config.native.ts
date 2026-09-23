@@ -55,6 +55,7 @@ export default defineConfig({
         "voice-controls.spec.ts",
         "pending-messages.spec.ts",
         "http-cancellation.spec.ts",
+        "long-session.spec.ts",
       ],
     },
     {

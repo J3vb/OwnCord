@@ -136,7 +136,14 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   not add an entry without a reason. The runtime proof is the CDP soak
   (`tests/e2e/support/lifecycle-probe.ts`,
   `tests/e2e/fullstack/long-session.spec.ts`), which needs
-  `OWNCORD_E2E_LIVEKIT_BINARY` and gates every `client-fullstack` PR.
+  `OWNCORD_E2E_LIVEKIT_BINARY` and gates every `client-fullstack` PR; it also
+  runs over WebView2 in `client-native` and at length through
+  `npm run test:e2e:soak`. Its bars hold within one page as well as across
+  logins, so a leak the re-login navigation would release still fails. A native
+  voice backend keeps these rules plus three IPC ones (owned `listen()` with a
+  late-unlisten, native handles released in the web room's teardown, native
+  counts reported through `getSessionDebugInfo`):
+  [docs/architecture/client.md](../docs/architecture/client.md#lifecycle-ownership).
 - Do not run `npm run tauri build` locally; the desktop build is CI-only.
 - Formatting is prettier-enforced; match the surrounding code rather than
   reasoning about style.
