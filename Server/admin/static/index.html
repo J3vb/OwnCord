@@ -341,8 +341,8 @@ function handleSessionExpired(){
   showOverlay('loginOverlay');
 }
 
-async function api(method,path,body){
-  const opts={method,headers:{'Authorization':'Bearer '+state.token,'Content-Type':'application/json'}};
+async function api(method,path,body,headers){
+  const opts={method,headers:{'Authorization':'Bearer '+state.token,'Content-Type':'application/json',...headers}};
   if(body!==undefined)opts.body=JSON.stringify(body);
   const res=await fetch('/admin/api'+path,opts);
   if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
@@ -426,11 +426,13 @@ function showToast(msg,type='success'){
 }
 
 function openModal(html){
+  state.retentionProposal=null;
   const o=document.getElementById('modal');
   document.getElementById('modalInner').innerHTML=html;
   o.classList.add('visible');o.setAttribute('aria-hidden','false');
 }
 function closeModal(){
+  state.retentionProposal=null;
   const o=document.getElementById('modal');
   o.classList.remove('visible');o.setAttribute('aria-hidden','true');
 }
@@ -1890,6 +1892,7 @@ async function renderRetention(){
   let channels=null;
   try{channels=await api('GET','/channels')}catch(e){}
   const serverDays=(policy&&policy.server_days)||0;
+  state.retentionRevision=policy&&policy.revision;
   state.retentionPolicyChannels=(policy&&policy.channels)||[];
   const overrides={};state.retentionPolicyChannels.forEach(c=>{overrides[c.channel_id]=c.days});
   const windows={};let totalDue=0;
@@ -1912,7 +1915,7 @@ async function renderRetention(){
 
   html+='<div class="section-card"><div class="section-card-header"><h3>Server-wide window</h3></div><div class="section-card-body">';
   html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Keep messages for</div><div class="setting-desc">Applies to every channel without its own override. 0 keeps everything indefinitely, which is the default; otherwise between 1 and 3650 days.</div></div>';
-  html+='<div class="setting-ctrl" style="display:flex;gap:8px;align-items:center"><input class="form-input" id="retentionDays" type="number" min="0" max="3650" style="width:110px" value="'+esc(serverDays)+'"><button class="btn btn-accent" onclick="openApplyRetention()">Apply</button></div></div>';
+  html+='<div class="setting-ctrl" style="display:flex;gap:8px;align-items:center"><input class="form-input" id="retentionDays" type="number" min="0" max="3650" style="width:110px" value="'+esc(serverDays)+'"><button class="btn btn-accent" onclick="openApplyRetention()">Preview change</button></div></div>';
   html+='<div style="color:var(--text-faint);font-size:12px;margin-top:4px">Currently: <strong style="color:var(--text-normal)">'+esc(retentionLabel(serverDays))+'</strong></div>';
   html+='</div></div>';
 
@@ -1941,25 +1944,74 @@ async function renderRetention(){
   return html;
 }
 
-/* Changing the server window is confirmed against what it means, not toggled
-   past on the Settings page: the sweep is continuous and the deletion is
-   permanent. */
-function openApplyRetention(){
-  const el=document.getElementById('retentionDays');
-  const days=parseInt(el?el.value:'',10);
-  if(isNaN(days)||days<0||days>3650){showToast('Window must be 0 (keep forever) or between 1 and 3650 days','error');return}
-  const body=days===0
-    ?'<p style="color:var(--text-muted)">Stop deleting old messages server-wide. Channels with their own override keep it.</p>'
-    :'<p style="color:var(--text-muted)">Every message older than <strong style="color:white">'+days+' day'+(days===1?'':'s')+'</strong> will be deleted permanently, in every channel without its own override, and the sweep keeps running from now on. <strong style="color:var(--red)">Deleted messages cannot be recovered.</strong></p>'
-      +'<p style="color:var(--text-faint);font-size:12px;margin-top:8px">Pinned messages and direct messages are exempt. Saving refreshes the effect preview with the number of messages the next sweep will remove.</p>';
-  openModal('<div class="modal-header"><h3>Apply retention window</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
-    +'<div class="modal-body">'+body+'</div>'
-    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="applyRetention('+days+')">Apply window</button></div>');
+/* Proposed previews are observations, never writes. Only the final explicit
+   confirmation sends the signed proposal back through the existing routes. */
+function readRetentionDays(id){
+  const el=document.getElementById(id);
+  const raw=el?el.value.trim():'';
+  const days=Number(raw);
+  if(!raw||!Number.isInteger(days)||days<0||days>3650){showToast('Window must be 0 (keep forever) or between 1 and 3650 days','error');return null}
+  return days;
 }
 
-async function applyRetention(days){
-  try{await api('PATCH','/settings',{retention_days:String(days)});closeModal();showToast('Retention window updated');renderContent()}
-  catch(e){showToast(e.message,'error')}
+async function openApplyRetention(){
+  const days=readRetentionDays('retentionDays');
+  if(days===null)return;
+  await previewRetentionChange({scope:'server',days:days});
+}
+
+function proposedRetentionLabel(change){
+  if(change.scope==='server')return 'Server-wide window: '+retentionLabel(change.days);
+  if(change.days===null)return 'Remove override for channel #'+change.channel_id+' and use the server policy (including removal of keep-forever protection).';
+  return 'Channel #'+change.channel_id+': '+retentionLabel(change.days);
+}
+
+async function previewRetentionChange(change){
+  openModal('<div class="modal-header"><h3>Preview retention change</h3></div><div class="modal-body" role="status">Calculating affected messages…</div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>');
+  const pending={change:change,revision:state.retentionRevision,preview:null};
+  state.retentionProposal=pending;
+  try{
+    const preview=await api('POST','/retention/preview',{proposed:change,revision:pending.revision});
+    if(state.retentionProposal!==pending)return;
+    pending.preview=preview;
+    let html='<div class="modal-header"><h3>Confirm retention change</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body">';
+    html+='<p><strong>'+esc(proposedRetentionLabel(change))+'</strong></p>';
+    html+='<p style="color:var(--yellow);margin-top:12px">Under the proposed policy, <strong>'+Number(preview.would_delete).toLocaleString()+'</strong> messages are currently eligible for permanent deletion across '+Number(preview.affected_channels).toLocaleString()+' channels.</p>';
+    html+='<p style="color:var(--red);margin-top:8px">Deletion cannot be undone. The policy continues to apply on future maintenance sweeps.</p>';
+    html+='<p style="margin-top:8px">Protected exclusions: '+Number(preview.protected_pinned).toLocaleString()+' pinned messages, '+Number(preview.protected_indefinite).toLocaleString()+' messages kept indefinitely, and '+Number(preview.protected_direct_messages).toLocaleString()+' direct messages. Counts are separate; pinned messages in indefinite channels are counted as indefinite.</p>';
+    html+='<p style="color:var(--text-faint);margin-top:8px">Observed at '+esc(preview.observed_at)+'. Counts can change as messages arrive, age or are pinned. This preview expires after 15 minutes.</p>';
+    html+='<table class="tbl" style="margin-top:12px"><thead><tr><th>Channel</th><th>Proposed window</th><th>Would delete</th><th>Protected</th></tr></thead><tbody>';
+    (preview.channels||[]).forEach(ch=>{html+='<tr><td>'+esc(ch.channel_name)+'</td><td>'+esc(retentionLabel(ch.days))+' ('+esc(ch.source)+')</td><td>'+Number(ch.would_delete).toLocaleString()+'</td><td>'+Number(ch.protected_pinned+ch.protected_indefinite).toLocaleString()+'</td></tr>'});
+    html+='</tbody></table></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button id="applyRetentionPreview" class="btn btn-danger" onclick="applyRetention()">Apply window</button></div>';
+    document.getElementById('modalInner').innerHTML=html;
+  }catch(e){
+    if(state.retentionProposal!==pending)return;
+    state.retentionProposal=null;
+    document.getElementById('modalInner').innerHTML='<div class="modal-header"><h3>Preview unavailable</h3></div><div class="modal-body" role="alert">'+esc(e.message)+'</div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal();renderContent()">Reload policy</button></div>';
+  }
+}
+
+async function applyRetention(){
+  const pending=state.retentionProposal;
+  if(!pending||!pending.preview||pending.applying)return;
+  if(pending.change.scope==='server'&&readRetentionDays('retentionDays')!==pending.change.days){
+    state.retentionProposal=null;closeModal();showToast('The window changed. Preview it again before applying.','error');return;
+  }
+  pending.applying=true;
+  const button=document.getElementById('applyRetentionPreview');if(button)button.disabled=true;
+  const change=pending.change;
+  const headers={'X-Retention-Preview':pending.preview.token};
+  try{
+    if(change.scope==='server')await api('PATCH','/settings',{retention_days:String(change.days)},headers);
+    else if(change.days===null)await api('DELETE','/channels/'+change.channel_id+'/retention',undefined,headers);
+    else await api('PUT','/channels/'+change.channel_id+'/retention',{days:change.days},headers);
+    if(state.retentionProposal!==pending)return;
+    closeModal();showToast('Retention policy updated');renderContent();
+  }catch(e){
+    if(state.retentionProposal!==pending)return;
+    state.retentionProposal=null;
+    document.getElementById('modalInner').innerHTML='<div class="modal-header"><h3>Retention change needs review</h3></div><div class="modal-body" role="alert">'+esc(e.message)+'</div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal();renderContent()">Reload policy</button></div>';
+  }
 }
 
 function openChannelRetention(id,name){
@@ -1970,20 +2022,17 @@ function openChannelRetention(id,name){
     +'<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">An override replaces the server-wide window for this channel, in either direction. <strong style="color:white">0 keeps this channel forever</strong>, even under a server window. <strong style="color:var(--red)">Messages the window removes are deleted permanently.</strong></p>'
     +'<div class="form-group"><label class="form-label" for="chRetDays">Keep messages for (days)</label><input class="form-input" id="chRetDays" type="number" min="0" max="3650" value="'+esc(current)+'"></div>'
     +'</div>'
-    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="saveChannelRetention('+id+')">Save override</button></div>');
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="saveChannelRetention('+id+')">Preview override</button></div>');
 }
 
 async function saveChannelRetention(id){
-  const el=document.getElementById('chRetDays');
-  const days=parseInt(el?el.value:'',10);
-  if(isNaN(days)||days<0||days>3650){showToast('Window must be 0 (keep forever) or between 1 and 3650 days','error');return}
-  try{await api('PUT','/channels/'+id+'/retention',{days:days});closeModal();showToast('Channel retention updated');renderContent()}
-  catch(e){showToast(e.message,'error')}
+  const days=readRetentionDays('chRetDays');
+  if(days===null)return;
+  await previewRetentionChange({scope:'channel',channel_id:id,days:days});
 }
 
 async function clearChannelRetention(id){
-  try{await api('DELETE','/channels/'+id+'/retention');showToast('Channel follows the server policy');renderContent()}
-  catch(e){showToast(e.message,'error')}
+  await previewRetentionChange({scope:'channel',channel_id:id,days:null});
 }
 
 /* ═══ Backups ═══ */

@@ -59,7 +59,7 @@ func TestHandleGetSettings_NilServiceUnavailable(t *testing.T) {
 func TestHandlePatchSettings_NilServiceUnavailable(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/admin/api/settings", nil)
 	rec := httptest.NewRecorder()
-	handlePatchSettings(nil).ServeHTTP(rec, r)
+	handlePatchSettings(nil, nil).ServeHTTP(rec, r)
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", rec.Code)
 	}
