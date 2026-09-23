@@ -278,16 +278,20 @@ pub struct Devices {
     pub outputs: Vec<DeviceInfo>,
 }
 
+fn inputs_of(audio: &PlatformAudio) -> Vec<DeviceInfo> {
+    audio
+        .recording_devices()
+        .map(|d| DeviceInfo {
+            id: d.name.clone(),
+            name: d.name,
+            index: d.index as u16,
+        })
+        .collect()
+}
+
 fn devices_of(audio: &PlatformAudio) -> Devices {
     Devices {
-        inputs: audio
-            .recording_devices()
-            .map(|d| DeviceInfo {
-                id: d.name.clone(),
-                name: d.name,
-                index: d.index as u16,
-            })
-            .collect(),
+        inputs: inputs_of(audio),
         outputs: playout::list_outputs(),
     }
 }
@@ -575,7 +579,7 @@ impl NativeSession {
             return;
         }
         let selection = &mut self.input;
-        let (index, fell_back) = resolve_device(&selection.name, &devices_of(audio).inputs);
+        let (index, fell_back) = resolve_device(&selection.name, &inputs_of(audio));
         if fell_back {
             log::warn!(
                 "[native_voice] capture device {} not found; using the default",
@@ -735,7 +739,7 @@ impl NativeSession {
             .audio
             .as_ref()
             .ok_or("no audio device module — platform audio unavailable")?;
-        let (index, fell_back) = resolve_device(device_id, &devices_of(audio).inputs);
+        let (index, fell_back) = resolve_device(device_id, &inputs_of(audio));
         let index = index.ok_or("no capture device")?;
         // PlatformAudio only switches by GUID, which is empty on Linux; the
         // runtime its device module lives in exposes the index-based calls.

@@ -255,23 +255,38 @@ impl Playout {
     /// fallback as an error, the same contract as the capture switch. A
     /// device that fails to open leaves the current stream playing.
     pub fn set_device(&mut self, id: &str) -> Result<(), String> {
-        let listed = output_devices(&cpal::default_host());
-        let infos: Vec<DeviceInfo> = listed.iter().map(|(i, _)| i.clone()).collect();
-        let (index, fell_back) = resolve_device(id, &infos);
-        let (info, device) = index
-            .and_then(|i| listed.into_iter().find(|(d, _)| d.index == i))
-            .ok_or("no playout device")?;
-        if self.output.as_ref().map(|(opened, _)| opened) != Some(&info.id) {
-            let stream = open_output(&device, self.mixer.clone())?;
-            self.output = Some((info.id, stream));
-        }
-        if fell_back {
-            return Err(format!(
-                "playout device {id} not found; switched to the default"
-            ));
-        }
-        Ok(())
+        let mixer = self.mixer.clone();
+        switch_output(
+            &mut self.output,
+            id,
+            output_devices(&cpal::default_host()),
+            |device| open_output(device, mixer),
+        )
     }
+}
+
+/// `Playout::set_device` over any listed devices and stream opener.
+fn switch_output<D, S>(
+    output: &mut Option<(String, S)>,
+    id: &str,
+    listed: Vec<(DeviceInfo, D)>,
+    open: impl FnOnce(&D) -> Result<S, String>,
+) -> Result<(), String> {
+    let infos: Vec<DeviceInfo> = listed.iter().map(|(i, _)| i.clone()).collect();
+    let (index, fell_back) = resolve_device(id, &infos);
+    let (info, device) = index
+        .and_then(|i| listed.into_iter().find(|(d, _)| d.index == i))
+        .ok_or("no playout device")?;
+    if output.as_ref().map(|(opened, _)| opened) != Some(&info.id) {
+        let stream = open(&device)?;
+        *output = Some((info.id, stream));
+    }
+    if fell_back {
+        return Err(format!(
+            "playout device {id} not found; switched to the default"
+        ));
+    }
+    Ok(())
 }
 
 impl Drop for Playout {
@@ -328,6 +343,58 @@ mod tests {
         let mut out = vec![0.0; frames];
         mixer.mix(&mut out, 1);
         out
+    }
+
+    fn sinks(ids: &[&'static str]) -> Vec<(DeviceInfo, &'static str)> {
+        ids.iter()
+            .enumerate()
+            .map(|(i, id)| {
+                let info = DeviceInfo {
+                    id: id.to_string(),
+                    name: id.to_string(),
+                    index: i as u16,
+                };
+                (info, *id)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_default_output_reopens_only_when_the_default_sink_moves() {
+        let mut output = None;
+        let mut opened = Vec::new();
+        let mut open = |sink: &&'static str| {
+            opened.push(*sink);
+            Ok(*sink)
+        };
+        switch_output(&mut output, "", sinks(&["speakers"]), &mut open).unwrap();
+        switch_output(
+            &mut output,
+            "",
+            sinks(&["speakers", "headphones"]),
+            &mut open,
+        )
+        .unwrap();
+        // Headphones plugged in and made the default sink.
+        switch_output(
+            &mut output,
+            "",
+            sinks(&["headphones", "speakers"]),
+            &mut open,
+        )
+        .unwrap();
+        assert_eq!(opened, ["speakers", "headphones"]);
+        assert_eq!(output, Some(("headphones".to_string(), "headphones")));
+    }
+
+    #[test]
+    fn a_device_that_fails_to_open_leaves_the_current_stream_playing() {
+        let mut output = Some(("speakers".to_string(), "speakers"));
+        let result = switch_output(&mut output, "usb", sinks(&["speakers", "usb"]), |_| {
+            Err::<&str, _>("busy".to_string())
+        });
+        assert_eq!(result, Err("busy".to_string()));
+        assert_eq!(output, Some(("speakers".to_string(), "speakers")));
     }
 
     #[test]

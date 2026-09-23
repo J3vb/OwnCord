@@ -211,7 +211,8 @@ the Linux device modules report no GUIDs — not the webview's; a switch
 resolves the name to the module's index, first match wins, and an unknown
 name falls back to the default and reports it) and is null everywhere else, leaving the web enumeration untouched.
 Hot-plug (`devicechange`) still comes from the webview; on Linux it triggers a
-re-list through the native backend and re-applies both saved selections,
+re-list through the native backend and re-applies both saved selections
+(and a saved default output, see Audio parity below),
 which refreshes a device-module index the hot-plug shifted (an
 unchanged index or output device leaves the running stream alone). Unmuting
 (`set_microphone(true)`) also re-resolves the saved capture name before the
@@ -437,7 +438,12 @@ first, ids are `cpal`'s stable device ids, names the sink descriptions) and an
 id falls back to the default and reports it; the device already playing is
 left alone, and a device that fails to open leaves the current stream
 playing). A sink that disappears mid-call is moved by the sound server itself;
-the stream error is only logged.
+the stream error is only logged. The stream is opened on a concrete sink, so
+"System default" (an empty id) follows the default only through the
+hot-plug re-apply above: a `devicechange` re-applies it, which reopens the
+stream when the default sink has moved. **Follow-up:** a default changed in
+the system mixer with no hot-plug leaves playout on the old sink until the
+next device change, switch or join; closing it needs a default-sink watcher.
 
 **Echo cancellation caveat.** The echo canceller's reference is the device
 module's synthetic mix: every remote track at unity, on the pump's clock
