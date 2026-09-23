@@ -28,13 +28,13 @@ import { test as base, expect } from "./fixtures";
 import { login } from "./fixtures";
 import type { ConsoleMessage, Page } from "@playwright/test";
 import { expectDecodedMedia, joinVoice, mediaStats } from "../support/media";
+import type { TestServer } from "../support/server";
 import {
   installTimerLedger,
   sampleLifecycle,
   evaluateBars,
   formatBars,
   describeLiveListeners,
-  type SlopeCeilings,
 } from "../support/lifecycle-probe";
 import { openSettings, switchSettingsTab } from "../helpers";
 
@@ -42,16 +42,6 @@ const CYCLES = Number(process.env.OWNCORD_SOAK_CYCLES ?? 20);
 const IDLE_MIN = Number(process.env.OWNCORD_SOAK_IDLE_MIN ?? 0);
 /** Phases of the 10-cycle page (`cycle % 10`) sampled for the within-page pair. */
 const WITHIN_PAGE_PHASES = new Set([6, 9]);
-
-/**
- * Phase-series slope ceilings for a metric with a known growth that survives
- * the re-login navigation: about one listener and 1.6 nodes per logout/login,
- * recorded by 11a and followed up separately. Each is ratcheted a small margin
- * above that measured slope, so any further growth fails the PR soak. They
- * never apply to the within-page series, which always hold the plan's 0.05 per
- * cycle. The measurements are in docs/plans/b7-0-client-baseline-2026-09-19.md.
- */
-const PENDING_METRICS: SlopeCeilings = { listeners: 0.15, nodes: 2 };
 
 // The reconnect and logout steps deliberately drop the socket, so the client
 // logs its own transport failure while it is offline. Only the exact messages
@@ -115,6 +105,15 @@ async function quiesce(page: Page): Promise<void> {
   // window reads listeners and controllers that are already being released,
   // which is a measurement bug, not a leak.
   await page.waitForTimeout(1000);
+}
+
+/** Log out from settings and log back in, as a user would. */
+async function relogin(page: Page, server: TestServer): Promise<void> {
+  await openSettings(page);
+  await page.locator(".settings-nav-item.danger").click();
+  await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
+  await login(page, server, "alice");
+  await expect(page.locator(".channel-item:not(.voice)", { hasText: "general" })).toBeVisible();
 }
 
 /** The row whose text contains `text`. */
@@ -203,12 +202,11 @@ async function runCycle(
     "Keybinds",
     "Advanced",
     "Logs",
-    // End on a static tab. The last tab stays mounted while settings is
+    // Back to the first tab: the last tab stays mounted while settings is
     // closed, and the Logs view renders the logger's whole ring buffer
     // (MAX_LOG_BUFFER, 500 entries), so ending on it would sample the ring's
-    // fill level; Account lists server-side account state that the run itself
-    // changes. Neither is the client's own footprint.
-    "Appearance",
+    // fill level, not a leak.
+    "Account",
   ]) {
     await switchSettingsTab(page, tab);
   }
@@ -308,6 +306,12 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
   // remote media to decode when she rejoins each cycle.
   await joinVoice(bob);
 
+  // The first login in a fresh browser has no saved server profile yet, so the
+  // connect page has not fetched the server info that later pages render (the
+  // Account tab's retention notice). One relogin up front makes every sampled
+  // page start from the same stored state.
+  await relogin(alice, server);
+
   try {
     samples.push(await sampleLifecycle(alice, cdp, 0));
     for (let cycle = 1; cycle <= CYCLES; cycle++) {
@@ -330,15 +334,7 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
 
       // Every 10th cycle: a logout and a fresh login. This deliberately tears
       // the app down and rebuilds it, so counts fall to a fresh baseline.
-      if (cycle % 10 === 0) {
-        await openSettings(alice);
-        await alice.locator(".settings-nav-item.danger").click();
-        await expect(alice.locator("#host")).toBeVisible({ timeout: 30_000 });
-        await login(alice, server, "alice");
-        await expect(
-          alice.locator(".channel-item:not(.voice)", { hasText: "general" }),
-        ).toBeVisible();
-      }
+      if (cycle % 10 === 0) await relogin(alice, server);
 
       if (cycle % 5 === 0 || WITHIN_PAGE_PHASES.has(cycle % 10)) {
         await quiesce(alice);
@@ -375,7 +371,7 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
     });
   }
 
-  const bars = evaluateBars(samples, PENDING_METRICS);
+  const bars = evaluateBars(samples);
   console.log(`lifecycle soak (${CYCLES} cycles):\n${formatBars(bars)}`);
 
   expect(pageErrors, "no page errors across the run").toEqual([]);
@@ -384,14 +380,12 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
     "no unexpected console.error lines",
   ).toEqual([]);
 
-  // Every metric is asserted. `PENDING_METRICS` no longer removes any from
-  // assertion; it raises the slope ceiling of the two metrics with a known,
-  // recorded base leak so the gate still fails on any further growth.
+  // Every metric is asserted at the plan's bar.
   expect(
     bars
       .filter((bar) => !bar.pass)
       .map((bar) => `${bar.metric}: ${bar.final} vs warm ${bar.warm} (slope ${bar.slope})`),
-    `metric bars (raised ceilings: ${Object.keys(PENDING_METRICS).join(", ") || "none"})`,
+    "metric bars",
   ).toEqual([]);
 
   // A short run (below the warm + 1 sample) has nothing to compare; a 20-cycle
