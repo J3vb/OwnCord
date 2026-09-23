@@ -521,6 +521,10 @@ type ReportDetail struct {
 	Evidence []db.ReportEvidenceRow
 	Notes    []db.ReportNoteRow
 	Events   []db.ReportEvent
+	// EvidenceWithheld is empty when Evidence is readable, or the reason it
+	// is empty: EvidenceNSFWAcknowledgementRequired or
+	// EvidenceSourceChannelUnavailable (see evidenceWithheld).
+	EvidenceWithheld string
 }
 
 // Get returns one report with its evidence, notes and history. 404s — never
@@ -542,22 +546,25 @@ func (s *ReportService) Get(ctx context.Context, actorID, reportID int64) (*Repo
 	if err := guardConfidentiality(actorID, report); err != nil {
 		return nil, err
 	}
-	evidence, err := s.st.ListReportEvidence(ctx, reportID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
+	var evidence []db.ReportEvidenceRow
+	withheld := s.evidenceWithheld(ctx, actorID, report)
+	if withheld == "" {
+		if evidence, err = s.st.ListReportEvidence(ctx, reportID); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInternal, err)
+		}
 	}
 	events, err := s.st.ListReportEvents(ctx, reportID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	if report.ReporterID != 0 && report.ReporterID == actorID {
-		return &ReportDetail{Report: *report, Evidence: evidence, Events: events}, nil
+		return &ReportDetail{Report: *report, Evidence: evidence, Events: events, EvidenceWithheld: withheld}, nil
 	}
 	notes, err := s.st.ListReportNotes(ctx, reportID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
-	return &ReportDetail{Report: *report, Evidence: evidence, Notes: notes, Events: events}, nil
+	return &ReportDetail{Report: *report, Evidence: evidence, Notes: notes, Events: events, EvidenceWithheld: withheld}, nil
 }
 
 // Assign assigns reportID to actorID. 409 if it is already assigned to

@@ -5,4 +5,4 @@ DROP TRIGGER retention_server_delete;
 DROP TRIGGER retention_server_update;
 DROP TRIGGER retention_server_insert;
 DROP TABLE retention_revision;
-DELETE FROM schema_versions WHERE version = '052_retention_revision.sql';
+DELETE FROM schema_versions WHERE version = '053_retention_revision.sql';
