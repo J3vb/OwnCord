@@ -1,5 +1,5 @@
 {
-  "nextId": 457,
+  "nextId": 458,
   "findings": [
     {
       "id": "OC-0001",
@@ -10564,6 +10564,24 @@
       "fix": {
         "commit": "1a6748d6",
         "test": "Client/tests/unit/livekit-e2ee-enable-ack.test.ts",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0457",
+      "title": "Leaving a voice room strips livekit's own disconnect cleanup, so its timers outlive the room",
+      "file": "Client/src/features/voice/releaseRoom.ts",
+      "line": 24,
+      "severity": "low",
+      "why": "Every room teardown (leaveVoice, the reconnect teardown, releaseRoom, the superseded-join discard) called room.removeAllListeners() before room.disconnect(). That also removed the listeners livekit-client registers on its own Room, among them the once(Disconnected) cleanups that clear its 10 s wait for a LocalTrackSubscribed publication and release deferred track callbacks. After a quick camera toggle the SFU confirms a subscription to a track the client already unpublished, so the 10 s timer and its closure (which reaches the Room) survived the leave and fired later with a 'could not find local track publication' warning. The long-session soak counts pending timeouts, and failed its timeouts bar whenever a sample landed inside that window (reproduced locally on three runners at once under load).",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "ci-flake-media-e2e",
+      "lens": "fullstack-e2e-flake",
+      "finder": "media-e2e-flake",
+      "fix": {
+        "commit": "a6793f07",
+        "test": "Client/src/features/voice/releaseRoom.test.ts",
         "revertProof": "pass"
       }
     }
