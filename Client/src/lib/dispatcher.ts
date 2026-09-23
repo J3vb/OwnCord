@@ -124,7 +124,16 @@ export function wireDispatcher(
   setActiveChannelProvider(() => channelsStore.select((s) => s.activeChannelId));
   unsubs.push(() => setActiveChannelProvider(null));
 
-  unsubs.push(ws.on(S.AUTH_OK, (payload) => handleAuthOk(ws, clock, payload)));
+  unsubs.push(
+    ws.on(S.AUTH_OK, (payload) => {
+      handleAuthOk(ws, clock, payload);
+      // A resumed connection gets no ready, so refetch Message Requests here;
+      // a full flow ("none") refetches them from ready instead.
+      if (payload.replay_source === "buffer" || payload.replay_source === "db") {
+        applyReadyDmRequests(api);
+      }
+    }),
+  );
 
   unsubs.push(ws.on(S.AUTH_ERROR, (payload) => handleAuthError(api, payload)));
 

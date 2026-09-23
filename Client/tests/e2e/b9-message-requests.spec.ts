@@ -240,7 +240,7 @@ test.describe("B9-5 Message Requests inbox", () => {
     );
     await expect.poll(() => inboxReads(page), { timeout: 15_000 }).toBeGreaterThan(reads);
     await expect(items(page)).toHaveCount(2);
-    await expect(page.locator("[data-testid='requests-status']")).toBeHidden();
+    await expect(page.locator("[data-testid='requests-status']")).toHaveText("");
     // The reconnect keeps the view open, with its return channel.
     await expect(view(page)).toBeVisible();
     await page.locator("[data-testid='feature-view-close']").click();

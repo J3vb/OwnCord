@@ -3,8 +3,8 @@
  * account on the connected server. The dispatcher's handlers are its only
  * writers; sign-out and profile switch empty it.
  *
- * Two sources feed it. Each `ready` fetches GET /api/v1/dm-requests, the
- * authoritative snapshot, and dm_request frames change it live. A frame that
+ * Two sources feed it. Each `ready`, and each resume (which gets no `ready`),
+ * fetches GET /api/v1/dm-requests, the authoritative snapshot, and dm_request frames change it live. A frame that
  * lands while a snapshot is in flight is newer than that snapshot for its id,
  * so the snapshot keeps the frame's word for it. Only the latest snapshot
  * applies, and none crosses a sign-out.

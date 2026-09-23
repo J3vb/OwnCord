@@ -6,9 +6,10 @@ import { mapRequest } from "./api";
 import { applyFrame, applySnapshot, beginSnapshot, failSnapshot } from "./store";
 
 /**
- * The Message Requests slice of `ready`: re-fetch the pending inbox. dm_request
- * is unsequenced and never replayed, so a frame missed while disconnected is
- * only recovered here (docs/protocol.md, dm_request).
+ * The Message Requests slice of `ready`, and of a resumed `auth_ok` (which gets
+ * no ready): re-fetch the pending inbox. dm_request is unsequenced and never
+ * replayed, so a frame missed while disconnected is only recovered here
+ * (docs/protocol.md, dm_request).
  */
 export function applyReadyDmRequests(api: DispatchApi | undefined): void {
   if (api?.listDmRequests === undefined) return;

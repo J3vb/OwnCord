@@ -189,6 +189,29 @@ describe("inbox store", () => {
   });
 });
 
+function fakeWs() {
+  const handlers = new Map<string, (payload: unknown) => void>();
+  const ws = {
+    on: (type: string, fn: (payload: unknown) => void) => {
+      handlers.set(type, fn);
+      return () => handlers.delete(type);
+    },
+    send: vi.fn(),
+    onStateChange: () => () => {},
+    onSendFailure: () => () => {},
+  } as unknown as WsClient;
+  return { ws, handlers };
+}
+
+function authOk(replaySource: "none" | "buffer" | "db") {
+  return {
+    user: { id: 1, username: "me", avatar: null, status: "online", role: "member" },
+    server_name: "OwnCord",
+    motd: "",
+    replay_source: replaySource,
+  };
+}
+
 describe("wiring", () => {
   it("is the registered requests destination", () => {
     expect(NAVIGATION_DESTINATIONS.requests?.build).toBe(buildInbox);
@@ -196,20 +219,34 @@ describe("wiring", () => {
   });
 
   it("routes dm_request frames into the inbox", () => {
-    const handlers = new Map<string, (payload: unknown) => void>();
-    const ws = {
-      on: (type: string, fn: (payload: unknown) => void) => {
-        handlers.set(type, fn);
-        return () => handlers.delete(type);
-      },
-      onStateChange: () => () => {},
-      onSendFailure: () => () => {},
-    } as unknown as WsClient;
+    const { ws, handlers } = fakeWs();
     const cleanup = wireDispatcher(ws);
     handlers.get("dm_request")!(frame(4, "pending"));
     expect(ids()).toEqual([4]);
     cleanup();
     expect(handlers.has("dm_request")).toBe(false);
+  });
+
+  it("refetches on a resume, which gets no ready, and leaves a full flow to ready", async () => {
+    const { ws, handlers } = fakeWs();
+    const { api, calls } = deferredApi();
+    const cleanup = wireDispatcher(ws, api);
+    handleDmRequest(frame(1, "pending"));
+
+    handlers.get("auth_ok")!(authOk("buffer"));
+    expect(api.listDmRequests).toHaveBeenCalledTimes(1);
+    // Request 1 was decided and request 2 arrived while the socket was down.
+    calls[0]!.resolve([item(2)]);
+    await settle();
+    expect(ids()).toEqual([2]);
+
+    handlers.get("auth_ok")!(authOk("db"));
+    expect(api.listDmRequests).toHaveBeenCalledTimes(2);
+
+    handlers.get("auth_ok")!(authOk("none"));
+    expect(api.listDmRequests).toHaveBeenCalledTimes(2);
+    cleanup();
+    clearAuth();
   });
 });
 
@@ -299,7 +336,9 @@ describe("inbox view", () => {
     ).toHaveLength(0);
     expect(root.innerHTML).not.toContain("evil.example/a.png");
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(status().hidden).toBe(true);
+    // Silent but still in the accessibility tree, so its next change is spoken.
+    expect(status().textContent).toBe("");
+    expect(status().hidden).toBe(false);
     fetchSpy.mockRestore();
   });
 

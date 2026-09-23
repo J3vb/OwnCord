@@ -252,6 +252,9 @@
   margin: 0;
   color: var(--text-muted);
 }
+.requests-status:empty {
+  position: absolute;
+}
 .requests-list {
   flex: 1;
   min-height: 0;

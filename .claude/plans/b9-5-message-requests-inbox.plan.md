@@ -191,7 +191,8 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   - `api.ts` maps the B5-6 wire shape to the inbox model and drops the
     sender's `avatar` there, so no later code can load it.
   - `store.ts` is the account-scoped inbox and `pendingRequestCount`.
-  - `wsHandlers.ts` holds the `ready` refetch and the `dm_request` handler.
+  - `wsHandlers.ts` holds the inbox refetch (on `ready` and on a resumed
+    `auth_ok`) and the `dm_request` handler.
   - `Inbox.ts` is the text-only view.
   - `inbox.test.ts` is the unit suite.
 - `destinations.ts` registers `requests: { build: buildInbox, pending: pendingRequestCount }`
@@ -199,8 +200,8 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   (N)" at the top of DM mode and the DM header's pending badge.
 - Single-writer files, each a minimal edit: `lib/api.ts` (`listDmRequests`),
   `lib/types.ts` (the wire types and the `dm_request` union entry) and
-  `lib/dispatcher.ts` (one `ws.on`, plus one call in the `ready` order after
-  blocks). MainPage, SidebarArea, SidebarDmSection, `ui.store` and the
+  `lib/dispatcher.ts` (one `ws.on`, one call in the `ready` order after
+  blocks, and one call in the `auth_ok` handler on a resume). MainPage, SidebarArea, SidebarDmSection, `ui.store` and the
   navigator are unchanged.
 - Files beyond the table: `features/connection/dispatchContext.ts` (adds
   `listDmRequests` to `DispatchApi`, as in the dispatcher's signature),
@@ -214,7 +215,12 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
 ### Implementation decisions
 
 - **Reconciliation.** Every `ready` fetches `GET /api/v1/dm-requests`, since
-  `dm_request` is unsequenced and never replayed. The newest snapshot wins
+  `dm_request` is unsequenced and never replayed. A tier-1/2 resume
+  (`auth_ok` with `replay_source` `buffer` or `db`) gets no `ready`, so the
+  dispatcher's `auth_ok` handler fetches it then; a full flow (`none`) leaves
+  it to the `ready` that follows, so no connection fetches twice (review fix,
+  2026-09-23; unit test "refetches on a resume, which gets no ready", which
+  fails without the call). The newest snapshot wins
   (`snapshotSeq`). A frame that lands while a snapshot is in flight keeps its
   word for that id (`touched` rev), so a request decided mid-fetch is not
   brought back, and a request that arrived mid-fetch is not dropped. A
@@ -234,7 +240,9 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   they trigger no notification or taskbar flash.
 - **States.** The status region reads loading, empty, unavailable (the GET
   failed or the server is older) or reconnecting. It speaks only when its
-  text changes. B9-6 owns decisions, and with them a retry path.
+  text changes. It is never `hidden`: when silent it is empty and taken out
+  of the layout by CSS, so it stays in the accessibility tree and its next
+  change is announced (review fix, 2026-09-23). B9-6 owns decisions, and with them a retry path.
 - **Bundle.** The eager import stays within budget, so no lazy chunk:
   MainPage went from 58,546 B to 59,256 B (budget 60,000 B), and the startup
   closure from 87,349 B to 88,073 B (budget 91,000 B).

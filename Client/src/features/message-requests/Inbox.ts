@@ -76,7 +76,6 @@ export function buildInbox({ signal }: { readonly signal: AbortSignal }): HTMLEl
             : "";
     // A live region re-reads what it is given; only speak on a change.
     if (status.textContent !== message) setText(status, message);
-    status.hidden = message === "";
     if (pending !== shown) {
       shown = pending;
       clearChildren(list);
