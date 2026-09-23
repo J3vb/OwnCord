@@ -3,8 +3,8 @@ package ws
 // serve_pumps_reconnect_race_test.go — regression test for OC-0019.
 //
 // readPump's defer snapshots `replaced := hub.unregisterNow(c)` BEFORE running
-// hub.handleVoiceLeave, which can block for seconds (DB delete, audience scan,
-// a LiveKit RemoveParticipant HTTP call bounded by lkTimeout=5s). The stale
+// hub.handleVoiceLeave, which can block (DB delete with retry, audience scan;
+// the LiveKit RemoveParticipant call runs in the background since OC-0453). The stale
 // `replaced` boolean is then reused, unchecked, to decide whether to run
 // MarkUserDisconnected and broadcast an offline presence. A reconnect that
 // registers during that window is invisible to the stale flag: the dead
@@ -16,22 +16,21 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
-	lkproto "github.com/livekit/protocol/livekit"
-	"google.golang.org/protobuf/proto"
 
-	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // TestReadPump_ReconnectDuringVoiceCleanup_DoesNotMarkUserOffline reproduces
 // the finding's repro: a client's socket drops while it holds a voice
 // session, its readPump defer starts tearing down (unregisterNow already
 // removed it from the hub), and — while handleVoiceLeave is still blocked on
-// the LiveKit call — the same user reconnects and takes the hub slot. The
+// its DB delete — the same user reconnects and takes the hub slot. The
 // defer must not go on to mark that user offline once it resumes.
 func TestReadPump_ReconnectDuringVoiceCleanup_DoesNotMarkUserOffline(t *testing.T) {
 	database := newHarvestVoiceDB(t)
@@ -46,30 +45,17 @@ func TestReadPump_ReconnectDuringVoiceCleanup_DoesNotMarkUserOffline(t *testing.
 		t.Fatalf("UpdateUserStatus: %v", err)
 	}
 
-	// Fake LiveKit server: holds the RemoveParticipant response until the
-	// test releases it, giving full control over handleVoiceLeave's window.
-	reachedLiveKit := make(chan struct{})
+	// The voice store holds the voice_states delete until the test releases
+	// it, giving full control over handleVoiceLeave's window.
+	reachedLeave := make(chan struct{})
 	proceed := make(chan struct{})
-	lkSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		close(reachedLiveKit)
-		<-proceed
-		body, _ := proto.Marshal(&lkproto.RemoveParticipantResponse{})
-		w.Header().Set("Content-Type", "application/protobuf")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(body)
-	}))
-	defer lkSrv.Close()
-
-	lk, err := NewLiveKitClient(&config.VoiceConfig{
-		LiveKitAPIKey:    "testkeytestkeytest",
-		LiveKitAPISecret: "testsecrettestsecrettestsecret",
-		LiveKitURL:       "ws://" + lkSrv.Listener.Addr().String(),
-	})
-	if err != nil {
-		t.Fatalf("NewLiveKitClient: %v", err)
+	voice := &blockingLeaveVoiceStore{
+		VoiceService: service.NewVoiceService(database),
+		reached:      reachedLeave,
+		proceed:      proceed,
 	}
 
-	h := newTestHubWith(t, HubOptions{DB: database, LiveKit: lk})
+	h := newTestHubWith(t, HubOptions{DB: database, Voice: voice})
 
 	c := NewTestClient(h, uid, make(chan []byte, 8))
 	c.user = &db.User{ID: uid, Status: "online"}
@@ -114,12 +100,12 @@ func TestReadPump_ReconnectDuringVoiceCleanup_DoesNotMarkUserOffline(t *testing.
 		close(done)
 	}()
 
-	// Wait until the defer is blocked inside handleVoiceLeave's LiveKit call —
+	// Wait until the defer is blocked inside handleVoiceLeave's DB delete —
 	// unregisterNow has already run and sampled replaced=false.
 	select {
-	case <-reachedLiveKit:
+	case <-reachedLeave:
 	case <-time.After(5 * time.Second):
-		t.Fatal("readPump's defer never reached the LiveKit RemoveParticipant call")
+		t.Fatal("readPump's defer never reached the voice_states delete")
 	}
 
 	// The user reconnects while the old connection's teardown is still in
@@ -129,13 +115,13 @@ func TestReadPump_ReconnectDuringVoiceCleanup_DoesNotMarkUserOffline(t *testing.
 	newClient.user = &db.User{ID: uid, Status: "online"}
 	h.registerNow(newClient, map[int64]bool{})
 
-	// Let handleVoiceLeave's LiveKit call complete so the old defer resumes.
+	// Let handleVoiceLeave's DB delete complete so the old defer resumes.
 	close(proceed)
 
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("readPump did not return after the LiveKit call completed")
+		t.Fatal("readPump did not return after the voice_states delete completed")
 	}
 
 	if got := h.GetClient(uid); got != newClient {
@@ -160,4 +146,19 @@ func TestReadPump_ReconnectDuringVoiceCleanup_DoesNotMarkUserOffline(t *testing.
 	if user.Status != "online" {
 		t.Errorf("user status = %q after the reconnect race, want %q — the dead socket's teardown overwrote the live session's status", user.Status, "online")
 	}
+}
+
+// blockingLeaveVoiceStore is the real voice service with LeaveIfMatch held
+// until proceed closes, signalling reached once it is entered.
+type blockingLeaveVoiceStore struct {
+	*service.VoiceService
+	reached chan struct{}
+	proceed chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingLeaveVoiceStore) LeaveIfMatch(ctx context.Context, userID, channelID int64, joinedAt string) (bool, error) {
+	s.once.Do(func() { close(s.reached) })
+	<-s.proceed
+	return s.VoiceService.LeaveIfMatch(ctx, userID, channelID, joinedAt)
 }
