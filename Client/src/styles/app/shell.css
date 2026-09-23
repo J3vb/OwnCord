@@ -1,0 +1,13 @@
+/* ═══ Layout ═══ */
+.app {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── SVG Icon base ── */
+.icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}

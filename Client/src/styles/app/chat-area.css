@@ -1,0 +1,224 @@
+/* ── Chat Area ── */
+.chat-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-primary);
+}
+
+.chat-header {
+  height: 48px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: none;
+  box-shadow: var(--elevation-low);
+  flex-shrink: 0;
+}
+.chat-header .ch-hash {
+  color: var(--text-micro);
+  font-size: 22px;
+  font-weight: 600;
+}
+.chat-header .ch-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: white;
+}
+.chat-header .ch-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+}
+.chat-header .ch-topic {
+  font-size: 13px;
+  color: var(--text-muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-header .ch-tools {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.chat-header .ch-tools button {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  transition: all 0.1s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chat-header .ch-tools button:hover {
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+.chat-header .ch-tools button.active {
+  color: white;
+}
+.chat-header .search-input {
+  width: 160px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 0 8px;
+  transition: width 0.3s;
+}
+.chat-header .search-input::placeholder {
+  color: var(--text-micro);
+}
+.chat-header .search-input:focus {
+  width: 240px;
+  color: var(--text-normal);
+}
+
+/* ── Slot wrappers (inside .chat-area flex column) ── */
+.messages-slot {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* Containing block for the NSFW age gate, which covers exactly this slot. */
+  position: relative;
+}
+.typing-slot {
+  flex-shrink: 0;
+}
+.input-slot {
+  flex-shrink: 0;
+}
+
+/* ── Messages ── */
+/* Non-scrolling frame around the message scroller. The floating controls
+   (scroll-to-bottom button, Jump to Present pill) anchor to this box: an
+   absolutely positioned box whose containing block is the scroller itself is
+   part of its scrollable overflow and translates with the content, so the
+   controls need a positioned ancestor outside the scroller to stay pinned to
+   the viewport edge. */
+.messages-region {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.messages-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 0;
+  overscroll-behavior: contain;
+  contain: strict;
+  position: relative;
+}
+/* Scroll anchoring: only the bottom anchor element pins, everything else opts out */
+.messages-container > * {
+  overflow-anchor: none;
+}
+.scroll-anchor {
+  overflow-anchor: auto;
+  height: 1px;
+}
+/* ── Scroll-to-bottom floating button ── */
+.scroll-to-bottom-btn {
+  position: absolute;
+  bottom: 8px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  border: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+  pointer-events: none;
+  z-index: 5;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.scroll-to-bottom-btn.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.scroll-to-bottom-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+/* ── Jump to Present pill ──
+   Shown only while the loaded window is an around-window detached from the
+   live tail: the bottom of the list is not "now", and this is the only thing
+   that says so. Sits above the scroll-to-bottom button, which means something
+   different (scroll within the window). */
+.jump-to-present-pill {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translate(-50%, 10px);
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--accent);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+  z-index: 6;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.jump-to-present-pill.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}
+
+.jump-to-present-pill:hover {
+  filter: brightness(1.1);
+}
+
+/* ── Jump target flash ──
+   The row a jump landed on, briefly tinted so the eye can find it after the
+   scroll. Applied by MessageList.scrollToMessage for 1.5s. */
+.highlight-flash {
+  animation: jump-flash 1.5s ease-out;
+}
+
+@keyframes jump-flash {
+  0%,
+  55% {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .highlight-flash {
+    animation-duration: 0.01ms;
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  .jump-to-present-pill {
+    transition: none;
+  }
+}
