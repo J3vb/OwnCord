@@ -2277,6 +2277,25 @@ describe("createChannelController", () => {
       opts.slots.messagesSlot.remove();
     });
 
+    it("lets the gate take focus from the composer when another device withdraws consent", async () => {
+      seedChannel(true, true);
+      const opts = consentOpts();
+      document.body.appendChild(opts.slots.inputSlot);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(CH, "spicy");
+      const composer = document.createElement("textarea");
+      opts.slots.inputSlot.appendChild(composer);
+      composer.focus();
+
+      setNsfwAcknowledged(CH, false); // nsfw_ack from a second device
+      await settle();
+
+      expect(mockCreateNsfwGate).toHaveBeenCalledTimes(1);
+      expect(capturedNsfwOpts.value.focusOnMount).toBe(true);
+      ctrl.destroyChannel();
+      opts.slots.inputSlot.remove();
+    });
+
     it("lets the gate take focus when the reader withdraws from the bar", async () => {
       seedChannel(true, true);
       const opts = consentOpts();

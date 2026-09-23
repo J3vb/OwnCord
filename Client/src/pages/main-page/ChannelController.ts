@@ -593,7 +593,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // reconnect) takes focus only from the content it replaces, never
           // from an open dialog or another part of the app.
           const active = document.activeElement;
-          const gateHadFocus = slots.messagesSlot.contains(active);
+          const gateHadFocus = [slots.messagesSlot, slots.typingSlot, slots.inputSlot].some(
+            (slot) => slot.contains(active),
+          );
           const focusGate = gateHadFocus || active === null || active === document.body;
           const name = channelsStore.getState().channels.get(channelId)?.name ?? channelName;
           destroyChannel();
