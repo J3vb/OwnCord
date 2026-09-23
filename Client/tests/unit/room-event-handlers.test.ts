@@ -600,6 +600,18 @@ describe("handleEncryptionError", () => {
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
     });
 
+    it("tolerates separate transient races a few seconds apart", () => {
+      const h = build();
+
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+      vi.advanceTimersByTime(5000);
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
     it("tolerates separate transient races that are far apart", () => {
       const h = build();
 

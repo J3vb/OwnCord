@@ -21,9 +21,12 @@ import type { AudioElements } from "@lib/audioElements";
 const log = createLogger("roomEventHandlers");
 
 /** OC-0452: how long a remote sender's decrypt failures may last before they
- *  count as a real E2EE failure, and the quiet gap that ends a streak. */
+ *  count as a real E2EE failure, and the quiet gap that ends a streak. The gap
+ *  sits above the worker's 1 s per-participant error throttle, so a persistent
+ *  failure stays one streak, but below the grace window, so separate rotation
+ *  races a few seconds apart each start a fresh streak. */
 const DECRYPT_GRACE_MS = 3000;
-const DECRYPT_STREAK_RESET_MS = 10_000;
+const DECRYPT_STREAK_RESET_MS = 2500;
 
 // --- Callback types ---
 
