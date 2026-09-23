@@ -45,6 +45,7 @@
             },
             "channels": [
               {
+                "can_moderate_voice": false,
                 "can_send": true,
                 "category": "",
                 "id": "<id:number>",
@@ -62,6 +63,7 @@
                 "voice_max_video": 25
               },
               {
+                "can_moderate_voice": false,
                 "can_send": true,
                 "category": "",
                 "id": "<id:number>",
@@ -256,6 +258,7 @@
             },
             "channels": [
               {
+                "can_moderate_voice": false,
                 "can_send": true,
                 "category": "",
                 "id": "<id:number>",
@@ -273,6 +276,7 @@
                 "voice_max_video": 25
               },
               {
+                "can_moderate_voice": false,
                 "can_send": true,
                 "category": "",
                 "id": "<id:number>",

@@ -12,6 +12,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
@@ -1264,6 +1265,101 @@ func TestRefreshChannelVisibility_TargetedCreateCarriesPerClientCanSend(t *testi
 	}
 	if ownerPayload["can_send"] != true {
 		t.Fatalf("owner can_send = %v, want true (admin bypass)", ownerPayload["can_send"])
+	}
+}
+
+// can_moderate_voice (B9 Q5) rides the same targeted channel_create as
+// can_send, so an override edit on either layer converges a connected
+// moderator's voice controls without a reconnect — and the member, who never
+// held MUTE_MEMBERS, is told false throughout.
+func TestRefreshChannelVisibility_TargetedCreateCarriesCanModerateVoice(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+	ctx := context.Background()
+
+	chID, err := database.CreateChannel(ctx, "modvoice-room", "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	ch, err := database.GetChannel(ctx, chID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+
+	// Pin the Moderator role's MUTE_MEMBERS rather than lean on migration
+	// history for the default mask.
+	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = permissions | ? WHERE id = 3`, permissions.MuteMembers); err != nil {
+		t.Fatalf("grant MUTE_MEMBERS: %v", err)
+	}
+	modID, err := database.CreateUser(ctx, "modvoice-mod", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	mod, err := database.GetUserByID(ctx, modID)
+	if err != nil || mod == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	memberID := seedTestUser(t, database, "modvoice-member")
+	member, err := database.GetUserByID(ctx, memberID)
+	if err != nil || member == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+
+	modSend := make(chan []byte, 16)
+	memberSend := make(chan []byte, 16)
+	modClient := ws.NewTestClientWithUser(hub, mod, 0, modSend)
+	memberClient := ws.NewTestClientWithUser(hub, member, 0, memberSend)
+	hub.Register(modClient)
+	hub.Register(memberClient)
+	waitRegistered(t, hub, memberClient)
+
+	canModerateVoice := func(send chan []byte) any {
+		t.Helper()
+		msg := drainForMsgType(t, send, "channel_create")
+		payload, ok := msg["payload"].(map[string]any)
+		if !ok {
+			t.Fatalf("channel_create payload not an object: %#v", msg["payload"])
+		}
+		v, present := payload["can_moderate_voice"]
+		if !present {
+			t.Fatal("targeted channel_create omitted can_moderate_voice")
+		}
+		return v
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := database.ExecContext(ctx, q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	mute := permissions.MuteMembers
+
+	steps := []struct {
+		name          string
+		sql           string
+		args          []any
+		wantMod       bool
+		wantMemberMod bool
+	}{
+		{"no override", "", nil, true, false},
+		{"role deny MUTE", `INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 3, 0, ?)`, []any{chID, mute}, false, false},
+		{"role deny lifted", `DELETE FROM channel_overrides WHERE channel_id = ? AND role_id = 3`, []any{chID}, true, false},
+		{"user deny MUTE", `INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, 0, ?)`, []any{chID, modID, mute}, false, false},
+		// A channel allow cannot manufacture authority the base role lacks.
+		{"member user allow MUTE", `INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, ?, 0)`, []any{chID, memberID, mute}, false, false},
+	}
+	for _, s := range steps {
+		if s.sql != "" {
+			exec(s.sql, s.args...)
+		}
+		hub.RefreshChannelVisibility(ch)
+		if got := canModerateVoice(modSend); got != s.wantMod {
+			t.Errorf("%s: moderator can_moderate_voice = %v, want %v", s.name, got, s.wantMod)
+		}
+		if got := canModerateVoice(memberSend); got != s.wantMemberMod {
+			t.Errorf("%s: member can_moderate_voice = %v, want %v", s.name, got, s.wantMemberMod)
+		}
 	}
 }
 

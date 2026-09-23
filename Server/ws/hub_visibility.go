@@ -293,9 +293,11 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		if visible {
 			// Idempotent add on the client; also refreshes channel metadata.
 			// Addressed per client so it can carry this recipient's own
-			// can_send verdict — the whole point of this fan-out is that a
-			// permission change just made those verdicts diverge.
-			live.sendMsg(buildChannelCreateFor(ch, h.refreshChannelVisibilityCanSend(ctx, ch, c.user.ID)))
+			// can_send and can_moderate_voice verdicts — the whole point of
+			// this fan-out is that a permission change just made those
+			// verdicts diverge.
+			canSend, canModerateVoice := h.refreshChannelVisibilityAffordances(ctx, ch, c.user.ID)
+			live.sendMsg(buildChannelCreateFor(ch, canSend, canModerateVoice))
 			continue
 		}
 		live.sendMsg(buildChannelDelete(ch.ID))
@@ -316,22 +318,24 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	h.bumpVisibilityWatermark()
 }
 
-// refreshChannelVisibilityCanSend is the can_send verdict the ready payload
-// ships per channel (channelCanSend), recomputed for one live user from their
-// CURRENT role: permissions.CanSendMessage over the subject subjectFor
-// resolves in either the service or the bare-hub branch, failing closed on a
-// lookup error (S-12).
+// refreshChannelVisibilityAffordances is the can_send and can_moderate_voice
+// verdicts the ready payload ships per channel (channelCanSend,
+// channelCanModerateVoice), recomputed for one live user from their CURRENT
+// role: permissions.CanSendMessage and permissions.AuthorizeVoiceModerator
+// over the one subject subjectFor resolves in either the service or the
+// bare-hub branch, both failing closed on a lookup error (S-12).
 //
-// Without this, can_send is only ever computed at connect time, so a role
-// edit or override edit leaves every connected client's composer stuck on
-// its stale connect-time verdict until the socket is rebuilt.
-func (h *Hub) refreshChannelVisibilityCanSend(ctx context.Context, ch *db.Channel, userID int64) bool {
+// Without this, both are only ever computed at connect time, so a role edit
+// or override edit leaves every connected client's composer and voice
+// controls stuck on their stale connect-time verdicts until the socket is
+// rebuilt.
+func (h *Hub) refreshChannelVisibilityAffordances(ctx context.Context, ch *db.Channel, userID int64) (canSend, canModerateVoice bool) {
 	sub, err := h.subjectFor(ctx, userID, ch.ID)
 	if err != nil {
-		return false
+		return false, false
 	}
 	sub.Channel = channelRef(ch)
-	return permissions.CanSendMessage(sub) == nil
+	return permissions.CanSendMessage(sub) == nil, permissions.AuthorizeVoiceModerator(sub) == nil
 }
 
 // RefreshAllChannelVisibility re-runs RefreshChannelVisibility for every

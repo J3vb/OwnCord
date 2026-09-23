@@ -61,6 +61,51 @@ func TestChannelCanSend(t *testing.T) {
 	}
 }
 
+// TestChannelCanModerateVoice locks the ready payload's can_moderate_voice
+// affordance (B9 Q5) to the authorizer voiceModTarget enforces: base
+// MUTE_MEMBERS, then effective READ|MUTE_MEMBERS after both override layers.
+func TestChannelCanModerateVoice(t *testing.T) {
+	admin := &db.Role{Permissions: permissions.Administrator}
+	mod := &db.Role{Permissions: permissions.ReadMessages | permissions.ConnectVoice | permissions.MuteMembers}
+	member := &db.Role{Permissions: permissions.ReadMessages | permissions.ConnectVoice}
+	none := db.ChannelOverride{}
+
+	cases := []struct {
+		name string
+		role *db.Role
+		o    db.ChannelOverride
+		want bool
+	}{
+		{"nil role fails closed", nil, none, false},
+		{"admin bypasses", admin, none, true},
+		{"admin bypasses a MUTE deny", admin, db.ChannelOverride{Deny: permissions.MuteMembers}, true},
+		{"moderator allowed", mod, none, true},
+		{"member without MUTE denied", member, none, false},
+		{"role deny MUTE denies", mod, db.ChannelOverride{Deny: permissions.MuteMembers}, false},
+		{"user deny MUTE denies", mod, db.ChannelOverride{UserDeny: permissions.MuteMembers}, false},
+		{"role deny READ denies", mod, db.ChannelOverride{Deny: permissions.ReadMessages}, false},
+		{"user allow beats role deny", mod, db.ChannelOverride{Deny: permissions.MuteMembers, UserAllow: permissions.MuteMembers}, true},
+		// A channel allow must not manufacture authority the base role never
+		// held: the server refuses it, so the affordance must too.
+		{"channel allow without base bit denied", member, db.ChannelOverride{Allow: permissions.MuteMembers}, false},
+	}
+	for _, c := range cases {
+		if got := channelCanModerateVoice(c.role, c.o, "voice"); got != c.want {
+			t.Errorf("%s: channelCanModerateVoice = %v, want %v", c.name, got, c.want)
+		}
+		var bits int64
+		if c.role != nil {
+			bits = c.role.Permissions
+		}
+		want := permissions.AuthorizeVoiceModerator(permissions.Subject{
+			RolePerms: bits, Override: permOverride(c.o), Channel: permissions.ChannelRef{Type: "voice"},
+		}) == nil
+		if want != c.want {
+			t.Errorf("%s: AuthorizeVoiceModerator = %v, table says %v", c.name, want, c.want)
+		}
+	}
+}
+
 // TestBuildErrorMsgWithID echoes the request id so the client can correlate a
 // failure with the specific command it sent; an empty id omits the field.
 func TestBuildErrorMsgWithID(t *testing.T) {

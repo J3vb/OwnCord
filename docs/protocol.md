@@ -356,7 +356,7 @@ These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
 
 `nsfw`, `nsfw_acknowledged`, `voice_max_users` and `voice_max_video` are always
 present, with their column defaults on an unconfigured channel — `false`,
@@ -368,6 +368,15 @@ different things. `nsfw` is a label the server enforces (see below);
 means nothing; the two voice limits are the values
 the voice-join path enforces with `CHANNEL_FULL` / `VIDEO_LIMIT`, shipped so a
 client can show "3/5" and explain a refusal it could have predicted.
+
+`can_moderate_voice` is whether the caller may mute, deafen, move or disconnect
+voice participants in that channel. It is `permissions.AuthorizeVoiceModerator`,
+the same authorizer the voice-moderation commands enforce in the target's
+channel: the base role must hold `MUTE_MEMBERS`, and the effective permission
+after both override layers must hold `READ_MESSAGES | MUTE_MEMBERS`
+(Administrator bypasses the bits). Target rank and move-destination capacity
+are per-target and stay server-side refusals. No override data is sent. Older
+servers omit it.
 
 `mention_count` is the number of unread messages that mention this user — a
 direct `@username` or an authorized `@everyone`/`@here` — in that channel. It is
@@ -812,11 +821,13 @@ All channel update messages are broadcast to all connected clients. Triggered by
 or channel-override edit changes who may post, `RefreshChannelVisibility` sends
 each still-visible client its own `channel_create`, and that copy carries this
 viewer's `can_send` — the same value `ready` ships per channel — so the composer
-affordance converges without a reconnect.
+affordance converges without a reconnect. `can_moderate_voice` rides the same
+targeted copy under the same rules, so a role edit or a role- or user-override
+edit on the channel converges the voice-moderation controls too.
 
-The broadcast form omits it: one encoded frame is delivered to a whole audience,
+The broadcast form omits both: one encoded frame is delivered to a whole audience,
 and a single value would be wrong for some of them. Older servers omit it too.
-**Treat an absent `can_send` as "unchanged", never as `false`** — a client that
+**Treat an absent `can_send` or `can_moderate_voice` as "unchanged", never as `false`** — a client that
 resets on absence would disable the composer on every ordinary broadcast.
 
 ### channel_update (Server -> Client, broadcast)

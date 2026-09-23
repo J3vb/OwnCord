@@ -155,6 +155,14 @@ export interface ReadyChannel {
    */
   readonly can_send?: boolean;
   /**
+   * Whether the current user may mute, deafen, move or disconnect voice
+   * participants in this channel — server-computed from the same authorizer
+   * voice moderation enforces (base MUTE_MEMBERS, then effective
+   * READ|MUTE_MEMBERS after channel overrides). Target rank and move capacity
+   * stay server-side refusals. Absent from older servers.
+   */
+  readonly can_moderate_voice?: boolean;
+  /**
    * Per-channel cooldown in seconds (0 = off). Drives the composer's
    * slow-mode countdown; the server still enforces. Absent from older servers.
    */
@@ -417,6 +425,12 @@ export interface ChannelCreatePayload {
    * never as false.
    */
   readonly can_send?: boolean;
+  /**
+   * This viewer's voice-moderation affordance — see
+   * ReadyChannel.can_moderate_voice. Same targeted-only, absent-means-
+   * unchanged rules as can_send.
+   */
+  readonly can_moderate_voice?: boolean;
 }
 
 export interface ChannelUpdatePayload {

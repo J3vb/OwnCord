@@ -7,7 +7,7 @@ package ws_test
 // `if s.TimedOut { return ErrTimedOut }`, so a user with an active timeout
 // (a moderation_actions row, kind='timeout', not yet expired/lifted) got
 // can_send: true on every visible text/announcement channel in their
-// fresh-connect ready payload -- identical to refreshChannelVisibilityCanSend
+// fresh-connect ready payload -- identical to refreshChannelVisibilityAffordances
 // (the live-refresh sibling on a targeted channel_create), which DOES thread
 // a live HasActiveTimeout lookup through subjectFor. The very next send from
 // that client is refused with TIMED_OUT even though the composer was left

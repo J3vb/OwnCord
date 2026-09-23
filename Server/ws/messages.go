@@ -286,6 +286,10 @@ type channelPayload struct {
 	// a client must keep its existing verdict when the field is absent, and an
 	// older server that never sends it keeps the permissive default.
 	CanSend *bool `json:"can_send,omitempty"`
+	// CanModerateVoice is the per-recipient voice-moderation affordance (B9
+	// Q5), the same value the ready payload ships per channel. Same
+	// per-recipient, targeted-only, absent-means-unchanged rules as CanSend.
+	CanModerateVoice *bool `json:"can_moderate_voice,omitempty"`
 }
 
 // channelPayloadFrom narrows a channel row to the wire shape shared by the
@@ -767,14 +771,15 @@ func buildChannelCreate(ch *db.Channel) []byte {
 }
 
 // buildChannelCreateFor constructs a channel_create addressed to ONE client,
-// carrying that client's can_send verdict.
+// carrying that client's can_send and can_moderate_voice verdicts.
 //
 // Separate from buildChannelCreate because can_send is per-recipient: the
 // broadcast form encodes a single frame for a whole audience, so it must leave
 // the field absent rather than assert one client's answer for everyone.
-func buildChannelCreateFor(ch *db.Channel, canSend bool) []byte {
+func buildChannelCreateFor(ch *db.Channel, canSend, canModerateVoice bool) []byte {
 	p := channelPayloadFrom(ch)
 	p.CanSend = &canSend
+	p.CanModerateVoice = &canModerateVoice
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChannelCreate,
 		Payload: p,
