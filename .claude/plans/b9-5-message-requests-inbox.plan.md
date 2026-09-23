@@ -201,8 +201,9 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
 - Single-writer files, each a minimal edit: `lib/api.ts` (`listDmRequests`),
   `lib/types.ts` (the wire types and the `dm_request` union entry) and
   `lib/dispatcher.ts` (one `ws.on`, one call in the `ready` order after
-  blocks, and one call in the `auth_ok` handler on a resume). MainPage, SidebarArea, SidebarDmSection, `ui.store` and the
-  navigator are unchanged.
+  blocks, and one call in the `auth_ok` handler on a resume). MainPage, SidebarArea, `ui.store` and the
+  navigator are unchanged. SidebarDmSection only turns the DM header's
+  pending badge into a button into DM mode (see Implementation decisions).
 - Files beyond the table: `features/connection/dispatchContext.ts` (adds
   `listDmRequests` to `DispatchApi`, as in the dispatcher's signature),
   `i18n/messageRequests.ts` (the feature's catalog), `styles/app/chat-area.css`
@@ -238,6 +239,11 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
 - **Q2 badge meaning.** The count is the store's own. Requests never enter
   `dmStore`/`channelsStore`, so they add nothing to unread or mentions, and
   they trigger no notification or taskbar flash.
+- **Way in with no DMs.** The DM header's pending badge is a button that
+  enters DM mode, where "Message Requests (N)" sits. Without it, a user with
+  no accepted DMs has no DM row and no "View all" to click, so a
+  first-contact request could not be opened (live test fix, 2026-09-23; unit
+  test "opens DM mode from the badge for a user with no DMs").
 - **States.** The status region reads loading, empty, unavailable (the GET
   failed or the server is older) or reconnecting. It speaks only when its
   text changes. It is never `hidden`: when silent it is empty and taken out
