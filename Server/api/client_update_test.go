@@ -26,6 +26,8 @@ func fakeGitHubRelease(t *testing.T, tag string) *httptest.Server {
 	assetNames := []string{
 		"OwnCord_1.0.0_x64-setup.nsis.zip",
 		"OwnCord_1.0.0_x64-setup.nsis.zip.sig",
+		"OwnCord_1.0.0_arm64-setup.nsis.zip",
+		"OwnCord_1.0.0_arm64-setup.nsis.zip.sig",
 		"OwnCord_1.0.0_amd64.AppImage.tar.gz",
 		"OwnCord_1.0.0_amd64.AppImage.tar.gz.sig",
 		"OwnCord_1.0.0_aarch64.AppImage.tar.gz",
@@ -168,6 +170,59 @@ func TestClientUpdate_WindowsTargetGetsNSISInstaller(t *testing.T) {
 	url, _ := entry["url"].(string)
 	if !strings.HasSuffix(url, "_x64-setup.nsis.zip") {
 		t.Errorf("windows url = %q, want NSIS installer", url)
+	}
+}
+
+func TestClientUpdate_WindowsArm64TargetGetsArm64NSIS(t *testing.T) {
+	srv := fakeGitHubRelease(t, "v2.0.0")
+	u := updater.NewUpdater("1.0.0", "", "test", "repo")
+	u.SetBaseURL(srv.URL)
+
+	router := buildClientUpdateRouter(u)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-aarch64-nsis/1.0.0", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	entry := platformEntry(t, rr, "windows-aarch64-nsis")
+	url, _ := entry["url"].(string)
+	if !strings.HasSuffix(url, "_arm64-setup.nsis.zip") {
+		t.Errorf("windows arm64 url = %q, want the arm64 NSIS updater archive", url)
+	}
+	if sig, _ := entry["signature"].(string); sig == "" {
+		t.Error("windows arm64 platform entry missing signature")
+	}
+}
+
+// A release that published only the arm64 signature (a staging slip) must
+// not offer the update: the plugin would download nothing verifiable.
+func TestClientUpdate_Arm64SignatureWithoutArchiveNoContent(t *testing.T) {
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/test/repo/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": "v2.0.0",
+			"assets": []map[string]any{{
+				"name":                 "OwnCord_1.0.0_arm64-setup.nsis.zip.sig",
+				"browser_download_url": srv.URL + "/download/OwnCord_1.0.0_arm64-setup.nsis.zip.sig",
+			}},
+		})
+	})
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	u := updater.NewUpdater("1.0.0", "", "test", "repo")
+	u.SetBaseURL(srv.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-aarch64-nsis/1.0.0", nil)
+	rr := httptest.NewRecorder()
+	buildClientUpdateRouter(u).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 204; body: %s", rr.Code, rr.Body.String())
 	}
 }
 

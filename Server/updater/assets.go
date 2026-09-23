@@ -38,6 +38,7 @@ type textAssetCacheEntry struct {
 // install_deb reject every update.
 var clientAssetSuffixByTarget = map[string]string{
 	"windows-x86_64-nsis":    "_x64-setup.nsis.zip",
+	"windows-aarch64-nsis":   "_arm64-setup.nsis.zip",
 	"linux-x86_64-appimage":  "_amd64.AppImage.tar.gz",
 	"linux-aarch64-appimage": "_aarch64.AppImage.tar.gz",
 }

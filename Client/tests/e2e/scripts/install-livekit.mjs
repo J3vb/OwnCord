@@ -5,13 +5,29 @@ import { resolve } from "node:path";
 
 // Fixed release and archive digests: never execute a floating download.
 const release = "1.13.5";
+// Keyed by `${platform}-${arch}`; the arm64 pair serves B7-17's ARM64
+// artifact smoke. Digests match the release's own checksums.txt.
 const archives = {
-  linux: ["linux_amd64.tar.gz", "c020fac437b7cc9b776eef1ad5ea8af77be9acfa07602eca20a3a44930dfbc70"],
-  win32: ["windows_amd64.zip", "3ec7eaa76ef64063bf21f78364733703e0969612cb92ffd60661ed45fa4a8906"],
+  "linux-x64": [
+    "linux_amd64.tar.gz",
+    "c020fac437b7cc9b776eef1ad5ea8af77be9acfa07602eca20a3a44930dfbc70",
+  ],
+  "linux-arm64": [
+    "linux_arm64.tar.gz",
+    "332015305518765fe05bad74fc3a9d9583e635e7dd130de3c4fc563d69c550f3",
+  ],
+  "win32-x64": [
+    "windows_amd64.zip",
+    "3ec7eaa76ef64063bf21f78364733703e0969612cb92ffd60661ed45fa4a8906",
+  ],
+  "win32-arm64": [
+    "windows_arm64.zip",
+    "9a0facddf31346f22854a1beaeaaa2c623c165078c54765115b249d771eb0b66",
+  ],
 };
-if (process.arch !== "x64" || !archives[process.platform])
-  throw new Error("Media CI supports Linux/Windows x64");
-const [suffix, digest] = archives[process.platform];
+const target = archives[`${process.platform}-${process.arch}`];
+if (!target) throw new Error("Media CI supports Linux/Windows on x64 and arm64");
+const [suffix, digest] = target;
 const dir = resolve("tests/e2e/.bin");
 await mkdir(dir, { recursive: true });
 const archive = resolve(dir, `livekit_${release}_${suffix}`);
@@ -25,9 +41,12 @@ if (createHash("sha256").update(bytes).digest("hex") !== digest)
   throw new Error("LiveKit archive checksum mismatch");
 await writeFile(archive, bytes);
 try {
-  // Windows runners ship bsdtar, which also reads zip archives.
+  // Windows ships bsdtar, which also reads zip archives. Named by path: under
+  // Git Bash a bare `tar` is GNU tar, which reads `D:\...` as a remote host.
   const result = spawnSync(
-    "tar",
+    process.platform === "win32"
+      ? resolve(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
+      : "tar",
     [
       "-xf",
       archive,

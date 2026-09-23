@@ -1258,12 +1258,12 @@ base64 -d server_update_public_key.txt > server_update.pub
 minisign -Vm chatserver.exe -x chatserver.exe.minisig -p server_update.pub
 ```
 
-| Asset class                                         | Signature                                                    | SBOM                        | Who verifies it                                  |
-| --------------------------------------------------- | ------------------------------------------------------------ | --------------------------- | ------------------------------------------------ |
-| `chatserver.exe`, `chatserver-windows-arm64.exe`    | detached minisign signature, plus the signed update manifest | CycloneDX, one per binary   | the updater on every update; by hand with step 5 |
-| `chatserver-linux-*.tar.gz`                         | none detached — the SHA256 in the signed update manifest     | CycloneDX, one per archive  | the updater, through the manifest                |
-| Tauri client bundles (Windows, Linux x64 and arm64) | updater signature                                            | none yet                    | the client's own updater                         |
-| `ghcr.io/j3vb/owncord-server` image                 | Sigstore provenance attestation, stored in the registry      | SPDX, attached to the index | an operator, with steps 3 and 4                  |
+| Asset class                                             | Signature                                                    | SBOM                        | Who verifies it                                  |
+| ------------------------------------------------------- | ------------------------------------------------------------ | --------------------------- | ------------------------------------------------ |
+| `chatserver.exe`, `chatserver-windows-arm64.exe`        | detached minisign signature, plus the signed update manifest | CycloneDX, one per binary   | the updater on every update; by hand with step 5 |
+| `chatserver-linux-*.tar.gz`                             | none detached — the SHA256 in the signed update manifest     | CycloneDX, one per archive  | the updater, through the manifest                |
+| Tauri client bundles (Windows and Linux, x64 and arm64) | updater signature                                            | none yet                    | the client's own updater                         |
+| `ghcr.io/j3vb/owncord-server` image                     | Sigstore provenance attestation, stored in the registry      | SPDX, attached to the index | an operator, with steps 3 and 4                  |
 
 What this does and does not prove:
 

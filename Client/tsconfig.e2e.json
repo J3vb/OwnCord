@@ -18,7 +18,8 @@
     "playwright.config.admin.ts",
     "playwright.config.fullstack.ts",
     "playwright.config.soak.ts",
-    "playwright.config.native-voice.ts"
+    "playwright.config.native-voice.ts",
+    "playwright.config.artifact.ts"
   ],
   "exclude": []
 }

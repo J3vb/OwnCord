@@ -9,19 +9,26 @@ if (process.platform !== "win32" || !process.env.CI)
   throw new Error("Native updater tests run in Windows CI only");
 
 await mkdir("test-results", { recursive: true });
-const logPath = resolve("test-results/native-updater-process.log");
+// Defaults to the native-updater project; B7-17's artifact update passes its
+// own Playwright arguments and log name for the same pipe isolation.
+const [name = "native-updater", ...custom] = process.argv.slice(2);
+const logPath = resolve(`test-results/${name}-process.log`);
 const log = await open(logPath, "w");
 const child = spawn(
   process.execPath,
   [
     resolve("node_modules/@playwright/test/cli.js"),
     "test",
-    "--config",
-    "playwright.config.native.ts",
-    "--project",
-    "native-updater",
-    "--output",
-    "test-results/native-updater",
+    ...(custom.length
+      ? custom
+      : [
+          "--config",
+          "playwright.config.native.ts",
+          "--project",
+          "native-updater",
+          "--output",
+          "test-results/native-updater",
+        ]),
   ],
   { stdio: ["ignore", log.fd, log.fd] },
 );

@@ -186,6 +186,15 @@ server's internals were reorganised behind service boundaries.
   it again, as standalone binaries and as containers, and is blocked unless a
   signed-in session, an uploaded file, the configuration, the credential keys
   and the backups all survive both directions intact.
+- **Windows ARM64 desktop client.** Releases now carry a native Windows ARM64
+  installer (`OwnCord_<version>_arm64-setup.exe`), and the server offers it
+  updates, as it already did for Windows x64 and Linux x64/ARM64.
+- **Every desktop build is used before a release ships, not just built.** The
+  Windows x64/ARM64 installers and Linux x64/ARM64 AppImages are each
+  installed on their own architecture, connected to a server, taken into a
+  voice channel and through an account recovery, then updated from the
+  previous release and rolled back to it; each .deb is installed and booted.
+  A failure blocks the release.
 - **Plugins are described by `plugin.json` only — the `plugin.toml` manifest is
   gone.** A plugin directory carrying only a `plugin.toml` no longer loads;
   convert it to `plugin.json`. A directory carrying both could previously leave

@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   outputDir: "test-results/mock",
   testDir: "./tests/e2e",
-  testIgnore: ["**/native/**", "**/admin/**", "**/fullstack/**"],
+  testIgnore: ["**/native/**", "**/admin/**", "**/fullstack/**", "**/artifact-smoke/**"],
   timeout: 30_000,
   expect: {
     timeout: 5_000,
