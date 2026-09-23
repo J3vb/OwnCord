@@ -3113,6 +3113,24 @@ describe("SidebarArea", () => {
         cleanup(result);
       });
 
+      it("skips a remembered channel that has since been deleted", () => {
+        seed();
+        setActiveChannel(2);
+        const result = mount();
+        result.rememberChannel();
+        setActiveChannel(null);
+        channelsStore.setState((prev) => {
+          const channels = new Map(prev.channels);
+          channels.delete(2);
+          return { ...prev, channels };
+        });
+
+        result.returnToChannel();
+
+        expect(channelsStore.getState().activeChannelId).toBe(1);
+        cleanup(result);
+      });
+
       it("never remembers a DM as the channel to go back to", () => {
         seed();
         setActiveChannel(100);

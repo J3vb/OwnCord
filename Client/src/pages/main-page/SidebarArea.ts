@@ -506,7 +506,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       return;
     }
     setSidebarMode("channels");
-    if (channelBeforeDm !== null) {
+    if (channelBeforeDm !== null && channelsStore.getState().channels.has(channelBeforeDm)) {
       setActiveChannel(channelBeforeDm);
       return;
     }
@@ -567,9 +567,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
    */
   function returnToChannel(): void {
     setSidebarMode("channels");
-    if (channelBeforeDm !== null) {
-      setActiveChannel(channelBeforeDm);
-      channelBeforeDm = null;
+    const saved = channelBeforeDm;
+    channelBeforeDm = null;
+    if (saved !== null && channelsStore.getState().channels.has(saved)) {
+      setActiveChannel(saved);
       return;
     }
     // No saved channel — this happens when DM mode was entered without
