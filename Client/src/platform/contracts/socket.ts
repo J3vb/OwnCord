@@ -55,6 +55,14 @@ export interface SocketCertEvent {
   readonly storedFingerprint?: string;
 }
 
+/** Optional retry metadata for a disconnected state report. */
+export interface SocketRetryHint {
+  /** Server minimum wait, relative to this disconnect, when the transport can
+   * expose it. The app bounds it by maxReconnectDelayMs. The current desktop
+   * proxy exposes neither handshake headers nor a structured retry delay. */
+  readonly retryAfterMs?: number;
+}
+
 /** One connection's transport. */
 export interface SocketConnection {
   /** Open the connection. Rejects when the handshake fails, or when there is
@@ -67,7 +75,9 @@ export interface SocketConnection {
   send(text: string): Promise<void>;
   /** Accept a changed certificate fingerprint for a host, then reconnect. */
   acceptCertificate(host: string, fingerprint: string): Promise<void>;
-  onStateChange(handler: (state: SocketConnectionState) => void): () => void;
+  onStateChange(
+    handler: (state: SocketConnectionState, retryHint?: SocketRetryHint) => void,
+  ): () => void;
   /** A raw inbound frame, exactly as the native transport delivered it. */
   onMessage(handler: (text: string) => void): () => void;
   onCertFirstUse(handler: (event: SocketCertEvent) => void): () => void;
