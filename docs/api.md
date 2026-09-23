@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 172 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 174 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -60,6 +60,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/channels`                                                |
 | DELETE  | `/admin/api/channels/{id}`                                           |
 | PATCH   | `/admin/api/channels/{id}`                                           |
+| GET     | `/admin/api/channels/{id}/access/explain`                            |
+| POST    | `/admin/api/channels/{id}/access/preview`                            |
 | GET     | `/admin/api/channels/{id}/permissions`                               |
 | DELETE  | `/admin/api/channels/{id}/permissions/{roleId}`                      |
 | PUT     | `/admin/api/channels/{id}/permissions/{roleId}`                      |
@@ -4155,6 +4157,116 @@ Clear the override row, returning the target to the layer above it. `204 No
 Content`; deleting a row that does not exist is a no-op, not a `404`. Same
 cache/fan-out behavior as the writes; audits as `channel_perms_clear` /
 `channel_user_perms_clear`.
+
+### GET /admin/api/channels/{id}/access/explain
+
+Explain one member's effective access in a channel (RI-06). Query:
+`user_id` (required) and `action` (optional; omit for every action). Actions
+map one-to-one onto the server's authorization predicates:
+
+| `action`         | Predicate                                                 |
+| ---------------- | --------------------------------------------------------- |
+| `view_channel`   | `CanViewChannel`                                          |
+| `read_content`   | `CanReadContent` (adds NSFW consent)                      |
+| `send_message`   | `CanSendMessage`                                          |
+| `add_reaction`   | `CanAddReaction`                                          |
+| `join_voice`     | `CanJoinVoice`                                            |
+| `moderate_voice` | `AuthorizeVoiceModerator` (base `MUTE_MEMBERS` + channel) |
+
+The decision is the predicate's own verdict over the member's live state —
+role bits, both override layers, active timeout and NSFW acknowledgement,
+never the 30-second permission cache. An effectively banned account, or one
+whose registration is not `active`, holds no session, so every action is
+denied with that reason. Nothing here creates or uses a session for the
+member. `bits` traces each bit the predicate consulted through the layers
+(`""` means the layer has no opinion).
+
+```json
+{
+  "user_id": 12,
+  "username": "alice",
+  "role_id": 4,
+  "role_name": "Member",
+  "channel_id": 4,
+  "restrictions": {
+    "banned": false,
+    "registration_status": "active",
+    "timed_out": true,
+    "nsfw_acknowledged": false,
+    "channel_archived": false,
+    "channel_nsfw": false,
+    "channel_type": "text"
+  },
+  "decisions": [
+    {
+      "action": "send_message",
+      "allowed": false,
+      "reason": "user is timed out",
+      "administrator_bypass": false,
+      "bits": [
+        {
+          "bit": "SEND_MESSAGES",
+          "base": true,
+          "role_override": "deny",
+          "user_override": "allow",
+          "effective": true
+        },
+        {
+          "bit": "READ_MESSAGES",
+          "base": true,
+          "role_override": "",
+          "user_override": "",
+          "effective": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+Audited as `permission_explain`, target `user`.
+
+### POST /admin/api/channels/{id}/access/preview
+
+Evaluate a proposed override before saving it. Body: exactly one of `role_id`
+(role layer) or `user_id` (member layer), plus the `allow`/`deny` masks the
+matching `PUT` would take (clamped the same way). Every member the override
+could reach — each holder of the role, or the one member — is evaluated for
+every action with the current and the proposed layer, through the same
+predicates as `explain`; `members` lists only those whose decision changes.
+Nothing is written. The save path still applies its own escalation and
+hierarchy checks.
+
+```json
+{
+  "channel_id": 4,
+  "allow": 0,
+  "deny": 2,
+  "evaluated": 3,
+  "members": [
+    {
+      "user_id": 12,
+      "username": "alice",
+      "changes": [
+        {
+          "action": "view_channel",
+          "before": true,
+          "after": false,
+          "after_reason": "permission denied: missing READ_MESSAGES"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Audited as `permission_preview`, target `channel`.
+
+| Status | Code          | When                                                           |
+| ------ | ------------- | -------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Bad `user_id`, unknown `action`, or not exactly one of the ids |
+| 403    | `FORBIDDEN`   | Missing `MANAGE_CHANNELS`                                      |
+| 404    | `NOT_FOUND`   | Unknown or DM channel, unknown role or user                    |
 
 ---
 
