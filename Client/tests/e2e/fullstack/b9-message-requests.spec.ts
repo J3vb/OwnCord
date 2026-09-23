@@ -66,17 +66,17 @@ async function connect(server: TestServer, name: string): Promise<Sender> {
   const token = await signIn(server, name);
   const socket = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/ws`);
   const frames: Frame[] = [];
-  const waiters: Array<{ match: (f: Frame) => boolean; resolve: (f: Frame) => void }> = [];
+  const waiters: Array<{ wants: (f: Frame) => boolean; resolve: (f: Frame) => void }> = [];
   socket.addEventListener("message", (e) => {
     const f = JSON.parse(String(e.data)) as Frame;
     frames.push(f);
     for (const w of waiters.splice(0)) {
-      if (w.match(f)) w.resolve(f);
+      if (w.wants(f)) w.resolve(f);
       else waiters.push(w);
     }
   });
-  const next = (match: (f: Frame) => boolean): Promise<Frame> =>
-    new Promise((resolve) => waiters.push({ match, resolve }));
+  const next = (wants: (f: Frame) => boolean): Promise<Frame> =>
+    new Promise((resolve) => waiters.push({ wants, resolve }));
   await new Promise((resolve) => socket.addEventListener("open", resolve, { once: true }));
   const ready = next((f) => f.type === "ready");
   socket.send(JSON.stringify({ type: "auth", payload: { token } }));
