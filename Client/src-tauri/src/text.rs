@@ -23,11 +23,17 @@ pub const TRAY_TOOLTIP: &str = "OwnCord";
 
 // --- Startup failure dialog (not Linux) ------------------------------------
 
+// The startup failure dialog is `#[cfg(not(target_os = "linux"))]` in lib.rs
+// (Linux reports a fatal startup error to the console instead), so these are
+// unused there.
+#[cfg(not(target_os = "linux"))]
 pub const STARTUP_DIALOG_TITLE: &str = "OwnCord failed to start";
+#[cfg(not(target_os = "linux"))]
 pub const STARTUP_DIALOG_BODY: &str =
     "The application encountered a startup error and cannot continue.\n\n{error}";
 
 /// The startup dialog body with the raw error detail appended verbatim.
+#[cfg(not(target_os = "linux"))]
 pub fn startup_dialog_body(error: &str) -> String {
     STARTUP_DIALOG_BODY.replace("{error}", error)
 }
@@ -70,7 +76,9 @@ mod tests {
             ("ws_proxy.rs", include_str!("ws_proxy.rs")),
             ("http_proxy.rs", include_str!("http_proxy.rs")),
         ];
-        let extracted = [
+        // `mut` only on the platforms that push the dialog title below.
+        #[allow(unused_mut)]
+        let mut extracted: Vec<&str> = vec![
             TRAY_SHOW_HIDE,
             TRAY_STATUS,
             TRAY_STATUS_ONLINE,
@@ -78,10 +86,11 @@ mod tests {
             TRAY_STATUS_DND,
             TRAY_STATUS_OFFLINE,
             TRAY_QUIT,
-            STARTUP_DIALOG_TITLE,
         ];
+        #[cfg(not(target_os = "linux"))]
+        extracted.push(STARTUP_DIALOG_TITLE);
         for (name, source) in CALL_SITES {
-            for literal in extracted {
+            for literal in &extracted {
                 assert!(
                     !source.contains(&format!("\"{literal}\"")),
                     "{name} hard-codes the user-visible literal {literal:?}; \
@@ -101,6 +110,7 @@ mod tests {
         assert!(msg.contains("Stored:  aa:bb"), "{msg}");
         assert!(msg.contains("Current: cc:dd"), "{msg}");
         assert!(msg.starts_with("Certificate fingerprint changed for example.com:8443."));
+        #[cfg(not(target_os = "linux"))]
         assert!(startup_dialog_body("boom").ends_with("boom"));
     }
 }

@@ -16,10 +16,34 @@ const QUIT_ID: &str = "quit";
 pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::Error> {
     let show_hide = MenuItem::with_id(app, SHOW_HIDE_ID, text::TRAY_SHOW_HIDE, true, None::<&str>)?;
 
-    let status_online = MenuItem::with_id(app, STATUS_ONLINE_ID, text::TRAY_STATUS_ONLINE, true, None::<&str>)?;
-    let status_idle = MenuItem::with_id(app, STATUS_IDLE_ID, text::TRAY_STATUS_IDLE, true, None::<&str>)?;
-    let status_dnd = MenuItem::with_id(app, STATUS_DND_ID, text::TRAY_STATUS_DND, true, None::<&str>)?;
-    let status_offline = MenuItem::with_id(app, STATUS_OFFLINE_ID, text::TRAY_STATUS_OFFLINE, true, None::<&str>)?;
+    let status_online = MenuItem::with_id(
+        app,
+        STATUS_ONLINE_ID,
+        text::TRAY_STATUS_ONLINE,
+        true,
+        None::<&str>,
+    )?;
+    let status_idle = MenuItem::with_id(
+        app,
+        STATUS_IDLE_ID,
+        text::TRAY_STATUS_IDLE,
+        true,
+        None::<&str>,
+    )?;
+    let status_dnd = MenuItem::with_id(
+        app,
+        STATUS_DND_ID,
+        text::TRAY_STATUS_DND,
+        true,
+        None::<&str>,
+    )?;
+    let status_offline = MenuItem::with_id(
+        app,
+        STATUS_OFFLINE_ID,
+        text::TRAY_STATUS_OFFLINE,
+        true,
+        None::<&str>,
+    )?;
 
     let status_submenu = Submenu::with_items(
         app,
