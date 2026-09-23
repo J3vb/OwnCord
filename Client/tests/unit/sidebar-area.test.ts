@@ -149,6 +149,10 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
 // ---------------------------------------------------------------------------
 
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
+import {
+  createContentNavigator,
+  type ContentNavigator,
+} from "../../src/features/navigation/contentView";
 import { channelsStore, setActiveChannel, setRoles } from "../../src/stores/channels.store";
 import { dmStore, addDmChannel } from "../../src/stores/dm.store";
 import { uiStore, setSidebarMode, setActiveDmUser } from "../../src/stores/ui.store";
@@ -3120,6 +3124,71 @@ describe("SidebarArea", () => {
 
         // No channel remembered: the first text channel, as the DM back arrow does.
         expect(channelsStore.getState().activeChannelId).toBe(1);
+        cleanup(result);
+      });
+
+      /** A content navigator wired to the sidebar the way MainPage wires it. */
+      function navigatorFor(
+        result: ReturnType<typeof createSidebarArea>,
+        fallback: HTMLElement,
+      ): ContentNavigator {
+        const chatArea = document.createElement("div");
+        const nav = createContentNavigator({
+          destinations: destinations(),
+          chatArea,
+          rememberChannel: result.rememberChannel,
+          forgetChannel: result.forgetChannel,
+          returnToChannel: result.returnToChannel,
+          fallbackFocus: () => fallback.focus(),
+        });
+        host.append(chatArea, nav.element, fallback);
+        return nav;
+      }
+
+      it("closing a Requests view focuses the fallback once DM mode takes the entry away", async () => {
+        seed();
+        setActiveChannel(2);
+        const fallback = document.createElement("button");
+        let nav: ContentNavigator | null = null;
+        const result = mount({
+          destinations: destinations(),
+          onOpenView: (id, opener) => nav?.open(id, opener),
+        });
+        nav = navigatorFor(result, fallback);
+        setSidebarMode("dms");
+        uiStore.flush();
+        q(result, "dm-requests-entry")!.click();
+        channelsStore.flush();
+        uiStore.flush();
+        expect(uiStore.getState().activeView).toBe("requests");
+
+        nav.close();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(channelsStore.getState().activeChannelId).toBe(2);
+        expect(q(result, "dm-requests-entry")).toBeNull();
+        expect(document.activeElement).toBe(fallback);
+        nav.destroy();
+        cleanup(result);
+      });
+
+      it("choosing another channel over a view does not leave the view's return channel", () => {
+        seed();
+        setActiveChannel(1);
+        const result = mount({ destinations: destinations() });
+        const nav = navigatorFor(result, document.createElement("button"));
+        nav.open("requests", null);
+        channelsStore.flush();
+
+        setActiveChannel(2);
+        channelsStore.flush();
+        expect(uiStore.getState().activeView).toBeNull();
+
+        // "View all messages" enters DM mode bare; Back then stays on channel 2.
+        setSidebarMode("dms");
+        result.returnToChannel();
+        expect(channelsStore.getState().activeChannelId).toBe(2);
+        nav.destroy();
         cleanup(result);
       });
     });

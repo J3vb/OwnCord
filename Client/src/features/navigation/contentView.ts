@@ -34,6 +34,8 @@ export interface ContentNavigatorOptions {
   readonly chatArea: HTMLElement;
   /** Remember the channel on screen as the one to go back to (channelBeforeDm). */
   readonly rememberChannel: () => void;
+  /** Drop the remembered channel: the user chose another one instead of going back. */
+  readonly forgetChannel: () => void;
   /** Go back to the remembered channel (the DM sidebar's back path). */
   readonly returnToChannel: () => void;
   /** Focus something reachable when the opener is gone. Runs after the channel remounts. */
@@ -43,8 +45,6 @@ export interface ContentNavigatorOptions {
 export interface ContentNavigator {
   /** The view's column, a sibling of the chat column. */
   readonly element: HTMLElement;
-  /** Whether `id` has a shipped view the signed-in user may open. */
-  isAvailable(id: ContentViewId): boolean;
   /** Open `id`. `opener` gets focus back on close. A no-op when unavailable. */
   open(id: ContentViewId, opener: HTMLElement | null): void;
   /** Close the open view and go back, as its Close button does. */
@@ -90,13 +90,20 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
   }
 
   function restoreFocus(opener: HTMLElement | null): void {
-    if (opener !== null && opener.isConnected && opener.style.display !== "none") {
-      opener.focus();
-      return;
-    }
-    // The back path remounts the channel from a store notification, so the
-    // fallback (the composer) exists only after that has run.
-    setOwnedTimeout(page.signal, opts.fallbackFocus, 0);
+    // The back path remounts the sidebar and the channel from store
+    // notifications, which can remove the opener (the Requests entry leaves
+    // with DM mode) or create the fallback (the composer), so decide after.
+    setOwnedTimeout(
+      page.signal,
+      () => {
+        if (opener !== null && opener.isConnected && opener.style.display !== "none") {
+          opener.focus();
+        } else {
+          opts.fallbackFocus();
+        }
+      },
+      0,
+    );
   }
 
   /** Close and take the back path. */
@@ -179,8 +186,10 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
   page.onStoreChange(
     channelsStore,
     (s) => s.activeChannelId,
-    (id) => {
-      if (id !== null) teardown();
+    (id: number | null) => {
+      if (id === null || current === null) return;
+      teardown();
+      if (channelsStore.getState().channels.get(id)?.type !== "dm") opts.forgetChannel();
     },
   );
 
@@ -196,7 +205,6 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
 
   return {
     element,
-    isAvailable: (id) => builderFor(id) !== null,
     open,
     close,
     destroy: () => {

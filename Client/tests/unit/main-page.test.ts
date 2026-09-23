@@ -161,6 +161,7 @@ vi.mock("../../src/pages/main-page/SidebarArea", () => ({
       unsubscribers: [],
       openQuickSwitch: vi.fn(),
       rememberChannel: mockRememberChannel,
+      forgetChannel: vi.fn(),
       returnToChannel: mockReturnToChannel,
     };
   },

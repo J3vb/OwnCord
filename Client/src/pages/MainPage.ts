@@ -537,6 +537,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       destinations: NAVIGATION_DESTINATIONS,
       chatArea: chatAreaResult.chatArea,
       rememberChannel: sidebar.rememberChannel,
+      forgetChannel: sidebar.forgetChannel,
       returnToChannel: sidebar.returnToChannel,
       // The opener is gone (the Requests entry leaves with DM mode): the
       // composer of the channel returned to, else the sidebar's first control.

@@ -12,6 +12,8 @@ import { Permission } from "@lib/types";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { channelsStore, setActiveChannel, setRoles, type Channel } from "@stores/channels.store";
 import { closeSettings, openSettings, setSidebarMode, uiStore } from "@stores/ui.store";
+import { applyReadyActiveChannel } from "../channels/wsHandlers";
+import type { Payload } from "../connection/dispatchContext";
 import { createContentNavigator, trackCurrentView, type ContentNavigator } from "./contentView";
 import type { FeatureViewContext, NavigationDestinations } from "./destinations";
 
@@ -105,6 +107,9 @@ function makeNavigator(destinations: NavigationDestinations): ContentNavigator {
       const id = channelsStore.getState().activeChannelId;
       if (id !== null && id !== DM) returnTarget = id;
     },
+    forgetChannel: () => {
+      returnTarget = null;
+    },
     returnToChannel: () => {
       setSidebarMode("channels");
       setActiveChannel(returnTarget);
@@ -178,8 +183,6 @@ describe("opening a view", () => {
   it("does nothing for a destination this build does not ship", () => {
     nav.destroy();
     nav = makeNavigator({});
-    expect(nav.isAvailable("requests")).toBe(false);
-    expect(nav.isAvailable("moderation")).toBe(false);
 
     nav.open("requests", opener());
 
@@ -190,7 +193,6 @@ describe("opening a view", () => {
 
   it("refuses Moderation without MODERATE_MEMBERS", () => {
     signInAs("Member", Permission.SEND_MESSAGES);
-    expect(nav.isAvailable("moderation")).toBe(false);
 
     nav.open("moderation", opener());
 
@@ -209,6 +211,7 @@ describe("opening a view", () => {
   });
 
   it("switching views destroys the old one and keeps the first opener", () => {
+    vi.useFakeTimers();
     const first = opener();
     nav.open("moderation", first);
     nav.open("requests", opener());
@@ -218,6 +221,7 @@ describe("opening a view", () => {
     expect(nav.element.querySelector("[data-testid='inert-requests']")).not.toBeNull();
 
     nav.close();
+    vi.runAllTimers();
     expect(document.activeElement).toBe(first);
   });
 
@@ -241,6 +245,7 @@ describe("opening a view", () => {
 
 describe("closing a view", () => {
   it("Close returns to the channel the user came from and focuses the opener", () => {
+    vi.useFakeTimers();
     const btn = opener();
     nav.open("moderation", btn);
     nav.element.querySelector<HTMLButtonElement>("[data-testid='feature-view-close']")?.click();
@@ -251,10 +256,12 @@ describe("closing a view", () => {
     expect(chatArea.style.display).toBe("");
     expect(uiStore.getState().activeView).toBeNull();
     expect(channelsStore.getState().activeChannelId).toBe(GENERAL);
+    vi.runAllTimers();
     expect(document.activeElement).toBe(btn);
   });
 
   it("Escape anywhere in the view closes it the same way", () => {
+    vi.useFakeTimers();
     const btn = opener();
     nav.open("moderation", btn);
     const inner = nav.element.querySelector<HTMLButtonElement>(
@@ -265,6 +272,7 @@ describe("closing a view", () => {
 
     expect(uiStore.getState().activeView).toBeNull();
     expect(channelsStore.getState().activeChannelId).toBe(GENERAL);
+    vi.runAllTimers();
     expect(document.activeElement).toBe(btn);
   });
 
@@ -343,6 +351,48 @@ describe("leaving a view another way", () => {
     expect(moderation.contexts[0]?.signal.aborted).toBe(true);
     expect(uiStore.getState().activeView).toBeNull();
     expect(chatArea.style.display).toBe("");
+    expect(channelsStore.getState().activeChannelId).toBe(RANDOM);
+  });
+
+  it("choosing a channel forgets the one the view would have gone back to", () => {
+    nav.open("moderation", opener());
+    expect(returnTarget).toBe(GENERAL);
+    setActiveChannel(RANDOM);
+    flush();
+    expect(returnTarget).toBeNull();
+  });
+
+  it("choosing a DM keeps the channel to go back to", () => {
+    nav.open("moderation", opener());
+    setActiveChannel(DM);
+    flush();
+    expect(uiStore.getState().activeView).toBeNull();
+    expect(returnTarget).toBe(GENERAL);
+  });
+
+  it("a fresh ready keeps an open view and the channel to go back to", () => {
+    setActiveChannel(RANDOM);
+    flush();
+    nav.open("moderation", opener());
+    flush();
+
+    const text = (id: number) => ({
+      id,
+      name: `c${id}`,
+      type: "text",
+      category: null,
+      position: id,
+    });
+    applyReadyActiveChannel({
+      channels: [text(GENERAL), text(RANDOM)],
+      dm_channels: [],
+    } as unknown as Payload<"ready">);
+    flush();
+
+    expect(uiStore.getState().activeView).toBe("moderation");
+    expect(moderation.contexts[0]?.signal.aborted).toBe(false);
+    expect(channelsStore.getState().activeChannelId).toBeNull();
+    nav.close();
     expect(channelsStore.getState().activeChannelId).toBe(RANDOM);
   });
 

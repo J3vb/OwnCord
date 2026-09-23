@@ -90,6 +90,8 @@ export interface SidebarAreaResult {
   readonly openQuickSwitch: () => void;
   /** Remember the channel on screen as the one a content view returns to. */
   readonly rememberChannel: () => void;
+  /** Drop the remembered channel. */
+  readonly forgetChannel: () => void;
   /** The Q2 back path: leave DM mode for the channel the user came from. */
   readonly returnToChannel: () => void;
 }
@@ -947,6 +949,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     unsubscribers,
     openQuickSwitch,
     rememberChannel,
+    forgetChannel: () => {
+      channelBeforeDm = null;
+    },
     returnToChannel,
   };
 }
