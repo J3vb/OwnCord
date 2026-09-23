@@ -200,11 +200,11 @@ render path as a fallback; fail closed and record a blocker instead.
 
 No new owner decision is introduced by this milestone. The PRD's unresolved entry decisions still apply; stop if implementation would require a new product, UX or scope choice.
 
-One budget decision is open and escalated to firstmate (see the record below): the
-MainPage chunk measure exceeded the shared 64,000 B budget after this lane;
-the raise was withdrawn in favour of the owner's "do not weaken any threshold";
-the channel editor now loads on demand, and MainPage fits 64,000 B. No open
-question remains.
+The one budget question escalated to firstmate during implementation is
+closed: the MainPage chunk exceeded the shared 64,000 B budget after this lane,
+the raise was withdrawn in favour of the owner's "do not weaken any threshold",
+and the channel editor now loads on demand so MainPage fits 64,000 B (see the
+record below). No open question remains.
 
 ## Implementation record — 2026-09-23
 
@@ -224,7 +224,8 @@ were edited.
   node; only the changed row is rebuilt.
 - **`lib/reconcile.ts`** — a small keyed reconciler (`reconcileChildren`):
   reuse by `key` + `signature`, rebuild a changed row, remove the gone ones,
-  restore focus to a rebuilt focused row, `dispose` a row before it detaches.
+  keep focus on a focused row that is moved or rebuilt, `dispose` a row before
+  it detaches.
   It is not a virtual DOM; `signature` is the caller's honest statement of what
   the row draws.
 - **`ChannelSidebar`** — two-level keyed reconciliation (category groups, then
@@ -240,7 +241,8 @@ were edited.
   survive. Row keyboard semantics as above; the back header is a real
   focusable control.
 - **`SidebarDmSection`** — the embedded preview's top-3 rows are keyed; the
-  list is one Tab stop with vertical roving.
+  list is one Tab stop with vertical roving; the section's collapse arrow is a
+  real `<button aria-expanded>`, as on the channel categories.
 - **`SidebarArea`** — `refreshDmSidebar()` now calls `DmSidebar.update()`
   (removing the OC-0280 capture/restore of a destroy+recreate).
 - **CSS (`app/sidebar.css`, `app/friends-dm.css`)** — focus-visible rings for
@@ -257,18 +259,19 @@ were edited.
   lifetime across re-renders) and OC-0280 (DM search/focus preservation) tests.
   `tsc --noEmit`, `eslint`, `oxlint`, `lint:cycles` and `knip` clean.
 - **E2E (mocked, Chromium, one spec, `--workers=1`):**
-  `Client/tests/e2e/b9-shell-polish.spec.ts` — 6 tests: one Tab stop + arrow
+  `Client/tests/e2e/b9-shell-polish.spec.ts` — 7 tests: one Tab stop + arrow
   roving + Enter + ring; row identity across an unrelated unread update; DM
   search/focus across a presence change; scroll position preserved on a long
-  list; reflow at 940×500; the embedded DM preview's Tab stop + arrows. All
+  list; reflow at 940×500; the embedded DM preview's Tab stop + arrows; the
+  embedded DM section collapsed and expanded from the keyboard. All
   pass against the dev server. The neighbour specs that touch these surfaces
   also pass unchanged: `channel-sidebar`, `sidebar-header`, `sidebar-menus`,
   `b9-navigation`, `a11y-smoke`, `b9-text-expansion`, `server-profiles`,
   `overlays` (75 tests).
 - **Native AT (NVDA/Orca) recordings and OS-zoom checks are owner-run and remain
   pending**, consistent with the other B9 lanes.
-- **Bundle budgets:** startup closure 94,688 B of the shared 95,000 B;
-  MainPage 63,544 B of the unchanged 64,000 B. This lane adds ~1.1 KB of
+- **Bundle budgets** (`npm run check:budgets` at `841ad52f`): startup closure
+  94,732 B of the shared 95,000 B; MainPage 63,611 B of the unchanged 64,000 B. This lane adds ~1.1 KB of
   MainPage (the reconciler and the keyed render paths, all startup code); the
   admin-only channel editor (`EditChannelModal`) moved to an on-demand chunk to
   pay for it. No budget was raised.

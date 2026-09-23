@@ -496,7 +496,7 @@ describe("DmSidebar", () => {
     });
     sidebar.mount(container);
 
-    const statusDots = container.querySelectorAll(".dm-status");
+    const statusDots = container.querySelectorAll<HTMLSpanElement>(".dm-status");
     const colors = Array.from(statusDots).map((dot) => dot.style.background);
 
     expect(colors).toContain("var(--green)");

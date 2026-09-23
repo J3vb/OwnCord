@@ -40,9 +40,8 @@ connection banner, identity-key prompt) out of the startup catalog brought it to
 records the keyed sidebar reconciler (`Client/src/lib/reconcile.ts`), the
 measured before/after (a DM/unread change replaced every row at the base; only
 the changed row is rebuilt now), the vertical roving keyboard navigation, the
-long-list scroll/reflow fix and the failing controls. With `dev` `838bab09`
-merged this lane measures startup 94,506 B of the shared 95,000 B and MainPage
-63,544 B of the unchanged 64,000 B: the admin-only channel editor loads on
+long-list scroll/reflow fix, the failing controls and the measured bundle
+figures. Both budgets hold unchanged: the admin-only channel editor loads on
 demand to pay for the reconciler. No budget was raised.
 **B9-7 implemented — native AT recordings pending owner — 2026-09-23**:
 [the plan's implementation record](../../.claude/plans/b9-7-nsfw-consent-gate.plan.md#implementation-record-2026-09-23) records the server-backed

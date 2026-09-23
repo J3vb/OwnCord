@@ -2136,9 +2136,7 @@ describe("ChannelSidebar voice identity badge", () => {
     voiceStore.setState((prev) => ({ ...prev, localSessionFingerprint: "0123 4567 89AB CDEF" }));
     sidebar.mount(container);
 
-    const own = container.querySelector(
-      `.voice-user-item[data-voice-uid="7"] .vu-session-fp`,
-    );
+    const own = container.querySelector(`.voice-user-item[data-voice-uid="7"] .vu-session-fp`);
     expect(own).not.toBeNull();
     expect(own!.getAttribute("title")).toContain("0123 4567 89AB CDEF");
   });
