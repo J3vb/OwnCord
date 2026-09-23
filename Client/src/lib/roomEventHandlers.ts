@@ -16,6 +16,7 @@ import {
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { parseUserId } from "../features/voice/sessionState";
+import { detachRoom } from "../features/voice/releaseRoom";
 import type { AudioElements } from "@lib/audioElements";
 
 const log = createLogger("roomEventHandlers");
@@ -202,7 +203,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
       if (room !== null) {
         deps.setRoom(null);
         deps.syncModuleRooms();
-        room.removeAllListeners();
+        detachRoom(room);
         room.disconnect().catch((err) => log.warn("Failed to disconnect stale room", err));
       }
       const ac = new AbortController();

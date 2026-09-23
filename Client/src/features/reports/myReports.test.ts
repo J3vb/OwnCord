@@ -151,8 +151,9 @@ describe("My reports", () => {
     vi.doMock("./myReports", () => Promise.reject(new Error("chunk failed")));
     try {
       const pane = buildSafetyPane(tab.signal, api);
+      // Other Safety sections keep their own (empty) alert regions; find ours.
       await vi.waitFor(() =>
-        expect(pane.querySelector("[role=alert]")?.textContent).toBe(
+        expect([...pane.querySelectorAll("[role=alert]")].map((a) => a.textContent)).toContain(
           "Couldn't load the Safety tab. Close Settings and try again.",
         ),
       );

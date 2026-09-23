@@ -169,9 +169,26 @@ export async function sampleLifecycle(
     probe.signaling = probe.signaling.filter((socket) => socket.readyState <= WebSocket.OPEN);
     probe.tracks = probe.tracks.filter((track) => track.readyState === "live");
   });
-  await cdp.send("HeapProfiler.collectGarbage");
-  await cdp.send("HeapProfiler.collectGarbage");
-  const counters = await cdp.send("Memory.getDOMCounters");
+  // The DOM counters are read after a GC until two reads a second apart agree
+  // on nodes (at most four reads). One CI soak (run 35886832029, attempt 2)
+  // sampled page 0 at 2739, 2738 and 2739 nodes while its attached DOM was
+  // identical at all three samples: a single retained, detached node was in
+  // flux at that one read, and the within-page bar counted the difference as
+  // growth. A leaked node is present on every read, so settling on a stable
+  // value leaves the bar as strict as before.
+  const readCounters = async () => {
+    await cdp.send("HeapProfiler.collectGarbage");
+    await cdp.send("HeapProfiler.collectGarbage");
+    return cdp.send("Memory.getDOMCounters");
+  };
+  let counters = await readCounters();
+  for (let read = 1; read < 4; read++) {
+    await page.waitForTimeout(1000);
+    const next = await readCounters();
+    const stable = next.nodes === counters.nodes;
+    counters = next;
+    if (stable) break;
+  }
   const heap = await cdp.send("Runtime.getHeapUsage");
   await page.waitForTimeout(Math.max(0, firstLedgerAt + 1000 - Date.now()));
   const secondLedger = await readLedger();

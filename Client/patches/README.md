@@ -39,3 +39,27 @@ cancellation scenario when upgrading the plugin. Remove this patch when an
 upstream npm release passes both without local modifications; update the npm and
 Rust locks together. Remove the postinstall hook and `patch-package` dependency
 when no patches remain.
+
+## `livekit-client` 2.22.3
+
+The E2EE worker acknowledges every `enable` message, and the manager then looks
+the participant up by identity to report its encryption status. A remote
+participant can leave between the post and the ack: a quick leave right after
+publishing, or the room's own reconnect re-posting `enable` for every peer. The
+SDK then threw `couldn't set encryption status, participant not found` from the
+worker's `onmessage`, an uncaught error the app cannot catch. The patch skips
+the status event for a participant who is gone; the local participant and
+present peers are reported as before.
+
+Only `dist/livekit-client.esm.mjs` is patched: Vite and vitest resolve the
+package's `import` condition, and the `require` entry is not bundled. The
+dependency is pinned to 2.22.3 for the same install check as above. After
+editing the installed file, regenerate from `Client/` with:
+
+```sh
+npm exec patch-package -- livekit-client
+```
+
+`tests/unit/livekit-e2ee-enable-ack.test.ts` drives the installed SDK's real
+`Room` and `E2EEManager` with a stand-in worker. Remove this patch when an
+upstream release passes it unmodified.

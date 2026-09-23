@@ -14,6 +14,7 @@ import { createElement, setText } from "@lib/dom";
 import { openSettings } from "@stores/ui.store";
 import { createLogger } from "@lib/logger";
 import { formatWhen, safetyText as t } from "../../i18n/safety";
+import type { AppealsApi } from "./Appeals";
 import {
   refreshOwnModeration,
   removeNotice,
@@ -23,7 +24,10 @@ import {
 } from "./store";
 
 export interface NoticesBannerOptions {
-  readonly api: Pick<ApiClient, "acknowledgeNotice" | "getOwnModeration">;
+  readonly api: Pick<
+    ApiClient,
+    "acknowledgeNotice" | "getOwnModeration" | "fileAppeal" | "withdrawAppeal"
+  >;
   /** Where focus goes when the last notice leaves while it held focus. */
   readonly fallbackFocus: () => void;
   readonly signal: AbortSignal;
@@ -75,6 +79,9 @@ function applyAck(row: NoticeRow, n: ModerationNotice): void {
 /** The persistent warning banner. Mount it on the page root. */
 export function createNoticesBanner(opts: NoticesBannerOptions): HTMLElement {
   const { api, signal } = opts;
+  // The Safety tab's appeals use this page's client (its seam takes only a
+  // signal). The tab lives inside this page, so it never outlives it.
+  tabApi = api;
   const root = createElement("section", {
     class: "moderation-notices",
     "aria-label": t("banner.label"),
@@ -170,6 +177,9 @@ export function createNoticesBanner(opts: NoticesBannerOptions): HTMLElement {
 
 const log = createLogger("safety");
 
+/** The mounted banner's client, for the Safety tab's appeal actions. */
+let tabApi: AppealsApi | null = null;
+
 /** The Settings "Safety" tab (the B9-4 destination). Its body loads on first open. */
 export function buildSafetyTab(signal: AbortSignal): HTMLDivElement {
   const pane = createElement("div", { class: "settings-pane active safety-tab" });
@@ -178,7 +188,7 @@ export function buildSafetyTab(signal: AbortSignal): HTMLDivElement {
   pane.appendChild(body);
   import("./SafetyTab")
     .then(({ renderSafetyTab }) => {
-      if (!signal.aborted) renderSafetyTab(body, signal);
+      if (!signal.aborted) renderSafetyTab(body, signal, tabApi);
     })
     .catch((err: unknown) => log.error("Safety tab failed to load", { error: String(err) }));
   return pane;
