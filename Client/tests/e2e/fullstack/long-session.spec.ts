@@ -9,10 +9,11 @@
  *
  * The pass bar is "no net growth after warm-up" (tests/e2e/support/
  * lifecycle-probe.ts). `login()` navigates, so every 10-cycle generation is a
- * fresh page. Samples are taken at cycle 0 and every 5 cycles (right after the
- * reconnect or the logout), which compare like-for-like across pages, plus at
- * cycles 6 and 9 of every page, which compare like-for-like within one page:
- * both come after that page's reconnect and neither directly follows one. A
+ * fresh page. Every 5th cycle starts with an application reconnect and every
+ * 10th ends with a logout. Samples are taken at cycle 0 and every 5 cycles,
+ * which compare like-for-like across pages, plus at cycles 6 and 9 of every
+ * page, which compare like-for-like within one page: both come after that
+ * page's reconnect and neither directly follows one. A
  * leak that the re-login navigation releases shows only in that within-page
  * pair. The series is attached to the Playwright report as JSON, so a failure
  * shows the curve.
@@ -293,12 +294,13 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
   try {
     samples.push(await sampleLifecycle(alice, cdp, 0));
     for (let cycle = 1; cycle <= CYCLES; cycle++) {
-      await runCycle(alice, bob, cycle, purgeMessages, general.id);
-
-      // Every 5th cycle: an application reconnect. The server removes voice
-      // membership when the authenticated socket drops, so the client must
-      // leave the room (media.spec.ts asserts the same), otherwise the next
-      // cycle's join starts from a stuck "reconnecting voice" state.
+      // Every 5th cycle starts with an application reconnect, so each sample
+      // follows a full cycle of use rather than the reconnect's own settling
+      // (one 20-cycle run caught a node still in flux right after it). The
+      // server removes voice membership when the authenticated socket drops,
+      // so the client must not be left in the room (media.spec.ts asserts the
+      // same); Alice is out of voice here, having left at the previous cycle's
+      // end.
       if (cycle % 5 === 0) {
         await aliceTransport.offline();
         await expect(alice.locator(".reconnecting-banner")).toBeVisible();
@@ -309,6 +311,8 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
           .poll(async () => (await mediaStats(alice)).liveCapture, { timeout: 30_000 })
           .toBe(0);
       }
+
+      await runCycle(alice, bob, cycle, purgeMessages, general.id);
 
       // Every 10th cycle: a logout and a fresh login. This deliberately tears
       // the app down and rebuilds it, so counts fall to a fresh baseline.

@@ -274,13 +274,14 @@ const COUNT_METRICS: readonly CountMetric[] = [
  * navigates, so a phase series compares samples from different pages: it sees
  * growth that survives the navigation, but not growth the navigation releases.
  *
- * The within-page series closes that gap: every sample not taken right after a
- * reconnect or logout (`cycle % 5 !== 0`) is grouped by its page (`cycle / 10`),
+ * The within-page series closes that gap: every sample off the 5-cycle marks,
+ * where the reconnect and logout happen (`cycle % 5 !== 0`), is grouped by its
+ * page (`cycle / 10`),
  * and each page's samples must hold the plan's bar. Heap is not asserted within
  * a page: V8 compiles and tiers up code as a page ages (about 1 MB of `(code)`
  * over five cycles in a heap-snapshot diff), so page age, not a leak, moves it;
- * heap is compared only in the phase series taken right after a reconnect or
- * logout (`cycle % 5 === 0`), 11a's calibrated series. The later page ages
+ * heap is compared only in the phase series at the 5-cycle marks, where the
+ * reconnect and logout happen (`cycle % 5 === 0`), 11a's calibrated series. The later page ages
  * (cycles 6 and 9) are where that tier-up still moves it: one 20-cycle run grew
  * 413 KB between cycles 9 and 19 with every count flat.
  *
@@ -303,8 +304,8 @@ export function evaluateBars(
     const phase = sample.cycle % 10;
     groups.set(phase, [...(groups.get(phase) ?? []), sample]);
   }
-  // Like-for-like samples within one page: neither right after a reconnect
-  // nor after the logout that starts the page.
+  // Like-for-like samples within one page: off the 5-cycle marks, where the
+  // reconnect and the logout that starts the next page happen.
   const pages = new Map<number, LifecycleSample[]>();
   for (const sample of post) {
     if (sample.cycle % 5 === 0) continue;
