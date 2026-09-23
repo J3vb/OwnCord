@@ -243,21 +243,14 @@ async function launchLinux(
 
 /**
  * Ends every process running the installed binary, including an updater
- * relaunch. taskkill fails for a tree member that exited between the query and
- * the kill; that process is gone either way, so the exit status is not the check.
+ * relaunch. Windows kills by image name, trees included: WMI's process query
+ * can outlast a 30 s budget on windows-11-arm, and a CI runner has no other
+ * owncord-client.exe. taskkill exits non-zero when none is running, which is
+ * the state wanted, so its status is not the check.
  */
 export async function killInstalled(binary: string) {
   if (process.platform === "win32") {
-    await exec(
-      "powershell",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:OWNCORD_ARTIFACT_EXE } | ForEach-Object { taskkill /pid $_.ProcessId /t /f 2>$null | Out-Null }; exit 0",
-      ],
-      { env: { ...process.env, OWNCORD_ARTIFACT_EXE: binary }, timeout: 30_000 },
-    );
+    await exec("taskkill", ["/im", WINDOWS_EXE, "/t", "/f"], { timeout: 30_000 }).catch(() => {});
     return;
   }
   for (const pid of await readdir("/proc")) {
