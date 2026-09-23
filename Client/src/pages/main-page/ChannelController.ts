@@ -42,6 +42,7 @@ import { membersStore } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../features/safety/store";
+import { reportEntryText } from "../../i18n/reportEntry";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { markChannelRead } from "@lib/read-state";
 import {
@@ -539,9 +540,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // The dialog's closing restores focus to the Report button; the
         // composer is the fallback when a re-render has replaced the row.
         const fallbackFocus = () => slots.inputSlot.querySelector<HTMLElement>("textarea");
-        void import("../../features/reports/openers").then(({ openMessageReport }) => {
-          if (!signal.aborted) openMessageReport({ api, msg, signal, fallbackFocus });
-        });
+        import("../../features/reports/openers").then(
+          ({ openMessageReport }) => {
+            if (!signal.aborted) openMessageReport({ api, msg, signal, fallbackFocus });
+          },
+          () => showToast(reportEntryText("reportLoadFailed"), "error"),
+        );
       },
       onRetry: (correlationId: string) => retrySend(correlationId),
       onDeleteDraft: (correlationId: string) => deleteDraft(correlationId),

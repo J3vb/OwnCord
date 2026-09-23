@@ -17,6 +17,7 @@ import { roleHasPermission } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
 import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
+import { reportEntryText } from "../../i18n/reportEntry";
 import { shellText } from "../../i18n/shell";
 
 // ---------------------------------------------------------------------------
@@ -281,11 +282,14 @@ export function createSidebarMemberSection(
     ...(onMessageUser !== undefined ? { onMessageUser } : {}),
     onReportUser: (userId, name) => {
       // The dialog lives as long as this section (resizeOwner is its lifetime).
-      void import("../../features/reports/openers").then(({ openUserReport }) => {
-        if (!resizeOwner.signal.aborted) {
-          openUserReport({ api, userId, name, signal: resizeOwner.signal, list: memberContent });
-        }
-      });
+      import("../../features/reports/openers").then(
+        ({ openUserReport }) => {
+          if (!resizeOwner.signal.aborted) {
+            openUserReport({ api, userId, name, signal: resizeOwner.signal, list: memberContent });
+          }
+        },
+        () => getToast()?.show(reportEntryText("reportLoadFailed"), "error"),
+      );
     },
     // "Force Logout", not "Kick": the endpoint revokes the target's sessions
     // and nothing stops them signing back in — there is no membership to remove.

@@ -22,6 +22,8 @@ import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
 import { roleHasPermission } from "@lib/permissions";
 import { createAvatarElement } from "@lib/avatar";
 import { readableRoleColor } from "@lib/themes";
+import { showToast } from "@lib/toast";
+import { reportEntryText } from "../i18n/reportEntry";
 import { shellText } from "../i18n/shell";
 
 /** Options for configuring admin action callbacks on the member list. */
@@ -291,37 +293,40 @@ function createMemberItem(
     // Loaded on first open: the popup is only ever needed after a click, so
     // it stays out of the main-page bundle.
     const seq = ++popupSeq;
-    void import("@components/UserProfilePopup").then(({ createUserProfilePopup }) => {
-      if (seq !== popupSeq || signal.aborted) return;
-      const popup = createUserProfilePopup({
-        user: {
-          id: live.id,
-          username: live.username,
-          avatar: live.avatar,
-          role: live.role,
-          status: live.status,
-          displayName: live.displayName,
-          customStatus: live.customStatus,
-        },
-        anchorX,
-        anchorY,
-        ...(isSelf || onMessageUser === undefined
-          ? {}
-          : { onMessage: (userId: number) => onMessageUser(userId) }),
-        ...(isSelf || onReportUser === undefined
-          ? {}
-          : { onReport: (userId: number) => onReportUser(userId, memberDisplayName(live)) }),
-        onClose: () => {
-          if (activePopup === popup) activePopup = null;
-        },
-        fallbackFocus: () =>
-          list?.querySelector<HTMLElement>(`[data-testid="member-${member.id}"]`) ??
-          list?.querySelector<HTMLElement>(".member-item") ??
-          null,
-      });
-      activePopup = popup;
-      popup.mount(document.body);
-    });
+    import("@components/UserProfilePopup").then(
+      ({ createUserProfilePopup }) => {
+        if (seq !== popupSeq || signal.aborted) return;
+        const popup = createUserProfilePopup({
+          user: {
+            id: live.id,
+            username: live.username,
+            avatar: live.avatar,
+            role: live.role,
+            status: live.status,
+            displayName: live.displayName,
+            customStatus: live.customStatus,
+          },
+          anchorX,
+          anchorY,
+          ...(isSelf || onMessageUser === undefined
+            ? {}
+            : { onMessage: (userId: number) => onMessageUser(userId) }),
+          ...(isSelf || onReportUser === undefined
+            ? {}
+            : { onReport: (userId: number) => onReportUser(userId, memberDisplayName(live)) }),
+          onClose: () => {
+            if (activePopup === popup) activePopup = null;
+          },
+          fallbackFocus: () =>
+            list?.querySelector<HTMLElement>(`[data-testid="member-${member.id}"]`) ??
+            list?.querySelector<HTMLElement>(".member-item") ??
+            null,
+        });
+        activePopup = popup;
+        popup.mount(document.body);
+      },
+      () => showToast(reportEntryText("profileLoadFailed"), "error"),
+    );
   };
   item.addEventListener("click", (e) => openProfile(e.clientX, e.clientY), { signal });
   item.addEventListener(

@@ -726,6 +726,28 @@ describe("SidebarMemberSection", () => {
 
       section.destroy();
     });
+
+    it("shows an error toast when the report form fails to load", async () => {
+      vi.doMock("../../src/features/reports/openers", () =>
+        Promise.reject(new Error("chunk failed")),
+      );
+      try {
+        const show = vi.fn();
+        const section = createSidebarMemberSection({
+          ...defaultOpts(),
+          getToast: vi.fn().mockReturnValue({ show }),
+        });
+        container.appendChild(section.element);
+        const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
+        calls[calls.length - 1]![0].onReportUser(7, "bob");
+        await vi.waitFor(() =>
+          expect(show).toHaveBeenCalledWith("Couldn't open the report form. Try again.", "error"),
+        );
+        section.destroy();
+      } finally {
+        vi.doUnmock("../../src/features/reports/openers");
+      }
+    });
   });
 
   // -------------------------------------------------------------------------

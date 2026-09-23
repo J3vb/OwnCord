@@ -154,7 +154,7 @@ describe("My reports", () => {
       // Other Safety sections keep their own (empty) alert regions; find ours.
       await vi.waitFor(() =>
         expect([...pane.querySelectorAll("[role=alert]")].map((a) => a.textContent)).toContain(
-          "Couldn't load the Safety tab. Close Settings and try again.",
+          "Couldn't load your reports. Close Settings and try again.",
         ),
       );
       expect(signals).toEqual([]);
