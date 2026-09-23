@@ -983,7 +983,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     return { element };
   }
 
-  it("hides the input volume, sensitivity and RNNoise controls and explains why", async () => {
+  it("hides the input volume and sensitivity controls and explains why", async () => {
     const tab = await mount();
     const headings = [...tab.element.querySelectorAll("h3")].map((h) => h.textContent);
     expect(headings).not.toContain("Input Volume");
@@ -993,9 +993,14 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       expect.arrayContaining(["Input Device", "Output Device", "Output Volume"]),
     );
     const labels = [...tab.element.querySelectorAll(".setting-label")].map((l) => l.textContent);
-    expect(labels).not.toContain("Enhanced Noise Suppression");
+    // RNNoise runs on the engine's own capture path.
     expect(labels).toEqual(
-      expect.arrayContaining(["Echo Cancellation", "Noise Suppression", "Automatic Gain Control"]),
+      expect.arrayContaining([
+        "Echo Cancellation",
+        "Noise Suppression",
+        "Automatic Gain Control",
+        "Enhanced Noise Suppression",
+      ]),
     );
     const note = tab.element.querySelector('[data-testid="native-audio-note"]');
     expect(note?.textContent).toContain("system mixer");
@@ -1008,7 +1013,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     const descs = [...tab.element.querySelectorAll(".setting-desc")].map((d) => d.textContent);
     expect(
       descs.filter((d) => d?.endsWith("Applies when you next join a voice channel.")),
-    ).toHaveLength(3);
+    ).toHaveLength(4);
   });
 
   it("lists the native engine's audio devices, not the webview's", async () => {

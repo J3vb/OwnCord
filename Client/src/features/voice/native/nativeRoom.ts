@@ -7,8 +7,8 @@
 // publications (deafen), the camera publish and the remote video tracks.
 // This class implements exactly that slice over the Rust backend's commands
 // and its single `native-voice` Tauri event, so the shared modules run
-// unchanged on Linux. Media never crosses IPC: audio capture (libwebrtc's
-// audio device module) and playout (the session's own mixer) happen in the
+// unchanged on Linux. Media never crosses IPC: audio capture (the session's
+// own input stream, APM then RNNoise) and playout (its own mixer) happen in the
 // Rust process, so no `TrackSubscribed` is raised for audio — there is no
 // MediaStreamTrack to attach, and per-user volume is a command
 // (`NativeRemoteParticipant.setVolume`) instead of a gain node. Video does reach the webview, over the session's loopback frame
