@@ -633,7 +633,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // ---------------------------------------------------------------------------
 
   function mountSidebarContent(mode: "channels" | "dms"): void {
-    const hadFocus = contentSlot.contains(document.activeElement);
+    const contentHadFocus = contentSlot.contains(document.activeElement);
     // Tear down the existing content
     if (activeSidebarContent !== null) {
       activeSidebarContent.destroy?.();
@@ -736,7 +736,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       dmSidebar.mount(innerSlot);
       activeSidebarContent = dmSidebar;
       contentSlot.appendChild(innerSlot);
-      if (hadFocus) {
+      if (contentHadFocus) {
         contentSlot.querySelector<HTMLElement>("button, input, [tabindex='0']")?.focus();
       }
 
