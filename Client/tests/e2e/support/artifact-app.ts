@@ -217,8 +217,8 @@ async function launchLinux(
             type: "key",
             id: "keyboard",
             actions: [
-              { type: "keyDown", value: "" },
-              { type: "keyUp", value: "" },
+              { type: "keyDown", value },
+              { type: "keyUp", value },
             ],
           },
         ],
