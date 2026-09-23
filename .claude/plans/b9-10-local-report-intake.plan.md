@@ -205,6 +205,8 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   close the form and abort a pending send; a late result is dropped. Success
   closes it, returns focus to the opener and shows a toast pointing at
   Settings, Safety. No screenshot, no guessed metadata, no other destination.
+  If the form's chunk (or the profile popup's) fails to load, an error toast
+  says so instead of the action silently doing nothing.
 - **My reports** (`features/reports/myReports.ts`) is the Settings Safety tab's
   first section (Q2): kind, reason, where it stands (state and outcome as one
   English phrase) and when, from `GET /reports/mine` only, with loading, empty,
@@ -228,7 +230,7 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   stays first) and appends My reports after it; B9-16 adds appeals to the
   same pane.
 - **Budget.** The form, the openers and My reports load on first use
-  (`import()`), and the two entry labels and the Safety tab's load error live
+  (`import()`), and the two entry labels and the load-failure messages live
   in their own small catalog (`i18n/reportEntry.ts`), so MainPage stays inside
   its 60,000 B budget. After B9-15 merged, `dev` alone measured 59,968 B, so
   the profile popup (only ever needed after a click, and imported only by
@@ -269,7 +271,7 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
 Base `166d71e4`; Node 26.9.0, vitest 4.1.11, Playwright Chromium headless
 shell 151, Go 1.26.7, Linux. The counts and sizes below predate the review
 round's fixes (member-row description, user-report fallback focus, Safety load
-error, profile-popup focus restore), whose tests are in `member-list`,
+error, profile-popup focus restore, chunk-failure toasts), whose tests are in `member-list`,
 `sidebar-member-section` and `myReports`.
 
 | Check                                                                                                                                                                                                                                                     | Result                                                                                                                  |
