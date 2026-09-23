@@ -2,6 +2,8 @@
 
 **Status:** IMPLEMENTED — native AT recordings and OS-zoom check pending owner — 2026-09-23 on branch `fm/b9-3-impl` from `dev` `4830b23c`; inventory and evidence in `docs/plans/b9-text-inventory-2026-09-23.md`.
 
+Validated at `d33224d7e8fa110bf68c93be2a030cf2f50da8d3`.
+
 > **Milestone:** B9-3 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `refactor/b9-3-english-text-boundary`; branch from current `dev`, PR to `dev` only.
 > **Drafted:** 2026-09-23. **Base commit:** `0beee8e4c50ca18823750e381d3a1d6e327029b8` (`dev`).

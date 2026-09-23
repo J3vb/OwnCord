@@ -162,6 +162,8 @@ Environment: Ubuntu 24.04.5 LTS (headless agent host, no display or screen
 reader), Node 26.9.0, vitest 4.1.11, Playwright 1.63.0 with bundled Chromium,
 mocked Tauri (`tests/e2e/helpers.ts`).
 
+Validated at `d33224d7e8fa110bf68c93be2a030cf2f50da8d3`.
+
 Inventory drift at the base: the plan's three rows were re-read at `4830b23c`.
 Only `AccessibilityTab.ts` changed since `0beee8e4` (B9-2's
 `SYNC_OS_MOTION_DEFAULT`, three lines, no copy change). Every cited line range
