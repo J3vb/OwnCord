@@ -134,7 +134,7 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
     const pending =
       decideDmRequest === undefined
         ? Promise.resolve("failed" as const)
-        : decide({ decideDmRequest }, r, decision, signal);
+        : decide({ decideDmRequest, listBlocks: api?.listBlocks }, r, decision, signal);
     void pending.then((result) => {
       if (result === "aborted") return;
       // A decided row stays busy until the store's next render removes it.

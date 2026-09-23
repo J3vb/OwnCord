@@ -9,6 +9,10 @@
  * request is gone) refetch the inbox instead of guessing: a request
  * disappearing never proves it was accepted.
  *
+ * The server commits a block before it moves the request, so a Block that
+ * ends stale or failed may still have blocked the sender: the block list is
+ * re-read rather than assumed either way.
+ *
  * Accepting opens the ordinary conversation, but only once the server's
  * dm_channel_open has put it in the DM store. The DM is never synthesized
  * from the request.
@@ -17,7 +21,7 @@
 import type { ApiClient, ApiClientError, DmRequestDecision } from "@lib/api";
 import { createElement } from "@lib/dom";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
-import { setUserBlockedByMe } from "@stores/blocks.store";
+import { blocksStore, setBlockedByMe, setUserBlockedByMe } from "@stores/blocks.store";
 import { setActiveChannel } from "@stores/channels.store";
 import { addDmChannel, clearDmUnread, dmStore, type DmChannel } from "@stores/dm.store";
 import { setActiveDmUser, setSidebarMode } from "@stores/ui.store";
@@ -28,7 +32,7 @@ import { applyFrame } from "./store";
 import { loadRequests, requestsApi } from "./sync";
 
 export type DecisionApi = Pick<ApiClient, "decideDmRequest"> &
-  Partial<Pick<ApiClient, "getDmChannels">>;
+  Partial<Pick<ApiClient, "getDmChannels" | "listBlocks">>;
 
 /** done: the server applied it. stale: 409/404, the inbox was refetched. failed: try again. */
 export type DecisionOutcome = "done" | "stale" | "failed" | "aborted";
@@ -54,6 +58,7 @@ export async function decide(
   } catch (err) {
     // The view went away (closed, signed out): whatever happened, it is not ours to show.
     if (signal.aborted) return "aborted";
+    if (decision === "block") refreshBlocks(api, signal);
     if (isStale(err)) {
       loadRequests(requestsApi());
       return "stale";
@@ -64,6 +69,18 @@ export async function decide(
   applyFrame(request, false);
   if (decision === "block") setUserBlockedByMe(request.sender.id, true);
   return "done";
+}
+
+/** Re-read our blocks, unless a local block change or the view's end overtakes it. */
+function refreshBlocks(api: DecisionApi, signal: AbortSignal): void {
+  const rev = blocksStore.getState().blockedByMeRev ?? 0;
+  api.listBlocks?.(signal).then(
+    (r) => {
+      if (!signal.aborted) setBlockedByMe(r.blocked_user_ids, rev);
+    },
+    // The next ready re-reads it.
+    () => {},
+  );
 }
 
 /** selectDmConversation without its back-path bookkeeping: the content view

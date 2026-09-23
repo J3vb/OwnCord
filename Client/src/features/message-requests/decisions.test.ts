@@ -308,6 +308,46 @@ describe("message request decisions", () => {
     expect(outcome()).toBe("Blocked Stranger 1 and removed their request.");
   });
 
+  it("re-reads the block list when a Block loses the race after its block committed", async () => {
+    await open(1);
+    let blocks!: (ids: number[]) => void;
+    vi.mocked(fx.api.listBlocks).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          blocks = (ids) => resolve({ blocked_user_ids: ids });
+        }),
+    );
+    button(1, "block").click();
+    dialog()!.querySelector<HTMLButtonElement>("[data-testid='request-confirm']")!.click();
+    // Another device accepted between the server's block and its state change.
+    fx.decisions[0]!.reject(new ApiClientError(409, "CONFLICT", "not pending"));
+    await settle();
+    expect(fx.api.listBlocks).toHaveBeenCalledTimes(1);
+    expect(blocksStore.getState().blockedByMe.has(11)).toBe(false);
+    blocks([11]);
+    await settle();
+    expect(blocksStore.getState().blockedByMe.has(11)).toBe(true);
+  });
+
+  it("drops the block list re-read once the view has gone", async () => {
+    await open(1);
+    let blocks!: (ids: number[]) => void;
+    vi.mocked(fx.api.listBlocks).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          blocks = (ids) => resolve({ blocked_user_ids: ids });
+        }),
+    );
+    button(1, "block").click();
+    dialog()!.querySelector<HTMLButtonElement>("[data-testid='request-confirm']")!.click();
+    fx.decisions[0]!.reject(new TypeError("Failed to fetch"));
+    await settle();
+    owner.abort();
+    blocks([11]);
+    await settle();
+    expect(blocksStore.getState().blockedByMe.has(11)).toBe(false);
+  });
+
   it("moves focus to the next request, then the previous, then the heading", async () => {
     await open(1, 2, 3);
     // Newest first: 3, 2, 1.
