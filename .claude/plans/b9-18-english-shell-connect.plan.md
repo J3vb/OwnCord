@@ -288,7 +288,7 @@ Chromium, Linux, dev server on a private port.
 | `npm run typecheck`, `typecheck:build`, `typecheck:e2e`, `npm run lint` (oxlint, cycles, eslint) | clean                                                                                                                                                                                                                                       |
 | Playwright `b9-text-expansion` (B9-3 cases plus the two B9-18 cases)                             | 4 passed                                                                                                                                                                                                                                    |
 | Playwright full mocked suite, 4 workers                                                          | 456 passed, 7 skipped, 8 failed; the 8 failures (in `channel-gating`, `channel-management`, `dm-calls`) came from source edits and builds made against the live dev server mid-run, and those three files then passed 37 of 37 on their own |
-| `npm run build:budget && npm run check:budgets`                                                  | all ok; with dev 9f9e2b8e merged, MainPage 63,026 B of 64,000 B, startup closure 92,876 B of 93,000 B ([Bundle budget](#bundle-budget))                                                                                                     |
+| `npm run build:budget && npm run check:budgets`                                                  | all ok; with dev 20bcfdf8 merged, MainPage 63,132 B of 64,000 B, startup closure 93,923 B of 94,000 B ([Bundle budget](#bundle-budget))                                                                                                     |
 | `npm run check:docs`                                                                             | passed                                                                                                                                                                                                                                      |
 
 **Failing controls.** Each was applied in turn, the B9-18 expansion case was
@@ -304,7 +304,7 @@ Measured against the same `build:budget` at the base, gzip level 9:
 
 | Chunk           | Base `166d71e4` | This branch | Dev `5682b410` | Branch merged with dev |                  Budget |
 | --------------- | --------------: | ----------: | -------------: | ---------------------: | ----------------------: |
-| startup closure |        87,349 B |    89,398 B |       90,289 B |               92,265 B | 93,000 B (was 91,000 B) |
+| startup closure |        87,349 B |    89,398 B |       90,289 B |               92,265 B | 94,000 B (was 91,000 B) |
 | MainPage        |        58,546 B |    60,721 B |       59,945 B |               62,271 B | 64,000 B (was 60,512 B) |
 
 The growth is the cost of reading text through catalog keys, not new copy:
@@ -332,6 +332,13 @@ banner and identity-key prompt text moved to `shell.ts`, with the identity
 prompt itself moved from `CertMismatchModal.ts` to `IdentityMismatchModal.ts`
 (only the main page opens it). The startup closure now measures 92,876 B and
 MainPage 63,026 B.
+
+**Re-measured after merging dev 20bcfdf8 (2026-09-23):** dev's #1760 and
+#1763 took the startup closure to 93,923 B, over the 93,000 B budget; MainPage
+measures 63,132 B of 64,000 B. **Decision (firstmate, 2026-09-23):** the
+shared startup budget is raised to 94,000 B for the B9 lanes, including
+Refined Neon (+1.1 KB) and the B9-18 connect catalog, with no further size
+restructuring; MainPage stays at 64,000 B. Re-baselined at B9-26.
 
 ### Accessibility (Q1)
 
