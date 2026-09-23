@@ -12,12 +12,14 @@
  *   send (TIMED_OUT) revalidates it against the server.
  * - `history` is the latest GET /users/me/moderation answer; null until one
  *   lands.
+ * - `appeals` (B9-16) is the latest GET /appeals/mine answer, patched by a
+ *   live appeal_status frame until the next read replaces it.
  */
 
-import type { ApiClient, OwnModerationAction } from "@lib/api";
+import type { ApiClient, MyAppeal, OwnModerationAction } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { createStore } from "@lib/store";
-import type { ReadyNotice } from "@lib/types";
+import type { AppealStatusPayload, ReadyNotice } from "@lib/types";
 
 const log = createLogger("safety");
 
@@ -44,13 +46,22 @@ export interface SafetyState {
   readonly timeout: { readonly expiresAt: string } | null;
   readonly history: readonly OwnModerationAction[] | null;
   readonly historyFailed: boolean;
+  readonly appeals: readonly MyAppeal[] | null;
+  readonly appealsFailed: boolean;
 }
 
-const INITIAL: SafetyState = { notices: [], timeout: null, history: null, historyFailed: false };
+const INITIAL: SafetyState = {
+  notices: [],
+  timeout: null,
+  history: null,
+  historyFailed: false,
+  appeals: null,
+  appealsFailed: false,
+};
 
 export const safetyStore = createStore<SafetyState>(INITIAL);
 
-type HistorySource = Pick<ApiClient, "getOwnModeration">;
+type HistorySource = Pick<ApiClient, "getOwnModeration"> & Partial<Pick<ApiClient, "getMyAppeals">>;
 
 let source: HistorySource | null = null;
 let refreshSeq = 0;
@@ -221,8 +232,27 @@ function applyHistory(rows: readonly OwnModerationAction[]): void {
 }
 
 /**
- * Re-read the caller's own moderation history, the authority for timeout
- * expiry and lifted/removed state after a restart or a missed live frame.
+ * A live appeal_status frame: show the new state now. The next read (the
+ * caller refreshes) is the authority, and brings an appeal filed elsewhere.
+ */
+export function applyAppealStatus(p: AppealStatusPayload): void {
+  safetyStore.setState((prev) => ({
+    ...prev,
+    appeals:
+      prev.appeals?.map((a) =>
+        a.id === p.id ? { ...a, state: p.state, decision_note: p.decision_note } : a,
+      ) ?? null,
+    history:
+      prev.history?.map((r) =>
+        r.appeal?.id === p.id ? { ...r, appeal: { id: p.id, state: p.state } } : r,
+      ) ?? null,
+  }));
+}
+
+/**
+ * Re-read the caller's own moderation history and appeals, the authority for
+ * timeout expiry, lifted/removed state and appeal status after a restart or a
+ * missed live frame.
  * `api` is remembered for later refreshes (the Safety tab, a retry). Only
  * the latest request's answer applies.
  */
@@ -240,6 +270,18 @@ export function refreshOwnModeration(api?: HistorySource): void {
       if (seq !== refreshSeq || from !== source) return;
       log.warn("Failed to load own moderation history", { error: String(err) });
       safetyStore.setState((prev) => ({ ...prev, historyFailed: true }));
+    });
+  from
+    .getMyAppeals?.()
+    .then((appeals) => {
+      if (seq === refreshSeq && from === source) {
+        safetyStore.setState((prev) => ({ ...prev, appeals, appealsFailed: false }));
+      }
+    })
+    .catch((err: unknown) => {
+      if (seq !== refreshSeq || from !== source) return;
+      log.warn("Failed to load own appeals", { error: String(err) });
+      safetyStore.setState((prev) => ({ ...prev, appealsFailed: true }));
     });
 }
 

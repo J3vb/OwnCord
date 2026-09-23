@@ -4,6 +4,7 @@ import { formatUntil, safetyText } from "../../i18n/safety";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import {
   addNotice,
+  applyAppealStatus,
   confirmTimeout,
   refreshOwnModeration,
   setActiveTimeout,
@@ -14,7 +15,8 @@ type SafetyApi = DispatchApi | undefined;
 
 function refresh(api: SafetyApi): void {
   const getOwnModeration = api?.getOwnModeration?.bind(api);
-  if (getOwnModeration !== undefined) refreshOwnModeration({ getOwnModeration });
+  const getMyAppeals = api?.getMyAppeals?.bind(api);
+  if (getOwnModeration !== undefined) refreshOwnModeration({ getOwnModeration, getMyAppeals });
 }
 
 /** Every ready (first connect and each reconnect): notices, then the authoritative history. */
@@ -51,5 +53,11 @@ export function handleModAction(api: SafetyApi, payload: Payload<"mod_action">):
 export function handleTimedOutRefusal(api: SafetyApi, payload: Payload<"error">): void {
   if (payload.code !== "TIMED_OUT") return;
   confirmTimeout(null);
+  refresh(api);
+}
+
+/** The caller's own appeal changed (B9-16): show it now, then re-read (an overturn lifts or acknowledges). */
+export function handleAppealStatus(api: SafetyApi, payload: Payload<"appeal_status">): void {
+  applyAppealStatus(payload);
   refresh(api);
 }

@@ -388,7 +388,12 @@ function mount(acknowledgeNotice: (id: number) => Promise<void>): {
   const ac = new AbortController();
   const fallback = vi.fn();
   const el = createNoticesBanner({
-    api: { acknowledgeNotice, getOwnModeration: vi.fn().mockResolvedValue([]) },
+    api: {
+      acknowledgeNotice,
+      getOwnModeration: vi.fn().mockResolvedValue([]),
+      fileAppeal: vi.fn(),
+      withdrawAppeal: vi.fn(),
+    },
     fallbackFocus: fallback,
     signal: ac.signal,
   });
