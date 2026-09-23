@@ -6,8 +6,8 @@
   },
   "chunks": {
     "MainPage": {
-      "budget": 60000,
-      "note": "Measured 56,855 B at dev 4c45d26a (B7-7)."
+      "budget": 61000,
+      "note": "Measured 56,855 B at dev 4c45d26a (B7-7). Raised 60,000 -> 61,000 B for B9-7: dev 5682b410 measured 59,944 B (56 B headroom) and the NSFW consent gate (pre-load gate, withdraw bar, consent copy catalog) brings it to 60,794 B."
     },
     "livekit": {
       "budget": 135000,
