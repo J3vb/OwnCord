@@ -118,8 +118,7 @@ func (s *UploadService) Resolve(ctx context.Context, fileID string) (*db.Attachm
 //   - DM participation is required of everyone, administrators included. This
 //     matches every other DM read gate in the codebase (requireChannelRead,
 //     checkSendPermission), none of which have an admin bypass, and it is
-//     checked ahead of the admin branch
-//     so that branch cannot skip it.
+//     checked ahead of the admin branch so that branch cannot skip it.
 //   - A linked attachment in a guild channel needs READ_MESSAGES there, which
 //     an administrator is exempt from.
 //   - An unlinked attachment is private to its uploader, administrators
@@ -176,8 +175,8 @@ func (s *UploadService) Authorize(ctx context.Context, aa *db.AttachmentAccess, 
 
 // checkNSFWConsent is Authorize's B5-7 decision 13 gate: an administrator
 // without a row is refused exactly like anyone else — no bit and no admin
-// bypass skips this. DMs
-// cannot be labelled, so this only ever applies to a non-DM linked channel.
+// bypass skips this. DMs cannot be labelled, so this only ever applies to a
+// non-DM linked channel.
 func (s *UploadService) checkNSFWConsent(ctx context.Context, aa *db.AttachmentAccess, actor *db.User) error {
 	if aa.ChannelID == nil || aa.ChannelType == "dm" || !aa.ChannelNSFW {
 		return nil
