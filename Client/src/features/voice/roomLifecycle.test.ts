@@ -2,14 +2,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Room } from "livekit-client";
 import type { SessionState } from "./sessionState";
 
-vi.mock("livekit-client", () => ({
-  Room: vi.fn(function (this: Record<string, unknown>, options: unknown) {
-    this.options = options;
-    this.on = vi.fn();
-    this.setE2EEEnabled = vi.fn(async () => {});
-  }),
-  RoomEvent: {},
-}));
+vi.mock("livekit-client", () => {
+  const Room = Object.assign(
+    vi.fn(function (this: Record<string, unknown>, options: unknown) {
+      // What livekit's constructor branches on when it registers its
+      // navigator.mediaDevices devicechange listener.
+      this.cleanupRegistryAtConstruction = Room.cleanupRegistry;
+      this.options = options;
+      this.on = vi.fn();
+      this.setE2EEEnabled = vi.fn(async () => {});
+    }),
+    { cleanupRegistry: new FinalizationRegistry(() => {}) },
+  );
+  return { Room, RoomEvent: {} };
+});
 vi.mock("../../stores/voice.store", () => ({
   setLocalCamera: vi.fn(),
   setLocalScreenshare: vi.fn(),
@@ -131,6 +137,17 @@ describe("createRoom", () => {
     expect(workers[1]!.terminate).not.toHaveBeenCalled();
     expect(e2ee.keyProvider.removeAllListeners).toHaveBeenCalledTimes(2);
     expect(first.setE2EEEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it("builds every Room on livekit's direct devicechange listener, which disconnect removes", async () => {
+    // livekit-client 2.22's FinalizationRegistry path registers a closure
+    // that still captures the Room, so the Room is never collected and the
+    // listener is never removed: every join leaked a whole Room.
+    const { lifecycle } = setup();
+    const room = await lifecycle.createRoom(1);
+    expect(
+      (room as unknown as { cleanupRegistryAtConstruction: unknown }).cleanupRegistryAtConstruction,
+    ).toBe(false);
   });
 });
 
