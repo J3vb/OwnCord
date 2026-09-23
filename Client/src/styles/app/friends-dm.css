@@ -13,14 +13,14 @@
   background: var(--bg-hover);
 }
 .dm-back-arrow {
-  color: var(--accent-primary, var(--accent));
+  color: var(--accent-text);
   font-size: 16px;
 }
 .dm-back-info {
   flex: 1;
 }
 .dm-back-title {
-  color: var(--accent-primary, var(--accent));
+  color: var(--accent-text);
   font-weight: 600;
   font-size: 12px;
 }
@@ -168,6 +168,7 @@
 }
 .dm-item .dm-unread-badge {
   background: var(--accent);
+  color: var(--on-accent);
 }
 .dm-item .dm-mention-badge {
   background: var(--red);

@@ -11,10 +11,12 @@ vi.mock("@stores/ui.store", () => ({
   setTheme: vi.fn(),
 }));
 
-vi.mock("@lib/themes", () => ({
+vi.mock("@lib/themes", async (importOriginal) => ({
   getActiveThemeName: mockGetActiveThemeName,
   restoreTheme: mockRestoreTheme,
   applyThemeByName: mockApplyThemeByName,
+  // The real single writer of the accent tokens (B9-2).
+  applyAccent: (await importOriginal<typeof import("@lib/themes")>()).applyAccent,
 }));
 
 describe("AppearanceTab — Accessibility", () => {
@@ -406,6 +408,18 @@ describe("AppearanceTab — Accessibility", () => {
   });
 
   // --- Renders all 10 accent swatches ---
+
+  it("names the custom accent input and describes the Q8 readability fallback (B9-2)", () => {
+    const section = buildAppearanceTab(ac.signal);
+    container.appendChild(section);
+
+    const hexInput = container.querySelector(".accent-hex-row input") as HTMLInputElement;
+    expect(hexInput.getAttribute("aria-label")).toBe("Custom accent color (hex)");
+    const note = document.getElementById(hexInput.getAttribute("aria-describedby") ?? "");
+    expect(note?.textContent).toBe(
+      "Custom colours may reduce readability; text and focus indicators fall back to a readable colour when needed, and High Contrast restores tested colours.",
+    );
+  });
 
   it("renders all 10 accent color swatches", () => {
     const section = buildAppearanceTab(ac.signal);

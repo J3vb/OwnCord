@@ -28,7 +28,7 @@
 }
 .context-menu-item:hover {
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
 }
 .context-menu-item.danger {
   color: var(--red);
@@ -83,14 +83,14 @@
 }
 .context-menu__item:hover {
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
 }
 .context-menu__item--active {
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 .context-menu__item--active:hover {
-  color: white;
+  color: var(--on-accent);
 }
 .context-menu__item--danger {
   color: var(--red);

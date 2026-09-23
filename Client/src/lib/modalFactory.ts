@@ -35,6 +35,8 @@ export interface ModalOptions {
   readonly ariaLabelledBy?: string;
   /** AbortSignal for automatic cleanup when the parent component is destroyed. */
   readonly signal?: AbortSignal;
+  /** Focus target on close when the opener is no longer in the document. */
+  readonly fallbackFocus?: () => HTMLElement | null;
 }
 
 export interface ModalInstance {
@@ -66,6 +68,7 @@ export function createModal(
     ariaLabel,
     ariaLabelledBy,
     signal,
+    fallbackFocus,
   } = options;
 
   const disposable = new Disposable();
@@ -151,7 +154,7 @@ export function createModal(
   // After append: move focus into the dialog and remember where it came from.
   // Callers that focus a specific control afterwards (e.g. the prompt input)
   // simply override the initial target; the restore still works.
-  restoreFocus = focusDialog(modal);
+  restoreFocus = focusDialog(modal, fallbackFocus);
 
   return {
     overlay,

@@ -63,7 +63,7 @@
 .quick-switch-item.add-new {
   border-style: dashed;
   border-color: var(--border);
-  color: var(--accent-primary, var(--accent));
+  color: var(--accent-text);
 }
 .quick-switch-icon {
   width: 36px;
@@ -80,7 +80,7 @@
 }
 .quick-switch-item.current .quick-switch-icon {
   background: var(--accent-gradient, var(--accent));
-  color: white;
+  color: var(--on-accent);
 }
 .quick-switch-item.add-new .quick-switch-icon {
   background: transparent;

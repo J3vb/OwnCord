@@ -4,7 +4,7 @@
 
 import { createElement } from "@lib/dom";
 import { appendToggleRows, loadPref, type ToggleItem } from "./helpers";
-import { syncOsMotionListener } from "@lib/os-motion";
+import { SYNC_OS_MOTION_DEFAULT, syncOsMotionListener } from "@lib/os-motion";
 import { applyFontSize } from "@lib/appearance";
 
 const TOGGLES: ReadonlyArray<ToggleItem> = [
@@ -22,7 +22,7 @@ const TOGGLES: ReadonlyArray<ToggleItem> = [
     // re-reads the OS media query (OS wins), OFF re-reads the just-saved
     // manual pref — matching applyStoredAppearance's startup ordering.
     sideEffect: () => {
-      syncOsMotionListener(loadPref<boolean>("syncOsMotion", false));
+      syncOsMotionListener(loadPref<boolean>("syncOsMotion", SYNC_OS_MOTION_DEFAULT));
     },
   },
   {
@@ -44,7 +44,7 @@ const TOGGLES: ReadonlyArray<ToggleItem> = [
     key: "syncOsMotion",
     label: "Sync with OS",
     desc: "Automatically enable reduced motion based on your OS accessibility settings",
-    fallback: false,
+    fallback: SYNC_OS_MOTION_DEFAULT,
     sideEffect: (nowOn) => {
       syncOsMotionListener(nowOn);
     },

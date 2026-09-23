@@ -24,7 +24,7 @@ vi.mock("@lib/themes", () => ({
   restoreTheme: vi.fn(),
   applyThemeByName: mockApplyThemeByName,
 }));
-vi.mock("@lib/os-motion", () => ({ syncOsMotionListener: vi.fn() }));
+vi.mock("@lib/os-motion", () => ({ SYNC_OS_MOTION_DEFAULT: true, syncOsMotionListener: vi.fn() }));
 
 import { applyStoredAppearance } from "@lib/appearance";
 import { buildAccessibilityTab } from "@components/settings/AccessibilityTab";

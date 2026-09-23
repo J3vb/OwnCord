@@ -78,7 +78,7 @@
   transition: color 0.15s;
 }
 .sidebar-dm-view-all:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .sidebar-members-section .member-list {
   width: 100%;
@@ -144,7 +144,7 @@
   transition: color 0.15s;
 }
 .banned-unban-btn:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .member-role-group {
   padding: 16px 16px 4px;

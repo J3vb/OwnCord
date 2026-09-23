@@ -173,7 +173,7 @@
   border: none;
   border-radius: var(--radius-pill, 999px);
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;

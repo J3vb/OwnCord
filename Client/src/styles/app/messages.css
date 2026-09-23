@@ -259,7 +259,7 @@
 }
 .mention:hover {
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
 }
 /* A mention of the signed-in user (or an honoured @everyone/@here) reads
    louder than a mention of someone else. */
@@ -296,7 +296,7 @@
 .channel-mention:hover,
 .channel-mention:focus-visible {
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
   outline: none;
 }
 /* owncord://message/… permalinks pasted into chat, rendered as a compact chip
@@ -338,7 +338,7 @@
 .message-link-chip:focus-visible .mlc-channel,
 .message-link-chip:hover .mlc-action,
 .message-link-chip:focus-visible .mlc-action {
-  color: white;
+  color: var(--on-accent);
 }
 
 /* Reply */
@@ -380,7 +380,7 @@
 }
 /* The bar is a jump control, so it needs a visible keyboard focus ring. */
 .msg-reply-ref:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: 3px;
 }
@@ -779,7 +779,7 @@ ul.md-list-nested {
 }
 
 .msg-spoiler:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -945,7 +945,7 @@ ul.md-list-nested {
   height: 36px;
   border-radius: var(--radius-sm);
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1048,7 +1048,7 @@ ul.md-list-nested {
   gap: 12px;
   padding: 8px 16px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 13px;
   font-weight: 500;
   flex-shrink: 0;
@@ -1070,7 +1070,8 @@ ul.md-list-nested {
   opacity: 0.85;
 }
 .update-banner-install {
-  background: #fff;
+  /* Inverted accent pair: the same contrast as --on-accent text on --accent. */
+  background: var(--on-accent);
   color: var(--accent);
 }
 .update-banner-later {
