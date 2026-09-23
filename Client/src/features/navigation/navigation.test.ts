@@ -84,6 +84,11 @@ function seedChannels(): void {
   }));
 }
 
+/** A text channel as a `ready` payload carries it. */
+function readyTextChannel(id: number) {
+  return { id, name: `c${id}`, type: "text", category: null, position: id };
+}
+
 /** Store notifications are batched on a microtask. */
 function flush(): void {
   channelsStore.flush();
@@ -376,15 +381,8 @@ describe("leaving a view another way", () => {
     nav.open("moderation", opener());
     flush();
 
-    const text = (id: number) => ({
-      id,
-      name: `c${id}`,
-      type: "text",
-      category: null,
-      position: id,
-    });
     applyReadyActiveChannel({
-      channels: [text(GENERAL), text(RANDOM)],
+      channels: [readyTextChannel(GENERAL), readyTextChannel(RANDOM)],
       dm_channels: [],
     } as unknown as Payload<"ready">);
     flush();

@@ -2,7 +2,8 @@
 
 **Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-4-impl` from `dev` `500f99a4`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
-Implemented at `71737d93ab1f917d05081894b1ddc2f64ffdfbe4`.
+Implemented at `71737d93ab1f917d05081894b1ddc2f64ffdfbe4`; the review fixes that
+followed on the branch are folded into the implementation decisions below.
 
 > **Milestone:** B9-4 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-4-shared-navigation`; branch from current `dev`, PR to `dev` only.
@@ -61,11 +62,17 @@ Q9's gate conditions met and Q2 decided on 2026-09-23. `dev` later gained
   count as on screen: `wsHandlers.ts` and `notifications.ts` suppress unread
   and notifications for the active channel. MainPage's existing
   active-channel subscriber tears the chat surface down. Choosing any channel
-  or DM (the one the user came from included) replaces the view.
+  or DM (the one the user came from included) replaces the view; choosing a
+  non-DM channel also drops the remembered `channelBeforeDm`. A fresh `ready`
+  does not auto-select a channel while a view is open
+  (`applyReadyActiveChannel` in `features/channels/wsHandlers.ts`), so a
+  reconnect keeps the view and its return channel.
 - **Back is the sidebar's path.** `SidebarArea.returnToChannel()` is the DM back
-  arrow's body, extracted unchanged. Close and Escape call it. Focus returns to
-  the entry that opened the view, or, when that entry left with DM mode, to the
-  returned channel's composer.
+  arrow's body, extracted. Close and Escape call it. It (and `fallBackFromDm`)
+  skips a remembered channel that no longer exists and falls through to the
+  first text channel. Focus is decided after the sidebar and channel remount:
+  it returns to the entry that opened the view, or, when that entry left with
+  DM mode, to the returned channel's composer.
 - **Nothing shows before its feature.** `NAVIGATION_DESTINATIONS` is empty in
   this build. The Requests section, the DM header badge, the Moderation button
   and the Safety tab each render only when their destination has an entry.
@@ -81,7 +88,9 @@ Q9's gate conditions met and Q2 decided on 2026-09-23. `dev` later gained
   `openSettings("Safety")` landing); `Client/src/i18n/navigation.ts` (new) and
   one `tabs.safety` key in `Client/src/i18n/settings.ts`;
   `Client/src/styles/app/chat-area.css` and `member-list.css` (the view column
-  and badge rules, in their owning fragments); and the unit tests whose
+  and badge rules, in their owning fragments); `sidebar.css` (the server header
+  wraps its buttons when Moderation shows); `Client/src/features/channels/wsHandlers.ts`
+  (the `ready` auto-select guard); and the unit tests whose
   `UiState` fixtures gained the two new fields.
 
 ## Patterns to mirror

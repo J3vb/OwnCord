@@ -575,9 +575,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       setActiveChannel(saved);
       return;
     }
-    // No saved channel — this happens when DM mode was entered without
-    // going through selectDmConversation (e.g. SidebarDmSection's "View
-    // all messages" button, which does a bare setSidebarMode). If a real
+    // No saved channel, or it was deleted. The former happens when DM mode
+    // was entered without going through selectDmConversation (e.g.
+    // SidebarDmSection's "View all messages" button, which does a bare
+    // setSidebarMode). If a real
     // non-DM channel is already active, leave it alone instead of
     // silently jumping to the first text channel in Map order.
     const st = channelsStore.getState();
