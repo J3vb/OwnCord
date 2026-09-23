@@ -367,6 +367,7 @@ export class E2EEManager {
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
       const makeTimeout = (ms: number) =>
         new Promise<void>((_, reject) => {
+          // i18n-exempt: internal E2EE timeout, surfaces only as an unverified-peer badge
           timeoutId = setTimeout(() => reject(new Error("E2EE key exchange timeout")), ms);
         });
       try {
@@ -1025,6 +1026,7 @@ export class E2EEManager {
     // Reject (not resolve) so waiting setupKeyExchange sees a failure, not a
     // silent success with no room key.
     if (this._roomKeyRejector) {
+      // i18n-exempt: internal voice teardown signal, never rendered
       this._roomKeyRejector(new Error("Voice session ended"));
     }
     this._roomKeyResolver = null;

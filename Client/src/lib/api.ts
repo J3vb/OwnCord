@@ -227,6 +227,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       const headers: Record<string, string> = {};
       if (!opts?.multipart) headers["Content-Type"] = "application/json";
       const token = opts?.token ?? snapshot.token;
+      // i18n-exempt: wire header value, never rendered
       if (token) headers["Authorization"] = `Bearer ${token}`;
       const init: RequestInit = { method, headers, signal: transport.signal };
       if (body !== undefined)
@@ -318,6 +319,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     body?: unknown,
     signal?: AbortSignal,
   ): Promise<T> {
+    // i18n-exempt: log label for admin requests, never rendered
     return doFetch<T>("Admin API", "/admin/api", method, path, body, signal);
   }
 
@@ -342,6 +344,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     setConfig(newConfig: Partial<ApiClientConfig>): void {
       if (newConfig.host !== undefined && !isValidHost(newConfig.host)) {
         log.error("setConfig rejected invalid host", { host: newConfig.host });
+        // i18n-exempt: internal guard; callers validate the host before this runs
         throw new Error("Invalid host format");
       }
       // Switching to a different host without an accompanying new token must
@@ -921,6 +924,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         );
         owner.assertCurrent();
         if (!res.ok) {
+          // i18n-exempt: internal ApiClientError diagnostic; the connect page shows a fixed status, not this message
           throw new ApiClientError(res.status, "HEALTH_CHECK_FAILED", "Health check failed");
         }
         const data = await owner
@@ -959,6 +963,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         );
         owner.assertCurrent();
         if (!res.ok) {
+          // i18n-exempt: internal ApiClientError diagnostic; the connect page shows a fixed status, not this message
           throw new ApiClientError(res.status, "SERVER_INFO_FAILED", "Server info check failed");
         }
         const data = await owner

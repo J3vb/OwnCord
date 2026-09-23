@@ -111,6 +111,10 @@ export const connectText = defineCatalog("connect", {
   "connected.ready": "Ready!",
 
   "session.expired": "Your session expired — sign in again.",
+  "session.serverShutdown": "The server was shut down — you have been signed out.",
+  "session.serverRestarting": "Server is restarting: {reason}",
+  "session.banned": "You have been banned",
+  "error.serverFallback": "Server error",
   "session.passwordRemoveFailed": "Could not remove the saved password — it is still stored",
   "session.credentialsSaveFailed": "Could not save credentials — auto-login won't work",
   "session.savedLoginUnavailable":

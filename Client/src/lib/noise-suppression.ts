@@ -256,6 +256,7 @@ export function createRNNoiseProcessor(): TrackProcessor<Track.Kind.Audio, Audio
       log.debug("RNNoise processor init", { audioWorkletSupported: supportsAudioWorklet() });
       const ctx = opts.audioContext ?? cachedCtx;
       if (ctx == null) {
+        // i18n-exempt: internal audio guard; the caller keeps the unprocessed track
         throw new Error("RNNoise processor: no AudioContext available");
       }
       cachedCtx = ctx;
