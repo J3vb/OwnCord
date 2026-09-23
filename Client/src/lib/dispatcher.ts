@@ -57,6 +57,7 @@ import {
   handleDmChannelClose,
   handleDmChannelOpen,
 } from "../features/direct-messages/wsHandlers";
+import { applyReadyDmRequests, handleDmRequest } from "../features/message-requests/wsHandlers";
 import {
   handleVoiceConfig,
   handleVoiceDisconnected,
@@ -113,6 +114,7 @@ export function wireDispatcher(
         | "listEmoji"
         | "getMessages"
         | "getMessagesAround"
+        | "listDmRequests"
         | "getOwnModeration"
         | "getMyAppeals"
       >
@@ -135,6 +137,11 @@ export function wireDispatcher(
     ws.on(S.AUTH_OK, (payload) => {
       handleAuthOk(ws, clock, payload);
       refreshSafetyOnResume(api, payload);
+      // A resumed connection gets no ready, so refetch Message Requests here;
+      // a full flow ("none") refetches them from ready instead.
+      if (payload.replay_source === "buffer" || payload.replay_source === "db") {
+        applyReadyDmRequests(api);
+      }
     }),
   );
 
@@ -148,7 +155,7 @@ export function wireDispatcher(
       // setVoiceStates overwrites it) -> channels/roles/members -> voice
       // restate + reconcile -> identity publish -> active channel -> message
       // resync (reads the active channel just chosen) -> DMs -> mark read ->
-      // blocks -> emoji.
+      // blocks -> Message Requests -> emoji.
       activateReadyPendingMessages(api, payload);
       const applyReadyVoice = snapshotReadyVoice();
       applyReadyChannels(payload);
@@ -160,6 +167,7 @@ export function wireDispatcher(
       applyReadyDms(payload);
       markReadyActiveChannelRead(readyActive);
       applyReadyBlocks(api);
+      applyReadyDmRequests(api);
       applyReadyEmoji(api);
       applyReadySafety(api, payload);
 
@@ -177,6 +185,8 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.DM_CHANNEL_OPEN, handleDmChannelOpen));
 
   unsubs.push(ws.on(S.DM_CHANNEL_CLOSE, handleDmChannelClose));
+
+  unsubs.push(ws.on(S.DM_REQUEST, handleDmRequest));
 
   // ── Chat Messages ─────────────────────────────────────
 

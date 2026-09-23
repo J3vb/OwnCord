@@ -80,6 +80,8 @@
   line-height: 14px;
   margin-left: 4px;
   flex-shrink: 0;
+  font-family: inherit;
+  cursor: pointer;
 }
 .sidebar-dm-view-all {
   display: block;
