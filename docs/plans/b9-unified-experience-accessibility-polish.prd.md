@@ -33,7 +33,8 @@ the owner on 2026-09-23; the plan lists the affected keys.
 Budget note (2026-09-23, firstmate decision 010): B9 feature lanes share one budget, startup 93,000 B (was 91,000 B) and MainPage
 64,000 B (was 60,512 B), superseding the earlier MainPage 61,000 B decision; re-baseline at B9-26. B9-18's cost is catalog keys and
 lookup calls from moving text behind the B9-3 seam, with no new copy; with dev ff349278 merged it measures startup 92,884 B and MainPage
-62,443 B.
+62,443 B. With dev 9f9e2b8e (Refined Neon) merged the startup closure reached 93,384 B; moving copy that only lazy chunks show (recovery,
+connection banner, identity-key prompt) out of the startup catalog brought it to 92,876 B, MainPage 63,026 B.
 
 > **Drafted:** 2026-09-23. **Planning branch:** `docs/b9-unified-experience-plan`.
 > **Exact base:** `0beee8e4c50ca18823750e381d3a1d6e327029b8`, checked-out `dev`.

@@ -2,9 +2,9 @@ import { defineCatalog } from "./format";
 
 /**
  * Connect, sign-in, trust and session copy (B9-18): the connect page and its
- * server panel, login and recovery forms, the incompatible-server notice, the
- * certificate and identity trust prompts, the post-login overlay, the
- * connection banner and the session messages main.ts raises. It ships in the
+ * server panel, login and two-factor forms, the incompatible-server notice,
+ * the certificate trust prompts, the post-login overlay and the session
+ * messages main.ts raises. It ships in the
  * startup chunk, so it also holds the few shell messages raised by startup
  * modules (the render fallback, the channel-deleted notice, the DM helpers the
  * dispatcher reaches) and keeps shell.ts, the main page's catalog, out of it.
@@ -88,18 +88,6 @@ export const connectText = defineCatalog("connect", {
   "totp.verifying": "Verifying…",
   "totp.failed": "Verification failed.",
 
-  "recover.title": "Account Recovery",
-  "recover.description":
-    "Sign back in without your password or two-factor device. This sets a new password and signs out every other device.",
-  "recover.usernameLabel": "Username",
-  "recover.secretLabel": "Recovery kit secret or a recovery credential from your server owner",
-  "recover.passwordLabel": "New password",
-  "recover.submit": "Recover account",
-  "recover.submitting": "Recovering…",
-  "recover.secretRequired": "Enter your recovery kit secret or recovery credential.",
-  "recover.passwordTooShort": "New password must be at least {min} characters.",
-  "recover.failed": "Recovery failed.",
-
   "cert.mismatch.title": "Certificate Warning",
   "cert.mismatch.heading": "Certificate Changed",
   "cert.mismatch.description":
@@ -115,24 +103,11 @@ export const connectText = defineCatalog("connect", {
   "cert.firstUse.fingerprint": "Fingerprint",
   "cert.firstUse.accept": "Trust This Certificate",
   "cert.host": "Host",
-  "identity.title": "Identity Warning",
-  "identity.heading": "Identity Key Changed",
-  "identity.description":
-    "This participant's end-to-end encryption identity key no longer matches the one pinned on first contact. This usually means they reinstalled or switched device, but it could also indicate that the server swapped their key. Verify the new key out-of-band before trusting it.",
-  "identity.participant": "Participant",
-  "identity.newKey": "New key",
-  "identity.accept": "Trust New Key",
 
   "connected.title": "Connected!",
   "connected.loggedInAs": "Logged in as {username}",
   "connected.loading": "Loading server data...",
   "connected.ready": "Ready!",
-
-  "banner.restarting": "Server restarting in {seconds} seconds...",
-  "banner.reconnecting": "Reconnecting...",
-  "banner.disconnected": "Disconnected",
-  "banner.signedInElsewhere": "Signed in elsewhere",
-  "banner.useHere": "Use here",
 
   "session.expired": "Your session expired — sign in again.",
   "session.passwordRemoveFailed": "Could not remove the saved password — it is still stored",

@@ -27,7 +27,7 @@ import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { rePinPeerIdentity } from "@lib/livekitSession";
-import { createIdentityMismatchModal } from "./CertMismatchModal";
+import { createIdentityMismatchModal } from "./IdentityMismatchModal";
 import { createLogger } from "@lib/logger";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { roleHasPermission, canManageChannels } from "@lib/permissions";

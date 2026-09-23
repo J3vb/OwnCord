@@ -5,6 +5,7 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { connectText } from "../../i18n/connect";
+import { recoverText } from "../../i18n/recover";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -66,22 +67,22 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
     "data-testid": "recover-overlay",
   });
   const card = createElement("div", { class: "totp-card" });
-  const title = createElement("h2", { class: "totp-title" }, connectText("recover.title"));
+  const title = createElement("h2", { class: "totp-title" }, recoverText("recover.title"));
   const description = createElement(
     "p",
     { class: "totp-subtitle" },
-    connectText("recover.description"),
+    recoverText("recover.description"),
   );
   const username = buildField(
     "recover-username",
-    connectText("recover.usernameLabel"),
+    recoverText("recover.usernameLabel"),
     "text",
     "username",
   );
-  const secret = buildField("recover-secret", connectText("recover.secretLabel"), "text", "off");
+  const secret = buildField("recover-secret", recoverText("recover.secretLabel"), "text", "off");
   const password = buildField(
     "recover-password",
-    connectText("recover.passwordLabel"),
+    recoverText("recover.passwordLabel"),
     "password",
     "new-password",
   );
@@ -94,12 +95,12 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
   const submit = createElement(
     "button",
     { class: "btn-primary", type: "button", "data-testid": "recover-submit" },
-    connectText("recover.submit"),
+    recoverText("recover.submit"),
   );
   const cancel = createElement(
     "button",
     { class: "totp-back", type: "button", "data-testid": "recover-cancel" },
-    connectText("common.cancel"),
+    recoverText("common.cancel"),
   );
   appendChildren(
     card,
@@ -125,9 +126,9 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
   function validate(host: string, user: string, key: string, pw: string): string | null {
     if (!host) return connectText("validation.hostRequired");
     if (!user) return connectText("validation.usernameRequired");
-    if (!key) return connectText("recover.secretRequired");
+    if (!key) return recoverText("recover.secretRequired");
     if (pw.length < MIN_PASSWORD_LENGTH) {
-      return connectText("recover.passwordTooShort", { min: MIN_PASSWORD_LENGTH });
+      return recoverText("recover.passwordTooShort", { min: MIN_PASSWORD_LENGTH });
     }
     if (pw === ctx.placeholder) {
       return connectText("validation.placeholderPassword");
@@ -150,7 +151,7 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
     }
     setText(error, "");
     submit.disabled = true;
-    setText(submit, connectText("recover.submitting"));
+    setText(submit, recoverText("recover.submitting"));
     try {
       await ctx.onRecover(host, user, key, pw);
       // Signed in: the recovery root is spent, and neither it nor the new
@@ -159,11 +160,11 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
       ctx.usernameInput.value = user;
       ctx.onRecovered();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : connectText("recover.failed");
+      const message = err instanceof Error ? err.message : recoverText("recover.failed");
       setText(error, message.length > 200 ? message.slice(0, 200) + "..." : message);
     } finally {
       submit.disabled = false;
-      setText(submit, connectText("recover.submit"));
+      setText(submit, recoverText("recover.submit"));
     }
   }
 

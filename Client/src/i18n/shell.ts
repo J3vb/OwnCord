@@ -4,7 +4,8 @@ import { defineCatalog } from "./format";
  * Shell and navigation copy (B9-18): the sidebar (server header, channels,
  * direct messages, members), channel management dialogs and menus, the member
  * context menu, invites, the user bar and status picker, quick switching,
- * stream previews and the shell's toasts. It loads with the main page; copy a
+ * stream previews, the connection banner, the identity-key prompt and the
+ * shell's toasts. It loads with the main page; copy a
  * startup-chunk module shows lives in connect.ts.
  */
 export const shellText = defineCatalog("shell", {
@@ -106,6 +107,19 @@ export const shellText = defineCatalog("shell", {
   "identity.unverified": "Identity not verified — this participant published no key.",
   "identity.unverifiedWithFingerprint":
     "Identity not verified — this participant published no key. Session fingerprint (changes every call — not an identity): {fingerprint}",
+  "identity.title": "Identity Warning",
+  "identity.heading": "Identity Key Changed",
+  "identity.description":
+    "This participant's end-to-end encryption identity key no longer matches the one pinned on first contact. This usually means they reinstalled or switched device, but it could also indicate that the server swapped their key. Verify the new key out-of-band before trusting it.",
+  "identity.participant": "Participant",
+  "identity.newKey": "New key",
+  "identity.accept": "Trust New Key",
+
+  "banner.restarting": "Server restarting in {seconds} seconds...",
+  "banner.reconnecting": "Reconnecting...",
+  "banner.disconnected": "Disconnected",
+  "banner.signedInElsewhere": "Signed in elsewhere",
+  "banner.useHere": "Use here",
 
   "invite.invite": "Invite",
   "invite.invitePeople": "Invite people",

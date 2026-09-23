@@ -198,11 +198,13 @@ render path as a fallback; fail closed and record a blocker instead.
 ### What moved
 
 - **Catalogs.** `Client/src/i18n/connect.ts` (`connectText`) holds the connect
-  page, login, registration, 2FA and recovery forms, the server panel, the
-  incompatible-server notice, the certificate and identity trust prompts, the
-  post-login overlay, the connection banner and main.ts's session messages.
-  `Client/src/i18n/shell.ts` (`shellText`) holds the sidebar, channel, member,
-  invite, DM, purge, status, quick-switch and stream-preview copy.
+  page, login, registration and 2FA forms, the server panel, the
+  incompatible-server notice, the certificate trust prompts, the post-login
+  overlay and main.ts's session messages. `Client/src/i18n/shell.ts`
+  (`shellText`) holds the sidebar, channel, member, invite, DM, purge, status,
+  quick-switch and stream-preview copy, the connection banner and the
+  identity-key prompt. `Client/src/i18n/recover.ts` (`recoverText`) holds the
+  lazily loaded recovery form's copy.
 - **Split by bundle.** connect.ts ships in the startup chunk; shell.ts loads
   with the main page. A startup-chunk module therefore reads connect.ts even
   for shell copy: the render fallback (`safe-render.ts`), the channel-deleted
@@ -286,7 +288,7 @@ Chromium, Linux, dev server on a private port.
 | `npm run typecheck`, `typecheck:build`, `typecheck:e2e`, `npm run lint` (oxlint, cycles, eslint) | clean                                                                                                                                                                                                                                       |
 | Playwright `b9-text-expansion` (B9-3 cases plus the two B9-18 cases)                             | 4 passed                                                                                                                                                                                                                                    |
 | Playwright full mocked suite, 4 workers                                                          | 456 passed, 7 skipped, 8 failed; the 8 failures (in `channel-gating`, `channel-management`, `dm-calls`) came from source edits and builds made against the live dev server mid-run, and those three files then passed 37 of 37 on their own |
-| `npm run build:budget && npm run check:budgets`                                                  | all ok; with dev ff349278 merged, MainPage 62,443 B of 64,000 B, startup closure 92,884 B of 93,000 B ([Bundle budget](#bundle-budget))                                                                                                     |
+| `npm run build:budget && npm run check:budgets`                                                  | all ok; with dev 9f9e2b8e merged, MainPage 63,026 B of 64,000 B, startup closure 92,876 B of 93,000 B ([Bundle budget](#bundle-budget))                                                                                                     |
 | `npm run check:docs`                                                                             | passed                                                                                                                                                                                                                                      |
 
 **Failing controls.** Each was applied in turn, the B9-18 expansion case was
@@ -321,6 +323,15 @@ measures 92,884 B and MainPage 62,443 B.
 budget, set in `Client/bundle-budgets.json` to startup 93,000 B (was
 91,000 B) and MainPage 64,000 B (was 60,512 B), superseding the earlier
 MainPage 61,000 B decision. The budgets are re-baselined at B9-26.
+
+**Re-measured after merging dev 9f9e2b8e (2026-09-23):** the Refined Neon
+tokens took the startup closure to 93,384 B, over the 93,000 B budget. The
+budget stays; instead copy that only lazy chunks show left the startup
+catalog: the recovery form's text moved to `recover.ts`, and the connection
+banner and identity-key prompt text moved to `shell.ts`, with the identity
+prompt itself moved from `CertMismatchModal.ts` to `IdentityMismatchModal.ts`
+(only the main page opens it). The startup closure now measures 92,876 B and
+MainPage 63,026 B.
 
 ### Accessibility (Q1)
 
