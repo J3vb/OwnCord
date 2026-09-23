@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 // libX11 is already linked: GTK, device_query (push-to-talk) and libwebrtc
-// (screen capture; the audio device module's typing detection) all use it.
+// (screen capture's shared X display) all use it.
 #[cfg(target_os = "linux")]
 #[link(name = "X11")]
 extern "C" {
@@ -11,12 +11,13 @@ extern "C" {
 
 fn main() {
     // Xlib is not thread-safe unless XInitThreads runs before any other Xlib
-    // call. libwebrtc's audio device module opens and queries its own X display
-    // from whichever thread creates it (a Tokio worker listing devices at
-    // sign-in), racing GTK's main-thread Xlib use; without this the app aborts
-    // with "[xcb] Too much data requested from _XRead" (seen by the B7-17
-    // artifact smoke on Ubuntu 22.04, x64 and arm64). It only enables Xlib's
-    // locking, so it is harmless where no X display is ever opened.
+    // call, and libwebrtc and device_query open and query their own X displays
+    // from worker threads while GTK uses Xlib on the main one. Without this the
+    // app aborted at sign-in with "[xcb] Too much data requested from _XRead"
+    // (B7-17 artifact smoke, Ubuntu 22.04 x64 and arm64: libwebrtc's audio
+    // device module, since replaced by our own cpal streams, did it from a
+    // Tokio worker). It only enables Xlib's locking, so it is harmless where no
+    // X display is ever opened.
     #[cfg(target_os = "linux")]
     // SAFETY: the first Xlib call in the process, made before any thread exists.
     unsafe {

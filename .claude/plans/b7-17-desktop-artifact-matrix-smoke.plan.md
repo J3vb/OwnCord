@@ -84,7 +84,10 @@ from _XRead`, both arches, intermittent). libwebrtc's audio device module
   keyring on/off), then `main.rs` calls `XInitThreads()` first: 3/3 journeys
   green on each arch in the crashing environment, where the unpatched build
   failed most runs. The unpatched binary passed locally on Ubuntu 24.04 — a
-  race, which is why this needed the runner.
+  race, which is why this needed the runner. #1722 (merged in afterwards)
+  replaced that device module with the session's own `cpal` streams; the call
+  stays, because libwebrtc's screen capture and `device_query` (push-to-talk)
+  still open X displays off the main thread.
 - Harness fixes the runners exposed: Git Bash's GNU `tar` read `D:\...` as a
   remote host (`install-livekit.mjs` now names `System32\tar.exe`); WMI's
   process query outlasted its budget on `windows-11-arm` (`killInstalled` now
