@@ -6,8 +6,8 @@
   },
   "chunks": {
     "MainPage": {
-      "budget": 60000,
-      "note": "Measured 56,855 B at dev 4c45d26a (B7-7)."
+      "budget": 60512,
+      "note": "Measured 56,855 B at dev 4c45d26a (B7-7). Raised 60,000 -> 60,512 B by owner decision (B9-5): the Message Requests entry, its DM-header badge button into DM mode and the lazy inbox loader need about 73 B more than dev 5682b410 left (59,945 B), even with the inbox view lazy-loaded; measured 60,073 B."
     },
     "livekit": {
       "budget": 135000,

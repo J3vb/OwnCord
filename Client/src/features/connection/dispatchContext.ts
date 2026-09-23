@@ -31,6 +31,7 @@ export type DispatchApi = Pick<ApiClient, "listBlocks"> &
       | "listEmoji"
       | "getMessages"
       | "getMessagesAround"
+      | "listDmRequests"
       | "getOwnModeration"
     >
   >;

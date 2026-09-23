@@ -29,6 +29,7 @@ import type {
   CreateDmResponse,
   GroupDmResponse,
   BlockedUsersResponse,
+  DmRequestListResponse,
   GifSearchResponse,
   PartialSuccessResponse,
 } from "./types";
@@ -714,6 +715,11 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     /** List recipient user IDs the current user has blocked. */
     listBlocks(signal?: AbortSignal): Promise<BlockedUsersResponse> {
       return request<BlockedUsersResponse>("GET", "/blocks", undefined, signal);
+    },
+
+    /** The pending Message Requests inbox (B5-6). */
+    listDmRequests(signal?: AbortSignal): Promise<DmRequestListResponse> {
+      return request<DmRequestListResponse>("GET", "/dm-requests", undefined, signal);
     },
 
     /** Block a user (prevents DMs in both directions). */
