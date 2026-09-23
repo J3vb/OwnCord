@@ -132,10 +132,11 @@ export function enableRovingNavigation(
   container.addEventListener(
     "keydown",
     (e: KeyboardEvent) => {
-      // Only keystrokes originating on a cell rove; the search input above
-      // the grid keeps its native caret behavior for arrows and Home/End.
+      // Only keystrokes originating on a cell itself rove; the search input
+      // above the grid and a control nested inside a cell keep their native
+      // key behavior.
       const origin =
-        e.target instanceof HTMLElement ? e.target.closest<HTMLElement>(cellSelector) : null;
+        e.target instanceof HTMLElement && e.target.matches(cellSelector) ? e.target : null;
       if (origin === null) return;
       const cells = Array.from(container.querySelectorAll<HTMLElement>(cellSelector));
       const from = cells.indexOf(origin);

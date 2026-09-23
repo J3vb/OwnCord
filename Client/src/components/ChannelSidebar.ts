@@ -736,22 +736,7 @@ interface GroupRender {
   /** Category name, or null for the uncategorized group. */
   readonly name: string | null;
   readonly channels: readonly Channel[];
-  readonly activeChannelId: number | null;
   readonly orderIds: string;
-}
-
-interface ChannelListDeps {
-  readonly onCreateChannel?: (category: string) => void;
-  readonly onEditChannel?: (channel: Channel) => void;
-  readonly onDeleteChannel?: (channel: Channel) => void;
-  readonly onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void;
-  readonly onVoiceJoin: (channelId: number) => void;
-  readonly onVoiceLeave: () => void;
-  readonly onWatchStream?: (userId: number) => void;
-  readonly onVoiceModerate?: VoiceModerationCallbacks;
-  readonly onPurgeChannel?: (channel: Channel, count: number) => Promise<void>;
-  /** Sidebar-lifetime signal: owns DOM mounted outside a row (menus, modals). */
-  readonly lifetimeSignal: AbortSignal;
 }
 
 export function createChannelSidebar(options: ChannelSidebarOptions): MountableComponent {
@@ -770,7 +755,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   // renderChannels() keys every row (B9-21): an unchanged row is reused and its
   // listeners left alone; a replaced row's listeners must be aborted before it
   // detaches. Per-row listeners (context menu, drag handlers) therefore hold
-  // their own `Disposable` (rowOwnerByEl), NOT the sidebar-lifetime
+  // their own `Disposable` (ownerByEl), NOT the sidebar-lifetime
   // `disposable.signal` — addEventListener({ signal }) keeps a detached row
   // alive via that signal's own retained "abort" listener list until it fires,
   // so a row left on the sidebar signal would be retained for the sidebar's
@@ -813,41 +798,19 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   }
 
   /**
-   * Per-row listener owners. A row that is reused keeps its owner; a row that
-   * is replaced (its signature changed) has its owner aborted before it
-   * detaches, so a stale row can never outlive the render that replaced it
-   * (OC-0229) — without aborting the listeners of every UNCHANGED row, which
-   * the old single per-render controller did.
+   * Listener owners for every keyed group and row. A reused element keeps its
+   * owner; a replaced or removed one has its owner aborted before it detaches,
+   * so a stale element can never outlive the render that replaced it (OC-0229)
+   * — without aborting the listeners of every UNCHANGED row, which the old
+   * single per-render controller did.
    */
-  const rowOwnerByEl = new WeakMap<Element, Disposable>();
+  const ownerByEl = new WeakMap<Element, Disposable>();
 
-  /** Build one channel row with its own listener owner. */
-  function buildChannelRow(
-    channel: Channel,
-    activeChannelId: number | null,
-    order: readonly Channel[],
-    containerEl: HTMLElement,
-    deps: ChannelListDeps,
-  ): HTMLDivElement {
-    const owner = new Disposable();
-    const el = renderChannelItem(
-      channel,
-      channel.id === activeChannelId,
-      owner.signal,
-      deps.lifetimeSignal,
-      deps.onVoiceJoin,
-      deps.onVoiceLeave,
-      deps.onEditChannel,
-      deps.onDeleteChannel,
-      containerEl,
-      order,
-      deps.onReorderChannel,
-      deps.onWatchStream,
-      deps.onVoiceModerate,
-      deps.onPurgeChannel,
-    );
-    rowOwnerByEl.set(el, owner);
-    return el;
+  /** Abort a group's or row's owner and those of the rows inside it. */
+  function disposeOwned(el: Element): void {
+    for (const owned of [el, ...el.querySelectorAll(".category-channels-container > *")]) {
+      ownerByEl.get(owned)?.destroy();
+    }
   }
 
   /** `voiceChanged` is true for the refreshes that can alter a voice row's
@@ -861,37 +824,26 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     voiceRowByUserId.clear();
 
     const grouped = getChannelsByCategory();
-    const state = channelsStore.getState();
+    const activeChannelId = channelsStore.getState().activeChannelId;
 
     if (grouped.size === 0) {
-      // Reconcile to no groups so any prior rows are disposed, then show the
-      // empty state once.
-      reconcileChildren(channelList, [], {
-        key: () => "",
-        signature: () => "",
-        create: () => createElement("div", {}),
-        dispose: (el) => {
-          for (const row of el.querySelectorAll<HTMLElement>(".channel-item")) {
-            rowOwnerByEl.get(row)?.destroy();
-            rowOwnerByEl.delete(row);
-          }
-        },
-      });
-      if (channelList.querySelector(".channel-list-empty") === null) {
-        const emptyState = createElement("div", { class: "channel-list-empty" });
-        const msg = createElement(
-          "p",
-          { class: "channel-list-empty-text" },
-          shellText("channel.empty"),
-        );
-        const hint = createElement(
-          "p",
-          { class: "channel-list-empty-hint" },
-          shellText("channel.emptyHint"),
-        );
-        appendChildren(emptyState, msg, hint);
-        channelList.appendChild(emptyState);
+      for (const child of Array.from(channelList.children)) {
+        disposeOwned(child);
+        child.remove();
       }
+      const emptyState = createElement("div", { class: "channel-list-empty" });
+      const msg = createElement(
+        "p",
+        { class: "channel-list-empty-text" },
+        shellText("channel.empty"),
+      );
+      const hint = createElement(
+        "p",
+        { class: "channel-list-empty-hint" },
+        shellText("channel.emptyHint"),
+      );
+      appendChildren(emptyState, msg, hint);
+      channelList.appendChild(emptyState);
       return;
     }
     channelList.querySelector(".channel-list-empty")?.remove();
@@ -903,52 +855,61 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // uncategorized group.
     const groups: GroupRender[] = [];
     for (const [category, channels] of grouped) {
-      groups.push({
-        name: category,
-        channels,
-        activeChannelId: state.activeChannelId,
-        orderIds: channels.map((c) => c.id).join(","),
+      groups.push({ name: category, channels, orderIds: channels.map((c) => c.id).join(",") });
+    }
+
+    /** One group's rows, keyed and reused (B9-21). */
+    function reconcileRows(container: HTMLElement, g: GroupRender): void {
+      reconcileChildren(container, g.channels, {
+        key: (ch) => String(ch.id),
+        signature: (ch) => channelRowSignature(ch, activeChannelId, g.orderIds, voiceTick),
+        create: (ch) => {
+          const owner = new Disposable();
+          const el = renderChannelItem(
+            ch,
+            ch.id === activeChannelId,
+            owner.signal,
+            // Sidebar-lifetime signal (aborted only in destroy()) for anything
+            // that owns DOM mounted outside this render's rows — a menu or
+            // modal on document.body must not be torn down by an unrelated
+            // re-render (OC-0281, OC-0282).
+            disposable.signal,
+            onVoiceJoin,
+            onVoiceLeave,
+            onEditChannel,
+            onDeleteChannel,
+            container,
+            g.channels,
+            onReorderChannel,
+            onWatchStream,
+            onVoiceModerate,
+            onPurgeChannel,
+          );
+          ownerByEl.set(el, owner);
+          return el;
+        },
+        dispose: disposeOwned,
       });
     }
 
-    const deps: ChannelListDeps = {
-      onCreateChannel,
-      onEditChannel,
-      onDeleteChannel,
-      onReorderChannel,
-      onVoiceJoin,
-      onVoiceLeave,
-      onWatchStream,
-      onVoiceModerate,
-      onPurgeChannel,
-      // Sidebar-lifetime signal (aborted only in destroy()) for anything that
-      // owns DOM mounted outside this render's rows — a menu or modal on
-      // document.body must not be torn down by an unrelated re-render
-      // (OC-0281, OC-0282).
-      lifetimeSignal: disposable.signal,
-    };
-
     reconcileChildren(channelList, groups, {
       key: (g) => g.name ?? "\u0000uncategorized",
-      // A group rebuilds when its own chrome, order or permission-dependent
-      // affordances change; an unchanged group reuses its element (and updates
-      // its rows in place).
+      // A group rebuilds when its own chrome or permission-dependent
+      // affordances change; an unchanged group reuses its element and
+      // reconciles its rows in place.
       signature: (g) =>
         [
           g.name ?? "",
           g.name !== null && isCategoryCollapsed(g.name) ? "c" : "e",
-          g.orderIds,
           canCreate ? "C" : "",
           canModerate ? "M" : "",
         ].join("|"),
-      create: (g) => buildCategoryGroup(g, deps),
-      update: (el, g) => updateCategoryGroup(el, g, deps),
-      dispose: (el) => {
-        for (const row of el.querySelectorAll<HTMLElement>(".channel-item")) {
-          rowOwnerByEl.get(row)?.destroy();
-          rowOwnerByEl.delete(row);
-        }
+      create: (g) => buildCategoryGroup(g, reconcileRows),
+      update: (el, g) => {
+        const container = el.querySelector<HTMLElement>(".category-channels-container");
+        if (container !== null) reconcileRows(container, g);
       },
+      dispose: disposeOwned,
     });
 
     setRovingTabindex(channelList, ".channel-item");
@@ -956,8 +917,14 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   }
 
   /** Build the header (and, when expanded, the rows) for one category group. */
-  function buildCategoryGroup(g: GroupRender, deps: ChannelListDeps): HTMLDivElement {
+  function buildCategoryGroup(
+    g: GroupRender,
+    reconcileRows: (container: HTMLElement, g: GroupRender) => void,
+  ): HTMLDivElement {
     const group = createElement("div", {});
+    const owner = new Disposable();
+    ownerByEl.set(group, owner);
+    const { signal } = owner;
 
     if (g.name !== null) {
       const collapsed = isCategoryCollapsed(g.name);
@@ -1002,7 +969,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
             e.stopPropagation();
             onCreateChannel(g.name!);
           },
-          { signal: disposable.signal },
+          { signal },
         );
         header.appendChild(addBtn);
       }
@@ -1012,45 +979,21 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         () => {
           toggleCategory(g.name!);
         },
-        { signal: disposable.signal },
+        { signal },
       );
 
       group.appendChild(header);
     }
 
     if (g.name === null || !isCategoryCollapsed(g.name)) {
-      group.appendChild(buildChannelsContainer(g, deps));
+      const container = createElement("div", { class: "category-channels-container" });
+      // Populate through the reconciler so every row gets its key metadata; a
+      // later in-place update can then recognise and reuse them.
+      reconcileRows(container, g);
+      group.appendChild(container);
     }
 
     return group;
-  }
-
-  /** Insert/reorder one group's rows in place, aborting only replaced ones. */
-  function updateCategoryGroup(el: Element, g: GroupRender, deps: ChannelListDeps): void {
-    const container = el.querySelector<HTMLElement>(".category-channels-container");
-    if (container === null) return;
-    reconcileGroupRows(container, g, deps);
-  }
-
-  function buildChannelsContainer(g: GroupRender, deps: ChannelListDeps): HTMLDivElement {
-    const container = createElement("div", { class: "category-channels-container" });
-    // Populate through the reconciler so every row gets its key metadata; a
-    // later in-place update can then recognise and reuse them.
-    reconcileGroupRows(container, g, deps);
-    return container;
-  }
-
-  /** One group's rows, keyed and reused (B9-21). */
-  function reconcileGroupRows(container: HTMLElement, g: GroupRender, deps: ChannelListDeps): void {
-    reconcileChildren(container, g.channels, {
-      key: (ch) => String(ch.id),
-      signature: (ch) => channelRowSignature(ch, g.activeChannelId, g.orderIds, voiceTick),
-      create: (ch) => buildChannelRow(ch, g.activeChannelId, g.channels, container, deps),
-      dispose: (row) => {
-        rowOwnerByEl.get(row)?.destroy();
-        rowOwnerByEl.delete(row);
-      },
-    });
   }
 
   /** Redraw when a row's mute is toggled (see CHANNEL_MUTE_CHANGED). */

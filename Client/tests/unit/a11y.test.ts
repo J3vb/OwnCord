@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import { applyDialogSemantics, trapFocus, focusDialog } from "@lib/a11y";
+import { applyDialogSemantics, trapFocus, focusDialog, enableRovingNavigation } from "@lib/a11y";
 
 let container: HTMLDivElement;
 
@@ -306,5 +306,38 @@ describe("focusDialog", () => {
     focusDialog(dialog);
 
     expect(document.activeElement).toBe(enabledBtn);
+  });
+});
+
+describe("enableRovingNavigation", () => {
+  it("leaves Enter on a control nested inside a cell to that control", () => {
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    const nested = document.createElement("button");
+    cell.appendChild(nested);
+    container.appendChild(cell);
+    const onCell = vi.fn();
+    cell.addEventListener("click", onCell);
+    const ac = new AbortController();
+    enableRovingNavigation(container, ".cell", ac.signal, "vertical");
+
+    const onNested = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
+    nested.dispatchEvent(onNested);
+    expect(onNested.defaultPrevented).toBe(false);
+    expect(onCell).not.toHaveBeenCalled();
+
+    const onItself = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
+    cell.dispatchEvent(onItself);
+    expect(onItself.defaultPrevented).toBe(true);
+    expect(onCell).toHaveBeenCalledTimes(1);
+    ac.abort();
   });
 });

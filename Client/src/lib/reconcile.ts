@@ -36,8 +36,10 @@ export interface ReconcileOptions<T> {
  * Make `container`'s element children exactly one row per item, in order.
  * Returns the number of rows built.
  *
- * If the focused row root had to be replaced, focus moves to its replacement,
- * so an async update never drops the user mid-list.
+ * If a replaced row held focus (itself or a control inside it), focus moves
+ * to the same control in its replacement, so an async update never drops the
+ * user mid-list. "The same control" is the first element in the new row with
+ * the focused one's tag, first class and `data-testid`.
  */
 export function reconcileChildren<T>(
   container: Element,
@@ -51,46 +53,46 @@ export function reconcileChildren<T>(
     if (meta !== undefined) existing.set(meta.key, child);
   }
   const active = document.activeElement;
-  const focusedKey =
-    active !== null && active.parentElement === container ? (META.get(active)?.key ?? null) : null;
+  let holder = active;
+  while (holder !== null && holder.parentElement !== container) holder = holder.parentElement;
+  const focusedKey = holder === null ? undefined : META.get(holder)?.key;
 
-  const wanted = new Map<string, Element>();
+  const wanted: Element[] = [];
   let built = 0;
   for (const item of items) {
     const k = key(item);
     const sig = signature(item);
     const current = existing.get(k);
     existing.delete(k);
-    const meta = current === undefined ? undefined : META.get(current);
-    if (current !== undefined && meta !== undefined && meta.sig === sig) {
+    if (current !== undefined && META.get(current)!.sig === sig) {
       update?.(current, item);
-      wanted.set(k, current);
+      wanted.push(current);
       continue;
     }
-    if (current !== undefined) {
-      dispose?.(current);
-      current.remove();
-    }
+    if (current !== undefined) existing.set(k, current);
     const el = create(item);
     META.set(el, { key: k, sig });
-    wanted.set(k, el);
+    wanted.push(el);
     built++;
   }
-  for (const [k, el] of existing) {
+  for (const el of existing.values()) {
     dispose?.(el);
     el.remove();
-    existing.delete(k);
   }
   // insertBefore moves an existing node, so this inserts new rows and reorders
   // the kept ones in one pass.
-  items.forEach((item, i) => {
-    const el = wanted.get(key(item));
-    if (el !== undefined && container.children[i] !== el) {
-      container.insertBefore(el, container.children[i] ?? null);
-    }
+  wanted.forEach((el, i) => {
+    if (container.children[i] !== el) container.insertBefore(el, container.children[i] ?? null);
   });
-  if (focusedKey !== null && active !== null && !active.isConnected) {
-    (wanted.get(focusedKey) as HTMLElement | undefined)?.focus();
+  if (active !== null && !active.isConnected) {
+    const next = wanted.find((el) => META.get(el)!.key === focusedKey);
+    const same = (el: Element): boolean =>
+      el.tagName === active.tagName &&
+      el.classList[0] === active.classList[0] &&
+      el.getAttribute("data-testid") === active.getAttribute("data-testid");
+    if (next !== undefined) {
+      ([next, ...next.querySelectorAll("*")].find(same) as HTMLElement | undefined)?.focus();
+    }
   }
   return built;
 }

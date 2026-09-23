@@ -18,7 +18,6 @@ import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
 import type { DmSidebar } from "@components/DmSidebar";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
-import { createEditChannelModal } from "@components/EditChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createUserBar } from "@components/UserBar";
 import { createVoiceWidget } from "@components/VoiceWidget";
@@ -355,40 +354,54 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       },
       onEditChannel: (channel) => {
         if (activeModal !== null) return;
-        // Pre-fill from the store rather than from the sidebar's row: the store
-        // is what channel_update writes into, so the modal opens on the current
-        // values even if the row was rendered before the last edit landed.
-        const stored = channelsStore.getState().channels.get(channel.id);
-        const modal = createEditChannelModal({
-          channelId: channel.id,
-          channelName: channel.name,
-          channelType: channel.type,
-          channelTopic: stored?.topic ?? "",
-          channelCategory: stored?.category ?? "",
-          channelSlowMode: stored?.slowMode ?? 0,
-          channelNsfw: stored?.nsfw ?? false,
-          channelVoiceMaxUsers: stored?.voiceMaxUsers ?? 0,
-          channelVoiceMaxVideo: stored?.voiceMaxVideo ?? 0,
-          onSave: async (data) => {
-            try {
-              await api.adminUpdateChannel(channel.id, data);
-              modal.destroy?.();
-              activeModal = null;
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : shellText("channel.updateFailed");
-              getToast()?.show(msg, "error");
-              // Propagate so the modal re-enables its save button and shows
-              // the inline error.
-              throw err;
-            }
+        // The editor is admin-only and never on first paint, so it loads on
+        // demand. The placeholder holds the modal slot while it loads: a second
+        // click is refused, and a teardown in between drops the late modal.
+        const pending: MountableComponent = { mount: () => {} };
+        activeModal = pending;
+        void import("@components/EditChannelModal").then(
+          ({ createEditChannelModal }) => {
+            if (activeModal !== pending) return;
+            // Pre-fill from the store rather than from the sidebar's row: the store
+            // is what channel_update writes into, so the modal opens on the current
+            // values even if the row was rendered before the last edit landed.
+            const stored = channelsStore.getState().channels.get(channel.id);
+            const modal = createEditChannelModal({
+              channelId: channel.id,
+              channelName: channel.name,
+              channelType: channel.type,
+              channelTopic: stored?.topic ?? "",
+              channelCategory: stored?.category ?? "",
+              channelSlowMode: stored?.slowMode ?? 0,
+              channelNsfw: stored?.nsfw ?? false,
+              channelVoiceMaxUsers: stored?.voiceMaxUsers ?? 0,
+              channelVoiceMaxVideo: stored?.voiceMaxVideo ?? 0,
+              onSave: async (data) => {
+                try {
+                  await api.adminUpdateChannel(channel.id, data);
+                  modal.destroy?.();
+                  activeModal = null;
+                } catch (err) {
+                  const msg =
+                    err instanceof Error ? err.message : shellText("channel.updateFailed");
+                  getToast()?.show(msg, "error");
+                  // Propagate so the modal re-enables its save button and shows
+                  // the inline error.
+                  throw err;
+                }
+              },
+              onClose: () => {
+                modal.destroy?.();
+                activeModal = null;
+              },
+            });
+            activeModal = modal;
+            modal.mount(document.body);
           },
-          onClose: () => {
-            modal.destroy?.();
-            activeModal = null;
+          () => {
+            if (activeModal === pending) activeModal = null;
           },
-        });
-        activeModal = modal;
-        modal.mount(document.body);
+        );
       },
       onDeleteChannel: (channel) => {
         if (activeModal !== null) return;
@@ -604,13 +617,12 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   function buildDmSidebar(): DmSidebar {
     const serverName = authStore.getState().serverName ?? shellText("common.serverFallback");
     const activeChannelId = channelsStore.getState().activeChannelId;
-    const dmChannels = dmStore.getState().channels;
     const conversations = buildDmConversations(activeChannelId);
 
     return createDmSidebar({
       conversations,
       onSelectConversation: (channelId) => {
-        const dmChannel = dmChannels.find((c) => c.channelId === channelId);
+        const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
         if (dmChannel !== undefined) {
           selectDmConversation(dmChannel, dmDeps);
         }

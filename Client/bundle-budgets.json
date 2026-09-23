@@ -6,8 +6,8 @@
   },
   "chunks": {
     "MainPage": {
-      "budget": 64500,
-      "note": "Measured 56,855 B at dev 4c45d26a (B7-7). Dev raised 60,000 -> 60,512 B by owner decision (B9-5, Message Requests entry, 60,073 B). On 2026-09-23 (B9-18) moving the shell text behind the B9-3 catalog seam costs +2,175 B (58,546 B at dev 166d71e4 -> 60,721 B), all catalog keys and lookup calls, no new copy; after merging dev: 59,945 B at dev 5682b410 -> 62,271 B (+2,326 B, the same catalog cost plus the member-menu re-clamp); dev grew MainPage by 1,399 B after the first measurement; 62,443 B after merging dev ff349278 (B9-5 included); 63,026 B after merging dev 9f9e2b8e with the banner and identity-prompt copy and code moved in. Raised 60,512 -> 64,000 B: B9 feature lanes shared budget, firstmate decision 2026-09-23; re-baseline at B9-26. Raised 64,000 -> 64,500 B on 2026-09-23 (firstmate decision 014, B9-21): the keyed sidebar reconciler (src/lib/reconcile.ts) and the keyed render paths in ChannelSidebar/DmSidebar/SidebarDmSection replace the O(n) full rebuild and are startup code on the shell journey; dev 838bab09 measured 63,343 B and B9-21 brings it to 64,449 B. Re-baseline at B9-26."
+      "budget": 64000,
+      "note": "Measured 56,855 B at dev 4c45d26a (B7-7). Dev raised 60,000 -> 60,512 B by owner decision (B9-5, Message Requests entry, 60,073 B). On 2026-09-23 (B9-18) moving the shell text behind the B9-3 catalog seam costs +2,175 B (58,546 B at dev 166d71e4 -> 60,721 B), all catalog keys and lookup calls, no new copy; after merging dev: 59,945 B at dev 5682b410 -> 62,271 B (+2,326 B, the same catalog cost plus the member-menu re-clamp); dev grew MainPage by 1,399 B after the first measurement; 62,443 B after merging dev ff349278 (B9-5 included); 63,026 B after merging dev 9f9e2b8e with the banner and identity-prompt copy and code moved in. Raised 60,512 -> 64,000 B: B9 feature lanes shared budget, firstmate decision 2026-09-23; re-baseline at B9-26."
     },
     "livekit": {
       "budget": 135000,

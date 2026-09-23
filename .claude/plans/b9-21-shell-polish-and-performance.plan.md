@@ -202,8 +202,9 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
 
 One budget decision is open and escalated to firstmate (see the record below): the
 MainPage chunk measure exceeded the shared 64,000 B budget after this lane;
-firstmate raised it to 64,500 B (decision 014) with a dated note naming B9-21,
-keeping every earlier note. No open question remains.
+the raise was withdrawn in favour of the owner's "do not weaken any threshold";
+the channel editor now loads on demand, and MainPage fits 64,000 B. No open
+question remains.
 
 ## Implementation record — 2026-09-23
 
@@ -266,11 +267,11 @@ were edited.
   `overlays` (75 tests).
 - **Native AT (NVDA/Orca) recordings and OS-zoom checks are owner-run and remain
   pending**, consistent with the other B9 lanes.
-- **Bundle budgets:** startup closure 94,506 B of the shared 95,000 B;
-  MainPage 64,449 B. This lane adds ~1.1 KB of MainPage (the reconciler and the
-  keyed render paths, all startup code), taking it past the shared 64,000 B
-  budget; firstmate raised the budget to 64,500 B (decision 014) with a dated
-  note naming B9-21, keeping every earlier note, re-baseline at B9-26.
+- **Bundle budgets:** startup closure 94,688 B of the shared 95,000 B;
+  MainPage 63,544 B of the unchanged 64,000 B. This lane adds ~1.1 KB of
+  MainPage (the reconciler and the keyed render paths, all startup code); the
+  admin-only channel editor (`EditChannelModal`) moved to an on-demand chunk to
+  pay for it. No budget was raised.
 
 ### Requirements and register
 

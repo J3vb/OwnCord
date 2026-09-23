@@ -138,4 +138,24 @@ describe("reconcileChildren", () => {
     });
     expect(disposed).toEqual([gone]);
   });
+
+  it("moves focus from a control inside a replaced row to the same control in its replacement", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const nestedOpts = {
+      ...opts,
+      create: (r: Row) => {
+        const row = createElement("div", { "data-id": String(r.id) }, r.label);
+        row.appendChild(createElement("button", { class: "row-action" }));
+        return row;
+      },
+    };
+    reconcileChildren(container, [{ id: 1, label: "a" }], nestedOpts);
+    (container.querySelector(".row-action") as HTMLElement).focus();
+
+    reconcileChildren(container, [{ id: 1, label: "changed" }], nestedOpts);
+
+    expect(document.activeElement).toBe(container.querySelector(".row-action"));
+    container.remove();
+  });
 });

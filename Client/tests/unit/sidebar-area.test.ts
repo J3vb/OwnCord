@@ -156,7 +156,7 @@ import {
 } from "../../src/features/navigation/contentView";
 import { channelsStore, setActiveChannel, setRoles } from "../../src/stores/channels.store";
 import { dmStore, addDmChannel } from "../../src/stores/dm.store";
-import { uiStore, setSidebarMode, setActiveDmUser } from "../../src/stores/ui.store";
+import { uiStore, setSidebarMode } from "../../src/stores/ui.store";
 import { authStore } from "../../src/stores/auth.store";
 import { Permission } from "../../src/lib/types";
 import { membersStore } from "../../src/stores/members.store";
@@ -329,7 +329,7 @@ function defaultOpts(): SidebarAreaOptions {
     presenceSender: {
       send: vi.fn(),
       destroy: vi.fn(),
-    } as unknown as SidebarAreaOptions["presenceSender"],
+    },
     getRoot: vi.fn().mockReturnValue(document.createElement("div")),
     getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
   };
@@ -1482,6 +1482,22 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
+    it("onSelectConversation opens a DM that arrived after the sidebar was built", () => {
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+      const callArgs = (createDmSidebar as MockedFn).mock.calls[0]![0];
+
+      addDmChannel(makeDm({ channelId: 100 }));
+      dmStore.flush();
+      callArgs.onSelectConversation(100);
+
+      expect(channelsStore.getState().activeChannelId).toBe(100);
+
+      cleanup(result);
+    });
+
     it("onBack restores previous channel and switches to channels mode", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
@@ -1897,16 +1913,29 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onEditChannel opens edit channel modal", () => {
+    it("onEditChannel opens edit channel modal", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       callArgs.onEditChannel({ id: 1, name: "general", type: "text" });
+      await vi.dynamicImportSettled();
 
       expect(createEditChannelModal).toHaveBeenCalled();
 
       cleanup(result);
+    });
+
+    it("onEditChannel opens nothing when the sidebar is torn down while the editor loads", async () => {
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      callArgs.onEditChannel({ id: 1, name: "general", type: "text" });
+      cleanup(result);
+      await vi.dynamicImportSettled();
+
+      expect(createEditChannelModal).not.toHaveBeenCalled();
     });
 
     it("onDeleteChannel opens delete channel modal", () => {
@@ -2116,6 +2145,7 @@ describe("SidebarArea", () => {
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
       await modalCallArgs.onSave({ name: "updated" });
@@ -2136,6 +2166,7 @@ describe("SidebarArea", () => {
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
       await expect(modalCallArgs.onSave({ name: "updated" })).rejects.toThrow("Update failed");
@@ -2157,6 +2188,7 @@ describe("SidebarArea", () => {
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
       await expect(modalCallArgs.onSave({ name: "updated" })).rejects.toBe(42);
@@ -2166,17 +2198,20 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onClose callback destroys edit modal", () => {
+    it("onClose callback destroys edit modal", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
       modalCallArgs.onClose();
 
       channelCallArgs.onEditChannel({ id: 2, name: "random", type: "text" });
+
+      await vi.dynamicImportSettled();
       expect(createEditChannelModal).toHaveBeenCalledTimes(2);
 
       cleanup(result);

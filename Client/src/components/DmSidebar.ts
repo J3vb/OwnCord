@@ -332,6 +332,8 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
   let rendered: readonly DmConversation[] = [];
   // Rows the search filter has hidden, so a later update can re-apply it.
   let query = "";
+  // Each row's listeners die with the row, not with the sidebar (OC-0229).
+  const rowOwners = new Map<Element, Disposable>();
 
   /** Apply the current search query to the current rows. */
   function applyFilter(): void {
@@ -352,7 +354,16 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
     reconcileChildren(list, rendered, {
       key: (c) => String(c.channelId),
       signature: convoSignature,
-      create: (convo) => renderDmItem(convo, options, disposable.signal),
+      create: (convo) => {
+        const owner = new Disposable();
+        const el = renderDmItem(convo, options, owner.signal);
+        rowOwners.set(el, owner);
+        return el;
+      },
+      dispose: (el) => {
+        rowOwners.get(el)?.destroy();
+        rowOwners.delete(el);
+      },
     });
     setRovingTabindex(list, ".dm-item");
     applyFilter();
@@ -439,6 +450,8 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
 
   function destroy(): void {
     disposable.destroy();
+    for (const owner of rowOwners.values()) owner.destroy();
+    rowOwners.clear();
     if (root !== null) {
       root.remove();
       root = null;
