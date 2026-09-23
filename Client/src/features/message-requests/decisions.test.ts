@@ -351,6 +351,16 @@ describe("message request decisions", () => {
     expect(document.activeElement).toBe(row(1));
   });
 
+  it("moves focus from the list to the heading when another device empties it", async () => {
+    await open(1);
+    const list = root.querySelector<HTMLElement>("[data-testid='requests-list']")!;
+    list.focus();
+    expect(document.activeElement).toBe(list);
+    handleDmRequest({ ...item(1), state: "ignored", preview: null, decided_at: "x" });
+    messageRequestsStore.flush();
+    expect(document.activeElement).toBe(heading);
+  });
+
   it("drops a decision that lands after the view closed or the account changed", async () => {
     await open(1);
     button(1, "accept").click();

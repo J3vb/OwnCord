@@ -296,6 +296,8 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
     const ordered = pending.map((r) => [r.id, rows.get(r.id)!] as const);
     rows.clear();
     for (const [id, row] of ordered) rows.set(id, row);
+    // The list itself is a tab stop; hiding it would drop focus to the body.
+    if (pending.length === 0 && list.contains(document.activeElement)) focusLeftAt ??= 0;
     list.hidden = pending.length === 0;
     if (focusLeftAt !== null) refocus(focusLeftAt, pending);
   };
