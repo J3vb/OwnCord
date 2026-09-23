@@ -28,9 +28,10 @@ is the implementation supplement for the B3, B7 and B9 structural workstreams
 (see the `_(added 2026-08-29)_` lines); it is not a phase and adds no gate.
 **Audit update, 2026-09-23, at `dev` `8df46055` (B7-18): B7 has built
 everything and HP-7 is signed, but the phase exit is open.** B7-0 through B7-17
-are merged, and the owner signed HP-7 on 2026-09-23. Three items keep the exit
+are merged, and the owner signed HP-7 on 2026-09-23. Three items kept the exit
 open: C-10's B7 half, the client voice-join budget, and the decision on
-`tauri-build` for PRs into `dev`. The
+`tauri-build` for PRs into `dev`. The voice-join budget was recorded and
+enforced on 2026-09-23, so two remain. The
 [B7 PRD](b7-shared-client-platform-desktop-parity.prd.md#b7-18-reconciliation-2026-09-23)
 records them, and the B7 section below summarizes them.
 [README.md](README.md) is the status authority when this header and a README
@@ -943,11 +944,10 @@ three stated limits, which carry forward:
   leg is N/A;
 - the owner still has to run the real-desktop Linux device check.
 
-The exit gate is **not yet met**, because three items are open:
+The exit gate is **not yet met**, because two items are open:
 
 - C-10's B7 half: the desktop CSP's `connect-src` still allows `https:` and
   `wss:`;
-- no client voice-join budget has been recorded;
 - the 2026-09-19 decision to run `tauri-build` on PRs into `dev` was not
   implemented.
 
@@ -1046,7 +1046,10 @@ this hold point's desktop-parity text is otherwise unchanged.)_
 - Desktop artifacts pass install, boot, connect, update, rollback, media, and
   recovery smoke on the supported architecture matrix.
 - Startup, bundle, voice-join, and long-session budgets meet or improve the
-  accepted baseline.
+  accepted baseline. _(2026-09-23: the client voice-join budget, the one
+  missing, is the median of seven joins to decoded remote audio at 1,500 ms
+  or less, enforced in `client-fullstack`; baseline in
+  [b7-0-client-baseline-2026-09-19.md](b7-0-client-baseline-2026-09-19.md#b7-voice-join-budget-baseline-2026-09-23).)_
 
 ### Required evidence
 

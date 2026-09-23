@@ -22,9 +22,10 @@
 > [HP-7 sign-off](#hp-7-sign-off-2026-09-23).
 >
 > **B7-18 reconciled 2026-09-23. B7 is not closed.** Every build milestone
-> has merged. Three items still hold the exit open (C-10's B7 half, the
-> client voice-join budget, and the decision on `tauri-build` for `dev`
-> PRs); see [B7-18 reconciliation](#b7-18-reconciliation-2026-09-23).
+> has merged. Three items held the exit open (C-10's B7 half, the client
+> voice-join budget, and the decision on `tauri-build` for `dev` PRs); the
+> voice-join budget is now recorded and enforced, so two remain; see
+> [B7-18 reconciliation](#b7-18-reconciliation-2026-09-23).
 
 ## Problem
 
@@ -383,8 +384,9 @@ The Linux device check is owner-run and stays open after this signature. B7-18
 
 Reconciled against `git log` on `dev` at `8df46055` and the merged PRs linked
 in the milestone table. Every build milestone, B7-0 through B7-17, is merged
-and HP-7 is signed. **B7 is not closed.** Three items below are still open,
-so B7-18 stays `in-progress`. The phase closes when the owner resolves them.
+and HP-7 is signed. **B7 is not closed.** Three items below were open; item 2
+closed 2026-09-23, so two remain and B7-18 stays `in-progress`. The phase
+closes when the owner resolves them.
 
 **What remains before B7 can close**
 
@@ -400,7 +402,14 @@ so B7-18 stays `in-progress`. The phase closes when the owner resolves them.
    allowlist contract exists. The owner can do the work, accept the residual
    with a reason in the register, or re-tag the row to a later phase with a
    written reason (roadmap rule 2).
-2. **Exit-gate evidence: there is no client voice-join budget.** The exit gate
+2. **Closed 2026-09-23: the client voice-join budget is recorded and
+   enforced.** The median of seven joins, from the click to decoded remote
+   audio, is held to 1,500 ms (`Client/voice-join-budget.json`) by
+   `Client/tests/e2e/fullstack/voice-join-budget.spec.ts` in the
+   `client-fullstack` CI job. The CI baseline, run medians 462–670 ms, is in
+   [b7-0-client-baseline-2026-09-19.md](b7-0-client-baseline-2026-09-19.md#b7-voice-join-budget-baseline-2026-09-23).
+   The original finding follows.
+   **Exit-gate evidence: there is no client voice-join budget.** The exit gate
    asks for startup, bundle, voice-join and long-session budgets that meet or
    improve the accepted baseline. B7 recorded three of them: startup and
    bundle budgets (`Client/bundle-budgets.json`, B7-7
@@ -560,4 +569,4 @@ already exists" list names the same artifacts:
 
 ---
 
-_Status: B7-0 to B7-17 complete and HP-7 signed. B7-18 reconciled on 2026-09-23. The phase exit is open on three items; see [B7-18 reconciliation](#b7-18-reconciliation-2026-09-23)._
+_Status: B7-0 to B7-17 complete and HP-7 signed. B7-18 reconciled on 2026-09-23. The phase exit is open on two items (the voice-join budget closed 2026-09-23); see [B7-18 reconciliation](#b7-18-reconciliation-2026-09-23)._

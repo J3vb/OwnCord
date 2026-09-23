@@ -1,0 +1,5 @@
+{
+  "method": "Client/tests/e2e/fullstack/voice-join-budget.spec.ts in the client-fullstack CI job (ubuntu-latest, headless Chromium, real server, LiveKit 1.13.5, E2EE on): wall clock from clicking a voice channel to 'Voice Connected' with the peer's remote audio decoding and advancing. Seven joins into a call the peer is already publishing in, each the first join on a fresh application socket; the median is held to the budget.",
+  "budgetMs": 1500,
+  "note": "Baseline at dev 56055d86 (2026-09-23), CI run 35852239736, 28 samples in four runs: run medians 462, 615, 634 and 670 ms; 27 samples 312-726 ms, one 2,406 ms. Budget = the worst run median x 2.2, rounded up to the next 500 ms: CI-runner timing noise is far wider than the bundle budgets' 10 %, and the median of seven fails only when four joins exceed it, so one slow join does not trip it while a regression that slows every join does."
+}
