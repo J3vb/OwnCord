@@ -191,7 +191,9 @@ moved (through the Refined Neon tokens, #1764). The server contract is on
   - `decisions.ts`: `decide()` posts one decision and applies only the
     server's 200, like a `dm_request` frame, so an in-flight snapshot cannot
     resurrect the request. A 409/404 refetches the inbox instead of guessing.
-    Block also records the sender in `blocksStore`. `openAcceptedConversation`
+    Block also records the sender in `blocksStore`; a Block that ends stale
+    or failed re-reads `GET /blocks` (the server commits the block before it
+    moves the request). `openAcceptedConversation`
     enters the ordinary DM only once the server has opened it: from
     `dm_channel_open`, or from `GET /dms` when that frame was lost (a warm
     resume gets no `ready` to carry it). `confirmDecision` is the
@@ -203,7 +205,7 @@ moved (through the Refined Neon tokens, #1764). The server contract is on
   - `sync.ts` (new): the snapshot fetch moved out of `wsHandlers.ts`, plus the
     session's client for the inbox (forgotten on sign-out). The inbox cannot
     import a `wsHandlers` module (`dispatcherDoor.test.ts`).
-  - `decisions.test.ts` (new, 14 tests).
+  - `decisions.test.ts` (new, 17 tests).
 - Single-writer files, minimal: `lib/api.ts` (`decideDmRequest` and its two
   types), `lib/dispatcher.ts` and `features/connection/dispatchContext.ts`
   (`decideDmRequest`, `getDmChannels` added to the `DispatchApi` pick). No
@@ -244,7 +246,8 @@ Node 26.9.0, vitest 4.1.11, Playwright 1.63.0 Chromium, Linux, head
 removal focus moved from the next request's Accept to its row after that
 head; the unit, mocked and fullstack assertions for the row (and its focus
 ring), and the unit tests that a newer snapshot redraws a kept row's sender
-and preview and that emptying a focused list focuses the heading, are recorded by the PR's CI run, not by the counts below.
+and preview, that emptying a focused list focuses the heading and that a
+stale or failed Block re-reads the block list, are recorded by the PR's CI run, not by the counts below.
 
 | Check                                                                                                                                                                                               | Result                                   |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
