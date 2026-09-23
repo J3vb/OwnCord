@@ -84,10 +84,11 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     const categoryGroup = createElement("div", { class: "form-group" });
     const categoryLabel = createElement(
       "label",
-      { class: "form-label" },
+      { class: "form-label", for: "create-channel-category" },
       shellText("channelForm.category"),
     );
     const categoryInput = createElement("input", {
+      id: "create-channel-category",
       class: "form-input",
       type: "text",
       list: "create-channel-categories",
@@ -106,10 +107,11 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     const nameGroup = createElement("div", { class: "form-group" });
     const nameLabel = createElement(
       "label",
-      { class: "form-label" },
+      { class: "form-label", for: "create-channel-name" },
       shellText("channelForm.name"),
     );
     const nameInput = createElement("input", {
+      id: "create-channel-name",
       class: "form-input",
       type: "text",
       placeholder: shellText(
@@ -125,10 +127,11 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     const typeGroup = createElement("div", { class: "form-group" });
     const typeLabel = createElement(
       "label",
-      { class: "form-label" },
+      { class: "form-label", for: "create-channel-type" },
       shellText("channelForm.type"),
     );
     const typeSelect = createElement("select", {
+      id: "create-channel-type",
       class: "form-input",
       "data-testid": "channel-type-select",
     });

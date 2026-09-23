@@ -113,8 +113,9 @@ function buildVoiceLimitField(
   value: number,
 ): { group: HTMLDivElement; input: HTMLInputElement } {
   const group = createElement("div", { class: "form-group" });
-  const label = createElement("label", { class: "form-label" }, labelText);
+  const label = createElement("label", { class: "form-label", for: testId }, labelText);
   const input = createElement("input", {
+    id: testId,
     class: "form-input",
     type: "number",
     min: "0",
@@ -180,10 +181,11 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     const nameGroup = createElement("div", { class: "form-group" });
     const nameLabel = createElement(
       "label",
-      { class: "form-label" },
+      { class: "form-label", for: "edit-channel-name" },
       shellText("channelForm.name"),
     );
     const nameInput = createElement("input", {
+      id: "edit-channel-name",
       class: "form-input",
       type: "text",
       value: channelName,
@@ -196,10 +198,11 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     const topicGroup = createElement("div", { class: "form-group" });
     const topicLabel = createElement(
       "label",
-      { class: "form-label" },
+      { class: "form-label", for: "edit-channel-topic" },
       shellText("channelForm.topic"),
     );
     const topicInput = createElement("input", {
+      id: "edit-channel-topic",
       class: "form-input",
       type: "text",
       placeholder: shellText("channelForm.topicPlaceholder"),
@@ -213,10 +216,11 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     const categoryGroup = createElement("div", { class: "form-group" });
     const categoryLabel = createElement(
       "label",
-      { class: "form-label" },
+      { class: "form-label", for: "edit-channel-category" },
       shellText("channelForm.category"),
     );
     const categoryInput = createElement("input", {
+      id: "edit-channel-category",
       class: "form-input",
       type: "text",
       list: "edit-channel-categories",
@@ -236,10 +240,11 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     const slowGroup = createElement("div", { class: "form-group" });
     const slowLabel = createElement(
       "label",
-      { class: "form-label" },
+      { class: "form-label", for: "edit-channel-slowmode" },
       shellText("channelForm.slowMode"),
     );
     const slowSelect = createElement("select", {
+      id: "edit-channel-slowmode",
       class: "form-input",
       "data-testid": "edit-channel-slowmode-select",
     });

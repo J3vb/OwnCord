@@ -564,6 +564,22 @@ describe("EditChannelModal", () => {
       modal.destroy?.();
     });
 
+    it("names each form control by its visible label", () => {
+      const { modal } = makeModal({ channelType: "voice" });
+      const labelOf = (testId: string) =>
+        [
+          ...((container.querySelector(`[data-testid='${testId}']`) as HTMLInputElement).labels ??
+            []),
+        ].map((l) => l.textContent);
+      expect(labelOf("edit-channel-name-input")).toEqual(["Name"]);
+      expect(labelOf("edit-channel-topic-input")).toEqual(["Topic"]);
+      expect(labelOf("edit-channel-category-input")).toEqual(["Category"]);
+      expect(labelOf("edit-channel-slowmode-select")).toEqual(["Slow Mode"]);
+      expect(labelOf("edit-channel-max-users-input")).toEqual(["User Limit"]);
+      expect(labelOf("edit-channel-max-video-input")).toEqual(["Video Limit"]);
+      modal.destroy?.();
+    });
+
     it("labels the icon-only close button", () => {
       const { modal } = makeModal();
       const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
