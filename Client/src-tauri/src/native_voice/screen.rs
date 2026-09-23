@@ -103,7 +103,7 @@ pub struct Source {
     pub id: String,
     pub kind: &'static str,
     pub title: String,
-    /// A `data:image/bmp` URL of the source as it looks now, when it could
+    /// A `data:image/png` URL of the source as it looks now, when it could
     /// be captured.
     pub thumbnail: Option<String>,
 }
@@ -159,58 +159,60 @@ fn thumbnail(ty: DesktopCaptureSourceType, source: CaptureSource) -> Option<Stri
     // X11 capturers call back synchronously inside `capture_frame`.
     capturer.start_capture(Some(source), move |result| {
         if let Ok(frame) = result {
-            *out.lock().unwrap_or_else(|p| p.into_inner()) = thumbnail_bmp(&frame);
+            *out.lock().unwrap_or_else(|p| p.into_inner()) = thumbnail_url(&frame);
         }
     });
     capturer.capture_frame();
-    let bmp = slot.lock().unwrap_or_else(|p| p.into_inner()).take()?;
-    Some(format!(
-        "data:image/bmp;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(bmp)
-    ))
+    slot.lock().unwrap_or_else(|p| p.into_inner()).take()
 }
 
-const THUMB_WIDTH: usize = 256;
-const THUMB_HEIGHT: usize = 144;
+/// Small enough that an incompressible thumbnail stays within
+/// [`MAX_THUMBNAIL`], so 30 sources cost about 1 MB of IPC.
+const THUMB_WIDTH: usize = 120;
+const THUMB_HEIGHT: usize = 68;
+const MAX_THUMBNAIL: usize = 33 * 1024;
 
-fn thumbnail_bmp(frame: &DesktopFrame) -> Option<Vec<u8>> {
+fn thumbnail_url(frame: &DesktopFrame) -> Option<String> {
     let (w, h) = (frame.width(), frame.height());
     if w <= 0 || h <= 0 {
         return None;
     }
-    let (w, h) = (w as usize, h as usize);
+    png_url(
+        frame.data(),
+        frame.stride() as usize,
+        w as usize,
+        h as usize,
+    )
+}
+
+/// Nearest-neighbour downscale of a BGRA image (a `DesktopFrame`) to fit
+/// the thumbnail box, as a `data:image/png` URL.
+fn png_url(src: &[u8], stride: usize, w: usize, h: usize) -> Option<String> {
     let scale = (THUMB_WIDTH as f64 / w as f64)
         .min(THUMB_HEIGHT as f64 / h as f64)
         .min(1.0);
     let tw = ((w as f64 * scale) as usize).max(1);
     let th = ((h as f64 * scale) as usize).max(1);
-    Some(bmp(frame.data(), frame.stride() as usize, w, h, tw, th))
-}
-
-/// Nearest-neighbour downscale of a BGRA image (a `DesktopFrame`) to
-/// `tw` x `th`, as a top-down 32-bit BMP with opaque alpha.
-fn bmp(src: &[u8], stride: usize, w: usize, h: usize, tw: usize, th: usize) -> Vec<u8> {
-    let size = tw * th * 4;
-    let mut out = Vec::with_capacity(54 + size);
-    out.extend_from_slice(b"BM");
-    for v in [54 + size as u32, 0, 54, 40] {
-        out.extend_from_slice(&v.to_le_bytes());
-    }
-    out.extend_from_slice(&(tw as i32).to_le_bytes());
-    out.extend_from_slice(&(-(th as i32)).to_le_bytes()); // negative: top-down
-    out.extend_from_slice(&1u16.to_le_bytes());
-    out.extend_from_slice(&32u16.to_le_bytes());
-    for v in [0, size as u32, 2835, 2835, 0, 0] {
-        out.extend_from_slice(&v.to_le_bytes());
-    }
+    let mut rgb = Vec::with_capacity(tw * th * 3);
     for y in 0..th {
         let row = &src[(y * h / th) * stride..];
         for x in 0..tw {
             let px = &row[(x * w / tw) * 4..][..3];
-            out.extend_from_slice(&[px[0], px[1], px[2], 255]);
+            rgb.extend_from_slice(&[px[2], px[1], px[0]]);
         }
     }
-    out
+    let mut png = Vec::new();
+    let mut encoder = png::Encoder::new(&mut png, tw as u32, th as u32);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.set_compression(png::Compression::High);
+    let mut writer = encoder.write_header().ok()?;
+    writer.write_image_data(&rgb).ok()?;
+    writer.finish().ok()?;
+    Some(format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png)
+    ))
 }
 
 /// Capture pacing and size cap, from the web path's screen-share presets.
@@ -532,8 +534,21 @@ mod tests {
         assert_eq!(fit(1001, 5001, 1280, 720), Some((144, 720)));
     }
 
+    fn decode(url: &str) -> (png::OutputInfo, Vec<u8>) {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(url.strip_prefix("data:image/png;base64,").unwrap())
+            .unwrap();
+        let mut reader = png::Decoder::new(std::io::Cursor::new(bytes))
+            .read_info()
+            .unwrap();
+        let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        buf.truncate(info.buffer_size());
+        (info, buf)
+    }
+
     #[test]
-    fn thumbnails_are_top_down_opaque_bmps() {
+    fn thumbnails_are_downscaled_rgb_pngs() {
         // 4x2 BGRA with a row stride of 20 (4 bytes of padding per row).
         let mut src = vec![0u8; 40];
         for (i, px) in [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]
@@ -543,14 +558,38 @@ mod tests {
             src[i * 4..i * 4 + 3].copy_from_slice(px);
         }
         src[20..23].copy_from_slice(&[21, 22, 23]);
-        let out = bmp(&src, 20, 4, 2, 2, 1);
-        assert_eq!(&out[..2], b"BM");
-        assert_eq!(u32::from_le_bytes(out[2..6].try_into().unwrap()), 54 + 8);
-        assert_eq!(i32::from_le_bytes(out[18..22].try_into().unwrap()), 2);
-        assert_eq!(i32::from_le_bytes(out[22..26].try_into().unwrap()), -1);
-        assert_eq!(u16::from_le_bytes(out[28..30].try_into().unwrap()), 32);
-        // Nearest neighbour picks columns 0 and 2 of row 0, alpha forced.
-        assert_eq!(&out[54..], &[1, 2, 3, 255, 7, 8, 9, 255]);
+        let (info, rgb) = decode(&png_url(&src, 20, 4, 2).unwrap());
+        assert_eq!((info.width, info.height), (4, 2));
+        assert_eq!(info.color_type, png::ColorType::Rgb);
+        assert_eq!(&rgb[..12], &[3, 2, 1, 6, 5, 4, 9, 8, 7, 12, 11, 10]);
+        assert_eq!(&rgb[12..15], &[23, 22, 21]);
+
+        // A 4K screen fits the box, keeping its aspect.
+        let src = vec![0u8; 3840 * 2160 * 4];
+        let (info, _) = decode(&png_url(&src, 3840 * 4, 3840, 2160).unwrap());
+        assert_eq!((info.width, info.height), (120, 67));
+    }
+
+    #[test]
+    fn an_incompressible_thumbnail_stays_within_the_ipc_budget() {
+        // Noise that fills the whole box defeats compression: the worst case.
+        let (w, h) = (THUMB_WIDTH * 10, THUMB_HEIGHT * 10);
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let src: Vec<u8> = (0..w * h * 4)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state as u8
+            })
+            .collect();
+        let url = png_url(&src, w * 4, w, h).unwrap();
+        let (info, _) = decode(&url);
+        assert_eq!(
+            (info.width as usize, info.height as usize),
+            (THUMB_WIDTH, THUMB_HEIGHT)
+        );
+        assert!(url.len() <= MAX_THUMBNAIL, "{} bytes", url.len());
     }
 
     #[test]
@@ -611,7 +650,7 @@ mod tests {
         assert!(screen
             .thumbnail
             .as_ref()
-            .is_some_and(|t| t.starts_with("data:image/bmp;base64,Qk")));
+            .is_some_and(|t| t.starts_with("data:image/png;base64,iVBOR")));
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();

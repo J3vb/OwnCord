@@ -150,6 +150,9 @@ device_query = "2"
 # Default features only — no TLS backend, because the native room dials the
 # plain ws:// loopback that livekit_proxy already exposes.
 livekit = "=0.9.1"
+# Encodes the screen picker's thumbnails (native_voice/screen.rs). Already in
+# the tree via tauri's tray-icon, so this costs no extra build.
+png = "0.18"
 # Direct access to the WebKitGTK webview for voice/video support. WebKitGTK
 # denies getUserMedia/enumerateDevices permission requests by default (wry
 # installs no handler on Linux, unlike its macOS backend which auto-grants),

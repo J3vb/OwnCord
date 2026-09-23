@@ -14,7 +14,12 @@ import { captureOptions } from "./screenTrack";
 const x11: NativeVoiceScreenSources = {
   portal: false,
   sources: [
-    { id: "screen:277", kind: "screen", title: "screen", thumbnail: "data:image/bmp;base64,Qk0=" },
+    {
+      id: "screen:277",
+      kind: "screen",
+      title: "screen",
+      thumbnail: "data:image/png;base64,iVBORw==",
+    },
     { id: "window:81", kind: "window", title: "Terminal", thumbnail: null },
   ],
 };
@@ -48,7 +53,9 @@ describe("pickScreenSource", () => {
       "Share Screen: screen",
       "Share Window: Terminal",
     ]);
-    expect(cards[0]!.querySelector("img")!.getAttribute("src")).toBe("data:image/bmp;base64,Qk0=");
+    expect(cards[0]!.querySelector("img")!.getAttribute("src")).toBe(
+      "data:image/png;base64,iVBORw==",
+    );
     expect(cards[1]!.textContent).toContain("No preview");
     cards[1]!.click();
     await expect(picking).resolves.toBe("window:81");

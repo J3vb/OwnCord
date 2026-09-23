@@ -203,6 +203,9 @@ export class NativeRoom {
   private pending: NativeVoiceEnvelope[] | null = null;
   /** The live screen capture's track; null when not capturing. */
   private screen: NativeScreenTrack | null = null;
+  /** The last capture the host ended, in case it ended before its track
+   *  existed (the event and the start result travel separately). */
+  private endedCapture: number | null = null;
 
   constructor(private readonly audio: NativeVoiceAudioOptions) {}
 
@@ -366,6 +369,7 @@ export class NativeRoom {
     );
     this.screen?.stop();
     this.screen = track;
+    if (this.endedCapture === track.capture) track.end();
     return [track];
   }
 
@@ -435,6 +439,7 @@ export class NativeRoom {
     // The session close releases the host capture; this is the preview.
     this.screen?.stop();
     this.screen = null;
+    this.endedCapture = null;
     this.localParticipant.trackPublications.delete("screen_share");
   }
 
@@ -560,6 +565,7 @@ export class NativeRoom {
         );
         break;
       case "screenCaptureEnded":
+        this.endedCapture = event.capture;
         if (this.screen?.capture === event.capture) this.screen.end();
         break;
       case "encryptionStatus":

@@ -76,10 +76,13 @@ export class NativeScreenTrack {
     return this.renderer.mediaStreamTrack;
   }
 
-  /** The host capture ended on its own: raise what a browser capture track
-   *  raises when the OS stops it, so the shared code disables the share. */
+  /** The host capture ended on its own: do what a browser capture track
+   *  does when the OS stops it (readyState "ended", then the `ended` event),
+   *  so the shared code disables the share, even before it listens. */
   end(): void {
-    if (!this.stopped) this.mediaStreamTrack.dispatchEvent(new Event("ended"));
+    if (this.stopped) return;
+    this.mediaStreamTrack.stop();
+    this.mediaStreamTrack.dispatchEvent(new Event("ended"));
   }
 
   stop(): void {

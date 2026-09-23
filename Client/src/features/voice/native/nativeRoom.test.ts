@@ -49,6 +49,10 @@ vi.mock("./videoRenderer", () => ({
     readonly mediaStreamTrack = {
       id: `canvas-${host.renderers.length}`,
       events: [] as string[],
+      readyState: "live",
+      stop() {
+        this.readyState = "ended";
+      },
       dispatchEvent(e: Event) {
         this.events.push(e.type);
         return true;
@@ -706,6 +710,21 @@ describe("NativeRoom screen share", () => {
     expect(host.renderers[0]!.mediaStreamTrack!.events).toEqual([]);
     emit({ session: 1, event: { type: "screenCaptureEnded", capture: 4 } });
     expect(host.renderers[0]!.mediaStreamTrack!.events).toEqual(["ended"]);
+  });
+
+  it("ends a track whose capture ended before its start result arrived", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    host.startScreen = () => {
+      emit({ session: 1, event: { type: "screenCaptureEnded", capture: 4 } });
+      return Promise.resolve({ capture: 4, width: 1280, height: 720 });
+    };
+    const screen = await share(room);
+    expect(screen.mediaStreamTrack.readyState).toBe("ended");
+    expect(host.renderers[0]!.mediaStreamTrack!.events).toEqual(["ended"]);
+    host.startScreen = () => Promise.resolve({ capture: 5, width: 1280, height: 720 });
+    const next = await share(room);
+    expect(next.mediaStreamTrack.readyState).toBe("live");
   });
 
   it("stops the previous capture's track when a new capture replaces it", async () => {
