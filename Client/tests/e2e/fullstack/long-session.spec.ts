@@ -273,7 +273,7 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
   aliceTransport,
   server,
 }) => {
-  test.setTimeout(CYCLES * 30_000 + 180_000);
+  test.setTimeout(CYCLES * 30_000 + IDLE_MIN * 60_000 + 180_000);
   const cdp = await alice.context().newCDPSession(alice);
   const samples: Awaited<ReturnType<typeof sampleLifecycle>>[] = [];
 
