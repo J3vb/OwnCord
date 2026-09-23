@@ -128,6 +128,9 @@ export function keyword(d: CssDeclaration | undefined): string | undefined {
   if (!d) return undefined;
   const v: unknown = d.value.value;
   if (typeof v === "string" || typeof v === "number") return String(v);
+  if (typeof v === "object" && v !== null && "type" in v && v.type === "keyword") {
+    if ("value" in v && typeof v.value === "string") return v.value;
+  }
   const tokens = d.value.property === "custom" ? d.value.value.value : undefined;
   if (tokens?.length !== 1) return undefined;
   const t = tokens[0]!;

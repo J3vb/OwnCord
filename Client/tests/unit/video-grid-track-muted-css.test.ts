@@ -6,10 +6,26 @@
 // hide a stalled remote camera's last frame. If app.css has no rule for that
 // class, the toggle is a no-op and the viewer keeps seeing a frozen frame
 // with no indication the track stalled.
+import { transform } from "lightningcss";
+import type { Declaration } from "lightningcss";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
 import { describe, it, expect } from "vitest";
 
 describe("VideoGrid track-muted CSS", () => {
+  it("reads a parsed display: none declaration as none", () => {
+    let value: Declaration | undefined;
+    transform({
+      filename: "probe.css",
+      code: Buffer.from(".probe { display: none }"),
+      visitor: {
+        Declaration(d) {
+          value = d;
+        },
+      },
+    });
+    expect(keyword(value && { value, important: false })).toBe("none");
+  });
+
   it("app.css hides the video element while .video-cell.track-muted is active", () => {
     const selector = ".video-cell.track-muted video";
     const hidden =
