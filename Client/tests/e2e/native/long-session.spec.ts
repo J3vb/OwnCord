@@ -39,11 +39,15 @@ async function runCycle(page: Page, cycle: number, purge: () => Promise<void>): 
   await row.hover();
   await row.locator("[data-testid^='msg-edit-']").click();
   await input.fill(`${own}-edited`);
-  await input.press("Enter");
   const edited = page.locator(".message", {
     has: page.locator(".msg-text", { hasText: `${own}-edited` }),
   });
-  await expect(edited).toHaveCount(1);
+  // The composer drops a submit within 200 ms of the last send (its
+  // double-send guard); Enter again until the edit lands.
+  await expect(async () => {
+    await input.press("Enter");
+    await expect(edited).toHaveCount(1, { timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
   await edited.hover();
   await edited.locator("[data-testid^='msg-react-']").click();
   const picker = page.locator(".reaction-picker-wrap .emoji-picker.open");
