@@ -114,6 +114,8 @@ export function wireDispatcher(
         | "getMessages"
         | "getMessagesAround"
         | "listDmRequests"
+        | "decideDmRequest"
+        | "getDmChannels"
         | "getOwnModeration"
       >
     >,
