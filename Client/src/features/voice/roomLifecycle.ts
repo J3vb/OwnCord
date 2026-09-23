@@ -149,6 +149,14 @@ export class RoomLifecycle {
     // OC-0438: publish with the channel's configured audio bitrate — spreading
     // undefined omits audioPreset, leaving LiveKit's own default in place.
     const audioOptions = this.configuredAudioOptions(channelId ?? null);
+    // livekit-client 2.22's Room constructor, when this registry exists,
+    // registers its navigator.mediaDevices devicechange listener as a
+    // WeakRef closure that only the registry removes. The closure's scope
+    // still captures the Room, so the Room is never collected and every join
+    // leaked a whole Room (engine, participants, E2EE manager) for the page's
+    // lifetime. Without the registry it registers `handleDeviceChange`, which
+    // disconnect() removes, and leaveVoice always disconnects.
+    Room.cleanupRegistry = false;
     const newRoom = new Room({
       // Adaptive features reduce quality based on subscriber viewport —
       // disable for "source" quality to maintain full resolution.
