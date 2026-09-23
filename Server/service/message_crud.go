@@ -62,25 +62,6 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	}
 	msgID := msg.ID
 
-	// Advance the author's own read state past the message they just sent.
-	// Both unread queries count "messages with id > my read_states row" and
-	// neither filters by author, so without this an author's own message
-	// counts as unread to themselves: post in a channel, navigate away, and
-	// the next `ready` restates it as an unread badge that never clears until
-	// something else marks the channel read.
-	//
-	// Done here rather than by adding an author filter to the two queries so
-	// the stored read state stays truthful — you have, in fact, seen your own
-	// message — and so the fix covers DMs and text channels through one path.
-	//
-	// Best-effort: the message is already committed and broadcast-bound, so a
-	// failure here must not fail the send. The worst case is the pre-existing
-	// stale-badge behaviour, which the next mark_read corrects.
-	if err := s.st.UpdateReadState(ctx, p.UserID, p.ChannelID, msgID); err != nil {
-		slog.Warn("MessageService.SendMessage: could not advance author read state",
-			"err", err, "user_id", p.UserID, "channel_id", p.ChannelID, "msg_id", msgID)
-	}
-
 	result := &SendMessageResult{
 		MessageID:        msgID,
 		Timestamp:        msg.Timestamp,

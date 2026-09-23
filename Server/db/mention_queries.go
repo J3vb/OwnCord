@@ -52,7 +52,8 @@ type MentionTarget struct {
 // CreateMessageWithMentions inserts a message and its resolved mentions in one
 // writer transaction, so a reader can never observe a message whose mention set
 // is still half-written. mentionedUserIDs is truncated to
-// maxMentionsPerMessage and duplicates are ignored.
+// maxMentionsPerMessage and duplicates are ignored. The same transaction
+// advances the author's read state past the message (advanceAuthorReadState).
 func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*Message, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -79,6 +80,7 @@ func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID in
 	if err := insertMentionRows(ctx, tx, m.ID, mentionedUserIDs); err != nil {
 		return nil, err
 	}
+	advanceAuthorReadState(ctx, d.q.WithTx(tx), userID, channelID, m.ID)
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("CreateMessageWithMentions commit: %w", err)
 	}

@@ -48,10 +48,9 @@ type Store interface {
 	AddReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	RemoveReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	GetReactionUsers(ctx context.Context, messageID int64, emoji string, limit int) ([]db.ReactionUser, error)
-	UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error
 	// MarkChannelReadAtLatest is the mark-read that computes its own
-	// watermark; UpdateReadState is for a caller that already holds the
-	// exact id it means (OC-0323).
+	// watermark (OC-0323). The send path's read-state advance happens inside
+	// CreateMessageWithMentions / CreateMessageDelivery.
 	MarkChannelReadAtLatest(ctx context.Context, userID, channelID int64) error
 	GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error)
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
