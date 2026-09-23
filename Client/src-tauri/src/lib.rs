@@ -177,6 +177,14 @@ pub fn run() {
             native_voice::native_voice_publish_camera,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_unpublish_camera,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_screen_sources,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_start_screen,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_publish_screen,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_stop_screen,
             #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])
