@@ -222,3 +222,18 @@
     transition: none;
   }
 }
+
+/* ── B9-4 content view: a destination shown in place of the chat column ── */
+.feature-view .feature-view-title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feature-view-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}

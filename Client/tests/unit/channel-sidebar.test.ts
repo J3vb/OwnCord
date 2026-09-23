@@ -77,6 +77,8 @@ function resetStores(): void {
     collapsedCategories: new Set<string>(),
     sidebarMode: "channels" as const,
     activeDmUserId: null,
+    activeView: null,
+    settingsTab: null,
   }));
   voiceStore.setState(() => ({
     currentChannelId: null,

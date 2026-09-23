@@ -9,6 +9,8 @@ import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { setSidebarMode } from "@stores/ui.store";
 import { isChannelMuted } from "@lib/channel-mutes";
+import type { CountSource } from "../../features/navigation/destinations";
+import { navigationText } from "../../i18n/navigation";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -19,6 +21,8 @@ export interface SidebarDmSectionOptions {
   readonly onSelectDm: (dmChannel: DmChannel) => void;
   /** Called when the user clicks the "+" button to create a new DM. */
   readonly onNewDm: () => void;
+  /** Pending Message Requests (B9-4, Q2). Badged apart from unread, never added to it. */
+  readonly pendingRequests?: CountSource;
 }
 
 export interface SidebarDmSectionResult {
@@ -47,7 +51,30 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   const dmUnreadBadge = createElement("span", { class: "dm-header-unread-badge" });
   const dmAddBtn = createElement("button", { class: "category-add-btn", title: "New DM" }, "+");
   dmAddBtn.style.opacity = "1";
-  appendChildren(dmHeader, dmArrow, dmLabelEl, dmUnreadBadge, dmAddBtn);
+  appendChildren(dmHeader, dmArrow, dmLabelEl, dmUnreadBadge);
+
+  // Its own badge, not a share of the unread one: a request is not a message
+  // the reader has, and it never raises the unread or mention totals.
+  const pending = opts.pendingRequests;
+  if (pending !== undefined) {
+    const requestsBadge = createElement("span", {
+      class: "dm-header-requests-badge",
+      "data-testid": "dm-requests-badge",
+    });
+    const requestsCount = createElement("span", { "aria-hidden": "true" });
+    const requestsLabel = createElement("span", { class: "sr-only" });
+    appendChildren(requestsBadge, requestsCount, requestsLabel);
+    const renderRequests = (): void => {
+      const count = pending.get();
+      setText(requestsCount, String(count));
+      setText(requestsLabel, navigationText("requests.badge", { count }));
+      requestsBadge.style.display = count > 0 ? "" : "none";
+    };
+    renderRequests();
+    unsubs.push(pending.subscribe(renderRequests));
+    dmHeader.appendChild(requestsBadge);
+  }
+  dmHeader.appendChild(dmAddBtn);
   dmSection.appendChild(dmHeader);
 
   // --- DM list ---
