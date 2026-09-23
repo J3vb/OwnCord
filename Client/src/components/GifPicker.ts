@@ -2,6 +2,7 @@
 // (which proxies Klipy). Uses @lib/dom helpers exclusively. Never sets
 // innerHTML with user content.
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { ApiClientError } from "@lib/api";
@@ -44,8 +45,8 @@ export function createGifPicker(options: GifPickerOptions): {
   readonly element: HTMLDivElement;
   destroy(): void;
 } {
-  const abortController = new AbortController();
-  const signal = abortController.signal;
+  const disposable = new Disposable();
+  const signal = disposable.signal;
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let currentRequestId = 0;
@@ -228,7 +229,7 @@ export function createGifPicker(options: GifPickerOptions): {
     if (debounceTimer !== null) {
       clearTimeout(debounceTimer);
     }
-    abortController.abort();
+    disposable.destroy();
   }
 
   return { element: root, destroy };

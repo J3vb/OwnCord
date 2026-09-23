@@ -115,6 +115,10 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 		// in-flight handlers no window to re-take a stripped topic.
 		slog.Warn("hub: kicking stale connection for re-registering user",
 			"user_id", c.userID, "last_seq", c.lastSeq)
+		// Name the reason first: writePumpDrainAndClose delivers queued
+		// frames before the close, so the displaced device learns it was
+		// replaced rather than dropped, and does not reconnect to kick back.
+		old.sendMsg(buildErrorMsg(ErrCodeSessionReplaced, "signed in on another device"))
 		old.closeSend()
 
 		// Remove the old client from all pub/sub topics before replacing.

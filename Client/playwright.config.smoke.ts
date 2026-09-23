@@ -38,6 +38,7 @@ export default defineConfig({
     // Boot and identity: nothing else can pass if these break.
     "connect-page.spec.ts",
     "register-flow.spec.ts",
+    "recovery-flow.spec.ts",
     "logout-flow.spec.ts",
     // The shell and the main surfaces.
     "main-layout.spec.ts",

@@ -71,6 +71,7 @@ function resetStores(): void {
     // when connected. Frozen-state behavior is exercised explicitly below.
     connectionStatus: "connected" as const,
     transientError: null,
+    sessionReplaced: false,
     persistentError: null,
     updateRequiredHost: null,
     collapsedCategories: new Set<string>(),

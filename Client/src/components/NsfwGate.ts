@@ -13,6 +13,7 @@
  * is warning about and leaves the sidebar and header usable.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -35,7 +36,7 @@ export interface NsfwGateOptions {
 
 export function createNsfwGate(options: NsfwGateOptions): MountableComponent {
   const { channelId, channelName, onContinue, onCancel } = options;
-  const ac = new AbortController();
+  const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
 
   function mount(container: Element): void {
@@ -74,7 +75,7 @@ export function createNsfwGate(options: NsfwGateOptions): MountableComponent {
         { class: "btn-modal-cancel", type: "button", "data-testid": "nsfw-gate-back" },
         "Go Back",
       );
-      backBtn.addEventListener("click", onCancel, { signal: ac.signal });
+      backBtn.addEventListener("click", onCancel, { signal: disposable.signal });
       actions.appendChild(backBtn);
     }
 
@@ -91,7 +92,7 @@ export function createNsfwGate(options: NsfwGateOptions): MountableComponent {
         acknowledgeNsfw(channelId);
         onContinue();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
     actions.appendChild(continueBtn);
 
@@ -102,7 +103,7 @@ export function createNsfwGate(options: NsfwGateOptions): MountableComponent {
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     if (root !== null) {
       root.remove();
       root = null;

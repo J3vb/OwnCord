@@ -3,7 +3,7 @@
  * and cache management.
  */
 
-import { createElement, appendChildren } from "@lib/dom";
+import { createElement, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { clearPendingPersistedLogs } from "@lib/logPersistence";
 import { desktop } from "../../platform/desktop";
@@ -102,17 +102,25 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
         try {
           await clearImageCache();
           btn.textContent = "Cleared!";
-          setTimeout(() => {
-            btn.textContent = "Clear";
-            btn.removeAttribute("disabled");
-          }, 2000);
+          setOwnedTimeout(
+            signal,
+            () => {
+              btn.textContent = "Clear";
+              btn.removeAttribute("disabled");
+            },
+            2000,
+          );
         } catch (err) {
           log.error("Failed to clear image cache", err);
           btn.textContent = "Failed";
-          setTimeout(() => {
-            btn.textContent = "Clear";
-            btn.removeAttribute("disabled");
-          }, 2000);
+          setOwnedTimeout(
+            signal,
+            () => {
+              btn.textContent = "Clear";
+              btn.removeAttribute("disabled");
+            },
+            2000,
+          );
         }
       },
     ),
@@ -135,17 +143,25 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
           await clearPendingPersistedLogs();
           await desktop.logFiles.clearAll();
           btn.textContent = "Cleared!";
-          setTimeout(() => {
-            btn.textContent = "Clear";
-            btn.removeAttribute("disabled");
-          }, 2000);
+          setOwnedTimeout(
+            signal,
+            () => {
+              btn.textContent = "Clear";
+              btn.removeAttribute("disabled");
+            },
+            2000,
+          );
         } catch (err) {
           log.error("Failed to clear log files", err);
           btn.textContent = "Failed";
-          setTimeout(() => {
-            btn.textContent = "Clear";
-            btn.removeAttribute("disabled");
-          }, 2000);
+          setOwnedTimeout(
+            signal,
+            () => {
+              btn.textContent = "Clear";
+              btn.removeAttribute("disabled");
+            },
+            2000,
+          );
         }
       },
     ),
@@ -194,10 +210,14 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
         } catch (err) {
           log.error("Failed to clear all cache", err);
           btn.textContent = "Failed";
-          setTimeout(() => {
-            btn.textContent = "Clear & Restart";
-            btn.removeAttribute("disabled");
-          }, 2000);
+          setOwnedTimeout(
+            signal,
+            () => {
+              btn.textContent = "Clear & Restart";
+              btn.removeAttribute("disabled");
+            },
+            2000,
+          );
         }
       },
     ),

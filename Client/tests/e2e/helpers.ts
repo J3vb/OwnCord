@@ -441,7 +441,9 @@ export function voiceJoinFailureHandler(): { type: string; handler: string } {
 // ---------------------------------------------------------------------------
 
 export function buildTauriMockScript(opts: {
-  httpRoutes: Array<{ pattern: string; status: number; body: unknown }>;
+  /** `method`, when set, restricts a route to that HTTP method — for one path
+   *  that answers GET and DELETE differently. */
+  httpRoutes: Array<{ pattern: string; status: number; body: unknown; method?: string }>;
   simulateWsFlow: boolean;
   deferReady?: boolean;
   echoChatSend?: boolean;
@@ -472,6 +474,17 @@ export function buildTauriMockScript(opts: {
    *  call is recorded on `window.__mockSavedPasswordLogins` so a test can
    *  assert the saved-password path ran instead of a typed-password login. */
   savedPasswordLogin?: { status: number; body: unknown };
+  /** Stub the external-content broker (B7-16) so link previews, oEmbed titles
+   *  and external images can be exercised. Without it every broker call is
+   *  refused as "unavailable" (the mocked suite has no external network).
+   *  `preview` keys on the requested URL; `image` keys on `url:<url>` or
+   *  `handle:<handle>`. A preview value that is a bare failure-class string
+   *  refuses just that request; a request with no entry keeps the refusing
+   *  default. */
+  externalContent?: {
+    preview?: Record<string, Record<string, unknown> | string>;
+    image?: Record<string, number[] | string>;
+  };
 }): string {
   const readyPayload = buildReadyPayload(opts.readyOverrides);
   // A profile read is GET /auth/me; /users/me only supports PATCH. Keep the
@@ -526,9 +539,9 @@ export function buildTauriMockScript(opts: {
     // Sort routes by pattern length (longest first) to match most specific route
     HTTP_ROUTES.sort((a, b) => b.pattern.length - a.pattern.length);
 
-    function matchRoute(url) {
+    function matchRoute(url, method) {
       for (const route of HTTP_ROUTES) {
-        if (url.includes(route.pattern)) return route;
+        if (url.includes(route.pattern) && (!route.method || route.method === method)) return route;
       }
       return null;
     }
@@ -583,7 +596,7 @@ export function buildTauriMockScript(opts: {
         if (cmd === "plugin:http|fetch") {
           const url = args?.clientConfig?.url || args?.url || "";
           const rid = __nextRid++;
-          const route = matchRoute(url);
+          const route = matchRoute(url, args?.clientConfig?.method || "GET");
           __pendingFetch[rid] = { url, route };
           return rid;
         }
@@ -790,7 +803,24 @@ export function buildTauriMockScript(opts: {
         // No external network here: refuse the way the native broker does,
         // with a bare failure-class string. Teardown also names a fresh
         // partition with an empty-URL preview, which the broker refuses.
-        if (cmd === "external_preview" || cmd === "external_image") throw "unavailable";
+        // A test can opt in to a canned answer per URL/handle via the
+        // externalContent option; anything unmatched stays refused.
+        window.__mockExternalPreview ??= ${JSON.stringify(opts.externalContent?.preview ?? {})};
+        window.__mockExternalImage ??= ${JSON.stringify(opts.externalContent?.image ?? {})};
+        if (cmd === "external_preview") {
+          var preview = window.__mockExternalPreview[args?.url];
+          if (preview !== undefined) {
+            if (typeof preview === "string") throw preview;
+            return preview;
+          }
+          throw "unavailable";
+        }
+        if (cmd === "external_image") {
+          var source = args?.handle !== undefined ? "handle:" + args.handle : "url:" + args.url;
+          var bytes = window.__mockExternalImage[source];
+          if (bytes !== undefined) return new Uint8Array(bytes).buffer;
+          throw "unavailable";
+        }
         const error = new Error("Unexpected IPC command: " + cmd);
         console.error("[tauri-mock]", error.message);
         throw error;
@@ -892,6 +922,53 @@ export const mockTauriFullSessionWithAutoConnect = mock({
   },
 });
 
+/** This device and one other desktop, whose sign-in nobody has reviewed. */
+export const MOCK_SESSIONS = [
+  {
+    id: 9,
+    device: "tauri-plugin-http/2.6.0",
+    ip: "198.51.100.2",
+    created_at: "2026-09-21 08:00:00",
+    last_used: "2026-09-21 08:30:00",
+    is_current: false,
+    unseen: true,
+  },
+  {
+    id: 7,
+    device: "OwnCord-Client/1.4.0",
+    ip: "203.0.113.5",
+    created_at: "2026-09-20 10:00:00",
+    last_used: "2026-09-21 09:00:00",
+    is_current: true,
+    unseen: true,
+  },
+];
+
+/** Full session with the device list: GET lists, DELETE {id} signs one out,
+ *  DELETE on the collection signs out everywhere (this device included). */
+export const mockTauriFullSessionWithSessions = mock({
+  httpRoutes: [
+    ROUTE_HEALTH,
+    ROUTE_LOGIN,
+    ROUTE_MESSAGES,
+    ROUTE_PINS,
+    {
+      pattern: "/api/v1/users/me/sessions",
+      method: "GET",
+      status: 200,
+      body: { sessions: MOCK_SESSIONS },
+    },
+    { pattern: "/api/v1/users/me/sessions/9", method: "DELETE", status: 204, body: null },
+    {
+      pattern: "/api/v1/users/me/sessions",
+      method: "DELETE",
+      status: 200,
+      body: { sessions_revoked: 2, current_session_revoked: true },
+    },
+  ],
+  simulateWsFlow: true,
+});
+
 export const mockTauriFullSessionWithMessages = mock({
   httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES_RICH, ROUTE_PINS, ROUTE_INVITES],
   simulateWsFlow: true,
@@ -991,10 +1068,35 @@ export async function switchSettingsTab(page: Page, tabName: string): Promise<vo
 }
 
 /**
+ * Wait until the transport's Tauri listener for `eventName` is registered.
+ *
+ * `setupEventListeners()` (platform/desktop/socket.ts) registers ws-message /
+ * ws-state / ws-error through an async `tauriListen` invoke roundtrip, so an
+ * event emitted straight after login can land before the listener exists and
+ * be dropped silently. Tests that emit a synthetic frame must wait for the
+ * listener instead of racing it.
+ */
+export async function waitForWsListeners(
+  page: Page,
+  eventName = "ws-message",
+  timeout = 10_000,
+): Promise<void> {
+  await page.waitForFunction(
+    (name) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((window as any).__tauriEventListeners?.[name]?.length ?? 0) > 0,
+    eventName,
+    { timeout },
+  );
+}
+
+/**
  * Emit a WebSocket event from the mock server to the client.
- * Must be called after the page has loaded and WS listeners are registered.
+ * Waits for the transport listener first so the frame cannot be dropped by
+ * a listener-registration race (see waitForWsListeners).
  */
 export async function emitWsEvent(page: Page, eventName: string, payload: unknown): Promise<void> {
+  await waitForWsListeners(page, eventName);
   await page.evaluate(
     ({ event, data }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

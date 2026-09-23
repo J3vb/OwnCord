@@ -3,7 +3,8 @@
  * everyone, plus a moderation section for users whose role holds MUTE_MEMBERS.
  */
 
-import { createElement, setText, appendChildren } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
+import { createElement, setText, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { setUserVolume, getUserVolume } from "@lib/livekitSession";
 
 /** Moderation section wiring. Passed only when the local user may moderate
@@ -36,10 +37,10 @@ export function showUserVolumeMenu(
   lifetimeSignal: AbortSignal,
   mod?: VoiceModMenuOptions,
 ): void {
-  // Remove any existing context menus and abort their dismiss controllers
+  // Remove any existing context menus and destroy their dismiss owners
   document.querySelectorAll(".user-vol-menu").forEach((el) => {
-    const prev = (el as HTMLElement & { dismissAc?: AbortController }).dismissAc;
-    prev?.abort();
+    const prev = (el as HTMLElement & { dismiss?: Disposable }).dismiss;
+    prev?.destroy();
     el.remove();
   });
 
@@ -118,25 +119,28 @@ export function showUserVolumeMenu(
   menu.style.top = `${y}px`;
   document.body.appendChild(menu);
 
-  // Close on click outside — store controller on element for cleanup on re-open
-  const dismissAc = new AbortController();
-  (menu as HTMLElement & { dismissAc?: AbortController }).dismissAc = dismissAc;
-  setTimeout(() => {
-    if (dismissAc.signal.aborted) return;
-    document.addEventListener(
-      "mousedown",
-      (e: MouseEvent) => {
-        if (!menu.contains(e.target as Node)) {
-          menu.remove();
-          dismissAc.abort();
-        }
-      },
-      { signal: dismissAc.signal },
-    );
-  }, 0);
+  // Close on click outside — store the owner on the element for cleanup on re-open
+  const dismiss = new Disposable();
+  (menu as HTMLElement & { dismiss?: Disposable }).dismiss = dismiss;
+  setOwnedTimeout(
+    dismiss.signal,
+    () => {
+      document.addEventListener(
+        "mousedown",
+        (e: MouseEvent) => {
+          if (!menu.contains(e.target as Node)) {
+            menu.remove();
+            dismiss.destroy();
+          }
+        },
+        { signal: dismiss.signal },
+      );
+    },
+    0,
+  );
 
-  // Also clean up if the parent component is destroyed. Tied to dismissAc's
-  // own signal (mirrors context-menu.ts's menuAc pattern) so this bridge
+  // Also clean up if the parent component is destroyed. Tied to dismiss's
+  // own signal (mirrors context-menu.ts's menuOwner pattern) so this bridge
   // listener is torn down with the menu itself — otherwise it never runs
   // (the lifetime signal is long-lived) and every right-click permanently
   // accumulates one closure retaining a detached .user-vol-menu subtree.
@@ -144,9 +148,9 @@ export function showUserVolumeMenu(
     "abort",
     () => {
       menu.remove();
-      dismissAc.abort();
+      dismiss.destroy();
     },
-    { signal: dismissAc.signal },
+    { signal: dismiss.signal },
   );
 }
 

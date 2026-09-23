@@ -20,6 +20,17 @@ export const shards = {
     "src/features/voice/roomLifecycle.ts",
     "src/features/voice/mediaControl.ts",
     "src/features/voice/remoteTracks.ts",
+    "src/features/voice/e2eeIdentity.ts",
+    "src/features/voice/e2eeEpoch.ts",
+    "src/features/voice/e2eePeerState.ts",
+    "src/features/voice/e2eeWorker.ts",
+    "src/features/voice/e2eeOffer.ts",
+    "src/features/voice/native/platform.ts",
+    "src/features/voice/native/counters.ts",
+    "src/features/voice/native/nativeRoom.ts",
+    "src/features/voice/native/devices.ts",
+    "src/features/voice/native/videoRenderer.ts",
+    "src/features/voice/native/cameraUplink.ts",
   ], // 2901 mutants
   "audio-media": [
     "src/lib/audioPipeline.ts",
@@ -48,7 +59,14 @@ export const shards = {
     "src/lib/hostValidation.ts",
     "src/lib/rate-limiter.ts",
     "src/lib/sessionScope.ts",
+    "src/lib/session-notice.ts",
     "src/lib/pendingMessages.ts",
+    "src/features/connection/dispatchContext.ts",
+    "src/features/connection/wsHandlers.ts",
+    "src/features/direct-messages/wsHandlers.ts",
+    "src/features/channels/wsHandlers.ts",
+    "src/features/messaging/wsHandlers.ts",
+    "src/features/voice/wsHandlers.ts",
   ], // 3103 mutants
   "lib-rest": [
     "src/lib/a11y.ts",
@@ -81,6 +99,7 @@ export const shards = {
     "src/lib/read-state.ts",
     "src/lib/safe-render.ts",
     "src/lib/store.ts",
+    "src/lib/supportBundle.ts",
     "src/lib/themes.ts",
     "src/lib/toast.ts",
     "src/lib/updater.ts",
@@ -97,6 +116,12 @@ export const shards = {
     "src/stores/messages.store.ts",
     "src/stores/ui.store.ts",
     "src/stores/voice.store.ts",
+    "src/features/messaging/messageModel.ts",
+    "src/features/messaging/echoReconcile.ts",
+    "src/features/messaging/liveMessages.ts",
+    "src/features/messaging/historyWindows.ts",
+    "src/features/messaging/messageEdits.ts",
+    "src/features/messaging/reactionState.ts",
   ], // 1918 mutants
 };
 

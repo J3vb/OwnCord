@@ -3,6 +3,7 @@
  * role-colored usernames, @mention highlighting, infinite scroll, and
  * virtual scrolling (DOM windowing) for performance with large message counts.
  */
+import { Disposable } from "@lib/disposable";
 import { createElement, clearChildren } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
@@ -241,25 +242,25 @@ export type MessageListComponent = MountableComponent & {
 };
 
 export function createMessageList(options: MessageListOptions): MessageListComponent {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   const unsubscribers: Array<() => void> = [];
   /**
    * Scopes the *current* rendered window's row listeners (react/reply/pin/
    * edit/delete/copy-link, reply-ref, reaction chips, ...). `renderWindow`
    * aborts and replaces this before every full rebuild, so a discarded row's
-   * listeners are dropped immediately instead of accumulating on `ac` for
+   * listeners are dropped immediately instead of accumulating on `disposable` for
    * the whole component lifetime — every row used to register against
-   * `ac.signal` directly, and nothing aborted a stale render's registrations
+   * `disposable.signal` directly, and nothing aborted a stale render's registrations
    * short of `destroy()`, retaining a full window of detached rows (and
    * everything they reference: videos, images, embeds, tooltips) per rebuild
-   * (OC-0286). Mirrors ChannelSidebar's `renderAc` (OC-0229) and
-   * SettingsOverlay's `renderAC`.
+   * (OC-0286). Mirrors ChannelSidebar's `renderOwner` (OC-0229) and
+   * SettingsOverlay's `renderOwner`.
    */
-  let rowAc: AbortController | null = null;
-  /** Signal handed to row renderers — combines `ac.signal` (component
-   *  lifetime) with `rowAc.signal` (current window) so either one aborts a
-   *  row's listeners. Starts as plain `ac.signal` before the first render. */
-  let rowSignal: AbortSignal = ac.signal;
+  let rowOwner: Disposable | null = null;
+  /** Signal handed to row renderers — combines `disposable.signal` (component
+   *  lifetime) with `rowOwner.signal` (current window) so either one aborts a
+   *  row's listeners. Starts as plain `disposable.signal` before the first render. */
+  let rowSignal: AbortSignal = disposable.signal;
   /** Non-scrolling frame around the scroller; what is actually appended to
    *  the parent. The floating controls anchor to this box — an absolutely
    *  positioned box whose containing block is the scroller itself sits in
@@ -513,9 +514,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    *  call this, since it appends to rows that stay live until the next
    *  rebuild and must keep using the current window's signal. */
   function beginRowRender(): void {
-    rowAc?.abort();
-    rowAc = new AbortController();
-    rowSignal = AbortSignal.any([ac.signal, rowAc.signal]);
+    rowOwner?.destroy();
+    rowOwner = new Disposable();
+    rowSignal = AbortSignal.any([disposable.signal, rowOwner.signal]);
   }
 
   let renderWindowCount = 0;
@@ -924,7 +925,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         scrollToBottom();
         updateScrollToBottomBtn();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     jumpToPresentPill = createElement("button", {
@@ -933,7 +934,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     });
     jumpToPresentPill.textContent = "Jump to Present ↓";
     jumpToPresentPill.addEventListener("click", () => options.onJumpToPresent?.(), {
-      signal: ac.signal,
+      signal: disposable.signal,
     });
 
     root.appendChild(topSpacer);
@@ -945,7 +946,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     region.appendChild(jumpToPresentPill);
 
     root.addEventListener("scroll", handleScroll, {
-      signal: ac.signal,
+      signal: disposable.signal,
       passive: true,
     });
 
@@ -987,7 +988,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     updateJumpToPresentPill();
     scrollToBottom();
     const initialScrollRaf = requestAnimationFrame(() => scrollToBottom());
-    ac.signal.addEventListener("abort", () => cancelAnimationFrame(initialScrollRaf));
+    disposable.signal.addEventListener("abort", () => cancelAnimationFrame(initialScrollRaf));
 
     unsubscribers.push(
       messagesStore.subscribeSelector(
@@ -1042,13 +1043,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       resizeObserver.disconnect();
       resizeObserver = null;
     }
-    ac.abort();
-    // rowSignal (AbortSignal.any([ac.signal, rowAc.signal])) already aborts
-    // as soon as ac does, but abort + drop the reference too so a stray
+    disposable.destroy();
+    // rowSignal (AbortSignal.any([disposable.signal, rowOwner.signal])) already aborts
+    // as soon as disposable does, but abort + drop the reference too so a stray
     // beginRowRender() after destroy (there shouldn't be one) can't resurrect
     // a live-looking controller.
-    rowAc?.abort();
-    rowAc = null;
+    rowOwner?.destroy();
+    rowOwner = null;
     if (scrollRafId !== 0) {
       cancelAnimationFrame(scrollRafId);
       scrollRafId = 0;

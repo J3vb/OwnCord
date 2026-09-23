@@ -2,6 +2,7 @@
 // Composes standalone components; never sets innerHTML with user content.
 // Delegates sidebar and chat-area DOM construction to sub-orchestrators.
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
@@ -17,9 +18,10 @@ import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
 import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@lib/toast";
+import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
-import { closeSettings, uiStore } from "@stores/ui.store";
+import { closeSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
 import { loadUserStatus } from "@lib/userStatus";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
@@ -41,6 +43,7 @@ import { setServerHost } from "@components/message-list/renderers";
 import {
   clearAttachmentCaches,
   clearExternalImageCache,
+  pruneAttachmentCacheScope,
   setAttachmentCacheScope,
 } from "@components/message-list/attachments";
 import { clearEmbedCaches } from "@components/message-list/embeds";
@@ -78,6 +81,8 @@ import { createChatArea } from "./main-page/ChatArea";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 
 const log = createLogger("main-page");
+/** Long enough to read which sign-in it names (cf. toast.ts PARTIAL_SUCCESS_TOAST_MS). */
+const SESSION_NOTICE_TOAST_MS = 12_000;
 
 // ---------------------------------------------------------------------------
 // Options
@@ -86,6 +91,8 @@ const log = createLogger("main-page");
 export interface MainPageOptions {
   readonly ws: WsClient;
   readonly api: ApiClient;
+  /** The connected server's retention sentence, or null when unknown. */
+  readonly getRetentionNotice?: () => string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,7 +178,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // Server images are cached per account, not per host: two accounts on one
   // server see different channels. Expired the moment auth clears, so a
   // profile switch isolates the cache even before this page is destroyed.
-  setAttachmentCacheScope(apiConfig.host ? `${apiConfig.host}#${getCurrentUserId()}` : null);
+  const cacheScope = apiConfig.host ? `${apiConfig.host}#${getCurrentUserId()}` : null;
+  setAttachmentCacheScope(cacheScope);
   const unsubCacheScope = onAuthCleared(() => setAttachmentCacheScope(null));
 
   // "Mark as Read" affordances need the socket but are reached from deep inside
@@ -386,6 +394,33 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     banner = createServerBanner();
     root.appendChild(banner.element);
 
+    // "Use here" takes the connection back: this device connects again and
+    // the server displaces the other one (last connect wins).
+    const useHere = (): void => {
+      const token = authStore.getState().token;
+      if (token === null) return;
+      setSessionReplaced(false);
+      ws.connect({ host: api.getConfig().host, token });
+    };
+    // Signed-in-elsewhere outranks the connection status it leaves behind
+    // ("disconnected"), so every banner refresh goes through here.
+    const syncBanner = (): void => {
+      if (banner === null) return;
+      const state = uiStore.getState();
+      if (state.sessionReplaced) banner.showSignedInElsewhere(useHere);
+      else applyConnectionStatus(banner, state.connectionStatus);
+    };
+    unsubscribers.push(uiStore.subscribeSelector((s) => s.sessionReplaced, syncBanner));
+
+    // A sign-in not yet reviewed: listed on connect and on window focus.
+    const sessionNotice = new Disposable();
+    unsubscribers.push(() => sessionNotice.destroy());
+    const pollSessions = startSessionNotice({
+      fetchSessions: (signal) => api.getSessions(signal),
+      notify: (unseen) => showToast(sessionNoticeMessage(unseen), "info", SESSION_NOTICE_TOAST_MS),
+      signal: sessionNotice.signal,
+    });
+
     // Banner reacts to the store-backed connection status (single source of
     // truth, docs/architecture/ux §3). "disconnected" keeps the banner visible
     // — a fatal drop navigates away via clearAuth, and anything short of that
@@ -395,9 +430,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         (s) => s.connectionStatus,
         (status) => {
           try {
-            if (status === "connected") restoreSavedPresence();
-            if (banner === null) return;
-            applyConnectionStatus(banner, status);
+            if (status === "connected") {
+              restoreSavedPresence();
+              pollSessions();
+            }
+            syncBanner();
           } catch (err) {
             log.error("Connection status handler error", err);
           }
@@ -408,7 +445,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // current value and only fires on change, so a MainPage mounted mid-outage
     // (status already "reconnecting") would otherwise never show the banner —
     // the whole retry cycle maps to the same 3-state value.
-    applyConnectionStatus(banner, uiStore.getState().connectionStatus);
+    syncBanner();
     if (uiStore.getState().connectionStatus === "connected") restoreSavedPresence();
 
     // Auto-idle. It only ever moves a status it is itself responsible for
@@ -431,7 +468,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
               // actually dropped). Re-sync to the real connection status
               // instead of letting showRestart's countdown fall straight
               // through to a permanent "Reconnecting..." banner.
-              applyConnectionStatus(banner, uiStore.getState().connectionStatus);
+              syncBanner();
             } else {
               banner.showRestart(payload.delay_seconds);
             }
@@ -549,9 +586,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       },
       onLogout: () => logout(api),
+      getRetentionNotice: options.getRetentionNotice,
       onDeleteAccount: async (password) => {
         await api.deleteAccount(password);
         clearAuth();
+        // The account is gone, so its cached server images go too (B7-15c).
+        // clearAuth has already disarmed the scope, so no late write follows.
+        if (cacheScope !== null) void pruneAttachmentCacheScope(cacheScope);
         showToast("Account deleted successfully", "success");
       },
       onEnableTotp: async (password) => {
@@ -602,7 +643,20 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           log.warn("Failed to refresh the 2FA state", err);
         }
       },
+      onRegenerateRecoveryCodes: async (password) =>
+        (await api.regenerateRecoveryCodes(password)).backup_codes,
+      onEnrolRecoveryKit: (password) => api.enrolRecoveryKit(password),
+      onGetRecoveryKitStatus: () => api.getRecoveryKitStatus(),
       onStatusChange: (status) => applyPresence(status),
+      onListSessions: () => api.getSessions(),
+      onRevokeSession: (id) => api.revokeSession(id),
+      onRevokeAllSessions: async () => {
+        const result = await api.revokeAllSessions();
+        // The token died with the response: leave for the connect page now
+        // rather than let the next request fail with a 401.
+        if (result.current_session_revoked) clearAuth();
+        return result;
+      },
     });
     settingsOverlay.mount(root);
     children.push(settingsOverlay);

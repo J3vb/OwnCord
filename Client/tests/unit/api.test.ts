@@ -469,6 +469,7 @@ describe("API Client", () => {
         created_at: "2026-01-01T00:00:00Z",
         last_used: "2026-01-02T00:00:00Z",
         is_current: true,
+        unseen: true,
       };
       mockFetch.mockResolvedValue(jsonResponse({ sessions: [session] }));
       const result = await api.getSessions();
@@ -480,6 +481,58 @@ describe("API Client", () => {
       await api.revokeSession(42);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/sessions/42");
       expect(fetchCallOpts().method).toBe("DELETE");
+    });
+
+    it("revokeAllSessions calls DELETE /users/me/sessions and returns the body", async () => {
+      const body = { sessions_revoked: 3, current_session_revoked: true };
+      mockFetch.mockResolvedValue(jsonResponse(body));
+      await expect(api.revokeAllSessions()).resolves.toEqual(body);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/sessions");
+      expect(fetchCallOpts().method).toBe("DELETE");
+    });
+  });
+
+  describe("account recovery endpoints (B7-15b)", () => {
+    it("recoverAccount POSTs /auth/recover with the secret in kit_secret", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ token: "t", requires_2fa: false }));
+      await expect(api.recoverAccount("alice", "KIT-SECRET", "N3w-Pass!")).resolves.toEqual({
+        token: "t",
+        requires_2fa: false,
+      });
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/auth/recover");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({
+        username: "alice",
+        kit_secret: "KIT-SECRET",
+        new_password: "N3w-Pass!",
+      });
+    });
+
+    it("enrolRecoveryKit POSTs the password only, so the server generates the secret", async () => {
+      const body = { kit_secret: "AAAA-BBBB", created_at: "2026-09-21T00:00:00Z" };
+      mockFetch.mockResolvedValue(jsonResponse(body));
+      await expect(api.enrolRecoveryKit("pw")).resolves.toEqual(body);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/recovery-kit");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ password: "pw" });
+    });
+
+    it("getRecoveryKitStatus GETs /users/me/recovery-kit", async () => {
+      const body = { enrolled: true, created_at: "2026-09-21T00:00:00Z", used_at: null };
+      mockFetch.mockResolvedValue(jsonResponse(body));
+      await expect(api.getRecoveryKitStatus()).resolves.toEqual(body);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/recovery-kit");
+      expect(fetchCallOpts().method).toBe("GET");
+    });
+
+    it("regenerateRecoveryCodes POSTs the password to /users/me/totp/recovery-codes", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ backup_codes: ["AAAAA-BBBBB"] }));
+      await expect(api.regenerateRecoveryCodes("pw")).resolves.toEqual({
+        backup_codes: ["AAAAA-BBBBB"],
+      });
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/totp/recovery-codes");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ password: "pw" });
     });
   });
 

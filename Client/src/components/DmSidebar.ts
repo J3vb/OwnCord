@@ -12,6 +12,7 @@
  * with you, so a user id no longer identifies a conversation.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { showContextMenu } from "@lib/context-menu";
@@ -282,7 +283,7 @@ function renderDmItem(
 }
 
 export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
 
   function mount(container: Element): void {
@@ -306,7 +307,7 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
       const backSub = createElement("div", { class: "dm-back-subtitle" }, "Return to channels");
       appendChildren(backInfo, backTitle, backSub);
       appendChildren(backHeader, arrow, backInfo);
-      backHeader.addEventListener("click", () => backFn(), { signal: ac.signal });
+      backHeader.addEventListener("click", () => backFn(), { signal: disposable.signal });
       root.appendChild(backHeader);
     }
 
@@ -326,7 +327,7 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
       title: "New DM",
     });
     setText(addBtn, "+");
-    addBtn.addEventListener("click", () => options.onNewDm(), { signal: ac.signal });
+    addBtn.addEventListener("click", () => options.onNewDm(), { signal: disposable.signal });
     sectionLabel.appendChild(addBtn);
 
     // Conversation list
@@ -334,7 +335,7 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
       (a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0),
     );
 
-    const items = sorted.map((convo) => renderDmItem(convo, options, ac.signal));
+    const items = sorted.map((convo) => renderDmItem(convo, options, disposable.signal));
 
     searchInput.addEventListener(
       "input",
@@ -345,7 +346,7 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
           el.style.display = match ? "" : "none";
         });
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     appendChildren(root, header, sectionLabel, ...items);
@@ -353,7 +354,7 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     if (root !== null) {
       root.remove();
       root = null;

@@ -72,6 +72,30 @@ export interface SessionInfo {
   readonly created_at: string;
   readonly last_used: string;
   readonly is_current: boolean;
+  /** A sign-in no other device has acknowledged yet. Listing the sessions
+   *  acknowledges every row but the caller's own, so this is visible in
+   *  exactly one listing per device. */
+  readonly unseen: boolean;
+}
+
+/** DELETE /users/me/sessions: every session is revoked, the caller's included. */
+export interface RevokeAllSessionsResponse {
+  readonly sessions_revoked: number;
+  readonly current_session_revoked: boolean;
+}
+
+/** POST /users/me/recovery-kit: `kit_secret` is present only when the server
+ *  generated it, and it is shown exactly once. */
+export interface RecoveryKitIssue {
+  readonly kit_secret?: string;
+  readonly created_at: string;
+}
+
+/** GET /users/me/recovery-kit: whether the account holds an unspent kit. */
+export interface RecoveryKitStatus {
+  readonly enrolled: boolean;
+  readonly created_at?: string;
+  readonly used_at: string | null;
 }
 
 interface SessionsListResponse {
@@ -272,6 +296,23 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       });
     },
 
+    /** POST /auth/recover. `secret` is a recovery kit secret or an
+     *  owner-issued recovery credential; the server tells them apart by
+     *  shape, so both travel in `kit_secret`. Answers the login shape. */
+    recoverAccount(
+      username: string,
+      secret: string,
+      newPassword: string,
+      signal?: AbortSignal,
+    ): Promise<AuthResponse> {
+      return request<AuthResponse>(
+        "POST",
+        "/auth/recover",
+        { username, kit_secret: secret, new_password: newPassword },
+        signal,
+      );
+    },
+
     deleteAccount(password: string, signal?: AbortSignal): Promise<void> {
       return request<void>("DELETE", "/auth/account", { password }, signal);
     },
@@ -370,6 +411,23 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       );
     },
 
+    /** Replace the emergency recovery codes; the new set is returned once. */
+    regenerateRecoveryCodes(
+      password: string,
+      signal?: AbortSignal,
+    ): Promise<{ backup_codes: string[] }> {
+      return request("POST", "/users/me/totp/recovery-codes", { password }, signal);
+    },
+
+    /** Issue (or replace) the recovery kit; the server generates the secret. */
+    enrolRecoveryKit(password: string, signal?: AbortSignal): Promise<RecoveryKitIssue> {
+      return request<RecoveryKitIssue>("POST", "/users/me/recovery-kit", { password }, signal);
+    },
+
+    getRecoveryKitStatus(signal?: AbortSignal): Promise<RecoveryKitStatus> {
+      return request<RecoveryKitStatus>("GET", "/users/me/recovery-kit", undefined, signal);
+    },
+
     getSessions(signal?: AbortSignal): Promise<SessionInfo[]> {
       const owner = session;
       return request<SessionsListResponse>("GET", "/users/me/sessions", undefined, signal).then(
@@ -382,6 +440,10 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     revokeSession(sessionId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("DELETE", `/users/me/sessions/${sessionId}`, undefined, signal);
+    },
+
+    revokeAllSessions(signal?: AbortSignal): Promise<RevokeAllSessionsResponse> {
+      return request<RevokeAllSessionsResponse>("DELETE", "/users/me/sessions", undefined, signal);
     },
 
     // ── Channels ──────────────────────────────────────────

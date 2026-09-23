@@ -1,6 +1,7 @@
 // EmojiPicker — grid-based emoji selector with search and scrollable categories.
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { buildCustomEmojiNode } from "@components/message-list/custom-emoji";
@@ -601,8 +602,8 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   readonly element: HTMLDivElement;
   destroy(): void;
 } {
-  const abortController = new AbortController();
-  const signal = abortController.signal;
+  const disposable = new Disposable();
+  const signal = disposable.signal;
 
   let searchQuery = "";
 
@@ -754,7 +755,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   requestAnimationFrame(() => searchInput.focus());
 
   function destroy(): void {
-    abortController.abort();
+    disposable.destroy();
   }
 
   return { element: root, destroy };

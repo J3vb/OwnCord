@@ -58,8 +58,11 @@ for (const media of [false, true]) {
         await joinVoice(bob);
         await expectDecodedMedia(bob);
       }
-      const companions = media ? await childPids((await release.pids())[0]!) : [];
-      if (media) expect(companions).toHaveLength(1);
+      // A managed LiveKit companion is spawned exactly when media is on; assert
+      // the count in BOTH directions so a mis-wired media flag fails the test
+      // instead of silently dropping the check.
+      const companions = await childPids((await release.pids())[0]!);
+      expect(companions).toHaveLength(media ? 1 : 0);
       const original = createHash("sha256")
         .update(await readFile(release.binary))
         .digest("hex");

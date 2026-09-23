@@ -1,6 +1,7 @@
 // Step 8.60 — Quick switcher modal (Ctrl+K) for fast channel navigation.
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
+import { Disposable } from "@lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -33,8 +34,8 @@ function getFilteredChannels(query: string): readonly Channel[] {
 }
 
 export function createQuickSwitcher(options: QuickSwitcherOptions): MountableComponent {
-  const ac = new AbortController();
-  const signal = ac.signal;
+  const disposable = new Disposable();
+  const signal = disposable.signal;
 
   let root: HTMLDivElement | null = null;
   let resultsDiv: HTMLDivElement;
@@ -240,7 +241,7 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     if (unsubscribe !== null) {
       unsubscribe();
       unsubscribe = null;

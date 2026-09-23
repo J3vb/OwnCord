@@ -4,14 +4,16 @@
  * SettingsOverlay and AccessibilityTab.
  */
 
-let ac: AbortController | null = null;
+import { Disposable } from "./disposable";
+
+let owner: Disposable | null = null;
 
 /** Enable or disable the OS reduced-motion sync listener. Safe to call multiple times. */
 export function syncOsMotionListener(enabled: boolean): void {
   // Tear down any previous listener
-  if (ac !== null) {
-    ac.abort();
-    ac = null;
+  if (owner !== null) {
+    owner.destroy();
+    owner = null;
   }
   if (!enabled) {
     // Restore the user's manual reducedMotion preference from settings.
@@ -29,7 +31,7 @@ export function syncOsMotionListener(enabled: boolean): void {
     return;
   }
 
-  ac = new AbortController();
+  owner = new Disposable();
   const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
   document.documentElement.classList.toggle("reduced-motion", mq.matches);
   mq.addEventListener(
@@ -37,6 +39,6 @@ export function syncOsMotionListener(enabled: boolean): void {
     (e: MediaQueryListEvent) => {
       document.documentElement.classList.toggle("reduced-motion", e.matches);
     },
-    { signal: ac.signal },
+    { signal: owner.signal },
   );
 }

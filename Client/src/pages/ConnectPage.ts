@@ -1,6 +1,7 @@
 // ConnectPage — login/register page component.
 // Thin composition shell that wires ServerPanel and LoginForm together.
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createLogger } from "@lib/logger";
@@ -30,6 +31,8 @@ export interface ConnectPageCallbacks {
   onLoginWithSavedPassword(host: string, username: string): Promise<void>;
   onRegister(host: string, username: string, password: string, inviteCode: string): Promise<void>;
   onTotpSubmit(code: string): Promise<void>;
+  /** Recover with a recovery kit secret or an owner-issued credential. */
+  onRecover?(host: string, username: string, secret: string, newPassword: string): Promise<void>;
   onAddProfile?(name: string, host: string): void;
   onDeleteProfile?(profileId: string): void;
   onToggleAutoLogin?(profileId: string, enabled: boolean): void;
@@ -38,11 +41,16 @@ export interface ConnectPageCallbacks {
   onUpdateClient?(host: string): void;
   /** The registration mode `server-info` reported for a host, if known. */
   getRegistrationMode?(host: string): RegistrationMode | null;
+  /** The retention sentence `server-info` reported for a host, if known. */
+  getRetentionNotice?(host: string): string | null;
 }
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
+
+/** Account actions offered by the settings overlay before sign-in. */
+const notAuthenticated = (): Promise<never> => Promise.reject(new Error("Not authenticated"));
 
 const DEFAULT_PROFILES: readonly SimpleProfile[] = [
   { name: "Local Server", host: "localhost:8443" },
@@ -83,8 +91,8 @@ export function createConnectPage(
   let root: HTMLDivElement;
 
   // Cleanup tracking
-  const abortController = new AbortController();
-  const { signal } = abortController;
+  const disposable = new Disposable();
+  const { signal } = disposable;
 
   // --- Create sub-components ---
 
@@ -94,9 +102,11 @@ export function createConnectPage(
     onLoginWithSavedPassword: callbacks.onLoginWithSavedPassword,
     onRegister: callbacks.onRegister,
     onTotpSubmit: callbacks.onTotpSubmit,
+    onRecover: callbacks.onRecover,
     onSettingsOpen: () => openSettings(),
     onAutoLoginCancel: callbacks.onAutoLoginCancel,
     getRegistrationMode: callbacks.getRegistrationMode,
+    getRetentionNotice: callbacks.getRetentionNotice,
   });
 
   // Per-host compatibility from the advisory preflight. The notice reads it
@@ -286,14 +296,20 @@ export function createConnectPage(
         onClose: () => closeSettings(),
         onChangePassword: () => Promise.resolve(undefined),
         onUpdateProfile: () => Promise.resolve(),
-        onUploadAvatar: () => Promise.reject(new Error("Not authenticated")),
+        onUploadAvatar: notAuthenticated,
         onLogout: () => {},
         onDeleteAccount: () => Promise.resolve(),
         onStatusChange: () => {},
-        onEnableTotp: () => Promise.reject(new Error("Not authenticated")),
-        onConfirmTotp: () => Promise.reject(new Error("Not authenticated")),
-        onDisableTotp: () => Promise.reject(new Error("Not authenticated")),
+        onEnableTotp: notAuthenticated,
+        onConfirmTotp: notAuthenticated,
+        onDisableTotp: notAuthenticated,
         onRefreshTotpStatus: () => Promise.resolve(),
+        onRegenerateRecoveryCodes: notAuthenticated,
+        onEnrolRecoveryKit: notAuthenticated,
+        onGetRecoveryKitStatus: notAuthenticated,
+        onListSessions: () => Promise.resolve([]),
+        onRevokeSession: notAuthenticated,
+        onRevokeAllSessions: notAuthenticated,
       });
       settingsOverlay.mount(root);
     });
@@ -340,7 +356,7 @@ export function createConnectPage(
 
   function destroy(): void {
     // Abort all event listeners registered with the signal
-    abortController.abort();
+    disposable.destroy();
     unsubSettingsOpen?.();
     unsubSettingsOpen = null;
     unsubTransientError?.();

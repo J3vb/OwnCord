@@ -6,6 +6,39 @@
 > **Worktree:** `.claude/worktrees/b7-14`.
 > **Drafted:** 2026-09-21. **Base commit:** `639d5bb3` (`dev`).
 
+## Owner decisions (2026-09-21) — these override the plan below
+
+- **"Active" means signed in**, not holding a live connection. The server
+  keeps one live WebSocket per user and the last connect wins. That exposed a
+  reproduced fight: the displaced device got a bare 1000 close, took it for a
+  network drop, reconnected at the 1 s floor (a successful `auth_ok` resets the
+  backoff) and kicked the other device, forever. The one approved **server
+  change**: the hub's replacement branch (`Server/ws/hub_registry.go`) queues
+  an error frame `SESSION_REPLACED` ("signed in on another device") before the
+  close, and the client treats it like `BANNED` — stop, no reconnect — but
+  keeps the credential and shows "Signed in elsewhere" with "Use here". This
+  overrides "no server change" in Files to Change and Out of scope.
+- **Revoke-one does not disconnect.** With one live socket per user, a revoked
+  device cannot also hold a live socket while you revoke from a connected one,
+  and calling `DisconnectRevokedUser` would kick the caller's own device. REST
+  enforcement is immediate, so the UI says plainly that the device is signed
+  out and can no longer connect — no ~30 s caveat. The exception is a device
+  showing "Signed in elsewhere" revoking the device that holds the live
+  socket: that socket stays up until the hub's 30 s session sweep or the
+  per-message recheck, so from that state the toast says its connection
+  closes within about 30 seconds (owner decision in review: accepted, wording
+  made honest, no server change).
+- **The notice** is a main-page toast naming the sign-in (device, IP, time),
+  pointing to Settings > Account, and worded as a sign-in **not yet reviewed**
+  rather than "new": `MarkSessionsSeen` excludes the caller, so a device may be
+  told about another device's older sign-in.
+- **No per-row revoke on the current device**; sign-out-everywhere covers it.
+- **This milestone writes the BPR-035 evidence row** in the beta traceability
+  doc (overrides Task 6's "leave it to B7-18").
+- **Device labels:** both desktop User-Agents (`OwnCord-Client/<version>` and
+  tauri-plugin-http's default) show as "OwnCord desktop"; IP and last-used
+  tell devices apart. A per-device name is out of scope.
+
 ## Summary
 
 The PRD's outcome is one sentence — "A user sees every device signed into
@@ -110,29 +143,29 @@ or a place to store one.
 Every row was re-derived at `639d5bb3` by the command shown. If a row is false
 at your HEAD, **stop that task and record it**; do not improvise around it.
 
-| #   | Claim                                                                                                                                                                            | How to re-check                                                                                                                                                     | Verified |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| 1   | Three session routes are mounted on the authenticated `/users/me` group: list, revoke-all, revoke-one                                                                            | `grep -n "sessions" Server/api/profile_handler.go` → `:160` `:161` `:162` (handlers `:501` `:583` `:550`)                                                           | yes      |
-| 2   | `sessionResponse` carries `unseen`; the list handler builds the response with the flags **before** the acknowledge write, so one listing can see them                            | read `Server/api/profile_handler.go:92-103`; `resp` is built at `:518-531`, `MarkSessionsSeen` runs at `:540`, `writeJSON` at `:545`                                | yes      |
-| 3   | The client `SessionInfo` omits `unseen`, and there is no client revoke-all method                                                                                                | `grep -n "export interface SessionInfo" -A 12 Client/src/lib/api.ts` → no `unseen`; `grep -n "revokeAllSessions" Client/src/lib/api.ts` → empty                     | yes      |
-| 4   | `getSessions`/`revokeSession` have no production consumer — the only references are their own declarations, plus tests                                                           | `grep -rn "getSessions\|revokeSession" Client/src --include=*.ts` → `api.ts:372,382` only; same grep over `Client/tests` → `api.test.ts` only                       | yes      |
-| 5   | The Account tab has no session/device section today                                                                                                                              | `grep -n "^function build\|export function buildAccountTab" Client/src/components/settings/AccountTab.ts` → profile, avatar, password, TOTP, status, delete-account | yes      |
-| 6   | Revoke-one does **not** disconnect the live socket; revoke-all does                                                                                                              | `sed -n '549,568p' Server/api/profile_handler.go` (no disconnect); `:598-610` calls `DisconnectRevokedUser`                                                         | yes      |
-| 7   | A revoked live socket is dropped within one 30 s sweep tick, or after 10 messages, whichever first                                                                               | `grep -n "30 \* time.Second" Server/ws/hub.go` → `:212`; `Server/ws/client.go:21` (`SessionCheckInterval = 10`); `Server/ws/handlers.go:124-150`                    | yes      |
-| 8   | Revoke-one is scoped to the caller's own rows                                                                                                                                    | `Server/db/queries/sqlite/sessions.sql:27-30` (`WHERE id = ? AND user_id = ?`)                                                                                      | yes      |
-| 9   | A login's session starts `unseen`; `MarkSessionsSeen` clears every row but the caller's                                                                                          | `Server/db/auth_queries.go:463`; `Server/db/profile_queries.go:89-100`; SQL at `sessions.sql:52-56`                                                                 | yes      |
-| 10  | The owner decision is recorded and binds B7: poll on connect/focus, no WS frame                                                                                                  | `b7-shared-client-platform-desktop-parity.prd.md:383`                                                                                                               | yes      |
-| 11  | `SettingsOverlayOptions` is the only seam the Account tab and MainPage/ConnectPage share; every option is passed by both callers                                                 | `Client/src/components/SettingsOverlay.ts:29-64`; `Client/src/pages/MainPage.ts:496`; `Client/src/pages/ConnectPage.ts:238`                                         | yes      |
-| 12  | A `visibilitychange`/`focus` listener pattern already exists to copy, and lifecycle ownership goes through `AbortSignal`/`Disposable`                                            | `Client/src/lib/media-visibility.ts:171,184`; `Client/src/lib/disposable.ts:9`; `Client/src/components/settings/AccountTab.ts` takes a `signal`                     | yes      |
-| 13  | The client unit suite is green before any change                                                                                                                                 | `npm --prefix Client test` (Task 0 records the count; it must not drop)                                                                                             | yes      |
-| 14  | The PRD's B7-14 row has no server work and no plan yet, and B7-12/13/15 plans do not exist yet                                                                                   | `ls .claude/plans/ \| grep 'b7-1[2-5]'` → empty; `b7-shared-client-platform-desktop-parity.prd.md:326` (`Plan` cell `—`)                                            | yes      |
-| 15  | The B7-14 register close-out is BG-08, whose closure line is the multi-device journey; BPR-035 is the traceability row                                                           | `docs/plans/repo-health-issue-register-2026-08-23.md:302`; `docs/plans/beta-requirements-traceability-2026-08-23.md:84`                                             | yes      |
-| 16  | e2e specs are the "harness" capability in `ci-select`, so a change there widens the dev browser run to the full suite, not the smoke set; the production run is unaffected       | `scripts/ci-select.mjs:113` (`HARNESS_PREFIXES`); `.github/workflows/ci.yml:837-842`                                                                                | yes      |
-| 17  | No WebSocket message type carries a new-login signal, and adding one would be a protocol change (both generators, fixtures)                                                      | `grep -n "unseen" Server/ws/message_types.go Client/src/lib/protocolTypes.ts` → empty; `b7-shared-client-platform-desktop-parity.prd.md:383`                        | yes      |
-| 18  | The account-list ordering is `created_at DESC` (newest first), which the UI may rely on for "newest device first"                                                                | `Server/db/queries/sqlite/sessions.sql:46-50`                                                                                                                       | yes      |
-| 19  | The `PartialSuccessResponse` warning path (change-password partial failure) tells the user to revoke sessions "from the sessions list", so that list must be reachable           | `Server/api/profile_handler.go:489-492`; `Client/src/lib/types.ts:861-869`; `Client/src/lib/toast.ts:48-60`                                                         | yes      |
-| 20  | The design doc already specifies the Account tab's sessions section, with the list fields and the optimistic-removal/ toast behaviour, but not sign-out-everywhere or the notice | `docs/architecture/ux/settings-and-admin.md:87-93` (§2.4)                                                                                                           | yes      |
-| 21  | A device's own listing never clears its own row: `MarkSessionsSeen` excludes the caller's session id, and the login's own row is `unseen` from creation                          | `Server/db/queries/sqlite/sessions.sql:52-56` (`id != ?`); `Server/db/auth_queries.go:463`                                                                          | yes      |
+| #   | Claim                                                                                                                                                                                            | How to re-check                                                                                                                                                     | Verified |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| 1   | Three session routes are mounted on the authenticated `/users/me` group: list, revoke-all, revoke-one                                                                                            | `grep -n "sessions" Server/api/profile_handler.go` → `:160` `:161` `:162` (handlers `:501` `:583` `:550`)                                                           | yes      |
+| 2   | `sessionResponse` carries `unseen`; the list handler builds the response with the flags **before** the acknowledge write, so one listing can see them                                            | read `Server/api/profile_handler.go:92-103`; `resp` is built at `:518-531`, `MarkSessionsSeen` runs at `:540`, `writeJSON` at `:545`                                | yes      |
+| 3   | The client `SessionInfo` omits `unseen`, and there is no client revoke-all method                                                                                                                | `grep -n "export interface SessionInfo" -A 12 Client/src/lib/api.ts` → no `unseen`; `grep -n "revokeAllSessions" Client/src/lib/api.ts` → empty                     | yes      |
+| 4   | `getSessions`/`revokeSession` have no production consumer — the only references are their own declarations, plus tests                                                                           | `grep -rn "getSessions\|revokeSession" Client/src --include=*.ts` → `api.ts:372,382` only; same grep over `Client/tests` → `api.test.ts` only                       | yes      |
+| 5   | The Account tab has no session/device section today                                                                                                                                              | `grep -n "^function build\|export function buildAccountTab" Client/src/components/settings/AccountTab.ts` → profile, avatar, password, TOTP, status, delete-account | yes      |
+| 6   | Revoke-one does **not** disconnect the live socket; revoke-all does                                                                                                                              | `sed -n '549,568p' Server/api/profile_handler.go` (no disconnect); `:598-610` calls `DisconnectRevokedUser`                                                         | yes      |
+| 7   | A revoked live socket is dropped within one 30 s sweep tick, or after 10 messages, whichever first                                                                                               | `grep -n "30 \* time.Second" Server/ws/hub.go` → `:212`; `Server/ws/client.go:21` (`SessionCheckInterval = 10`); `Server/ws/handlers.go:124-150`                    | yes      |
+| 8   | Revoke-one is scoped to the caller's own rows                                                                                                                                                    | `Server/db/queries/sqlite/sessions.sql:27-30` (`WHERE id = ? AND user_id = ?`)                                                                                      | yes      |
+| 9   | A login's session starts `unseen`; `MarkSessionsSeen` clears every row but the caller's                                                                                                          | `Server/db/auth_queries.go:463`; `Server/db/profile_queries.go:89-100`; SQL at `sessions.sql:52-56`                                                                 | yes      |
+| 10  | The owner decision is recorded and binds B7: poll on connect/focus, no WS frame                                                                                                                  | `b7-shared-client-platform-desktop-parity.prd.md:383`                                                                                                               | yes      |
+| 11  | `SettingsOverlayOptions` is the only seam the Account tab and MainPage/ConnectPage share; every option is passed by both callers                                                                 | `Client/src/components/SettingsOverlay.ts:29-64`; `Client/src/pages/MainPage.ts:496`; `Client/src/pages/ConnectPage.ts:238`                                         | yes      |
+| 12  | A `visibilitychange`/`focus` listener pattern already exists to copy, and lifecycle ownership goes through `AbortSignal`/`Disposable`                                                            | `Client/src/lib/media-visibility.ts:171,184`; `Client/src/lib/disposable.ts:9`; `Client/src/components/settings/AccountTab.ts` takes a `signal`                     | yes      |
+| 13  | The client unit suite is green before any change                                                                                                                                                 | `npm --prefix Client test` (Task 0 records the count; it must not drop)                                                                                             | yes      |
+| 14  | _Stale at merge:_ B7-13 has since merged (https://github.com/J3vb/OwnCord/pull/1651). Originally: the PRD's B7-14 row has no server work and no plan yet, and B7-12/13/15 plans do not exist yet | `ls .claude/plans/ \| grep 'b7-1[2-5]'` → empty; `b7-shared-client-platform-desktop-parity.prd.md:326` (`Plan` cell `—`)                                            | yes      |
+| 15  | The B7-14 register close-out is BG-08, whose closure line is the multi-device journey; BPR-035 is the traceability row                                                                           | `docs/plans/repo-health-issue-register-2026-08-23.md:302`; `docs/plans/beta-requirements-traceability-2026-08-23.md:84`                                             | yes      |
+| 16  | e2e specs are the "harness" capability in `ci-select`, so a change there widens the dev browser run to the full suite, not the smoke set; the production run is unaffected                       | `scripts/ci-select.mjs:113` (`HARNESS_PREFIXES`); `.github/workflows/ci.yml:837-842`                                                                                | yes      |
+| 17  | No WebSocket message type carries a new-login signal, and adding one would be a protocol change (both generators, fixtures)                                                                      | `grep -n "unseen" Server/ws/message_types.go Client/src/lib/protocolTypes.ts` → empty; `b7-shared-client-platform-desktop-parity.prd.md:383`                        | yes      |
+| 18  | The account-list ordering is `created_at DESC` (newest first), which the UI may rely on for "newest device first"                                                                                | `Server/db/queries/sqlite/sessions.sql:46-50`                                                                                                                       | yes      |
+| 19  | The `PartialSuccessResponse` warning path (change-password partial failure) tells the user to revoke sessions "from the sessions list", so that list must be reachable                           | `Server/api/profile_handler.go:489-492`; `Client/src/lib/types.ts:861-869`; `Client/src/lib/toast.ts:48-60`                                                         | yes      |
+| 20  | The design doc already specifies the Account tab's sessions section, with the list fields and the optimistic-removal/ toast behaviour, but not sign-out-everywhere or the notice                 | `docs/architecture/ux/settings-and-admin.md:87-93` (§2.4)                                                                                                           | yes      |
+| 21  | A device's own listing never clears its own row: `MarkSessionsSeen` excludes the caller's session id, and the login's own row is `unseen` from creation                                          | `Server/db/queries/sqlite/sessions.sql:52-56` (`id != ?`); `Server/db/auth_queries.go:463`                                                                          | yes      |
 
 **Row 6 is the one that governs the acceptance wording.** It is the difference
 between "revoke-one kicks the device immediately" (false) and "revoke-one makes
@@ -207,7 +240,7 @@ and the owner decision forbids a frame (row 10).
 **B7-13 overlaps two of these files by ownership, not by line.**
 `Client/src/pages/MainPage.ts` and `Client/src/lib/api.ts` are named in
 B7-13's scope (one connection, isolated profiles, quick switch — PRD `:325`),
-which does not have a plan file yet (row 14). B7-13 owns the profile-switch
+which has since merged (https://github.com/J3vb/OwnCord/pull/1651). B7-13 owns the profile-switch
 teardown path in `MainPage.ts`; this milestone's poll in the same file is a
 sibling concern and must be registered/cleared through the same mechanism the
 page already uses for teardown (`MainPage.ts:1006-1014` destroys unsubscribers
@@ -362,10 +395,9 @@ commit, no `Co-Authored-By` trailer.
   (`:87-93`) — its table already specifies List sessions and Revoke a session
   but not the two things this milestone adds: a "Sign out everywhere" row and a
   "New sign-in" row (the notice, its transport being the list, not a frame).
-  Correct anything in that table this milestone makes false. Do not touch
-  `docs/plans/`: the BPR-035 traceability row is B7-18's to reconcile
-  (`b7-shared-client-platform-desktop-parity.prd.md:331`), so record the
-  evidence in the PR description and leave that doc alone.
+  Correct anything in that table this milestone makes false. Per the owner
+  decision above, this milestone also writes the BPR-035 evidence row in
+  `docs/plans/beta-requirements-traceability-2026-08-23.md` itself.
 - **Validate:**
 
   ```
@@ -403,7 +435,7 @@ npm run check:hygiene
 | The notice never fires because listing acknowledges, so `unseen` is cleared by the poll itself         | The server returns flags as they were before the clear (row 2); Task 4 fires from that single response and its test is observed red with the `unseen` read removed   |
 | The caller's own `unseen` row re-notifies on every listing                                             | Task 4 ignores the `is_current` row and tests exactly that                                                                                                           |
 | Revoke-all is wired through `logout()`, sending the wrong request and leaving other devices alone      | Task 3's gotcha names the two actions apart; a test asserts `DELETE /users/me/sessions` is what the button calls                                                     |
-| `MainPage.ts` / `api.ts` conflict with B7-13, which owns the profile-switch teardown in the same files | Expected. B7-13 has no plan yet (row 14); the poll registers through the page's existing teardown list so both edits coexist. Keep both edits                        |
+| `MainPage.ts` / `api.ts` conflict with B7-13, which owns the profile-switch teardown in the same files | Expected. B7-13 has merged (row 14); the poll registers through the page's existing teardown list so both edits coexist. Keep both edits                             |
 | The new e2e spec silently only runs in the full dev suite, never in CI                                 | `Client/tests/e2e/` is the `harness` prefix (row 16), which forces the full dev-suite run in CI for this PR; the production run is complete regardless               |
 | The device string is attacker-controlled (a login's `User-Agent`) and is rendered in the UI            | The server truncates it to 512 bytes and the client renders it as text through `createElement` (never `innerHTML`), the same posture every other server string gets  |
 | A UI surface is added without the `unseen` half being genuinely wired                                  | Task 4 exists as its own task with its own falsifiable test; Task 6's acceptance requires a row with `unseen` to produce a notice, observed red first                |
@@ -481,5 +513,4 @@ Keep this list short; each is a real choice with materially different work.
       `ci-check` skill are green
 - [ ] No new `ts-ignore` / `.skip` / `.only`; no loosened assertion; cycle
       ceiling not raised
-- [ ] The PR description records the BPR-035 evidence and the revoke-one timing
-      contract (Verify row 6) for B7-18's reconciliation
+- [ ] The BPR-035 traceability row records this milestone's evidence

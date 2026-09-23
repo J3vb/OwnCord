@@ -101,6 +101,23 @@ describe("ServerBanner", () => {
     banner.destroy();
   });
 
+  it("signed-in-elsewhere shows a Use here action that calls back once", () => {
+    const banner = createServerBanner();
+    const onUseHere = vi.fn();
+    banner.showSignedInElsewhere(onUseHere);
+
+    expect(banner.element.classList.contains("visible")).toBe(true);
+    expect(banner.element.textContent).toBe("Signed in elsewhere Use here");
+    const button = banner.element.querySelector("button");
+    button!.click();
+    button!.click();
+    expect(onUseHere).toHaveBeenCalledTimes(1);
+
+    banner.showReconnecting();
+    expect(banner.element.querySelector("button")).toBeNull();
+    banner.destroy();
+  });
+
   it("destroy removes element from DOM", () => {
     const banner = createServerBanner();
     const parent = document.createElement("div");

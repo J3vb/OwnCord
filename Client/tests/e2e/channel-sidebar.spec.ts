@@ -98,13 +98,29 @@ test.describe("Channel Sidebar", () => {
 });
 
 test.describe("Channel Sidebar — Categories", () => {
-  test("categories with multiple channel types show correctly", async ({ page }) => {
+  test("categories group their channels by type", async ({ page }) => {
     await mockTauriFullSessionWithMessages(page);
     await page.goto("/");
     await navigateToMainPage(page);
 
-    const categories = page.locator(".category");
-    const count = await categories.count();
-    expect(count).toBeGreaterThanOrEqual(1);
+    // The category header is a sibling of its channels container inside the
+    // group wrapper, so scope from the header's group parent.
+    const groupOf = (category: string) =>
+      page.locator(`.category[data-category='${category}']`).locator("xpath=..");
+
+    const textGroup = groupOf("Text Channels");
+    const voiceGroup = groupOf("Voice Channels");
+    await expect(page.locator(".category[data-category='Text Channels']")).toBeVisible();
+    await expect(page.locator(".category[data-category='Voice Channels']")).toBeVisible();
+
+    // "Show correctly" means each category actually contains its own channels.
+    await expect(textGroup.locator(".channel-item", { hasText: "general" })).toBeVisible();
+    await expect(textGroup.locator(".channel-item", { hasText: "random" })).toBeVisible();
+    await expect(voiceGroup.locator(".channel-item", { hasText: "Voice Chat" })).toBeVisible();
+    await expect(voiceGroup.locator(".channel-item", { hasText: "Music" })).toBeVisible();
+
+    // …and the groups do not bleed into each other.
+    await expect(textGroup.locator(".channel-item.voice")).toHaveCount(0);
+    await expect(voiceGroup.locator(".channel-item", { hasText: "general" })).toHaveCount(0);
   });
 });

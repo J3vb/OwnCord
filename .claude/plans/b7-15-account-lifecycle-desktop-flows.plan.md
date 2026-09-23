@@ -403,6 +403,12 @@ git grep -n "server-info" Client/src                        # the one new caller
 - **B7-12's epoch/update-notice work, B7-14's session UI, B7-13's profile
   isolation** — named only as file collisions.
 
+## Evidence
+
+B7-15b's evidence is in `docs/plans/beta-requirements-traceability-2026-08-23.md`, rows BPR-044 and BPR-046 (each milestone writes its own row, per the B7 plan review).
+
+B7-15c's evidence (Tasks 7-9: deletion disclosure, image-cache prune, retention disclosure at sign-up and in the Account tab, the local support bundle) is in the same file, rows BPR-052, BPR-054 and BPR-055. Owner decisions applied there override Task 7's wording (no retention window in the delete dialog) and resolve Open Question 2 as option (b), a store-only TypeScript zip writer with no Rust command.
+
 ## Open questions for the owner
 
 - [ ] **Q1 — the `retention` summary shape.** Decision 3 says "server-default

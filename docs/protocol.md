@@ -1844,26 +1844,27 @@ and the ringer's own 30s window already covers it.
 
 ### Error Codes
 
-| Code              | Description                                                                                                               |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `BAD_REQUEST`     | Invalid payload format or field values                                                                                    |
-| `BAD_PAYLOAD`     | Structurally valid message with a field that fails validation (E2EE announce/offer key material, signatures, targets)     |
-| `INTERNAL`        | Server-side error                                                                                                         |
-| `NOT_FOUND`       | Channel or message not found                                                                                              |
-| `FORBIDDEN`       | Missing required permission                                                                                               |
-| `NOT_KEY_HOLDER`  | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                              |
-| `RATE_LIMITED`    | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not) |
-| `ALREADY_JOINED`  | Already in this voice channel                                                                                             |
-| `CHANNEL_FULL`    | Voice channel at capacity                                                                                                 |
-| `VOICE_ERROR`     | Voice-specific error                                                                                                      |
-| `VIDEO_LIMIT`     | Maximum video streams reached                                                                                             |
-| `BANNED`          | User is banned                                                                                                            |
-| `INVALID_JSON`    | Message is not valid JSON                                                                                                 |
-| `UNKNOWN_TYPE`    | Unrecognized message type                                                                                                 |
-| `SLOW_MODE`       | Channel has slow mode enabled                                                                                             |
-| `CONFLICT`        | Duplicate reaction or constraint violation                                                                                |
-| `SERVER_MUTED`    | Self-unmute refused: a moderator imposed the mute                                                                         |
-| `SERVER_DEAFENED` | Self-undeafen refused: a moderator imposed the deafen                                                                     |
+| Code               | Description                                                                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `BAD_REQUEST`      | Invalid payload format or field values                                                                                                           |
+| `BAD_PAYLOAD`      | Structurally valid message with a field that fails validation (E2EE announce/offer key material, signatures, targets)                            |
+| `INTERNAL`         | Server-side error                                                                                                                                |
+| `NOT_FOUND`        | Channel or message not found                                                                                                                     |
+| `FORBIDDEN`        | Missing required permission                                                                                                                      |
+| `NOT_KEY_HOLDER`   | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                                                     |
+| `RATE_LIMITED`     | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not)                        |
+| `ALREADY_JOINED`   | Already in this voice channel                                                                                                                    |
+| `CHANNEL_FULL`     | Voice channel at capacity                                                                                                                        |
+| `VOICE_ERROR`      | Voice-specific error                                                                                                                             |
+| `VIDEO_LIMIT`      | Maximum video streams reached                                                                                                                    |
+| `BANNED`           | User is banned                                                                                                                                   |
+| `INVALID_JSON`     | Message is not valid JSON                                                                                                                        |
+| `UNKNOWN_TYPE`     | Unrecognized message type                                                                                                                        |
+| `SLOW_MODE`        | Channel has slow mode enabled                                                                                                                    |
+| `CONFLICT`         | Duplicate reaction or constraint violation                                                                                                       |
+| `SERVER_MUTED`     | Self-unmute refused: a moderator imposed the mute                                                                                                |
+| `SERVER_DEAFENED`  | Self-undeafen refused: a moderator imposed the deafen                                                                                            |
+| `SESSION_REPLACED` | Sent before the close to a connection displaced because the same account connected from another device; the client does not reconnect on its own |
 
 After 10 consecutive invalid JSON messages, the connection is forcibly closed.
 

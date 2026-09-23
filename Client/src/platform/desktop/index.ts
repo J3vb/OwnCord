@@ -17,6 +17,7 @@ import { http } from "./http";
 import { identity } from "./identity";
 import { logFiles } from "./logFiles";
 import { nativeProxies } from "./nativeProxies";
+import { nativeVoice } from "./nativeVoice";
 import { notifier } from "./notifications";
 import { pendingMessages } from "./pendingMessages";
 import { pushToTalk } from "./pushToTalk";
@@ -41,6 +42,7 @@ export const desktop: Platform = {
   identity,
   logFiles,
   nativeProxies,
+  nativeVoice,
   notifier,
   pendingMessages,
   pushToTalk,

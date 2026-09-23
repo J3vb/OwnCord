@@ -22,21 +22,27 @@ test.describe("Chat Header", () => {
 
   test("member list is always visible in sidebar", async ({ page }) => {
     const memberList = page.locator("[data-testid='sidebar-members']");
-    await expect(memberList).toBeAttached({ timeout: 3000 });
+    await expect(memberList).toBeVisible({ timeout: 3000 });
+
+    // "Always visible" means the member roster rendered, not merely that an
+    // empty container exists: assert the seeded member names are in it.
+    await expect(memberList).toContainText("testuser");
+    await expect(memberList).toContainText("otheruser");
   });
 
-  test("search input expands on focus and collapses on blur", async ({ page }) => {
-    // The search input in ChatHeader acts as a trigger: focusing it opens the
-    // full SearchOverlay and immediately blurs the input (delegating to the
-    // overlay's own search field). Verify the input exists and is interactive.
+  test("focusing the search input opens the SearchOverlay", async ({ page }) => {
+    // The search input is a trigger: focusing it opens the full SearchOverlay
+    // and blurs itself, delegating to the overlay's own search field. Assert
+    // the rendered overlay, not just that the trigger exists.
     const search = page.locator(".ch-tools .search-input");
-    await expect(search).toBeAttached();
-
-    // The input should have the search placeholder
     await expect(search).toHaveAttribute("placeholder", "Search...");
 
-    // Verify the search input is present in the tools area
-    await expect(search).toHaveAttribute("type", "text");
+    await search.focus();
+
+    const overlay = page.locator("[data-testid='search-overlay']");
+    await expect(overlay).toHaveClass(/open/, { timeout: 3_000 });
+    await expect(page.locator("[data-testid='search-overlay-input']")).toBeFocused();
+    await expect(search).not.toBeFocused();
   });
 
   test("pin button opens pinned messages panel", async ({ page }) => {
