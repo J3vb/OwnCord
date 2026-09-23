@@ -57,7 +57,7 @@ export function resetExternalConsent(): void {
   savePref(EXTERNAL_CONSENT_PREF, {});
 }
 
-/** Forget items admitted one by one (a cache clear or a page teardown). */
+/** Forget items admitted one by one (a page teardown). */
 export function forgetAdmittedItems(): void {
   admitted.clear();
 }

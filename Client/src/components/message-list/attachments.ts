@@ -22,11 +22,7 @@ import type {
 
 const log = createLogger("attachments");
 import type { Attachment } from "@lib/types";
-import {
-  externalAllowed,
-  forgetAdmittedItems,
-  setExternalConsentScope,
-} from "../../features/content-consent/external";
+import { externalAllowed, setExternalConsentScope } from "../../features/content-consent/external";
 
 /** Cached value of the animateGifs preference. Invalidated on pref change
  *  (same pattern as roleColors in formatting.ts). */
@@ -578,7 +574,6 @@ export function clearExternalImageCache(): void {
   externalObjectUrls.clear();
   externalGifUrls.clear();
   externalInFlight.clear();
-  forgetAdmittedItems();
 }
 
 /** The broker cache and consent admission key for an image source. */

@@ -1133,6 +1133,27 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("a mousedown inside a modal dialog keeps the GIF picker open", async () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    (container.querySelector(".gif-btn") as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 0));
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay visible";
+    const choice = document.createElement("button");
+    overlay.appendChild(choice);
+    document.body.appendChild(overlay);
+    choice.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(container.querySelector(".gif-picker")).not.toBeNull();
+
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(container.querySelector(".gif-picker")).toBeNull();
+
+    overlay.remove();
+    comp.destroy?.();
+  });
+
   it("opening emoji picker closes GIF picker", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);

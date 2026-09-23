@@ -33,6 +33,7 @@ import {
   EXTERNAL_CONSENT_PREF,
   externalAllowed,
   externalConsentChoice,
+  forgetAdmittedItems,
   setExternalConsentChoice,
 } from "./external";
 
@@ -90,6 +91,7 @@ beforeEach(() => {
   URL.revokeObjectURL = vi.fn();
   setServerHost("chat.example");
   clearExternalImageCache();
+  forgetAdmittedItems();
   clearEmbedCaches();
   clearMediaCaches();
   previewMock.mockClear(); // the partition rotation above names an empty URL
@@ -188,6 +190,24 @@ describe("the per-server choice", () => {
     setServerHost("other.example");
     setServerHost("chat.example");
     expect(externalAllowed(`url:${IMAGE}`)).toBe(false);
+  });
+
+  it("a manual cache clear keeps an admitted item loadable", async () => {
+    setExternalConsentChoice("ask");
+    const row = show(IMAGE);
+    concealed(row)[0]?.click();
+    const img = await vi.waitFor(() => {
+      const el = row.querySelector<HTMLImageElement>(".msg-image img");
+      if (!el?.src.startsWith("blob:")) throw new Error("not loaded yet");
+      return el;
+    });
+    const before = img.src;
+
+    clearExternalImageCache();
+    img.dispatchEvent(new Event("error"));
+    await vi.waitFor(() => expect(img.src).not.toBe(before));
+    expect(img.src).toMatch(/^blob:/);
+    expect(imageMock).toHaveBeenCalledTimes(2);
   });
 
   it("is separate from NSFW consent", () => {

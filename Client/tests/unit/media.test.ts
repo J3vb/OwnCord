@@ -69,6 +69,7 @@ vi.mock("../../src/components/message-list/embeds", () => ({
     el.textContent = url;
     return el;
   },
+  clearEmbedCaches: () => {},
 }));
 
 // ---------------------------------------------------------------------------

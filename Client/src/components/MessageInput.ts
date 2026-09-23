@@ -992,6 +992,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     function handleGifClickOutside(e: MouseEvent): void {
       if (gifPicker === null) return;
       const target = e.target as Node;
+      if ((target as Element).closest?.(".modal-overlay")) return;
       if (!gifPicker.element.contains(target) && target !== gifBtn && !gifBtn.contains(target)) {
         closeGifPicker();
       }
