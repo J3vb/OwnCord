@@ -22,6 +22,8 @@
  * action behind a destination, and nothing here fetches to decide it.
  */
 
+import { buildSafetyTab } from "../safety/Notices";
+
 /** A destination that opens in the content area, in place of the chat column. */
 export type ContentViewId = "requests" | "moderation";
 
@@ -56,4 +58,6 @@ export interface NavigationDestinations {
 }
 
 /** The destinations this build ships. */
-export const NAVIGATION_DESTINATIONS: NavigationDestinations = {};
+export const NAVIGATION_DESTINATIONS: NavigationDestinations = {
+  safety: { build: buildSafetyTab },
+};
