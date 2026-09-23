@@ -18,6 +18,25 @@ const UPDATE_READ_TIMEOUT: Duration = Duration::from_secs(30);
 // installer against the same executable.
 static UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
+// Set once the download is done and `install()` is about to be called. From
+// that point the old process still owns the single-instance mutex while
+// `ShellExecuteW` waits for the installer, so the single-instance callback must
+// stop restoring the old window for any forwarded launch (shortcut click,
+// owncord:// link, autostart): doing so puts the old UI back for the whole gap.
+static INSTALLER_LAUNCHING: AtomicBool = AtomicBool::new(false);
+
+/// True between `install()` being called and process exit. Read by the
+/// single-instance callback (`lib.rs`) to ignore forwarded launches.
+pub(crate) fn installer_launching() -> bool {
+    INSTALLER_LAUNCHING.load(Ordering::SeqCst)
+}
+
+/// True for the whole download+install operation; logged by the single-instance
+/// callback so a report shows whether a forwarded launch landed mid-update.
+pub(crate) fn update_in_progress() -> bool {
+    UPDATE_IN_PROGRESS.load(Ordering::SeqCst)
+}
+
 struct InstallGuard<'a> {
     active: &'a AtomicBool,
     installed: bool,
@@ -254,16 +273,40 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
             // A failed emit must never abort the install, hence `let _ =`.
             let progress_app = app.clone();
             let mut received: u64 = 0;
-            u.download_and_install(
-                move |chunk_len, total| {
-                    received += chunk_len as u64;
-                    let _ =
-                        progress_app.emit("update-progress", DownloadProgress { received, total });
-                },
-                || {},
-            )
-            .await
-            .map_err(|e| format!("download/install failed: {e}"))?;
+            let bytes = u
+                .download(
+                    move |chunk_len, total| {
+                        received += chunk_len as u64;
+                        let _ = progress_app
+                            .emit("update-progress", DownloadProgress { received, total });
+                    },
+                    || {},
+                )
+                .await
+                .map_err(|e| format!("download/install failed: {e}"))?;
+            log::info!(
+                "[update] download finished ({} bytes) for version {}",
+                bytes.len(),
+                u.version
+            );
+
+            // The split from `download_and_install` exists for this point: from
+            // here the old process may still be alive (the plugin hides the
+            // window, then blocks in ShellExecuteW on Windows) while any
+            // forwarded launch would otherwise restore the old UI. Set the flag
+            // and install.
+            INSTALLER_LAUNCHING.store(true, Ordering::SeqCst);
+            log::info!(
+                "[update] installer launching for version {} (old window will ignore forwarded launches)",
+                u.version
+            );
+            if let Err(e) = u.install(&bytes) {
+                // The installer never launched (e.g. ShellExecuteW refused), so
+                // the guard releases for a retry; clear the flag too or every
+                // later forwarded launch would be swallowed until restart.
+                INSTALLER_LAUNCHING.store(false, Ordering::SeqCst);
+                return Err(format!("download/install failed: {e}"));
+            }
             install_guard.installed();
             Ok(())
         }
