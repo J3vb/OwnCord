@@ -1363,6 +1363,77 @@ func TestRefreshChannelVisibility_TargetedCreateCarriesCanModerateVoice(t *testi
 	}
 }
 
+// A newly created channel has no earlier verdict for an absent field to keep,
+// so the creation fan-out must carry each recipient's own can_moderate_voice.
+func TestBroadcastChannelCreate_CarriesPerRecipientCanModerateVoice(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+	ctx := context.Background()
+
+	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = permissions | ? WHERE id = 3`, permissions.MuteMembers); err != nil {
+		t.Fatalf("grant MUTE_MEMBERS: %v", err)
+	}
+	modID, err := database.CreateUser(ctx, "newvoice-mod", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	mod, err := database.GetUserByID(ctx, modID)
+	if err != nil || mod == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	memberID := seedTestUser(t, database, "newvoice-member")
+	member, err := database.GetUserByID(ctx, memberID)
+	if err != nil || member == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+
+	modSend := make(chan []byte, 16)
+	memberSend := make(chan []byte, 16)
+	hub.Register(ws.NewTestClientWithUser(hub, mod, 0, modSend))
+	memberClient := ws.NewTestClientWithUser(hub, member, 0, memberSend)
+	hub.Register(memberClient)
+	waitRegistered(t, hub, memberClient)
+
+	chID, err := database.CreateChannel(ctx, "newvoice-room", "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	ch, err := database.GetChannel(ctx, chID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+	hub.BroadcastChannelCreate(ch)
+
+	for _, tc := range []struct {
+		name string
+		send chan []byte
+		want bool
+	}{
+		{"moderator", modSend, true},
+		{"member", memberSend, false},
+	} {
+		msg := drainForMsgType(t, tc.send, "channel_create")
+		payload, ok := msg["payload"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s: channel_create payload not an object: %#v", tc.name, msg["payload"])
+		}
+		if id, _ := payload["id"].(float64); int64(id) != chID {
+			t.Fatalf("%s: channel_create id = %v, want %d", tc.name, payload["id"], chID)
+		}
+		v, present := payload["can_moderate_voice"]
+		if !present {
+			t.Fatalf("%s: channel_create for a new channel omitted can_moderate_voice", tc.name)
+		}
+		if v != tc.want {
+			t.Errorf("%s: can_moderate_voice = %v, want %v", tc.name, v, tc.want)
+		}
+		if v, present := payload["can_send"]; !present || v != true {
+			t.Errorf("%s: can_send = %v (present %v), want true", tc.name, v, present)
+		}
+	}
+}
+
 func TestRefreshChannelVisibility_ForcesFullResyncForStaleResumes(t *testing.T) {
 	hub, database := newTestHub(t)
 

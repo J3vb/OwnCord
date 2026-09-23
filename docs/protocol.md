@@ -93,15 +93,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                                       |
-| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                                          |
-| Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`, `mod_action`, `appeal_status`                                                                                                          |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                        |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                     |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                               |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                        |
+| Category           | Has seq? | Examples                                                                                                                                                                                     |
+| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                        |
+| Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
+| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`, `mod_action`, `appeal_status`, `channel_create` (targeted per recipient; see below)                                  |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                      |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                   |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                             |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                      |
 
 **`presence` is split, and only one half is sequenced.** Connect and disconnect
 presence is a normal sequenced global broadcast, so it replays on a warm resume.
@@ -794,13 +794,12 @@ clears its local badge optimistically and the next `ready` confirms.
 
 ## Channel Updates
 
-All channel update messages are broadcast to all connected clients. Triggered by REST API calls from admins.
+Channel messages are triggered by REST API calls from admins and reach only the clients that may view the channel (`channel_delete` excepted).
 
-### channel_create (Server -> Client, broadcast)
+### channel_create (Server -> Client, targeted)
 
 ```json
 {
-  "seq": 60,
   "type": "channel_create",
   "payload": {
     "id": 8,
@@ -812,23 +811,28 @@ All channel update messages are broadcast to all connected clients. Triggered by
     "slow_mode": 0,
     "nsfw": false,
     "voice_max_users": 0,
-    "voice_max_video": 0
+    "voice_max_video": 0,
+    "can_send": true,
+    "can_moderate_voice": false
   }
 }
 ```
 
-`can_send` is an **optional extra field on the targeted form only.** When a role
-or channel-override edit changes who may post, `RefreshChannelVisibility` sends
-each still-visible client its own `channel_create`, and that copy carries this
-viewer's `can_send` — the same value `ready` ships per channel — so the composer
-affordance converges without a reconnect. `can_moderate_voice` rides the same
-targeted copy under the same rules, so a role edit or a role- or user-override
-edit on the channel converges the voice-moderation controls too.
+Every `channel_create` is addressed to one client and carries that viewer's own
+`can_send` and `can_moderate_voice` — the same values `ready` ships per channel.
+It has no `seq` and is not replayed: a client that misses one is forced onto a
+full `ready` on resume instead. It is sent in two cases:
 
-The broadcast form omits both: one encoded frame is delivered to a whole audience,
-and a single value would be wrong for some of them. Older servers omit it too.
-**Treat an absent `can_send` or `can_moderate_voice` as "unchanged", never as `false`** — a client that
-resets on absence would disable the composer on every ordinary broadcast.
+- **Channel creation.** Every connected client that may view the new channel
+  gets its own copy, so a new channel arrives with its verdicts already set.
+- **Visibility refresh.** When a role or channel-override edit changes who may
+  see or post, `RefreshChannelVisibility` sends each still-visible client its
+  own copy, so the composer affordance converges without a reconnect. A role
+  edit or a role- or user-override edit on the channel converges the
+  voice-moderation controls the same way.
+
+Older servers sent `channel_create` as one shared broadcast without either field.
+**Treat an absent `can_send` or `can_moderate_voice` as "unchanged", never as `false`.**
 
 ### channel_update (Server -> Client, broadcast)
 
@@ -1969,7 +1973,7 @@ tables below add per-type behavioral notes.
 | `reaction_update`     | Yes      | Channel or DM participants                                              |
 | `typing`              | No       | Channel (excl. sender) or DM                                            |
 | `presence`            | Yes      | All clients                                                             |
-| `channel_create`      | Yes      | All clients                                                             |
+| `channel_create`      | No       | Each client that may view the channel (per-recipient)                   |
 | `channel_update`      | Yes      | All clients                                                             |
 | `channel_delete`      | Yes      | All clients                                                             |
 | `voice_state`         | Yes      | All clients                                                             |

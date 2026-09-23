@@ -41,7 +41,8 @@ func countChannelMetaFor(msgs [][]byte, channelID int64) int {
 // category and topic of a channel that channel_overrides hides from their role —
 // live, and again on reconnect, since an event stored under channelID 0 is
 // replayed unconditionally. A role that may READ the channel must still receive
-// both, live and on replay.
+// both live, and the sequenced channel_update on replay (channel_create is a
+// targeted, unsequenced per-recipient frame).
 func TestChannelMetadata_NotDeliveredToRolesDeniedRead(t *testing.T) {
 	hub, database := newHandlerHub(t)
 
@@ -68,6 +69,9 @@ func TestChannelMetadata_NotDeliveredToRolesDeniedRead(t *testing.T) {
 		ID: privID, Name: "chmeta-leadership", Type: "text",
 		Category: "Staff", Topic: "acquisition talks",
 	}
+	// A sequenced anchor ahead of the channel frames: replay cannot resume from
+	// at or before the oldest buffered seq.
+	hub.BroadcastToAll([]byte(`{"type":"replay_anchor"}`))
 	hub.BroadcastChannelCreate(pub)
 	hub.BroadcastChannelUpdate(pub)
 	hub.BroadcastChannelCreate(priv)
@@ -103,8 +107,8 @@ func TestChannelMetadata_NotDeliveredToRolesDeniedRead(t *testing.T) {
 		return hub.ReplayBuffer().EventsSinceFiltered(oldest+1, allowed)
 	}
 
-	if got := countChannelMetaFor(replayFor(insider), privID); got != 2 {
-		t.Errorf("insider replay contained %d channel metadata events for the private channel, want 2", got)
+	if got := countChannelMetaFor(replayFor(insider), privID); got != 1 {
+		t.Errorf("insider replay contained %d channel metadata events for the private channel, want 1", got)
 	}
 	if got := countChannelMetaFor(replayFor(outsider), privID); got != 0 {
 		t.Errorf("replay leaked %d channel metadata events for the private channel to a role denied READ, want 0", got)
