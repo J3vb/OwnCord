@@ -212,9 +212,6 @@ export interface BarResult {
   pass: boolean;
 }
 
-/** Per-metric slope ceilings, in units per cycle; absent uses the plan's 0.05. */
-export type SlopeCeilings = Partial<Record<CountMetric, number>>;
-
 /**
  * Least-squares slope of y per **cycle** (not per sample index). Samples are 5
  * cycles apart, so regressing on the index would report a slope 5× the stated
@@ -267,15 +264,10 @@ const COUNT_METRICS: readonly CountMetric[] = [
  * over five cycles in a heap-snapshot diff), so page age, not a leak, moves it;
  * the phase series compare heap at equal page age.
  *
- * `slopeCeilings` raises the phase-series ceiling of a metric with a known,
- * recorded leak that survives the navigation, so the gate still fails on any
- * growth past the measured slope. It never applies to the within-page series.
+ * Every count metric holds the plan's 0.05 per cycle in every series.
  * `documents` and `intervals` must be exactly flat in every group.
  */
-export function evaluateBars(
-  samples: readonly LifecycleSample[],
-  slopeCeilings: SlopeCeilings = {},
-): BarResult[] {
+export function evaluateBars(samples: readonly LifecycleSample[]): BarResult[] {
   const post = samples.filter((s) => s.cycle > 0);
   if (post.length < 2) return [];
 
@@ -301,14 +293,12 @@ export function evaluateBars(
 
   const results: BarResult[] = [];
   for (const metric of COUNT_METRICS) {
-    const phaseCeiling = slopeCeilings[metric] ?? COUNT_BAR_SLOPE;
     const exact = metric === "documents" || metric === "intervals";
     const failures: string[] = [];
     let worstSlope = 0;
     let lastWarm: number | null = null;
     let lastFinal = 0;
     for (const { label, group, withinPage } of series) {
-      const ceiling = withinPage ? COUNT_BAR_SLOPE : phaseCeiling;
       const values = group.map((s) => s[metric]);
       const measuredSlope = slope(group.map((s) => ({ x: s.cycle, y: s[metric] })));
       if (Math.abs(measuredSlope) >= Math.abs(worstSlope)) {
@@ -317,7 +307,7 @@ export function evaluateBars(
         lastFinal = values[values.length - 1]!;
       }
       const flat = values.every((v) => v === values[0]);
-      const ok = exact ? flat : measuredSlope <= ceiling;
+      const ok = exact ? flat : measuredSlope <= COUNT_BAR_SLOPE;
       if (!ok) failures.push(`${label}: ${values.join("→")}`);
     }
     const result: BarResult = {
@@ -327,7 +317,7 @@ export function evaluateBars(
       slope: worstSlope,
       bar: exact
         ? "every phase and page series exactly flat"
-        : `every phase series slope <= ${phaseCeiling}/cycle, every page series <= ${COUNT_BAR_SLOPE}/cycle`,
+        : `every phase and page series slope <= ${COUNT_BAR_SLOPE}/cycle`,
       pass: failures.length === 0,
     };
     if (failures.length > 0) result.bar += ` — FAIL ${failures.join("; ")}`;
