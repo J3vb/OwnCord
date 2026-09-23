@@ -167,11 +167,10 @@ fn thumbnail(ty: DesktopCaptureSourceType, source: CaptureSource) -> Option<Stri
     url
 }
 
-/// Small enough that an incompressible thumbnail stays within
-/// [`MAX_THUMBNAIL`], so 30 sources cost about 1 MB of IPC.
+/// Small enough that an incompressible thumbnail stays within 33 KB as a
+/// data URL, so 30 sources cost about 1 MB of IPC.
 const THUMB_WIDTH: usize = 120;
 const THUMB_HEIGHT: usize = 68;
-const MAX_THUMBNAIL: usize = 33 * 1024;
 
 fn thumbnail_url(frame: &DesktopFrame) -> Option<String> {
     let (w, h) = (frame.width(), frame.height());
@@ -573,6 +572,7 @@ mod tests {
 
     #[test]
     fn an_incompressible_thumbnail_stays_within_the_ipc_budget() {
+        const MAX_THUMBNAIL: usize = 33 * 1024;
         // Noise that fills the whole box defeats compression: the worst case.
         let (w, h) = (THUMB_WIDTH * 10, THUMB_HEIGHT * 10);
         let mut state = 0x9e37_79b9_7f4a_7c15_u64;
