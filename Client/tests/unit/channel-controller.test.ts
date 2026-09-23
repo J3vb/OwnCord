@@ -252,6 +252,7 @@ import {
 } from "@lib/pendingMessages";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
+import { setActiveTimeout } from "../../src/features/safety/store";
 import {
   channelsStore,
   setChannels,
@@ -792,6 +793,24 @@ describe("createChannelController", () => {
       setConnectionStatus("disconnected");
       ctrl.mountChannel(43, "general-2");
       expect(mockSetDisabled).toHaveBeenLastCalledWith("Not connected");
+    });
+
+    it("composer shows the timeout with the server-supplied expiry and re-enables on lift (B9-15)", async () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+
+      setActiveTimeout(new Date(Date.now() + 60_000).toISOString());
+      await Promise.resolve();
+      expect(mockSetDisabled).toHaveBeenLastCalledWith(
+        expect.stringMatching(/^You can't send messages until /),
+      );
+
+      setActiveTimeout(null);
+      await Promise.resolve();
+      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+      ctrl.destroyChannel();
     });
 
     it("onRetryLoad re-invokes loadMessages for the mounted channel", () => {

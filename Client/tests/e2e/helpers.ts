@@ -270,6 +270,7 @@ function buildReadyPayload(overrides?: {
   voice_states?: unknown[];
   roles?: unknown[];
   dm_channels?: unknown[];
+  notices?: unknown[];
 }): unknown {
   return {
     type: "ready",
@@ -279,6 +280,7 @@ function buildReadyPayload(overrides?: {
       voice_states: overrides?.voice_states ?? [],
       roles: overrides?.roles ?? MOCK_ROLES,
       dm_channels: overrides?.dm_channels ?? [],
+      notices: overrides?.notices ?? [],
     },
   };
 }
@@ -453,6 +455,7 @@ export function buildTauriMockScript(opts: {
     members?: unknown[];
     voice_states?: unknown[];
     dm_channels?: unknown[];
+    notices?: unknown[];
   };
   /** Pinned peer identity keys served by get_identity_pin, keyed by userId
    *  (string). Absent key = null = "never pinned". */

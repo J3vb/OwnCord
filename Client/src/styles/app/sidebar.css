@@ -204,6 +204,13 @@
   background: transparent;
   color: var(--text-muted);
 }
+/* A timeout's expiry under the voice row it disables (B9-15, Q4). */
+.ch-restriction {
+  padding: 0 8px 4px 36px;
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
 .channel-draggable {
   cursor: grab;
 }

@@ -288,6 +288,7 @@ The Tauri desktop client implements the following security measures:
 - HTTP fetch is restricted to `http://127.0.0.1:*` (the Rust TOFU proxies' loopback tunnels) — no `https://` destination at all. It still **denies** `https://localhost[:*]` and `https://127.0.0.1[:*]` as defence in depth should a wildcard ever return
 - `http:allow-fetch` is the **only** URL-scoped HTTP identifier. `tauri-plugin-http` validates the URL exactly once, in the `fetch` command; `fetch_send` and `fetch_read_body` operate on an already-validated `ResourceId` and never consult a scope, so `allow`/`deny` blocks on those identifiers are inert and were removed rather than left in place advertising a control that does not exist
 - The `https://*` wildcard was removed in B7-16: link previews, external images, GIFs and external avatars are fetched by the native external-content broker (`src-tauri/src/external_content.rs`), and the CSP `img-src` no longer allows `https:`. The broker's policy is in [trust-model.md](trust-model.md) §"Desktop preview destination policy (C-09)"
+- CSP `connect-src` allows only `'self'`, IPC and loopback `http:`/`ws:` (`localhost`, `127.0.0.1`) — no `https:` or `wss:` source, so a compromised renderer's own `fetch` or `WebSocket` cannot reach a remote host. REST and the chat socket go through IPC, and LiveKit through the loopback TOFU tunnel; a local server's LiveKit `direct_url` is used as-is only when it is itself loopback `ws:`/`http:`, and anything else (LiveKit Cloud, a TLS LiveKit elsewhere) is tunnelled like a remote server's (`src/platform/desktop/nativeProxies.ts`). The exception is Linux, where voice runs in the native Rust LiveKit backend outside the webview's CSP and keeps any local server's `direct_url`
 - Regression-guarded by `tests/unit/capabilities-scope.test.ts` and `tests/unit/tauri-conf-csp.test.ts`; the original rationale is in [docs/plans/tauri-capability-narrowing.md](plans/tauri-capability-narrowing.md)
 
 ### TLS and Certificate Pinning (TOFU)
@@ -327,7 +328,6 @@ The Tauri desktop client implements the following security measures:
 ## Known Limitations
 
 - Server auto-updates depend on a dedicated pinned minisign/Ed25519 server release key in [Server/updater/server_update_public_key.txt](../Server/updater/server_update_public_key.txt) and a signed release manifest that binds the shipped binary hash to the release version; Windows Authenticode/SmartScreen code signing is still separate work
-- CSP `connect-src` still allows `https:` to any host, because the LiveKit SDK makes its own renderer fetches to the operator's LiveKit host. The narrowed `http:allow-fetch` scope therefore does not bound exfiltration from a compromised renderer — the webview's own `fetch` reaches any https host without going through the plugin. Narrowing `connect-src` needs the LiveKit direct-URL path to go through a proxy first
 
 ## Security Hardening Checklist for Operators
 

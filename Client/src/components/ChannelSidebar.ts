@@ -16,6 +16,8 @@ import { dmStore } from "@stores/dm.store";
 import type { Channel } from "@stores/channels.store";
 import { authStore, getCurrentUser } from "@stores/auth.store";
 import { uiStore, toggleCategory, isCategoryCollapsed } from "@stores/ui.store";
+import { safetyStore } from "../features/safety/store";
+import { formatUntil, safetyText } from "../i18n/safety";
 import { voiceStore, getChannelVoiceUsers, getPeerVerification } from "@stores/voice.store";
 import type { PeerVerification, VoiceUser } from "@stores/voice.store";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
@@ -352,10 +354,15 @@ function renderVoiceChannelItem(
   // (docs/architecture/ux/README.md §3). LiveKit keeps retrying underneath; we
   // only gate the UI so the click isn't a silent no-op.
   const connectionStatus = uiStore.getState().connectionStatus;
-  const frozen = connectionStatus !== "connected";
-  const frozenReason = shellText(
+  // A timeout refuses a join (TIMED_OUT) but never a leave (B9-15, Q4).
+  const timeout = isJoined ? null : safetyStore.getState().timeout;
+  const timeoutReason =
+    timeout === null ? null : safetyText("timeout.voice", { time: formatUntil(timeout.expiresAt) });
+  const frozen = connectionStatus !== "connected" || timeoutReason !== null;
+  let frozenReason = shellText(
     connectionStatus === "reconnecting" ? "channel.reconnecting" : "channel.notConnected",
   );
+  if (connectionStatus === "connected" && timeoutReason !== null) frozenReason = timeoutReason;
 
   const wrapper = createElement("div", {});
 
@@ -398,8 +405,9 @@ function renderVoiceChannelItem(
   item.addEventListener(
     "click",
     () => {
-      // Frozen while the WS socket is down — no-op; the reason is shown via title.
+      // Frozen while the WS socket is down or timed out — no-op; the reason is shown via title.
       if (uiStore.getState().connectionStatus !== "connected") return;
+      if (!isJoined && safetyStore.getState().timeout !== null) return;
       if (isJoined) {
         onVoiceLeave();
       } else {
@@ -410,6 +418,15 @@ function renderVoiceChannelItem(
   );
 
   wrapper.appendChild(item);
+  if (timeoutReason !== null) {
+    wrapper.appendChild(
+      createElement(
+        "div",
+        { class: "ch-restriction", "data-testid": `voice-timeout-${channel.id}` },
+        timeoutReason,
+      ),
+    );
+  }
 
   // Render connected voice users below the channel
   if (voiceUsers.length > 0) {
@@ -1005,6 +1022,12 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       () => renderChannels(),
     );
     unsubscribers.push(unsubConnStatus);
+    unsubscribers.push(
+      safetyStore.subscribeSelector(
+        (s) => s.timeout,
+        () => renderChannels(),
+      ),
+    );
 
     // Subscribe to voice store, split in two:
     //  (a) a structural selector (who is in which channel + mute/deafen/camera/

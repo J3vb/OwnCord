@@ -15,6 +15,7 @@ import { cleanupNotificationAudio } from "@lib/notifications";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { authStore, clearAuth, onAuthCleared } from "@stores/auth.store";
+import { resetSafetyStore } from "./features/safety/store";
 import {
   setTransientError,
   uiStore,
@@ -158,6 +159,8 @@ configureConnectionDiagnostics(api, ws);
 // Registered here rather than imported by auth.store: notifications imports
 // auth.store, so that import was a cycle.
 onAuthCleared(cleanupNotificationAudio);
+// A profile switch or sign-out must not carry one account's moderation notices into the next.
+onAuthCleared(resetSafetyStore);
 onAuthCleared((reason) => {
   // Server switches retain their account-scoped drafts. Explicit logout and
   // invalid credentials discard pending sends.
