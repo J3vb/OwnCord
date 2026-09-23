@@ -222,8 +222,10 @@ render path as a fallback; fail closed and record a blocker instead.
   nothing resends by itself; 404/409 re-read the authoritative state.
 - **Withdrawal:** open and assigned appeals offer **Withdraw appeal**, which
   opens a confirmation in the same panel ("You can't appeal this action
-  again") before `POST /appeals/{id}/withdraw`; 409 says it was already
-  decided, 404 that it no longer exists.
+  again") before `POST /appeals/{id}/withdraw`; 409 (decided or already
+  withdrawn) says it can no longer be withdrawn, 404 that it no longer
+  exists. For an erased action the panel shows "the action no longer
+  exists" in place of a reason.
 - **Status (Task 3):** the safety store keeps `appeals` from
   `GET /appeals/mine`, read with the history on `ready`, a resumed
   connection, opening the tab, a retry and after each change; a failure has

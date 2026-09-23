@@ -494,7 +494,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<MyAppeal[]>("GET", "/appeals/mine", undefined, signal);
     },
 
-    /** Open or assigned appeals only: 409 once decided, 404 when not the caller's. */
+    /** Open or assigned appeals only: 409 once decided or withdrawn, 404 when not the caller's. */
     withdrawAppeal(publicId: string, signal?: AbortSignal): Promise<void> {
       return request<void>(
         "POST",
