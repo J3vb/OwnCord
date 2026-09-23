@@ -267,8 +267,8 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
 Base `166d71e4`; Node 26.9.0, vitest 4.1.11, Playwright Chromium headless
 shell 151, Go 1.26.7, Linux. The counts and sizes below predate the review
 round's fixes (member-row description, user-report fallback focus, Safety load
-error), whose tests are in `member-list`, `sidebar-member-section` and
-`myReports`.
+error, profile-popup focus restore), whose tests are in `member-list`,
+`sidebar-member-section` and `myReports`.
 
 | Check                                                                                                                                                                                                                                                     | Result                                                                                                                  |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
@@ -325,8 +325,10 @@ the accessible-name check misread both failed before their fixes.
   error, stays on Send while pending and after a refusal, and returns to the
   opener on cancel and success (the composer if the row was re-rendered; the
   member row for a user report, found again by its `data-testid` if the list
-  re-rendered). After Retry succeeds in My reports, focus
-  moves to its heading. Every focus ring measured ≥ 5.03:1 at ≥ 2 px.
+  re-rendered). Closing the profile popup returns focus to the member row
+  that opened it, or to that user's rebuilt row if the list re-rendered; a
+  popup that has already closed never takes focus back. After Retry succeeds
+  in My reports, focus moves to its heading. Every focus ring measured ≥ 5.03:1 at ≥ 2 px.
 - **Contrast:** measured on the rendered dialog and My reports in dark,
   neon-glow, midnight and light, each with and without High Contrast; the
   lowest text ratio is 5.09:1 (midnight, dates) and the lowest focus ratio
