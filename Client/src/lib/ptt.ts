@@ -1,3 +1,5 @@
+import { voiceText } from "../i18n/voice";
+
 /**
  * Push-to-Talk display helpers. The PTT service itself — Rust-side
  * GetAsyncKeyState polling, so the key is NOT consumed/hijacked — is
@@ -6,27 +8,29 @@
  */
 
 // Well-known virtual key code names for display
+// i18n-exempt: F1-F16 and punctuation key labels have no English words; the named
+// keys above resolve through the voice catalog.
 const VK_NAMES: ReadonlyMap<number, string> = new Map([
-  [0x01, "Mouse Left"],
-  [0x02, "Mouse Right"],
-  [0x04, "Mouse Middle"],
-  [0x05, "Mouse 4"],
-  [0x06, "Mouse 5"],
-  [0x08, "Backspace"],
-  [0x09, "Tab"],
-  [0x0d, "Enter"],
-  [0x1b, "Escape"],
-  [0x20, "Space"],
-  [0x21, "Page Up"],
-  [0x22, "Page Down"],
-  [0x23, "End"],
-  [0x24, "Home"],
-  [0x25, "Arrow Left"],
-  [0x26, "Arrow Up"],
-  [0x27, "Arrow Right"],
-  [0x28, "Arrow Down"],
-  [0x2d, "Insert"],
-  [0x2e, "Delete"],
+  [0x01, voiceText("key.mouseLeft")],
+  [0x02, voiceText("key.mouseRight")],
+  [0x04, voiceText("key.mouseMiddle")],
+  [0x05, voiceText("key.mouse4")],
+  [0x06, voiceText("key.mouse5")],
+  [0x08, voiceText("key.backspace")],
+  [0x09, voiceText("key.tab")],
+  [0x0d, voiceText("key.enter")],
+  [0x1b, voiceText("key.escape")],
+  [0x20, voiceText("key.space")],
+  [0x21, voiceText("key.pageUp")],
+  [0x22, voiceText("key.pageDown")],
+  [0x23, voiceText("key.end")],
+  [0x24, voiceText("key.home")],
+  [0x25, voiceText("key.arrowLeft")],
+  [0x26, voiceText("key.arrowUp")],
+  [0x27, voiceText("key.arrowRight")],
+  [0x28, voiceText("key.arrowDown")],
+  [0x2d, voiceText("key.insert")],
+  [0x2e, voiceText("key.delete")],
   [0x70, "F1"],
   [0x71, "F2"],
   [0x72, "F3"],
@@ -64,6 +68,6 @@ export function vkName(vk: number): string {
   // A-Z keys
   if (vk >= 0x41 && vk <= 0x5a) return String.fromCharCode(vk);
   // Numpad 0-9
-  if (vk >= 0x60 && vk <= 0x69) return `Numpad ${vk - 0x60}`;
-  return `Key 0x${vk.toString(16).toUpperCase()}`;
+  if (vk >= 0x60 && vk <= 0x69) return voiceText("key.numpad", { digit: vk - 0x60 });
+  return voiceText("key.unknown", { code: vk.toString(16).toUpperCase() });
 }

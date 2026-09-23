@@ -161,7 +161,9 @@ export const settingsText = defineCatalog("settings", {
   "logs.version.known": "Client version: v{version}",
   "logs.version.unknown": "Client version: unknown",
   "logs.filter": "Filter:",
+  "logs.filterLabel": "Log filter",
   "logs.minLevel": "Min Level:",
+  "logs.minLevelLabel": "Minimum log level",
   "logs.copyAll": "Copy All",
   "logs.copied": "Copied!",
   "logs.copyFailed": "Failed to copy",
@@ -175,4 +177,97 @@ export const settingsText = defineCatalog("settings", {
     "Saves a zip on this computer with your log files, these diagnostics, your saved servers and display and voice settings. Nothing is uploaded, and passwords, tokens, recovery kits, recovery codes and 2FA secrets are never read into it. Log lines are exported verbatim, without redaction — read them before sharing.",
   "logs.bundleSaved": "Support bundle saved.",
   "logs.exportFailed": "Export failed: {error}",
+  "logs.bundleReadme":
+    "OwnCord support bundle\n\nCreated on this computer by the OwnCord desktop client. Nothing was sent to\na server. Contents:\n\n  app.json               client version and when this bundle was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings > Logs\n  logs/*.jsonl           the client's log files, copied verbatim\n\nPasswords, session tokens, recovery kits, recovery codes and 2FA secrets are\nnever read into this bundle: settings are copied from a fixed allowlist and the\nOS keychain is not touched. The log files are NOT redacted: they are exported\nexactly as written. Read them before sharing this bundle, and share it only\nwith someone you trust.\n",
+
+  "diagnostics.stage.connection": "Server connection",
+  "diagnostics.stage.authentication": "Signed-in access",
+  "diagnostics.stage.websocket": "Live message connection",
+  "diagnostics.stage.microphone": "Microphone access",
+  "diagnostics.stage.signaling": "Voice signaling",
+  "diagnostics.stage.media": "Incoming media",
+  "diagnostics.detail.checking": "Checking…",
+  "diagnostics.detail.connectionPassed":
+    "This client reached the server through its normal certificate-checked connection.",
+  "diagnostics.detail.noServer": "Choose and connect to a server, then run this test again.",
+  "diagnostics.detail.authPassed":
+    "The server accepted a fresh request for your signed-in account.",
+  "diagnostics.detail.authFailed":
+    "The account request failed. Reconnect or sign in again, then retry.",
+  "diagnostics.detail.wsPassed":
+    "A fresh heartbeat response arrived on your authenticated message connection.",
+  "diagnostics.detail.wsFailed":
+    "No live heartbeat response arrived. Wait for reconnection or check whether your network allows WebSocket connections.",
+  "diagnostics.detail.signInAccount": "Sign in to test access to your account.",
+  "diagnostics.detail.signInMessage": "Sign in to test the live message connection.",
+  "diagnostics.detail.micPassed":
+    "Your selected microphone opened successfully. The test capture has stopped; no audio was sent.",
+  "diagnostics.detail.micDenied":
+    "Microphone access was denied. Allow it in your app or system privacy settings, then retry.",
+  "diagnostics.detail.micTimeout":
+    "The microphone prompt did not finish. Dismiss any pending prompt, then retry. Any late capture will be stopped.",
+  "diagnostics.detail.micFailed":
+    "The selected microphone could not open. Check Voice & Audio settings and reconnect your device.",
+  "diagnostics.detail.micSkipped": "Microphone check was not selected.",
+  "diagnostics.detail.joinVoice": "Join a voice channel yourself, then run this test again.",
+  "diagnostics.detail.joinCall":
+    "Join a call with another person speaking or sharing video to test incoming media.",
+  "diagnostics.detail.signalingClosed":
+    "The current voice signaling connection is not open. Wait for voice recovery or leave and rejoin the channel.",
+  "diagnostics.detail.restoreVoice": "Restore the voice connection before checking incoming media.",
+  "diagnostics.detail.signalingOpen": "Your current call has an open voice signaling connection.",
+  "diagnostics.detail.noParticipant":
+    "No other participant is in this call. Ask someone to join and speak or share video, then retry.",
+  "diagnostics.detail.listening":
+    "Listening for decoded incoming media for three seconds. Ask another participant to speak or share video.",
+  "diagnostics.detail.callChanged":
+    "The call changed during the check. Run it again in your current call.",
+  "diagnostics.detail.mediaPassed":
+    "Incoming {kinds} decoded during this check. This does not test your speakers, outgoing media, or the other person's identity.",
+  "diagnostics.detail.mediaMissing":
+    "No advancing decoded media was observed. Ask someone to speak or share video and retry. If they are already sending, check voice permissions, encryption warnings and the media network path.",
+  "diagnostics.detail.mediaFailed":
+    "Incoming media could not be inspected. Rejoin the call and retry.",
+  "diagnostics.detail.connectionTimeout":
+    "The server did not respond in time. Check your connection and server address, then retry.",
+  "diagnostics.detail.connectionRefused":
+    "The server could not be reached through the normal certificate-checked connection. Check the server address and any certificate prompt, then retry.",
+
+  "voiceAudio.inputDevice": "Input Device",
+  "voiceAudio.default": "Default",
+  "voiceAudio.inputVolume": "Input Volume",
+  "voiceAudio.inputSensitivity": "Input Sensitivity",
+  "voiceAudio.outputDevice": "Output Device",
+  "voiceAudio.outputVolume": "Output Volume",
+  "voiceAudio.streamQuality": "Stream Quality",
+  "voiceAudio.streamQualityDesc":
+    "Applies to camera and screenshare. Higher quality uses more bandwidth. Changes take effect on next voice join.",
+  "voiceAudio.quality.low": "Low (360p cam / 720p screen)",
+  "voiceAudio.quality.medium": "Medium (720p)",
+  "voiceAudio.quality.high": "High (1080p)",
+  "voiceAudio.quality.source": "Source (1080p max bitrate)",
+  "voiceAudio.screenFps": "Screen Share FPS",
+  "voiceAudio.screenFpsDesc":
+    "Higher frame rates use more bandwidth and depend on what the capture source and display can deliver. Takes effect the next time you start sharing.",
+  "voiceAudio.fps.30": "30 FPS (default)",
+  "voiceAudio.fps.60": "60 FPS",
+  "voiceAudio.fps.120": "120 FPS",
+  "voiceAudio.videoDevice": "Video Device",
+  "voiceAudio.kind.microphone": "Microphone",
+  "voiceAudio.kind.speaker": "Speaker",
+  "voiceAudio.kind.camera": "Camera",
+  "voiceAudio.enumerateFailed": "Could not enumerate devices",
+  "voiceAudio.cameraUnavailable": "Camera unavailable",
+  "voiceAudio.echo.label": "Echo Cancellation",
+  "voiceAudio.echo.desc": "Reduce echo from speakers feeding back into microphone",
+  "voiceAudio.noise.label": "Noise Suppression",
+  "voiceAudio.noise.desc": "Filter out background noise from your microphone",
+  "voiceAudio.agc.label": "Automatic Gain Control",
+  "voiceAudio.agc.desc": "Automatically adjust microphone volume",
+  "voiceAudio.enhanced.label": "Enhanced Noise Suppression",
+  "voiceAudio.enhanced.desc":
+    "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds",
+  "voiceAudio.applyNextJoin": "{desc}. Applies when you next join a voice channel.",
+  "voiceAudio.nativeNote":
+    "On Linux, audio runs in the app's native engine. Your microphone level and voice sensitivity are handled by the engine's automatic gain control and silence detection, so the input volume and input sensitivity controls are not available here. Use your system mixer to adjust your microphone level.",
 });

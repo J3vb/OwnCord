@@ -1,7 +1,7 @@
 import { appendChildren, clearChildren, createElement } from "@lib/dom";
 import { settingsText as t } from "../../i18n/settings";
 import {
-  DIAGNOSTIC_LABELS,
+  diagnosticLabel,
   getConnectionDiagnosticsSessionSignal,
   runConnectionDiagnostics,
   type DiagnosticStage,
@@ -96,7 +96,7 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
             result.status === "not-tested"
               ? t("diagnostics.notTested")
               : t(DIAGNOSTIC_STATUS_KEYS[result.status]);
-          row.textContent = `${DIAGNOSTIC_LABELS[result.stage]} — ${label}: ${result.detail}`;
+          row.textContent = `${diagnosticLabel(result.stage)} — ${label}: ${result.detail}`;
         },
         AbortSignal.any([signal, current.signal]),
         microphone.checked,

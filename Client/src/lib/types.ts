@@ -4,6 +4,8 @@
 // Source of truth: docs/protocol.md, docs/api.md, docs/schema.md
 // =============================================================================
 
+import { connectText } from "../i18n/connect";
+
 // -----------------------------------------------------------------------------
 // Common / Shared Types
 // -----------------------------------------------------------------------------
@@ -1006,10 +1008,8 @@ export function retentionNotice(info: ServerInfoResponse | undefined): string | 
   const days: unknown = info?.retention?.messages_days;
   if (typeof days !== "number" || !Number.isInteger(days) || days < 0) return null;
   const window =
-    days === 0
-      ? "keeps messages until they are deleted"
-      : `deletes messages after ${days} day${days === 1 ? "" : "s"}`;
-  return `By default this server ${window}; attachments are removed with their messages.`;
+    days === 0 ? connectText("retention.kept") : connectText("retention.deleted", { count: days });
+  return connectText("retention.notice", { window });
 }
 
 /**

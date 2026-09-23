@@ -40,6 +40,7 @@ import { RemoteTracks } from "../features/voice/remoteTracks";
 import { isLinuxDesktop } from "../features/voice/native/platform";
 import { nativeCounters } from "../features/voice/native/counters";
 import { desktop } from "../platform/desktop";
+import { voiceText } from "../i18n/voice";
 
 // Re-export StreamQuality so existing consumers don't break
 export type { StreamQuality } from "@lib/screenShare";
@@ -542,13 +543,13 @@ export class LiveKitSession {
         log.warn("Auto-reconnect: mic unavailable — listen-only mode", micErr);
       } else if (micErr instanceof DOMException && micErr.name === "NotAllowedError") {
         log.warn("Microphone permission denied — joined in listen-only mode");
-        this.onErrorCallback?.("Microphone permission denied — joined in listen-only mode");
+        this.onErrorCallback?.(voiceText("session.listenOnlyPermission"));
       } else if (micErr instanceof DOMException && micErr.name === "NotFoundError") {
         log.warn("No microphone found — joined in listen-only mode");
-        this.onErrorCallback?.("No microphone found — joined in listen-only mode");
+        this.onErrorCallback?.(voiceText("session.listenOnlyMissing"));
       } else {
         log.warn("Microphone unavailable — joined in listen-only mode", micErr);
-        this.onErrorCallback?.("Microphone unavailable — joined in listen-only mode");
+        this.onErrorCallback?.(voiceText("session.listenOnlyUnavailable"));
       }
     }
 

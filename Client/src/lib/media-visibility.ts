@@ -19,6 +19,7 @@
 
 import { createElement } from "./dom";
 import { createIcon } from "./icons";
+import { connectText } from "../i18n/connect";
 
 /** How long a GIF plays before auto-pausing (ms). */
 const AUTO_PAUSE_MS = 10_000;
@@ -93,7 +94,7 @@ function createPlayPauseButton(): HTMLButtonElement {
   const btn = createElement("button", {
     class: "gif-play-btn",
     type: "button",
-    "aria-label": "Play/pause GIF",
+    "aria-label": connectText("media.playPauseGif"),
   });
   btn.textContent = "";
   btn.appendChild(createIcon("play", 14));

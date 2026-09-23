@@ -18,6 +18,7 @@ import { createLogger } from "@lib/logger";
 import { parseUserId } from "../features/voice/sessionState";
 import { detachRoom } from "../features/voice/releaseRoom";
 import type { AudioElements } from "@lib/audioElements";
+import { voiceText } from "../i18n/voice";
 
 const log = createLogger("roomEventHandlers");
 
@@ -213,7 +214,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     }
     deps.leaveVoice(false);
     leaveVoiceChannel();
-    if (isUnexpected) deps.getOnErrorCallback()?.("Voice connection lost — disconnected");
+    if (isUnexpected) deps.getOnErrorCallback()?.(voiceText("event.voiceDisconnected"));
   };
 
   /** OC-0002: livekit-client's E2eeManager emits RoomEvent.EncryptionError

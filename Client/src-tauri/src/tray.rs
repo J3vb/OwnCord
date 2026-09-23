@@ -4,6 +4,8 @@ use tauri::{
     Emitter, Manager, Runtime,
 };
 
+use crate::text;
+
 const SHOW_HIDE_ID: &str = "show_hide";
 const STATUS_ONLINE_ID: &str = "status_online";
 const STATUS_IDLE_ID: &str = "status_idle";
@@ -12,21 +14,21 @@ const STATUS_OFFLINE_ID: &str = "status_offline";
 const QUIT_ID: &str = "quit";
 
 pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::Error> {
-    let show_hide = MenuItem::with_id(app, SHOW_HIDE_ID, "Show/Hide", true, None::<&str>)?;
+    let show_hide = MenuItem::with_id(app, SHOW_HIDE_ID, text::TRAY_SHOW_HIDE, true, None::<&str>)?;
 
-    let status_online = MenuItem::with_id(app, STATUS_ONLINE_ID, "Online", true, None::<&str>)?;
-    let status_idle = MenuItem::with_id(app, STATUS_IDLE_ID, "Idle", true, None::<&str>)?;
-    let status_dnd = MenuItem::with_id(app, STATUS_DND_ID, "Do Not Disturb", true, None::<&str>)?;
-    let status_offline = MenuItem::with_id(app, STATUS_OFFLINE_ID, "Offline", true, None::<&str>)?;
+    let status_online = MenuItem::with_id(app, STATUS_ONLINE_ID, text::TRAY_STATUS_ONLINE, true, None::<&str>)?;
+    let status_idle = MenuItem::with_id(app, STATUS_IDLE_ID, text::TRAY_STATUS_IDLE, true, None::<&str>)?;
+    let status_dnd = MenuItem::with_id(app, STATUS_DND_ID, text::TRAY_STATUS_DND, true, None::<&str>)?;
+    let status_offline = MenuItem::with_id(app, STATUS_OFFLINE_ID, text::TRAY_STATUS_OFFLINE, true, None::<&str>)?;
 
     let status_submenu = Submenu::with_items(
         app,
-        "Status",
+        text::TRAY_STATUS,
         true,
         &[&status_online, &status_idle, &status_dnd, &status_offline],
     )?;
 
-    let quit = MenuItem::with_id(app, QUIT_ID, "Quit", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT_ID, text::TRAY_QUIT, true, None::<&str>)?;
 
     let menu = Menu::with_items(app, &[&show_hide, &status_submenu, &quit])?;
 
@@ -40,7 +42,7 @@ pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::E
                 .unwrap_or_else(|| tauri::image::Image::new(&[], 1, 1)),
         )
         .menu(&menu)
-        .tooltip("OwnCord")
+        .tooltip(text::TRAY_TOOLTIP)
         .on_tray_icon_event(move |_tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,

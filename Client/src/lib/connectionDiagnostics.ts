@@ -3,6 +3,7 @@ import type { Room } from "livekit-client";
 import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
 import { loadPref } from "@components/settings/helpers";
+import { settingsText as t } from "../i18n/settings";
 
 export type DiagnosticStatus = "running" | "passed" | "failed" | "not-tested";
 export type DiagnosticStage =
@@ -12,14 +13,19 @@ export interface DiagnosticResult {
   readonly status: DiagnosticStatus;
   readonly detail: string;
 }
-export const DIAGNOSTIC_LABELS: Record<DiagnosticStage, string> = {
-  connection: "Server connection",
-  authentication: "Signed-in access",
-  websocket: "Live message connection",
-  microphone: "Microphone access",
-  signaling: "Voice signaling",
-  media: "Incoming media",
-};
+const DIAGNOSTIC_LABEL_KEYS = {
+  connection: "diagnostics.stage.connection",
+  authentication: "diagnostics.stage.authentication",
+  websocket: "diagnostics.stage.websocket",
+  microphone: "diagnostics.stage.microphone",
+  signaling: "diagnostics.stage.signaling",
+  media: "diagnostics.stage.media",
+} as const satisfies Record<DiagnosticStage, string>;
+
+/** Resolve a stage's display label where it renders (B9-20). */
+export function diagnosticLabel(stage: DiagnosticStage): string {
+  return t(DIAGNOSTIC_LABEL_KEYS[stage]);
+}
 
 export interface DiagnosticServices {
   api: Pick<ApiClient, "getSession" | "getConfig" | "getHealth" | "getMe">;
@@ -57,6 +63,7 @@ function bounded<T>(task: Promise<T>, signal: AbortSignal, timeoutMs: number): P
     };
     const timer = setTimeout(() => {
       finish();
+      // i18n-exempt: internal TimeoutError name/type, its detail is a catalog line
       reject(new DOMException("The check timed out.", "TimeoutError"));
     }, timeoutMs);
     signal.addEventListener("abort", abort, { once: true });
@@ -122,9 +129,9 @@ async function readDecoding(room: Room): Promise<Map<string, DecodingSnapshot> |
 function connectionFailure(error: unknown): string {
   // Do not expose raw proxy errors (URLs, certificate fingerprints or tokens).
   if (error instanceof DOMException && error.name === "TimeoutError") {
-    return "The server did not respond in time. Check your connection and server address, then retry.";
+    return t("diagnostics.detail.connectionTimeout");
   }
-  return "The server could not be reached through the normal certificate-checked connection. Check the server address and any certificate prompt, then retry.";
+  return t("diagnostics.detail.connectionRefused");
 }
 
 /** Each result belongs to one session. Abort rejects without emitting stale
@@ -135,6 +142,7 @@ export async function runConnectionDiagnostics(
   includeMicrophone: boolean,
   services: DiagnosticServices | null = configured,
 ): Promise<void> {
+  // i18n-exempt: internal configuration guard, never rendered
   if (!services) throw new Error("Diagnostics are not available yet.");
   const { api, ws } = services;
   const owner = api.getSession();
@@ -149,7 +157,7 @@ export async function runConnectionDiagnostics(
     task: () => Promise<string>,
     failure: (error: unknown) => string,
   ): Promise<void> => {
-    emit(stage, "running", "Checking…");
+    emit(stage, "running", t("diagnostics.detail.checking"));
     try {
       const detail = await bounded(task(), lifetime, stage === "microphone" ? 12_000 : 8_000);
       emit(stage, "passed", detail);
@@ -164,12 +172,12 @@ export async function runConnectionDiagnostics(
       "connection",
       async () => {
         await api.getHealth(undefined, 5000, lifetime);
-        return "This client reached the server through its normal certificate-checked connection.";
+        return t("diagnostics.detail.connectionPassed");
       },
       connectionFailure,
     );
   } else {
-    emit("connection", "not-tested", "Choose and connect to a server, then run this test again.");
+    emit("connection", "not-tested", t("diagnostics.detail.noServer"));
   }
 
   if (api.getConfig().token) {
@@ -177,22 +185,21 @@ export async function runConnectionDiagnostics(
       "authentication",
       async () => {
         await api.getMe(lifetime);
-        return "The server accepted a fresh request for your signed-in account.";
+        return t("diagnostics.detail.authPassed");
       },
-      () => "The account request failed. Reconnect or sign in again, then retry.",
+      () => t("diagnostics.detail.authFailed"),
     );
     await check(
       "websocket",
       async () => {
         await ws.ping(lifetime);
-        return "A fresh heartbeat response arrived on your authenticated message connection.";
+        return t("diagnostics.detail.wsPassed");
       },
-      () =>
-        "No live heartbeat response arrived. Wait for reconnection or check whether your network allows WebSocket connections.",
+      () => t("diagnostics.detail.wsFailed"),
     );
   } else {
-    emit("authentication", "not-tested", "Sign in to test access to your account.");
-    emit("websocket", "not-tested", "Sign in to test the live message connection.");
+    emit("authentication", "not-tested", t("diagnostics.detail.signInAccount"));
+    emit("websocket", "not-tested", t("diagnostics.detail.signInMessage"));
   }
 
   if (includeMicrophone) {
@@ -208,61 +215,46 @@ export async function runConnectionDiagnostics(
         });
         try {
           if (!stream.getAudioTracks().some((track) => track.readyState === "live")) {
+            // i18n-exempt: internal guard mapped to the microphone failure catalog line
             throw new Error("No live audio track.");
           }
-          return "Your selected microphone opened successfully. The test capture has stopped; no audio was sent.";
+          return t("diagnostics.detail.micPassed");
         } finally {
           for (const track of stream.getTracks()) track.stop();
         }
       },
       (error) => {
         if (error instanceof DOMException && error.name === "NotAllowedError") {
-          return "Microphone access was denied. Allow it in your app or system privacy settings, then retry.";
+          return t("diagnostics.detail.micDenied");
         }
         if (error instanceof DOMException && error.name === "TimeoutError") {
-          return "The microphone prompt did not finish. Dismiss any pending prompt, then retry. Any late capture will be stopped.";
+          return t("diagnostics.detail.micTimeout");
         }
-        return "The selected microphone could not open. Check Voice & Audio settings and reconnect your device.";
+        return t("diagnostics.detail.micFailed");
       },
     );
   } else {
-    emit("microphone", "not-tested", "Microphone check was not selected.");
+    emit("microphone", "not-tested", t("diagnostics.detail.micSkipped"));
   }
 
   lifetime.throwIfAborted();
   const room = await bounded(Promise.resolve(services.getRoom()), lifetime, 5000);
   if (!room) {
-    emit("signaling", "not-tested", "Join a voice channel yourself, then run this test again.");
-    emit(
-      "media",
-      "not-tested",
-      "Join a call with another person speaking or sharing video to test incoming media.",
-    );
+    emit("signaling", "not-tested", t("diagnostics.detail.joinVoice"));
+    emit("media", "not-tested", t("diagnostics.detail.joinCall"));
     return;
   }
   if (room.state !== "connected" || room.engine.client.ws?.readyState !== WebSocket.OPEN) {
-    emit(
-      "signaling",
-      "failed",
-      "The current voice signaling connection is not open. Wait for voice recovery or leave and rejoin the channel.",
-    );
-    emit("media", "not-tested", "Restore the voice connection before checking incoming media.");
+    emit("signaling", "failed", t("diagnostics.detail.signalingClosed"));
+    emit("media", "not-tested", t("diagnostics.detail.restoreVoice"));
     return;
   }
-  emit("signaling", "passed", "Your current call has an open voice signaling connection.");
+  emit("signaling", "passed", t("diagnostics.detail.signalingOpen"));
   if (room.remoteParticipants.size === 0) {
-    emit(
-      "media",
-      "not-tested",
-      "No other participant is in this call. Ask someone to join and speak or share video, then retry.",
-    );
+    emit("media", "not-tested", t("diagnostics.detail.noParticipant"));
     return;
   }
-  emit(
-    "media",
-    "running",
-    "Listening for decoded incoming media for three seconds. Ask another participant to speak or share video.",
-  );
+  emit("media", "running", t("diagnostics.detail.listening"));
   try {
     const before = await bounded(readDecoding(room), lifetime, 5000);
     await pause(lifetime, 3000);
@@ -271,11 +263,7 @@ export async function runConnectionDiagnostics(
       (await bounded(Promise.resolve(services.getRoom()), lifetime, 5000)) !== room ||
       room.state !== "connected"
     ) {
-      emit(
-        "media",
-        "failed",
-        "The call changed during the check. Run it again in your current call.",
-      );
+      emit("media", "failed", t("diagnostics.detail.callChanged"));
       return;
     }
     let audio = false;
@@ -290,20 +278,12 @@ export async function runConnectionDiagnostics(
     }
     if (audio || video) {
       const kinds = [audio ? "audio" : "", video ? "video" : ""].filter(Boolean).join(" and ");
-      emit(
-        "media",
-        "passed",
-        `Incoming ${kinds} decoded during this check. This does not test your speakers, outgoing media, or the other person's identity.`,
-      );
+      emit("media", "passed", t("diagnostics.detail.mediaPassed", { kinds }));
     } else {
-      emit(
-        "media",
-        "not-tested",
-        "No advancing decoded media was observed. Ask someone to speak or share video and retry. If they are already sending, check voice permissions, encryption warnings and the media network path.",
-      );
+      emit("media", "not-tested", t("diagnostics.detail.mediaMissing"));
     }
   } catch {
     lifetime.throwIfAborted();
-    emit("media", "failed", "Incoming media could not be inspected. Rejoin the call and retry.");
+    emit("media", "failed", t("diagnostics.detail.mediaFailed"));
   }
 }

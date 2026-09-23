@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
+  joinVoiceChannelByName,
   mockTauriFullSessionWithMessages,
   navigateToMainPageReady,
   openSettings,
@@ -343,6 +344,116 @@ test.describe("B9-18 connect and shell text", () => {
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
     await testInfo.attach("server-row-expanded-940x500-20px.png", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B9-20: settings, account and voice/media text. The settings overlay and the
+// voice widget are built after the seam switch, so their labels are expanded.
+// ---------------------------------------------------------------------------
+
+test.describe("B9-20 settings, account and voice text", () => {
+  test.use({ viewport: { width: 940, height: 500 } });
+
+  test("reads the settings catalogs' English copy across the tabs", async ({ page }) => {
+    await startAtLargestText(page);
+    await navigateToMainPageReady(page);
+    await openSettings(page);
+
+    for (const [tab, english] of [
+      ["Account", "Edit User Profile"],
+      ["Notifications", "Desktop Notifications"],
+      ["Text & Images", "Link Preview"],
+      ["Voice & Audio", "Input Device"],
+      ["Keybinds", "Push to Talk"],
+      ["Advanced", "Developer Mode"],
+      ["Logs", "Export Support Bundle"],
+    ] as const) {
+      await switchSettingsTab(page, tab);
+      const content = page.locator("[data-testid='settings-overlay'] .settings-content");
+      await expect(content.getByText(english, { exact: true }).or(content).first()).toBeVisible();
+    }
+  });
+
+  test("keeps expanded settings and account text whole and named at 940×500 with 20px text", async ({
+    page,
+  }, testInfo) => {
+    await startAtLargestText(page);
+    await navigateToMainPageReady(page);
+    // Open before the switch: the Settings button's own name comes from shell.ts,
+    // and only a tab switched afterwards re-renders through the expanded seam.
+    await openSettings(page);
+    test.skip(!(await expandCatalogText(page)), "needs the dev server's modules");
+
+    for (const tab of [
+      "Notifications",
+      "Text & Images",
+      "Voice & Audio",
+      "Keybinds",
+      "Advanced",
+      "Logs",
+    ] as const) {
+      await switchSettingsTab(page, tab);
+      const content = page.locator("[data-testid='settings-overlay'] .settings-content");
+      // Every control on the tab has an accessible name built from the seam.
+      expect(await findUnnamedControls(content)).toEqual([]);
+    }
+
+    const account = page.locator("[data-testid='settings-overlay'] .settings-content");
+    await switchSettingsTab(page, "Account");
+    for (const [el, english] of [
+      [account.locator(".account-field-label", { hasText: "Username" }), "Username"],
+      [account.locator("[data-testid='profile-save-btn']"), "Save Profile"],
+      [account.locator("[data-testid='delete-account-trigger']"), "Delete Account"],
+    ] as const) {
+      await expect(el).toHaveText(expanded(english));
+      await expectWhole(el);
+    }
+
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+    await testInfo.attach("settings-expanded-940x500-20px.png", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+  });
+
+  test("keeps expanded voice controls named and operable at 940×500 with 20px text", async ({
+    page,
+  }, testInfo) => {
+    await startAtLargestText(page);
+    test.skip(!(await expandCatalogText(page)), "needs the dev server's modules");
+    await navigateToMainPageReady(page);
+    await joinVoiceChannelByName(page);
+
+    const widget = page.locator("[data-testid='voice-widget']");
+    await expect(widget).toHaveClass(/visible/);
+    await expect(widget.locator(".vw-channel")).toHaveText("Voice Chat");
+    // The lifecycle status is expanded regardless of which branch it settles on.
+    await expect(widget.locator("[data-testid='vw-status']")).toHaveText(/^⟦.+⟧$/);
+    // The stats pane is hidden until its signal icon is clicked.
+    await widget.locator(".vw-signal").click();
+    await expect(widget.locator(".vw-stats")).toHaveClass(/visible/);
+    for (const [el, english] of [
+      [widget.locator(".vw-stats-title"), "Transport Statistics"],
+      [widget.locator(".vw-stats-col-label.out"), "Outgoing"],
+      [widget.locator(".vw-stats-col-label.in"), "Incoming"],
+      [widget.locator(".vw-stats-totals-label"), "Session Totals"],
+    ] as const) {
+      await expect(el).toHaveText(expanded(english));
+      await expectWhole(el);
+    }
+
+    for (const name of ["Mute", "Deafen", "Camera", "Screenshare", "Disconnect"]) {
+      await expect(
+        widget.getByRole("button", { name: new RegExp(`^⟦${name} .+⟧$`) }),
+      ).toBeVisible();
+    }
+    expect(await findUnnamedControls(widget)).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+    await testInfo.attach("voice-widget-expanded-940x500-20px.png", {
       body: await page.screenshot(),
       contentType: "image/png",
     });

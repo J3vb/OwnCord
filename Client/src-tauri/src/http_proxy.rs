@@ -271,10 +271,7 @@ async fn handle_connection<R: Runtime>(
                     b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
                 )
                 .await;
-            return Err(format!(
-                "certificate for {store_key} is not yet trusted; confirm the fingerprint to continue"
-            )
-            .into());
+            return Err(crate::text::cert_not_trusted(&store_key).into());
         }
         TofuOutcome::Mismatch { stored } => {
             let mismatch_msg = tofu::mismatch_message(&store_key, &stored, &fingerprint);

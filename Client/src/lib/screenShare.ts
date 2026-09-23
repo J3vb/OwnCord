@@ -22,6 +22,7 @@ import { setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
 import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { isLinuxDesktop } from "../features/voice/native/platform";
+import { voiceText } from "../i18n/voice";
 
 const log = createLogger("screenShare");
 
@@ -231,7 +232,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
   const ws = deps.getWs();
   if (room === null || ws === null) {
     log.warn("Cannot enable camera: no active voice session");
-    deps.onError("Join a voice channel first");
+    deps.onError(voiceText("share.joinVoiceFirst"));
     return;
   }
   setLocalCamera(true);
@@ -293,11 +294,11 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     setLocalCamera(false);
     log.error("Failed to enable camera", err);
     if (err instanceof DOMException && err.name === "NotAllowedError") {
-      deps.onError("Camera permission denied");
+      deps.onError(voiceText("share.cameraDenied"));
     } else if (err instanceof DOMException && err.name === "NotFoundError") {
-      deps.onError("No camera found");
+      deps.onError(voiceText("share.noCamera"));
     } else {
-      deps.onError("Failed to start camera");
+      deps.onError(voiceText("share.cameraFailed"));
     }
   }
 }
@@ -354,7 +355,7 @@ export async function enableScreenshare(
   const ws = deps.getWs();
   if (room === null || ws === null) {
     log.warn("Cannot enable screenshare: no active voice session");
-    deps.onError("Join a voice channel first");
+    deps.onError(voiceText("share.joinVoiceFirst"));
     return;
   }
   setLocalScreenshare(true);
@@ -470,9 +471,9 @@ export async function enableScreenshare(
     setLocalScreenshare(false);
     log.error("Failed to enable screenshare", err);
     if (err instanceof DOMException && err.name === "NotAllowedError") {
-      deps.onError("Screen sharing permission denied");
+      deps.onError(voiceText("share.screenDenied"));
     } else {
-      deps.onError("Failed to start screen sharing");
+      deps.onError(voiceText("share.screenFailed"));
     }
   }
 }

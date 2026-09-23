@@ -19,6 +19,7 @@ pub mod native_voice;
 mod proxy_common;
 mod ptt;
 mod secret_store;
+mod text;
 mod tofu;
 mod tray;
 mod update_commands;
@@ -245,10 +246,8 @@ pub fn run() {
             eprintln!("Fatal startup error: {e}");
             #[cfg(not(target_os = "linux"))]
             rfd::MessageDialog::new()
-                .set_title("OwnCord failed to start")
-                .set_description(format!(
-                    "The application encountered a startup error and cannot continue.\n\n{e}"
-                ))
+                .set_title(text::STARTUP_DIALOG_TITLE)
+                .set_description(text::startup_dialog_body(&e.to_string()))
                 .set_level(rfd::MessageLevel::Error)
                 .show();
             std::process::exit(1);

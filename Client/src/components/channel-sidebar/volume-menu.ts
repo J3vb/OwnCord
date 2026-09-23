@@ -6,6 +6,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { setUserVolume, getUserVolume } from "@lib/livekitSession";
+import { voiceText as t } from "../../i18n/voice";
 
 /** Moderation section wiring. Passed only when the local user may moderate
  *  voice; the menu renders the section iff this is present, so the permission
@@ -66,7 +67,7 @@ export function showUserVolumeMenu(
       class: "context-menu-item",
       style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
     },
-    `User Volume: ${currentVol}%`,
+    t("volume.user", { percent: currentVol }),
   );
   menu.appendChild(volLabel);
 
@@ -93,19 +94,19 @@ export function showUserVolumeMenu(
   slider.addEventListener("input", () => {
     const val = Number(slider.value);
     setText(valLabel, `${val}%`);
-    setText(volLabel, `User Volume: ${val}%`);
+    setText(volLabel, t("volume.user", { percent: val }));
     setUserVolume(userId, val);
   });
 
   appendChildren(sliderRow, slider, valLabel);
   menu.appendChild(sliderRow);
 
-  const resetBtn = createElement("div", { class: "context-menu-item" }, "Reset Volume");
+  const resetBtn = createElement("div", { class: "context-menu-item" }, t("volume.reset"));
   resetBtn.addEventListener("click", () => {
     setUserVolume(userId, 100);
     slider.value = "100";
     setText(valLabel, "100%");
-    setText(volLabel, "User Volume: 100%");
+    setText(volLabel, t("volume.resetFull"));
   });
   menu.appendChild(resetBtn);
 
@@ -166,7 +167,7 @@ function appendModerationSection(
   const muteItem = createElement(
     "div",
     { class: "context-menu-item", "data-action": "server-mute" },
-    mod.serverMuted ? "Server Unmute" : "Server Mute",
+    mod.serverMuted ? t("volume.serverUnmute") : t("volume.serverMute"),
   );
   muteItem.addEventListener("click", () => {
     mod.onServerMute(!mod.serverMuted);
@@ -177,7 +178,7 @@ function appendModerationSection(
   const deafenItem = createElement(
     "div",
     { class: "context-menu-item", "data-action": "server-deafen" },
-    mod.serverDeafened ? "Server Undeafen" : "Server Deafen",
+    mod.serverDeafened ? t("volume.serverUndeafen") : t("volume.serverDeafen"),
   );
   deafenItem.addEventListener("click", () => {
     mod.onServerDeafen(!mod.serverDeafened);
@@ -191,7 +192,7 @@ function appendModerationSection(
       class: "context-menu-item context-menu-item--submenu",
       "data-action": "move-to",
     });
-    moveWrap.appendChild(createElement("span", {}, "Move to"));
+    moveWrap.appendChild(createElement("span", {}, t("volume.moveTo")));
     const sub = createElement("div", { class: "context-menu__submenu" });
     sub.style.display = "none";
     moveWrap.addEventListener("mouseenter", () => {
@@ -220,7 +221,7 @@ function appendModerationSection(
   const kickItem = createElement(
     "div",
     { class: "context-menu-item danger", "data-action": "voice-disconnect" },
-    "Disconnect",
+    t("volume.disconnect"),
   );
   kickItem.addEventListener("click", () => {
     mod.onDisconnect();

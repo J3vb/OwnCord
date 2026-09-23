@@ -15,6 +15,7 @@
  * here (pinned equal to `preferences.STORAGE_PREFIX` by the unit test).
  */
 import type { Platform } from "../platform/contracts";
+import { settingsText } from "../i18n/settings";
 
 export const SETTINGS_PREFIX = "owncord:settings:";
 
@@ -166,23 +167,7 @@ const PROFILE_FIELDS = [
   "lastConnected",
 ] as const;
 
-const README = `OwnCord support bundle
-
-Created on this computer by the OwnCord desktop client. Nothing was sent to
-a server. Contents:
-
-  app.json               client version and when this bundle was made
-  settings.json          allowlisted display and voice settings, and your saved
-                         servers (name, address, username, sign-in options)
-  voice-diagnostics.json the voice session state shown in Settings > Logs
-  logs/*.jsonl           the client's log files, copied verbatim
-
-Passwords, session tokens, recovery kits, recovery codes and 2FA secrets are
-never read into this bundle: settings are copied from a fixed allowlist and the
-OS keychain is not touched. The log files are NOT redacted: they are exported
-exactly as written. Read them before sharing this bundle, and share it only
-with someone you trust.
-`;
+const README = settingsText("logs.bundleReadme");
 
 export interface SupportBundleSources {
   readonly appVersion: string;

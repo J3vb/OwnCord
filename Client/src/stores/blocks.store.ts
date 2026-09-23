@@ -12,11 +12,12 @@
  */
 
 import { createStore } from "@lib/store";
+import { connectText } from "../i18n/connect";
 
 /** Shown when the local user is the blocker. */
-export const BLOCKED_BY_ME_REASON = "You've blocked this user. Unblock to send messages.";
+export const BLOCKED_BY_ME_REASON = connectText("blocks.blockedByMe");
 /** Neutral reason for the blocking direction — never reveals the block explicitly. */
-export const BLOCKED_BY_THEM_REASON = "You can't message this user right now.";
+export const BLOCKED_BY_THEM_REASON = connectText("blocks.blockedByThem");
 
 export interface BlocksState {
   readonly blockedByMe: ReadonlySet<number>;

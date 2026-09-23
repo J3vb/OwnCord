@@ -168,6 +168,7 @@ export class NativeRoom {
     getTrackPublication: (source: string): NativeLocalPublication | undefined =>
       this.localParticipant.trackPublications.get(source),
     setMicrophoneEnabled: async (enabled: boolean): Promise<void> => {
+      // i18n-exempt: internal native-room state guard, consumed by joinOrchestration's catalog toast
       if (this.sessionId === null) throw new Error("native room is not connected");
       await desktop.nativeVoice.setMicrophone(this.sessionId, enabled);
     },
@@ -260,6 +261,7 @@ export class NativeRoom {
    *  default. Camera switching has no native counterpart yet. */
   async switchActiveDevice(kind: string, deviceId: string): Promise<boolean> {
     if (kind !== "audioinput" && kind !== "audiooutput") return false;
+    // i18n-exempt: internal native-room state guard, consumed by joinOrchestration's catalog toast
     if (this.sessionId === null) throw new Error("native room is not connected");
     await desktop.nativeVoice.setDevice(
       this.sessionId,
@@ -270,6 +272,7 @@ export class NativeRoom {
   }
 
   async connect(url: string, token: string): Promise<void> {
+    // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId !== null) throw new Error("native room already connected");
     this.state = "connecting";
     this.pending = [];
@@ -317,11 +320,13 @@ export class NativeRoom {
     track: PublishableTrack,
     options: PublishOptions,
   ): Promise<NativeLocalPublication> {
+    // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId === null) throw new Error("native room is not connected");
     if (track.kind !== "video" || (options.source ?? track.source) !== "camera")
       throw unsupported(`publishing ${options.source ?? track.source}`);
     const encoding = options.videoEncoding;
     if (encoding?.maxFramerate === undefined)
+      // i18n-exempt: internal publish-config guard, never rendered
       throw new Error("native camera publish needs videoEncoding.maxBitrate and maxFramerate");
     const session = this.sessionId;
     const settings = track.mediaStreamTrack.getSettings();
@@ -336,6 +341,7 @@ export class NativeRoom {
     const sid = await desktop.nativeVoice.publishCamera(session, camera);
     if (this.sessionId !== session) {
       // Disconnected meanwhile: the session (and its publish) is gone.
+      // i18n-exempt: internal native-room state guard, never rendered
       throw new Error("native room disconnected during camera publish");
     }
     this.localParticipant.trackPublications.get("camera")?.uplink?.dispose();
@@ -365,10 +371,13 @@ export class NativeRoom {
   }
 
   private async createScreenTracks(options?: ScreenCaptureRequest): Promise<NativeScreenTrack[]> {
+    // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId === null) throw new Error("native room is not connected");
     const session = this.sessionId;
     const source = await pickScreenSource();
+    // i18n-exempt: NotAllowedError signal for the shared screen-share code, not display text
     if (source === null) throw new DOMException("Screen share cancelled", "NotAllowedError");
+    // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId !== session) throw new Error("native room disconnected during screen pick");
     const started = await desktop.nativeVoice
       .startScreen(session, source, captureOptions(options))
@@ -377,6 +386,7 @@ export class NativeRoom {
       });
     if (this.sessionId !== session) {
       // Disconnected meanwhile: the session (and its capture) is gone.
+      // i18n-exempt: internal native-room state guard, never rendered
       throw new Error("native room disconnected during screen capture");
     }
     const track = new NativeScreenTrack(started, `${this.frames}/screen`, (t) =>
@@ -404,11 +414,14 @@ export class NativeRoom {
     track: PublishableTrack,
     options: PublishOptions,
   ): Promise<NativeLocalPublication> {
+    // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId === null) throw new Error("native room is not connected");
     if (!(track instanceof NativeScreenTrack))
+      // i18n-exempt: internal unsupported-path guard, never rendered
       throw unsupported("publishing a browser screen track");
     const encoding = options.videoEncoding;
     if (encoding?.maxFramerate === undefined)
+      // i18n-exempt: internal publish-config guard, never rendered
       throw new Error("native screen publish needs videoEncoding.maxBitrate and maxFramerate");
     const session = this.sessionId;
     const sid = await desktop.nativeVoice.publishScreen(session, track.capture, {
@@ -418,6 +431,7 @@ export class NativeRoom {
       maxFramerate: encoding.maxFramerate,
     });
     if (this.sessionId !== session)
+      // i18n-exempt: internal native-room state guard, never rendered
       throw new Error("native room disconnected during screen publish");
     const publication: NativeLocalPublication = {
       trackSid: sid,
@@ -613,6 +627,7 @@ export class NativeRoom {
         // The backend's only signal that frames are not being protected —
         // surface it the way the web path surfaces a dead E2EE worker.
         if (!event.encrypted && event.identity === this.localParticipant.identity)
+          // i18n-exempt: internal E2EE state guard, never rendered
           this.emit(RoomEvent.EncryptionError, new Error("native E2EE not active"));
         break;
       case "reconnecting":
@@ -637,6 +652,7 @@ export class NativeRoom {
 }
 
 function unsupported(what: string): Error {
+  // i18n-exempt: internal Linux unsupported-path guard, caught and mapped by the caller
   return new Error(`${what} is not available on Linux yet`);
 }
 

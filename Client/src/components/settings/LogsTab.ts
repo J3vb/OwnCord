@@ -155,6 +155,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       t("logs.filter"),
     );
     const filterSelect = createElement("select", {
+      "aria-label": t("logs.filterLabel"),
       style:
         "background: var(--bg-tertiary); color: var(--text-normal); border: 1px solid var(--bg-active); border-radius: 4px; padding: 4px 8px; font-size: 13px;",
     });
@@ -181,6 +182,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       t("logs.minLevel"),
     );
     const levelSelect = createElement("select", {
+      "aria-label": t("logs.minLevelLabel"),
       style:
         "background: var(--bg-tertiary); color: var(--text-normal); border: 1px solid var(--bg-active); border-radius: 4px; padding: 4px 8px; font-size: 13px;",
     });

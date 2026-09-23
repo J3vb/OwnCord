@@ -20,6 +20,7 @@ import { nativeCounters } from "./counters";
 
 const log = createLogger("nativeVideo");
 
+// i18n-exempt: WebGL/GLSL vertex shader source, not display text
 const VERTEX = `#version 300 es
 out vec2 uv;
 void main() {
@@ -29,6 +30,7 @@ void main() {
 }`;
 
 // BT.601 limited range, what libwebrtc's software decoders emit.
+// i18n-exempt: WebGL/GLSL fragment shader source, not display text
 const FRAGMENT = `#version 300 es
 precision mediump float;
 in vec2 uv;
@@ -75,6 +77,7 @@ function compile(gl: WebGL2RenderingContext, type: number, source: string): WebG
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
+    // i18n-exempt: internal WebGL guard, never rendered
     throw new Error(gl.getShaderInfoLog(shader) ?? "shader compile failed");
   return shader;
 }
@@ -86,6 +89,7 @@ function setup(gl: WebGL2RenderingContext): WebGLTexture[] {
   gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, FRAGMENT));
   gl.linkProgram(program);
   if (!gl.getProgramParameter(program, gl.LINK_STATUS))
+    // i18n-exempt: internal WebGL guard, never rendered
     throw new Error(gl.getProgramInfoLog(program) ?? "program link failed");
   gl.useProgram(program);
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -113,6 +117,7 @@ export class NativeVideoRenderer {
   constructor(url: string) {
     this.gl = this.canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false });
     try {
+      // i18n-exempt: internal WebGL guard, never rendered
       if (this.gl === null) throw new Error("WebGL2 unavailable");
       setup(this.gl);
     } catch (err) {

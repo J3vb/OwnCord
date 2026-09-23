@@ -11,6 +11,7 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { RecoveryKitStatus } from "@lib/api";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
+import { accountText as t } from "../../i18n/account";
 
 const MUTED = "color:var(--text-muted);font-size:13px;margin-bottom:12px";
 const ERROR = "color:var(--red);font-size:13px;margin-bottom:8px";
@@ -75,8 +76,8 @@ export function buildShownOnce(
       if (text === "") return;
       void navigator.clipboard
         .writeText(text)
-        .then(() => restore("Copied!"))
-        .catch(() => restore("Copy failed"));
+        .then(() => restore(t("recovery.copied")))
+        .catch(() => restore(t("recovery.copyFailed")));
     },
     { signal },
   );
@@ -115,7 +116,7 @@ function buildPasswordConfirm(
   const pwInput = createElement("input", {
     class: "form-input",
     type: "password",
-    placeholder: "Enter your password",
+    placeholder: t("totp.passwordPlaceholder"),
     style: "margin-bottom:12px",
     "data-testid": `${opts.testIdPrefix}-password`,
   });
@@ -132,7 +133,7 @@ function buildPasswordConfirm(
   const cancelBtn = createElement(
     "button",
     { class: "ac-btn", style: "background:var(--bg-active)" },
-    "Cancel",
+    t("recovery.cancel"),
   );
   appendChildren(btnRow, submitBtn, cancelBtn);
   appendChildren(area, pwInput, errorEl, btnRow);
@@ -158,7 +159,7 @@ function buildPasswordConfirm(
     () => {
       const pw = pwInput.value;
       if (pw.length === 0) {
-        setText(errorEl, "Password is required.");
+        setText(errorEl, t("password.required"));
         return;
       }
       pwInput.value = "";
@@ -169,7 +170,7 @@ function buildPasswordConfirm(
         .onSubmit(pw)
         .then(close)
         .catch((err: unknown) => {
-          setText(errorEl, err instanceof Error ? err.message : "Request failed.");
+          setText(errorEl, err instanceof Error ? err.message : t("recovery.requestFailed"));
         })
         .finally(() => {
           submitBtn.disabled = false;
@@ -195,7 +196,7 @@ function buildRevealSlot(signal: AbortSignal): {
   const done = createElement(
     "button",
     { class: "ac-btn", "data-testid": "shown-once-done" },
-    "Done",
+    t("recovery.done"),
   );
   done.style.display = "none";
   const dismiss = (): void => {
@@ -229,18 +230,13 @@ export function buildRegenerateCodes(
   signal: AbortSignal,
 ): HTMLDivElement {
   const wrapper = createElement("div", { style: "margin-top:16px" });
-  const description = createElement(
-    "div",
-    { style: MUTED },
-    "Emergency recovery codes let you sign in without your authenticator app. " +
-      "Generating a new set invalidates the old one.",
-  );
+  const description = createElement("div", { style: MUTED }, t("recovery.codesDescription"));
   const slot = buildRevealSlot(signal);
   const confirm = buildPasswordConfirm(
     {
-      triggerLabel: "Regenerate recovery codes",
-      submitLabel: "Regenerate",
-      busyLabel: "Regenerating...",
+      triggerLabel: t("recovery.regenerate"),
+      submitLabel: t("recovery.regenerateSubmit"),
+      busyLabel: t("recovery.regenerating"),
       testIdPrefix: "totp-regenerate",
       onSubmit: async (password) => {
         const codes = await options.onRegenerateRecoveryCodes(password);
@@ -248,11 +244,11 @@ export function buildRegenerateCodes(
         slot.show(
           buildShownOnce(
             {
-              warning: "Save these recovery codes now — you won't see them again:",
+              warning: t("recovery.codesWarning"),
               text: codes.join("\n"),
               codeTestId: "totp-regenerated-codes",
               copyTestId: "totp-copy-regenerated-codes",
-              copyLabel: "Copy Codes",
+              copyLabel: t("recovery.copyCodes"),
             },
             signal,
           ),
@@ -273,12 +269,12 @@ function statusLabel(status: RecoveryKitStatus | null): {
   readonly text: string;
   readonly enrolled: boolean;
 } {
-  if (status === null) return { text: "Checking\u2026", enrolled: false };
-  if (status.enrolled) return { text: "Enrolled", enrolled: true };
+  if (status === null) return { text: t("recovery.checking"), enrolled: false };
+  if (status.enrolled) return { text: t("recovery.enrolled"), enrolled: true };
   if (status.used_at !== null && status.used_at !== undefined) {
-    return { text: "Used", enrolled: false };
+    return { text: t("recovery.used"), enrolled: false };
   }
-  return { text: "Not set up", enrolled: false };
+  return { text: t("recovery.notSetUp"), enrolled: false };
 }
 
 export function buildRecoveryKitSection(
@@ -293,7 +289,7 @@ export function buildRecoveryKitSection(
   const header = createElement(
     "div",
     { class: "settings-section-title", style: "margin-bottom:0" },
-    "Recovery Kit",
+    t("recovery.kitTitle"),
   );
   const badge = createElement("span", {
     "data-testid": "recovery-kit-status",
@@ -303,13 +299,7 @@ export function buildRecoveryKitSection(
   });
   appendChildren(headerRow, header, badge);
 
-  const description = createElement(
-    "div",
-    { style: MUTED },
-    "A recovery kit signs you back in if you lose your password and your two-factor device. " +
-      "Keep it offline: anyone with it and your username can take over this account. " +
-      "Creating a new kit replaces the old one, and a kit works once.",
-  );
+  const description = createElement("div", { style: MUTED }, t("recovery.kitDescription"));
   const statusError = createElement("div", { style: ERROR });
   const slot = buildRevealSlot(signal);
 
@@ -318,7 +308,7 @@ export function buildRecoveryKitSection(
     setText(badge, text);
     badge.style.background = enrolled ? "var(--green, #3ba55d)" : "var(--bg-active)";
     badge.style.color = enrolled ? "#fff" : "var(--text-muted)";
-    confirm.setTriggerLabel(enrolled ? "Replace recovery kit" : "Create recovery kit");
+    confirm.setTriggerLabel(enrolled ? t("recovery.replaceKit") : t("recovery.createKit"));
   }
 
   function refresh(): void {
@@ -331,33 +321,31 @@ export function buildRecoveryKitSection(
       })
       .catch(() => {
         if (signal.aborted) return;
-        setText(statusError, "Could not load the recovery kit status.");
+        setText(statusError, t("recovery.kitStatusFailed"));
       });
   }
 
   const confirm = buildPasswordConfirm(
     {
-      triggerLabel: "Create recovery kit",
-      submitLabel: "Create",
-      busyLabel: "Creating...",
+      triggerLabel: t("recovery.createKit"),
+      submitLabel: t("recovery.create"),
+      busyLabel: t("recovery.creating"),
       testIdPrefix: "recovery-kit",
       onSubmit: async (password) => {
         const issue = await options.onEnrolRecoveryKit(password);
         if (signal.aborted) return;
         refresh();
         if (issue.kit_secret === undefined || issue.kit_secret === "") {
-          throw new Error("The server did not return a recovery kit secret.");
+          throw new Error(t("recovery.secretMissing"));
         }
         slot.show(
           buildShownOnce(
             {
-              warning:
-                "Save this recovery kit secret now — you won't see it again. " +
-                "Store it somewhere safe and offline:",
+              warning: t("recovery.secretWarning"),
               text: issue.kit_secret,
               codeTestId: "recovery-kit-secret",
               copyTestId: "recovery-kit-copy",
-              copyLabel: "Copy Secret",
+              copyLabel: t("recovery.copySecret"),
             },
             signal,
           ),

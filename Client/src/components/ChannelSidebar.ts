@@ -10,7 +10,7 @@ import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon, type IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
-import { channelsStore, getChannelsByCategory } from "@stores/channels.store";
+import { channelsStore, getChannelsByCategory, categoryLabel } from "@stores/channels.store";
 import { navigateToChannel } from "@lib/channel-navigation";
 import { markAllRead, unreadChannelIds } from "@lib/read-state";
 import { isChannelMuted } from "@lib/channel-mutes";
@@ -942,7 +942,11 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       // being an interactive element nested inside another one. The label
       // names the arrow (aria-labelledby), so no second copy of the category
       // name is needed.
-      const label = createElement("span", { class: "category-name", id: categoryNameId }, g.name);
+      const label = createElement(
+        "span",
+        { class: "category-name", id: categoryNameId },
+        categoryLabel(g.name),
+      );
       const arrow = createElement("button", {
         type: "button",
         class: "category-arrow",

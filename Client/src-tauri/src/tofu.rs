@@ -400,13 +400,7 @@ pub(crate) fn evaluate<R: Runtime>(
 /// The human-readable mismatch message. The frontend parses `Stored:` out of it,
 /// so keep this exact shape stable.
 pub(crate) fn mismatch_message(host: &str, stored: &str, current: &str) -> String {
-    format!(
-        "Certificate fingerprint changed for {host}.\n\
-         Stored:  {stored}\n\
-         Current: {current}\n\
-         This may indicate a man-in-the-middle attack or a server certificate rotation.\n\
-         Use accept_cert_fingerprint to trust the new certificate."
-    )
+    crate::text::cert_mismatch(host, stored, current)
 }
 
 // ---------------------------------------------------------------------------

@@ -205,9 +205,7 @@ pub async fn ws_connect<R: Runtime>(
             );
             // Do not open the socket: the user must confirm the fingerprint
             // (accept_cert_fingerprint) before anything is sent over it.
-            return Err(format!(
-                "certificate for {host} is not yet trusted; confirm the fingerprint to continue"
-            ));
+            return Err(crate::text::cert_not_trusted(&host));
         }
         TofuOutcome::Mismatch { stored } => {
             let msg = tofu::mismatch_message(&host, &stored, &fingerprint);

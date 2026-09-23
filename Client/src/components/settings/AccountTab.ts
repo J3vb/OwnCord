@@ -22,6 +22,7 @@ import {
 } from "@components/message-list/attachments";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { buildRecoveryKitSection, buildRegenerateCodes, buildShownOnce } from "./RecoverySections";
+import { accountText as t } from "../../i18n/account";
 
 const log = createLogger("AccountTab");
 
@@ -69,17 +70,29 @@ function buildProfileCard(displayName: string, username: string): ProfileCardRes
   // Header row
   const accountHeader = createElement("div", { class: "account-header" });
   const headerName = createElement("div", { class: "account-header-name" }, displayName);
-  const editUserProfileBtn = createElement("button", { class: "ac-btn" }, "Edit User Profile");
+  const editUserProfileBtn = createElement(
+    "button",
+    { class: "ac-btn" },
+    t("profile.editUserProfile"),
+  );
   appendChildren(accountHeader, headerName, editUserProfileBtn);
 
   // Username field row
   const fieldsContainer = createElement("div", { class: "account-fields" });
   const usernameField = createElement("div", { class: "account-field" });
   const usernameLeft = createElement("div", {});
-  const usernameLabel = createElement("div", { class: "account-field-label" }, "Username");
+  const usernameLabel = createElement(
+    "div",
+    { class: "account-field-label" },
+    t("profile.username"),
+  );
   const usernameValue = createElement("div", { class: "account-field-value" }, username);
   appendChildren(usernameLeft, usernameLabel, usernameValue);
-  const editUsernameBtn = createElement("button", { class: "account-field-edit" }, "Edit");
+  const editUsernameBtn = createElement(
+    "button",
+    { class: "account-field-edit" },
+    t("profile.edit"),
+  );
   appendChildren(usernameField, usernameLeft, editUsernameBtn);
   fieldsContainer.appendChild(usernameField);
 
@@ -155,16 +168,16 @@ export function validateAvatarFile(
   dimensions: { width: number; height: number } | null,
 ): string | null {
   if (!ACCEPTED_AVATAR_TYPES.split(",").includes(file.type)) {
-    return "Avatar must be a PNG, JPEG or WebP image.";
+    return t("avatar.notImage");
   }
   if (file.size > MAX_AVATAR_BYTES) {
-    return `Avatar must be at most ${MAX_AVATAR_BYTES / 1024} KB.`;
+    return t("avatar.tooLarge", { kb: MAX_AVATAR_BYTES / 1024 });
   }
   if (dimensions === null) {
-    return "That file could not be read as an image.";
+    return t("avatar.unreadable");
   }
   if (dimensions.width > MAX_AVATAR_DIMENSION || dimensions.height > MAX_AVATAR_DIMENSION) {
-    return `Avatar must be at most ${MAX_AVATAR_DIMENSION}x${MAX_AVATAR_DIMENSION} pixels.`;
+    return t("avatar.tooWide", { width: MAX_AVATAR_DIMENSION, height: MAX_AVATAR_DIMENSION });
   }
   return null;
 }
@@ -184,7 +197,7 @@ function buildAvatarUploader(
   const uploadBtn = createElement(
     "button",
     { class: "ac-btn", "data-testid": "avatar-upload-btn" },
-    "Change Avatar",
+    t("profile.changeAvatar"),
   );
   const errorEl = createElement("div", {
     style: "color:var(--red);font-size:13px;margin-top:6px",
@@ -208,7 +221,7 @@ function buildAvatarUploader(
           return;
         }
         uploadBtn.disabled = true;
-        setText(uploadBtn, "Uploading...");
+        setText(uploadBtn, t("profile.uploading"));
         try {
           const url = await options.onUploadAvatar(file);
           const user = authStore.getState().user;
@@ -222,11 +235,11 @@ function buildAvatarUploader(
             }),
           );
         } catch (err) {
-          setText(errorEl, err instanceof Error ? err.message : "Failed to upload avatar.");
+          setText(errorEl, err instanceof Error ? err.message : t("profile.uploadFailed"));
         } finally {
           input.value = "";
           uploadBtn.disabled = false;
-          setText(uploadBtn, "Change Avatar");
+          setText(uploadBtn, t("profile.changeAvatar"));
         }
       })();
     },
@@ -248,26 +261,34 @@ function buildProfileFields(
 ): HTMLDivElement {
   const wrapper = createElement("div", {});
   const separator = createElement("div", { class: "settings-separator" });
-  const header = createElement("div", { class: "settings-section-title" }, "Profile");
+  const header = createElement(
+    "div",
+    { class: "settings-section-title" },
+    t("profile.sectionTitle"),
+  );
 
   const user = authStore.getState().user;
 
-  const nameLabel = createElement("div", { class: "account-field-label" }, "Display Name");
+  const nameLabel = createElement(
+    "div",
+    { class: "account-field-label" },
+    t("profile.displayName"),
+  );
   const nameInput = createElement("input", {
     class: "form-input",
     type: "text",
-    placeholder: "Shown instead of your username",
+    placeholder: t("profile.displayNamePlaceholder"),
     maxlength: String(MAX_DISPLAY_NAME_LEN),
     style: "margin-bottom:12px",
     "data-testid": "display-name-input",
   });
   nameInput.value = user?.display_name ?? "";
 
-  const aboutLabel = createElement("div", { class: "account-field-label" }, "About Me");
+  const aboutLabel = createElement("div", { class: "account-field-label" }, t("profile.about"));
   const aboutInput = createElement("textarea", {
     class: "form-input",
     rows: "3",
-    placeholder: "A little about you",
+    placeholder: t("profile.aboutPlaceholder"),
     maxlength: String(MAX_ABOUT_LEN),
     style: "margin-bottom:8px;resize:vertical",
     "data-testid": "about-input",
@@ -281,7 +302,7 @@ function buildProfileFields(
   const saveBtn = createElement(
     "button",
     { class: "ac-btn", "data-testid": "profile-save-btn" },
-    "Save Profile",
+    t("profile.save"),
   );
 
   saveBtn.addEventListener(
@@ -294,22 +315,22 @@ function buildProfileFields(
       statusEl.style.color = "var(--red)";
       setText(statusEl, "");
       saveBtn.disabled = true;
-      setText(saveBtn, "Saving...");
+      setText(saveBtn, t("profile.saving"));
       void options
         .onUpdateProfile({ display_name: displayName, about })
         .then(() => {
           statusEl.style.color = "var(--green)";
-          setText(statusEl, "Profile saved.");
+          setText(statusEl, t("profile.saved"));
           onSaved(
             displayName.length > 0 ? displayName : (authStore.getState().user?.username ?? ""),
           );
         })
         .catch((err: unknown) => {
-          setText(statusEl, err instanceof Error ? err.message : "Failed to save profile.");
+          setText(statusEl, err instanceof Error ? err.message : t("profile.saveFailed"));
         })
         .finally(() => {
           saveBtn.disabled = false;
-          setText(saveBtn, "Save Profile");
+          setText(saveBtn, t("profile.save"));
         });
     },
     { signal },
@@ -343,32 +364,32 @@ function buildPasswordSection(
   const pwHeader = createElement(
     "div",
     { class: "settings-section-title" },
-    "Password and Authentication",
+    t("password.sectionTitle"),
   );
 
   const oldPw = createElement("input", {
     class: "form-input",
     type: "password",
-    placeholder: "Old password",
+    placeholder: t("password.old"),
     style: "margin-bottom:12px",
   });
   const newPw = createElement("input", {
     class: "form-input",
     type: "password",
-    placeholder: "New password",
+    placeholder: t("password.new"),
     style: "margin-bottom:12px",
   });
   const confirmPw = createElement("input", {
     class: "form-input",
     type: "password",
-    placeholder: "Confirm new password",
+    placeholder: t("password.confirm"),
     style: "margin-bottom:12px",
   });
   const pwError = createElement("div", {
     style: "color:var(--red);font-size:13px;margin-bottom:8px",
     "data-testid": "pw-change-status",
   });
-  const pwBtn = createElement("button", { class: "ac-btn" }, "Change Password");
+  const pwBtn = createElement("button", { class: "ac-btn" }, t("password.change"));
   let pwSuccessTimer: ReturnType<typeof setTimeout> | null = null;
 
   pwBtn.addEventListener(
@@ -380,25 +401,25 @@ function buildPasswordSection(
 
       pwError.style.color = "var(--red)";
       if (oldVal.length === 0) {
-        setText(pwError, "Enter your current password.");
+        setText(pwError, t("password.enterCurrent"));
         return;
       }
       if (newVal.length < 8) {
-        setText(pwError, "New password must be at least 8 characters.");
+        setText(pwError, t("password.tooShort"));
         return;
       }
       if (newVal !== confirmVal) {
-        setText(pwError, "Passwords do not match.");
+        setText(pwError, t("password.mismatch"));
         return;
       }
       setText(pwError, "");
       // In-flight state: a second click would burn an attempt against the
       // server's lockout counter with the same credentials.
       pwBtn.disabled = true;
-      setText(pwBtn, "Changing...");
+      setText(pwBtn, t("password.changing"));
       const finish = (): void => {
         pwBtn.disabled = false;
-        setText(pwBtn, "Change Password");
+        setText(pwBtn, t("password.change"));
       };
       void options
         .onChangePassword(oldVal, newVal)
@@ -420,7 +441,7 @@ function buildPasswordSection(
             setText(pwError, warning);
           } else {
             pwError.style.color = "var(--green)";
-            setText(pwError, "Password changed successfully.");
+            setText(pwError, t("password.changed"));
             pwSuccessTimer = setTimeout(() => {
               setText(pwError, "");
               pwError.style.color = "var(--red)";
@@ -430,7 +451,7 @@ function buildPasswordSection(
           finish();
         })
         .catch((err: unknown) => {
-          setText(pwError, err instanceof Error ? err.message : "Failed to change password.");
+          setText(pwError, err instanceof Error ? err.message : t("password.changeFailed"));
           finish();
         });
     },
@@ -457,7 +478,7 @@ function buildTotpEnrollForm(
     {
       style: "color:var(--text-muted);font-size:13px;margin-bottom:12px",
     },
-    "Add an extra layer of security to your account.",
+    t("totp.description"),
   );
 
   const enableBtn = createElement(
@@ -466,14 +487,14 @@ function buildTotpEnrollForm(
       class: "ac-btn",
       "data-testid": "totp-enable-btn",
     },
-    "Enable 2FA",
+    t("totp.enable"),
   );
 
   const formArea = createElement("div", { style: "display:none" });
   const pwInput = createElement("input", {
     class: "form-input",
     type: "password",
-    placeholder: "Enter your password",
+    placeholder: t("totp.passwordPlaceholder"),
     style: "margin-bottom:12px",
     "data-testid": "totp-password-input",
   });
@@ -481,7 +502,7 @@ function buildTotpEnrollForm(
     style: "color:var(--red);font-size:13px;margin-bottom:8px",
     "data-testid": "totp-error",
   });
-  const submitBtn = createElement("button", { class: "ac-btn" }, "Submit");
+  const submitBtn = createElement("button", { class: "ac-btn" }, t("totp.submit"));
 
   appendChildren(formArea, pwInput, errorEl, submitBtn);
 
@@ -504,12 +525,12 @@ function buildTotpEnrollForm(
     () => {
       const pw = pwInput.value;
       if (pw.length === 0) {
-        setText(errorEl, "Password is required.");
+        setText(errorEl, t("password.required"));
         return;
       }
       setText(errorEl, "");
       submitBtn.disabled = true;
-      setText(submitBtn, "Requesting...");
+      setText(submitBtn, t("totp.requesting"));
 
       void options
         .onEnableTotp(pw)
@@ -518,12 +539,12 @@ function buildTotpEnrollForm(
           buildTotpConfirmArea(enrollArea, options, pw, result, signal, onEnrolled);
           enrollArea.style.display = "block";
           submitBtn.disabled = false;
-          setText(submitBtn, "Submit");
+          setText(submitBtn, t("totp.submit"));
         })
         .catch((err: unknown) => {
-          setText(errorEl, err instanceof Error ? err.message : "Failed to enable 2FA.");
+          setText(errorEl, err instanceof Error ? err.message : t("totp.enableFailed"));
           submitBtn.disabled = false;
-          setText(submitBtn, "Submit");
+          setText(submitBtn, t("totp.submit"));
         });
     },
     { signal },
@@ -551,7 +572,7 @@ function buildTotpConfirmArea(
     {
       style: "color:var(--text-muted);font-size:13px;margin-bottom:8px",
     },
-    "Scan this URI with your authenticator app, or copy it manually:",
+    t("totp.scanUri"),
   );
 
   const qrUri = createElement(
@@ -573,11 +594,11 @@ function buildTotpConfirmArea(
     // Say so, and give a one-click way to keep them.
     const reveal = buildShownOnce(
       {
-        warning: "Save these backup codes now — you won't see them again:",
+        warning: t("totp.backupWarning"),
         text: result.backup_codes.join("\n"),
         codeTestId: "totp-backup-codes",
         copyTestId: "totp-copy-backup-codes",
-        copyLabel: "Copy Codes",
+        copyLabel: t("totp.copyCodes"),
       },
       signal,
     );
@@ -587,7 +608,7 @@ function buildTotpConfirmArea(
   const codeInput = createElement("input", {
     class: "form-input",
     type: "text",
-    placeholder: "6-digit code",
+    placeholder: t("totp.codePlaceholder"),
     maxlength: "6",
     style: "margin-bottom:12px",
     "data-testid": "totp-code-input",
@@ -604,7 +625,7 @@ function buildTotpConfirmArea(
       class: "ac-btn",
       "data-testid": "totp-confirm-btn",
     },
-    "Verify & Activate",
+    t("totp.verify"),
   );
 
   confirmBtn.addEventListener(
@@ -612,12 +633,12 @@ function buildTotpConfirmArea(
     () => {
       const code = codeInput.value.trim();
       if (!/^\d{6}$/.test(code)) {
-        setText(confirmError, "Please enter a valid 6-digit code.");
+        setText(confirmError, t("totp.codeInvalid"));
         return;
       }
       setText(confirmError, "");
       confirmBtn.disabled = true;
-      setText(confirmBtn, "Verifying...");
+      setText(confirmBtn, t("totp.verifying"));
 
       void options
         .onConfirmTotp(password, code)
@@ -625,9 +646,9 @@ function buildTotpConfirmArea(
           onEnrolled();
         })
         .catch((err: unknown) => {
-          setText(confirmError, err instanceof Error ? err.message : "Invalid verification code.");
+          setText(confirmError, err instanceof Error ? err.message : t("totp.codeWrong"));
           confirmBtn.disabled = false;
-          setText(confirmBtn, "Verify & Activate");
+          setText(confirmBtn, t("totp.verify"));
         });
     },
     { signal },
@@ -649,7 +670,7 @@ function buildTotpDisableView(
     {
       style: "color:var(--text-muted);font-size:13px;margin-bottom:12px",
     },
-    "Your account is protected with 2FA.",
+    t("totp.protected"),
   );
 
   const disableBtn = createElement(
@@ -658,14 +679,14 @@ function buildTotpDisableView(
       class: "ac-btn account-delete-btn",
       "data-testid": "totp-disable-btn",
     },
-    "Disable 2FA",
+    t("totp.disable"),
   );
 
   const confirmArea = createElement("div", { style: "display:none" });
   const pwInput = createElement("input", {
     class: "form-input",
     type: "password",
-    placeholder: "Enter your password",
+    placeholder: t("totp.passwordPlaceholder"),
     style: "margin-bottom:12px",
     "data-testid": "totp-password-input",
   });
@@ -677,7 +698,7 @@ function buildTotpDisableView(
   const confirmBtn = createElement(
     "button",
     { class: "ac-btn account-delete-btn" },
-    "Confirm Disable",
+    t("totp.confirmDisable"),
   );
   const cancelBtn = createElement(
     "button",
@@ -685,7 +706,7 @@ function buildTotpDisableView(
       class: "ac-btn",
       style: "background:var(--bg-active)",
     },
-    "Cancel",
+    t("recovery.cancel"),
   );
   appendChildren(btnRow, confirmBtn, cancelBtn);
   appendChildren(confirmArea, pwInput, errorEl, btnRow);
@@ -718,12 +739,12 @@ function buildTotpDisableView(
     () => {
       const pw = pwInput.value;
       if (pw.length === 0) {
-        setText(errorEl, "Password is required.");
+        setText(errorEl, t("password.required"));
         return;
       }
       setText(errorEl, "");
       confirmBtn.disabled = true;
-      setText(confirmBtn, "Disabling...");
+      setText(confirmBtn, t("totp.disabling"));
 
       void options
         .onDisableTotp(pw)
@@ -731,14 +752,11 @@ function buildTotpDisableView(
           onDisabled();
         })
         .catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : "Failed to disable 2FA.";
+          const msg = err instanceof Error ? err.message : t("totp.disableFailed");
           const is403Required = msg.toLowerCase().includes("required");
-          setText(
-            errorEl,
-            is403Required ? "2FA is required by this server and cannot be disabled" : msg,
-          );
+          setText(errorEl, is403Required ? t("totp.requiredByServer") : msg);
           confirmBtn.disabled = false;
-          setText(confirmBtn, "Confirm Disable");
+          setText(confirmBtn, t("totp.confirmDisable"));
         });
     },
     { signal },
@@ -761,7 +779,7 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
       class: "settings-section-title",
       style: "margin-bottom:0",
     },
-    "Two-Factor Authentication",
+    t("totp.sectionTitle"),
   );
 
   const statusBadge = createElement("span", {
@@ -777,11 +795,11 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
     const enabled = authStore.getState().user?.totp_enabled === true;
 
     if (enabled) {
-      statusBadge.textContent = "Enabled";
+      statusBadge.textContent = t("totp.enabled");
       statusBadge.style.background = "var(--green, #3ba55d)";
       statusBadge.style.color = "#fff";
     } else {
-      statusBadge.textContent = "Disabled";
+      statusBadge.textContent = t("totp.disabled");
       statusBadge.style.background = "var(--bg-active)";
       statusBadge.style.color = "var(--text-muted)";
     }
@@ -830,20 +848,20 @@ interface StatusOption {
 }
 
 const STATUS_OPTIONS: readonly StatusOption[] = [
-  { value: "online", label: "Online", description: "", color: "#3ba55d" },
-  { value: "idle", label: "Idle", description: "You will appear as idle", color: "#faa61a" },
+  { value: "online", label: t("status.online"), description: "", color: "#3ba55d" },
+  { value: "idle", label: t("status.idle"), description: t("status.idleDesc"), color: "#faa61a" },
   {
     value: "dnd",
-    label: "Do Not Disturb",
-    description: "You will not receive desktop notifications",
+    label: t("status.dnd"),
+    description: t("status.dndDesc"),
     color: "#ed4245",
   },
   {
     // Its own status now, not "offline" relabeled: the server stores it as
     // chosen, shows everyone else offline, and honours it across reconnects.
     value: "invisible",
-    label: "Invisible",
-    description: "You will appear offline but still have full access",
+    label: t("status.invisible"),
+    description: t("status.invisibleDesc"),
     color: "#747f8d",
   },
 ];
@@ -851,7 +869,11 @@ const STATUS_OPTIONS: readonly StatusOption[] = [
 function buildStatusSelector(options: SettingsOverlayOptions, signal: AbortSignal): HTMLDivElement {
   const wrapper = createElement("div", {});
   const separator = createElement("div", { class: "settings-separator" });
-  const sectionTitle = createElement("div", { class: "settings-section-title" }, "Status");
+  const sectionTitle = createElement(
+    "div",
+    { class: "settings-section-title" },
+    t("status.sectionTitle"),
+  );
   const optionsList = createElement("div", { class: "settings-status-options" });
 
   const currentStatus = loadUserStatus();
@@ -927,12 +949,15 @@ function buildSessionRow(
   const info = createElement("div", { class: "session-info" });
   const name = createElement("div", { class: "session-device" }, sessionDeviceLabel(s.device));
   if (s.is_current) {
-    name.appendChild(createElement("span", { class: "session-current" }, "This device"));
+    name.appendChild(createElement("span", { class: "session-current" }, t("devices.thisDevice")));
   }
   const detail = createElement(
     "div",
     { class: "session-detail" },
-    `${s.ip === "" ? "Unknown IP" : s.ip} \u00b7 Last used ${formatMessageTimestamp(s.last_used)}`,
+    t("devices.detail", {
+      ip: s.ip === "" ? t("devices.unknownIp") : s.ip,
+      time: formatMessageTimestamp(s.last_used),
+    }),
   );
   appendChildren(info, name, detail);
   row.appendChild(info);
@@ -943,7 +968,7 @@ function buildSessionRow(
   const revokeBtn = createElement(
     "button",
     { class: "ac-btn", "data-testid": "session-revoke" },
-    "Sign out",
+    t("devices.signOut"),
   );
   revokeBtn.addEventListener(
     "click",
@@ -956,8 +981,8 @@ function buildSessionRow(
         .then(() => {
           showToast(
             uiStore.getState().sessionReplaced
-              ? "Device signed out. Its requests are refused now, and its current connection closes within about 30 seconds."
-              : "Device signed out. It can no longer connect.",
+              ? t("devices.signedOutReplaced")
+              : t("devices.signedOut"),
             "success",
           );
         })
@@ -965,7 +990,7 @@ function buildSessionRow(
           // The server kept the session, so the row comes back.
           if (next?.parentNode === list) list?.insertBefore(row, next);
           else list?.appendChild(row);
-          showToast(err instanceof Error ? err.message : "Failed to sign out the device.", "error");
+          showToast(err instanceof Error ? err.message : t("devices.signOutFailed"), "error");
         });
     },
     { signal },
@@ -980,22 +1005,26 @@ function buildSessionsSection(
 ): HTMLDivElement {
   const wrapper = createElement("div", { "data-testid": "sessions-section" });
   const separator = createElement("div", { class: "settings-separator" });
-  const header = createElement("div", { class: "settings-section-title" }, "Devices");
+  const header = createElement(
+    "div",
+    { class: "settings-section-title" },
+    t("devices.sectionTitle"),
+  );
   const description = createElement(
     "div",
     { style: "color:var(--text-muted);font-size:13px;margin-bottom:12px" },
-    "Every device signed in to your account. A device you sign out can no longer connect.",
+    t("devices.description"),
   );
   const list = createElement("div", { class: "session-list", "data-testid": "sessions-list" });
   const status = createElement(
     "div",
     { style: "color:var(--text-muted);font-size:13px" },
-    "Loading devices...",
+    t("devices.loading"),
   );
 
   function load(): void {
     list.replaceChildren(status);
-    setText(status, "Loading devices...");
+    setText(status, t("devices.loading"));
     void options
       .onListSessions()
       .then((sessions) => {
@@ -1005,7 +1034,7 @@ function buildSessionsSection(
       .catch((err: unknown) => {
         if (signal.aborted) return;
         log.warn("Failed to list sessions", err);
-        setText(status, "Could not load your devices.");
+        setText(status, t("devices.loadFailed"));
       });
   }
 
@@ -1016,7 +1045,7 @@ function buildSessionsSection(
       style: "margin-top:12px",
       "data-testid": "sessions-revoke-all",
     },
-    "Sign out everywhere",
+    t("devices.signOutEverywhere"),
   );
   const confirmArea = createElement("div", {
     style: "display:none;margin-top:12px",
@@ -1025,7 +1054,7 @@ function buildSessionsSection(
   const warning = createElement(
     "div",
     { style: "color:var(--red);font-size:13px;margin-bottom:12px;line-height:1.4" },
-    "This signs out every device, including this one. You will need to sign in again here.",
+    t("devices.signOutEverywhereWarning"),
   );
   const errorEl = createElement("div", {
     style: "color:var(--red);font-size:13px;margin-bottom:8px",
@@ -1034,12 +1063,12 @@ function buildSessionsSection(
   const confirmBtn = createElement(
     "button",
     { class: "ac-btn account-delete-btn", "data-testid": "sessions-revoke-all-confirm" },
-    "Sign out everywhere",
+    t("devices.signOutEverywhere"),
   );
   const cancelBtn = createElement(
     "button",
     { class: "ac-btn", style: "background:var(--bg-active)" },
-    "Cancel",
+    t("recovery.cancel"),
   );
   appendChildren(btnRow, confirmBtn, cancelBtn);
   appendChildren(confirmArea, warning, errorEl, btnRow);
@@ -1073,7 +1102,10 @@ function buildSessionsSection(
           load();
         })
         .catch((err: unknown) => {
-          setText(errorEl, err instanceof Error ? err.message : "Failed to sign out everywhere.");
+          setText(
+            errorEl,
+            err instanceof Error ? err.message : t("devices.signOutEverywhereFailed"),
+          );
         })
         .finally(() => {
           confirmBtn.disabled = false;
@@ -1097,7 +1129,7 @@ function buildRetentionSection(notice: string): HTMLDivElement {
   appendChildren(
     wrapper,
     createElement("div", { class: "settings-separator" }),
-    createElement("div", { class: "settings-section-title" }, "Message Retention"),
+    createElement("div", { class: "settings-section-title" }, t("retention.sectionTitle")),
     createElement("div", { style: "color:var(--text-muted);font-size:13px" }, notice),
   );
   return wrapper;
@@ -1106,12 +1138,6 @@ function buildRetentionSection(notice: string): HTMLDivElement {
 // ---------------------------------------------------------------------------
 // Delete account (danger zone) builder
 // ---------------------------------------------------------------------------
-
-/** What deletion does and does not reach (Server/service/erasure.go). */
-const DELETE_ACCOUNT_WARNING =
-  "Deletion is immediate and permanent: your account, messages and attachments are erased now and cannot be recovered. " +
-  "Server backups made before you delete keep a copy until they rotate out; if one is restored, your deletion is applied again. " +
-  "Images you shared may stay cached on other people's devices. Enter your password to confirm.";
 
 function buildDeleteAccountSection(
   options: SettingsOverlayOptions,
@@ -1126,7 +1152,7 @@ function buildDeleteAccountSection(
       class: "settings-section-title",
       style: "color:var(--red)",
     },
-    "Danger Zone",
+    t("delete.sectionTitle"),
   );
 
   const description = createElement(
@@ -1134,7 +1160,7 @@ function buildDeleteAccountSection(
     {
       style: "color:var(--text-muted);font-size:13px;margin-bottom:12px",
     },
-    "Permanently delete your account and all associated data.",
+    t("delete.description"),
   );
 
   const deleteBtn = createElement(
@@ -1143,7 +1169,7 @@ function buildDeleteAccountSection(
       class: "ac-btn account-delete-btn",
       "data-testid": "delete-account-trigger",
     },
-    "Delete Account",
+    t("delete.button"),
   );
 
   // Inline confirmation area (hidden by default)
@@ -1161,13 +1187,13 @@ function buildDeleteAccountSection(
     // B7-15c owner decision: no retention window here. Erasure hard-deletes
     // the account's messages and attachments at once (Server/db/erasure.go),
     // so a "kept N days" line would imply a grace period that does not exist.
-    DELETE_ACCOUNT_WARNING,
+    t("delete.warning"),
   );
 
   const passwordInput = createElement("input", {
     class: "form-input",
     type: "password",
-    placeholder: "Enter your password",
+    placeholder: t("totp.passwordPlaceholder"),
     style: "margin-bottom:12px",
     "data-testid": "delete-account-password",
   });
@@ -1184,7 +1210,7 @@ function buildDeleteAccountSection(
       class: "ac-btn account-delete-btn",
       "data-testid": "delete-account-confirm",
     },
-    "Confirm Delete",
+    t("delete.confirm"),
   );
   const cancelBtn = createElement(
     "button",
@@ -1192,7 +1218,7 @@ function buildDeleteAccountSection(
       class: "ac-btn",
       style: "background:var(--bg-active)",
     },
-    "Cancel",
+    t("recovery.cancel"),
   );
 
   appendChildren(btnRow, confirmBtn, cancelBtn);
@@ -1229,12 +1255,12 @@ function buildDeleteAccountSection(
     () => {
       const pw = passwordInput.value;
       if (pw.length === 0) {
-        setText(errorEl, "Password is required.");
+        setText(errorEl, t("password.required"));
         return;
       }
       setText(errorEl, "");
       confirmBtn.disabled = true;
-      setText(confirmBtn, "Deleting...");
+      setText(confirmBtn, t("delete.deleting"));
 
       void options
         .onDeleteAccount(pw)
@@ -1242,9 +1268,9 @@ function buildDeleteAccountSection(
           // Success — cleanup is handled by the callback (clears auth, navigates away)
         })
         .catch((err: unknown) => {
-          setText(errorEl, err instanceof Error ? err.message : "Failed to delete account.");
+          setText(errorEl, err instanceof Error ? err.message : t("delete.failed"));
           confirmBtn.disabled = false;
-          setText(confirmBtn, "Confirm Delete");
+          setText(confirmBtn, t("delete.confirm"));
         });
     },
     { signal },
@@ -1266,7 +1292,7 @@ export function buildAccountTab(
 ): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   const user = authStore.getState().user;
-  const username = user?.username ?? "Unknown";
+  const username = user?.username ?? t("profile.unknown");
   const displayName = resolveDisplayName({
     username,
     displayName: user?.display_name ?? null,
@@ -1310,14 +1336,14 @@ export function buildAccountTab(
   const editInput = createElement("input", {
     class: "form-input",
     type: "text",
-    placeholder: "New username",
+    placeholder: t("profile.newUsername"),
     "data-testid": "username-edit-input",
   });
-  const saveBtn = createElement("button", { class: "ac-btn" }, "Save");
+  const saveBtn = createElement("button", { class: "ac-btn" }, t("common.save"));
   const cancelBtn = createElement(
     "button",
     { class: "ac-btn", style: "background:var(--bg-active)" },
-    "Cancel",
+    t("recovery.cancel"),
   );
   appendChildren(editForm, editInput, saveBtn, cancelBtn);
 
@@ -1349,7 +1375,7 @@ export function buildAccountTab(
     () => {
       const newName = editInput.value.trim();
       if (newName.length < 2 || newName.length > MAX_USERNAME_LEN) {
-        setText(usernameError, `Username must be 2\u2013${MAX_USERNAME_LEN} characters.`);
+        setText(usernameError, t("profile.usernameInvalid", { max: MAX_USERNAME_LEN }));
         return;
       }
       setText(usernameError, "");
@@ -1372,7 +1398,10 @@ export function buildAccountTab(
           editForm.style.display = "none";
         })
         .catch((err: unknown) => {
-          setText(usernameError, err instanceof Error ? err.message : "Failed to update username.");
+          setText(
+            usernameError,
+            err instanceof Error ? err.message : t("profile.usernameSaveFailed"),
+          );
         });
     },
     { signal },

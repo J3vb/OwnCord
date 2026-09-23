@@ -5,6 +5,7 @@
 
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
+import { shellText } from "../../i18n/shell";
 import {
   setMessages,
   prependMessages,
@@ -115,7 +116,7 @@ export function createMessageController(opts: MessageControllerOptions): Message
         // broadcasts or an optimistic send may already have populated it, in
         // which case the failure must still be surfaced (no silent drop).
         if (getChannelMessages(channelId).length > 0) {
-          showError("Failed to load message history");
+          showError(shellText("messages.loadHistoryFailed"));
         }
       }
     }
@@ -149,7 +150,7 @@ export function createMessageController(opts: MessageControllerOptions): Message
           channelId,
           error: String(err),
         });
-        showError("Failed to load older messages");
+        showError(shellText("messages.loadOlderFailed"));
       }
     }
   }

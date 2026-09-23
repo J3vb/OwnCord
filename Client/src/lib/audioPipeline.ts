@@ -13,6 +13,7 @@ import { Track, type Room, type LocalAudioTrack } from "livekit-client";
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { createRNNoiseProcessor } from "@lib/noise-suppression";
+import { voiceText } from "../i18n/voice";
 
 const log = createLogger("audioPipeline");
 
@@ -516,7 +517,7 @@ export class AudioPipeline {
       }
     } catch (err) {
       log.error("Failed to reapply audio processing", err);
-      onError?.("Failed to update audio settings");
+      onError?.(voiceText("audio.settingsFailed"));
     }
   }
 }

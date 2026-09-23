@@ -53,7 +53,8 @@ function mutedChannelName(channelId: number): string {
   if (dm !== undefined) return `@${dmDisplayName(dm)}`;
   // A mute can outlive the channel it names (deleted channel, left group). It
   // is shown rather than hidden so the user can clear it.
-  return t("notifications.channelFallback", { id: channelId });
+  // i18n-exempt: a numeric channel id, formatted as a plain string so it is not thousands-grouped
+  return t("notifications.channelFallback", { id: String(channelId) });
 }
 
 /**

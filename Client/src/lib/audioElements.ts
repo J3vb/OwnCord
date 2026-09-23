@@ -38,6 +38,7 @@ export function setAudioVolumeHost(host: string | null): void {
 }
 
 function userVolumeKey(userId: number): string {
+  // i18n-exempt: localStorage key, not display text
   return currentHost === null ? `userVolume_${userId}` : `userVolume_${userId}:${currentHost}`;
 }
 

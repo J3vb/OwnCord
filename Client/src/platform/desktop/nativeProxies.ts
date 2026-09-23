@@ -86,6 +86,7 @@ function setLiveKitServerHost(host: string | null): void {
  *  resolveLiveKitUrl(), which takes the passthrough branch for a null host.
  *  @public */
 export async function ensureLiveKitProxy(): Promise<number> {
+  // i18n-exempt: internal proxy guard, never rendered
   if (serverHost === null) throw new Error("no server host for LiveKit proxy");
   // Ensure host:port format — default to 443 (standard HTTPS) when the
   // server is behind a reverse proxy. Without an explicit port, the Rust
