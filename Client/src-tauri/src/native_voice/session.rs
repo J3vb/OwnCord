@@ -809,11 +809,32 @@ async fn forward_events(
         if let RoomEvent::LocalTrackRepublished {
             previous_sid,
             publication,
+            participant,
             ..
         } = &ev
         {
-            if let Some(c) = camera.lock().unwrap().as_mut() {
-                c.republished(previous_sid, publication.sid());
+            let orphan = {
+                let mut slot = camera.lock().unwrap();
+                apply_republish(
+                    &mut slot,
+                    publication.source(),
+                    previous_sid,
+                    &publication.sid(),
+                )
+            };
+            if let Some(sid) = orphan {
+                // The camera was disabled (slot emptied) or replaced while the
+                // SDK was between its unpublish and publish during a full
+                // reconnect: this fresh publication (a new sid) found nothing
+                // to attach to, so no frames are driven for it and the webview
+                // already considers the camera off. Unpublish it, or it lingers
+                // beside the next camera.
+                let participant = participant.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = participant.unpublish_track(&sid).await {
+                        log::warn!("[native_voice] orphan camera unpublish: {e}");
+                    }
+                });
             }
         }
         // Before the webview hears of a video track, so its frame socket
@@ -822,6 +843,31 @@ async fn forward_events(
         if let Some(mapped) = map_event(ev) {
             on_event(mapped);
         }
+    }
+}
+
+/// The camera slot's response to a local track's `LocalTrackRepublished`:
+/// adopt the new sid when the event continues the slot's live camera, or
+/// return the sid to unpublish when it does not — the camera was disabled
+/// (slot emptied) or a newer one replaced it while the SDK was between its
+/// unpublish and publish, leaving a publication nobody can drive. A non-camera
+/// republish returns `None`: the microphone is tracked by `NativeSession`
+/// itself, not here.
+fn apply_republish(
+    camera: &mut Option<CameraPublication>,
+    source: TrackSource,
+    previous_sid: &TrackSid,
+    sid: &TrackSid,
+) -> Option<TrackSid> {
+    if source != TrackSource::Camera {
+        return None;
+    }
+    match camera.as_mut() {
+        Some(c) if c.live == *previous_sid => {
+            c.republished(previous_sid, sid.clone());
+            None
+        }
+        _ => Some(sid.clone()),
     }
 }
 
@@ -998,6 +1044,73 @@ mod tests {
         camera.republished(&sid("TR_b"), sid("TR_c"));
         assert_eq!(camera.live, sid("TR_c"));
         assert_eq!(camera.issued, "TR_a", "the webview still names TR_a");
+    }
+
+    /// A disable can land while the SDK is between its unpublish of the old
+    /// sid and the dispatch of `LocalTrackRepublished` during a full
+    /// reconnect: `release_camera` empties the slot, then the event arrives
+    /// carrying a fresh publication sid nobody can drive. The slot must hand
+    /// that sid back so the forwarder unpublishes it — the alternative is a
+    /// camera published with no frames (frozen remote tiles) beside the next
+    /// one the webview enables.
+    #[test]
+    fn a_camera_republished_after_a_disable_is_orphaned_not_adopted() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut slot = Some(CameraPublication::new(sid("TR_a")));
+        // The disable arrives inside the await, before the republish event,
+        // emptying the slot.
+        assert!(slot.take().is_some());
+        assert_eq!(
+            apply_republish(&mut slot, TrackSource::Camera, &sid("TR_a"), &sid("TR_b")),
+            Some(sid("TR_b")),
+            "a republish with no live camera to continue must be unpublished"
+        );
+        assert!(slot.is_none(), "the orphan must not occupy the slot");
+
+        // The later enable publishes one camera, and its own republish is
+        // adopted rather than orphaned: exactly one camera remains.
+        let mut slot = Some(CameraPublication::new(sid("TR_c")));
+        assert_eq!(
+            apply_republish(&mut slot, TrackSource::Camera, &sid("TR_c"), &sid("TR_d")),
+            None
+        );
+        let live = slot.expect("the enabled camera stays published").live;
+        assert_eq!(live, sid("TR_d"));
+    }
+
+    #[test]
+    fn a_republished_camera_replaced_under_its_old_sid_is_orphaned() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        // A newer camera owns the slot; the stale publication's republish
+        // arrives with the old sid and must not be attached to it.
+        let mut slot = Some(CameraPublication::new(sid("TR_new")));
+        assert_eq!(
+            apply_republish(
+                &mut slot,
+                TrackSource::Camera,
+                &sid("TR_old"),
+                &sid("TR_old2")
+            ),
+            Some(sid("TR_old2"))
+        );
+        assert_eq!(slot.unwrap().live, sid("TR_new"));
+    }
+
+    #[test]
+    fn a_non_camera_republish_is_never_orphaned() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        // The microphone is tracked by the session, not the camera slot; an
+        // empty slot must not make its republish look like a stray camera.
+        let mut slot = None;
+        assert_eq!(
+            apply_republish(
+                &mut slot,
+                TrackSource::Microphone,
+                &sid("TR_mic"),
+                &sid("TR_mic2")
+            ),
+            None
+        );
     }
 
     #[test]
