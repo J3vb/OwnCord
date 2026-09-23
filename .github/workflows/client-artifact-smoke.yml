@@ -106,6 +106,12 @@ jobs:
             librsvg2-dev \
             xdg-utils
 
+      # clang >= 21 and the pinned, digest-verified libwebrtc the Linux client
+      # links for native voice — the release jobs' step, same no-cache rule.
+      - name: Install native-voice build prerequisites
+        if: runner.os == 'Linux'
+        run: bash Client/scripts/linux-webrtc-toolchain.sh
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
@@ -121,6 +127,11 @@ jobs:
           BUNDLES: ${{ matrix.bundles }}
         shell: bash
         run: npm run tauri build -- --bundles "$BUNDLES" --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Check the binary's glibc floor
+        if: runner.os == 'Linux'
+        working-directory: Client
+        run: bash scripts/check-glibc-floor.sh src-tauri/target/release/owncord-client
 
       # The same strip the release applies before re-signing, so the nightly
       # boots the image an owner would download.
@@ -194,12 +205,19 @@ jobs:
       # WebKitWebDriver comes from the same WebKitGTK packaging the AppImage
       # bundles from its ubuntu-22.04 build host, so driver and engine match.
       # The keyring backs the stored credential an update must preserve.
-      - name: Install the Linux WebDriver stack
+      # Linux voice runs in the native LiveKit backend, which captures and
+      # plays through the sound server; a runner has no sound card, so a
+      # PulseAudio null sink (and its monitor as the source) stands in.
+      - name: Install the Linux WebDriver and audio stack
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y webkit2gtk-driver xvfb dbus-x11 gnome-keyring
+          sudo apt-get install -y webkit2gtk-driver xvfb dbus-x11 gnome-keyring pulseaudio
           cargo install tauri-driver --locked --version 2.0.6
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=smoke
+          pactl set-default-sink smoke
+          pactl set-default-source smoke.monitor
 
       - run: npm ci
       - run: npm run test:e2e:build-server
