@@ -20,6 +20,7 @@ function harness(env = {}, vu = 1) {
   const frames = [];
   const handlers = {};
   const intervals = new Map();
+  const timeouts = [];
   let body = {};
   class Metric {
     constructor(name) {
@@ -53,7 +54,7 @@ function harness(env = {}, vu = 1) {
             handlers[event] = handler;
           },
           setInterval: (callback, ms) => intervals.set(ms, callback),
-          setTimeout: () => {},
+          setTimeout: (callback, ms) => timeouts.push({ ms, callback }),
           close: () => {},
         });
         return { status: 101 };
@@ -66,6 +67,7 @@ function harness(env = {}, vu = 1) {
     metrics,
     frames,
     intervals,
+    timeouts,
     evaluate,
     at: (seconds) => {
       now = epoch + seconds * 1000;
@@ -170,6 +172,39 @@ test("unsafe ceiling inputs fail before sockets; custom maximum/step/rate still 
   h.at(1);
   h.intervals.get(500)();
   assert.equal(h.metrics.ws_messages_sent[0].tags.step, "100-ramp");
+});
+
+test("a resumed connection keeps the VU's send, typing and presence phase (OC-0445)", () => {
+  const h = harness({ K6_PROFILE: "operational" });
+  // First connection at t=10.5 s: send phase 500 ms of 2000, typing 2500 of
+  // 4000, presence 10500 of 15000. Timers start immediately on a fresh socket.
+  h.at(10.5);
+  h.start();
+  const firstSend = h.intervals.get(2000);
+  assert.equal(typeof firstSend, "function");
+  assert.equal(h.timeouts.filter((t) => t.ms < 2000).length, 0);
+
+  // The storm: every VU reopens its socket at t=180 s (phase 0 of every
+  // period). A plain setInterval would put all sends on that shared phase.
+  h.evaluate("vuLastSeq = 7");
+  h.at(180);
+  h.evaluate("websocketScenario()");
+  const byDelay = (ms) => h.timeouts.filter((t) => t.ms === ms);
+  assert.equal(byDelay(500).length, 1, "send re-anchors 500 ms later");
+  assert.equal(byDelay(2500).length, 1, "typing re-anchors 2500 ms later");
+  assert.equal(byDelay(10500).length, 1, "presence re-anchors 10500 ms later");
+  assert.equal(h.intervals.get(2000), firstSend, "no interval before the phase point");
+
+  // The phased tick fires before auth_ok: nothing is sent yet, and the
+  // interval that follows keeps the period.
+  const sent = () => h.frames.filter((f) => f.type === "chat_send").length;
+  const before = sent();
+  byDelay(500)[0].callback();
+  assert.equal(sent(), before);
+  assert.notEqual(h.intervals.get(2000), firstSend);
+  h.receive({ type: "auth_ok", payload: { replay_source: "buffer" } });
+  h.intervals.get(2000)();
+  assert.equal(sent(), before + 1);
 });
 
 test("operational acknowledgement and delivery samples carry the observer's phase", () => {

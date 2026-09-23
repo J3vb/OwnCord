@@ -950,6 +950,33 @@ let vuToken = null; // stored session token (a resume does not re-login)
 let vuLastSeq = 0; // highest seq this VU has seen on any connection
 let vuHoldEnd = 0; // wall-clock ms when this VU's first connection ends
 let vuStormDone = false; // the storm already fired for this VU
+// The phase (ms offset within the period) each periodic client timer took on
+// this VU's FIRST connection — see phasedInterval.
+const vuTimerPhase = {};
+
+// phasedInterval is setInterval whose ticks keep the phase the VU's first
+// connection established, across reconnects. The storm reopens every socket
+// in the same instant, and a plain setInterval started from that instant
+// would have all 100 users press Enter in the same few milliseconds every
+// SEND_INTERVAL_MS for the rest of the run — a metronome no population
+// produces, and one that queues N simultaneous sends behind the single
+// SQLite writer (OC-0445: ack p95 went from ~50 ms to ~600 ms at the storm
+// and stayed there, at unchanged throughput and an unchanged 0.4 ms per
+// write). A reconnect changes when a user is connected, not when they type,
+// so the timer re-anchors on its original phase instead.
+function phasedInterval(socket, name, periodMs, fn) {
+  const now = Date.now();
+  if (!(name in vuTimerPhase)) {
+    vuTimerPhase[name] = now % periodMs;
+    socket.setInterval(fn, periodMs);
+    return;
+  }
+  const delay = (((vuTimerPhase[name] - now) % periodMs) + periodMs) % periodMs;
+  socket.setTimeout(function () {
+    fn();
+    socket.setInterval(fn, periodMs);
+  }, delay);
+}
 let vuInVoice = false; // this VU believes it holds a voice session
 // Restart drill: contents of this VU's drain sends that got neither an ack
 // nor an error before the socket closed. VU scope on purpose — the socket
@@ -1335,8 +1362,10 @@ export default function () {
     // resume (a replay resume sends no ready frame, protocol.md:305-315).
     // The interval keeps running for the whole hold — there is no message
     // cap, because the sustained fan-out IS the load being measured.
-    socket.setInterval(function () {
-      if (!ready && !resumedConn) {
+    phasedInterval(socket, "send", SEND_INTERVAL_MS, function () {
+      // A resumed socket's first phased tick can land before auth_ok; a
+      // frame sent before that is refused, so wait for the session.
+      if (!ready && !(resumedConn && authed)) {
         return;
       }
       const id = `${vuId}-${msgCount}-${Date.now()}`;
@@ -1361,22 +1390,22 @@ export default function () {
         IS_CEILING ? { ...stepTags(true), channel: String(VU_CHANNEL_ID) } : undefined,
       );
       msgCount++;
-    }, SEND_INTERVAL_MS); // chat_send is 10/sec; 1 per 2s is well under it
+    }); // chat_send is 10/sec; 1 per SEND_INTERVAL_MS (2 s) is well under it
 
     // Typing indicators (client->server type is typing_start, not "typing").
-    socket.setInterval(function () {
-      if (ready || resumedConn) {
+    phasedInterval(socket, "typing", 4000, function () {
+      if (ready || (resumedConn && authed)) {
         socket.send(envelope("typing_start", { channel_id: VU_CHANNEL_ID }));
       }
-    }, 4000);
+    });
 
     // Presence updates (client->server type is presence_update; bare
     // "presence" is the server->client broadcast).
-    socket.setInterval(function () {
+    phasedInterval(socket, "presence", 15000, function () {
       if (authed) {
         socket.send(envelope("presence_update", { status: "online" }));
       }
-    }, 15000);
+    });
 
     // Leave voice before the socket goes, so the run exercises the leave path
     // rather than relying on disconnect cleanup to tidy up 25 voice states.
