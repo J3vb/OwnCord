@@ -1,5 +1,4 @@
 import { defineConfig, devices } from "@playwright/test";
-import { PREVIEW_ORIGIN, PREVIEW_PORT } from "./tests/e2e/support/server";
 
 export default defineConfig({
   outputDir: "test-results/fullstack",
@@ -18,7 +17,7 @@ export default defineConfig({
     ["junit", { outputFile: "test-results/fullstack.xml" }],
   ],
   use: {
-    baseURL: PREVIEW_ORIGIN,
+    baseURL: "http://localhost:4173",
     // This suite drives the browser LiveKit path (Windows' WebView2). Chromium
     // on a Linux runner would otherwise report Linux and take the native
     // backend (isLinuxDesktop), which only exists in the Tauri app.
@@ -35,8 +34,8 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: `node node_modules/vite/bin/vite.js preview --port ${PREVIEW_PORT} --strictPort`,
-    url: PREVIEW_ORIGIN,
+    command: "node node_modules/vite/bin/vite.js preview --port 4173 --strictPort",
+    url: "http://localhost:4173",
     reuseExistingServer: false,
   },
 });

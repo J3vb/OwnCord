@@ -1,6 +1,6 @@
 import { installMediaProbe } from "../support/media";
 import { test as base, expect, type Page } from "@playwright/test";
-import { PREVIEW_ORIGIN, startTestServer, TEST_PASSWORD, type TestServer } from "../support/server";
+import { startTestServer, TEST_PASSWORD, type TestServer } from "../support/server";
 import { installRealTransport } from "../support/real-transport";
 
 type Transport = Awaited<ReturnType<typeof installRealTransport>>;
@@ -52,7 +52,7 @@ export const test = base.extend<Fixtures>({
   },
   bobTransport: async ({ browser, server, media }, use) => {
     const context = await browser.newContext({
-      baseURL: PREVIEW_ORIGIN,
+      baseURL: "http://localhost:4173",
       permissions: ["microphone", "camera"],
     });
     const page = await context.newPage();
