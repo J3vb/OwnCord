@@ -1,14 +1,13 @@
 //! Remote-audio playout with a gain per participant (per-user volume).
 //!
 //! The SDK's audio device module (ADM) mixes every remote track itself and
-//! exposes no per-track gain, so the ADM's playout is switched to its
-//! synthetic mode — it still pumps the decode pipeline every 10 ms and still
-//! hands that mix to the echo canceller as its reference — and playout
-//! happens here instead: each subscribed remote audio track is read as PCM
-//! through a `NativeAudioStream` (microphones mono, screen-share audio
-//! stereo), queued per track, and the output stream mixes the queues with
-//! each participant's gain into the device's front pair. What it plays is
-//! also the echo canceller's reference (`capture::Reference`).
+//! exposes no per-track gain, so the ADM is never acquired and its playout
+//! stays in the synthetic mode that still pumps the decode pipeline every
+//! 10 ms; playout happens here instead: each subscribed remote audio track is
+//! read as PCM through a `NativeAudioStream` (microphones mono, screen-share
+//! audio stereo), queued per track, and the output stream mixes the queues
+//! with each participant's gain into the device's front pair. What it plays
+//! is also the echo canceller's reference (`capture::Reference`).
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
 
