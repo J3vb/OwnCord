@@ -60,7 +60,6 @@ export const accountText = defineCatalog("account", {
   "totp.verify": "Verify & Activate",
   "totp.codeInvalid": "Please enter a valid 6-digit code.",
   "totp.verifying": "Verifying...",
-  "totp.codeWrong": "Invalid verification code.",
   "totp.protected": "Your account is protected with 2FA.",
   "totp.disable": "Disable 2FA",
   "totp.confirmDisable": "Confirm Disable",

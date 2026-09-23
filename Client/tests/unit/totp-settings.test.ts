@@ -510,6 +510,63 @@ describe("TOTP Settings", () => {
       overlay.destroy?.();
     });
 
+    it("reports an internal confirm failure as a failure, not a wrong code", async () => {
+      mockTotpEnabled = false;
+      const options = makeOptions({
+        onConfirmTotp: vi
+          .fn()
+          .mockRejectedValue(
+            new ApiClientError(500, "INTERNAL_ERROR", "failed to enable two-factor authentication"),
+          ),
+      });
+      const overlay = createSettingsOverlay(options);
+      overlay.mount(container);
+
+      // Navigate through enable flow
+      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
+      enableBtn.click();
+
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
+      pwInput.value = "mypassword123";
+
+      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Submit",
+      ) as HTMLElement;
+      submitBtn.click();
+
+      await vi.waitFor(() => {
+        expect(container.querySelector("[data-testid='totp-qr-uri']")).not.toBeNull();
+      });
+
+      const codeInput = container.querySelector(
+        "[data-testid='totp-code-input']",
+      ) as HTMLInputElement;
+      codeInput.value = "000000";
+
+      const confirmBtn = container.querySelector("[data-testid='totp-confirm-btn']") as HTMLElement;
+      confirmBtn.click();
+
+      await vi.waitFor(() => {
+        // The error element in the confirm area also has data-testid="totp-error"
+        const errorEls = container.querySelectorAll("[data-testid='totp-error']");
+        const confirmError = Array.from(errorEls).find(
+          (el) => el.textContent === "Failed to enable 2FA.",
+        );
+        expect(confirmError).not.toBeUndefined();
+      });
+
+      // Confirm button should be re-enabled
+      const confirmBtnAfter = container.querySelector(
+        "[data-testid='totp-confirm-btn']",
+      ) as HTMLButtonElement;
+      expect(confirmBtnAfter.disabled).toBe(false);
+      expect(confirmBtnAfter.textContent).toBe("Verify & Activate");
+
+      overlay.destroy?.();
+    });
+
     it("updates UI to disabled state after successful confirm", async () => {
       mockTotpEnabled = false;
       // Simulate MainPage's onConfirmTotp: it calls updateUser after API success

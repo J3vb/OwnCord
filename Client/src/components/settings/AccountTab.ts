@@ -650,7 +650,7 @@ function buildTotpConfirmArea(
           onEnrolled();
         })
         .catch((err: unknown) => {
-          setText(confirmError, errorText(err, t("totp.codeWrong")));
+          setText(confirmError, errorText(err, t("totp.enableFailed")));
           confirmBtn.disabled = false;
           setText(confirmBtn, t("totp.verify"));
         });
