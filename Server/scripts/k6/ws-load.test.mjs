@@ -172,6 +172,41 @@ test("unsafe ceiling inputs fail before sockets; custom maximum/step/rate still 
   assert.equal(h.metrics.ws_messages_sent[0].tags.step, "100-ramp");
 });
 
+test("operational acknowledgement and delivery samples carry the observer's phase", () => {
+  const h = harness({ K6_PROFILE: "operational" });
+  h.start();
+  // The same boundaries obsPhase draws: ramp, sustain, uploads from
+  // K6_RAMP + 60 s, the 30 s storm window at K6_RAMP + K6_STORM_AT, then
+  // upload again until the run drains.
+  const cases = [
+    [59.999, "ramp"],
+    [60, "sustain"],
+    [119.999, "sustain"],
+    [120, "upload"],
+    [179.999, "upload"],
+    [180, "storm"],
+    [210, "storm"],
+    [210.001, "upload"],
+  ];
+  for (const [time, phase] of cases) {
+    h.at(time);
+    h.receive({ type: "chat_message", payload: { content: `t=${epoch + time * 1000 - 10} v=2` } });
+    assert.equal(h.metrics.ws_delivery_latency_ms.at(-1).tags.phase, phase);
+    h.intervals.get(2000)();
+    const send = h.frames.at(-1);
+    h.receive({ type: "chat_send_ok", id: send.id });
+    assert.equal(h.metrics.ws_broadcast_latency_ms.at(-1).tags.phase, phase);
+  }
+  for (const metric of ["ws_delivery_latency_ms", "ws_broadcast_latency_ms"]) {
+    for (const phase of ["ramp", "sustain", "storm", "upload"]) {
+      assert.equal(h.evaluate(`options.thresholds["${metric}{phase:${phase}}"][0]`), "p(95)>=0");
+    }
+  }
+  // The run-wide budget is untouched by the per-phase series.
+  assert.equal(h.evaluate('options.thresholds["ws_broadcast_latency_ms"][0]'), "p(95)<150");
+  assert.equal(h.evaluate('options.thresholds["ws_broadcast_latency_ms"][1]'), "p(99)<300");
+});
+
 test("restart receipt boundaries, legacy tags and nonempty summary samples", () => {
   const h = harness({ K6_PROFILE: "restart" });
   h.start();

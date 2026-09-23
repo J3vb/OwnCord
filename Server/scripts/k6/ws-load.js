@@ -804,6 +804,10 @@ function passThroughThresholds() {
     for (const c of perPhase) out[`${c}{phase:${p}}`] = ["count>=0"];
     // The one Gauge among the observer's metrics; a Gauge aggregates as value.
     out[`obs_upload_storage_used_mb{phase:${p}}`] = ["value>=0"];
+    // The per-phase acknowledgement/delivery series (operationalTags). The
+    // run-wide budgets above stay the gate; these only materialize.
+    out[`ws_broadcast_latency_ms{phase:${p}}`] = ["p(95)>=0"];
+    out[`ws_delivery_latency_ms{phase:${p}}`] = ["p(95)>=0"];
   }
   // Tier and backpressure come in two shapes: the run total per tier/kind,
   // and the per-phase delta (a sub-metric key takes several comma-separated
@@ -1159,7 +1163,7 @@ export default function () {
             if (data.id && pendingSends[data.id]) {
               broadcastLatency.add(
                 Date.now() - pendingSends[data.id],
-                stepTags(true) ?? restartTags(),
+                stepTags(true) ?? restartTags() ?? operationalTags(),
               );
               delete pendingSends[data.id];
             }
@@ -1180,7 +1184,7 @@ export default function () {
             const from = sentBy(content);
             const at = sentAt(content);
             if (at && from && from !== vuId && Date.now() - at < 30 * 1000) {
-              deliveryLatency.add(Date.now() - at, stepTags(true) ?? restartTags());
+              deliveryLatency.add(Date.now() - at, stepTags(true) ?? restartTags() ?? operationalTags());
               deliveries.add(1, restartTags());
             }
             break;
@@ -1422,7 +1426,21 @@ let obsPrev = null;
 //             tagged `sustain`;
 //   sustain — the peak before either of those.
 function obsPhase(nowMs) {
-  const t = (nowMs - obsStart) / 1000;
+  return obsPhaseAt(nowMs, obsStart);
+}
+
+// operationalTags is the per-phase tag for sender acknowledgement and
+// recipient delivery under the operational profile (OC-0445): the same
+// boundaries the observer's obsPhase draws, anchored on this VU's own
+// scenario start (both scenarios start at t=0, as stormFireAt relies on), so a
+// run says WHICH phase missed the budget rather than only that one did.
+function operationalTags() {
+  if (!IS_OPERATIONAL) return undefined;
+  return { phase: obsPhaseAt(Date.now(), exec.scenario.startTime) };
+}
+
+function obsPhaseAt(nowMs, startMs) {
+  const t = (nowMs - startMs) / 1000;
   // The restart drill runs the observer too (OC-0446), and the evidence it is
   // there for is the per-phase writer-wait delta either side of the stop — so
   // its samples carry the RESTART phases. Falling through to the operational
@@ -1430,7 +1448,7 @@ function obsPhase(nowMs) {
   // on a run with no upload leg, leaving no pre/post-restart split at all.
   if (IS_RESTART) return restartPhaseAt(t);
   if (t < RAMP_S) return "ramp";
-  if (IS_OPERATIONAL && nowMs >= stormFireAt(obsStart) && nowMs <= stormFireAt(obsStart) + 30000) {
+  if (IS_OPERATIONAL && nowMs >= stormFireAt(startMs) && nowMs <= stormFireAt(startMs) + 30000) {
     return "storm";
   }
   if (t >= UPLOADS_START_S) return "upload";
