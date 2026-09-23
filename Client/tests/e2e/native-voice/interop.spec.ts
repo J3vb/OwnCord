@@ -18,11 +18,14 @@
 //      refuses a wrong token and is gone after close;
 //   6. the video negative control: with a wrong key neither side decodes a
 //      single video frame;
-//   7. a native screen share (a synthetic capture source, through the app's
+//   7. per-user volume: the native session's own playout mix plays the
+//      browser peer at the volume set for it (the runner has no sound
+//      device, so the peer pulls the mix itself);
+//   8. a native screen share (a synthetic capture source, through the app's
 //      capture thread and publish) decodes in the browser with the same key,
 //      its local preview arrives on the frame socket, and repeated share
 //      stop/start releases every capturer;
-//   8. the screen-share negative control: with a wrong key the browser
+//   9. the screen-share negative control: with a wrong key the browser
 //      decodes not one frame of it.
 // Not exercised here: the X11 capturer and the Wayland portal (CI has no
 // display); see docs/architecture/voice-e2ee.md.
@@ -43,6 +46,8 @@ const API_SECRET = "e2e-secret-at-least-32-characters-long";
 const ROOM = "native-interop";
 /** 440 Hz sine, amplitude 8000 of 32768: RMS = 8000/32768/sqrt(2). */
 const EXPECTED_SINE_RMS = 8000 / 32768 / Math.SQRT2;
+/** The per-user volume the native peer plays the browser peer at. */
+const PEER_VOLUME = 0.5;
 
 const livekitBinary = process.env.OWNCORD_E2E_LIVEKIT_BINARY;
 const nativePeer = process.env.OWNCORD_NATIVE_VOICE_PEER;
@@ -267,6 +272,7 @@ test("native and browser peers decode each other's audio with the same key", asy
   const encryption: Array<{ identity: string; encrypted: boolean }> = [];
   const threads: Array<{ phase: string; count: number }> = [];
   const devices: Array<{ ok: boolean; detail: string }> = [];
+  const playout: number[] = [];
   const peer = runNativePeer(
     [
       "--url",
@@ -281,6 +287,8 @@ test("native and browser peers decode each other's audio with the same key", asy
       "5",
       "--mute-cycles",
       "10",
+      "--volume",
+      String(PEER_VOLUME),
     ],
     ({ event }) => {
       if (event.type === "audio")
@@ -291,6 +299,7 @@ test("native and browser peers decode each other's audio with the same key", asy
         threads.push(event as unknown as { phase: string; count: number });
       if (event.type === "devices")
         devices.push(event as unknown as { ok: boolean; detail: string });
+      if (event.type === "playout") playout.push((event as unknown as { rms: number }).rms);
     },
   );
 
@@ -340,6 +349,18 @@ test("native and browser peers decode each other's audio with the same key", asy
   const muteAfter = threads.find((t) => t.phase === "mute-after")!.count;
   console.log(`native peer threads: before=${muteBefore} after 10 mute cycles=${muteAfter}`);
   expect(muteAfter - muteBefore).toBeLessThanOrEqual(2);
+  // 7. Per-user volume: the playout mix carries the browser peer (the only
+  //    remote) at PEER_VOLUME of its decoded level. Compared as energy over
+  //    the settled seconds of each per-second meter; the beep's gaps and the
+  //    two meters' unaligned windows are what the tolerance absorbs.
+  const energy = (rms: number[]) =>
+    Math.sqrt(rms.slice(3).reduce((sum, r) => sum + r * r, 0) / Math.max(1, rms.length - 3));
+  const direct = energy(fromBrowser.map((a) => a.rms));
+  const mixed = energy(playout);
+  console.log(`native playout at volume ${PEER_VOLUME}: mixed=${mixed} direct=${direct}`);
+  expect(playout.length).toBeGreaterThan(5);
+  expect(mixed / direct).toBeGreaterThan(PEER_VOLUME * 0.7);
+  expect(mixed / direct).toBeLessThan(PEER_VOLUME * 1.3);
 });
 
 test("a native peer with the wrong key hears silence and is heard as silence", async ({ page }) => {

@@ -179,7 +179,9 @@ export class DeviceManager {
       }
 
       // The native backend selects by device-module index, which a hot-plug
-      // can shift; re-selecting the saved devices by name refreshes it.
+      // can shift; re-selecting the saved devices by name refreshes it. Its
+      // output stream is opened on a concrete sink, so a saved "System
+      // default" is re-applied too, moving playout to a hot-plugged default.
       if (nativeInputs === null) return;
       const saved = [
         ["audioinput", "audioInputDevice", devices],
@@ -187,7 +189,9 @@ export class DeviceManager {
       ] as const;
       for (const [kind, key, listed] of saved) {
         const deviceId = loadPref<string>(key, "");
-        if (deviceId === "" || !listed.some((d) => d.deviceId === deviceId)) continue;
+        const reapply =
+          deviceId === "" ? kind === "audiooutput" : listed.some((d) => d.deviceId === deviceId);
+        if (!reapply) continue;
         try {
           // oxlint-disable-next-line no-await-in-loop -- sequential by design: the room-supersession check must run between the two switches
           await room.switchActiveDevice(kind, deviceId);

@@ -168,6 +168,10 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_subscribed,
             #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_volume,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_screenshare_volume,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_debug_info,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_list_devices,

@@ -27,6 +27,8 @@ export interface NativeVoiceResources {
   rooms: number;
   localTracks: number;
   admRefs: number;
+  /** Remote audio tracks being read into the playout mixer. */
+  audioStreams: number;
   /** Open frame-socket connections (remote renderers, camera upload and
    *  screen preview). */
   videoSockets: number;
@@ -73,7 +75,8 @@ export interface NativeVoiceEnvelope {
 }
 
 export interface NativeVoiceDevice {
-  /** The host device module's identifier (the device name on Linux). */
+  /** The host's identifier: the capture device's name, or the output
+   *  host's stable device id. */
   id: string;
   name: string;
 }
@@ -157,6 +160,12 @@ export interface NativeVoice {
   disconnect(session: number): Promise<NativeVoiceResources>;
   setMicrophone(session: number, enabled: boolean): Promise<void>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
+  /** Per-user volume: play `identity`'s microphone at `volume` (1 is unity),
+   *  the value the web path hands `RemoteParticipant.setVolume`. */
+  setVolume(session: number, identity: string, volume: number): Promise<void>;
+  /** Play `identity`'s screen-share audio at `volume` (1 is unity, 0 when
+   *  muted), the value the web path gives its screen-share audio element. */
+  setScreenshareVolume(session: number, identity: string, volume: number): Promise<void>;
   /** Publish (or replace) the camera; its frames then go up the session's
    *  frame socket. E2EE covers it with the room key, as for the microphone.
    *  Resolves with the publication's sid. */

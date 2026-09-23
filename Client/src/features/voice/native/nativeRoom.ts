@@ -7,10 +7,11 @@
 // publications (deafen), the camera publish and the remote video tracks.
 // This class implements exactly that slice over the Rust backend's commands
 // and its single `native-voice` Tauri event, so the shared modules run
-// unchanged on Linux. Media never crosses IPC: audio capture and playout
-// happen in libwebrtc's audio device module in the Rust process, so no
-// `TrackSubscribed` is raised for audio — there is no MediaStreamTrack to
-// attach. Video does reach the webview, over the session's loopback frame
+// unchanged on Linux. Media never crosses IPC: audio capture (libwebrtc's
+// audio device module) and playout (the session's own mixer) happen in the
+// Rust process, so no `TrackSubscribed` is raised for audio — there is no
+// MediaStreamTrack to attach, and per-user volume is a command
+// (`NativeRemoteParticipant.setVolume`) instead of a gain node. Video does reach the webview, over the session's loopback frame
 // socket: a subscribed remote video track is raised as `TrackSubscribed`
 // with a `NativeVideoRenderer`'s canvas track as its `mediaStreamTrack`, and
 // a published camera is the webview's own `LocalVideoTrack` (its preview)
@@ -102,7 +103,11 @@ export class NativeRemotePublication {
 
 export class NativeRemoteParticipant {
   readonly trackPublications = new Map<string, NativeRemotePublication>();
-  constructor(readonly identity: string) {}
+  private volume = 1;
+  constructor(
+    readonly identity: string,
+    private readonly room: NativeRoom,
+  ) {}
   get audioTrackPublications(): Map<string, NativeRemotePublication> {
     const audio = new Map<string, NativeRemotePublication>();
     for (const [sid, pub] of this.trackPublications) if (pub.kind === "audio") audio.set(sid, pub);
@@ -112,12 +117,14 @@ export class NativeRemoteParticipant {
     for (const pub of this.trackPublications.values()) if (pub.source === source) return pub;
     return undefined;
   }
-  // ponytail: per-user volume is a later phase (the ADM mixes all remote tracks
-  // with no per-track gain in the SDK); the store keeps the preference.
+  /** The microphone's playout gain, as livekit-client's (1 is unity). */
   getVolume(): number {
-    return 1;
+    return this.volume;
   }
-  setVolume(_volume: number): void {}
+  setVolume(volume: number): void {
+    this.volume = volume;
+    this.room.setVolume(this.identity, volume);
+  }
 }
 
 /** The slice of livekit-client's `LocalVideoTrack` the camera path hands
@@ -207,7 +214,15 @@ export class NativeRoom {
    *  existed (the event and the start result travel separately). */
   private endedCapture: number | null = null;
 
-  constructor(private readonly audio: NativeVoiceAudioOptions) {}
+  /** `volumeOf` is the saved volume a participant starts at: the web path
+   *  applies it on the audio `TrackSubscribed`, which native never raises.
+   *  `screenshareVolumeOf` is their screen-share audio's, which the web path
+   *  sets on its audio element; `applyScreenshareVolumes` re-reads it. */
+  constructor(
+    private readonly audio: NativeVoiceAudioOptions,
+    private readonly volumeOf: (identity: string) => number = () => 1,
+    private readonly screenshareVolumeOf: (identity: string) => number = () => 1,
+  ) {}
 
   // --- Emitter (the livekit Room surface roomLifecycle wires) ---
 
@@ -468,6 +483,29 @@ export class NativeRoom {
       .catch((err) => log.warn("native setSubscribed failed", { identity, sid, subscribed, err }));
   }
 
+  /** Per-user volume: forwarded from the participant model. */
+  setVolume(identity: string, volume: number): void {
+    if (this.sessionId === null) return;
+    desktop.nativeVoice
+      .setVolume(this.sessionId, identity, volume)
+      .catch((err) => log.warn("native setVolume failed", { identity, volume, err }));
+  }
+
+  /** Screen-share audio volume (0 when muted). */
+  private setScreenshareVolume(identity: string, volume: number): void {
+    if (this.sessionId === null) return;
+    desktop.nativeVoice
+      .setScreenshareVolume(this.sessionId, identity, volume)
+      .catch((err) => log.warn("native setScreenshareVolume failed", { identity, volume, err }));
+  }
+
+  /** Re-read every participant's screen-share audio volume after a change
+   *  to it, its mute or the output volume. */
+  applyScreenshareVolumes(): void {
+    for (const identity of this.remoteParticipants.keys())
+      this.setScreenshareVolume(identity, this.screenshareVolumeOf(identity));
+  }
+
   private releaseSubscription(): void {
     const stop = this.unsubscribe;
     this.unsubscribe = null;
@@ -487,8 +525,11 @@ export class NativeRoom {
 
   private participant(identity: string): NativeRemoteParticipant {
     let p = this.remoteParticipants.get(identity);
-    if (p === undefined)
-      this.remoteParticipants.set(identity, (p = new NativeRemoteParticipant(identity)));
+    if (p === undefined) {
+      this.remoteParticipants.set(identity, (p = new NativeRemoteParticipant(identity, this)));
+      p.setVolume(this.volumeOf(identity));
+      this.setScreenshareVolume(identity, this.screenshareVolumeOf(identity));
+    }
     return p;
   }
 
@@ -599,6 +640,10 @@ function unsupported(what: string): Error {
   return new Error(`${what} is not available on Linux yet`);
 }
 
-export function createNativeRoom(audio: NativeVoiceAudioOptions): NativeRoom {
-  return new NativeRoom(audio);
+export function createNativeRoom(
+  audio: NativeVoiceAudioOptions,
+  volumeOf?: (identity: string) => number,
+  screenshareVolumeOf?: (identity: string) => number,
+): NativeRoom {
+  return new NativeRoom(audio, volumeOf, screenshareVolumeOf);
 }

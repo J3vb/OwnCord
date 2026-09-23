@@ -135,6 +135,14 @@ vi.mock("../../src/platform/desktop", () => ({
         host.commands.push(["setSubscribed", args]);
         return Promise.resolve();
       },
+      setVolume: (...args: unknown[]) => {
+        host.commands.push(["setVolume", args]);
+        return Promise.resolve();
+      },
+      setScreenshareVolume: (...args: unknown[]) => {
+        host.commands.push(["setScreenshareVolume", args]);
+        return Promise.resolve();
+      },
       setDevice: (...args: unknown[]) => {
         host.commands.push(["setDevice", args]);
         return Promise.resolve();
@@ -185,7 +193,7 @@ vi.mock("../../src/features/voice/native/videoRenderer", () => ({
 const prefs = vi.hoisted(() => new Map<string, unknown>());
 vi.mock("@components/settings/helpers", () => ({
   loadPref: (key: string, defaultVal: unknown) => (prefs.has(key) ? prefs.get(key) : defaultVal),
-  savePref: vi.fn(),
+  savePref: (key: string, value: unknown) => prefs.set(key, value),
 }));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
@@ -347,7 +355,56 @@ describe("LiveKitSession on the Linux native backend", () => {
       },
     });
     await flush();
-    expect(host.commands).toEqual([["setSubscribed", [1, "user-3", "TR_b", false]]]);
+    expect(host.commands).toEqual([
+      ["setVolume", [1, "user-3", 1]],
+      ["setScreenshareVolume", [1, "user-3", 1]],
+      ["setSubscribed", [1, "user-3", "TR_b", false]],
+    ]);
+  });
+
+  it("per-user and output volume reach the native playout mixer", async () => {
+    prefs.set("userVolume_3", 50);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    host.commands.length = 0;
+    // A participant starts at their saved volume: the web path applies it on
+    // the audio TrackSubscribed, which the native room never raises.
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-4" } });
+    expect(host.commands).toEqual([
+      ["setVolume", [1, "user-3", 0.5]],
+      ["setScreenshareVolume", [1, "user-3", 1]],
+      ["setVolume", [1, "user-4", 1]],
+      ["setScreenshareVolume", [1, "user-4", 1]],
+    ]);
+    host.commands.length = 0;
+    // The volume menu, then the master output volume scaling everyone.
+    session.setUserVolume(4, 150);
+    session.setOutputVolume(50);
+    expect(host.commands.filter(([n]) => n === "setVolume")).toEqual([
+      ["setVolume", [1, "user-4", 1.5]],
+      ["setVolume", [1, "user-3", 0.25]],
+      ["setVolume", [1, "user-4", 0.75]],
+    ]);
+  });
+
+  it("screen-share audio follows the tile's volume and mute and the output volume", async () => {
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+    host.commands.length = 0;
+    const sent = () => host.commands.filter(([n]) => n === "setScreenshareVolume");
+    // Per-user stream volume x master output, clamped to 0-1; muted is 0.
+    session.setScreenshareAudioVolume(3, 0.8);
+    session.setOutputVolume(50);
+    session.muteScreenshareAudio(3, true);
+    session.muteScreenshareAudio(3, false);
+    session.setOutputVolume(200);
+    expect(sent()).toEqual([
+      ["setScreenshareVolume", [1, "user-3", 0.8]],
+      ["setScreenshareVolume", [1, "user-3", 0.4]],
+      ["setScreenshareVolume", [1, "user-3", 0]],
+      ["setScreenshareVolume", [1, "user-3", 0.4]],
+      ["setScreenshareVolume", [1, "user-3", 1]],
+    ]);
   });
 
   it("leaveVoice closes the native session and forgets the native key", async () => {
