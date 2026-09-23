@@ -99,6 +99,7 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 	svc.Attention = newAttention(cfg, hub, database, svc.Settings)
 
 	go hub.Run()
+	hub.RearmTimeoutExpiries()
 
 	return api.Runtime{Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled}, nil
 }

@@ -821,7 +821,7 @@ Channel messages are triggered by REST API calls from admins and reach only the 
 Every `channel_create` is addressed to one client and carries that viewer's own
 `can_send` and `can_moderate_voice` — the same values `ready` ships per channel.
 It has no `seq` and is not replayed: a client that misses one is forced onto a
-full `ready` on resume instead. It is sent in two cases:
+full `ready` on resume instead. It is sent in three cases:
 
 - **Channel creation.** Every connected client that may view the new channel
   gets its own copy, so a new channel arrives with its verdicts already set.
@@ -830,6 +830,10 @@ full `ready` on resume instead. It is sent in two cases:
   own copy, so the composer affordance converges without a reconnect. A role
   edit or a role- or user-override edit on the channel converges the
   voice-moderation controls the same way.
+- **Timeout refresh.** When a moderator times a member out or lifts the
+  timeout, or the timeout expires, that member alone gets a fresh copy of
+  every channel they can see, so their `can_send` follows the timeout without
+  a reconnect.
 
 Older servers sent `channel_create` as one shared broadcast without either field.
 **Treat an absent `can_send` or `can_moderate_voice` as "unchanged", never as `false`.**

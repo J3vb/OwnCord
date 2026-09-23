@@ -124,7 +124,11 @@ test.describe("B9-15 moderation notices (real server)", () => {
     // Let sign-in's own history read land first, so only the refusal can
     // tell the client about the timeout below.
     await bob.waitForTimeout(1_000);
-    bobTransport.filterServerMessages((m) => m.type !== "mod_action");
+    // A timeout also re-sends bob's channel_create with can_send=false; drop
+    // it too, or the composer learns the timeout before the refused send.
+    bobTransport.filterServerMessages(
+      (m) => m.type !== "mod_action" && m.type !== "channel_create",
+    );
     await server.api(
       `/api/v1/moderation/users/${target}/timeout`,
       { reason: "Again", duration_seconds: 600 },

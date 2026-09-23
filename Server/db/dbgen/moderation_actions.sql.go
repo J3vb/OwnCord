@@ -116,6 +116,41 @@ func (q *Queries) InsertModerationAction(ctx context.Context, arg InsertModerati
 	return id, err
 }
 
+const listActiveTimeoutExpiries = `-- name: ListActiveTimeoutExpiries :many
+SELECT target_id, expires_at FROM moderation_actions
+ WHERE kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
+`
+
+type ListActiveTimeoutExpiriesRow struct {
+	TargetID  int64   `json:"targetId"`
+	ExpiresAt *string `json:"expiresAt"`
+}
+
+// Every currently-active timeout's target and expiry, across all users, so
+// the hub can re-arm its in-memory expiry refresh after a restart.
+func (q *Queries) ListActiveTimeoutExpiries(ctx context.Context) ([]ListActiveTimeoutExpiriesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listActiveTimeoutExpiries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveTimeoutExpiriesRow{}
+	for rows.Next() {
+		var i ListActiveTimeoutExpiriesRow
+		if err := rows.Scan(&i.TargetID, &i.ExpiresAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveTimeouts = `-- name: ListActiveTimeouts :many
 SELECT id FROM moderation_actions
  WHERE target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')

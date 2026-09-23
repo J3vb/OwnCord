@@ -93,6 +93,10 @@ type DispatchReader interface {
 	// wire but the public id and the state.
 	GetReport(ctx context.Context, id int64) (*db.Report, error)
 	GetAppeal(ctx context.Context, id int64) (*db.Appeal, error)
+	// ListActiveTimeoutExpiries backs RearmTimeoutExpiries
+	// (moderation_actions.go): the startup re-arm of each active timeout's
+	// expiry can_send refresh.
+	ListActiveTimeoutExpiries(ctx context.Context) ([]db.ActiveTimeoutExpiry, error)
 }
 
 // HubReaders bundles the read seams HubOptions requires — every one of them
