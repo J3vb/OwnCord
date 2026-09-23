@@ -368,6 +368,7 @@ type Store interface {
 	AcknowledgeWarning(ctx context.Context, userID, actionID int64) (bool, error)
 	ListUnacknowledgedWarnings(ctx context.Context, userID int64) ([]db.ModerationNotice, error)
 	ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]db.ModerationAction, error)
+	ListOwnModerationActions(ctx context.Context, userID int64) ([]db.OwnModerationAction, error)
 	ListModerationActionsForReport(ctx context.Context, reportID int64) ([]db.ModerationAction, error)
 	// BanUserWithAction/ForceLogoutWithAction are BanUser/ForceLogoutUser
 	// plus a ledger row, in one transaction (plan item 2) — the ...WithReport

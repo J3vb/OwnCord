@@ -20,6 +20,8 @@
 //!   backpressure alone would not).
 //! - `/<token>/camera`: the local camera, webview to server, as
 //!   [`parse_upload`] messages fed to the published camera source.
+//! - `/<token>/screen`: the local screen capture's preview, server to
+//!   webview, acknowledged like a remote track; it ends with the capture.
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -37,6 +39,8 @@ use tokio::task::{JoinHandle, JoinSet};
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::Message;
+
+use super::screen::Preview;
 
 /// Pixel layouts the webview can upload, as `VideoFrame.format` names them.
 /// RGBX/BGRX share the alpha layouts (the alpha byte is ignored).
@@ -61,6 +65,8 @@ struct Shared {
     remote: Mutex<HashMap<String, RemoteVideoTrack>>,
     /// The published camera's source; `None` while no camera is published.
     camera: Mutex<Option<NativeVideoSource>>,
+    /// The running screen capture's preview; `None` while not capturing.
+    screen: Mutex<Option<Arc<Preview>>>,
     /// Open frame-socket connections, for the debug surface.
     sockets: AtomicUsize,
 }
@@ -101,6 +107,10 @@ impl FrameServer {
 
     pub fn set_camera(&self, source: Option<NativeVideoSource>) {
         *self.shared.camera.lock().unwrap_or_else(|p| p.into_inner()) = source;
+    }
+
+    pub fn set_screen(&self, preview: Option<Arc<Preview>>) {
+        *self.shared.screen.lock().unwrap_or_else(|p| p.into_inner()) = preview;
     }
 
     pub fn sockets(&self) -> usize {
@@ -155,6 +165,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 enum Route {
     Remote(String),
     Camera,
+    Screen,
 }
 
 /// The route of a request path, or `None` when the token does not match.
@@ -166,6 +177,7 @@ fn route(path: &str, token: &str) -> Option<Route> {
     match (parts.next()?, parts.next()) {
         ("remote", Some(sid)) if !sid.is_empty() => Some(Route::Remote(sid.to_string())),
         ("camera", None) => Some(Route::Camera),
+        ("screen", None) => Some(Route::Screen),
         _ => None,
     }
 }
@@ -235,6 +247,18 @@ async fn serve(stream: tokio::net::TcpStream, token: String, shared: Arc<Shared>
             }
         }
         Route::Camera => receive_camera(ws, &shared).await,
+        Route::Screen => {
+            let preview = shared
+                .screen
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .as_ref()
+                .map(|p| p.subscribe());
+            match preview {
+                Some(preview) => send_preview(ws, preview).await,
+                None => log::debug!("[native_voice] frame socket: no screen capture"),
+            }
+        }
     }
 }
 
@@ -244,6 +268,19 @@ async fn send_remote(ws: Ws, track: RemoteVideoTrack) {
     let mut frames = NativeVideoStream::new(track.rtc_track());
     send_acked(ws, &mut frames, |frame| pack_i420(&frame.buffer.to_i420())).await;
     frames.close();
+}
+
+async fn send_preview(ws: Ws, preview: tokio::sync::watch::Receiver<Option<Arc<I420Buffer>>>) {
+    // Ends when the capture drops its sender.
+    let mut frames = Box::pin(futures_util::stream::unfold(preview, |mut rx| async move {
+        rx.changed().await.ok()?;
+        let frame = rx.borrow_and_update().clone();
+        Some((frame, rx))
+    }));
+    send_acked(ws, &mut frames, |frame| {
+        frame.map(|f| pack_i420(&f)).unwrap_or_default()
+    })
+    .await;
 }
 
 /// Send `frames` one at a time, each only after the previous one was
@@ -429,6 +466,10 @@ mod tests {
         assert_eq!(
             route(&format!("/{token}/camera"), &token),
             Some(Route::Camera)
+        );
+        assert_eq!(
+            route(&format!("/{token}/screen"), &token),
+            Some(Route::Screen)
         );
         assert_eq!(route(&format!("/{}/camera", "ab".repeat(31)), &token), None);
         assert_eq!(route(&format!("/{}x/camera", token), &token), None);

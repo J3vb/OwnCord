@@ -12,6 +12,17 @@ const realReleaseWorkflow = readFileSync(
 
 const workflow = (jobsSrc) => `name: X\n\non:\n  push:\n    tags: ["v*"]\n\njobs:\n${jobsSrc}`;
 
+test("digest promotion is a publication and requires the release environment", () => {
+  const promotion = workflow(
+    [
+      "  promote:",
+      "    steps:",
+      '      - run: docker buildx imagetools create --tag "$TAG" "$IMAGE@$DIGEST"',
+    ].join("\n"),
+  );
+  assert.deepEqual(auditReleaseEnvironment(promotion), [{ name: "promote" }]);
+});
+
 test("a guarded push job reports nothing", () => {
   const guardedScalar = workflow(
     [

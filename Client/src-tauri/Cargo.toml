@@ -150,6 +150,20 @@ device_query = "2"
 # Default features only — no TLS backend, because the native room dials the
 # plain ws:// loopback that livekit_proxy already exposes.
 livekit = "=0.9.1"
+# Encodes the screen picker's thumbnails (native_voice/screen.rs). Already in
+# the tree via tauri's tray-icon, so this costs no extra build.
+png = "0.18"
+# Audio I/O for native voice. The SDK's device module mixes every remote
+# track with no per-track gain and hands its capture to no processing hook, so
+# per-user volume needs our own mixer and output stream (native_voice/playout.rs)
+# and RNNoise needs our own input stream (native_voice/capture.rs). The
+# `pulseaudio` host is a pure-Rust client (no libpulse link) that lists the
+# same device descriptions the device module showed; plain ALSA is the fallback.
+cpal = { version = "0.18", features = ["pulseaudio"] }
+# RNNoise for the Enhanced Noise Suppression setting on the native capture
+# path (native_voice/capture.rs): a pure-Rust port of the RNNoise model the web
+# path runs as WASM. Default features only add its command-line tool.
+nnnoiseless = { version = "0.5", default-features = false }
 # Direct access to the WebKitGTK webview for voice/video support. WebKitGTK
 # denies getUserMedia/enumerateDevices permission requests by default (wry
 # installs no handler on Linux, unlike its macOS backend which auto-grants),

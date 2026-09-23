@@ -2,8 +2,9 @@
 
 **Status:** 2026-09-08 — owner approved recording all eight ideas and starting
 the first four. RI-01 through RI-04 are implemented and merged into `dev` in
-PR #1573 (commit `3221fe9e`); RI-05 through RI-07 remain backlog ideas. RI-08 is implemented (2026-09-23). The
-validation record and remaining limits are below.
+PR #1573 (commit `3221fe9e`). RI-05 and RI-08 are implemented on
+2026-09-23; RI-06 and RI-07 remain backlog ideas. The validation record and
+remaining limits are below.
 
 **Base:** `dev` at `c900953651088120c62ff05d67abc2ffc74c2701`.
 
@@ -14,16 +15,16 @@ remains B6/B10. Implementing one item does not close those phases.
 
 ## Priority and ownership
 
-| ID    | Idea                                           | Value                                                               | Status  | Roadmap alignment                                |
-| ----- | ---------------------------------------------- | ------------------------------------------------------------------- | ------- | ------------------------------------------------ |
-| RI-01 | One owner for client session work              | Prevent obsolete requests and cleanup from affecting a new session  | Merged  | B7 client lifecycle; B9 account/server switching |
-| RI-02 | Previewed local support bundle                 | Make reports reproducible and safe to share                         | Merged  | B6/B9; existing BG-15 contract                   |
-| RI-03 | Guided connection and voice test               | Identify the failed connection stage with useful next steps         | Merged  | B6 connectivity; B9 diagnostics                  |
-| RI-04 | Retry-safe messaging and pending-send recovery | Preserve user intent across lost acknowledgments and restarts       | Merged  | Protocol/persistence contracts; B9 messaging     |
-| RI-05 | Spread reconnect attempts                      | Reduce synchronized retry pressure after a shared outage            | Backlog | B6 capacity; B7 reconnect behavior               |
-| RI-06 | Explain permissions and preview access changes | Help admins understand and safely change effective access           | Backlog | B9 administration                                |
-| RI-07 | Admin attention panel                          | Surface failed maintenance and capacity pressure early              | Backlog | B6 operations; B9 administration                 |
-| RI-08 | Preview destructive policy changes             | Show the impact of proposed retention settings before applying them | Done    | B9; existing BPR-054 retention controls          |
+| ID    | Idea                                           | Value                                                               | Status      | Roadmap alignment                                |
+| ----- | ---------------------------------------------- | ------------------------------------------------------------------- | ----------- | ------------------------------------------------ |
+| RI-01 | One owner for client session work              | Prevent obsolete requests and cleanup from affecting a new session  | Merged      | B7 client lifecycle; B9 account/server switching |
+| RI-02 | Previewed local support bundle                 | Make reports reproducible and safe to share                         | Merged      | B6/B9; existing BG-15 contract                   |
+| RI-03 | Guided connection and voice test               | Identify the failed connection stage with useful next steps         | Merged      | B6 connectivity; B9 diagnostics                  |
+| RI-04 | Retry-safe messaging and pending-send recovery | Preserve user intent across lost acknowledgments and restarts       | Merged      | Protocol/persistence contracts; B9 messaging     |
+| RI-05 | Spread reconnect attempts                      | Reduce synchronized retry pressure after a shared outage            | Implemented | B6 capacity; B7 reconnect behavior               |
+| RI-06 | Explain permissions and preview access changes | Help admins understand and safely change effective access           | Backlog     | B9 administration                                |
+| RI-07 | Admin attention panel                          | Surface failed maintenance and capacity pressure early              | Backlog     | B6 operations; B9 administration                 |
+| RI-08 | Preview destructive policy changes             | Show the impact of proposed retention settings before applying them | Implemented | B9; existing BPR-054 retention controls          |
 
 ## First implementation batch
 
@@ -150,6 +151,30 @@ the configured maximum delay; retain prompt cancellation on logout and
 certificate mismatch. Server-requested retry delays should be honored where
 the transport can expose them.
 
+Implemented 2026-09-23 against `dev` at
+`0beee8e4c50ca18823750e381d3a1d6e327029b8`:
+
+- The WebSocket policy samples uniformly from half to all of the existing
+  exponential ceiling (1s, 2s, 4s, ...), capped at `maxReconnectDelayMs` (30s
+  by default). Jitter continues at the cap. Authentication and logout keep
+  their existing exponent resets; session and transport lifecycle ownership
+  are unchanged.
+- Randomness and the reconnect timer/cancellation clock are injectable.
+  `Client/tests/unit/ws-backoff.test.ts` drives 256 independent clients through
+  a shared 20-second outage with a seeded random source and fake clock. It
+  checks first-attempt distribution, spreading at the cap and on recovery,
+  every attempt's delay bounds, and recovery within one configured maximum.
+  Boundary tests cover the random endpoints, exponent growth/reset, and
+  synchronous timer cancellation on logout and certificate mismatch. All 165
+  focused socket/lifecycle tests pass. Running the 16 new cases against the
+  original `ws.ts` fails all 16, including the outage distribution assertion.
+- A transport may attach `retryAfterMs` to its disconnected state report.
+  Valid hints form a minimum wait subject to the configured hard maximum;
+  longer hints are capped, negative/nonfinite hints are ignored, and hints
+  are not retained for the next failure. The current desktop IPC exposes
+  neither handshake headers nor structured retry delays, so it supplies no
+  hint. Native error strings are not interpreted as retry instructions.
+
 ### RI-06 — Permission explanations and impact preview
 
 Let an authorized admin choose a member, channel and action and see the
@@ -203,8 +228,8 @@ RI-08 implementation (2026-09-23), based on `dev` commit
 
 The first batch is implemented and merged into `dev` in
 [PR #1573](https://github.com/J3vb/OwnCord/pull/1573) (commit `3221fe9e`).
-RI-05 through RI-07 remain backlog ideas. RI-08 is implemented (2026-09-23). This does not close a broader roadmap
-phase.
+RI-05 and RI-08 are implemented as described above; RI-06 and RI-07 remain
+backlog ideas. This does not close a broader roadmap phase.
 
 Verified in the Linux development environment:
 

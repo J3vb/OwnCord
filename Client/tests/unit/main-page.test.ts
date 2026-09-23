@@ -1302,10 +1302,12 @@ describe("MainPage — presence", () => {
     onStatusChange("online");
     expect(ws.send).not.toHaveBeenCalled();
 
-    // Once the limiter's 10s window reopens, the deferred "online" frame must
-    // still go out — without a retry the server and every other client stay
-    // stuck on "idle" forever with no further trigger to correct it.
-    vi.advanceTimersByTime(10_000);
+    // Once the limiter's 10s window reopens (plus the OC-0451 margin that
+    // clears the server's receipt-measured window), the deferred "online"
+    // frame must still go out — without a retry the server and every other
+    // client stay stuck on "idle" forever with no further trigger to correct
+    // it.
+    vi.advanceTimersByTime(11_000);
 
     expect(ws.send).toHaveBeenCalledWith({
       type: "presence_update",
