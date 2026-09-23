@@ -79,11 +79,11 @@ baselines and scorecards.
 
 | Status    |   Count |
 | --------- | ------: |
-| Fixed     |     451 |
+| Fixed     |     452 |
 | Open      |       1 |
 | Declined  |       4 |
 | Duplicate |       1 |
-| **Total** | **457** |
+| **Total** | **458** |
 
 As of 2026-09-23, `OC-0446` and `OC-0447` (the k6 channel-spreading and
 restart-measurement harness fixes) and `OC-0448` (release tags moved only after

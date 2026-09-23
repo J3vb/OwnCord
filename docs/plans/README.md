@@ -89,9 +89,10 @@ Planning documents are not trackers. Do not read a defect count out of one.
 | Phase order and gates      | [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md)             |
 | Current measured baseline  | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                             |
 
-Current ledger summary (updated 2026-09-23): **451 fixed / 1 open / 4 declined / 1 duplicate = 457**
-(OC-0455 to OC-0457, the product causes of the fullstack media e2e flakes, are
-recorded and fixed; OC-0445, the operational delivery budgets, was a phase-locked load generator after the
+Current ledger summary (updated 2026-09-23): **452 fixed / 1 open / 4 declined / 1 duplicate = 458**
+(OC-0455 to OC-0457, the product causes of the fullstack media e2e flakes, and
+OC-0458, the soak's single-read DOM node sample, are recorded and fixed;
+OC-0445, the operational delivery budgets, was a phase-locked load generator after the
 reconnect storm and is fixed in the harness, with the server's per-hop burst cost recorded
 as OC-0454; OC-0453, a quick voice rejoin stalling behind the leave's LiveKit removal, is
 recorded and fixed; PR #1707's presence retry fix closed OC-0451, the N14 back-to-back status
