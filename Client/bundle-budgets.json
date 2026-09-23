@@ -1,13 +1,13 @@
 {
   "method": "Node zlib.gzipSync level 9 (owner decision 2026-09-20, amends decision 10's 'gzip -9' by pinning the implementation, not the level or format). Budgets are per-manifest-chunk gzip bytes.",
   "startup": {
-    "budget": 91000,
-    "note": "Entry's static closure: the index.html entry file, its static imports, and their linked CSS. Not a fixed file list — a new eagerly-imported chunk joins the closure automatically. Measured 87,982 B at dev 4c45d26a (B7-7); headroom ~2 kB. Raised 90,000 -> 91,000 B by owner decision (B7-10a): the dispatcher handler split into src/features/*/wsHandlers.ts costs +435 B (89,993 B at dev c18cf5a8 -> 90,428 B; +456 B at be7a0594), all module wrappers and unminifiable clock field names, not new code."
+    "budget": 93000,
+    "note": "B9 feature lanes shared budget, firstmate decision 2026-09-23; re-baseline at B9-26"
   },
   "chunks": {
     "MainPage": {
-      "budget": 60512,
-      "note": "Measured 56,855 B at dev 4c45d26a (B7-7). Raised 60,000 -> 60,512 B by owner decision (B9-5): the Message Requests entry, its DM-header badge button into DM mode and the lazy inbox loader need about 73 B more than dev 5682b410 left (59,945 B), even with the inbox view lazy-loaded; measured 60,073 B."
+      "budget": 64000,
+      "note": "B9 feature lanes shared budget, firstmate decision 2026-09-23; re-baseline at B9-26"
     },
     "livekit": {
       "budget": 135000,
