@@ -83,7 +83,7 @@ and add a failing contract/measurement for the change; no threshold weakening.
 
 ### Task 1: Add action forms
 
-Offer warning, timeout and lift-timeout only to the appropriate role, preserving server hierarchy/self-target decisions. Use the agreed duration input/presets (Q10); validate against server bounds without treating validation as authorization.
+Offer warning, timeout and lift-timeout only to the appropriate role, preserving server hierarchy/self-target decisions. Use the Q10 duration input (a number with a minutes/hours/days unit, 1 minute–28 days, sent as `duration_seconds`; no presets); validate against server bounds without treating validation as authorization.
 
 ### Task 2: Keep linked and direct actions consistent
 
@@ -129,17 +129,18 @@ evidence. No milestone defers its accessibility acceptance to B9-26.
 
 - [ ] **Keyboard:** Tab/Shift+Tab, Enter/Space, Escape and applicable arrow keys
       reach and operate every action; pointer parity; no hover-only action.
-- [ ] **Screen reader:** approved native AT reads names, roles, values, errors
+- [ ] **Screen reader:** NVDA (Windows) and Orca (Linux) read names, roles, values, errors
       and relevant status once; no concealed/private/secret content in its tree.
 - [ ] **Focus:** visible indicator, logical order, dialog containment/restore,
       stable location through async update/removal, and a safe fallback opener.
-- [ ] **Contrast:** measure agreed text, controls, status and focus targets in
-      built-in/high-contrast themes and the Q8-approved custom-accent policy;
+- [ ] **Contrast:** measure text, controls, status and focus at the Q1 thresholds in
+      built-in/high-contrast themes, preset accents and the Q8 custom-accent fallback
+      (accent text/focus below 3:1 uses the theme default accent);
       information never depends on color alone.
 - [ ] **Reduced motion:** test both OS and app settings; no required animation,
       unwanted autoplay or motion-dependent feedback; preserve media controls.
-- [ ] **Zoom/reflow:** test Q1-approved text scaling and desktop zoom/reflow,
-      long English/expanded strings and smallest supported desktop window;
+- [ ] **Zoom/reflow:** test Q1 text scale 12–20 px with Large Font, OS zoom 200 %,
+      long English/expanded strings and the 940×500 minimum desktop window;
       no clipped or unreachable controls, lost content or focus off screen.
 
 Frontend automation plus manual native evidence is required: mocked Playwright
@@ -169,6 +170,8 @@ render path as a fallback; fail closed and record a blocker instead.
 
 ### Q10 — Timeout duration control
 
+**Decided 2026-09-23 by the owner:** option (a). One duration input (a number with a minutes/hours/days unit selector), validated client-side to the server's 1 minute–28 days and sent as `duration_seconds`; server validation remains authoritative and its `BAD_REQUEST` message is shown on refusal. A "Lift timeout" action calls the existing untimeout route. No presets in beta.
+
 **Options and consequences:** Use a validated duration input within the existing one-minute to 28-day bounds; or add owner-chosen presets plus custom input. The former avoids inventing moderation policy; presets are faster but imply preferred sanction lengths.
 
-**Recommendation (not approved):** Use a validated duration input initially; add presets only if the owner chooses their labels and values.
+**Drafting recommendation (historical):** Use a validated duration input initially; add presets only if the owner chooses their labels and values.

@@ -83,7 +83,7 @@ and add a failing contract/measurement for the change; no threshold weakening.
 
 ### Task 1: Record the approved destination map
 
-Implement Q2 only after owner approval: Message Requests, Moderation Center and personal safety/status destinations, return path and badge meaning. Preserve familiar channel/DM/voice navigation.
+Implement Q2 as decided 2026-09-23: Message Requests, Moderation Center and personal safety/status destinations, return path and badge meaning. Preserve familiar channel/DM/voice navigation.
 
 ### Task 2: Expose narrow mounting callbacks
 
@@ -129,17 +129,18 @@ evidence. No milestone defers its accessibility acceptance to B9-26.
 
 - [ ] **Keyboard:** Tab/Shift+Tab, Enter/Space, Escape and applicable arrow keys
       reach and operate every action; pointer parity; no hover-only action.
-- [ ] **Screen reader:** approved native AT reads names, roles, values, errors
+- [ ] **Screen reader:** NVDA (Windows) and Orca (Linux) read names, roles, values, errors
       and relevant status once; no concealed/private/secret content in its tree.
 - [ ] **Focus:** visible indicator, logical order, dialog containment/restore,
       stable location through async update/removal, and a safe fallback opener.
-- [ ] **Contrast:** measure agreed text, controls, status and focus targets in
-      built-in/high-contrast themes and the Q8-approved custom-accent policy;
+- [ ] **Contrast:** measure text, controls, status and focus at the Q1 thresholds in
+      built-in/high-contrast themes, preset accents and the Q8 custom-accent fallback
+      (accent text/focus below 3:1 uses the theme default accent);
       information never depends on color alone.
 - [ ] **Reduced motion:** test both OS and app settings; no required animation,
       unwanted autoplay or motion-dependent feedback; preserve media controls.
-- [ ] **Zoom/reflow:** test Q1-approved text scaling and desktop zoom/reflow,
-      long English/expanded strings and smallest supported desktop window;
+- [ ] **Zoom/reflow:** test Q1 text scale 12–20 px with Large Font, OS zoom 200 %,
+      long English/expanded strings and the 940×500 minimum desktop window;
       no clipped or unreachable controls, lost content or focus off screen.
 
 Frontend automation plus manual native evidence is required: mocked Playwright
@@ -169,6 +170,8 @@ render path as a fallback; fail closed and record a blocker instead.
 
 ### Q2 — Navigation and badge placement
 
+**Decided 2026-09-23 by the owner:** keep the existing shell; no new rail. Message Requests: a "Message Requests (N)" section at the top of DM mode, N = pending requests from `GET /api/v1/dm-requests`, kept live by the `dm_request` frame. Badge meaning: the DM header badge shows pending-request count separately from unread; request messages never add to unread or mention counts, never flash the taskbar and never raise a desktop notification before acceptance. Moderation Center: a "Moderation" button in the server header beside "Audit Log", shown only with `MODERATE_MEMBERS`, opening a content-area view (not the browser); no badge in beta, the open-report count is shown inside the view. Personal notices, restrictions, own reports and appeals: a "Safety" tab in Settings, linked from the Q4 notice banner. Back: the Moderation Center and Requests views reuse the existing `channelBeforeDm` return path (close or Escape returns to the channel the user came from).
+
 **Options and consequences:** Place Requests beside DMs, Moderation Center behind a permission-gated server entry and personal notices/appeals in a safety view; or use a new top-level navigation rail. The first changes familiar workflows less; the rail is more visible but has a larger navigation and reflow cost. Badge semantics (pending requests versus unread) also need an explicit choice.
 
-**Recommendation (not approved):** Use the existing shell and a pending-request count; approve destinations, back behavior and badge meaning together before B9-4.
+**Drafting recommendation (historical):** Use the existing shell and a pending-request count; approve destinations, back behavior and badge meaning together before B9-4.

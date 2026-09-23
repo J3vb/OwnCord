@@ -129,17 +129,18 @@ evidence. No milestone defers its accessibility acceptance to B9-26.
 
 - [ ] **Keyboard:** Tab/Shift+Tab, Enter/Space, Escape and applicable arrow keys
       reach and operate every action; pointer parity; no hover-only action.
-- [ ] **Screen reader:** approved native AT reads names, roles, values, errors
+- [ ] **Screen reader:** NVDA (Windows) and Orca (Linux) read names, roles, values, errors
       and relevant status once; no concealed/private/secret content in its tree.
 - [ ] **Focus:** visible indicator, logical order, dialog containment/restore,
       stable location through async update/removal, and a safe fallback opener.
-- [ ] **Contrast:** measure agreed text, controls, status and focus targets in
-      built-in/high-contrast themes and the Q8-approved custom-accent policy;
+- [ ] **Contrast:** measure text, controls, status and focus at the Q1 thresholds in
+      built-in/high-contrast themes, preset accents and the Q8 custom-accent fallback
+      (accent text/focus below 3:1 uses the theme default accent);
       information never depends on color alone.
 - [ ] **Reduced motion:** test both OS and app settings; no required animation,
       unwanted autoplay or motion-dependent feedback; preserve media controls.
-- [ ] **Zoom/reflow:** test Q1-approved text scaling and desktop zoom/reflow,
-      long English/expanded strings and smallest supported desktop window;
+- [ ] **Zoom/reflow:** test Q1 text scale 12–20 px with Large Font, OS zoom 200 %,
+      long English/expanded strings and the 940×500 minimum desktop window;
       no clipped or unreachable controls, lost content or focus off screen.
 
 Frontend automation plus manual native evidence is required: mocked Playwright
@@ -169,72 +170,96 @@ render path as a fallback; fail closed and record a blocker instead.
 
 ### Q1 — Accessibility acceptance contract
 
+**Decided 2026-09-23 by the owner:** adopt a WCAG 2.2 AA-oriented checklist as the B9 acceptance bar. Named assistive technologies: NVDA (current stable) on Windows 11 and Orca (current GNOME release) on Linux; one native recording per milestone journey on each. Thresholds: text contrast 4.5:1, large text / UI components / focus indicators 3:1 (WCAG 1.4.3, 1.4.11); visible, unobscured focus (2.4.7, 2.4.11); pointer targets at least 24×24 CSS px (2.5.8); text spacing (1.4.12); no content or function lost at the app text scale of 12–20 px with Large Font on, at OS zoom 200 %, and at the 940×500 minimum window (1.4.10 as applied to desktop); reduced motion honoured from both the OS setting and the in-app toggle. The repository owner is the named human reviewer; automated reports supplement, never replace, the manual checks. This is a bar for B9 acceptance, not a certification claim.
+
 **Options and consequences:** Adopt a documented WCAG 2.2 AA-oriented checklist with Windows NVDA and Linux Orca native checks, text scaling and desktop reflow; or specify an equivalent native-task checklist covering every roadmap property with explicit thresholds and AT coverage. The first provides familiar criteria; the second needs more owner review to establish equivalent coverage. Structural smoke alone is insufficient under either option.
 
-**Recommendation (not approved):** Adopt the broader checklist, name supported OS/AT versions and assign human reviewers before implementation. This is a proposed bar, not a claim of certification.
+**Drafting recommendation (historical):** Adopt the broader checklist, name supported OS/AT versions and assign human reviewers before implementation. This is a proposed bar, not a claim of certification.
 
 ### Q2 — Navigation and badge placement
 
+**Decided 2026-09-23 by the owner:** keep the existing shell; no new rail. Message Requests: a "Message Requests (N)" section at the top of DM mode, N = pending requests from `GET /api/v1/dm-requests`, kept live by the `dm_request` frame. Badge meaning: the DM header badge shows pending-request count separately from unread; request messages never add to unread or mention counts, never flash the taskbar and never raise a desktop notification before acceptance. Moderation Center: a "Moderation" button in the server header beside "Audit Log", shown only with `MODERATE_MEMBERS`, opening a content-area view (not the browser); no badge in beta, the open-report count is shown inside the view. Personal notices, restrictions, own reports and appeals: a "Safety" tab in Settings, linked from the Q4 notice banner. Back: the Moderation Center and Requests views reuse the existing `channelBeforeDm` return path (close or Escape returns to the channel the user came from).
+
 **Options and consequences:** Place Requests beside DMs, Moderation Center behind a permission-gated server entry and personal notices/appeals in a safety view; or use a new top-level navigation rail. The first changes familiar workflows less; the rail is more visible but has a larger navigation and reflow cost. Badge semantics (pending requests versus unread) also need an explicit choice.
 
-**Recommendation (not approved):** Use the existing shell and a pending-request count; approve destinations, back behavior and badge meaning together before B9-4.
+**Drafting recommendation (historical):** Use the existing shell and a pending-request count; approve destinations, back behavior and badge meaning together before B9-4.
 
 ### Q3 — External-content consent scope and persistence
 
+**Decided 2026-09-23 by the owner:** one consent choice per server profile, persisted across restarts. The first time a message would load external content on a given server, nothing is fetched; a dialog states in one sentence that previews and images are fetched from the viewer's machine to hosts chosen by message authors, and offers "Load automatically on this server" or "Ask each time". "Ask each time" is per-item click-to-load. The grant is keyed by server profile (not global), stored with the other client preferences, and is revoked by turning off the existing Text & Images toggles or by a "Reset external content consent" action in that tab. Message Request previews and NSFW channels stay separately gated and never inherit this grant. YouTube playback remains a separate explicit click, as today.
+
 **Options and consequences:** Require per-item activation without persistence; remember consent for this server/account session; or persist provider/server permission across restarts. Per-item is clearest but repetitive, session memory reduces prompts, persistent grants need a discoverable revocation/reset model and stronger lifecycle evidence. All options keep zero fetch before the applicable acknowledgement; NSFW and request trust remain separate.
 
-**Recommendation (not approved):** Start with explicit per-item activation and no durable grants; offer broader grants only after the owner chooses their exact scope. Playback remains a separate deliberate action.
+**Drafting recommendation (historical):** Start with explicit per-item activation and no durable grants; offer broader grants only after the owner chooses their exact scope. Playback remains a separate deliberate action.
 
 ### Q4 — Warning and timeout presentation
 
+**Decided 2026-09-23 by the owner:** persistent notice, never a blocking modal. Unacknowledged warnings render as a top-of-app banner (the existing banner slot pattern) with the reason, the date, and one "Acknowledge" button that calls `POST /api/v1/users/me/notices/{id}/ack`; the banner has no other dismiss and survives navigation until the server confirms the acknowledgement. Multiple warnings stack oldest first. Timeouts are not banners: the composer, reaction controls and voice join show the disabled state inline with the server-supplied expiry ("You can't send messages until 14:05"); a local countdown is advisory and re-validates on the server's refusal codes. A one-time toast announces a newly received warning or timeout for screen readers.
+
 **Options and consequences:** Use a persistent dismiss-resistant notice with an explicit Acknowledge action; or a blocking modal before other navigation. The former preserves access to recovery and help; the latter is harder to miss but interrupts the whole app and has stronger focus/escape obligations.
 
-**Recommendation (not approved):** Use a persistent notice with explicit acknowledgement; keep timeout state adjacent to disabled actions. The server acknowledgement requirement does not itself settle whether the UI blocks navigation.
+**Drafting recommendation (historical):** Use a persistent notice with explicit acknowledgement; keep timeout state adjacent to disabled actions. The server acknowledgement requirement does not itself settle whether the UI blocks navigation.
 
 ### Q5 — Effective voice moderation affordance contract
 
+**Decided 2026-09-23 by the owner:** option (a). A separate small server PR (protocol-change skill) adds one boolean, `can_moderate_voice`, to each channel object in `ready` and in the per-user `channel_create` refresh, beside `can_send`. It is computed by the existing `permissions.CanModerateVoice` for the caller in that channel (effective READ | MUTE_MEMBERS after both override layers). It is refreshed on the same events that refresh `can_send` today, plus a per-user `channel_update` push when a role or user override on that channel changes. The client shows the four voice-moderation actions only when `can_moderate_voice` is true; target rank, timeouts and destination capacity remain server-side refusals and are surfaced as such. No override data is exposed to members; no server authorization is rewritten.
+
 **Options and consequences:** Provide a narrow server-computed capability projection for the caller in each channel; or expose sufficient authorized overrides for a complete client derivation. The first keeps policy canonical and payload small; the second duplicates more permission logic and data. Role-only controls with eventual server refusal do not close SEC-02's effective-permission UI requirement.
 
-**Recommendation (not approved):** Approve a minimal server-derived projection as a separately planned prerequisite PR; settle its payload, refresh semantics and owner before B9-14. Do not silently widen B9-14 into a server authorization rewrite.
+**Drafting recommendation (historical):** Approve a minimal server-derived projection as a separately planned prerequisite PR; settle its payload, refresh semantics and owner before B9-14. Do not silently widen B9-14 into a server authorization rewrite.
 
 ### Q6 — Restart-safe recipient sanctions and appeal eligibility
 
+**Decided 2026-09-23 by the owner:** option (a), as a separate B5 contract-completion PR. Add `GET /api/v1/users/me/moderation` (session auth) returning the caller's own ledger rows of kind warning, timeout, removal, and ban where the ban has lapsed or been reversed, newest first, bounded by the existing retention sweep. Each row: `id` (the ledger id appeals use), `kind`, `reason`, `created_at`, `expires_at`, `lifted_at`, `acknowledged_at`, `appealable` (computed by the same rules `Submit` applies: kind eligible, not already appealed), and `appeal` (`{id, state}` or null). Excluded by construction: actor, reporter, report link, evidence, internal notes. Keep `ready.notices` as the fast path for unacknowledged warnings. Currently banned users remain out of band under B5 policy. B9-15/16 stay blocked for complete closure until this contract is accepted.
+
 **Options and consequences:** Add a member-safe own-action/restriction read with ids, reasons, expiry and eligibility; or use only existing live frames and ready warnings. The read needs a narrowly scoped server contract PR; live-only UX cannot recover removal/timeout action ids and all eligible history after restart and leaves BPR-072/073 incomplete. Currently banned users remain out-of-band under the existing B5 policy in either case.
 
-**Recommendation (not approved):** Approve a separate B5 contract-completion PR for own-action/restriction discovery, with a DTO excluding reporter/evidence/internal notes. B9-15/16 remain blocked for complete closure until its exact contract is accepted.
+**Drafting recommendation (historical):** Approve a separate B5 contract-completion PR for own-action/restriction discovery, with a DTO excluding reporter/evidence/internal notes. B9-15/16 remain blocked for complete closure until its exact contract is accepted.
 
 ### Q7 — Translation boundary beyond renderer text
 
+**Decided 2026-09-23 by the owner:** option (a), bounded as follows. In scope: every app-authored string in `Client/src` (labels, accessible names, errors, toasts, banners, notification titles and bodies, date/number formatting) through the B9-3 catalog seam with typed parameters and plurals. Rust: only the user-visible native surfaces, moved into one `Client/src-tauri/src/text.rs` constant table with an extraction test; today that is the tray menu (`tray.rs`), the startup failure dialog (`lib.rs`) and the certificate/TOFU messages (`tofu.rs`, `ws_proxy.rs`). Rust strings returned to the renderer as errors are classified as codes: the renderer maps them to catalog text and shows the raw text only as a fallback detail. Server errors: the client maps the `error` code (`TIMED_OUT`, `NSFW_ACKNOWLEDGEMENT_REQUIRED`, `BANNED`, `RATE_LIMITED`, ...) to catalog text and shows the server `message` only when no mapping exists. Explicitly excluded with a written reason: OS-owned dialogs, user content, server-authored data (names, topics, reasons), and the separately served admin panel. Catalogs are feature-owned after B9-3.
+
 **Options and consequences:** Cover all app-authored desktop text, including native menus/notifications/errors, while treating OS/user/server data as classified inputs; or limit extraction to TypeScript. TypeScript-only is smaller but leaves desktop-owned text outside BPR-064; including the server admin panel would further expand this client phase.
 
-**Recommendation (not approved):** Cover renderer and app-authored native desktop text, inventory visible server errors with a client mapping where appropriate, explicitly exclude OS/user data and the separately served admin panel. Confirm catalog ownership and those exclusions.
+**Drafting recommendation (historical):** Cover renderer and app-authored native desktop text, inventory visible server errors with a client mapping where appropriate, explicitly exclude OS/user data and the separately served admin panel. Confirm catalog ownership and those exclusions.
 
 ### Q8 — Theme and custom-accent accessibility policy
 
+**Decided 2026-09-23 by the owner:** option (a), scoped. Qualify the four built-in themes (dark, neon-glow, midnight, light) and the High Contrast toggle at the Q1 thresholds, and the ten preset accent swatches with them. A custom accent is honoured for fills and decoration. Three tokens are derived from it at apply time: `--on-accent` (white or near-black by WCAG relative luminance, used for all text on accent surfaces), `--accent-hover` and `--accent-active`. Where the accent itself is the text or the focus indicator and its contrast against the theme background is below 3:1, those uses fall back to the theme's default accent; fills keep the user's colour. One line under the accent input discloses this: "Custom colours may reduce readability; text and focus indicators fall back to a readable colour when needed, and High Contrast restores tested colours."
+
 **Options and consequences:** Qualify every built-in theme and provide a contrast-safe fallback for arbitrary custom accents; or require/warn users to adjust custom themes themselves. Fallback preserves readable controls but can alter chosen colors; warnings preserve exact choices but cannot establish an all-settings contrast claim.
 
-**Recommendation (not approved):** Qualify built-ins and high-contrast mode, retain identity, and approve a safe fallback for essential text/focus indicators. The owner must decide how custom accents are constrained or disclosed.
+**Drafting recommendation (historical):** Qualify built-ins and high-contrast mode, retain identity, and approve a safe fallback for essential text/focus indicators. The owner must decide how custom accents are constrained or disclosed.
 
 ### Q9 — B9 start while upstream acceptance is open
 
+**Decided 2026-09-23 by the owner:** written amendment, narrow. B9-0 (evidence and decisions), B9-1 (mechanical CSS split), B9-2 (shared accessibility/tokens) and B9-3 (English text seam) may start now, in that serialized order, because none touches a B5 contract, native code or desktop-qualification evidence. B9-4 onward keeps the gate order: B7-17/HP-7 accepted, the B5 moderation-evidence consent follow-up accepted, and B7-10/B7-11 merged before any B9 change to MainPage, dispatcher, stores or `api.ts`. Residual risks accepted with this amendment: (1) rebase cost if B7-5/B7-9/B7-10 touch the same style or shell files; (2) B9-1's output-equality evidence must be re-run at the actual merge base; (3) nothing here authorizes moderation-evidence UI (B9-11) before its contract is accepted, and nothing waives HP-6/HP-7. This is not inferred from B7's HP-6 exception; it is its own dated decision.
+
 **Options and consequences:** Keep all product implementation behind the roadmap entry gates; or approve a written amendment allowing specific non-boundary work before B7/B5 closure. Strict ordering waits for evidence; a narrow exception could allow CSS/text work but must list residual risks and cannot authorize moderation evidence before its contract is accepted.
 
-**Recommendation (not approved):** Keep current gate order. This planning PR and non-mutating evidence preparation are allowed now; do not infer a waiver from B7's HP-6 exception.
+**Drafting recommendation (historical):** Keep current gate order. This planning PR and non-mutating evidence preparation are allowed now; do not infer a waiver from B7's HP-6 exception.
 
 ### Q10 — Timeout duration control
 
+**Decided 2026-09-23 by the owner:** option (a). One duration input (a number with a minutes/hours/days unit selector), validated client-side to the server's 1 minute–28 days and sent as `duration_seconds`; server validation remains authoritative and its `BAD_REQUEST` message is shown on refusal. A "Lift timeout" action calls the existing untimeout route. No presets in beta.
+
 **Options and consequences:** Use a validated duration input within the existing one-minute to 28-day bounds; or add owner-chosen presets plus custom input. The former avoids inventing moderation policy; presets are faster but imply preferred sanction lengths.
 
-**Recommendation (not approved):** Use a validated duration input initially; add presets only if the owner chooses their labels and values.
+**Drafting recommendation (historical):** Use a validated duration input initially; add presets only if the owner chooses their labels and values.
 
 ### Q11 — BPR-051 comprehension-read method at HP-9
 
+**Decided 2026-09-23 by the owner:** option (a). Readers: two desktop users who are not contributors to OwnCord, recruited by the owner (roles, not names, are recorded). Journey on the release candidate: install and sign up (retention summary at sign-up), open Settings > Account (retention and permanent-deletion text), Settings > Logs (local export note), and read the "short answer" section of `docs/trust-model.md`. Questions, answered unprompted in their own words: (1) Who can read your messages and files on this server? (2) What does the "End-to-end encrypted" badge on voice cover, and what does it not cover? (3) What happens to your messages when you delete your account, and can a backup bring them back? (4) What is in the support export and where does it go? Pass criterion: both readers answer all four correctly; one miss is a documentation defect to fix and re-read before HP-10. Results are recorded in the HP-9 scorecard against the RC SHA. This obligation stays in beta even though the longer documentation rows moved.
+
 **Options and consequences:** Have one or more non-developer desktop users explain the operator trust, text/file access, deletion/backup and local-export disclosures after following the journey; or rely only on technical review. The first satisfies the stated comprehension purpose; technical review alone leaves that B10 item unproven.
 
-**Recommendation (not approved):** Owner names the reader(s), questions and pass criterion at HP-9, records safe results against the RC and keeps this B10 obligation even if longer documentation moves later.
+**Drafting recommendation (historical):** Owner names the reader(s), questions and pass criterion at HP-9, records safe results against the RC and keeps this B10 obligation even if longer documentation moves later.
 
 ### Q12 — Confirm or revise the shortened B10 cut list
 
+**Decided 2026-09-23 by the owner (to be recorded at HP-9):** confirm the 2026-09-18 table row by row, with two additions that do not change any verdict. First, give the "later beta-to-stable gate" a phase id now, proposed B11, so items 2, 3, 13, 14 and the moved half of item 11 have an owner row in the roadmap instead of "no phase id assigned yet". Second, at HP-9 re-examine only item 11's moderation half with the shipped B9 features in hand: if the Moderation Center, appeals and the out-of-band ban-appeal route ship in the beta, a one-page user guide for them stays in beta; accessibility, support, feedback and contribution documentation move as decided. Retained and unchanged: the RC matrix (1), alpha upgrade/rollback (4), protocol re-run (5), desktop/server/Docker matrix (6, 7), one capacity comparison (8), zero open P0/P1 and advisories (9), packaging/provenance/signing/update checks (10), safe release notes (12), item 15 per Q11, and HP-10.
+
 **Options and consequences:** Confirm the 2026-09-18 keep/reduce/move table; or revise named rows at HP-9. Confirmation moves thirty-run and fourteen-day-soak evidence and the listed documentation to a later beta-to-stable gate; revision changes release work and needs an updated dated roadmap decision. Neither choice waives RC checks, upgrade/rollback, advisory closure or HP-10.
 
-**Recommendation (not approved):** Review the table row by row at HP-9 and record the owner's decision and later-gate ownership; do not pre-approve it in B9 planning.
+**Drafting recommendation (historical):** Review the table row by row at HP-9 and record the owner's decision and later-gate ownership; do not pre-approve it in B9 planning.
