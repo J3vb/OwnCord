@@ -16,6 +16,12 @@ export default defineConfig({
   // finding to read, not to retry past.
   retries: 0,
   globalTimeout: 90 * 60 * 1000,
+  // The test sets its own timeout; this one bounds fixture teardown, which
+  // attaches an hour of server log.
+  timeout: 10 * 60 * 1000,
+  // A trace of an hour-long run is about a gigabyte and outlives the teardown;
+  // the attached sample series and the screenshot are the diagnostics.
+  use: { ...fullstack.use, trace: "off" },
   reporter: [
     ["list"],
     ["html", { open: "never", outputFolder: "playwright-report/soak" }],
