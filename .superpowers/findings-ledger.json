@@ -1,5 +1,5 @@
 {
-  "nextId": 455,
+  "nextId": 457,
   "findings": [
     {
       "id": "OC-0001",
@@ -10530,6 +10530,42 @@
       "lens": "run-the-thing",
       "finder": "fm/oc-0445-fable",
       "suggestedFix": "Measure before touching: one checkout per send (UpdateReadState inside the message transaction, ignoring its error to keep it best-effort) halves the hops; batching writePump frames or lowering per-frame TLS cost shortens each hop. Neither is justified by a real-population shape yet."
+    },
+    {
+      "id": "OC-0455",
+      "title": "A remote camera freezes for good after the SFU pauses and resumes it",
+      "file": "Client/src/features/voice/roomLifecycle.ts",
+      "line": 161,
+      "severity": "medium",
+      "why": "The Room was built with adaptiveStream on (every quality but source), but the video grid plays each remote camera from its own MediaStream and never calls RemoteVideoTrack.attach(), so LiveKit observes no element. RemoteVideoTrack.setStreamState(Active) re-evaluates visibility on every server StreamStateUpdate, which the SFU sends when it resumes a video it paused for bandwidth; with no visible element LiveKit emits VisibilityChanged(false) and the publication sends disabled: true, so the SFU stops forwarding that camera for the rest of the subscription. The tile freezes on its last frame while audio keeps playing. CI run 35838844777 (media.spec.ts wrong-key positive control) shows it: after the rejoin the peer decoded exactly one video frame in 30 s while its audio energy and samples kept rising and no decrypt error was logged. It needs a congested link, so a loopback run does not reproduce it.",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "ci-flake-media-e2e",
+      "lens": "fullstack-e2e-flake",
+      "finder": "media-e2e-flake",
+      "fix": {
+        "commit": "59cc8825",
+        "test": "Client/tests/unit/livekit-session.test.ts",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0456",
+      "title": "livekit-client throws uncaught when an E2EE enable ack names a peer who already left",
+      "file": "Client/patches/livekit-client+2.22.3.patch",
+      "line": 1,
+      "severity": "low",
+      "why": "livekit-client 2.22.3 E2EEManager.onWorkerMessage handles the worker's ack of each enable message by looking the participant up, and throws TypeError(\"couldn't set encryption status, participant not found...\") when it is gone. A peer can leave between the post and the ack: a quick leave right after publishing, or the local room full-reconnecting (a server leave with STATE_MISMATCH) and re-posting enable for every peer while one of them leaves. The throw is an uncaught error from a worker message handler that nothing in the app can catch; no state is lost, but it surfaces as a page error. Seen twice in the long-session soak (CI runs 35846526468 and 35857549279), on the peer that holds the room open. Fixed with a patch-package patch that skips the status event for a missing participant.",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "ci-flake-media-e2e",
+      "lens": "fullstack-e2e-flake",
+      "finder": "media-e2e-flake",
+      "fix": {
+        "commit": "1a6748d6",
+        "test": "Client/tests/unit/livekit-e2ee-enable-ack.test.ts",
+        "revertProof": "pass"
+      }
     }
   ]
 }
