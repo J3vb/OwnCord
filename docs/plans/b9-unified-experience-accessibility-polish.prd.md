@@ -45,11 +45,11 @@ results (`Client/src/platform/contracts/externalContent.ts:18-64`,
 `Client/src/platform/desktop/externalContent.ts:55-67`). These are foundations
 to consume and preserve, not new features to rebuild in B9.
 
-The client NSFW helper still records acknowledgement in sessionStorage and
-describes the server as label-only, while B5 has authenticated acknowledgement
-routes and a caller-specific ready field (`Client/src/lib/nsfw-gate.ts:1-15`,
-`Client/src/lib/nsfw-gate.ts:50-65`, `Server/api/nsfw_handler.go:20-25`,
-`Server/ws/serve_ready.go:228-237`). That is code/document drift requiring
+At planning, the client NSFW helper (`Client/src/lib/nsfw-gate.ts`, since
+removed by B9-7) recorded acknowledgement in sessionStorage and described the
+server as label-only, while B5 has authenticated acknowledgement routes and a
+caller-specific ready field (`Server/api/nsfw_handler.go:20-25`,
+`Server/ws/serve_ready.go:228-237`). That code/document drift was B9-7's
 contract integration. Likewise, literal English remains in settings and
 dynamic sidebar labels (`Client/src/components/settings/AccessibilityTab.ts:10-64`,
 `Client/src/pages/main-page/SidebarDmSection.ts:130-133`), and the sidebar
