@@ -1,6 +1,6 @@
 # Plan: B9-5 — Show the Message Requests inbox and safe text preview
 
-**Status:** IMPLEMENTED — native AT recordings and OS-zoom check pending owner — 2026-09-23 on branch `fm/b9-5-impl` from `dev` `166d71e4`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — native AT recordings and OS-zoom check pending owner — 2026-09-23 on branch `fm/b9-5-impl` from `dev` `166d71e4`, carried to `fm/b9-5-impl-v2` with `dev` `5682b410` merged in; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-5 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-5-message-requests-inbox`; branch from current `dev`, PR to `dev` only.
@@ -193,17 +193,21 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   - `store.ts` is the account-scoped inbox and `pendingRequestCount`.
   - `wsHandlers.ts` holds the inbox refetch (on `ready` and on a resumed
     `auth_ok`) and the `dm_request` handler.
-  - `Inbox.ts` is the text-only view.
+  - `view.ts` is the destination's builder. It loads the text-only view in
+    `Inbox.ts` on first open, as B9-15's Safety tab does, and closes the view
+    if that chunk cannot load.
   - `inbox.test.ts` is the unit suite.
-- `destinations.ts` registers `requests: { build: buildInbox, pending: pendingRequestCount }`
+- `destinations.ts` registers `requests: { build: buildInbox, pending: pendingRequestCount }`, where `buildInbox` comes from `view.ts`
   (a one-line edit, the B9-4 plug-in rule). That turns on "Message Requests
   (N)" at the top of DM mode and the DM header's pending badge.
 - Single-writer files, each a minimal edit: `lib/api.ts` (`listDmRequests`),
   `lib/types.ts` (the wire types and the `dm_request` union entry) and
   `lib/dispatcher.ts` (one `ws.on`, one call in the `ready` order after
-  blocks, and one call in the `auth_ok` handler on a resume). MainPage, SidebarArea, `ui.store` and the
+  blocks, and one call in the `auth_ok` handler on a resume). MainPage, `ui.store` and the
   navigator are unchanged. SidebarDmSection only turns the DM header's
-  pending badge into a button into DM mode (see Implementation decisions).
+  pending badge into a button into DM mode, and SidebarArea only moves focus
+  into DM mode when that switch came from inside the sidebar, so the badge
+  never drops focus to `<body>` (see Implementation decisions).
 - Files beyond the table: `features/connection/dispatchContext.ts` (adds
   `listDmRequests` to `DispatchApi`, as in the dispatcher's signature),
   `i18n/messageRequests.ts` (the feature's catalog), `styles/app/chat-area.css`
@@ -243,15 +247,21 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   enters DM mode, where "Message Requests (N)" sits. Without it, a user with
   no accepted DMs has no DM row and no "View all" to click, so a
   first-contact request could not be opened (live test fix, 2026-09-23; unit
-  test "opens DM mode from the badge for a user with no DMs").
+  test "opens DM mode from the badge for a user with no DMs"). Pressing it
+  from the keyboard lands focus in DM mode (review fix, 2026-09-23).
 - **States.** The status region reads loading, empty, unavailable (the GET
   failed or the server is older) or reconnecting. It speaks only when its
   text changes. It is never `hidden`: when silent it is empty and taken out
   of the layout by CSS, so it stays in the accessibility tree and its next
   change is announced (review fix, 2026-09-23). B9-6 owns decisions, and with them a retry path.
-- **Bundle.** The eager import stays within budget, so no lazy chunk:
-  MainPage went from 58,546 B to 59,256 B (budget 60,000 B), and the startup
-  closure from 87,349 B to 88,073 B (budget 91,000 B).
+- **Bundle.** At base `166d71e4` the eager inbox fit. After B9-15 merged,
+  dev `5682b410` left 55 B of MainPage headroom (59,945 B of 60,000 B) and
+  711 B in the startup closure (90,289 B of 91,000 B). With the eager inbox,
+  the merged branch measured 60,642 B and 91,017 B, over both budgets. The
+  inbox view now loads lazily. That brings startup to 90,938 B (it fits) and
+  MainPage to 60,073 B, still 73 B over. The owner raised the MainPage budget
+  from 60,000 B to 60,512 B for B9-5 (firstmate relay, 2026-09-23). The reason
+  is recorded in `Client/bundle-budgets.json`.
 
 ### Evidence
 
