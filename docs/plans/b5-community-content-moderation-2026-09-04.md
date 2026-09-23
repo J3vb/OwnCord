@@ -10,7 +10,9 @@ merged; B5-12's initial reconciliation is merged.** B5-10 is being finished
 and is not assessed as complete by this audit. HP-5 was accepted 2026-09-06
 at #1547, with the signature record completed by #1550; it is not awaiting a
 new signature. The existing exit gate remains open for B5-10, the acceptance
-follow-ups below, final reconciliation and the required exit evidence.
+follow-ups below, final reconciliation and the required exit evidence. The
+moderation-evidence consent follow-up (Conditions 3 and 4) was accepted by the
+owner on 2026-09-23 ([#1735](https://github.com/J3vb/OwnCord/pull/1735)).
 **All fourteen decisions were settled 2026-09-04** (the owner delegated them;
 thirteen as drafted, decision 7 strengthened). Private advisory disposition
 is still an exit obligation; this source audit does not certify its closure.
@@ -2945,7 +2947,13 @@ audit implements none of them, and it does not judge B5-10's unfinished work.
   authorized and refused cases. This is the existing server-side consent
   contract and must close before the B9 interface is built.
 
-  **Evidence, 2026-09-23 — ready for owner acceptance, not accepted.**
+  **Accepted by the owner, 2026-09-23.** Conditions 3 and 4's consent
+  follow-up is accepted on the evidence below, merged as
+  [#1735](https://github.com/J3vb/OwnCord/pull/1735). This accepts this
+  follow-up only: it does not close Condition 6 (B5-11's push follow-up),
+  B5-12's final reconciliation, or the B5 exit.
+
+  **Evidence, 2026-09-23.**
   `ReportService.Get` (`Server/service/report.go`, `evidenceWithheld`), the
   only read of the snapshot, applies decision 13 to it: a labelled source
   channel's evidence reaches a caller only with their own acknowledgement,
