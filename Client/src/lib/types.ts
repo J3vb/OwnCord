@@ -648,6 +648,38 @@ export interface DmChannelClosePayload {
   readonly channel_id: number;
 }
 
+/** A Message Request's sender (B5-6). `avatar` may be a stranger-controlled URL: never fetch it. */
+export interface DmRequestSender {
+  readonly id: number;
+  readonly username: string;
+  readonly display_name: string;
+  readonly avatar: string;
+}
+
+/** The held first message, as plain text. Null when it has no text. */
+export interface DmRequestPreview {
+  readonly message_id: number;
+  readonly content: string;
+  readonly timestamp: string;
+}
+
+/** One pending entry of GET /api/v1/dm-requests. */
+export interface DmRequestListItem {
+  readonly id: number;
+  readonly channel_id: number;
+  readonly sender: DmRequestSender;
+  readonly preview: DmRequestPreview | null;
+  readonly created_at: string;
+}
+
+export type DmRequestState = "pending" | "accepted" | "ignored" | "deleted" | "blocked";
+
+/** dm_request: sent to the recipient on creation (preview set) and on every transition (preview null). */
+export interface DmRequestPayload extends DmRequestListItem {
+  readonly state: DmRequestState;
+  readonly decided_at: string | null;
+}
+
 export interface ServerRestartPayload {
   readonly reason: string;
   readonly delay_seconds: number;
@@ -813,6 +845,7 @@ export type ServerMessage =
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
   | (WsEnvelope<DmChannelClosePayload> & { readonly type: "dm_channel_close" })
+  | (WsEnvelope<DmRequestPayload> & { readonly type: "dm_request" })
   | (WsEnvelope<CallSignalPayload> & { readonly type: "call_incoming" })
   | (WsEnvelope<CallSignalPayload> & { readonly type: "call_declined" })
   | (WsEnvelope<ServerRestartPayload> & { readonly type: "server_restart" })
@@ -1148,6 +1181,11 @@ export interface CreateDmResponse {
 /** POST /api/v1/dms/group and PATCH /api/v1/dms/{id} both answer with the
  *  same DM summary shape the list and the ready payload use. */
 export type GroupDmResponse = DmChannelPayload;
+
+/** GET /api/v1/dm-requests response: the caller's pending inbox, newest first. */
+export interface DmRequestListResponse {
+  readonly requests: readonly DmRequestListItem[];
+}
 
 /** GET /api/v1/blocks response. */
 export interface BlockedUsersResponse {

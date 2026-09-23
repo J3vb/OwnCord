@@ -57,6 +57,7 @@ import {
   handleDmChannelClose,
   handleDmChannelOpen,
 } from "../features/direct-messages/wsHandlers";
+import { applyReadyDmRequests, handleDmRequest } from "../features/message-requests/wsHandlers";
 import {
   handleVoiceConfig,
   handleVoiceDisconnected,
@@ -101,7 +102,12 @@ export function wireDispatcher(
     Partial<
       Pick<
         ApiClient,
-        "updateProfile" | "getConfig" | "listEmoji" | "getMessages" | "getMessagesAround"
+        | "updateProfile"
+        | "getConfig"
+        | "listEmoji"
+        | "getMessages"
+        | "getMessagesAround"
+        | "listDmRequests"
       >
     >,
 ): DispatcherCleanup {
@@ -130,7 +136,7 @@ export function wireDispatcher(
       // setVoiceStates overwrites it) -> channels/roles/members -> voice
       // restate + reconcile -> identity publish -> active channel -> message
       // resync (reads the active channel just chosen) -> DMs -> mark read ->
-      // blocks -> emoji.
+      // blocks -> Message Requests -> emoji.
       activateReadyPendingMessages(api, payload);
       const applyReadyVoice = snapshotReadyVoice();
       applyReadyChannels(payload);
@@ -142,6 +148,7 @@ export function wireDispatcher(
       applyReadyDms(payload);
       markReadyActiveChannelRead(readyActive);
       applyReadyBlocks(api);
+      applyReadyDmRequests(api);
       applyReadyEmoji(api);
 
       log.info("Ready payload applied", {
@@ -158,6 +165,8 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.DM_CHANNEL_OPEN, handleDmChannelOpen));
 
   unsubs.push(ws.on(S.DM_CHANNEL_CLOSE, handleDmChannelClose));
+
+  unsubs.push(ws.on(S.DM_REQUEST, handleDmRequest));
 
   // ── Chat Messages ─────────────────────────────────────
 

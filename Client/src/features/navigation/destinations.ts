@@ -22,6 +22,9 @@
  * action behind a destination, and nothing here fetches to decide it.
  */
 
+import { buildInbox } from "../message-requests/Inbox";
+import { pendingRequestCount } from "../message-requests/store";
+
 /** A destination that opens in the content area, in place of the chat column. */
 export type ContentViewId = "requests" | "moderation";
 
@@ -56,4 +59,6 @@ export interface NavigationDestinations {
 }
 
 /** The destinations this build ships. */
-export const NAVIGATION_DESTINATIONS: NavigationDestinations = {};
+export const NAVIGATION_DESTINATIONS: NavigationDestinations = {
+  requests: { build: buildInbox, pending: pendingRequestCount },
+};

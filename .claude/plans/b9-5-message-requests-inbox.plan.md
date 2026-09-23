@@ -1,6 +1,6 @@
 # Plan: B9-5 — Show the Message Requests inbox and safe text preview
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-5-impl` from `dev` `166d71e4`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-5 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-5-message-requests-inbox`; branch from current `dev`, PR to `dev` only.
@@ -37,6 +37,19 @@ at the actual implementation base; record drift before coding.
 | 1   | B5 exposes an authenticated pending inbox with sender profile, optional text preview and no media bytes.                         | `Server/api/dm_request_handler.go:20-28`; `Server/api/dm_request_handler.go:44-99` |
 | 2   | The generated event name exists, while dispatcher currently wires DM channel open/close without a request handler in that group. | `Client/src/lib/protocolTypes.ts:46-60`; `Client/src/lib/dispatcher.ts:154-160`    |
 | 3   | The current DM sidebar section renders conversation rows and a View all messages button.                                         | `Client/src/pages/main-page/SidebarDmSection.ts:37-74`                             |
+
+### Drift at the implementation base (2026-09-23)
+
+Re-read at `166d71e44ce5dfde6455e3f108ce88a8def9c88f` (B9-4 merged). Rows 1 and
+2 hold: `git log 0beee8e4..166d71e4` does not touch
+`Server/api/dm_request_handler.go`, `protocolTypes.ts` or `dispatcher.ts`.
+Row 3 drifted: B9-4 changed `SidebarDmSection.ts`. The factory now starts at
+line 40, and it takes a `pendingRequests` count that it badges on the DM
+header, apart from unread. The "Message Requests (N)" entry at the top of DM
+mode is in `SidebarArea.ts`. Both render only once
+`NAVIGATION_DESTINATIONS.requests` exists, so this milestone registers that
+entry and edits neither file. The entry preconditions hold: B9-4 is merged,
+and Q1 and Q2 were decided on 2026-09-23.
 
 ## Patterns to mirror
 
@@ -169,3 +182,118 @@ render path as a fallback; fail closed and record a blocker instead.
 ## Open questions
 
 No new owner decision is introduced by this milestone. The PRD's unresolved entry decisions still apply; stop if implementation would require a new product, UX or scope choice.
+
+## Implementation record (2026-09-23)
+
+### What shipped
+
+- `Client/src/features/message-requests/`:
+  - `api.ts` maps the B5-6 wire shape to the inbox model and drops the
+    sender's `avatar` there, so no later code can load it.
+  - `store.ts` is the account-scoped inbox and `pendingRequestCount`.
+  - `wsHandlers.ts` holds the `ready` refetch and the `dm_request` handler.
+  - `Inbox.ts` is the text-only view.
+  - `inbox.test.ts` is the unit suite.
+- `destinations.ts` registers `requests: { build: buildInbox, pending: pendingRequestCount }`
+  (a one-line edit, the B9-4 plug-in rule). That turns on "Message Requests
+  (N)" at the top of DM mode and the DM header's pending badge.
+- Single-writer files, each a minimal edit: `lib/api.ts` (`listDmRequests`),
+  `lib/types.ts` (the wire types and the `dm_request` union entry) and
+  `lib/dispatcher.ts` (one `ws.on`, plus one call in the `ready` order after
+  blocks). MainPage, SidebarArea, SidebarDmSection, `ui.store` and the
+  navigator are unchanged.
+- Files beyond the table: `features/connection/dispatchContext.ts` (adds
+  `listDmRequests` to `DispatchApi`, as in the dispatcher's signature),
+  `i18n/messageRequests.ts` (the feature's catalog), `styles/app/chat-area.css`
+  (the inbox rules, in the fragment that owns the content view; no import order
+  change), `tests/e2e/b9-message-requests.spec.ts`, and
+  `tests/e2e/b9-navigation.spec.ts`. B9-4's absence check there covered the
+  Requests entry, which now ships by design. It keeps covering Moderation and
+  Safety, and a zero count still shows no badge.
+
+### Implementation decisions
+
+- **Reconciliation.** Every `ready` fetches `GET /api/v1/dm-requests`, since
+  `dm_request` is unsequenced and never replayed. The newest snapshot wins
+  (`snapshotSeq`). A frame that lands while a snapshot is in flight keeps its
+  word for that id (`touched` rev), so a request decided mid-fetch is not
+  brought back, and a request that arrived mid-fetch is not dropped. A
+  `pending` frame adds a request. Any other state (accepted, ignored,
+  deleted, blocked) removes it.
+- **Session scope.** `onAuthCleared` empties the store, and the reset keeps
+  `snapshotSeq` rising. A snapshot from the previous account therefore cannot
+  land, even after the next account's first fetch has started. The API
+  client's session scope also rejects it (AbortError, which the handler
+  ignores).
+- **Safe preview.** Every field is text (`textContent`). The view uses no
+  message renderer, avatar, link, embed, attachment, emoji or mention
+  lookup, and it opens no request channel. A null preview reads "This message
+  has no text to preview.", and an erased sender reads "Unknown user".
+- **Q2 badge meaning.** The count is the store's own. Requests never enter
+  `dmStore`/`channelsStore`, so they add nothing to unread or mentions, and
+  they trigger no notification or taskbar flash.
+- **States.** The status region reads loading, empty, unavailable (the GET
+  failed or the server is older) or reconnecting. It speaks only when its
+  text changes. B9-6 owns decisions, and with them a retry path.
+- **Bundle.** The eager import stays within budget, so no lazy chunk:
+  MainPage went from 58,546 B to 59,256 B (budget 60,000 B), and the startup
+  closure from 87,349 B to 88,073 B (budget 91,000 B).
+
+### Evidence
+
+Implementation on `fm/b9-5-impl` from base `166d71e4`: Node 26.9.0, vitest
+4.1.11, Playwright Chromium, Linux. The e2e runs used a private Vite server on a
+free port with no global teardown, because the machine is shared.
+
+| Check                                                                                                                                                                                                                                                         | Result                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Affected unit files before the change (`src/features`, `main-page`, `sidebar-area`, `ui-strings`, `dispatcher`, `sidebar-dm-section`)                                                                                                                         | 35 files, 734 passed                     |
+| `src/features/message-requests/inbox.test.ts`                                                                                                                                                                                                                 | 17 passed                                |
+| `npx vitest run --maxWorkers=4` (whole client)                                                                                                                                                                                                                | 6,401 passed, 149 expected-fail (exit 0) |
+| `typecheck`, `typecheck:build`, `typecheck:e2e`, `lint` (oxlint, cycles, eslint), Tauri version check                                                                                                                                                         | clean                                    |
+| `build:budget` + `check:budgets`                                                                                                                                                                                                                              | all ok (figures above)                   |
+| Playwright: `b9-message-requests` (journey, live/reconnect, contrast in 4 themes × High Contrast, 940×500 at 20 px Large Font)                                                                                                                                | 4 passed                                 |
+| Playwright regression: `b9-navigation`, `main-layout`, `profile-switch`, `a11y-smoke`, `sidebar-header`, `settings-overlay`, `dm-system`, `b9-primitives`, `b9-text-expansion`, `logout-flow`, `channel-sidebar`, `reconnection`, `sidebar-menus`, `dm-calls` | 109 passed (with the B9-5 spec)          |
+
+**Failing controls.** Each guard below was removed in turn and its suite
+re-run, and every one failed. Each was restored before commit.
+
+- `inbox.test.ts`: the latest-snapshot guard; the frame-over-snapshot rev
+  guard; the sign-out reset; `snapshotSeq` rising across a reset; dropping the
+  avatar at the adapter; the text-only preview (swapped for `innerHTML`); the
+  view's unsubscribe on abort; the status region speaking once; the dispatcher
+  registration; and the quiet cancelled fetch.
+- `b9-message-requests.spec.ts`: an `innerHTML` preview (caught by the
+  plain-text and zero-load assertions) and removing the `ready` refetch (the
+  reconnect no longer restores the server's inbox).
+
+### Accessibility (Q1)
+
+- **Keyboard:** the entry is a `<button>`, and Enter opens it. Tab order is
+  heading, Close, then the request list. The list scrolls and is focusable
+  (`tabindex="0"`, named "Pending message requests"). Escape and Close go back
+  to the channel the user came from (e2e). No action is hover-only, and the
+  inbox has no other controls (decisions are B9-6).
+- **Screen reader:** the view is a `region` named by its `h2`. Each request
+  is a list item whose `h3` is the sender, so heading navigation walks the
+  requests. The status is one `role="status"` that speaks only on change
+  (unit), and the badge reads "N pending message requests". No avatar URL
+  reaches the DOM. **NVDA and Orca recordings are owner-run and pending.**
+- **Focus:** the heading takes focus on open, and the Close and list rings
+  meet Q1 at 2px and 3:1 or better (e2e `focusIndicator`). The list keeps
+  focus and its element through live updates (unit). On close, focus goes to
+  the returned channel's composer, because the opener leaves with DM mode
+  (e2e).
+- **Contrast:** intro, sender, username, time, preview and the no-text line
+  meet 4.5:1 in neon-glow, dark, midnight and light, each with and without
+  High Contrast (e2e `textContrast`). They use only the qualified tokens
+  `--header-primary`, `--text-normal` and `--text-muted`. No information
+  depends on colour. The custom-accent fallback does not apply, because no
+  inbox text or indicator uses the accent (the focus ring is the shared
+  `--focus-ring`).
+- **Reduced motion:** nothing in the inbox animates (e2e `getAnimations`
+  returns 0, with the app's reduced-motion setting on). No media autoplays.
+- **Zoom/reflow:** at 940×500 with 20 px Large Font, every request's text is
+  reachable and in view. The long unbroken string wraps, and neither the list
+  nor the page scrolls sideways (e2e, screenshot attached). The OS 200 % zoom
+  check is owner-run and pending.
