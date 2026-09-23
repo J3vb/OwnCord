@@ -248,6 +248,17 @@ function slope(points: readonly { x: number; y: number }[]): number {
   return den === 0 ? 0 : num / den;
 }
 
+/** The plan's idle heap bar, in bytes per minute. */
+export const IDLE_HEAP_BAR_SLOPE = 100 * 1024;
+
+/** Least-squares slope of heap used, in bytes per minute, over the asserted
+ *  idle-phase samples (`cycle === -1`) against the time each was taken. */
+export function idleHeapSlope(samples: readonly LifecycleSample[]): number {
+  return slope(
+    samples.filter((s) => s.cycle === -1).map((s) => ({ x: s.cycleAt / 60_000, y: s.heapUsed })),
+  );
+}
+
 const COUNT_METRICS: readonly CountMetric[] = [
   "documents",
   "nodes",

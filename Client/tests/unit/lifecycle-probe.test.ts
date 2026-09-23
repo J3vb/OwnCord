@@ -10,7 +10,13 @@
 // layout: cycles 5/15/25 are the mid-session series, cycles 10/20/30 the
 // post-logout series.
 import { describe, expect, it } from "vitest";
-import { evaluateBars, formatBars, type LifecycleSample } from "../e2e/support/lifecycle-probe";
+import {
+  evaluateBars,
+  formatBars,
+  idleHeapSlope,
+  IDLE_HEAP_BAR_SLOPE,
+  type LifecycleSample,
+} from "../e2e/support/lifecycle-probe";
 
 function sample(cycle: number, overrides: Partial<LifecycleSample> = {}): LifecycleSample {
   return {
@@ -188,5 +194,28 @@ describe("lifecycle soak pass bars", () => {
     expect(report.split("\n")[0]).toMatch(/metric \| warm \| final \| slope \| bar \| pass/);
     expect(report).toContain("listeners");
     expect(report).toContain("heapUsed");
+  });
+});
+
+describe("idle heap bar", () => {
+  const idle = (minute: number, heapUsed: number, cycle = -1) =>
+    sample(cycle, { cycleAt: minute * 60_000, heapUsed });
+
+  it("measures the heap slope per minute over the settled idle samples only", () => {
+    const samples = [
+      sample(200, { heapUsed: 50_000_000 }),
+      idle(5, 40_000_000, -2),
+      idle(15, 1_000_000),
+      idle(20, 1_500_000),
+      idle(25, 2_000_000),
+    ];
+    expect(idleHeapSlope(samples)).toBeCloseTo(100_000);
+  });
+
+  it("fails a poller that retains 1 MB a minute and passes a flat idle heap", () => {
+    const leaking = [idle(15, 0), idle(20, 5_000_000), idle(25, 10_000_000)];
+    expect(idleHeapSlope(leaking)).toBeGreaterThan(IDLE_HEAP_BAR_SLOPE);
+    const flat = [idle(15, 4_330_328), idle(20, 4_330_400), idle(25, 4_330_416)];
+    expect(idleHeapSlope(flat)).toBeLessThanOrEqual(IDLE_HEAP_BAR_SLOPE);
   });
 });

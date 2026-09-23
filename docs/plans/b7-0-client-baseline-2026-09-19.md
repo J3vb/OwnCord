@@ -649,10 +649,10 @@ page-lifetime `Disposable` now, where before they hand-paired a
 ## B7-11c long-session evidence (Tasks 12–16, 2026-09-23)
 
 PR 11c's evidence append: what the soak found and the fixes, the within-page
-coverage, the at-head calibration, and the recorded long run. Base is `dev`
-`e852c109`. The runs below were taken before the branch was rebased from `dev`
-`233b93f4` (11b merged) onto it; each is cited by the rebased commit with the
-same subject. It is an evidence append, not a status row.
+coverage, the at-head calibration, and the recorded long run, based on `dev`
+after 11b merged. Each run is identified by the subject of the commit it ran
+on: the runs were taken on pre-rebase heads of this branch, and its later
+rebases changed no measured code. It is an evidence append, not a status row.
 
 ### Findings and fixes (Task 12)
 
@@ -689,8 +689,9 @@ firstmate decision during 11c (C1): a session fork would change when channel
 loads are cancelled at logout, and MainPage teardown already aborts it.
 
 One "misbehave" finding is outside lifecycle scope and recorded open as
-**OC-0452**: in 2 of the 3 recorded long runs (three times at `55abad99`, once
-at `3c27deaf`) a receive-side E2EE key race at voice join logged
+**OC-0452**: in 2 of the 3 recorded long runs (three times at "test(b7-11): re-submit the soak's edit
+until it lands", once at "test(b7-11): state the soak run's measured seconds per
+cycle") a receive-side E2EE key race at voice join logged
 `InvalidKey: Decryption failed`, which the client reports as a possibly
 unsecured call. The soak's console check stays strict.
 
@@ -701,12 +702,15 @@ cycles. Every fifth cycle starts with the application reconnect. Samples are
 taken at cycle 0, every five cycles, and at cycles 6 and 9 of every page; the 6/9
 pair is like-for-like within a page (both after that page's reconnect, neither
 directly after one). The planted unowned `window` `resize` listener in the
-Account tab's mount fails the listener bar at `23abea98`
+Account tab's mount fails the listener bar at "test(b7-11): start the soak's
+reconnect cycles with the reconnect"
 (`page 0: 176→182; page 1: 176→182`, 2 per cycle) and the node bar. Timers are
 read twice a second apart and the lower read counts, so a timer the app is
 running at that instant is not read as accumulation.
 
-### At-head calibration: five 20-cycle runs at `23abea98`
+### At-head calibration: five 20-cycle runs
+
+At "test(b7-11): start the soak's reconnect cycles with the reconnect".
 
 Linux x86_64 Chromium, `OWNCORD_SOAK_CYCLES=20`, about 2.5 minutes each. All
 five passed; every count was identical across them:
@@ -721,7 +725,8 @@ five passed; every count was identical across them:
 
 `documents`, `intervals` and `timeouts` were 1 and sockets, peer connections,
 tracks and `AudioContext`s 0 in every run. Two earlier five-run attempts (at
-`be5cbe3d` and `5818fd3e`) each failed one run on something that was not a
+"test(b7-11): ratchet the client coverage floor to 93" and "chore(b7-11): record
+the soak's E2EE over-warning at voice join (OC-0451)") each failed one run on something that was not a
 leak, and each changed the soak, not the bars: a two-point heap series at cycle 9 (V8 tier-up;
 heap now compares only at the reset phases) and one extra node read seconds
 after a reconnect (the reconnect now starts its cycle).
@@ -730,7 +735,7 @@ after a reconnect (the reconnect now starts its cycle).
 
 Command: `cd Client && OWNCORD_E2E_LIVEKIT_BINARY=tests/e2e/.bin/livekit-server npm run test:e2e:soak`
 (`playwright.config.soak.ts`: 200 cycles, then 30 idle-connected minutes sampled
-every 5 minutes; one attempt, no trace). Commit `3c27deaf`, Linux x86_64
+every 5 minutes; one attempt, no trace). Commit "test(b7-11): state the soak run's measured seconds per cycle", Linux x86_64
 Chromium on a 16-core developer machine. Wall time 52.5 minutes: 200 cycles in
 22.3 minutes (6.7 s per cycle including sampling), then the idle phase. 300
 cycles plus the idle phase would not fit the 60 minutes the run is sized to, so
@@ -752,7 +757,7 @@ Idle phase (after c200, logged in, no activity): the samples at 5 and 10
 minutes precede the app's own auto-idle status change (ten quiet minutes) and are
 recorded only; the four from 15 to 30 minutes held every count exactly (nodes 796,
 listeners 188, live controllers 22, intervals 1, timeouts 1, and 0 sockets, peers,
-tracks and contexts), and heap moved about 5 B per minute (4 330 328 → 4 330 416).
+tracks and contexts), and heap moved about 5 B per minute (4 330 328 → 4 330 416; the bar is a slope of at most 100 KB per minute).
 
 **Every lifecycle bar passed.** The run as a whole reported a failure, by design:
 the soak's strict console check caught one more occurrence of OC-0452 (the E2EE
@@ -769,13 +774,13 @@ the live-listener dump); the bars compare within a run.
 
 Earlier long runs on this branch, each at a head since superseded:
 
-- `2b918d95`: every count flat for 200 cycles except one extra pending timeout in
+- "test(b7-11): let a local fullstack run choose its preview port": every count flat for 200 cycles except one extra pending timeout in
   one of 80 samples (timers are now read twice), and one node in the idle phase
   from the auto-idle change (idle samples now start after it); its 926 MB failure
   trace overran teardown (the long run now records none).
-- `5280066f`: stopped at cycle 10 when the composer's 200 ms double-send guard
+- "test(b7-11): read soak timers twice and wait out the idle transition": stopped at cycle 10 when the composer's 200 ms double-send guard
   swallowed the cycle's edit (the soak now presses Enter until the edit lands).
-- `55abad99`: every lifecycle bar passed (heap 480 B/cycle, idle counts equal);
+- "test(b7-11): re-submit the soak's edit until it lands": every lifecycle bar passed (heap 480 B/cycle, idle counts equal);
   the console check caught OC-0452 three times.
 
 ### Native soak (Task 14)

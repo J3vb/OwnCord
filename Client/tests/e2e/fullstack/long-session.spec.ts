@@ -36,6 +36,8 @@ import {
   evaluateBars,
   formatBars,
   describeLiveListeners,
+  idleHeapSlope,
+  IDLE_HEAP_BAR_SLOPE,
   type SlopeCeilings,
 } from "../support/lifecycle-probe";
 import { quiesce } from "../support/quiesce";
@@ -403,5 +405,8 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
         drifted.push(`${metric}: ${idle.map((s) => s[metric]).join("→")}`);
     }
     expect(drifted, "idle-phase counts must be exactly equal").toEqual([]);
+    expect(idleHeapSlope(samples), "idle-phase heap slope (B/min)").toBeLessThanOrEqual(
+      IDLE_HEAP_BAR_SLOPE,
+    );
   }
 });
