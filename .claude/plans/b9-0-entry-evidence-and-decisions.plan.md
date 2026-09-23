@@ -66,7 +66,6 @@ only by their existing public identifiers, never reproduced here.
 | `docs/plans/b9-entry-baseline-<date>.md (new)`                                                                 | Measured baseline, entry decision and journey/evidence manifest |
 | `docs/plans/b9-unified-experience-accessibility-polish.prd.md; docs/plans/README.md`                           | Dated status and accepted owner decisions                       |
 | `docs/plans/repo-health-issue-register-2026-08-23.md; docs/plans/beta-requirements-traceability-2026-08-23.md` | Evidence-backed status reconciliation only                      |
-| `docs/plans/b9-unified-experience-accessibility-polish.prd.md` and this milestone plan                         | Dated implementation status and exact-SHA evidence              |
 
 Shared edits to navigation, `api.ts`, `types.ts`, `dispatcher.ts`, global stores,
 tokens and style import composition take the PRD's single-writer lane. Parallel

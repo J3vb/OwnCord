@@ -32,11 +32,15 @@ facts, not claims that tests or platform acceptance passed. Proposed paths later
 in this file are explicitly new work, not present behavior. Re-read this table
 at the actual implementation base; record drift before coding.
 
-| #   | Verified current state                                                             | Evidence at planning commit                                |
-| --- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| 1   | Account UI includes retention and permanent-deletion disclosure already.           | `Client/src/components/settings/AccountTab.ts:1094-1114`   |
-| 2   | Logs tab exposes local support export and explicitly warns that logs are verbatim. | `Client/src/components/settings/LogsTab.ts:348-376`        |
-| 3   | Notification options have app-authored labels and descriptions.                    | `Client/src/components/settings/NotificationsTab.ts:14-39` |
+| #   | Verified current state                                                             | Evidence at planning commit                                                                                                                           |
+| --- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Account UI includes retention and permanent-deletion disclosure already.           | `Client/src/components/settings/AccountTab.ts:1094-1114`                                                                                              |
+| 2   | Logs tab exposes local support export and explicitly warns that logs are verbatim. | `Client/src/components/settings/LogsTab.ts:348-376`                                                                                                   |
+| 3   | Notification options have app-authored labels and descriptions.                    | `Client/src/components/settings/NotificationsTab.ts:14-39`                                                                                            |
+| 4   | Account/session toasts on the main page are literal English.                       | `Client/src/pages/MainPage.ts:566`; `Client/src/pages/MainPage.ts:549`                                                                                |
+| 5   | Visible server-error text is thrown from the API client without a catalog mapping. | `Client/src/lib/api.ts:721`; `Client/src/lib/api.ts:759`                                                                                              |
+| 6   | Desktop update, incoming-call and native-voice surfaces hold app-authored copy.    | `Client/src/components/UpdateNotifier.ts:68`; `Client/src/components/IncomingCallBanner.ts:48`; `Client/src/features/voice/native/screenPicker.ts:25` |
+| 7   | App-authored native error text lives in Rust and is shown to the user.             | `Client/src-tauri/src/lib.rs:225`; `Client/src-tauri/src/tofu.rs:404`                                                                                 |
 
 ## Patterns to mirror
 
@@ -60,12 +64,13 @@ only by their existing public identifiers, never reproduced here.
 
 ## Files to change
 
-| File / bounded group                                                                                  | Purpose                                             |
-| ----------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `Client/src/components/settings/**; Client/src/components/{SettingsOverlay,VoiceWidget,VideoGrid}.ts` | Inventory-selected settings/desktop/media text only |
-| `Client/src/i18n/{settings,account,voice}.ts (new); native text owners identified in B9-3`            | Catalogs; native files only if Q7 includes them     |
-| `Client/scripts/check-ui-strings.mjs; B9 text inventory`                                              | Final zero-unexplained-literal scan                 |
-| `docs/plans/b9-unified-experience-accessibility-polish.prd.md` and this milestone plan                | Dated implementation status and exact-SHA evidence  |
+| File / bounded group                                                                                                                                                                                                                                       | Purpose                                              |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `Client/src/components/settings/**; Client/src/components/{SettingsOverlay,VoiceWidget,VideoGrid}.ts`                                                                                                                                                      | Inventory-selected settings/desktop/media text only  |
+| `Client/src/pages/MainPage.ts; Client/src/lib/{api,screenShare,livekitReconnect}.ts; Client/src/components/{UpdateNotifier,IncomingCallBanner}.ts; Client/src/components/channel-sidebar/volume-menu.ts; Client/src/features/voice/native/screenPicker.ts` | Account/session, error-mapping and voice/update copy |
+| `Client/src/i18n/{settings,account,voice}.ts (new); native text owners identified in B9-3`                                                                                                                                                                 | Catalogs; native files only if Q7 includes them      |
+| `Client/scripts/check-ui-strings.mjs; B9 text inventory`                                                                                                                                                                                                   | Final zero-unexplained-literal scan                  |
+| `docs/plans/b9-unified-experience-accessibility-polish.prd.md` and this milestone plan                                                                                                                                                                     | Dated implementation status and exact-SHA evidence   |
 
 Shared edits to navigation, `api.ts`, `types.ts`, `dispatcher.ts`, global stores,
 tokens and style import composition take the PRD's single-writer lane. Parallel
@@ -83,7 +88,7 @@ and add a failing contract/measurement for the change; no threshold weakening.
 
 ### Task 1: Bound the inventory
 
-Cover settings tabs, account/session/recovery flows, native desktop menu/notification/error copy identified by Q7, and voice-control text not owned by the messaging slice. Exclude user content and OS-owned dialogs with explicit reasons, not silent omissions.
+Cover settings tabs, account/session/recovery flows and their main-page toasts, visible API error text needing a catalog mapping, update/incoming-call banners, native desktop menu/notification/error copy identified by Q7, and voice-control text not owned by the messaging slice (volume menu, native screen picker). Exclude user content and OS-owned dialogs with explicit reasons, not silent omissions.
 
 ### Task 2: Extract without policy edits
 
@@ -109,7 +114,7 @@ finding solely because this milestone was merged.
 
 The following checks are **planned**, not reported as run by this planning PR:
 
-- Existing: Client/tests/e2e/settings-tabs-extra.spec.ts; Client/tests/e2e/recovery-flow.spec.ts; Client/tests/e2e/sessions.spec.ts
+- Existing: Client/tests/e2e/settings-tabs-extra.spec.ts; Client/tests/e2e/recovery-flow.spec.ts; Client/tests/e2e/sessions.spec.ts; Client/tests/e2e/updater.spec.ts; Client/tests/e2e/voice-channel.spec.ts; Client/tests/unit/update-notifier.test.ts; Client/tests/unit/notifications.test.ts; Client/tests/unit/screen-share-button.test.ts
 - Proposed: i18n/settings.test.ts; b9-text-expansion.spec.ts settings/media cases; native text extraction check if applicable
 
 - [ ] Named behavior tests cover success, refusal, pending/error, reconnect and
@@ -150,11 +155,16 @@ device qualification is deferred with B8; desktop zoom/reflow is not deferred.
 
 For a product PR run `npm run check:client` and the named focused/fullstack/native
 checks selected by the changed paths; preserve existing bundle budgets and
-lifecycle gates. Rust/server changes are not assumed: if an approved prerequisite
-changes them, it must run its complete component gate separately. Never run a
-local Tauri packaging build (CI-only per Client/CLAUDE.md). Documentation-only
-B9-0/B9-27 use `npm run check:docs`, `npm run check:hygiene` and evidence review.
-All PRs retain exact-integration-SHA CI evidence before phase closure.
+lifecycle gates. Because this milestone may move app-authored text in
+`Client/src-tauri` (Q7 native menus/notifications/errors), any PR that touches
+`Client/src-tauri` **must also run `npm run check:rust`** and report its result;
+a renderer-only PR that does not touch Rust remains on `npm run check:client`.
+Rust/server changes beyond the Q7 text seam are not assumed: if an approved
+prerequisite changes them, it must run its complete component gate separately.
+Never run a local Tauri packaging build (CI-only per Client/CLAUDE.md).
+Documentation-only B9-0/B9-27 use `npm run check:docs`, `npm run check:hygiene`
+and evidence review. All PRs retain exact-integration-SHA CI evidence before
+phase closure.
 
 ## Risks and rollback
 

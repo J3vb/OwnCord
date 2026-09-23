@@ -32,11 +32,14 @@ facts, not claims that tests or platform acceptance passed. Proposed paths later
 in this file are explicitly new work, not present behavior. Re-read this table
 at the actual implementation base; record drift before coding.
 
-| #   | Verified current state                                                                         | Evidence at planning commit                                                                                      |
-| --- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| 1   | Server switch copy and accessible button behavior live in QuickSwitchOverlay.                  | `Client/src/components/QuickSwitchOverlay.ts:70-81`; `Client/src/components/QuickSwitchOverlay.ts:126-140`       |
-| 2   | Sidebar labels/counts are literal and interpolated English.                                    | `Client/src/pages/main-page/SidebarDmSection.ts:44-64`; `Client/src/pages/main-page/SidebarDmSection.ts:130-133` |
-| 3   | Connection/session replacement and incompatible state have existing global models to preserve. | `Client/src/stores/ui.store.ts:8-40`                                                                             |
+| #   | Verified current state                                                                                      | Evidence at planning commit                                                                                                                         |
+| --- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Server switch copy and accessible button behavior live in QuickSwitchOverlay.                               | `Client/src/components/QuickSwitchOverlay.ts:70-81`; `Client/src/components/QuickSwitchOverlay.ts:126-140`                                          |
+| 2   | Sidebar labels/counts are literal and interpolated English.                                                 | `Client/src/pages/main-page/SidebarDmSection.ts:44-64`; `Client/src/pages/main-page/SidebarDmSection.ts:130-133`                                    |
+| 3   | Connection/session replacement and incompatible state have existing global models to preserve.              | `Client/src/stores/ui.store.ts:8-40`                                                                                                                |
+| 4   | Remaining shell/navigation/dialog components hold visible English that no plan's file table owned at draft. | `Client/src/components/UserBar.ts:252`; `Client/src/components/StatusPicker.ts:52`; `Client/src/components/MemberList.ts:101`                       |
+| 5   | Channel-management, trust and call-banner copy is literal in components outside the original slice.         | `Client/src/components/CreateChannelModal.ts:53`; `Client/src/components/CertMismatchModal.ts:40`; `Client/src/components/IncomingCallBanner.ts:48` |
+| 6   | Shell toasts, stream previews and channel-deletion notices carry user-visible English.                      | `Client/src/pages/main-page/OverlayManagers.ts:248`; `Client/src/lib/streamPreview.ts:215`; `Client/src/features/channels/wsHandlers.ts:144`        |
 
 ## Patterns to mirror
 
@@ -60,12 +63,14 @@ only by their existing public identifiers, never reproduced here.
 
 ## Files to change
 
-| File / bounded group                                                                                        | Purpose                                            |
-| ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `Client/src/pages/ConnectPage.ts; Client/src/pages/connect-page/**; Client/src/pages/main-page/Sidebar*.ts` | Inventory-selected text sinks only                 |
-| `Client/src/components/{QuickSwitchOverlay,QuickSwitcher}.ts; Client/src/i18n/{connect,shell}.ts (new)`     | Owned catalogs and call sites                      |
-| `B9-3 text inventory/baseline; Client/tests/e2e/b9-text-expansion.spec.ts (new)`                            | Coverage and expansion evidence                    |
-| `docs/plans/b9-unified-experience-accessibility-polish.prd.md` and this milestone plan                      | Dated implementation status and exact-SHA evidence |
+| File / bounded group                                                                                                                                                                                                                                        | Purpose                                            |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `Client/src/pages/ConnectPage.ts; Client/src/pages/connect-page/**; Client/src/pages/main-page/Sidebar*.ts`                                                                                                                                                 | Inventory-selected text sinks only                 |
+| `Client/src/components/{QuickSwitchOverlay,QuickSwitcher,CertMismatchModal,ServerBanner,ConnectedOverlay,UserBar,StatusPicker,MemberList,AdminActions,InviteManager,ChannelSidebar,CreateChannelModal,EditChannelModal,DeleteChannelModal,purge-prompt}.ts` | Remaining shell, member, trust and channel copy    |
+| `Client/src/components/channel-sidebar/context-menu.ts; Client/src/lib/{streamPreview,safe-render,credentials}.ts; Client/src/pages/main-page/OverlayManagers.ts; Client/src/features/channels/wsHandlers.ts; Client/src/main.ts`                           | Shell navigation, overlays and session copy        |
+| `Client/src/i18n/{connect,shell}.ts (new)`                                                                                                                                                                                                                  | Owned catalogs and call sites                      |
+| `B9-3 text inventory/baseline; Client/tests/e2e/b9-text-expansion.spec.ts (new)`                                                                                                                                                                            | Coverage and expansion evidence                    |
+| `docs/plans/b9-unified-experience-accessibility-polish.prd.md` and this milestone plan                                                                                                                                                                      | Dated implementation status and exact-SHA evidence |
 
 Shared edits to navigation, `api.ts`, `types.ts`, `dispatcher.ts`, global stores,
 tokens and style import composition take the PRD's single-writer lane. Parallel
@@ -83,7 +88,7 @@ and add a failing contract/measurement for the change; no threshold weakening.
 
 ### Task 1: Freeze the extraction slice
 
-Use B9-3 inventory for ConnectPage/connect-page, MainPage shell, sidebar, quick switch, trust/connect dialogs and common toasts; reserve shared files before editing.
+Use B9-3 inventory for ConnectPage/connect-page, MainPage shell, sidebar, quick switch, trust/connect dialogs, channel-management dialogs (create/edit/delete/invite), the member list and its admin/context menus, the user bar and status picker, call/server banners and common toasts; reserve shared files before editing.
 
 ### Task 2: Move complete messages
 
@@ -109,7 +114,7 @@ finding solely because this milestone was merged.
 
 The following checks are **planned**, not reported as run by this planning PR:
 
-- Existing: Client/tests/e2e/connect-page.spec.ts; Client/tests/e2e/cert-tofu.spec.ts; Client/tests/e2e/incompatible-epoch.spec.ts
+- Existing: Client/tests/e2e/connect-page.spec.ts; Client/tests/e2e/cert-tofu.spec.ts; Client/tests/e2e/incompatible-epoch.spec.ts; Client/tests/e2e/channel-management.spec.ts; Client/tests/e2e/member-list.spec.ts; Client/tests/e2e/user-bar.spec.ts; Client/tests/e2e/server-profiles.spec.ts; Client/tests/unit/create-channel-modal.test.ts; Client/tests/unit/edit-channel-modal.test.ts; Client/tests/unit/delete-channel-modal.test.ts; Client/tests/unit/cert-mismatch-modal.test.ts; Client/tests/unit/invite-manager.test.ts; Client/tests/unit/member-list.test.ts; Client/tests/unit/status-picker-userbar.test.ts; Client/tests/unit/server-banner.test.ts
 - Proposed: b9-text-expansion.spec.ts shell/connect cases; ui-strings.test.ts
 
 - [ ] Named behavior tests cover success, refusal, pending/error, reconnect and

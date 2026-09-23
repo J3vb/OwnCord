@@ -32,11 +32,14 @@ facts, not claims that tests or platform acceptance passed. Proposed paths later
 in this file are explicitly new work, not present behavior. Re-read this table
 at the actual implementation base; record drift before coding.
 
-| #   | Verified current state                                                 | Evidence at planning commit                                                              |
-| --- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| 1   | YouTube and media fallbacks contain literal loading and provider text. | `Client/src/components/message-list/media.ts:168-192`                                    |
-| 2   | Message-list jump controls are constructed in the component.           | `Client/src/components/MessageList.ts:911-935`                                           |
-| 3   | GIF search names, attribution and status messages are literal English. | `Client/src/components/GifPicker.ts:57-79`; `Client/src/components/GifPicker.ts:104-110` |
+| #   | Verified current state                                                  | Evidence at planning commit                                                                                                           |
+| --- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | YouTube and media fallbacks contain literal loading and provider text.  | `Client/src/components/message-list/media.ts:168-192`                                                                                 |
+| 2   | Message-list jump controls are constructed in the component.            | `Client/src/components/MessageList.ts:911-935`                                                                                        |
+| 3   | GIF search names, attribution and status messages are literal English.  | `Client/src/components/GifPicker.ts:57-79`; `Client/src/components/GifPicker.ts:104-110`                                              |
+| 4   | DM list/profile, member picker and emoji picker hold visible English.   | `Client/src/components/DmSidebar.ts:324`; `Client/src/components/DmProfileSidebar.ts:277`; `Client/src/components/EmojiPicker.ts:619` |
+| 5   | Message/upload/pin status toasts are literal in the channel controller. | `Client/src/pages/main-page/ChannelController.ts:512`; `Client/src/pages/main-page/ChannelController.ts:560`                          |
+| 6   | The NSFW gate and the user profile popup carry user-visible copy.       | `Client/src/components/NsfwGate.ts:60`; `Client/src/components/UserProfilePopup.ts:193`                                               |
 
 ## Patterns to mirror
 
@@ -60,12 +63,13 @@ only by their existing public identifiers, never reproduced here.
 
 ## Files to change
 
-| File / bounded group                                                                                                                | Purpose                                            |
-| ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `Client/src/components/message-list/**; Client/src/components/{MessageList,MessageInput,GifPicker,SearchOverlay,PinnedMessages}.ts` | Inventory-selected messaging text                  |
-| `Client/src/i18n/{messaging,content,requests}.ts (new or extend)`                                                                   | Feature catalogs                                   |
-| `B9-3 string scan baseline; Client/tests/e2e/b9-text-expansion.spec.ts`                                                             | Shrink baseline and messaging expansion cases      |
-| `docs/plans/b9-unified-experience-accessibility-polish.prd.md` and this milestone plan                                              | Dated implementation status and exact-SHA evidence |
+| File / bounded group                                                                                                                                                                                                                                        | Purpose                                            |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `Client/src/components/message-list/**; Client/src/components/{MessageList,MessageInput,GifPicker,SearchOverlay,PinnedMessages}.ts`                                                                                                                         | Inventory-selected messaging text                  |
+| `Client/src/components/{DmSidebar,DmProfileSidebar,EmojiPicker,UserProfilePopup,NsfwGate}.ts; Client/src/pages/main-page/{ChannelController,MessageJump,ChatHeader,MemberPickerModal}.ts; Client/src/components/{MentionAutocomplete,EmojiAutocomplete}.ts` | DM, picker, gate and message-status copy           |
+| `Client/src/i18n/{messaging,content,requests}.ts (new or extend)`                                                                                                                                                                                           | Feature catalogs                                   |
+| `B9-3 string scan baseline; Client/tests/e2e/b9-text-expansion.spec.ts`                                                                                                                                                                                     | Shrink baseline and messaging expansion cases      |
+| `docs/plans/b9-unified-experience-accessibility-polish.prd.md` and this milestone plan                                                                                                                                                                      | Dated implementation status and exact-SHA evidence |
 
 Shared edits to navigation, `api.ts`, `types.ts`, `dispatcher.ts`, global stores,
 tokens and style import composition take the PRD's single-writer lane. Parallel
@@ -83,7 +87,7 @@ and add a failing contract/measurement for the change; no threshold weakening.
 
 ### Task 1: Extract the bounded feature families
 
-Cover message list/input, actions, search, pins, emoji/GIF pickers, requests, previews and media UI from the inventory. New B9 feature copy should already use catalogs; verify it instead of migrating it twice.
+Cover message list/input, actions, search, pins, emoji/GIF pickers, requests, previews, media UI, the DM list/profile, member picker and the NSFW gate from the inventory. New B9 feature copy should already use catalogs; verify it instead of migrating it twice.
 
 ### Task 2: Keep dynamic data distinct
 
@@ -109,7 +113,7 @@ finding solely because this milestone was merged.
 
 The following checks are **planned**, not reported as run by this planning PR:
 
-- Existing: Client/tests/e2e/message-actions.spec.ts; Client/tests/e2e/search-overlay.spec.ts; Client/tests/e2e/message-media.spec.ts
+- Existing: Client/tests/e2e/message-actions.spec.ts; Client/tests/e2e/search-overlay.spec.ts; Client/tests/e2e/message-media.spec.ts; Client/tests/e2e/dm-system.spec.ts; Client/tests/e2e/emoji-insertion.spec.ts; Client/tests/e2e/user-profile.spec.ts; Client/tests/unit/dm-sidebar.test.ts; Client/tests/unit/dm-profile-sidebar.test.ts; Client/tests/unit/emoji-picker.test.ts; Client/tests/unit/message-jump.test.ts; Client/tests/unit/member-picker-modal.test.ts
 - Proposed: i18n/messaging.test.ts; expanded b9-text-expansion.spec.ts
 
 - [ ] Named behavior tests cover success, refusal, pending/error, reconnect and
