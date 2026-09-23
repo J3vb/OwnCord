@@ -228,7 +228,8 @@ render path as a fallback; fail closed and record a blocker instead.
   history read measures the offset from that row's `created_at` (a fast or
   slow local clock both end the timeout at the server's expiry). A
   `TIMED_OUT` refusal that the local clock contradicts pulls the clock back
-  only to 2 s inside the newest unlifted timeout's expiry, so a 3 s-fast
+  only to 2 s inside the newest timeout row's expiry (by `created_at`; when
+  that row is lifted, no offset is set), so a 3 s-fast
   clock unlocks within seconds of the real expiry, not a minute later. A
   badly skewed clock may unlock early and be refused again; each refusal
   re-pulls the offset. A fast clock never silently drops a
