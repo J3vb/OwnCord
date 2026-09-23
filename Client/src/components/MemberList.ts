@@ -334,12 +334,24 @@ function createMemberItem(
         onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
       });
 
-      // Position at mouse
-      activeMenu.element.style.position = "fixed";
-      activeMenu.element.style.left = `${e.clientX}px`;
-      activeMenu.element.style.top = `${e.clientY}px`;
-      activeMenu.element.style.zIndex = "1000";
-      document.body.appendChild(activeMenu.element);
+      // Position at mouse, kept on screen: a member low in the list at the
+      // 940x500 minimum window opened the menu past the bottom edge, leaving
+      // Force Logout, Ban and Block unreachable. When it does not fit below
+      // the pointer it is anchored by its bottom edge instead, so the ban
+      // form expanding later grows upward rather than off-screen.
+      const menuEl = activeMenu.element;
+      menuEl.style.position = "fixed";
+      menuEl.style.zIndex = "1000";
+      document.body.appendChild(menuEl);
+      const margin = 8;
+      const { innerWidth: vw, innerHeight: vh } = window;
+      const left = Math.min(e.clientX, vw - menuEl.offsetWidth - margin);
+      menuEl.style.left = `${Math.max(margin, left)}px`;
+      if (e.clientY + menuEl.offsetHeight > vh - margin) {
+        menuEl.style.bottom = `${Math.max(margin, vh - e.clientY)}px`;
+      } else {
+        menuEl.style.top = `${e.clientY}px`;
+      }
 
       // Close on outside click (deferred so this click doesn't close it)
       const dismiss = new Disposable();

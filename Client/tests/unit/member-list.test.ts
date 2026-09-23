@@ -358,6 +358,43 @@ describe("MemberList", () => {
     document.body.querySelector(".context-menu")?.remove();
   });
 
+  // At the 940x500 minimum window a member low in the list opened the menu at
+  // the pointer with its bottom past the viewport, so Force Logout, Ban and
+  // Block could not be reached.
+  it("keeps the context menu inside the viewport near the bottom-right edge", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(144);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(180);
+    vi.stubGlobal("innerWidth", 940);
+    vi.stubGlobal("innerHeight", 500);
+    try {
+      setTestMembers(testMembers);
+      memberList.mount(container);
+      const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
+
+      memberItem.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 930, clientY: 430 }),
+      );
+      let menu = document.body.querySelector<HTMLElement>(".context-menu")!;
+      // Anchored by its bottom edge at the pointer: spans y 286..430, x 752..932.
+      expect(menu.style.top).toBe("");
+      expect(menu.style.bottom).toBe("70px");
+      expect(menu.style.left).toBe("752px");
+
+      memberItem.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 100 }),
+      );
+      menu = document.body.querySelector<HTMLElement>(".context-menu")!;
+      // Room below the pointer: opens there as before.
+      expect(menu.style.top).toBe("100px");
+      expect(menu.style.bottom).toBe("");
+      expect(menu.style.left).toBe("100px");
+    } finally {
+      document.body.querySelector(".context-menu")?.remove();
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
   // The menu used to gate on the role NAME (owner/admin), so the seeded
   // Moderator role — which holds KICK_MEMBERS and BAN_MEMBERS — got nothing,
   // and a custom role holding those bits got nothing either.
