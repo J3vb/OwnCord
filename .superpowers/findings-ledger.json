@@ -10347,7 +10347,7 @@
         "commit": "4b2ea56b",
         "test": "node --test Server/scripts/k6/ws-load.test.mjs",
         "revertProof": "pass (restoring ws-load.js from dev fails 2 of 9 offline checks -- the phase-preservation test and the per-phase tag test; the fixed script passes all 9 under Node 26.9.0)",
-        "notes": "phasedInterval in ws-load.js keeps each VU's send, typing and presence timer phase across reconnects, and a resumed socket's first phased tick waits for auth_ok. ws_broadcast_latency_ms and ws_delivery_latency_ms carry phase=ramp|sustain|upload|storm under operational. load-baseline.yml gains an opt-in pprof input (goroutine dumps every 2 s, 30 s CPU profiles, block/mutex/heap) behind -tags loadprofile."
+        "notes": "phasedInterval in ws-load.js keeps each VU's send, typing and presence timer phase across reconnects, and a resumed socket's first phased tick waits for auth_ok. ws_broadcast_latency_ms and ws_delivery_latency_ms carry phase=ramp|sustain|upload|storm under operational. The profiling behind the diagnosis was a one-off diagnostic build, described in docs/capacity.md; the workflow carries no profiling input."
       }
     },
     {

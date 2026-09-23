@@ -98,11 +98,6 @@ on:
         description: "ceiling-search: highest connection count probed (and users to seed)"
         required: false
         default: "500"
-      pprof:
-        description: "Profile the constrained server (OC-0445): build with -tags loadprofile, sample goroutines/CPU/block/mutex, upload as pprof.tgz"
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -136,8 +131,6 @@ jobs:
       TLS_MODE: ${{ matrix.tls }}
       CEILING_MAX: ${{ inputs.ceiling_max }}
       SEED_USERS_INPUT: ${{ inputs.users }}
-      PPROF: ${{ inputs.pprof && 'true' || 'false' }}
-      PPROF_ADDR: 127.0.0.1:6060
       CONNECTIONS: ${{ inputs.connections }}
     strategy:
       fail-fast: false
@@ -175,19 +168,11 @@ jobs:
             exit 1
           fi
 
-      # -tags loadprofile (pprof input) compiles internal/app/loadprofile.go
-      # in: a loopback /debug/pprof/ listener the sampler below reads. A
-      # release build never carries it.
       - name: Build server
         working-directory: Server
         env:
           CGO_ENABLED: "0"
-        run: |
-          tags=()
-          if [ "$PPROF" = true ]; then
-            tags=(-tags loadprofile)
-          fi
-          go build "${tags[@]}" -o chatserver .
+        run: go build -o chatserver .
 
       # Downloaded on the host and mounted in, rather than letting the server
       # auto-download it: the constrained container then needs no egress and no
@@ -365,11 +350,6 @@ jobs:
           esac
           if [ "$TLS_MODE" = "off" ]; then
             extra_env+=(-e OWNCORD_TLS_MODE=off)
-          fi
-          if [ "$PPROF" = true ]; then
-            # --network=host, so the host-side sampler reaches the loopback
-            # listener directly.
-            extra_env+=(-e "OWNCORD_LOADPROFILE_ADDR=$PPROF_ADDR")
           fi
 
           # Removed first so a re-run on the same runner is idempotent, and so
@@ -592,29 +572,6 @@ jobs:
           ) >"$WORK/cpu.stat.log" 2>&1 &
           sample_pid=$!
 
-          # pprof input: goroutine dumps every 2 s (who holds the SQLite
-          # writer, who waits for it) and back-to-back 30 s CPU profiles for
-          # the whole run; block, mutex and heap once at the end. Both loops
-          # run on the generator CPUs, so they cost the server nothing but
-          # the sampled stacks.
-          pprof_pids=()
-          if [ "$PPROF" = true ]; then
-            mkdir -p "$WORK/pprof"
-            (
-              while [ ! -f "$WORK/.sampling-done" ]; do
-                curl -s -o "$WORK/pprof/goroutines-$(date -u +%s).txt" "http://$PPROF_ADDR/debug/pprof/goroutine?debug=2" || true
-                sleep 2
-              done
-            ) &
-            pprof_pids+=($!)
-            (
-              while [ ! -f "$WORK/.sampling-done" ]; do
-                curl -s -o "$WORK/pprof/cpu-$(date -u +%s).pprof" "http://$PPROF_ADDR/debug/pprof/profile?seconds=30" || true
-              done
-            ) &
-            pprof_pids+=($!)
-          fi
-
           # The lk cohort is capacity's alone; VOICE_LEG also covers the
           # operational k6 voice churn, which is why it is not the gate here.
           voice_pid=""
@@ -661,20 +618,8 @@ jobs:
           (cd Server/scripts/k6 && taskset -c 2,3 k6 run --insecure-skip-tls-verify ws-load.js) || k6_rc=$?
           cp Server/scripts/k6/reports/k6-summary.json "$WORK/" 2>/dev/null || true
 
-          if [ "$PPROF" = true ]; then
-            for p in block mutex heap; do
-              curl -s -o "$WORK/pprof/$p.pprof" "http://$PPROF_ADDR/debug/pprof/$p" || true
-            done
-          fi
           touch "$WORK/.sampling-done"
           wait "$sample_pid" || true
-          for p in "${pprof_pids[@]}"; do
-            wait "$p" || true
-          done
-          if [ "$PPROF" = true ]; then
-            cp Server/chatserver "$WORK/pprof/chatserver" 2>/dev/null || true
-            tar -C "$WORK" -czf "$WORK/pprof.tgz" pprof
-          fi
 
           voice_rc=0
           if [ -n "$voice_pid" ]; then
@@ -772,5 +717,4 @@ jobs:
             ${{ runner.temp }}/loadtest/server.log
             ${{ runner.temp }}/loadtest/cpu.stat.log
             ${{ runner.temp }}/loadtest/drain.txt
-            ${{ runner.temp }}/loadtest/pprof.tgz
           retention-days: 30
