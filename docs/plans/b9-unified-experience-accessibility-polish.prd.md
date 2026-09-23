@@ -4,6 +4,8 @@
 **Entry gate: NOT MET.** This document is not permission to bypass it.
 **Owner decisions:** Q1–Q12 decided 2026-09-23 ([Open questions](#open-questions)). The Q9
 amendment lets the serialized foundation lane B9-0 → B9-3 start now; B9-4 onward keeps the gate order.
+**B9-0 complete 2026-09-23** at `dev` `f32149c47756b06f2400d484b3347fd782586ff3`:
+[b9-entry-baseline-2026-09-23.md](b9-entry-baseline-2026-09-23.md) records the drift, verdicts and baselines.
 
 > **Drafted:** 2026-09-23. **Planning branch:** `docs/b9-unified-experience-plan`.
 > **Exact base:** `0beee8e4c50ca18823750e381d3a1d6e327029b8`, checked-out `dev`.
@@ -69,6 +71,10 @@ are labelled as proposed; no product tests were added or run for this planning P
   Current code has the font floor and bounded overlay
   (`Client/src/lib/appearance.ts:14-56`, `Client/src/styles/app.css:4875-4905`).
   B9 supplies regression acceptance and later reconciles the register.
+  _Drift at `f32149c4` (B9-0):_ register rows cited in this PRD sit five
+  lines lower (`:128`, `:181`, `:198`, `:215-221`, `:307-318`), and the
+  `Client/CLAUDE.md:125` packaging rule is now `:136`. B9-0 reconciled the
+  eight B9-tagged register rows that lacked their ledger fix.
 - Original multi-surface requirement wording is narrowed by the dated B8
   amendments, not by an implicit B9 deferral. Browser/mobile rows stay visible
   as post-beta scope, never desktop-qualified by substitution.
@@ -148,9 +154,13 @@ preparation are satisfied; phase acceptance is not. The required gate is in
 | B7 broker/platform foundation                                                   | Code present; qualification not inferred | Preserve broker tests and native privacy evidence; reconcile historical pending rows with accepted results.                                                                                                                                  |
 | Desktop platform matrix green                                                   | **NOT MET**                              | B7-17 install/boot/connect/update/rollback/media/recovery results for all four targets, declared native/cross-compile distinctions, and HP-7 acceptance. The missing updater target is source evidence above, not merely an absent document. |
 | B5 contracts stable and security-reviewed                                       | **NOT MET as a complete B9 gate**        | Accepted resolution/evidence for the public moderation-evidence consent follow-up, including revoke/relabel/deletion; exact server contract and security-review status. No private details in B9 artifacts.                                  |
-| Agreed tokens, interaction patterns and accessibility test rules                | **Decisions recorded; NOT MET**          | Q1/Q2/Q8 decided 2026-09-23; the named reviewer is the repository owner (Q1). Still needed: accepted baseline and examples in B9-0. Existing tokens and helpers do not constitute this agreement.                                            |
+| Agreed tokens, interaction patterns and accessibility test rules                | **Decisions recorded; NOT MET**          | Q1/Q2/Q8 decided 2026-09-23; the named reviewer is the repository owner (Q1). B9-0 recorded the baseline and rule set; owner acceptance is still needed. Existing tokens and helpers do not constitute this agreement.                       |
 | Recipient discovery and effective voice UI contracts                            | **Decided; contracts not implemented**   | Q5 (`can_moderate_voice`) PR accepted before B9-14; Q6 (`GET /api/v1/users/me/moderation`) PR accepted before complete B9-15/16. Keep these separate from a false claim that all B5 APIs are absent.                                         |
 | Common per-item entry contract                                                  | Prepared, not accepted for execution     | Assigned implementer, real base, reviewed code proof/failing control, contract/migration/privacy/rollback notes and green dependencies for each PR.                                                                                          |
+
+_Rechecked 2026-09-23 by B9-0 at `f32149c4`:_ every verdict above is unchanged
+([entry-gate verdicts](b9-entry-baseline-2026-09-23.md#entry-gate-verdicts-at-this-head);
+[execution contract](b9-entry-baseline-2026-09-23.md#execution-contract-for-b9-1b9-3)).
 
 B9-0 may prepare evidence and obtain decisions now. Under the Q9 amendment
 (2026-09-23), B9-1, B9-2 and B9-3 may also start now, after B9-0 and in that
@@ -167,7 +177,7 @@ every smaller number. All product rows additionally depend on the entry gate.
 
 | Milestone                                                                | One-PR outcome                                                          | Direct dependencies                                                                                                              | Roadmap workstreams | Status  |
 | ------------------------------------------------------------------------ | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ------- |
-| [B9-0](../../.claude/plans/b9-0-entry-evidence-and-decisions.plan.md)    | Verify entry evidence and settle the execution contract                 | Entry evidence preparation only                                                                                                  | entry; 8, 10        | Pending |
+| [B9-0](../../.claude/plans/b9-0-entry-evidence-and-decisions.plan.md)    | Verify entry evidence and settle the execution contract                 | Entry evidence preparation only                                                                                                  | entry; 8, 10        | Done    |
 | [B9-1](../../.claude/plans/b9-1-css-source-split.plan.md)                | Split app.css without changing its output                               | B9-0                                                                                                                             | 11                  | Pending |
 | [B9-2](../../.claude/plans/b9-2-shared-accessibility-and-tokens.plan.md) | Apply the agreed shared accessibility and token rules                   | B9-1                                                                                                                             | 7, 8                | Pending |
 | [B9-3](../../.claude/plans/b9-3-english-text-boundary.plan.md)           | Introduce the English text and formatting boundary                      | B9-2                                                                                                                             | 6                   | Pending |
@@ -305,6 +315,10 @@ gates. Newly verified B9 defects must enter the canonical ledger or a private
 advisory before remediation. Phase exit requires no open B9-tagged finding
 unless the owner explicitly retags it with a written reason in the scorecard;
 a known exploitable beta blocker is not accepted risk.
+
+_Drift at `f32149c4` (B9-0):_ OC-0446, OC-0447 and OC-0448 have since been
+fixed and OC-0449..OC-0451 recorded and fixed; OC-0445 is the ledger's only open
+entry (`.superpowers/findings-ledger.json:10331`). None is a B9 finding.
 
 ## HP-9 — Feature freeze and accessibility acceptance
 
