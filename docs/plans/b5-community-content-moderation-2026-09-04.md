@@ -2998,6 +2998,31 @@ audit implements none of them, and it does not judge B5-10's unfinished work.
   existing trust, NSFW, membership and online-state checks. This belongs to
   B5's revocable push service, alongside B8's already-planned client UX.
 
+  **Evidence, 2026-09-23 — ready for owner acceptance, not accepted.** No
+  production change was needed: `PushDispatcher.attemptOne`
+  (`Server/service/push_dispatch.go`) runs `subscriptionStillCurrent` and
+  `stillEligible` immediately before every attempt, the first included
+  (`Server/service/push_dispatch_revalidate.go`). The first re-reads the
+  subscription row the saved request was encrypted for, so a revoked,
+  re-keyed or rotated-away device is refused. The second asks the
+  recipient-blocks-author pair, then re-checks DM trust, online state,
+  channel access and NSFW acknowledgement. Both fail closed on a lookup
+  error. `TestPushDispatch_Condition6_WithdrawnAuthorityGovernsEveryAttempt`
+  (`Server/service/push_dispatch_consent_test.go`) sends through the real
+  `SendMessage` hook and withdraws through the paths a user reaches,
+  `PushService.Revoke` and `BlockService.BlockUser`. It withdraws at every
+  point a delivery can be pending: queued before its first attempt, and
+  after each of the first and second attempts. The withdrawn recipient's
+  endpoint sees exactly as many fetches as it had before the withdrawal and
+  none after. An untouched recipient in the same dispatch still gets its
+  whole retry budget and is delivered, so the refusal is not a blanket stop.
+  The existing R3 tests in `push_dispatch_test.go` (`RecheckBeforeEachAttempt_*`:
+  trust, NSFW acknowledgement, channel access, online state, credential and
+  VAPID-key rotation, lookup failures, unchanged work still retries) are
+  unchanged and pass. Revert-proof: skipping either per-attempt check turns
+  all three of its boundary cases red. Security-review status stays in the
+  private review trail. B5-12's final reconciliation is not claimed here.
+
 Keep security validation and advisory disposition in the private review
 trail. Close these items and B5-12's final reconciliation on the measured
 exit SHA before claiming B5 acceptance; do not defer these conditions to a
