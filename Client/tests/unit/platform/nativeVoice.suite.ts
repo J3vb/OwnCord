@@ -37,7 +37,12 @@ export interface NativeVoiceSubject {
   readonly native: NativeControl;
 }
 
-const audio = { echoCancellation: true, noiseSuppression: false, autoGainControl: true };
+const audio = {
+  echoCancellation: true,
+  noiseSuppression: false,
+  autoGainControl: true,
+  enhancedNoiseSuppression: true,
+};
 
 export function describeNativeVoiceSuite(
   makeSubject: () => Promise<NativeVoiceSubject>,

@@ -214,6 +214,7 @@ export class RoomLifecycle {
         echoCancellation: loadPref("echoCancellation", true),
         noiseSuppression: loadPref("noiseSuppression", true),
         autoGainControl: loadPref("autoGainControl", true),
+        enhancedNoiseSuppression: loadPref("enhancedNoiseSuppression", false),
       },
       (identity) => this._audioElements.getEffectiveVolume(parseUserId(identity)),
       (identity) => this._audioElements.getScreenshareGain(parseUserId(identity)),

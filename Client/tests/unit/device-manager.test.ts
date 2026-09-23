@@ -418,7 +418,7 @@ describe("DeviceManager", () => {
       expect(mockGetLocalDevices).not.toHaveBeenCalled();
     });
 
-    it("re-applies a saved system-default output on the native backend so playout follows a hot-plugged default", async () => {
+    it("re-applies saved system defaults on the native backend so capture and playout follow a hot-plugged default", async () => {
       mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
       mockNativeAudioDevices.mockImplementation(async (kind: string) =>
         kind === "audioinput"
@@ -431,8 +431,10 @@ describe("DeviceManager", () => {
       handler();
       await vi.advanceTimersByTimeAsync(600);
 
-      expect(mockRoom.switchActiveDevice).toHaveBeenCalledTimes(1);
-      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audiooutput", "");
+      expect(mockRoom.switchActiveDevice.mock.calls).toEqual([
+        ["audioinput", ""],
+        ["audiooutput", ""],
+      ]);
     });
 
     it("does not re-apply saved devices on the web path", async () => {

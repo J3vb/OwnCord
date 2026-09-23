@@ -618,9 +618,6 @@ function buildVoiceAudioTabInner(
   ];
 
   for (const item of audioToggles) {
-    // RNNoise attaches to a browser track; the native engine's own noise
-    // suppression stands in for it on Linux (owner decision).
-    if (nativeAudio && item.key === "enhancedNoiseSuppression") continue;
     const row = createElement("div", { class: "setting-row" });
     const info = createElement("div", {});
     const label = createElement("div", { class: "setting-label" }, item.label);
