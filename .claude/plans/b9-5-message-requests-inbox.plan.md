@@ -1,6 +1,6 @@
 # Plan: B9-5 — Show the Message Requests inbox and safe text preview
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-5-impl` from `dev` `166d71e4`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — native AT recordings and OS-zoom check pending owner — 2026-09-23 on branch `fm/b9-5-impl` from `dev` `166d71e4`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-5 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-5-message-requests-inbox`; branch from current `dev`, PR to `dev` only.
