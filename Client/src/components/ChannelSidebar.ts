@@ -703,13 +703,21 @@ function renderChannelItem(
  * The group's channel order is folded in so a reorder rebuilds the affected
  * rows: each row's drag handler captures the ordered channel array at attach
  * time, and a reused node would otherwise drop against a stale order.
+ *
+ * A voice row is rebuilt on every render (`voiceTick`, below): it carries live
+ * participant/stream/verification state whose changes already arrive through
+ * this sidebar's voice and connection subscriptions, and those rows are few.
+ * Text rows — the long list this milestone is about — keep their identity.
+ * ponytail: voice rows intentionally stay unkeyed; key them too if a voice
+ * roster ever grows large enough for the rebuild to matter.
  */
 function channelRowSignature(
   channel: Channel,
   activeChannelId: number | null,
   orderIds: string,
+  voiceTick: number,
 ): string {
-  const parts: (string | number)[] = [
+  return [
     channel.id,
     channel.name,
     channel.type,
@@ -720,32 +728,8 @@ function channelRowSignature(
     channel.unreadCount,
     channel.mentionCount,
     orderIds,
-  ];
-  if (channel.type === "voice") {
-    // The joined state decides whether the timeout freezes the row at all
-    // and whether the click joins or leaves, so it must be in the signature.
-    parts.push(voiceStore.getState().currentChannelId === channel.id ? "j" : "n");
-    parts.push(uiStore.getState().connectionStatus);
-    parts.push(safetyStore.getState().timeout?.expiresAt ?? "");
-    parts.push(voiceStore.getState().localSessionFingerprint ?? "");
-    for (const user of getChannelVoiceUsers(channel.id)) {
-      const member = membersStore.getState().members.get(user.userId);
-      const resolved = member !== undefined ? memberDisplayName(member) : user.username;
-      const verif = getPeerVerification(user.userId);
-      parts.push(
-        `${user.userId}:${resolved}:${user.camera ? "c" : ""}${user.screenshare ? "s" : ""}${
-          user.muted ? "m" : ""
-        }${user.deafened ? "d" : ""}${user.serverMuted === true ? "M" : ""}${
-          user.serverDeafened === true ? "D" : ""
-        }${
-          verif !== null
-            ? `#${verif.status}/${verif.safetyNumber ?? ""}/${verif.sessionFingerprint ?? ""}`
-            : ""
-        }`,
-      );
-    }
-  }
-  return parts.join("|");
+    channel.type === "voice" ? voiceTick : "",
+  ].join("|");
 }
 
 interface GroupRender {
@@ -803,6 +787,14 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
    *  speaking-only subscription patch classes without per-user querySelector. */
   const voiceRowByUserId = new Map<number, HTMLElement>();
 
+  /**
+   * Bumped by every refresh that can change a voice row's rendered state
+   * (voice membership/streams/E2EE, connection status, timeout). Voice rows
+   * fold it into their signature, so those refreshes rebuild them while text
+   * rows stay keyed (B9-21).
+   */
+  let voiceTick = 0;
+
   function rebuildVoiceRowCache(): void {
     voiceRowByUserId.clear();
     if (channelList === null) return;
@@ -858,11 +850,14 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     return el;
   }
 
-  function renderChannels(): void {
+  /** `voiceChanged` is true for the refreshes that can alter a voice row's
+   *  rendered state; they bump `voiceTick` so those rows rebuild. */
+  function renderChannels(voiceChanged = false): void {
     updateMarkAllBtn();
     if (channelList === null) {
       return;
     }
+    if (voiceChanged) voiceTick++;
     voiceRowByUserId.clear();
 
     const grouped = getChannelsByCategory();
@@ -970,21 +965,22 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         class: collapsed ? "category collapsed" : "category",
       });
       header.dataset.category = g.name;
+      const categoryNameId = `category-name-${g.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
       // The arrow is the keyboard-operated collapse control; the header div
       // itself keeps its mouse click handler. A real <button> here (rather
       // than making the whole header a button) keeps the header's own "+" from
-      // being an interactive element nested inside another one.
+      // being an interactive element nested inside another one. The label
+      // names the arrow (aria-labelledby), so no second copy of the category
+      // name is needed.
+      const label = createElement("span", { class: "category-name", id: categoryNameId }, g.name);
       const arrow = createElement("button", {
         type: "button",
         class: "category-arrow",
         "aria-expanded": collapsed ? "false" : "true",
-        "aria-label": collapsed
-          ? shellText("channel.expandCategory", { category: g.name })
-          : shellText("channel.collapseCategory", { category: g.name }),
+        "aria-labelledby": categoryNameId,
       });
       arrow.appendChild(createIcon(collapsed ? "chevron-right" : "chevron-down", 12));
-      const label = createElement("span", { class: "category-name" }, g.name);
 
       appendChildren(header, arrow, label);
 
@@ -995,7 +991,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
             type: "button",
             class: "category-add-btn",
             title: shellText("channel.create"),
-            "aria-label": shellText("channel.createInCategory", { category: g.name }),
+            "aria-label": shellText("channel.create"),
             "data-testid": `create-channel-${g.name.toLowerCase().replace(/\s+/g, "-")}`,
           },
           "+",
@@ -1033,31 +1029,28 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   function updateCategoryGroup(el: Element, g: GroupRender, deps: ChannelListDeps): void {
     const container = el.querySelector<HTMLElement>(".category-channels-container");
     if (container === null) return;
-    reconcileChildren(container, g.channels, {
-      key: (ch) => String(ch.id),
-      signature: (ch) => channelRowSignature(ch, g.activeChannelId, g.orderIds),
-      create: (ch) => buildChannelRow(ch, g.activeChannelId, g.channels, container, deps),
-      dispose: (row) => {
-        rowOwnerByEl.get(row)?.destroy();
-        rowOwnerByEl.delete(row);
-      },
-    });
+    reconcileGroupRows(container, g, deps);
   }
 
   function buildChannelsContainer(g: GroupRender, deps: ChannelListDeps): HTMLDivElement {
     const container = createElement("div", { class: "category-channels-container" });
     // Populate through the reconciler so every row gets its key metadata; a
     // later in-place update can then recognise and reuse them.
+    reconcileGroupRows(container, g, deps);
+    return container;
+  }
+
+  /** One group's rows, keyed and reused (B9-21). */
+  function reconcileGroupRows(container: HTMLElement, g: GroupRender, deps: ChannelListDeps): void {
     reconcileChildren(container, g.channels, {
       key: (ch) => String(ch.id),
-      signature: (ch) => channelRowSignature(ch, g.activeChannelId, g.orderIds),
+      signature: (ch) => channelRowSignature(ch, g.activeChannelId, g.orderIds, voiceTick),
       create: (ch) => buildChannelRow(ch, g.activeChannelId, g.channels, container, deps),
       dispose: (row) => {
         rowOwnerByEl.get(row)?.destroy();
         rowOwnerByEl.delete(row);
       },
     });
-    return container;
   }
 
   /** Redraw when a row's mute is toggled (see CHANNEL_MUTE_CHANGED). */
@@ -1169,13 +1162,13 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // affordance freezes/unfreezes with a visible reason (§3 connection status).
     const unsubConnStatus = uiStore.subscribeSelector(
       (s) => s.connectionStatus,
-      () => renderChannels(),
+      () => renderChannels(true),
     );
     unsubscribers.push(unsubConnStatus);
     unsubscribers.push(
       safetyStore.subscribeSelector(
         (s) => s.timeout,
-        () => renderChannels(),
+        () => renderChannels(true),
       ),
     );
 
@@ -1203,7 +1196,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         }
         return structSig;
       },
-      () => renderChannels(),
+      () => renderChannels(true),
     );
     unsubscribers.push(unsubVoiceStructure);
 
@@ -1213,7 +1206,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // (OC-0333). Re-render on roleRevision to pick up the new name/nickname.
     const unsubMemberRevision = membersStore.subscribeSelector(
       (s) => s.roleRevision ?? 0,
-      () => renderChannels(),
+      () => renderChannels(true),
     );
     unsubscribers.push(unsubMemberRevision);
 

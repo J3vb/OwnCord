@@ -221,7 +221,9 @@ test.describe("B9-21 DM preview list", () => {
   test("the embedded DM preview is a single Tab stop and arrow-navigable", async ({ page }) => {
     const entries = page.locator(".sidebar-dm-section [data-testid='dm-entry']");
     await expect(entries.first()).toBeVisible();
-    await expect(page.locator(".sidebar-dm-section [data-testid='dm-entry'][tabindex='0']")).toHaveCount(1);
+    await expect(
+      page.locator(".sidebar-dm-section [data-testid='dm-entry'][tabindex='0']"),
+    ).toHaveCount(1);
 
     await entries.first().focus();
     await page.keyboard.press("ArrowDown");
