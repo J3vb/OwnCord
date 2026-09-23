@@ -45,7 +45,7 @@ docs/security-findings/
 # Mutation-testing output (npm run test:mutate). Local-only by design: a
 # surviving-mutant report maps exactly which behaviour nothing tests.
 Client/.stryker-tmp/
-Client/reports/
+/Client/reports/
 
 # Load-test output (B6-9): k6's summary JSON and voice-load.sh's report. The
 # numbers that matter are published in docs/capacity.md and uploaded by
