@@ -9,8 +9,8 @@
  * strands the user in a dead call or tears down a call that was only blipping.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DisconnectReason, Track } from "livekit-client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DisconnectReason, RoomEvent, Track } from "livekit-client";
 import type {
   LocalTrackPublication,
   Participant,
@@ -21,6 +21,7 @@ import type {
 } from "livekit-client";
 
 import { createRoomEventHandlers } from "@lib/roomEventHandlers";
+import { onRoom } from "../../src/features/voice/releaseRoom";
 import type { RoomEventDeps } from "@lib/roomEventHandlers";
 import { voiceStore } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
@@ -53,7 +54,8 @@ interface Harness {
   room: {
     canPlaybackAudio: boolean;
     startAudio: ReturnType<typeof vi.fn>;
-    removeAllListeners: ReturnType<typeof vi.fn>;
+    on: ReturnType<typeof vi.fn>;
+    off: ReturnType<typeof vi.fn>;
     disconnect: ReturnType<typeof vi.fn>;
   };
   spies: {
@@ -75,7 +77,8 @@ function build(over: Partial<RoomEventDeps> = {}): Harness {
   const room = {
     canPlaybackAudio: true,
     startAudio: vi.fn().mockResolvedValue(undefined),
-    removeAllListeners: vi.fn(),
+    on: vi.fn(),
+    off: vi.fn(),
     disconnect: vi.fn().mockResolvedValue(undefined),
   };
   const spies = {
@@ -550,6 +553,121 @@ describe("handleEncryptionError", () => {
     expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
     expect(voiceStore.getState().encryptionDegraded).toBe(true);
   });
+
+  // OC-0452: every key rotation installs the new room key at index 0 before
+  // the peer has it, so for a moment one side's frames fail AES-GCM with a
+  // key present — the worker reports `InvalidKey: Decryption failed` for the
+  // REMOTE sender. Those frames are dropped, never played in clear, and the
+  // failures stop once the offer lands. Only a streak that outlasts the grace
+  // window is a real failure.
+  describe("receive-side decrypt failures (OC-0452)", () => {
+    const bob = { identity: "bob", isLocal: false } as Participant;
+    const decryptFailed = () =>
+      new Error(
+        "InvalidKey: Decryption failed: The operation failed for an operation-specific reason",
+      );
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("does not degrade on a transient InvalidKey from a remote participant at join", () => {
+      const h = build();
+
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+      vi.advanceTimersByTime(1000);
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
+    it("degrades when decrypt failures from the same participant persist past the grace window", () => {
+      const h = build();
+
+      // The worker throttles to one error per second: a key that never lands
+      // keeps reporting at that cadence.
+      for (let i = 0; i < 3; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        expectConsole("warn", /receive-side decrypt failure/);
+        vi.advanceTimersByTime(1000);
+      }
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    });
+
+    it("tolerates separate transient races a few seconds apart", () => {
+      const h = build();
+
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+      vi.advanceTimersByTime(5000);
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
+    it("tolerates separate transient races that are far apart", () => {
+      const h = build();
+
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+      vi.advanceTimersByTime(5 * 60_000);
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
+    it("degrades immediately on a sender-side missing key, even with a participant attributed", () => {
+      const h = build();
+      const me = { identity: "me", isLocal: true } as Participant;
+
+      h.handlers.handleEncryptionError(
+        new Error("MissingKey: encryption key missing for encoding"),
+        me,
+      );
+
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    });
+
+    it("degrades immediately on an InvalidKey attributed to the local participant", () => {
+      const h = build();
+      const me = { identity: "me", isLocal: true } as Participant;
+
+      h.handlers.handleEncryptionError(decryptFailed(), me);
+
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    });
+
+    it("degrades immediately on an InvalidKey with no participant attributed", () => {
+      const h = build();
+
+      h.handlers.handleEncryptionError(decryptFailed(), undefined);
+
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    });
+
+    it("degrades immediately on a native-backend encryption failure", () => {
+      const h = build();
+
+      h.handlers.handleEncryptionError(new Error("native E2EE not active"));
+
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    });
+  });
 });
 
 // ── handleDisconnected ─────────────────────────────────────────────────────
@@ -582,6 +700,7 @@ describe("handleDisconnected", () => {
 
   it("auto-reconnects on an unexpected disconnect", () => {
     const h = build();
+    onRoom(h.room as unknown as Room, RoomEvent.Disconnected, h.handlers.handleDisconnected);
 
     h.handlers.handleDisconnected(DisconnectReason.SERVER_SHUTDOWN);
 
@@ -589,7 +708,8 @@ describe("handleDisconnected", () => {
     expect(h.audioElements.cleanupAllAudioElements).toHaveBeenCalled();
     expect(h.spies.setRoom).toHaveBeenCalledWith(null);
     expect(h.spies.syncModuleRooms).toHaveBeenCalled();
-    expect(h.room.removeAllListeners).toHaveBeenCalled();
+    // Only the app's own listener goes; livekit's disconnect cleanups stay.
+    expect(h.room.off).toHaveBeenCalledWith(RoomEvent.Disconnected, h.handlers.handleDisconnected);
     expect(h.room.disconnect).toHaveBeenCalled();
     expect(h.spies.setReconnectAc).toHaveBeenCalledWith(expect.any(AbortController));
     expect(h.spies.attemptAutoReconnect).toHaveBeenCalledWith(

@@ -18,7 +18,8 @@
 import type { CDPSession, Page } from "@playwright/test";
 
 export interface LifecycleSample {
-  /** Cycle number, or -1 for the idle-phase samples. */
+  /** Cycle number, -1 for an asserted idle-phase sample, or -2 for an idle
+   *  sample taken before the app's own auto-idle transition. */
   cycle: number;
   cycleAt: number;
   documents: number;
@@ -132,19 +133,69 @@ export async function sampleLifecycle(
   cdp: CDPSession,
   cycle: number,
 ): Promise<LifecycleSample> {
-  await cdp.send("HeapProfiler.collectGarbage");
-  await cdp.send("HeapProfiler.collectGarbage");
-  const counters = await cdp.send("Memory.getDOMCounters");
-  const heap = await cdp.send("Runtime.getHeapUsage");
-  const ledger = await page.evaluate(() => {
-    const state = (
-      window as unknown as { __ocTimerLedger?: { timeouts: Set<number>; intervals: Set<number> } }
-    ).__ocTimerLedger;
-    return {
-      timeouts: state?.timeouts.size ?? 0,
-      intervals: state?.intervals.size ?? 0,
-    };
+  // Timers are read twice, at least a second apart, and the lower read counts:
+  // a short timer the app is running at that instant (a debounce, a re-armed
+  // poll) is not accumulation, while a leaked one is still pending on both
+  // reads. A single read caught one such timer in 80 samples of the long run.
+  const readLedger = () =>
+    page.evaluate(() => {
+      const state = (
+        window as unknown as {
+          __ocTimerLedger?: { timeouts: Set<number>; intervals: Set<number> };
+        }
+      ).__ocTimerLedger;
+      return { timeouts: state?.timeouts.size ?? 0, intervals: state?.intervals.size ?? 0 };
+    });
+  const firstLedger = await readLedger();
+  const firstLedgerAt = Date.now();
+  // Two retainers exist only because the soak observes the page. V8 keeps
+  // every console argument alive while an inspector session is attached
+  // (livekit logs its E2EE worker, which reaches the whole Room), and the
+  // media probe keeps every peer, socket and track it has seen. Drop both
+  // before the GC so the counters read what the app holds.
+  await cdp.send("Runtime.discardConsoleEntries");
+  await page.evaluate(() => {
+    const probe = (
+      window as unknown as {
+        __ocMedia?: {
+          peers: RTCPeerConnection[];
+          signaling: WebSocket[];
+          tracks: MediaStreamTrack[];
+        };
+      }
+    ).__ocMedia;
+    if (probe === undefined) return;
+    probe.peers = probe.peers.filter((peer) => peer.connectionState !== "closed");
+    probe.signaling = probe.signaling.filter((socket) => socket.readyState <= WebSocket.OPEN);
+    probe.tracks = probe.tracks.filter((track) => track.readyState === "live");
   });
+  // The DOM counters are read after a GC until two reads a second apart agree
+  // on nodes (at most four reads). One CI soak (run 35886832029, attempt 2)
+  // sampled page 0 at 2739, 2738 and 2739 nodes while its attached DOM was
+  // identical at all three samples: a single retained, detached node was in
+  // flux at that one read, and the within-page bar counted the difference as
+  // growth. A leaked node is present on every read, so settling on a stable
+  // value leaves the bar as strict as before.
+  const readCounters = async () => {
+    await cdp.send("HeapProfiler.collectGarbage");
+    await cdp.send("HeapProfiler.collectGarbage");
+    return cdp.send("Memory.getDOMCounters");
+  };
+  let counters = await readCounters();
+  for (let read = 1; read < 4; read++) {
+    await page.waitForTimeout(1000);
+    const next = await readCounters();
+    const stable = next.nodes === counters.nodes;
+    counters = next;
+    if (stable) break;
+  }
+  const heap = await cdp.send("Runtime.getHeapUsage");
+  await page.waitForTimeout(Math.max(0, firstLedgerAt + 1000 - Date.now()));
+  const secondLedger = await readLedger();
+  const ledger = {
+    timeouts: Math.min(firstLedger.timeouts, secondLedger.timeouts),
+    intervals: Math.min(firstLedger.intervals, secondLedger.intervals),
+  };
   return {
     cycle,
     cycleAt: Date.now(),
@@ -182,6 +233,10 @@ export async function sampleLifecycle(
   };
 }
 
+/** Per-metric phase-series slope ceilings, in units per cycle; absent uses the
+ *  plan's 0.05. Empty since 11c fixed the leaks that needed one. */
+export type SlopeCeilings = Partial<Record<CountMetric, number>>;
+
 export interface BarResult {
   metric: keyof Omit<LifecycleSample, "cycle" | "cycleAt">;
   warm: number | null;
@@ -190,9 +245,6 @@ export interface BarResult {
   bar: string;
   pass: boolean;
 }
-
-/** Per-metric slope ceilings, in units per cycle; absent uses the plan's 0.05. */
-export type SlopeCeilings = Partial<Record<CountMetric, number>>;
 
 /**
  * Least-squares slope of y per **cycle** (not per sample index). Samples are 5
@@ -211,6 +263,17 @@ function slope(points: readonly { x: number; y: number }[]): number {
     den += (p.x - meanX) ** 2;
   }
   return den === 0 ? 0 : num / den;
+}
+
+/** The plan's idle heap bar, in bytes per minute. */
+export const IDLE_HEAP_BAR_SLOPE = 100 * 1024;
+
+/** Least-squares slope of heap used, in bytes per minute, over the asserted
+ *  idle-phase samples (`cycle === -1`) against the time each was taken. */
+export function idleHeapSlope(samples: readonly LifecycleSample[]): number {
+  return slope(
+    samples.filter((s) => s.cycle === -1).map((s) => ({ x: s.cycleAt / 60_000, y: s.heapUsed })),
+  );
 }
 
 const COUNT_METRICS: readonly CountMetric[] = [
@@ -236,15 +299,24 @@ const COUNT_METRICS: readonly CountMetric[] = [
  * generation (`cycle % 10`): cycles 5/15/25 are one like-for-like mid-session
  * series, cycles 10/20 are the post-logout series. A metric passes only when
  * *every* group's per-cycle slope is within its ceiling. The soak's re-login
- * navigates, so every series compares samples from different pages: growth that
- * survives the navigation fails the gate, but growth confined to one page (and
- * released by the navigation) is invisible to it. That within-page case is
- * deferred to B7-11c.
+ * navigates, so a phase series compares samples from different pages: it sees
+ * growth that survives the navigation, but not growth the navigation releases.
  *
- * `slopeCeilings` is the ratchet for a metric with a known, recorded base leak
- * (the logout-path listeners/nodes leak): the gate still fails on any growth past
- * the measured slope, and 11c lowers each ceiling to the plan's 0.05 once the
- * leak is fixed. `documents` and `intervals` must be exactly flat in every group.
+ * The within-page series closes that gap: every sample off the 5-cycle marks,
+ * where the reconnect and logout happen (`cycle % 5 !== 0`), is grouped by its
+ * page (`cycle / 10`),
+ * and each page's samples must hold the plan's bar. Heap is not asserted within
+ * a page: V8 compiles and tiers up code as a page ages (about 1 MB of `(code)`
+ * over five cycles in a heap-snapshot diff), so page age, not a leak, moves it;
+ * heap is compared only in the phase series at the 5-cycle marks, where the
+ * reconnect and logout happen (`cycle % 5 === 0`), 11a's calibrated series. The later page ages
+ * (cycles 6 and 9) are where that tier-up still moves it: one 20-cycle run grew
+ * 413 KB between cycles 9 and 19 with every count flat.
+ *
+ * `slopeCeilings` raises the phase-series ceiling of a metric with a known,
+ * recorded leak that survives the navigation, so the gate still fails on any
+ * growth past the measured slope. It never applies to the within-page series.
+ * `documents` and `intervals` must be exactly flat in every group.
  */
 export function evaluateBars(
   samples: readonly LifecycleSample[],
@@ -260,16 +332,28 @@ export function evaluateBars(
     const phase = sample.cycle % 10;
     groups.set(phase, [...(groups.get(phase) ?? []), sample]);
   }
+  // Like-for-like samples within one page: off the 5-cycle marks, where the
+  // reconnect and the logout that starts the next page happen.
+  const pages = new Map<number, LifecycleSample[]>();
+  for (const sample of post) {
+    if (sample.cycle % 5 === 0) continue;
+    const page = Math.floor(sample.cycle / 10);
+    pages.set(page, [...(pages.get(page) ?? []), sample]);
+  }
+  const series: { label: string; group: LifecycleSample[]; withinPage: boolean }[] = [
+    ...[...groups].map(([phase, group]) => ({ label: `phase ${phase}`, group, withinPage: false })),
+    ...[...pages].map(([page, group]) => ({ label: `page ${page}`, group, withinPage: true })),
+  ];
 
   const results: BarResult[] = [];
   for (const metric of COUNT_METRICS) {
-    const ceiling = slopeCeilings[metric] ?? COUNT_BAR_SLOPE;
+    const phaseCeiling = slopeCeilings[metric] ?? COUNT_BAR_SLOPE;
     const exact = metric === "documents" || metric === "intervals";
     const failures: string[] = [];
     let worstSlope = 0;
     let lastWarm: number | null = null;
     let lastFinal = 0;
-    for (const [phase, group] of groups) {
+    for (const { label, group, withinPage } of series) {
       const values = group.map((s) => s[metric]);
       const measuredSlope = slope(group.map((s) => ({ x: s.cycle, y: s[metric] })));
       if (Math.abs(measuredSlope) >= Math.abs(worstSlope)) {
@@ -278,8 +362,8 @@ export function evaluateBars(
         lastFinal = values[values.length - 1]!;
       }
       const flat = values.every((v) => v === values[0]);
-      const ok = exact ? flat : measuredSlope <= ceiling;
-      if (!ok) failures.push(`phase ${phase}: ${values.join("→")}`);
+      const ok = exact ? flat : measuredSlope <= (withinPage ? COUNT_BAR_SLOPE : phaseCeiling);
+      if (!ok) failures.push(`${label}: ${values.join("→")}`);
     }
     const result: BarResult = {
       metric,
@@ -287,8 +371,8 @@ export function evaluateBars(
       final: lastFinal,
       slope: worstSlope,
       bar: exact
-        ? "every generation series exactly flat"
-        : `every generation series slope <= ${ceiling}/cycle`,
+        ? "every phase and page series exactly flat"
+        : `every phase series slope <= ${phaseCeiling}/cycle, every page series <= ${COUNT_BAR_SLOPE}/cycle`,
       pass: failures.length === 0,
     };
     if (failures.length > 0) result.bar += ` — FAIL ${failures.join("; ")}`;
@@ -303,6 +387,7 @@ export function evaluateBars(
   let heapFirst: number | null = null;
   let heapLast = 0;
   for (const [phase, group] of groups) {
+    if (phase % 5 !== 0) continue;
     const values = group.map((s) => s.heapUsed);
     const measured = slope(group.map((s) => ({ x: s.cycle, y: s.heapUsed })));
     if (Math.abs(measured) >= Math.abs(heapSlope)) {

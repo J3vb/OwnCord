@@ -1,0 +1,76 @@
+/* ── Invite Manager ── */
+.invite-manager__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.invite-manager__empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 32px 0;
+  font-size: var(--font-size-md);
+}
+.invite-item {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  transition: background 0.15s;
+}
+.invite-item:hover {
+  background: var(--bg-hover);
+}
+.invite-item__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.invite-item__code {
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: var(--font-size-md);
+  color: var(--header-primary);
+  font-weight: 600;
+}
+.invite-item__actions {
+  display: flex;
+  gap: 4px;
+}
+.invite-item__copy,
+.invite-item__revoke {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  transition: all 0.15s;
+  background: transparent;
+}
+.invite-item__copy {
+  color: var(--text-positive);
+}
+.invite-item__copy:hover {
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+}
+.invite-item__revoke {
+  color: var(--text-danger);
+}
+.invite-item__revoke:hover {
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+}
+.invite-item__revoke--confirming {
+  background: color-mix(in srgb, var(--red) 20%, transparent);
+  font-weight: 600;
+}
+.invite-item__revoke:disabled,
+.invite-manager__create:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.invite-item__meta {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}

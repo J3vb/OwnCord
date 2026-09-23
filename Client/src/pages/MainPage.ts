@@ -79,6 +79,10 @@ import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
 import { createChatArea } from "./main-page/ChatArea";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
+import { NAVIGATION_DESTINATIONS } from "../features/navigation/destinations";
+import { createContentNavigator } from "../features/navigation/contentView";
+import { createNoticesBanner } from "../features/safety/Notices";
+import type { ContentNavigator } from "../features/navigation/contentView";
 
 const log = createLogger("main-page");
 /** Long enough to read which sign-in it names (cf. toast.ts PARTIAL_SUCCESS_TOAST_MS). */
@@ -249,6 +253,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  status/name live (see toggleDmProfile) -- null while the panel is
    *  closed. Always cleared alongside dmProfileSidebar itself. */
   let dmProfileUnsub: (() => void) | null = null;
+
+  // B9-4: the content view (Message Requests, Moderation) shown in place of
+  // the chat column. Created in mount, once the chat column exists.
+  let contentNav: ContentNavigator | null = null;
 
   // DM calls: the banner draws a ring, the controller owns its lifetime.
   let callBanner: IncomingCallBannerComponent | null = null;
@@ -495,6 +503,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         videoModeCtrl.showVideoGrid();
         videoModeCtrl.setFocus(userId);
       },
+      destinations: NAVIGATION_DESTINATIONS,
+      onOpenView: (id, opener) => contentNav?.open(id, opener),
     });
     children.push(...sidebar.children);
     unsubscribers.push(...sidebar.unsubscribers);
@@ -524,13 +534,40 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       getCurrentUserId,
     });
 
+    // The composer of the channel on screen, else the sidebar's first control.
+    const focusReachable = (): void => {
+      const reachable =
+        chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea") ??
+        sidebar.sidebarWrapper.querySelector<HTMLElement>("button");
+      reachable?.focus();
+    };
+
+    contentNav = createContentNavigator({
+      destinations: NAVIGATION_DESTINATIONS,
+      chatArea: chatAreaResult.chatArea,
+      rememberChannel: sidebar.rememberChannel,
+      forgetChannel: sidebar.forgetChannel,
+      returnToChannel: sidebar.returnToChannel,
+      // The opener is gone (the Requests entry leaves with DM mode).
+      fallbackFocus: focusReachable,
+    });
+
     appendChildren(
       app,
       sidebar.sidebarWrapper,
       chatAreaResult.chatArea,
+      contentNav.element,
       chatAreaResult.dmProfileSlot,
     );
     root.appendChild(app);
+
+    // --- Moderation notices (B9-15, Q4): persistent, above the app row ---
+    const notices = new Disposable();
+    unsubscribers.push(() => notices.destroy());
+    root.insertBefore(
+      createNoticesBanner({ api, signal: notices.signal, fallbackFocus: focusReachable }),
+      app,
+    );
 
     // Settings overlay
     // Bumped by every local 2FA change so an in-flight profile refresh
@@ -587,6 +624,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onLogout: () => logout(api),
       getRetentionNotice: options.getRetentionNotice,
+      safetyTab: NAVIGATION_DESTINATIONS.safety?.build,
       onDeleteAccount: async (password) => {
         await api.deleteAccount(password);
         clearAuth();
@@ -1004,6 +1042,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // hidden) SettingsOverlay off that flag — ConnectPage, after logout —
       // would show it over the login screen.
       closeSettings();
+      // Before the chat teardown below: the view and its private content go
+      // first, and the next page starts with no view open.
+      contentNav?.destroy();
+      contentNav = null;
       teardownToast();
       // Full voice cleanup — tears down room, callbacks, ws ref, serverHost.
       // Prevents stale module-level state persisting across logout/reconnect cycles.

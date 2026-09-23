@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Room } from "livekit-client";
+import { Room, RoomEvent } from "livekit-client";
 import type { SessionState } from "./sessionState";
 
 const store = vi.hoisted(() => ({ currentChannelId: null as number | null }));
@@ -14,11 +14,13 @@ vi.mock("../../lib/logger", () => ({
 }));
 
 import { JoinOrchestration, type JoinHost } from "./joinOrchestration";
+import { onRoom } from "./releaseRoom";
 
 function fakeRoom(state = "connected"): Room {
   return {
     state,
-    removeAllListeners: vi.fn(),
+    on: vi.fn(),
+    off: vi.fn(),
     disconnect: vi.fn(async () => {}),
   } as unknown as Room;
 }
@@ -84,8 +86,10 @@ describe("disconnectSupersededLocalRoom", () => {
   it("disconnects only the passed room and re-syncs modules when idle", () => {
     const { host, join } = setup();
     const room = fakeRoom();
+    const onDisconnected = vi.fn();
+    onRoom(room, RoomEvent.Disconnected, onDisconnected);
     join.disconnectSupersededLocalRoom(room);
-    expect(room.removeAllListeners).toHaveBeenCalled();
+    expect(room.off).toHaveBeenCalledWith(RoomEvent.Disconnected, onDisconnected);
     expect(room.disconnect).toHaveBeenCalled();
     expect(host.syncModuleRooms).toHaveBeenCalledOnce();
     expect(host.leaveVoice).not.toHaveBeenCalled();
@@ -111,6 +115,31 @@ describe("connectAndSetup", () => {
     expect(room.disconnect).toHaveBeenCalled();
     expect(host.leaveVoice).not.toHaveBeenCalled();
     expect(getState()).toEqual({ type: "connecting", pendingJoin: null, joinGeneration: 99 });
+  });
+
+  it("leaves no devicechange listener behind for a Room superseded before connect", async () => {
+    const listeners = new Set<unknown>();
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        addEventListener: (_type: string, listener: unknown) => listeners.add(listener),
+        removeEventListener: (_type: string, listener: unknown) => listeners.delete(listener),
+      },
+    });
+    try {
+      const { host, join } = setup();
+      host.createRoom.mockImplementationOnce(async () => {
+        Room.cleanupRegistry = false;
+        const room = new Room();
+        expect(listeners.size).toBe(1);
+        host.setState({ type: "connecting", pendingJoin: null, joinGeneration: 99 });
+        return room;
+      });
+      await expect(join.connectAndSetup("t", "u", 1)).resolves.toBe("superseded");
+      expect(listeners.size).toBe(0);
+    } finally {
+      Reflect.deleteProperty(navigator, "mediaDevices");
+    }
   });
 });
 

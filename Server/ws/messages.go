@@ -277,15 +277,19 @@ type channelPayload struct {
 	VoiceMaxVideo int `json:"voice_max_video"`
 	// CanSend is the per-recipient composer affordance, the same value the
 	// ready payload ships per channel. It is per-client, so only the targeted
-	// sends in RefreshChannelVisibility populate it — the shared-buffer
-	// broadcasts (BroadcastChannelCreate/Update) leave it nil, since one
-	// encoded frame is delivered to every recipient and a single value would
-	// be wrong for some of them.
+	// channel_create sends (BroadcastChannelCreate, RefreshChannelVisibility)
+	// populate it — the shared-buffer channel_update broadcast leaves it nil,
+	// since one encoded frame is delivered to every recipient and a single
+	// value would be wrong for some of them.
 	//
 	// Pointer + omitempty so "not stated" stays distinguishable from "false":
 	// a client must keep its existing verdict when the field is absent, and an
 	// older server that never sends it keeps the permissive default.
 	CanSend *bool `json:"can_send,omitempty"`
+	// CanModerateVoice is the per-recipient voice-moderation affordance (B9
+	// Q5), the same value the ready payload ships per channel. Same
+	// per-recipient, targeted-only, absent-means-unchanged rules as CanSend.
+	CanModerateVoice *bool `json:"can_moderate_voice,omitempty"`
 }
 
 // channelPayloadFrom narrows a channel row to the wire shape shared by the
@@ -758,23 +762,12 @@ func buildVoiceLeave(channelID, userID int64) []byte {
 	})
 }
 
-// buildChannelCreate constructs a channel_create broadcast.
-func buildChannelCreate(ch *db.Channel) []byte {
-	return buildJSON(wsMsg{
-		Type:    MsgTypeChannelCreate,
-		Payload: channelPayloadFrom(ch),
-	})
-}
-
 // buildChannelCreateFor constructs a channel_create addressed to ONE client,
-// carrying that client's can_send verdict.
-//
-// Separate from buildChannelCreate because can_send is per-recipient: the
-// broadcast form encodes a single frame for a whole audience, so it must leave
-// the field absent rather than assert one client's answer for everyone.
-func buildChannelCreateFor(ch *db.Channel, canSend bool) []byte {
+// carrying that client's can_send and can_moderate_voice verdicts.
+func buildChannelCreateFor(ch *db.Channel, canSend, canModerateVoice bool) []byte {
 	p := channelPayloadFrom(ch)
 	p.CanSend = &canSend
+	p.CanModerateVoice = &canModerateVoice
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChannelCreate,
 		Payload: p,

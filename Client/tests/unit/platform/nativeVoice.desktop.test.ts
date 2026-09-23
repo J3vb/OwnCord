@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   connected: { session: 1, identity: "user-1", frames: "" },
   devices: { inputs: [], outputs: [] } as unknown,
   cameraSid: "",
+  screen: { sources: null as unknown, started: null as unknown, sid: "" },
   handlers: new Map<string, Set<(e: { payload: unknown }) => void>>(),
 }));
 
@@ -20,6 +21,9 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd === "native_voice_connect") return Promise.resolve(state.connected);
     if (cmd === "native_voice_list_devices") return Promise.resolve(state.devices);
     if (cmd === "native_voice_publish_camera") return Promise.resolve(state.cameraSid);
+    if (cmd === "native_voice_screen_sources") return Promise.resolve(state.screen.sources);
+    if (cmd === "native_voice_start_screen") return Promise.resolve(state.screen.started);
+    if (cmd === "native_voice_publish_screen") return Promise.resolve(state.screen.sid);
     return Promise.resolve();
   },
 }));
@@ -48,6 +52,9 @@ describeNativeVoiceSuite(async () => {
       },
       hasDevices(devices) {
         state.devices = devices;
+      },
+      sharesScreenAs(sources, started, sid) {
+        state.screen = { sources, started, sid };
       },
       commands: () => state.commands,
       async emits(envelope) {

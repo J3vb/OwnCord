@@ -1,0 +1,114 @@
+/* ── DM Profile Sidebar ── */
+.dm-profile-sidebar {
+  width: 340px;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-glow);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+  transition: margin-right 170ms ease;
+}
+.dps-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-circle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--on-accent);
+  margin: 24px auto 12px;
+  position: relative;
+  flex-shrink: 0;
+  background: var(--accent);
+}
+.dps-avatar-img {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-circle);
+}
+.dps-status-dot {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-circle);
+  border: 3px solid var(--bg-secondary);
+}
+.dps-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px;
+  z-index: 1;
+}
+.dps-content {
+  overflow-y: auto;
+  flex: 1;
+  padding: 0 16px 16px;
+}
+.dps-username {
+  text-align: center;
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--header-primary);
+  margin-bottom: 4px;
+}
+.dps-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 16px;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.dps-status-dot-inline {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-circle);
+  display: inline-block;
+}
+.dps-divider {
+  height: 1px;
+  background: var(--border-glow);
+  margin: 12px 0;
+}
+.dps-section-title {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.dps-about-text {
+  font-size: var(--font-size-md);
+  color: var(--text-normal);
+  line-height: 1.4;
+  word-break: break-word;
+}
+.dps-join-text {
+  font-size: var(--font-size-md);
+  color: var(--text-normal);
+}
+.dps-note {
+  width: 100%;
+  resize: vertical;
+  background: var(--bg-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--header-primary);
+  font-size: var(--font-size-sm);
+  padding: 8px;
+  font-family: inherit;
+}

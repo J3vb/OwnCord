@@ -5,8 +5,10 @@ since (B5-2's `044` is the first), and the order to run them in. `rollback.go` i
 
 `045_push_subscriptions` is B5-4's, `046_message_requests` is B5-6's,
 `047_nsfw_acknowledgements` is B5-7's, `048_reports` is B5-8's,
-`049_moderation_actions` is B5-9's and `050_appeals` is B5-10's — see the
-cost table below.
+`049_moderation_actions` is B5-9's, `050_appeals` is B5-10's and
+`052_report_source_nsfw` is the B5-7/B5-8 evidence-consent follow-up's and
+`053_retention_revision` is RI-08's — see
+the cost table below.
 
 Migrations here are **forward-only**: the server applies them and never
 un-applies them. Rolling one back is an operator action — these files are what
@@ -69,6 +71,8 @@ knowing before you start:
 
 | Reversal                        | What it costs                                                                                                                                                                                                                                                                                                                            |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `053_retention_revision`        | Removes retention revision tracking and its triggers. Existing retention settings and message history remain intact. Preview tokens must be obtained again after restarting or reapplying the migration.                                                                                                                                 |
+| `052_report_source_nsfw`        | Reports forget whether their source channel was ever labelled NSFW. Run it only with a server build from before 052 — the evidence gate reads the column — and a later re-apply backfills from current labels, so a report whose labelled channel was deleted in between comes back as unknown and stays withheld.                       |
 | `051_message_delivery_receipts` | Loses retry memory. Recovered pending drafts require deliberate review against existing history before resending; retry deduplication cannot cover a database rollback. Existing messages remain intact.                                                                                                                                 |
 | `050_appeals`                   | Every open appeal is lost outright, and with every decided one goes the `UNIQUE(action_id)` memory that forbids re-appealing — an action already decided once can be appealed again after this table is dropped and later re-created, because nothing recorded that it ever was.                                                         |
 | `049_moderation_actions`        | Every warning, timeout, and the ledger rows ban/kick/removal recorded alongside their existing mechanisms are gone. Active timeouts stop being enforced immediately (nowhere left to read `expires_at` from); unacknowledged warnings are lost outright. Bans and kicked-out sessions are unaffected — their state lives elsewhere.      |

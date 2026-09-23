@@ -1,0 +1,131 @@
+/* ═══ Compact Mode ═══ */
+/* Messages: hide avatars, inline timestamp + author, tighter spacing */
+.compact-mode .message {
+  padding: 2px 16px 2px 40px;
+  min-height: 20px;
+  margin-top: 4px;
+}
+.compact-mode .message.grouped {
+  min-height: 16px;
+  margin-top: 0;
+}
+.compact-mode .message .msg-avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+  top: 2px;
+  left: 8px;
+}
+.compact-mode .message.grouped .msg-avatar {
+  display: none;
+}
+.compact-mode .message .msg-hover-time {
+  display: none;
+}
+.compact-mode .message.grouped .msg-hover-time {
+  display: block;
+}
+.compact-mode .message .msg-header {
+  display: flex;
+}
+.compact-mode .message.grouped .msg-header {
+  display: none;
+}
+.compact-mode .message .msg-text {
+  line-height: 1.25;
+  font-size: var(--font-size-sm);
+}
+.compact-mode .message .msg-time {
+  display: none;
+}
+/* Reactions and embeds */
+.compact-mode .msg-reactions {
+  margin-top: 2px;
+}
+.compact-mode .msg-day-divider {
+  padding: 4px 16px 4px;
+  margin-bottom: 2px;
+}
+/* Channel sidebar */
+.compact-mode .channel-item {
+  padding: 3px 8px;
+}
+.compact-mode .channel-item .ch-name {
+  font-size: var(--font-size-sm);
+}
+.compact-mode .channel-sidebar-header {
+  height: 40px;
+}
+.compact-mode .category {
+  padding: 10px 8px 2px 16px;
+}
+/* Chat header */
+.compact-mode .chat-header {
+  height: 38px;
+}
+/* Empty states */
+.channel-list-empty,
+.member-list-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  text-align: center;
+  gap: 4px;
+}
+.channel-list-empty-text,
+.member-list-empty-text {
+  color: var(--text-muted);
+  font-size: var(--font-size-md);
+}
+.channel-list-empty-hint {
+  color: var(--text-faint);
+  font-size: var(--font-size-xs);
+}
+
+/* Members */
+.compact-mode .member-item {
+  padding: 2px 8px;
+}
+.compact-mode .member-item .mi-avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+.compact-mode .member-item .mi-name {
+  font-size: var(--font-size-sm);
+}
+.compact-mode .member-role-group {
+  padding: 12px 16px 2px;
+}
+/* Voice */
+.compact-mode .voice-user-item {
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
+}
+.compact-mode .voice-user-item .vu-avatar {
+  width: 16px;
+  height: 16px;
+  font-size: 7px;
+}
+.compact-mode .vu-preview {
+  margin: 1px 0;
+}
+.compact-mode .vu-preview video,
+.compact-mode .vu-preview-placeholder {
+  aspect-ratio: 16 / 9;
+}
+/* User bar */
+.compact-mode .user-bar {
+  height: 42px;
+}
+.compact-mode .user-bar .ub-avatar {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+}
+/* Messages container */
+.compact-mode .messages-container {
+  padding: 8px 0;
+}

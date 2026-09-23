@@ -74,8 +74,12 @@ type moderationReportDetailResponse struct {
 	UpdatedAt  string                       `json:"updated_at"`
 	ClosedAt   *string                      `json:"closed_at,omitempty"`
 	Evidence   []moderationEvidenceResponse `json:"evidence"`
-	Notes      []moderationNoteResponse     `json:"notes"`
-	Events     []moderationEventResponse    `json:"events"`
+	// EvidenceWithheld is set, and Evidence empty, when the caller may not
+	// read the snapshot: NSFW_ACKNOWLEDGEMENT_REQUIRED (acknowledge
+	// ChannelID first) or SOURCE_CHANNEL_UNAVAILABLE.
+	EvidenceWithheld string                    `json:"evidence_withheld,omitempty"`
+	Notes            []moderationNoteResponse  `json:"notes"`
+	Events           []moderationEventResponse `json:"events"`
 	// Actions is the immutable history of moderator actions taken against
 	// this report (plan item 7).
 	Actions []moderationActionResponse `json:"actions"`
@@ -233,7 +237,7 @@ func handleModerationQueueGet(svc *service.Services) http.HandlerFunc {
 			Reason: detail.Report.Reason, Detail: detail.Report.Detail, State: detail.Report.State,
 			AssigneeID: detail.Report.AssigneeID, Outcome: detail.Report.Outcome,
 			CreatedAt: detail.Report.CreatedAt, UpdatedAt: detail.Report.UpdatedAt, ClosedAt: detail.Report.ClosedAt,
-			Evidence: evidence, Notes: notes, Events: events,
+			Evidence: evidence, EvidenceWithheld: detail.EvidenceWithheld, Notes: notes, Events: events,
 			Actions: moderationActionResponses(r.Context(), svc, actorID, actionRows),
 		})
 	}

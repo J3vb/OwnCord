@@ -46,7 +46,7 @@ func sampleChannel() *db.Channel {
 }
 
 func TestBuildChannelCreate_Type(t *testing.T) {
-	msg := buildChannelCreate(sampleChannel())
+	msg := buildChannelCreateFor(sampleChannel(), true, false)
 	var env struct {
 		Type string `json:"type"`
 	}
@@ -60,7 +60,7 @@ func TestBuildChannelCreate_Type(t *testing.T) {
 
 func TestBuildChannelCreate_Payload(t *testing.T) {
 	ch := sampleChannel()
-	msg := buildChannelCreate(ch)
+	msg := buildChannelCreateFor(ch, true, false)
 	var env struct {
 		Type    string         `json:"type"`
 		Payload channelPayload `json:"payload"`
@@ -150,9 +150,9 @@ func TestBuildChannelDelete_Payload(t *testing.T) {
 
 // TestBuildChannelCreate_ValidJSON verifies the output is always valid JSON.
 func TestBuildChannelCreate_ValidJSON(t *testing.T) {
-	msg := buildChannelCreate(sampleChannel())
+	msg := buildChannelCreateFor(sampleChannel(), true, false)
 	if !json.Valid(msg) {
-		t.Errorf("buildChannelCreate output is not valid JSON: %s", msg)
+		t.Errorf("buildChannelCreateFor output is not valid JSON: %s", msg)
 	}
 }
 
@@ -835,7 +835,7 @@ func flaggedSampleChannel() *db.Channel {
 func TestBuildChannelMessages_CarryFeatureFlags(t *testing.T) {
 	ch := flaggedSampleChannel()
 	for name, msg := range map[string][]byte{
-		"channel_create": buildChannelCreate(ch),
+		"channel_create": buildChannelCreateFor(ch, true, false),
 		"channel_update": buildChannelUpdate(ch),
 	} {
 		t.Run(name, func(t *testing.T) {

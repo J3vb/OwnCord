@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 170 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 175 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -51,6 +51,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PUT     | `/admin/*`                                                           |
 | QUERY   | `/admin/*`                                                           |
 | TRACE   | `/admin/*`                                                           |
+| GET     | `/admin/api/attention`                                               |
 | GET     | `/admin/api/audit-log`                                               |
 | POST    | `/admin/api/backup`                                                  |
 | GET     | `/admin/api/backups`                                                 |
@@ -60,6 +61,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/channels`                                                |
 | DELETE  | `/admin/api/channels/{id}`                                           |
 | PATCH   | `/admin/api/channels/{id}`                                           |
+| GET     | `/admin/api/channels/{id}/access/explain`                            |
+| POST    | `/admin/api/channels/{id}/access/preview`                            |
 | GET     | `/admin/api/channels/{id}/permissions`                               |
 | DELETE  | `/admin/api/channels/{id}/permissions/{roleId}`                      |
 | PUT     | `/admin/api/channels/{id}/permissions/{roleId}`                      |
@@ -75,6 +78,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/registrations/{id}/deny`                                 |
 | GET     | `/admin/api/retention`                                               |
 | GET     | `/admin/api/retention/preview`                                       |
+| POST    | `/admin/api/retention/preview`                                       |
 | GET     | `/admin/api/roles`                                                   |
 | POST    | `/admin/api/roles`                                                   |
 | PATCH   | `/admin/api/roles/reorder`                                           |
@@ -177,6 +181,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/uploads`                                                    |
 | PATCH   | `/api/v1/users/me/`                                                  |
 | POST    | `/api/v1/users/me/avatar`                                            |
+| GET     | `/api/v1/users/me/moderation`                                        |
 | POST    | `/api/v1/users/me/notices/{id}/ack`                                  |
 | PUT     | `/api/v1/users/me/password`                                          |
 | GET     | `/api/v1/users/me/recovery-kit`                                      |
@@ -796,7 +801,7 @@ Broadcasts a `user_update` on success, exactly like the PATCH above.
 The bytes are stored as an ordinary attachment with no channel, and
 `users.avatar` is set to `/api/v1/files/{id}`. That URL is what makes the
 picture readable: `GET /api/v1/files/{id}` normally serves an unlinked
-attachment only to its uploader, and additionally admits one that some user's
+attachment only to its uploader (administrators included), and additionally admits one that some user's
 avatar currently points at — so an avatar is readable by every authenticated
 user for exactly as long as it is in use, and stops being readable the moment
 it is replaced.
@@ -980,31 +985,31 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 ]
 ```
 
-| Field             | Type   | Description                                                                                                                   |
-| ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `id`              | int64  | Channel ID                                                                                                                    |
-| `name`            | string | Channel name                                                                                                                  |
-| `type`            | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post)     |
-| `topic`           | string | Channel topic/description                                                                                                     |
-| `category`        | string | Category grouping                                                                                                             |
-| `position`        | int    | Sort order within category                                                                                                    |
-| `slow_mode`       | int    | Slow-mode delay in seconds (0 = disabled)                                                                                     |
-| `archived`        | bool   | Whether the channel is archived                                                                                               |
-| `nsfw`            | bool   | Age-restriction label. **Stored and shipped only** — the server applies no content behaviour to a flagged channel (see below) |
-| `voice_max_users` | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                              |
-| `voice_max_video` | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                        |
+| Field             | Type   | Description                                                                                                               |
+| ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | int64  | Channel ID                                                                                                                |
+| `name`            | string | Channel name                                                                                                              |
+| `type`            | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
+| `topic`           | string | Channel topic/description                                                                                                 |
+| `category`        | string | Category grouping                                                                                                         |
+| `position`        | int    | Sort order within category                                                                                                |
+| `slow_mode`       | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
+| `archived`        | bool   | Whether the channel is archived                                                                                           |
+| `nsfw`            | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
+| `voice_max_users` | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
+| `voice_max_video` | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
 
 #### The `nsfw` flag
 
-`nsfw` is metadata and nothing else. The server stores it, ships it in `ready`
-and in the `channel_create` / `channel_update` broadcasts, and audits an
-operator flipping it — and does **not** filter content, check anyone's age, or
-restrict who may read or post in a flagged channel. Every consequence is the
-client's: the desktop client shows a one-time-per-session "may contain
-sensitive content" gate before rendering a flagged channel's messages
-(remembered in `sessionStorage`, so a new session asks again) and marks the
-channel in its sidebar. A client that ignores the field behaves exactly as it
-did before the field existed.
+The server stores `nsfw`, ships it in `ready` and in the `channel_create` /
+`channel_update` broadcasts, and audits an operator flipping it. Since B5-7 it
+also enforces it: a member who has not acknowledged a labelled channel gets
+none of its content on any path, whatever their role — see
+[NSFW Acknowledgement](#nsfw-acknowledgement) for the paths and the
+acknowledge/revoke routes. The server checks no one's age. The desktop client
+also shows a one-time-per-session "may contain sensitive content" gate before
+rendering a flagged channel's messages (remembered in `sessionStorage`) and
+marks the channel in its sidebar; the client consent UI is B9's.
 
 ---
 
@@ -2243,6 +2248,23 @@ report's REPORTER may read it (their own filing, already visible via
 `GET /api/v1/reports/mine`), but `notes` is always `[]` for them — internal
 notes never reach the person who filed the report.
 
+The evidence snapshot is content from the report's source channel
+(`channel_id`), so it follows that channel's NSFW consent (B5-7, decision
+13): while the channel is labelled, `evidence` is `[]` and
+`evidence_withheld` is `NSFW_ACKNOWLEDGEMENT_REQUIRED` unless the caller
+has acknowledged it themselves (`PUT /api/v1/channels/{id}/nsfw-acknowledgement`)
+— no bit, `ADMINISTRATOR` included, bypasses this. Label and
+acknowledgement are read on every request, so a revoke, an unlabel and
+relabel, or a label added after filing applies to the next read. When the
+source channel has been deleted, the snapshot stays readable only if that
+channel was never labelled while the report existed (`reports.source_nsfw`,
+migration 052). Otherwise, including when that is unknown, `evidence` is
+`[]` and `evidence_withheld` is `SOURCE_CHANNEL_UNAVAILABLE`. `evidence_withheld` is omitted when the
+snapshot is returned. Files the snapshot references are served by
+`GET /api/v1/files/{id}` under that route's own channel and consent checks.
+Once the source channel is deleted the file is unlinked, and that route
+serves it only to its uploader — `ADMINISTRATOR` included.
+
 ---
 
 ### POST /api/v1/moderation/queue/{id}/assign
@@ -2512,10 +2534,70 @@ Acknowledge a warning — own rows only. `{id}` is the ledger row id from
 
 ---
 
+### GET /api/v1/users/me/moderation
+
+The caller's own sanctions, read from the ledger, so they survive a restart
+that live `mod_action` frames and `ready.notices` do not cover: every
+`warning`, `timeout`, `removal` and `ban` row that another moderator applied
+to the caller, newest first. Kicks are left out because nothing persists to
+appeal. Self-targeted rows are left out too: a moderator's own channel purge
+is recorded against the moderator but is not a sanction against them. A `ban` row can
+only reach a caller whose ban has lapsed or been reversed, since a currently
+banned caller cannot authenticate. A currently banned user still appeals out
+of band, as [Appeals](#appeals) describes. Rows leave this list when the
+retention sweep retires them (`moderation.action_retention_days`).
+**Auth:** Required (session). Rate-limited: 30 per minute per IP.
+
+#### Response 200 OK
+
+```json
+[
+  {
+    "id": 42,
+    "kind": "timeout",
+    "reason": "cool off",
+    "created_at": "2026-09-23 10:00:00",
+    "expires_at": "2026-09-23 11:00:00",
+    "lifted_at": null,
+    "acknowledged_at": null,
+    "appealable": true,
+    "appeal": null
+  },
+  {
+    "id": 17,
+    "kind": "warning",
+    "reason": "be nice",
+    "created_at": "2026-09-20 09:12:44",
+    "expires_at": null,
+    "lifted_at": null,
+    "acknowledged_at": "2026-09-20 09:30:01",
+    "appealable": false,
+    "appeal": { "id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9", "state": "open" }
+  }
+]
+```
+
+`id` is the ledger id that [`POST /api/v1/appeals`](#post-apiv1appeals) takes
+as `action_id` and that the acknowledgement route above takes. `appealable`
+follows the rules the appeal route itself applies: an appealable kind with no
+appeal filed against it yet, in any state. `appeal` is the appeal filed
+against this row (its opaque public id and state), or `null`. The response
+never includes the acting moderator, who lifted the action, the linked
+report, evidence, or moderator notes.
+
+#### Errors
+
+| Status | Code           | Cause                       |
+| ------ | -------------- | --------------------------- |
+| 429    | `RATE_LIMITED` | more than 30 reads a minute |
+
+---
+
 ## Appeals
 
 Rate-limited appeals against a moderation action (BPR-073, plan decision 8).
-`action_id` is the moderator-action ledger's own id (`GET
+`action_id` is the moderator-action ledger's own id (the caller's own `GET
+/api/v1/users/me/moderation` row `id`, `GET
 /api/v1/moderation/users/{id}/actions`'s `id`, or the `id` a live
 `mod_action` frame or a `ready` notice already carried to the target) — not
 an opaque public id; only reports and appeals carry one of those.
@@ -2934,7 +3016,7 @@ Authorization is two-layered:
 | `DELETE /admin/api/users/{id}/sessions`                                                                         | `KICK_MEMBERS`                                                                               |
 | `DELETE /admin/api/users/{id}`                                                                                  | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
 | `POST /admin/api/users/{id}/recovery-credential`                                                                | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`), not a bit — B4-6         |
-| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions` and `/user-permissions`)                     | `MANAGE_CHANNELS`                                                                            |
+| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)        | `MANAGE_CHANNELS`                                                                            |
 | `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                              | `MANAGE_ROLES`                                                                               |
 | `GET /admin/api/audit-log`                                                                                      | `VIEW_AUDIT_LOG`                                                                             |
 | `GET/PATCH /admin/api/settings`                                                                                 | `MANAGE_SERVER`                                                                              |
@@ -2942,6 +3024,7 @@ Authorization is two-layered:
 | `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                      | `MANAGE_SERVER`                                                                              |
 | `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |
 | `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                           | `ADMINISTRATOR`                                                                              |
+| `GET /admin/api/attention`                                                                                      | `ADMINISTRATOR` — RI-07                                                                      |
 | `/api/v1/admin/plugins…`                                                                                        | `ADMINISTRATOR`                                                                              |
 | `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                                            | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
 
@@ -3084,6 +3167,89 @@ Aggregate counts for the admin dashboard.
   "online_count": 3
 }
 ```
+
+---
+
+### GET /admin/api/attention
+
+The dashboard's attention panel (RI-07): server-side health signals and the
+deduplicated warnings raised from them. The server samples once a minute
+(the free space on the data volume, the SQLite writer pool's cumulative wait,
+reconnect resumes, hub broadcast drops plus send-queue overflow disconnects, the newest
+backup file and each maintenance job's last run); this route only reads that
+state. Thresholds and hysteresis are in
+[server-configuration.md](server-configuration.md#admin-attention-panel-attention).
+Nothing here is exported off the host.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Response 200 OK
+
+```json
+{
+  "evaluated_at": "2026-09-23T12:00:00Z",
+  "signals": [
+    {
+      "id": "disk",
+      "label": "Disk space",
+      "status": "unknown",
+      "detail": "disk space is not measured on this server",
+      "observed_at": "2026-09-23T12:00:00Z"
+    },
+    {
+      "id": "backup",
+      "label": "Last successful backup",
+      "status": "ok",
+      "value": "2026-09-23 03:00 UTC",
+      "threshold": "daily schedule: warn after 36h0m0s",
+      "detail": "9h0m0s old",
+      "observed_at": "2026-09-23T12:00:00Z"
+    }
+  ],
+  "warnings": [
+    {
+      "id": "job:Backups",
+      "severity": "warning",
+      "title": "Maintenance job failing: Backups",
+      "detail": "2 consecutive failed runs · disk I/O error",
+      "action": "Search Server Logs for …",
+      "first_observed": "2026-09-23T11:30:00Z",
+      "last_observed": "2026-09-23T12:00:00Z",
+      "occurrences": 1,
+      "recovered_at": null
+    }
+  ]
+}
+```
+
+- `status` is `ok`, `warning`, `critical` or `unknown`. `unknown` means the
+  server could not take the measurement (an unsupported platform, a failed
+  read, a rate with one sample so far, a job that has not run since start,
+  disk space with `attention.disk_warn_free_mb` and `server.min_free_disk_mb`
+  both `0`).
+  It is never reported as healthy and neither raises nor clears a warning.
+- `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `backup`,
+  and `job:<name>` for each maintenance step.
+- The first disk level is reported at once, and a stopped dispatch loop as
+  soon as it is seen; every other level change, including a rate's first
+  warning, holds for two samples.
+  A rate's `threshold` is its `attention.*` floor until it has learned a
+  baseline, then the higher of the floor and three times that baseline.
+  While learning, `reconnects` raises nothing and `db_writer_wait`
+  and `delivery` raise at the floor; samples above the floor are not learned.
+- A warning's `id` is its signal's id. A signal that keeps failing updates
+  `last_observed`. One that recovers gets `recovered_at` and is listed for 24
+  hours; if it fails again in that window, the same entry reopens and
+  `occurrences` increments. Active warnings are listed first, critical before
+  warning. The state is in memory, so a restart resets warning history;
+  active problems re-raise within the next sample intervals, about two
+  minutes (a rate needs a first sample plus two sustained ones).
+- `evaluated_at` is `null` until the first sample.
+
+#### Response 500
+
+`INTERNAL_ERROR` "attention service unavailable" when the server was built
+without the attention service (partial wirings in tests).
 
 ---
 
@@ -3248,6 +3414,7 @@ override.
 ```json
 {
   "server_days": 30,
+  "revision": "opaque-policy-revision",
   "channels": [
     { "channel_id": 4, "days": 0, "updated_by": 1, "updated_at": "2026-09-03 12:00:00" },
     { "channel_id": 7, "days": 7, "updated_by": 1, "updated_at": "2026-09-03 12:01:00" }
@@ -3281,6 +3448,53 @@ cutoff the next sweep uses and how many messages it would remove.
   }
 ]
 ```
+
+---
+
+### POST /admin/api/retention/preview
+
+**Auth:** `MANAGE_SERVER`. Computes the effect of a proposed policy without
+saving or deleting anything. Send the `revision` from `GET /retention` and
+exactly one edit:
+
+```json
+{
+  "revision": "opaque-policy-revision",
+  "proposed": { "scope": "server", "days": 30 }
+}
+```
+
+For a channel, use `{"scope":"channel","channel_id":4,"days":7}`. Zero
+means keep forever; `days: null` removes the override and inherits the server
+window, including when removing an indefinite override.
+
+The response contains `proposed`, `revision`, `observed_at` (UTC RFC3339),
+`token`, `would_delete`, `affected_channels`, `protected_pinned`,
+`protected_indefinite`, `protected_direct_messages`, and `channels`. Each
+non-DM channel has `channel_id`, `channel_name`, effective `days`, `source`,
+`cutoff` (finite windows only), `would_delete`, `protected_pinned` and
+`protected_indefinite`. Totals describe the **whole proposed policy**, not
+only the difference from the saved policy. Protected categories do not
+repeat messages: indefinite channels count all messages as indefinite;
+pinned counts cover finite channels. DMs are counted only in the aggregate.
+Pinned messages are excluded regardless of age. A message exactly at the
+cutoff is not due. The same candidate predicate is used by the sweep.
+
+After confirmation, send `X-Retention-Preview: <token>` on the existing
+server `PATCH /settings` or channel `PUT`/`DELETE` below. The token binds the
+exact edit, actor, revision and observation, expires after 15 minutes, and
+is invalid after server restart. It grants no permissions: the current
+bearer/session and `MANAGE_SERVER` permission are resolved again on apply.
+
+A stale revision on preview or apply returns **409** with code
+`STALE_RETENTION_POLICY` and instructions to reload and preview again. Apply
+compares the revision and writes in one transaction; it cannot overwrite a
+concurrent policy edit. Missing, altered, expired or mismatched tokens return
+**400**. All retention write routes require a preview token. A server-window
+PATCH must contain only `retention_days`; apply other settings separately.
+The audit entry records the prior and new policy, preview observation time
+and base revision. Counts may change with new messages, pins and elapsed
+time; the preview does not reserve messages or trigger an immediate sweep.
 
 ---
 
@@ -3894,8 +4108,8 @@ refused body writes nothing at all:
 | `voice_max_users` | 0…99    | Voice capacity; 0 = unlimited                             |
 | `voice_max_video` | 0…99    | Simultaneous cameras/screen shares; 0 = unlimited         |
 
-`nsfw` is a bool and is stored, broadcast and audited only — the server applies
-no content behaviour to a flagged channel (see `GET /api/v1/channels`). The
+`nsfw` is a bool; the server stores, broadcasts and audits it, and enforces it
+on every content path (see "NSFW Acknowledgement"). The
 audit detail names the transition: `updated #foo (marked NSFW)` /
 `(unmarked NSFW)`, and plain `updated #foo` when the flag did not move.
 
@@ -4028,6 +4242,125 @@ Clear the override row, returning the target to the layer above it. `204 No
 Content`; deleting a row that does not exist is a no-op, not a `404`. Same
 cache/fan-out behavior as the writes; audits as `channel_perms_clear` /
 `channel_user_perms_clear`.
+
+### GET /admin/api/channels/{id}/access/explain
+
+Explain one member's effective access in a channel (RI-06). Query:
+`user_id` and `action`, both required. Actions map one-to-one onto the
+server's authorization predicates:
+
+| `action`         | Predicate                                                 |
+| ---------------- | --------------------------------------------------------- |
+| `view_channel`   | `CanViewChannel`                                          |
+| `read_content`   | `CanReadContent` (adds NSFW consent)                      |
+| `send_message`   | `CanSendMessage`                                          |
+| `add_reaction`   | `CanAddReaction`                                          |
+| `join_voice`     | `CanJoinVoice`                                            |
+| `moderate_voice` | `AuthorizeVoiceModerator` (base `MUTE_MEMBERS` + channel) |
+
+The decision is the predicate's own verdict over the member's live state —
+role bits, both override layers, active timeout and NSFW acknowledgement,
+never the 30-second permission cache. An effectively banned account, or one
+whose registration is not `active`, holds no session, so every action is
+denied with that reason. Nothing here creates or uses a session for the
+member. `bits` traces each bit the predicate consulted through the layers
+(`""` means the layer has no opinion). It is omitted when
+`administrator_bypass` is true: an Administrator's decision consults no bit
+and no override layer.
+
+Like editing a member's override, explaining one is refused for a member
+whose role ranks at or above the caller's own, unless the caller holds
+`ADMINISTRATOR`: the answer discloses that member's ban, registration,
+timeout and NSFW consent state.
+
+```json
+{
+  "user_id": 12,
+  "username": "alice",
+  "role_id": 4,
+  "role_name": "Member",
+  "channel_id": 4,
+  "restrictions": {
+    "banned": false,
+    "registration_status": "active",
+    "timed_out": true,
+    "nsfw_acknowledged": false,
+    "channel_archived": false,
+    "channel_nsfw": false,
+    "channel_type": "text"
+  },
+  "decisions": [
+    {
+      "action": "send_message",
+      "allowed": false,
+      "reason": "user is timed out",
+      "administrator_bypass": false,
+      "bits": [
+        {
+          "bit": "SEND_MESSAGES",
+          "base": true,
+          "role_override": "deny",
+          "user_override": "allow",
+          "effective": true
+        },
+        {
+          "bit": "READ_MESSAGES",
+          "base": true,
+          "role_override": "",
+          "user_override": "",
+          "effective": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+Audited as `permission_explain`, target `user`.
+
+### POST /admin/api/channels/{id}/access/preview
+
+Evaluate a proposed override before saving it. Body: exactly one of `role_id`
+(role layer) or `user_id` (member layer), plus the `allow`/`deny` masks the
+matching `PUT` would take (clamped the same way). Every member the override
+could reach — each holder of the role, or the one member — is evaluated for
+every action with the current and the proposed layer, through the same
+predicates as `explain`; `members` lists only those whose decision changes.
+Nothing is written. A `user_id` preview follows the same rank rule as
+`explain`. A `role_id` preview is refused for a role at or above the caller's
+own rank, with no Administrator bypass, as saving that role's override is. The
+save path still applies its own escalation and hierarchy checks.
+
+```json
+{
+  "channel_id": 4,
+  "allow": 0,
+  "deny": 2,
+  "evaluated": 3,
+  "members": [
+    {
+      "user_id": 12,
+      "username": "alice",
+      "changes": [
+        {
+          "action": "view_channel",
+          "before": true,
+          "after": false,
+          "after_reason": "permission denied: missing READ_MESSAGES"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Audited as `permission_preview`, target `channel`.
+
+| Status | Code          | When                                                                      |
+| ------ | ------------- | ------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Bad `user_id`, missing or unknown `action`, or not exactly one of the ids |
+| 403    | `FORBIDDEN`   | Missing `MANAGE_CHANNELS`, or the member or role ranks at or above you    |
+| 404    | `NOT_FOUND`   | Unknown or DM channel, unknown role or user                               |
 
 ---
 
@@ -4223,10 +4556,10 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Path Parameters
 
-| Param             | Type   | Description                                                                                                                                                                                                                                                                                          |
-| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact (e.g., `linux-x86_64-deb`) get 204. |
-| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                      |
+| Param             | Type   | Description                                                                                                                                                                                                                                                                                                                  |
+| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `windows-aarch64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact (e.g., `linux-x86_64-deb`) get 204. |
+| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                                              |
 
 #### Response 200 OK (update available)
 

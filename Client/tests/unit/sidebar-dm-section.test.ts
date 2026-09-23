@@ -28,6 +28,8 @@ function resetStores(): void {
     collapsedCategories: new Set<string>(),
     sidebarMode: "channels" as const,
     activeDmUserId: null,
+    activeView: null,
+    settingsTab: null,
   }));
 }
 
@@ -201,9 +203,12 @@ describe("SidebarDmSection", () => {
       const section = createSidebarDmSection(defaultOpts());
       container.appendChild(section.element);
 
-      const badge = container.querySelector(".dm-unread-badge");
+      const badge = container.querySelector<HTMLElement>(".dm-unread-badge");
       expect(badge).not.toBeNull();
       expect(badge!.textContent).toBe("5");
+      // White text needs --danger-fill (4.5:1), not --red (3.77:1).
+      expect(badge!.style.background).toBe("var(--danger-fill)");
+      expect(badge!.style.color).toBe("var(--on-fill)");
 
       section.destroy();
     });
@@ -348,9 +353,11 @@ describe("SidebarDmSection", () => {
       const section = createSidebarDmSection(defaultOpts());
       container.appendChild(section.element);
 
-      const mentionBadge = container.querySelector(".dm-mention-badge");
+      const mentionBadge = container.querySelector<HTMLElement>(".dm-mention-badge");
       expect(mentionBadge).not.toBeNull();
       expect(mentionBadge!.textContent).toBe("2");
+      expect(mentionBadge!.style.background).toBe("var(--danger-fill)");
+      expect(mentionBadge!.style.color).toBe("var(--on-fill)");
 
       // The plain unread badge must not also render alongside it.
       const unreadBadge = container.querySelector(".dm-unread-badge");

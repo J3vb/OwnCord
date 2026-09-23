@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/service"
@@ -52,6 +53,10 @@ type putChannelRetentionRequest struct {
 }
 
 func writeRetentionErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, service.ErrConflict) {
+		writeErr(w, http.StatusConflict, "STALE_RETENTION_POLICY", err.Error())
+		return
+	}
 	writeSvcErr(w, err, "", "", "retention change failed")
 }
 
@@ -72,7 +77,12 @@ func handlePutChannelRetention(retention *service.RetentionService) http.Handler
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention service unavailable")
 			return
 		}
-		policy, err := retention.SetChannelPolicy(r.Context(), actorFromContext(r), id, req.Days)
+		err = retention.ApplyChange(r.Context(), actorFromContext(r), service.RetentionChange{Scope: "channel", ChannelID: id, Days: &req.Days}, r.Header.Get("X-Retention-Preview"))
+		if err != nil {
+			writeRetentionErr(w, err)
+			return
+		}
+		policy, err := retention.ChannelPolicy(r.Context(), id)
 		if err != nil {
 			writeRetentionErr(w, err)
 			return
@@ -93,10 +103,36 @@ func handleDeleteChannelRetention(retention *service.RetentionService) http.Hand
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention service unavailable")
 			return
 		}
-		if err := retention.ClearChannelPolicy(r.Context(), actorFromContext(r), id); err != nil {
+		if err := retention.ApplyChange(r.Context(), actorFromContext(r), service.RetentionChange{Scope: "channel", ChannelID: id}, r.Header.Get("X-Retention-Preview")); err != nil {
 			writeRetentionErr(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handlePostRetentionPreview calculates a proposed policy without saving it.
+func handlePostRetentionPreview(retention *service.RetentionService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if retention == nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention service unavailable")
+			return
+		}
+		var req struct {
+			Proposed service.RetentionChange `json:"proposed"`
+			Revision string                  `json:"revision"`
+		}
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&req); err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+			return
+		}
+		preview, err := retention.PreviewChange(r.Context(), actorFromContext(r), req.Proposed, req.Revision)
+		if err != nil {
+			writeRetentionErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, preview)
 	}
 }

@@ -116,6 +116,41 @@ func (q *Queries) InsertModerationAction(ctx context.Context, arg InsertModerati
 	return id, err
 }
 
+const listActiveTimeoutExpiries = `-- name: ListActiveTimeoutExpiries :many
+SELECT target_id, expires_at FROM moderation_actions
+ WHERE kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
+`
+
+type ListActiveTimeoutExpiriesRow struct {
+	TargetID  int64   `json:"targetId"`
+	ExpiresAt *string `json:"expiresAt"`
+}
+
+// Every currently-active timeout's target and expiry, across all users, so
+// the hub can re-arm its in-memory expiry refresh after a restart.
+func (q *Queries) ListActiveTimeoutExpiries(ctx context.Context) ([]ListActiveTimeoutExpiriesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listActiveTimeoutExpiries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveTimeoutExpiriesRow{}
+	for rows.Next() {
+		var i ListActiveTimeoutExpiriesRow
+		if err := rows.Scan(&i.TargetID, &i.ExpiresAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveTimeouts = `-- name: ListActiveTimeouts :many
 SELECT id FROM moderation_actions
  WHERE target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
@@ -230,6 +265,70 @@ func (q *Queries) ListModerationActionsForTarget(ctx context.Context, targetID i
 			&i.LiftedAt,
 			&i.LiftedBy,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOwnModerationActions = `-- name: ListOwnModerationActions :many
+SELECT m.id, m.kind, m.reason, m.created_at, m.expires_at, m.lifted_at,
+       m.acknowledged_at, a.public_id AS appeal_id, a.state AS appeal_state
+  FROM moderation_actions m
+  LEFT JOIN appeals a ON a.action_id = m.id
+ WHERE m.target_id = ? AND m.kind IN ('warning', 'timeout', 'removal', 'ban')
+   AND m.actor_id IS NOT m.target_id
+ ORDER BY m.created_at DESC, m.id DESC
+`
+
+type ListOwnModerationActionsRow struct {
+	ID             int64   `json:"id"`
+	Kind           string  `json:"kind"`
+	Reason         string  `json:"reason"`
+	CreatedAt      string  `json:"createdAt"`
+	ExpiresAt      *string `json:"expiresAt"`
+	LiftedAt       *string `json:"liftedAt"`
+	AcknowledgedAt *string `json:"acknowledgedAt"`
+	AppealID       *string `json:"appealId"`
+	AppealState    *string `json:"appealState"`
+}
+
+// GET /api/v1/users/me/moderation (B9 Q6): the caller's own warning,
+// timeout, removal and ban rows with their appeal, newest first. Member-safe
+// by construction -- no actor, lifted_by, report link or appeal body is
+// selected. Kicks are left out (nothing persists to appeal). A ban row can
+// only reach a caller whose ban has lapsed or been reversed, because
+// AuthMiddleware refuses a currently banned one. appeals.action_id is
+// UNIQUE, so the join adds at most one row per action. Self-targeted rows
+// (a moderator's own channel purge) are not sanctions and are left out; a
+// row whose actor was erased (NULL) is kept.
+func (q *Queries) ListOwnModerationActions(ctx context.Context, targetID int64) ([]ListOwnModerationActionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listOwnModerationActions, targetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOwnModerationActionsRow{}
+	for rows.Next() {
+		var i ListOwnModerationActionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Reason,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.LiftedAt,
+			&i.AcknowledgedAt,
+			&i.AppealID,
+			&i.AppealState,
 		); err != nil {
 			return nil, err
 		}

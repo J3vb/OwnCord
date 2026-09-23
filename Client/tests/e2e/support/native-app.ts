@@ -14,7 +14,7 @@ import { startProcess, stopProcess, waitForHttp } from "./process";
 
 export async function startNativeApp(
   binary = process.env.OWNCORD_E2E_CLIENT_BINARY,
-  options: { preserveProfile?: boolean } = {},
+  options: { preserveProfile?: boolean; identifier?: string } = {},
 ) {
   if (process.platform !== "win32") throw new Error("Native WebView2 tests require Windows");
   const exe = resolve(binary ?? "src-tauri/target/release/owncord-client.exe");
@@ -25,7 +25,7 @@ export async function startNativeApp(
   const port = 9222;
   const profiles = [...new Set([process.env.APPDATA, process.env.LOCALAPPDATA])]
     .filter((root): root is string => !!root)
-    .map((root) => join(root, "com.owncord.e2e"));
+    .map((root) => join(root, options.identifier ?? "com.owncord.e2e"));
   if (profiles.length === 0) throw new Error("Windows application data paths are missing");
   const clearProfiles = async () => {
     for (const profile of profiles)
@@ -60,8 +60,12 @@ export async function startNativeApp(
     // Returning that page made any spec that asserts immediately (title,
     // __TAURI_INTERNALS__) race the navigation. index.html's <title> is static
     // markup, so the app document is present as soon as its title is "OwnCord" —
-    // wait for that, across the navigation, before handing the page out.
-    await expect(page).toHaveTitle("OwnCord");
+    // wait for that, across the navigation, before handing the page out. The
+    // navigation can stall past the 15s expect default on a busy runner, so it
+    // shares the startup deadline too.
+    await expect(page).toHaveTitle("OwnCord", {
+      timeout: Math.max(1, startupDeadline - Date.now()),
+    });
     console.log(`native app ready: CDP after ${cdpReady}ms, page after ${Date.now() - started}ms`);
     return {
       cdpURL: `http://127.0.0.1:${port}`,

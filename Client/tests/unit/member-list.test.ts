@@ -6,6 +6,32 @@ import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
 import { Permission, type UserStatus } from "../../src/lib/types";
+import { applyThemeByName } from "@lib/themes";
+
+/**
+ * Give the role clamp (B9 Q13) the dark theme's surfaces to measure names
+ * against; a theme switch is what empties its cache.
+ */
+function useDarkSurfaces(): void {
+  const html = document.documentElement.style;
+  html.setProperty("--bg-primary", "#313338");
+  html.setProperty("--bg-secondary", "#2b2d31");
+  html.setProperty("--bg-tertiary", "#1e1f22");
+  html.setProperty("--bg-input", "#383a40");
+  applyThemeByName("dark");
+}
+
+// jsdom has no ResizeObserver; the member menu re-clamps itself through one.
+// The fake hands the latest observer's callback to tests that resize the menu.
+let lastResizeCallback: (() => void) | null = null;
+globalThis.ResizeObserver = class {
+  constructor(callback: () => void) {
+    lastResizeCallback = callback;
+  }
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+} as unknown as typeof ResizeObserver;
 
 function resetStore(): void {
   membersStore.setState(() => ({
@@ -273,6 +299,7 @@ describe("MemberList", () => {
     // Role management makes the list mutable mid-session. Before this the list
     // only re-rendered on a member change, so a rename/recolor/delete sat
     // invisible until unrelated traffic arrived.
+    useDarkSurfaces();
     setRoles([
       { id: 1, name: "Owner", color: "#E74C3C", permissions: 0 },
       { id: 2, name: "Staff", color: "#00FF00", permissions: 0 },
@@ -292,11 +319,15 @@ describe("MemberList", () => {
     // Store notifications are batched onto a microtask.
     channelsStore.flush();
 
-    const stanName = container.querySelector('[data-testid="member-2"] .mi-name');
-    expect((stanName as HTMLSpanElement).style.color).toBe("rgb(0, 0, 255)");
+    // The new colour reaches the row; #0000ff reads 1.36:1 on #383a40, so the
+    // role clamp shows the name in --text-normal.
+    const stanName = container.querySelector<HTMLSpanElement>('[data-testid="member-2"] .mi-name')!;
+    expect(stanName.dataset["roleColor"]).toBe("#0000FF");
+    expect(stanName.style.color).toBe("var(--text-normal)");
   });
 
   it("renders groups for custom server roles, colored by the server's role color", () => {
+    useDarkSurfaces();
     setRoles([
       { id: 1, name: "Owner", color: "#E74C3C", permissions: 0 },
       { id: 2, name: "Staff", color: "#00FF00", permissions: 0 },
@@ -356,6 +387,92 @@ describe("MemberList", () => {
     expect(labels).toEqual(["Block"]);
 
     document.body.querySelector(".context-menu")?.remove();
+  });
+
+  // At the 940x500 minimum window a member low in the list opened the menu at
+  // the pointer with its bottom past the viewport, so Force Logout, Ban and
+  // Block could not be reached.
+  it("keeps the context menu inside the viewport near the bottom-right edge", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(144);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(180);
+    vi.stubGlobal("innerWidth", 940);
+    vi.stubGlobal("innerHeight", 500);
+    try {
+      setTestMembers(testMembers);
+      memberList.mount(container);
+      const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
+
+      memberItem.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 930, clientY: 430 }),
+      );
+      let menu = document.body.querySelector<HTMLElement>(".context-menu")!;
+      // Anchored by its bottom edge at the pointer: spans y 286..430, x 752..932.
+      expect(menu.style.top).toBe("");
+      expect(menu.style.bottom).toBe("70px");
+      expect(menu.style.left).toBe("752px");
+
+      memberItem.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 100 }),
+      );
+      menu = document.body.querySelector<HTMLElement>(".context-menu")!;
+      // Room below the pointer: opens there as before.
+      expect(menu.style.top).toBe("100px");
+      expect(menu.style.bottom).toBe("");
+      expect(menu.style.left).toBe("100px");
+    } finally {
+      document.body.querySelector(".context-menu")?.remove();
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  // Opening Ban swaps one item for the reason/duration/Confirm Ban row, about
+  // 90 px taller. A menu opened top-anchored in the band just above the fit
+  // limit then ran past the bottom of the 940x500 window, taking Confirm Ban
+  // and Block with it; a bottom-anchored one can likewise grow past the top.
+  it("re-clamps the context menu into the viewport when the ban form expands", () => {
+    let menuHeight = 144;
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(() => menuHeight);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(180);
+    vi.stubGlobal("innerWidth", 940);
+    vi.stubGlobal("innerHeight", 500);
+    setRoles([{ id: 7, name: "admin", color: null, permissions: Permission.ADMINISTRATOR }]);
+    try {
+      setTestMembers(testMembers);
+      memberList.mount(container);
+      const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
+
+      memberItem.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 320 }),
+      );
+      let menu = document.body.querySelector<HTMLElement>(".context-menu")!;
+      expect(menu.style.top).toBe("320px");
+
+      const banItem = Array.from(menu.children).find((el) => el.textContent === "Ban")!;
+      banItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(menu.querySelector('[data-testid="ban-confirm"]')).not.toBeNull();
+      menuHeight = 234;
+      lastResizeCallback!();
+      // Re-anchored by its bottom edge at the pointer: spans y 86..320.
+      expect(menu.style.top).toBe("");
+      expect(menu.style.bottom).toBe("180px");
+
+      menuHeight = 144;
+      memberItem.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 430 }),
+      );
+      menu = document.body.querySelector<HTMLElement>(".context-menu")!;
+      expect(menu.style.bottom).toBe("70px");
+      menuHeight = 470;
+      lastResizeCallback!();
+      // Too tall to hang above the pointer: pulled down so its top stays at 8.
+      expect(menu.style.top).toBe("");
+      expect(menu.style.bottom).toBe("22px");
+    } finally {
+      document.body.querySelector(".context-menu")?.remove();
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
   });
 
   // The menu used to gate on the role NAME (owner/admin), so the seeded
@@ -491,8 +608,10 @@ describe("MemberList", () => {
 
     const nameEl = container.querySelector(".mi-name") as HTMLSpanElement;
     expect(nameEl.textContent).toBe("OwnerUser");
-    // Owner role has specific color var
-    expect(nameEl.style.color).toBe("var(--role-owner, #e74c3c)");
+    // Owner role has specific color var, shown through the role clamp (B9 Q13).
+    // No theme surfaces are measurable here, so the clamp fails closed.
+    expect(nameEl.dataset["roleColor"]).toBe("var(--role-owner, #e74c3c)");
+    expect(nameEl.style.color).toBe("var(--text-normal)");
   });
 
   it("uses '?' as avatar fallback for empty username", () => {

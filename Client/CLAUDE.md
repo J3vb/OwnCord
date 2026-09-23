@@ -9,13 +9,24 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `src/pages/`, `src/components/` UI · `src/features/voice/` modules
   extracted from `lib/livekitSession.ts` and `lib/livekitE2EE.ts` (the
   facades; the `e2ee*.ts` files are `E2EEManager`'s), with colocated
-  `*.test.ts`; `src/features/{connection,direct-messages,channels,messaging,voice}/wsHandlers.ts`
+  `*.test.ts`; `src/features/{connection,direct-messages,message-requests,channels,messaging,voice,safety}/wsHandlers.ts`
   hold the WebSocket handler bodies extracted from `lib/dispatcher.ts`;
   `src/features/messaging/` also holds `stores/messages.store.ts`'s pure
   reducers and message model — the store stays the facade, so import its
   mutators from `@stores/messages.store`, never from the reducer modules; new
   or extracted code uses `src/features/`, relative imports
+- `src/styles/app.css` is an `@import` manifest over `src/styles/app/*.css`;
+  its import order is the cascade, so add rules to the owning fragment and
+  never reorder imports or move rules between fragments in a visual PR.
+  Unit tests that pin CSS rules assert on the Lightning CSS parse of it
+  through `tests/helpers/app-css.ts`, never on its source text
 - `src/lib/protocolTypes.ts` is generated — see the root CLAUDE.md
+- `src/features/navigation/` is the B9-4 destination map (Q2) and content
+  navigator: a feature plugs in by adding its entry to `destinations.ts`, never
+  by editing MainPage/SidebarArea; `uiStore.activeView` has one writer there
+- `src/i18n/` holds the English catalogs (B9-3); rules are in `format.ts`'s
+  header. `tests/unit/ui-strings.test.ts` fails on new UI text outside a
+  catalog, against the shrink-only `scripts/ui-strings-baseline.json`
 - `tests/unit`, `tests/integration`, `tests/contract` (vitest, jsdom) ·
   `tests/e2e`, `tests/e2e/admin`, `tests/e2e/native` (Playwright) ·
   `tests/browser` (vitest browser mode)
@@ -90,20 +101,31 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `isLinuxDesktop()` (the Tauri host on a Linux, non-Android user agent) is the
   only switch, `RoomLifecycle.createRoom` builds a `NativeRoom` adapter there,
   `E2EEWorker.applyRoomKey` sends the key over the `NativeVoice` platform
-  contract, and audio device lists come from `native/devices.ts` (the device
-  module's device names, not the webview's). Video frames never cross IPC:
+  contract, and audio device lists come from `native/devices.ts` (`cpal`'s
+  device ids, not the webview's). Audio I/O is the session's own `cpal`
+  streams, not the SDK's device module: `native_voice/capture.rs` (APM, then
+  RNNoise) and `native_voice/playout.rs` (per-user volume mixer, which also
+  feeds the echo canceller its reference). Video frames never cross IPC:
   each native session serves them on a token-authenticated `127.0.0.1`
   WebSocket (`src-tauri/src/native_voice/video.rs`); remote tracks render
   through `native/videoRenderer.ts` (WebGL, exposed as a canvas
   `MediaStreamTrack` so the grid stays MediaStream-based) and the camera is
   the webview's own `getUserMedia` track, pumped up the socket by
-  `native/cameraUplink.ts`. Keep the state machine platform-blind:
-  a Linux-only behaviour belongs in the adapter or the Rust session, never as
-  a branch in `joinOrchestration`/`mediaControl`. The interop proof is
+  `native/cameraUplink.ts`. Screen share captures in the backend
+  (`src-tauri/src/native_voice/screen.rs`, libwebrtc's `DesktopCapturer`):
+  `native/screenPicker.ts` picks on X11, the xdg-desktop-portal dialog picks
+  on Wayland, and `lib/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
+  `createLocalScreenTracks` for `NativeRoom`'s `createScreenTracks`; it is
+  video only (no screen-share audio on Linux). Keep the state machine
+  platform-blind: a Linux-only behaviour belongs in the adapter or the Rust
+  session, never as a branch in `joinOrchestration`/`mediaControl`. The interop proof is
   `npm run test:e2e:native-voice` with `OWNCORD_E2E_LIVEKIT_BINARY` and
   `OWNCORD_NATIVE_VOICE_PEER=src-tauri/target/debug/examples/native_voice_interop`
-  (built with `cargo build --example native_voice_interop`); it covers audio
-  and video, each with a wrong-key control.
+  (built with `cargo build --example native_voice_interop`); it covers audio,
+  video and a synthetic-source screen share, each with a wrong-key control.
+  CI has no display: the X11 capturer runs only under
+  `xvfb-run cargo test -- --ignored x11`, and the Wayland portal only on a
+  real desktop.
 - **Lifecycle ownership is enforced, not assumed (B7-11).** `Disposable`
   (`src/lib/disposable.ts`) owns component, overlay and render lifetimes;
   `SessionScope` (`src/lib/sessionScope.ts`) owns session-bound async work.
@@ -121,7 +143,14 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   not add an entry without a reason. The runtime proof is the CDP soak
   (`tests/e2e/support/lifecycle-probe.ts`,
   `tests/e2e/fullstack/long-session.spec.ts`), which needs
-  `OWNCORD_E2E_LIVEKIT_BINARY` and gates every `client-fullstack` PR.
+  `OWNCORD_E2E_LIVEKIT_BINARY` and gates every `client-fullstack` PR; it also
+  runs over WebView2 in `client-native` and at length through
+  `npm run test:e2e:soak`. Its bars hold within one page as well as across
+  logins, so a leak the re-login navigation would release still fails. A native
+  voice backend keeps these rules plus three IPC ones (owned `listen()` with a
+  late-unlisten, native handles released in the web room's teardown, native
+  counts reported through `getSessionDebugInfo`):
+  [docs/architecture/client.md](../docs/architecture/client.md#lifecycle-ownership).
 - Do not run `npm run tauri build` locally; the desktop build is CI-only.
 - Formatting is prettier-enforced; match the surrounding code rather than
   reasoning about style.

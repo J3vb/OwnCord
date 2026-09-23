@@ -10335,13 +10335,20 @@
       "severity": "medium",
       "why": "docs/capacity.md publishes < 150 ms / < 300 ms for send -> sender acknowledgement and < 200 ms / < 400 ms for send -> recipient delivery, both met with room by the B6-9 steady profile (57/83 ms and 60/85 ms). The B6-10 operational profile is the same 100 connections and the same 2-vCPU cgroup with the storm, the voice churn and the upload scenario running alongside, and both budgets break: self_signed measured ack 228/348 ms and delivery 250/361 ms, tls off measured ack 329/472 ms and delivery 333/470 ms. These were the only two thresholds either run crossed. The server was not CPU-bound while it happened -- the cgroup averaged 0.41 of 2 CPUs (self_signed) and 0.31 (off), peaking at 1.23 -- so the cost is in the fan-out path, not the machine. The extra fan-out is the voice churn: 58,243 voice_state broadcasts against 12,044 chat sends, i.e. roughly five times as many broadcasts per second as the capacity profile carries.",
       "repro": "gh workflow run load-baseline.yml --ref feat/b6-10-operational-measurements -f profile=operational, then read k6-summary.json from the constrained artifact: ws_broadcast_latency_ms p(95) 228 against its p(95)<150 threshold and ws_delivery_latency_ms p(95) 250 against p(95)<200.",
-      "evidence": "Run 35113946945 at e57335c7 (2026-09-16). Jobs 104854470744 (self_signed) and 104854471050 (tls off), constrained leg only. k6-summary.json: ws_broadcast_latency_ms thresholds p(95)<150 and p(99)<300 both ok:false on both legs; ws_delivery_latency_ms p(95)<200 ok:false on both, p(99)<400 ok:false on tls off. Published in docs/capacity.md, 'The operational profiles'. cpu.stat.log shows the cgroup never above 1.23 of 2 CPUs.",
-      "status": "open",
+      "evidence": "Run 35113946945 at e57335c7 (2026-09-16). Jobs 104854470744 (self_signed) and 104854471050 (tls off), constrained leg only. k6-summary.json: ws_broadcast_latency_ms thresholds p(95)<150 and p(99)<300 both ok:false on both legs; ws_delivery_latency_ms p(95)<200 ok:false on both, p(99)<400 ok:false on tls off. Published in docs/capacity.md, 'The operational profiles'. cpu.stat.log shows the cgroup never above 1.23 of 2 CPUs. Diagnosis 2026-09-23 (fm/oc-0445-fable): profiled on the reference runner (load-baseline.yml -f pprof=true, run 35850079680) and re-measured with per-phase and per-10 s tags on ws_broadcast_latency_ms. Ack p95 was 3-90 ms in every 10 s bucket up to t=180 s -- WebSocket login ramp, the uploads cohort's 100 bcrypt logins, quota refusals and voice churn included -- and 500-750 ms from the reconnect storm to the drain, on both TLS legs (run 35852682786; bcrypt cost 10 changed nothing, run 35852685308). Server-side timing on a 2-core rig: the SQLite writer checkout (ResetSession to IsValid) held 0.4-0.6 ms before and after the storm, the idle gap between checkouts 5.5-6 ms before and after, checkouts per second unchanged, Go scheduler latency unchanged (runtime/metrics), writer pool never reopened; only queue depth changed. Chat-send arrival phase within the 2 s send period: before the storm at most 10 of 100 senders in any 50 ms slot; after it all 100 in the same 50 ms slot every period. The storm closes every socket at one scenario instant and each new socket's setInterval(SEND_INTERVAL_MS) restarted from that instant, so 100 users pressed Enter together every 2 s for the rest of the run; 100 sends queue behind the single writer at ~6 ms a hop (each handoff waits out the previous send's 100-recipient TLS fan-out on 2 vCPUs), ~600 ms for the last in line. The 2026-09-16 figures and the #1717 A/B were dominated by this artifact; #1717's audience change cut reader waits ~30x but left the writer queue untouched. Validation, interleaved, both constrained legs: fix runs 35856013841 (self_signed ack 45/234 ms, delivery 48/231; off 85/266, 93/270; every threshold met) and 35856019988 (41/80, 43/81; 96/267, 98/266) against dev 35856016690 (287/427, 301/430; 373/452, 378/454) and 35856022553 (330/467, 337/470; 276/352, 283/357). Cgroup CPU 0.26-0.43 of 2 on the fix runs, 0.34-0.43 on dev. The residual per-hop cost under a genuinely simultaneous burst is OC-0454.",
+      "status": "fixed",
       "found": "2026-09-16",
       "hunt": "operational-measurements-2026-09-16",
       "lens": "run-the-thing",
       "finder": "b6-10-operational-measurements",
-      "suggestedFix": "Profile the channel broadcast path under a voice_state-heavy fan-out before touching the budget. The budget is not to be loosened: it is met with 3x room by the steady profile on the same hardware, so the operational shape is doing something the steady shape does not."
+      "suggestedFix": "Profile the channel broadcast path under a voice_state-heavy fan-out before touching the budget. The budget is not to be loosened: it is met with 3x room by the steady profile on the same hardware, so the operational shape is doing something the steady shape does not.",
+      "fixedDate": "2026-09-23",
+      "fix": {
+        "commit": "4b2ea56b",
+        "test": "node --test Server/scripts/k6/ws-load.test.mjs",
+        "revertProof": "pass (restoring ws-load.js from dev fails 2 of 9 offline checks -- the phase-preservation test and the per-phase tag test; the fixed script passes all 9 under Node 26.9.0)",
+        "notes": "phasedInterval in ws-load.js keeps each VU's send, typing and presence timer phase across reconnects, and a resumed socket's first phased tick waits for auth_ok. ws_broadcast_latency_ms and ws_delivery_latency_ms carry phase=ramp|sustain|upload|storm under operational. The profiling behind the diagnosis was a one-off diagnostic build, described in docs/capacity.md; the workflow carries no profiling input."
+      }
     },
     {
       "id": "OC-0446",
@@ -10352,12 +10359,20 @@
       "why": "restartPhase() tags every delivery sample pre-restart or post-restart, which is what lets a missed budget be placed on one side of the stop. On the qualifying run the two sides are 34/51 ms and 393/452 ms -- an order of magnitude -- and the profile's run-level delivery budget (200/400 ms) is missed at 378/444 ms because of the post side. But the two windows are not comparable: pre-restart is the first 90 s, which is 60 s of ramp with most connections not yet on the wire plus 30 s at full fan-out, and post-restart is the remaining ~186 s all at full fan-out. The delivery rates confirm the imbalance (3,012/s before against ~4,620/s after). Server CPU inside the cgroup was flat across the stop (0.23 CPUs of 2 over the 30 s at full fan-out before it, 0.20 over the whole window after it), so CPU does not explain the gap either way, and no observer VU runs under the restart profile, so there are no per-phase writer-wait deltas to check. The drill therefore reports a large number it cannot attribute.",
       "repro": "gh workflow run load-baseline.yml --ref feat/b6-10-operational-measurements -f profile=restart, then compare ws_delivery_latency_ms{phase:pre-restart} (p95 34, count 271051) with ws_delivery_latency_ms{phase:post-restart} (p95 393, count 859303) in the constrained artifact's k6-summary.json.",
       "evidence": "Run 35113950011, job 104854480908, at e57335c7 (2026-09-16), constrained leg. The workflow sends the stop at RESTART_AT=90 (60 ramp + 30), so the pre-restart tag spans the ramp. cpu.stat.log for that run: 0.23 CPUs avg over 60-90 s, 0.20 CPUs avg over 100-240 s, with the cgroup counter reset at the second boot. Published with the caveat in docs/capacity.md, 'Restart under load'.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-16",
       "hunt": "operational-measurements-2026-09-16",
       "lens": "run-the-thing",
       "finder": "b6-10-operational-measurements",
-      "suggestedFix": "Hold the connections at full fan-out for as long before the stop as the drill runs after it (raise K6_RAMP's tail or push RESTART_AT out), and enable the observer VU under the restart profile so the per-phase writer-wait delta exists on both sides. Only then is a post-restart figure worth publishing as a server property."
+      "suggestedFix": "Hold the connections at full fan-out for as long before the stop as the drill runs after it (raise K6_RAMP's tail or push RESTART_AT out), and enable the observer VU under the restart profile so the per-phase writer-wait delta exists on both sides. Only then is a post-restart figure worth publishing as a server property.",
+      "fixedDate": "2026-09-23",
+      "fix": {
+        "commit": "c698ba17f15712d394fda525566a56a1cfa1e08a",
+        "test": "node --test Server/scripts/k6/ws-load.test.mjs",
+        "revertProof": "pass (restoring ws-load.js from dev 233b93f42ad941e00f43f2a62494707bdd30fe6e fails 5 of 7 offline checks; corrected harness passes all 7 under Node 26.9.0)",
+        "notes": "Completed the partial dev correction: explicit receipt-clock window boundaries, delivery/ack p95 and sample counts (empty = null/0), existing phase:pre-restart/recovery/post-restart series preserved, independent duration-based steady sample floors and invalid-window checks. The observer uses the scenario clock, ignores unavailable polls and rebases counters after a detected reboot.",
+        "loadRunValidation": "pending: A constrained restart run must verify the actual stop aligns with the scheduled boundary, the full cohort is back before the settled window, both steady windows carry the intended load, and publish recovery/settled/pre-stop p95s, counts, drain/resume/loss and phase wait evidence. No new load result or attribution of the historical 10x gap is claimed."
+      }
     },
     {
       "id": "OC-0447",
@@ -10365,15 +10380,23 @@
       "file": "Server/scripts/k6/ws-load.js",
       "line": 1184,
       "severity": "medium",
-      "why": "The sender loop sends one chat message every K6_SEND_INTERVAL_MS (2000) per connection into K6_CHANNEL_ID, and the ceiling-search profile points every step's connections at that single channel. Step 200 is therefore exactly 200 messages/s into one channel, and Server/ws/hub_stats.go:73 hard-codes topicRateLimitPerSecond = 100 per channel topic, enforced at Server/ws/hub_broadcast.go:402. The server log for the qualifying run carries 24,893 'hub: topic rate limit exceeded, dropping message' lines. Every step at or above 200 is shed by a constant in the code, and the latency reported there (27-30 s at step 300, ~29 s at 400 and 500) is the shed queue plus a quadratic single-channel fan-out, not the machine running out: the cgroup peaked at 1.93 of 2 CPUs and nr_throttled rose by 3 over the whole 500 s run. The plan's own rule is that a configuration or code cap must never be published as the ceiling, so this is a harness finding: the search as shaped cannot locate a hardware ceiling above 100 connections.",
+      "why": "The sender loop sends one chat message every K6_SEND_INTERVAL_MS (2000) per connection into K6_CHANNEL_ID, and the ceiling-search profile points every step's connections at that single channel. Step 200 is therefore exactly 100 messages/s into one channel, and Server/ws/hub_stats.go:73 hard-codes topicRateLimitPerSecond = 100 per channel topic, enforced at Server/ws/hub_broadcast.go:402. The server log for the qualifying run carries 24,893 'hub: topic rate limit exceeded, dropping message' lines. Every step at or above 200 is shed by a constant in the code, and the latency reported there (27-30 s at step 300, ~29 s at 400 and 500) is the shed queue plus a quadratic single-channel fan-out, not the machine running out: the cgroup peaked at 1.93 of 2 CPUs and nr_throttled rose by 3 over the whole 500 s run. The plan's own rule is that a configuration or code cap must never be published as the ceiling, so this is a harness finding: the search as shaped cannot locate a hardware ceiling above 100 connections.",
       "repro": "gh workflow run load-baseline.yml --ref feat/b6-10-operational-measurements -f profile=ceiling-search -f ceiling_max=500, then grep -c 'topic rate limit exceeded' the constrained artifact's server.log (24,893) and read ws_delivery_latency_ms{step:200} p(95) 397 ms against the 200 ms budget.",
       "evidence": "Run 35113953670, job 104854495119, at e57335c7 (2026-09-16), constrained leg. k6-summary.json per-step p95/p99 and obs_connected_users; obs_ws_conn_rejects 0 and login_giveups 0, so the cap is not max_ws_connections and not the login path. Steps 400 and 500 also failed to hold their population (370 of 400, 411 of 500) with host loadavg 3.43 and 3.76 on a 4-CPU runner and 797 'client send buffer full, closing connection to force reconnect' plus 857 write-pump errors in server.log. Published as such in docs/capacity.md, 'Ceiling search'.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-16",
       "hunt": "operational-measurements-2026-09-16",
       "lens": "run-the-thing",
       "finder": "b6-10-operational-measurements",
-      "suggestedFix": "Spread the search's connections over ceil(target / connections-per-channel) channels so the per-channel rate stays under topicRateLimitPerSecond, and assert the topic-limiter drop counter stayed 0 for the run the same way obs_ws_conn_rejects == 0 is asserted. A search that sheds by a constant should fail its own sanity gate rather than publish a number."
+      "suggestedFix": "Spread the search's connections over ceil(target / connections-per-channel) channels so the per-channel rate stays under topicRateLimitPerSecond, and assert the topic-limiter drop counter stayed 0 for the run the same way obs_ws_conn_rejects == 0 is asserted. A search that sheds by a constant should fail its own sanity gate rather than publish a number.",
+      "fixedDate": "2026-09-23",
+      "fix": {
+        "commit": "c698ba17f15712d394fda525566a56a1cfa1e08a",
+        "test": "node --test Server/scripts/k6/ws-load.test.mjs",
+        "revertProof": "pass (restoring ws-load.js from dev 233b93f42ad941e00f43f2a62494707bdd30fe6e fails 5 of 7 offline checks; corrected harness passes all 7 under Node 26.9.0)",
+        "notes": "Completed the partial dev correction: fail closed on unsafe/duplicate channel lists and size the cohort using a half-limit sliding-one-second send budget, including the observer VU slot. The workflow seeds 11 channels at 500 connections/2 s; posting and focus use the same stable channel, total offered sends are unchanged, and the summary includes each held step's planned rates, burst bound and observed per-channel attempts/counts. Server limit unchanged.",
+        "loadRunValidation": "pending: A constrained ceiling-search run must hold every requested population, confirm the expected total/per-channel offered rates and zero topic-limit log drops, and report generator/server utilization with fresh per-step latency figures. Multi-channel fan-out changes every step, so the old single-channel table is not a hardware-ceiling result for this shape."
+      }
     },
     {
       "id": "OC-0448",
@@ -10382,12 +10405,18 @@
       "line": 619,
       "severity": "high",
       "why": "Affected property: the bytes that reach the release tags are the bytes that were verified, and a failed verification leaves the tags where they were. The publication job validates after it has already written the tags, so a failure below the push leaves them moved.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-20",
       "hunt": "review-2026-09-20",
       "lens": "read-the-pipeline",
       "finder": "review-2026-09-20",
-      "fix": null
+      "fix": {
+        "commit": "5687b035ebaf3678e4228dda567f3f8fd8a3a00b",
+        "test": "node --test scripts/check-release-docker.test.mjs scripts/check-release-environment.test.mjs (29 pass); npm run check:hygiene (Node 26); actionlint 1.7.7 with ShellCheck; zizmor 1.30.1 --offline --no-progress .github/workflows/; node scripts/check-doc-counts.mjs; node .superpowers/render-ledger.mjs",
+        "revertProof": "pass: restoring release.yml from dev 233b93f42ad941e00f43f2a62494707bdd30fe6e makes the new suite fail (13 failures). Moving the sole promotion step ahead of verification makes it fail (12 failures), including all 10 verification-failure cases detecting moved tags. Restoring the fix passes all 14 Docker publication tests."
+      },
+      "fixed": "2026-09-23",
+      "evidence": "The build pushes an untagged multi-architecture index by digest. Architecture presence, equality with both native-smoked configs, and Sigstore provenance verification use that immutable candidate before the final success-only imagetools create copies the same index to all release tags. Signing, SBOM/max provenance, release approval and upgrade/rollback gates remain. Failure-injection tests execute the workflow shell itself and assert every prior tag value remains unchanged with no promotion attempt. Registry transport failure during the final multi-tag write is not a transaction and is distinct from verification failure."
     },
     {
       "id": "OC-0449",
@@ -10423,6 +10452,155 @@
         "commit": "b44f1554",
         "test": "Server/service/push_dispatch_test.go",
         "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0451",
+      "title": "Back-to-back presence changes: the queued retry lands before the server's rate-limit window ends and the server keeps the previous status",
+      "file": "Client/src/lib/presence.ts",
+      "line": 81,
+      "severity": "medium",
+      "why": "With the shared limiter closed, PresenceSender retries once at limiter.getRemainingMs(), i.e. the end of the client's own 10s window measured from its send; the server's one-update-per-10s window is measured from receipt, slightly later, so the retry arrives early, is answered RATE_LIMITED and is never retried - the client shows (and saves) the new status while users.status and every other member keep the previous one.",
+      "status": "fixed",
+      "found": "2026-09-22",
+      "hunt": "e2e-n14-native-extra",
+      "lens": "run-the-thing",
+      "finder": "e2e-n14",
+      "repro": "Client/tests/e2e/native/native-extra.spec.ts test.fixme \"back-to-back status changes reach the server\" (tray picks dnd then offline within 10s, poll /admin/api/users).",
+      "evidence": "Windows native CI run https://github.com/J3vb/OwnCord/actions/runs/35793973530 (tray test attempt 1: dnd stored, webview log \"[dispatcher] Server error {code: RATE_LIMITED}\" ~10s later, server still \"dnd\" after 25s).",
+      "suggestedFix": "Re-arm the retry when a presence_update is answered RATE_LIMITED (or add slack past the server window) so the latest chosen status always reaches the server.",
+      "fix": {
+        "commit": "57ff16a1bf1e952790127c9d401cc455f486678d",
+        "test": "Client/tests/unit/presence-sender.test.ts",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0452",
+      "title": "A receive-side E2EE key race at voice join marks the call as not secured",
+      "file": "Client/src/lib/roomEventHandlers.ts",
+      "line": 219,
+      "severity": "low",
+      "why": "Over-warning, not a weakness. In 2 of 3 recorded B7-11 long-session soak runs (200 voice joins each), the E2EE worker logged `InvalidKey: Decryption failed` for the peer's frames near voice join (3 times in one run, once in the other), while decoded media still arrived every cycle; it did not appear in 20+ 20-cycle runs. The likely cause is a key-rotation race: the joiner briefly holds a different key at the frame's key index than the sender encrypts with. handleEncryptionError treats every RoomEvent.EncryptionError as the encoder failing (OC-0002) and calls setEncryptionDegraded(true), so the transient race shows the call as possibly unsecured. Fix direction: tell a receive-side InvalidKey during key distribution (clear the degraded state once that participant's frames decrypt, or ignore it inside the join or rotation window) apart from a worker failure or an unencrypted track, which must still degrade. The long-session soak's strict console check is the reproducer.",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "b7-11c-soak",
+      "lens": "long-session-soak",
+      "finder": "b7-11c",
+      "fix": {
+        "commit": "505e7ec7",
+        "test": "Client/tests/unit/room-event-handlers.test.ts",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0453",
+      "title": "Rejoining voice straight after leaving, on the same socket, stalls 3-6 s behind the leave's LiveKit removal",
+      "file": "Server/ws/voice_leave.go",
+      "line": 88,
+      "severity": "medium",
+      "why": "finishVoiceLeave called livekit.RemoveParticipant synchronously on the client's read loop. A widget disconnect closes the client's own LiveKit session and sends voice_leave at the same moment; for a participant that is closing itself, LiveKit often answers the removal only after its 3 s routing timeout (\"twirp error unavailable: no response from servers\"), and the next frame on the socket - the rejoin's voice_join, or a channel switch, which runs the same leave path - waited behind it. A first join takes ~0.5 s; an immediate rejoin took 3.2-5.5 s in roughly a quarter of attempts.",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "b7-voice-join-budget",
+      "lens": "run-the-thing",
+      "finder": "voice-rejoin-stall",
+      "repro": "Client/tests/e2e/fullstack/voice-rejoin.spec.ts: alice leaves through the widget and rejoins voice-one at once, ten times on one socket, while bob publishes; each rejoin is timed from the click to 'Voice Connected' with bob's audio decoding.",
+      "evidence": "Local full-stack runs on the unfixed server: rejoin samples [266,928,385,392,343,371,239,439,3316,397] and [277,691,549,5193,444,257,543,5347,636,3282] ms; the server log shows 'voice leave' at 11:22:41.692, 'handleVoiceLeave RemoveParticipant failed ... no response from servers' at 11:22:44.695 and the queued 'voice join' at 11:22:44.696. With the fix, three runs: max rejoin 1,514 ms, typically 0.3-0.5 s, and bob's room held exactly one alice after the rejoins and none after her final leave.",
+      "suggestedFix": "Run the leave's LiveKit removal off the read loop; the participant identity carries the join token, so it cannot remove the new session.",
+      "fix": {
+        "commit": "9fc4b776e2288b03de2760f16d9137fb391b7aa1",
+        "test": "Server/ws/oc_0453_voice_leave_livekit_async_test.go",
+        "revertProof": "pass"
+      },
+      "fixedDate": "2026-09-23"
+    },
+    {
+      "id": "OC-0454",
+      "title": "A simultaneous burst of N chat sends acknowledges the last sender ~N x 6 ms later on 2 vCPUs",
+      "file": "Server/db/db.go",
+      "line": 271,
+      "severity": "low",
+      "why": "Every chat send takes the single SQLite writer connection twice (the message transaction, then UpdateReadState) and each checkout is held only 0.4-0.6 ms, but the pool handoff to the next waiter takes ~5.5-6 ms because the woken sender competes for the two vCPUs with the previous send's 100-recipient TLS fan-out (writePump wakeups) and the per-statement helper goroutines. Under spread-out arrivals the queue is empty and a send acknowledges in ~5 ms; when N senders hit the writer in the same instant they serialize and the last one waits ~N x 6 ms. The operational profile's storm made all 100 senders phase-locked (OC-0445) and measured exactly that (~600 ms). A real population rarely synchronizes 100 keystrokes, but a burst of 20-30 (a shared reaction to one event) would cost the last sender 120-180 ms on the reference hardware, so the shape is worth knowing rather than a defect to fix blind.",
+      "repro": "Remove the phase preservation from Server/scripts/k6/ws-load.js: replace the three phasedInterval(socket, name, period, fn) calls with plain socket.setInterval(fn, period), so every socket's timers restart from the storm instant, then run the operational profile and read ws_broadcast_latency_ms{phase:upload}: about 500-750 ms p95 at 50 sends/s, against 40-90 ms with the same throughput spread out. Locally, count writer checkouts (sql.DBStats) and time the driver connection between ResetSession and IsValid: hold 0.4 ms, gap ~6 ms, both unchanged by the burst.",
+      "evidence": "Runs 35852682786 (10 s buckets: 573/520/524/554/582/506/557/531 ms p95 from t=180 s on self_signed, 3-69 ms before) and 35856013841/35856019988 (phase-preserved: 41-96 ms p95). Local 2-core measurements 2026-09-23: checkout hold 0.40-0.60 ms, idle gap 5.5-6.1 ms, ~5000 checkouts per 30 s, before and after the storm; chat_send arrival histogram 10 vs 100 per 50 ms slot. runtime/metrics sched latency p50 0.4-0.65 ms, p99 5-25 ms, unchanged.",
+      "status": "open",
+      "found": "2026-09-23",
+      "hunt": "oc-0445-diagnosis",
+      "lens": "run-the-thing",
+      "finder": "fm/oc-0445-fable",
+      "suggestedFix": "Measure before touching: one checkout per send (UpdateReadState inside the message transaction, ignoring its error to keep it best-effort) halves the hops; batching writePump frames or lowering per-frame TLS cost shortens each hop. Neither is justified by a real-population shape yet."
+    },
+    {
+      "id": "OC-0455",
+      "title": "A remote camera freezes for good after the SFU pauses and resumes it",
+      "file": "Client/src/features/voice/roomLifecycle.ts",
+      "line": 161,
+      "severity": "medium",
+      "why": "The Room was built with adaptiveStream on (every quality but source), but the video grid plays each remote camera from its own MediaStream and never calls RemoteVideoTrack.attach(), so LiveKit observes no element. RemoteVideoTrack.setStreamState(Active) re-evaluates visibility on every server StreamStateUpdate, which the SFU sends when it resumes a video it paused for bandwidth; with no visible element LiveKit emits VisibilityChanged(false) and the publication sends disabled: true, so the SFU stops forwarding that camera for the rest of the subscription. The tile freezes on its last frame while audio keeps playing. CI run 35838844777 (media.spec.ts wrong-key positive control) shows it: after the rejoin the peer decoded exactly one video frame in 30 s while its audio energy and samples kept rising and no decrypt error was logged. It needs a congested link, so a loopback run does not reproduce it.",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "ci-flake-media-e2e",
+      "lens": "fullstack-e2e-flake",
+      "finder": "media-e2e-flake",
+      "fix": {
+        "commit": "59cc8825",
+        "test": "Client/tests/unit/livekit-session.test.ts",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0456",
+      "title": "livekit-client throws uncaught when an E2EE enable ack names a peer who already left",
+      "file": "Client/patches/livekit-client+2.22.3.patch",
+      "line": 1,
+      "severity": "low",
+      "why": "livekit-client 2.22.3 E2EEManager.onWorkerMessage handles the worker's ack of each enable message by looking the participant up, and throws TypeError(\"couldn't set encryption status, participant not found...\") when it is gone. A peer can leave between the post and the ack: a quick leave right after publishing, or the local room full-reconnecting (a server leave with STATE_MISMATCH) and re-posting enable for every peer while one of them leaves. The throw is an uncaught error from a worker message handler that nothing in the app can catch; no state is lost, but it surfaces as a page error. Seen twice in the long-session soak (CI runs 35846526468 and 35857549279), on the peer that holds the room open. Fixed with a patch-package patch that skips the status event for a missing participant.",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "ci-flake-media-e2e",
+      "lens": "fullstack-e2e-flake",
+      "finder": "media-e2e-flake",
+      "fix": {
+        "commit": "1a6748d6",
+        "test": "Client/tests/unit/livekit-e2ee-enable-ack.test.ts",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0457",
+      "title": "Leaving a voice room strips livekit's own disconnect cleanup, so its timers outlive the room",
+      "file": "Client/src/features/voice/releaseRoom.ts",
+      "line": 24,
+      "severity": "low",
+      "why": "Every room teardown (leaveVoice, the reconnect teardown, releaseRoom, the superseded-join discard) called room.removeAllListeners() before room.disconnect(). That also removed the listeners livekit-client registers on its own Room, among them the once(Disconnected) cleanups that clear its 10 s wait for a LocalTrackSubscribed publication and release deferred track callbacks. After a quick camera toggle the SFU confirms a subscription to a track the client already unpublished, so the 10 s timer and its closure (which reaches the Room) survived the leave and fired later with a 'could not find local track publication' warning. The long-session soak counts pending timeouts, and failed its timeouts bar whenever a sample landed inside that window (reproduced locally on three runners at once under load).",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "ci-flake-media-e2e",
+      "lens": "fullstack-e2e-flake",
+      "finder": "media-e2e-flake",
+      "fix": {
+        "commit": "a6793f07",
+        "test": "Client/src/features/voice/releaseRoom.test.ts",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0458",
+      "title": "The long-session soak read its DOM node count once, so one node in flux failed the growth bar",
+      "file": "Client/tests/e2e/support/lifecycle-probe.ts",
+      "line": 179,
+      "severity": "low",
+      "why": "sampleLifecycle took a single Memory.getDOMCounters read after the GC. In CI run 35886832029 (attempt 2) page 0 sampled 2739, 2738 and 2739 nodes at cycles 5, 6 and 9 while the trace's DOM snapshots showed an identical attached DOM (717 nodes) at all three: one retained, detached node was in flux at the cycle-6 read, and the within-page series (slope 0.33 > 0.05) failed as growth. 24 heap-snapshotted local samples read a stable 2739 with a bounded detached set, so the reading was noise, not a leak. The sampler now reads the DOM counters after a GC until two reads a second apart agree (at most four), as the timer ledger already double-reads; the pass bar is unchanged, and a leaked node is present on every read.",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "ci-flake-media-e2e",
+      "lens": "fullstack-e2e-flake",
+      "finder": "media-e2e-flake",
+      "fix": {
+        "commit": "5fe4845e",
+        "test": "Client/tests/e2e/fullstack/long-session.spec.ts",
+        "revertProof": "n/a"
       }
     },
     {

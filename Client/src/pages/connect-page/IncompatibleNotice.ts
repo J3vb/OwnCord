@@ -8,6 +8,7 @@
 // client (only when the client is the older side) or leave.
 
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
+import { connectText } from "../../i18n/connect";
 
 export interface IncompatibleNoticeOptions {
   /** Called when the user chooses to update this client. */
@@ -31,12 +32,12 @@ export interface IncompatibleNotice {
  */
 function requirementText(host: string, serverEpoch: number | null, clientEpoch: number): string {
   if (serverEpoch !== null && serverEpoch > clientEpoch) {
-    return `${host}: this client speaks protocol epoch ${clientEpoch} but the server needs ${serverEpoch}; update the client.`;
+    return connectText("incompatible.clientOlder", { host, clientEpoch, serverEpoch });
   }
   if (serverEpoch !== null) {
-    return `${host}: this client speaks protocol epoch ${clientEpoch} but the server only speaks ${serverEpoch}; update the server.`;
+    return connectText("incompatible.serverOlder", { host, clientEpoch, serverEpoch });
   }
-  return `${host}: this client cannot speak to this server — the protocol epochs differ.`;
+  return connectText("incompatible.unknown", { host });
 }
 
 export function createIncompatibleNotice(opts: IncompatibleNoticeOptions): IncompatibleNotice {
@@ -61,7 +62,7 @@ export function createIncompatibleNotice(opts: IncompatibleNoticeOptions): Incom
         class: "incompatible-notice-update btn-primary",
         type: "button",
       });
-      setText(updateBtn, "Update client");
+      setText(updateBtn, connectText("incompatible.updateClient"));
       updateBtn.addEventListener("click", () => {
         if (currentHost !== null) opts.onUpdate(currentHost);
       });
@@ -72,7 +73,7 @@ export function createIncompatibleNotice(opts: IncompatibleNoticeOptions): Incom
       class: "incompatible-notice-leave btn-ghost",
       type: "button",
     });
-    setText(leaveBtn, "Choose another server");
+    setText(leaveBtn, connectText("incompatible.leave"));
     leaveBtn.addEventListener("click", () => {
       notice.hide();
       opts.onLeave();

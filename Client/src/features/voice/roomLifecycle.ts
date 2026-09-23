@@ -28,8 +28,9 @@ import {
   bumpGeneration,
 } from "../../lib/screenShare";
 import { attachDiagnosticListeners } from "../../lib/livekitDiagnostics";
+import { detachRoom, onRoom } from "./releaseRoom";
 import type { RoomEventHandlers } from "../../lib/roomEventHandlers";
-import type { SessionState } from "./sessionState";
+import { parseUserId, type SessionState } from "./sessionState";
 import { isLinuxDesktop } from "./native/platform";
 
 // Same logger tag as before the extraction, so the lifecycle log lines are unchanged.
@@ -149,10 +150,25 @@ export class RoomLifecycle {
     // OC-0438: publish with the channel's configured audio bitrate — spreading
     // undefined omits audioPreset, leaving LiveKit's own default in place.
     const audioOptions = this.configuredAudioOptions(channelId ?? null);
+    // livekit-client 2.22's Room constructor, when this registry exists,
+    // registers its navigator.mediaDevices devicechange listener as a
+    // WeakRef closure that only the registry removes. The closure's scope
+    // still captures the Room, so the Room is never collected and every join
+    // leaked a whole Room (engine, participants, E2EE manager) for the page's
+    // lifetime. Without the registry it registers `handleDeviceChange`, which
+    // disconnect() removes from a Room that connected, and releaseRoom()
+    // removes from one discarded before it connected.
+    Room.cleanupRegistry = false;
     const newRoom = new Room({
-      // Adaptive features reduce quality based on subscriber viewport —
-      // disable for "source" quality to maintain full resolution.
-      adaptiveStream: !isSource,
+      // adaptiveStream sizes and pauses a remote video by the elements it was
+      // attach()ed to, but the video grid plays its own MediaStream and never
+      // calls attach(). LiveKit re-checks visibility on every server
+      // stream-state update (an SFU bandwidth pause and resume), finds no
+      // visible element and pauses the camera for the rest of the
+      // subscription: the tile freezes on its last frame.
+      adaptiveStream: false,
+      // Dynacast stops publishing unused simulcast layers — off for "source"
+      // quality to keep full resolution.
       dynacast: !isSource,
       audioCaptureDefaults: {
         echoCancellation: loadPref("echoCancellation", true),
@@ -209,11 +225,17 @@ export class RoomLifecycle {
    *  event wiring applies. */
   private async createNativeRoom(): Promise<Room> {
     const { createNativeRoom } = await import("./native/nativeRoom");
-    const nativeRoom = createNativeRoom({
-      echoCancellation: loadPref("echoCancellation", true),
-      noiseSuppression: loadPref("noiseSuppression", true),
-      autoGainControl: loadPref("autoGainControl", true),
-    });
+    const nativeRoom = createNativeRoom(
+      {
+        echoCancellation: loadPref("echoCancellation", true),
+        noiseSuppression: loadPref("noiseSuppression", true),
+        autoGainControl: loadPref("autoGainControl", true),
+        enhancedNoiseSuppression: loadPref("enhancedNoiseSuppression", false),
+      },
+      (identity) => this._audioElements.getEffectiveVolume(parseUserId(identity)),
+      (identity) => this._audioElements.getScreenshareGain(parseUserId(identity)),
+    );
+    this._audioElements.setScreenshareGainListener(() => nativeRoom.applyScreenshareVolumes());
     // The adapter is structurally the subset of Room the modules call; the
     // cast is the one seam where the two backends meet.
     const newRoom = nativeRoom as unknown as Room;
@@ -222,16 +244,21 @@ export class RoomLifecycle {
   }
 
   private wireRoomEvents(newRoom: Room): void {
-    newRoom.on(RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
-    newRoom.on(RoomEvent.TrackUnsubscribed, this._eventHandlers.handleTrackUnsubscribed);
-    newRoom.on(RoomEvent.Disconnected, this._eventHandlers.handleDisconnected);
-    newRoom.on(RoomEvent.ActiveSpeakersChanged, this._eventHandlers.handleActiveSpeakersChanged);
-    newRoom.on(
+    onRoom(newRoom, RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
+    onRoom(newRoom, RoomEvent.TrackUnsubscribed, this._eventHandlers.handleTrackUnsubscribed);
+    onRoom(newRoom, RoomEvent.Disconnected, this._eventHandlers.handleDisconnected);
+    onRoom(
+      newRoom,
+      RoomEvent.ActiveSpeakersChanged,
+      this._eventHandlers.handleActiveSpeakersChanged,
+    );
+    onRoom(
+      newRoom,
       RoomEvent.AudioPlaybackStatusChanged,
       this._eventHandlers.handleAudioPlaybackChanged,
     );
-    newRoom.on(RoomEvent.LocalTrackPublished, this._eventHandlers.handleLocalTrackPublished);
-    newRoom.on(RoomEvent.ParticipantPermissionsChanged, (_previous, participant) => {
+    onRoom(newRoom, RoomEvent.LocalTrackPublished, this._eventHandlers.handleLocalTrackPublished);
+    onRoom(newRoom, RoomEvent.ParticipantPermissionsChanged, (_previous, participant) => {
       if (
         participant !== newRoom.localParticipant ||
         this._room !== newRoom ||
@@ -245,7 +272,7 @@ export class RoomLifecycle {
     });
     // OC-0002: the only SDK-level signal that the E2EE worker died after the
     // key exchange already succeeded — see roomEventHandlers.ts for detail.
-    newRoom.on(RoomEvent.EncryptionError, this._eventHandlers.handleEncryptionError);
+    onRoom(newRoom, RoomEvent.EncryptionError, this._eventHandlers.handleEncryptionError);
     attachDiagnosticListeners(newRoom);
   }
 
@@ -299,9 +326,10 @@ export class RoomLifecycle {
     // TrackUnsubscribed, but may be missed during rapid reconnection).
     // Full cleanup: also clears screenshare mute state on intentional leave.
     this._audioElements.cleanupAllAudioElementsFull();
+    this._audioElements.setScreenshareGainListener(null);
     const room = this._room;
     if (room !== null) {
-      room.removeAllListeners();
+      detachRoom(room);
       room.disconnect().catch((err) => log.warn("room.disconnect() error (non-fatal)", err));
     }
     // Clear client-side E2EE state (ECDH keypair, room key, peer keys), and

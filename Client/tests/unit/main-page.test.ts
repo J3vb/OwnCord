@@ -104,6 +104,7 @@ const {
   // tests get at the actual slots/dmProfileSlot MainPage is wiring against.
   capturedChatAreaRef: {
     current: null as null | {
+      chatArea: HTMLDivElement;
       slots: {
         messagesSlot: HTMLDivElement;
         typingSlot: HTMLDivElement;
@@ -145,6 +146,12 @@ vi.mock("../../src/pages/main-page/ChannelController", () => ({
   },
 }));
 
+const { mockReturnToChannel, mockRememberChannel, inertModeration } = vi.hoisted(() => ({
+  mockReturnToChannel: vi.fn(),
+  mockRememberChannel: vi.fn(),
+  inertModeration: { signals: [] as AbortSignal[] },
+}));
+
 vi.mock("../../src/pages/main-page/SidebarArea", () => ({
   createSidebarArea: (...args: unknown[]) => {
     mockCreateSidebarArea(...args);
@@ -153,7 +160,24 @@ vi.mock("../../src/pages/main-page/SidebarArea", () => ({
       children: [],
       unsubscribers: [],
       openQuickSwitch: vi.fn(),
+      rememberChannel: mockRememberChannel,
+      forgetChannel: vi.fn(),
+      returnToChannel: mockReturnToChannel,
     };
+  },
+}));
+
+// B9-4: one inert destination, so the page's navigation wiring can be driven.
+vi.mock("../../src/features/navigation/destinations", () => ({
+  NAVIGATION_DESTINATIONS: {
+    moderation: {
+      build: (ctx: { signal: AbortSignal }) => {
+        inertModeration.signals.push(ctx.signal);
+        const el = document.createElement("div");
+        el.dataset["testid"] = "inert-moderation";
+        return el;
+      },
+    },
   },
 }));
 
@@ -178,9 +202,10 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       mount: vi.fn(),
       destroy: vi.fn(),
     };
-    capturedChatAreaRef.current = { slots, dmProfileSlot, videoGrid };
+    const chatArea = document.createElement("div");
+    capturedChatAreaRef.current = { chatArea, slots, dmProfileSlot, videoGrid };
     return {
-      chatArea: document.createElement("div"),
+      chatArea,
       slots,
       videoGrid,
       chatHeaderName: document.createElement("span"),
@@ -208,6 +233,7 @@ import { membersStore, updateMemberProfile } from "../../src/stores/members.stor
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ApiClient } from "../../src/lib/api";
 import type { ServerMessage } from "../../src/lib/types";
+import { Permission } from "../../src/lib/types";
 import { openImageLightbox, renderYouTubeEmbed } from "../../src/components/message-list/media";
 import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
 import {
@@ -1302,10 +1328,12 @@ describe("MainPage — presence", () => {
     onStatusChange("online");
     expect(ws.send).not.toHaveBeenCalled();
 
-    // Once the limiter's 10s window reopens, the deferred "online" frame must
-    // still go out — without a retry the server and every other client stay
-    // stuck on "idle" forever with no further trigger to correct it.
-    vi.advanceTimersByTime(10_000);
+    // Once the limiter's 10s window reopens (plus the OC-0451 margin that
+    // clears the server's receipt-measured window), the deferred "online"
+    // frame must still go out — without a retry the server and every other
+    // client stay stuck on "idle" forever with no further trigger to correct
+    // it.
+    vi.advanceTimersByTime(11_000);
 
     expect(ws.send).toHaveBeenCalledWith({
       type: "presence_update",
@@ -1484,5 +1512,76 @@ describe("MainPage — account deletion", () => {
 
     expect(mockPruneAttachmentCacheScope).not.toHaveBeenCalled();
     expect(authStore.getState().isAuthenticated).toBe(true);
+  });
+});
+
+describe("MainPage — B9-4 content view wiring", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  type OpenView = (id: "requests" | "moderation", opener: HTMLElement) => void;
+  const openView = (): OpenView =>
+    (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenView: OpenView }).onOpenView;
+
+  beforeEach(() => {
+    resetStores();
+    mockMountChannel.mockClear();
+    mockDestroyChannel.mockClear();
+    mockReturnToChannel.mockClear();
+    mockRememberChannel.mockClear();
+    inertModeration.signals.length = 0;
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[1, textChannel(1, "general")]]),
+      activeChannelId: 1,
+      roles: [{ id: 3, name: "Moderator", color: null, permissions: Permission.MODERATE_MEMBERS }],
+    }));
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 1, username: "alice", avatar: null, role: "Moderator" },
+    }));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+  });
+
+  afterEach(() => {
+    page.destroy?.();
+    container.remove();
+  });
+
+  it("places the view column between the chat column and the DM profile slot", () => {
+    const view = container.querySelector("[data-testid='feature-view']");
+    const chat = capturedChatAreaRef.current!;
+    expect(view?.previousElementSibling).toBe(chat.chatArea);
+    expect(view?.nextElementSibling).toBe(chat.dmProfileSlot);
+  });
+
+  it("opens in place of the chat, whose channel is torn down, and closes back", () => {
+    const opener = document.createElement("button");
+    container.appendChild(opener);
+    openView()("moderation", opener);
+
+    expect(mockRememberChannel).toHaveBeenCalled();
+    expect(container.querySelector("[data-testid='inert-moderation']")).not.toBeNull();
+    expect(capturedChatAreaRef.current!.chatArea.style.display).toBe("none");
+    channelsStore.flush();
+    expect(mockDestroyChannel).toHaveBeenCalled();
+
+    container.querySelector<HTMLButtonElement>("[data-testid='feature-view-close']")!.click();
+    expect(mockReturnToChannel).toHaveBeenCalledTimes(1);
+    expect(inertModeration.signals[0]?.aborted).toBe(true);
+    expect(capturedChatAreaRef.current!.chatArea.style.display).toBe("");
+  });
+
+  it("page teardown clears the view so the next page starts with none", () => {
+    openView()("moderation", document.createElement("button"));
+    expect(uiStore.getState().activeView).toBe("moderation");
+
+    page.destroy?.();
+
+    expect(inertModeration.signals[0]?.aborted).toBe(true);
+    expect(uiStore.getState().activeView).toBeNull();
   });
 });

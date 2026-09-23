@@ -149,6 +149,10 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
 // ---------------------------------------------------------------------------
 
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
+import {
+  createContentNavigator,
+  type ContentNavigator,
+} from "../../src/features/navigation/contentView";
 import { channelsStore, setActiveChannel, setRoles } from "../../src/stores/channels.store";
 import { dmStore, addDmChannel } from "../../src/stores/dm.store";
 import { uiStore, setSidebarMode, setActiveDmUser } from "../../src/stores/ui.store";
@@ -209,6 +213,8 @@ function resetStores(): void {
     collapsedCategories: new Set<string>(),
     sidebarMode: "channels" as const,
     activeDmUserId: null,
+    activeView: null,
+    settingsTab: null,
   }));
   authStore.setState(() => ({
     token: "test-token",
@@ -2854,6 +2860,375 @@ describe("SidebarArea", () => {
       expect(mockOpenUrl).not.toHaveBeenCalled();
       expect(show).toHaveBeenCalledWith("Not connected to a server", "error");
       cleanup(result);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // B9-4 navigation entries (Q2)
+  // -------------------------------------------------------------------------
+  //
+  // Each destination's entry appears only once its feature ships (an entry in
+  // `destinations`), and the Moderation entry only with MODERATE_MEMBERS.
+
+  describe("B9-4 navigation entries", () => {
+    let host: HTMLDivElement;
+    let pending: number;
+    let pendingListeners: Array<() => void>;
+
+    const inert = (): HTMLElement => document.createElement("div");
+
+    function destinations(): NonNullable<SidebarAreaOptions["destinations"]> {
+      return {
+        requests: {
+          build: inert,
+          pending: {
+            get: () => pending,
+            subscribe: (fn) => {
+              pendingListeners.push(fn);
+              return () => {
+                pendingListeners = pendingListeners.filter((l) => l !== fn);
+              };
+            },
+          },
+        },
+        moderation: { build: inert },
+      };
+    }
+
+    function setPending(n: number): void {
+      pending = n;
+      for (const fn of pendingListeners) fn();
+    }
+
+    function signInAs(roleName: string, permissions: number): void {
+      setRoles([{ id: 9, name: roleName, color: null, permissions }]);
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 9, username: "U", avatar: null, role: roleName },
+      }));
+    }
+
+    function mount(extra: Partial<SidebarAreaOptions> = {}): ReturnType<typeof createSidebarArea> {
+      const result = createSidebarArea({ ...defaultOpts(), ...extra });
+      host.appendChild(result.sidebarWrapper);
+      return result;
+    }
+
+    const q = (result: ReturnType<typeof createSidebarArea>, id: string): HTMLElement | null =>
+      result.sidebarWrapper.querySelector(`[data-testid='${id}']`);
+
+    beforeEach(() => {
+      resetStores();
+      resetMocks();
+      pending = 0;
+      pendingListeners = [];
+      host = document.createElement("div");
+      document.body.appendChild(host);
+    });
+
+    afterEach(() => {
+      host.remove();
+    });
+
+    it("shows no entry for a destination this build does not ship", () => {
+      signInAs("Owner", Permission.ADMINISTRATOR);
+      const result = mount();
+      expect(q(result, "moderation-btn")).toBeNull();
+      expect(q(result, "dm-requests-badge")).toBeNull();
+
+      setSidebarMode("dms");
+      uiStore.flush();
+      expect(q(result, "dm-requests-entry")).toBeNull();
+      cleanup(result);
+    });
+
+    describe("Moderation", () => {
+      it("sits beside Audit Log for a role holding MODERATE_MEMBERS", () => {
+        signInAs("Moderator", Permission.MODERATE_MEMBERS | Permission.VIEW_AUDIT_LOG);
+        const result = mount({ destinations: destinations() });
+        const btn = q(result, "moderation-btn");
+        expect(btn?.style.display).not.toBe("none");
+        expect(btn?.textContent).toBe("Moderation");
+        expect(btn?.tagName).toBe("BUTTON");
+        expect(btn?.previousElementSibling).toBe(q(result, "audit-log-btn"));
+        cleanup(result);
+      });
+
+      it("is hidden without the bit, and follows a role list that arrives or changes later", () => {
+        signInAs("Member", Permission.SEND_MESSAGES);
+        const result = mount({ destinations: destinations() });
+        expect(q(result, "moderation-btn")?.style.display).toBe("none");
+
+        setRoles([
+          { id: 9, name: "Member", color: null, permissions: Permission.MODERATE_MEMBERS },
+        ]);
+        channelsStore.flush();
+        expect(q(result, "moderation-btn")?.style.display).not.toBe("none");
+
+        setRoles([{ id: 9, name: "Member", color: null, permissions: Permission.SEND_MESSAGES }]);
+        channelsStore.flush();
+        expect(q(result, "moderation-btn")?.style.display).toBe("none");
+        cleanup(result);
+      });
+
+      it("opens the content view with itself as the opener, and marks itself current", () => {
+        signInAs("Moderator", Permission.MODERATE_MEMBERS);
+        const onOpenView = vi.fn();
+        const result = mount({ destinations: destinations(), onOpenView });
+        const btn = q(result, "moderation-btn")!;
+
+        btn.click();
+        expect(onOpenView).toHaveBeenCalledWith("moderation", btn);
+
+        uiStore.setState((prev) => ({ ...prev, activeView: "moderation" }));
+        uiStore.flush();
+        expect(btn.getAttribute("aria-current")).toBe("page");
+        uiStore.setState((prev) => ({ ...prev, activeView: null }));
+        uiStore.flush();
+        expect(btn.hasAttribute("aria-current")).toBe(false);
+        cleanup(result);
+      });
+    });
+
+    describe("Message Requests", () => {
+      it("heads DM mode with the pending count, live", () => {
+        pending = 2;
+        const result = mount({ destinations: destinations() });
+        setSidebarMode("dms");
+        uiStore.flush();
+
+        const entry = q(result, "dm-requests-entry");
+        expect(entry?.tagName).toBe("BUTTON");
+        expect(entry?.textContent).toBe("Message Requests (2)");
+        // The top of DM mode: its section is the first thing in the content slot.
+        const section = entry?.parentElement;
+        expect(section?.parentElement?.firstElementChild).toBe(section);
+
+        setPending(0);
+        expect(entry?.textContent).toBe("Message Requests");
+        setPending(1);
+        expect(entry?.textContent).toBe("Message Requests (1)");
+        cleanup(result);
+      });
+
+      it("opens the content view with itself as the opener", () => {
+        const onOpenView = vi.fn();
+        const result = mount({ destinations: destinations(), onOpenView });
+        setSidebarMode("dms");
+        uiStore.flush();
+        const entry = q(result, "dm-requests-entry")!;
+        entry.click();
+        expect(onOpenView).toHaveBeenCalledWith("requests", entry);
+        cleanup(result);
+      });
+
+      it("keeps its element (and focus) when the DM list redraws", () => {
+        const result = mount({ destinations: destinations() });
+        setSidebarMode("dms");
+        uiStore.flush();
+        const entry = q(result, "dm-requests-entry")!;
+        entry.focus();
+
+        addDmChannel(makeDm({ channelId: 100 }));
+        dmStore.flush();
+
+        expect(q(result, "dm-requests-entry")).toBe(entry);
+        expect(document.activeElement).toBe(entry);
+        cleanup(result);
+      });
+
+      it("leaves with DM mode and stops listening to the count", () => {
+        const result = mount({ destinations: destinations() });
+        setSidebarMode("dms");
+        uiStore.flush();
+        const inDmMode = [...pendingListeners];
+        setSidebarMode("channels");
+        uiStore.flush();
+        expect(q(result, "dm-requests-entry")).toBeNull();
+        expect(pendingListeners.some((l) => inDmMode.includes(l))).toBe(false);
+        cleanup(result);
+      });
+
+      it("badges the DM header apart from unread, and never adds to it", () => {
+        addDmChannel(makeDm({ channelId: 100, unreadCount: 3 }));
+        pending = 2;
+        const result = mount({ destinations: destinations() });
+
+        const badge = q(result, "dm-requests-badge");
+        expect(badge?.style.display).not.toBe("none");
+        expect(badge?.querySelector("[aria-hidden='true']")?.textContent).toBe("2");
+        expect(badge?.querySelector(".sr-only")?.textContent).toBe("2 pending message requests");
+        const unread = result.sidebarWrapper.querySelector(".dm-header-unread-badge");
+        expect(unread?.textContent).toBe("3");
+
+        setPending(1);
+        expect(badge?.querySelector(".sr-only")?.textContent).toBe("1 pending message request");
+        expect(unread?.textContent).toBe("3");
+        setPending(0);
+        expect(badge?.style.display).toBe("none");
+        cleanup(result);
+      });
+
+      it("opens DM mode from the badge for a user with no DMs", () => {
+        pending = 1;
+        const result = mount({ destinations: destinations() });
+        expect(result.sidebarWrapper.querySelectorAll("[data-testid='dm-entry']")).toHaveLength(0);
+
+        const badge = q(result, "dm-requests-badge");
+        expect(badge?.tagName).toBe("BUTTON");
+        badge?.focus();
+        expect(document.activeElement).toBe(badge);
+        badge?.click();
+        uiStore.flush();
+
+        expect(uiStore.getState().sidebarMode).toBe("dms");
+        const entry = q(result, "dm-requests-entry");
+        expect(entry?.textContent).toBe("Message Requests (1)");
+        // The badge left with channel mode; focus lands on the entry, not <body>.
+        expect(document.activeElement).toBe(entry);
+        cleanup(result);
+      });
+    });
+
+    describe("the back path", () => {
+      function seed(): void {
+        const ch = (id: number, name: string, type: "text" | "dm", position: number) => ({
+          id,
+          name,
+          type,
+          category: null,
+          position,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
+        channelsStore.setState((prev) => ({
+          ...prev,
+          channels: new Map([
+            [1, ch(1, "general", "text", 0)],
+            [2, ch(2, "random", "text", 1)],
+            [100, ch(100, "alice", "dm", 0)],
+          ]),
+        }));
+      }
+
+      it("returns to the remembered channel and leaves DM mode", () => {
+        seed();
+        setActiveChannel(2);
+        const result = mount();
+        result.rememberChannel();
+        setSidebarMode("dms");
+        setActiveChannel(null);
+
+        result.returnToChannel();
+
+        expect(uiStore.getState().sidebarMode).toBe("channels");
+        expect(channelsStore.getState().activeChannelId).toBe(2);
+        cleanup(result);
+      });
+
+      it("skips a remembered channel that has since been deleted", () => {
+        seed();
+        setActiveChannel(2);
+        const result = mount();
+        result.rememberChannel();
+        setActiveChannel(null);
+        channelsStore.setState((prev) => {
+          const channels = new Map(prev.channels);
+          channels.delete(2);
+          return { ...prev, channels };
+        });
+
+        result.returnToChannel();
+
+        expect(channelsStore.getState().activeChannelId).toBe(1);
+        cleanup(result);
+      });
+
+      it("never remembers a DM as the channel to go back to", () => {
+        seed();
+        setActiveChannel(100);
+        const result = mount();
+        result.rememberChannel();
+        setActiveChannel(null);
+
+        result.returnToChannel();
+
+        // No channel remembered: the first text channel, as the DM back arrow does.
+        expect(channelsStore.getState().activeChannelId).toBe(1);
+        cleanup(result);
+      });
+
+      /** A content navigator wired to the sidebar the way MainPage wires it. */
+      function navigatorFor(
+        result: ReturnType<typeof createSidebarArea>,
+        fallback: HTMLElement,
+      ): ContentNavigator {
+        const chatArea = document.createElement("div");
+        const nav = createContentNavigator({
+          destinations: destinations(),
+          chatArea,
+          rememberChannel: result.rememberChannel,
+          forgetChannel: result.forgetChannel,
+          returnToChannel: result.returnToChannel,
+          fallbackFocus: () => fallback.focus(),
+        });
+        host.append(chatArea, nav.element, fallback);
+        return nav;
+      }
+
+      it("closing a Requests view focuses the fallback once DM mode takes the entry away", async () => {
+        seed();
+        setActiveChannel(2);
+        const fallback = document.createElement("button");
+        let nav: ContentNavigator | null = null;
+        const result = mount({
+          destinations: destinations(),
+          onOpenView: (id, opener) => nav?.open(id, opener),
+        });
+        nav = navigatorFor(result, fallback);
+        setSidebarMode("dms");
+        uiStore.flush();
+        q(result, "dm-requests-entry")!.click();
+        channelsStore.flush();
+        uiStore.flush();
+        expect(uiStore.getState().activeView).toBe("requests");
+
+        nav.close();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(channelsStore.getState().activeChannelId).toBe(2);
+        expect(q(result, "dm-requests-entry")).toBeNull();
+        expect(document.activeElement).toBe(fallback);
+        nav.destroy();
+        cleanup(result);
+      });
+
+      it("choosing another channel over a view does not leave the view's return channel", () => {
+        seed();
+        setActiveChannel(1);
+        const result = mount({ destinations: destinations() });
+        const nav = navigatorFor(result, document.createElement("button"));
+        nav.open("requests", null);
+        channelsStore.flush();
+
+        setActiveChannel(2);
+        channelsStore.flush();
+        expect(uiStore.getState().activeView).toBeNull();
+
+        // "View all messages" enters DM mode bare; Back then stays on channel 2.
+        setSidebarMode("dms");
+        result.returnToChannel();
+        expect(channelsStore.getState().activeChannelId).toBe(2);
+        nav.destroy();
+        cleanup(result);
+      });
     });
   });
 });

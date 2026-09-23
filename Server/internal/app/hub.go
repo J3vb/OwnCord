@@ -1,14 +1,17 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/url"
 
+	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/diskutil"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -93,7 +96,10 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		}
 	}
 
+	svc.Attention = newAttention(cfg, hub, database, svc.Settings)
+
 	go hub.Run()
+	hub.RearmTimeoutExpiries()
 
 	return api.Runtime{Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled}, nil
 }
@@ -136,4 +142,31 @@ func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *ws.LiveKitProcess, bool
 			"livekit_host", lkHost)
 	}
 	return lk, nil, true
+}
+
+// newAttention builds the admin attention panel (RI-07) over counters the
+// server already keeps: the data volume's free space, the writer pool's
+// cumulative wait, the reconnect tiers, the hub's broadcast drops and
+// send-queue overflow disconnects, and the newest backup file.
+func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *service.SettingsService) *service.AttentionService {
+	return service.NewAttentionService(service.AttentionThresholds{
+		DiskWarnFreeBytes:     cfg.Attention.DiskWarnFreeBytes(),
+		DiskCriticalFreeBytes: cfg.Server.MinFreeDiskBytes(),
+		WriterWaitMsPerMin:    float64(cfg.Attention.WriterWaitMsPerMin),
+		ReconnectsPerMin:      float64(cfg.Attention.ReconnectsPerMin),
+		DeliveryDropsPerMin:   float64(cfg.Attention.DeliveryDropsPerMin),
+	}, service.AttentionSources{
+		DiskFree:   func() (uint64, error) { return diskutil.FreeBytes(cfg.Server.DataDir) },
+		WriterWait: service.WriterWaitSource(database),
+		Reconnects: func() uint64 {
+			buffer, cold, full := hub.ReconnectTierStats()
+			return buffer + cold + full
+		},
+		DeliveryDrops: hub.DeliveryDropCount,
+		DispatchAlive: hub.DispatchAlive,
+		BackupSchedule: func(ctx context.Context) (string, error) {
+			return settings.Setting(ctx, "backup_schedule")
+		},
+		LastBackup: admin.NewestBackup,
+	})
 }

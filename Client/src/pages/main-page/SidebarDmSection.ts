@@ -9,6 +9,9 @@ import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { setSidebarMode } from "@stores/ui.store";
 import { isChannelMuted } from "@lib/channel-mutes";
+import type { CountSource } from "../../features/navigation/destinations";
+import { navigationText } from "../../i18n/navigation";
+import { shellText } from "../../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -19,6 +22,8 @@ export interface SidebarDmSectionOptions {
   readonly onSelectDm: (dmChannel: DmChannel) => void;
   /** Called when the user clicks the "+" button to create a new DM. */
   readonly onNewDm: () => void;
+  /** Pending Message Requests (B9-4, Q2). Badged apart from unread, never added to it. */
+  readonly pendingRequests?: CountSource;
 }
 
 export interface SidebarDmSectionResult {
@@ -43,11 +48,45 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   // --- Header ---
   const dmHeader = createElement("div", { class: "category" });
   const dmArrow = createElement("span", { class: "category-arrow" }, "\u25BC");
-  const dmLabelEl = createElement("span", { class: "category-name" }, "DIRECT MESSAGES");
+  const dmLabelEl = createElement("span", { class: "category-name" }, shellText("dm.heading"));
   const dmUnreadBadge = createElement("span", { class: "dm-header-unread-badge" });
-  const dmAddBtn = createElement("button", { class: "category-add-btn", title: "New DM" }, "+");
+  const dmAddBtn = createElement(
+    "button",
+    { class: "category-add-btn", title: shellText("dm.new") },
+    "+",
+  );
   dmAddBtn.style.opacity = "1";
-  appendChildren(dmHeader, dmArrow, dmLabelEl, dmUnreadBadge, dmAddBtn);
+  appendChildren(dmHeader, dmArrow, dmLabelEl, dmUnreadBadge);
+
+  // Its own badge, not a share of the unread one: a request is not a message
+  // the reader has, and it never raises the unread or mention totals. It is a
+  // button into DM mode, where "Message Requests (N)" sits: with no DM rows
+  // and no "View all", it is a first-contact reader's only way in.
+  const pending = opts.pendingRequests;
+  if (pending !== undefined) {
+    const requestsBadge = createElement("button", {
+      type: "button",
+      class: "dm-header-requests-badge",
+      "data-testid": "dm-requests-badge",
+    });
+    requestsBadge.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setSidebarMode("dms");
+    });
+    const requestsCount = createElement("span", { "aria-hidden": "true" });
+    const requestsLabel = createElement("span", { class: "sr-only" });
+    appendChildren(requestsBadge, requestsCount, requestsLabel);
+    const renderRequests = (): void => {
+      const count = pending.get();
+      setText(requestsCount, String(count));
+      setText(requestsLabel, navigationText("requests.badge", { count }));
+      requestsBadge.style.display = count > 0 ? "" : "none";
+    };
+    renderRequests();
+    unsubs.push(pending.subscribe(renderRequests));
+    dmHeader.appendChild(requestsBadge);
+  }
+  dmHeader.appendChild(dmAddBtn);
   dmSection.appendChild(dmHeader);
 
   // --- DM list ---
@@ -60,7 +99,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     {
       class: "sidebar-dm-view-all",
     },
-    "View all messages",
+    shellText("dm.viewAll"),
   );
 
   viewAllBtn.addEventListener("click", () => {
@@ -102,7 +141,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
           "span",
           {
             class: "dm-mention-badge",
-            style: `margin-left:auto;background:var(--red);color:white;border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
+            style: `margin-left:auto;background:var(--danger-fill);color:var(--on-fill);border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
           },
           String(dm.mentionCount),
         );
@@ -114,7 +153,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
           "span",
           {
             class: muted ? "dm-unread-badge muted" : "dm-unread-badge",
-            style: `margin-left:auto;background:${muted ? "var(--text-micro)" : "var(--red)"};color:white;border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
+            style: `margin-left:auto;background:${muted ? "var(--text-micro)" : "var(--danger-fill)"};color:var(--on-fill);border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
           },
           String(dm.unreadCount),
         );
@@ -129,7 +168,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
 
     // Show/hide "View All" button based on DM count (respect collapsed state)
     if (dmChannels.length > 3) {
-      setText(viewAllBtn, `View all messages (${dmChannels.length})`);
+      setText(viewAllBtn, shellText("dm.viewAllCount", { count: dmChannels.length }));
       viewAllBtn.style.display = dmCollapsed ? "none" : "";
     } else {
       viewAllBtn.style.display = "none";

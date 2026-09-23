@@ -1296,14 +1296,14 @@ func TestServeFile_UnlinkedFile_OtherUserForbidden(t *testing.T) {
 	}
 }
 
-func TestServeFile_AdminBypassesAllChecks(t *testing.T) {
+func TestServeFile_AdminCannotReadAnotherUsersUnlinkedFile(t *testing.T) {
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
 	uploaderToken := uploadCreateToken(t, database, "acluploaderadmin", 4) // Member
 	adminToken := uploadCreateToken(t, database, "acladmin", 1)            // Owner (admin)
 
-	content := []byte("file for admin bypass test content with sufficient bytes")
+	content := []byte("file for admin unlinked test content with sufficient bytes")
 	rr := doUpload(t, router, uploaderToken, "file", "restricted.txt", content)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
@@ -1312,10 +1312,9 @@ func TestServeFile_AdminBypassesAllChecks(t *testing.T) {
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	fileID := resp["id"].(string)
 
-	// Admin can access any file regardless of ownership.
 	rr2 := doServeFile(t, router, fileID, adminToken, nil)
-	if rr2.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200 for admin bypass", rr2.Code)
+	if rr2.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for admin reading another user's unlinked file", rr2.Code)
 	}
 }
 

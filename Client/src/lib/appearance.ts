@@ -9,7 +9,7 @@
 import { loadPref, applyTheme } from "@components/settings/helpers";
 import type { ThemeName } from "@components/settings/helpers";
 import { getActiveThemeName, restoreAccent } from "@lib/themes";
-import { syncOsMotionListener } from "@lib/os-motion";
+import { SYNC_OS_MOTION_DEFAULT, syncOsMotionListener } from "@lib/os-motion";
 
 /** The Appearance slider's range, and the clamp applied to a stored value. */
 export const MIN_FONT_SIZE_PX = 12;
@@ -78,5 +78,5 @@ export function applyStoredAppearance(): void {
   );
   document.documentElement.classList.toggle("large-font", loadPref<boolean>("largeFont", false));
 
-  syncOsMotionListener(loadPref<boolean>("syncOsMotion", false));
+  syncOsMotionListener(loadPref<boolean>("syncOsMotion", SYNC_OS_MOTION_DEFAULT));
 }

@@ -155,6 +155,25 @@ func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string, timedO
 	}) == nil
 }
 
+// channelCanModerateVoice is the ready payload's can_moderate_voice
+// affordance (B9 Q5): whether the caller may mute, deafen, move or
+// disconnect voice participants in this channel. It is
+// permissions.AuthorizeVoiceModerator — the one authorizer voiceModTarget
+// enforces in the target's channel (base MUTE_MEMBERS, then effective
+// READ|MUTE_MEMBERS after both override layers, i.e. CanModerateVoice) — so
+// the client's controls follow the effective permission, not the base bit.
+// Target rank and move capacity are per-target and stay server-side refusals.
+func channelCanModerateVoice(role *db.Role, o db.ChannelOverride, chanType string) bool {
+	if role == nil {
+		return false
+	}
+	return permissions.AuthorizeVoiceModerator(permissions.Subject{
+		RolePerms: role.Permissions,
+		Override:  permOverride(o),
+		Channel:   permissions.ChannelRef{Type: chanType},
+	}) == nil
+}
+
 // channelRef maps one db channel to the predicates' db-agnostic ChannelRef.
 func channelRef(ch *db.Channel) permissions.ChannelRef {
 	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW}
@@ -221,6 +240,9 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 			// channels additionally require MANAGE_MESSAGES; admins bypass. The
 			// server remains the authority — this only pre-disables the UI.
 			"can_send": channelCanSend(role, overrides[visibleChannels[i].ID], visibleChannels[i].Type, timedOut),
+			// Voice-moderation affordance (B9 Q5), same shape and refresh
+			// path as can_send — see channelCanModerateVoice.
+			"can_moderate_voice": channelCanModerateVoice(role, overrides[visibleChannels[i].ID], visibleChannels[i].Type),
 			// Cooldown in seconds (0 = off). Lets the composer disable itself
 			// for the window instead of accepting a send the server refuses
 			// with SLOW_MODE. The server still enforces.
@@ -383,7 +405,7 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 	}
 
 	// Live, uncached timeout verdict (OC-0434): channelCanSend's Subject must
-	// carry the same TimedOut refreshChannelVisibilityCanSend resolves for a
+	// carry the same TimedOut refreshChannelVisibilityAffordances resolves for a
 	// live socket (via the identical subjectFor), or a just-timed-out user's
 	// fresh-connect ready payload ships can_send: true on every channel right
 	// up until their next send bounces off TIMED_OUT. Channel 0 is fine here:
@@ -642,26 +664,8 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 	}
 	h.updateKeyHolder(vs.ChannelID)
 	h.broadcastVoiceEvent(ctx, vs.ChannelID, c.userID, buildVoiceLeave(vs.ChannelID, c.userID))
-	if h.livekit == nil {
-		return
-	}
-	// BUG-089: Capture stale join token so the goroutine only removes
-	// the exact stale participant. The identity includes joinedAt, so
-	// even if the user rejoins voice quickly, the new session has a
-	// different identity and won't be removed. The removal must
-	// complete even if this connection drops mid-handshake, so detach
-	// from cancellation (values kept); shutdown is handled via h.stop.
-	staleChID, staleUserID, staleJoinToken := vs.ChannelID, c.userID, vs.JoinedAt
-	lkCtx := context.WithoutCancel(ctx)
-	go func() {
-		select {
-		case <-h.stop:
-			return
-		default:
-		}
-		if err := h.livekit.RemoveParticipant(lkCtx, staleChID, staleUserID, staleJoinToken); err != nil {
-			slog.Warn("ws fresh connect: RemoveParticipant failed (may already be gone)",
-				"err", err, "user_id", staleUserID, "channel_id", staleChID)
-		}
-	}()
+	// BUG-089: pass the stale join token so the removal only hits the exact
+	// stale participant — the identity includes joinedAt, so a quick rejoin's
+	// new session has a different identity and won't be removed.
+	h.removeLiveKitParticipantAsync(ctx, vs.ChannelID, c.userID, vs.JoinedAt, "ws fresh connect:")
 }

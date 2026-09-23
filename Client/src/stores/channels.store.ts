@@ -149,8 +149,8 @@ export function getRoleIdByName(name: string): number | undefined {
 
 /** Add a single channel from a channel_create event. The server re-sends
  *  channel_create to still-visible clients on role/override edits, so the add
- *  must be idempotent: the broadcast carries no per-user data, and a re-add
- *  must preserve the existing row's per-user fields instead of resetting them. */
+ *  must be idempotent: a re-add must preserve the existing row's per-user
+ *  fields the frame does not carry instead of resetting them. */
 export function addChannel(channel: ChannelCreatePayload): void {
   channelsStore.setState((prev) => {
     const existing = prev.channels.get(channel.id);
@@ -165,12 +165,11 @@ export function addChannel(channel: ChannelCreatePayload): void {
       unreadCount: existing?.unreadCount ?? 0,
       mentionCount: existing?.mentionCount ?? 0,
       lastMessageId: existing?.lastMessageId ?? null,
-      // A targeted channel_create from RefreshChannelVisibility carries this
-      // viewer's own can_send, so a live role/override edit updates the
-      // composer without waiting for a reconnect. The field is absent on the
-      // shared-buffer broadcasts (one frame, many recipients) and on older
-      // servers — keep the existing verdict there, and default permissive for
-      // a genuinely new channel. The server enforces regardless.
+      // Every channel_create carries this viewer's own can_send, so a live
+      // role/override edit updates the composer without waiting for a
+      // reconnect. Older servers omit it — keep the existing verdict there,
+      // and default permissive for a genuinely new channel. The server
+      // enforces regardless.
       canSend: channel.can_send ?? existing?.canSend ?? true,
       slowMode: channel.slow_mode ?? 0,
       nsfw: channel.nsfw ?? false,

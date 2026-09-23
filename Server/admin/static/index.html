@@ -341,8 +341,8 @@ function handleSessionExpired(){
   showOverlay('loginOverlay');
 }
 
-async function api(method,path,body){
-  const opts={method,headers:{'Authorization':'Bearer '+state.token,'Content-Type':'application/json'}};
+async function api(method,path,body,headers){
+  const opts={method,headers:{'Authorization':'Bearer '+state.token,'Content-Type':'application/json',...headers}};
   if(body!==undefined)opts.body=JSON.stringify(body);
   const res=await fetch('/admin/api'+path,opts);
   if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
@@ -426,11 +426,13 @@ function showToast(msg,type='success'){
 }
 
 function openModal(html){
+  state.retentionProposal=null;
   const o=document.getElementById('modal');
   document.getElementById('modalInner').innerHTML=html;
   o.classList.add('visible');o.setAttribute('aria-hidden','false');
 }
 function closeModal(){
+  state.retentionProposal=null;
   const o=document.getElementById('modal');
   o.classList.remove('visible');o.setAttribute('aria-hidden','true');
 }
@@ -895,6 +897,41 @@ function renderContent(){
   }
 }
 
+/* ═══ Attention (RI-07) ═══ */
+/* The server samples disk space, writer wait, reconnects, delivery pressure,
+   the newest backup and every maintenance job once a minute, and keeps one
+   deduplicated warning per signal with hysteresis; this only renders what
+   GET /attention reports. Unknown is a measurement the server could not take
+   and is never drawn as healthy. */
+const ATTN_STATUS={ok:['badge-green','Healthy'],warning:['badge-yellow','Warning'],critical:['badge-red','Critical'],unknown:['badge-muted','Unknown']};
+function attnBadge(s){const b=ATTN_STATUS[s]||ATTN_STATUS.unknown;return'<span class="badge '+b[0]+'">'+b[1]+'</span>'}
+function attnTime(iso){if(!iso)return'';const d=new Date(iso);return isNaN(d.getTime())?'':d.toLocaleString()}
+function renderAttention(rep){
+  const warnings=(rep&&rep.warnings)||[],signals=(rep&&rep.signals)||[];
+  const active=warnings.filter(w=>!w.recovered_at);
+  let html='<div class="section-card" id="attentionPanel"><div class="section-card-header"><h3>Attention'+(active.length?' ('+active.length+')':'')+'</h3><button class="btn btn-ghost" onclick="renderContent()">Refresh</button></div><div class="section-card-body">';
+  if(!rep||!rep.evaluated_at)html+='<p class="attn-pending" style="color:var(--text-faint)">The server has not evaluated its health yet.</p>';
+  else{
+    html+='<div class="activity-time">Evaluated '+esc(attnTime(rep.evaluated_at))+'</div>';
+    if(!active.length)html+='<p class="attn-none" style="margin-top:8px">No active warnings.</p>';
+  }
+  warnings.forEach(w=>{
+    const rec=!!w.recovered_at;
+    html+='<div class="activity-item attn-warning" data-id="'+esc(w.id)+'"><div>'+(rec?'<span class="badge badge-green">Recovered</span>':attnBadge(w.severity))+'</div><div>'
+      +'<div class="activity-text"><strong>'+esc(w.title)+'</strong>'+(w.detail?' — '+esc(w.detail):'')+'</div>'
+      +'<div class="activity-text attn-action">'+esc(w.action)+'</div>'
+      +'<div class="activity-time">First seen '+esc(attnTime(w.first_observed))+' · last seen '+esc(attnTime(w.last_observed))
+      +(w.occurrences>1?' · '+w.occurrences+' occurrences':'')+(rec?' · recovered '+esc(attnTime(w.recovered_at)):'')+'</div></div></div>';
+  });
+  html+='</div>';
+  if(signals.length){
+    html+='<div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Signal</th><th>Status</th><th>Measured</th><th>Detail</th></tr></thead><tbody>';
+    signals.forEach(g=>{html+='<tr data-signal="'+esc(g.id)+'"><td>'+esc(g.label)+'</td><td>'+attnBadge(g.status)+'</td><td>'+esc(g.value||'—')+'</td><td>'+esc([g.threshold,g.detail].filter(Boolean).join(' · '))+'</td></tr>'});
+    html+='</tbody></table></div>';
+  }
+  return html+'</div>';
+}
+
 /* ═══ Dashboard ═══ */
 async function renderDashboard(){
   try{state.cachedStats=await api('GET','/stats')}catch(e){return'<div class="page-title">Dashboard</div><p style="color:var(--red)">Failed to load stats: '+esc(e.message)+'</p>'}
@@ -904,6 +941,11 @@ async function renderDashboard(){
   const s=state.cachedStats;const u=state.cachedUpdate;
   let html='<div class="page-title">Dashboard</div><div class="page-desc">Server overview and statistics</div>';
   if(u&&u.update_available)html+='<div class="update-card" style="border-color:var(--accent);margin-bottom:20px"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">Update Available: '+esc(u.latest)+'</div><div class="update-notes">Current: '+esc(u.current)+' &mdash; <button class="btn btn-accent" style="margin-left:8px" onclick="navigateTo(\'updates\')">View Update</button></div></div></div>';
+  /* Attention is server health detail: ADMINISTRATOR, like the route. */
+  if(can(PERM.ADMINISTRATOR)){
+    try{html+=renderAttention(await api('GET','/attention'))}
+    catch(e){html+='<div class="section-card" id="attentionPanel"><div class="section-card-header"><h3>Attention</h3></div><div class="section-card-body"><p style="color:var(--red)">Could not load attention state: '+esc(e.message)+'</p></div></div>'}
+  }
   html+='<div class="stat-grid">';
   html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Total Users</span><div class="stat-card-icon" style="background:rgba(35,165,90,.15);color:var(--green)">'+I.users+'</div></div><div class="stat-card-value">'+(s.user_count||0)+'</div><div class="stat-card-sub">registered</div></div>';
   html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Messages</span><div class="stat-card-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.megaphone+'</div></div><div class="stat-card-value">'+(s.message_count||0).toLocaleString()+'</div><div class="stat-card-sub">total</div></div>';
@@ -1282,6 +1324,10 @@ function renderChannelPermsModal(){
     opts+='<option value="u:'+u.id+'">'+esc(u.username)+(u.has?' (override)':'')+'</option>';
   });
   opts+='</optgroup>';
+  let memberOpts='<option value="">— pick a member —</option>';
+  picked.forEach(u=>{memberOpts+='<option value="'+u.id+'">'+esc(u.username)+'</option>'});
+  let actionOpts='';
+  ACCESS_ACTIONS.forEach(a=>{actionOpts+='<option value="'+a[0]+'">'+esc(a[1])+'</option>'});
 
   openModal('<div class="modal-header"><h3>Channel Permissions — #'+esc(pc.name)+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
     +'<div class="modal-body">'
@@ -1292,8 +1338,16 @@ function renderChannelPermsModal(){
     +'<select class="form-input" id="permTarget" style="appearance:auto" onchange="renderPermMatrix()">'+opts+'</select></div>'
     +'<p style="color:var(--text-faint);font-size:12px;margin:0 0 10px">Resolution order: base role permissions → role override → member override. A member deny beats a role allow; Administrator bypasses everything.</p>'
     +'<div id="permMatrix"></div>'
+    +'<div id="permPreview"></div>'
+    +'</div>'
+    +'<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--bg-active)">'
+    +'<div class="form-group"><label class="form-label">Explain access</label>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap"><select class="form-input" id="explainUser" style="appearance:auto;flex:1;min-width:0">'+memberOpts+'</select>'
+    +'<select class="form-input" id="explainAction" style="appearance:auto;flex:1;min-width:0">'+actionOpts+'</select>'
+    +'<button class="btn btn-ghost" onclick="explainAccess()">Explain</button></div></div>'
+    +'<div id="permExplain"></div>'
     +'</div></div>'
-    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveChannelPerms()">Save</button></div>');
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-ghost" onclick="previewPermChange()">Preview matrix change</button><button class="btn btn-accent" onclick="saveChannelPerms()">Save</button></div>');
   renderPermMatrix();
 }
 
@@ -1302,6 +1356,7 @@ function renderChannelPermsModal(){
 function renderPermMatrix(){
   const pc=state.permChannel;if(!pc)return;
   const box=document.getElementById('permMatrix');if(!box)return;
+  const pv=document.getElementById('permPreview');if(pv)pv.innerHTML='';
   const sel=document.getElementById('permTarget');
   const val=sel?sel.value:'';
   if(!val){box.innerHTML='<p style="color:var(--text-faint);font-size:12px">Pick a role or member above to edit its per-channel bits.</p>';return}
@@ -1348,6 +1403,85 @@ function permTargetPath(){
   if(!pc||!val)return null;
   const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
   return '/channels/'+pc.id+(kind==='r'?'/permissions/':'/user-permissions/')+tid;
+}
+
+/* ═══ Access explanation and change preview (RI-06) ═══ */
+/* Both ask the server, which runs the canonical authorization predicates over
+   the member's live state — this panel never decides access itself, and
+   neither request acts as the member. Both reads are audited. */
+const ACCESS_ACTIONS=[
+  ['view_channel','View channel'],
+  ['read_content','Read content'],
+  ['send_message','Send messages'],
+  ['add_reaction','Add reactions'],
+  ['join_voice','Join voice'],
+  ['moderate_voice','Moderate voice'],
+];
+function accessActionLabel(a){const f=ACCESS_ACTIONS.find(x=>x[0]===a);return f?f[1]:a}
+function accessVerdict(ok){return ok?'<span style="color:var(--green)">Allowed</span>':'<span style="color:var(--red)">Denied</span>'}
+function layerLabel(v){return v==='allow'?'allow':v==='deny'?'deny':'—'}
+
+async function explainAccess(){
+  const pc=state.permChannel;if(!pc)return;
+  const box=document.getElementById('permExplain');
+  const uid=(document.getElementById('explainUser')||{}).value;
+  const action=(document.getElementById('explainAction')||{}).value;
+  if(!uid){showToast('Pick a member first','error');return}
+  let r;
+  try{
+    r=await api('GET','/channels/'+pc.id+'/access/explain?user_id='+encodeURIComponent(uid)+'&action='+encodeURIComponent(action));
+  }catch(e){showToast(e.message,'error');return}
+  const rs=r.restrictions||{};
+  const facts=['Role: '+esc(r.role_name||'none')];
+  if(rs.banned)facts.push('<span style="color:var(--red)">banned</span>');
+  if(rs.registration_status&&rs.registration_status!=='active')facts.push('registration '+esc(rs.registration_status));
+  if(rs.timed_out)facts.push('<span style="color:var(--yellow)">timed out</span>');
+  if(rs.channel_nsfw)facts.push('NSFW '+(rs.nsfw_acknowledged?'acknowledged':'not acknowledged'));
+  if(rs.channel_archived)facts.push('channel archived');
+  let html='<p style="font-size:12px;color:var(--text-muted);margin:8px 0">'+esc(r.username)+' · '+facts.join(' · ')+'</p>';
+  (r.decisions||[]).forEach(d=>{
+    html+='<div style="margin:8px 0"><div style="font-size:13px"><b>'+esc(accessActionLabel(d.action))+'</b>: '+accessVerdict(d.allowed)
+      +(d.reason?' <span style="color:var(--text-faint)">— '+esc(d.reason)+'</span>':'')
+      +(d.administrator_bypass?' <span style="color:var(--text-faint)">(Administrator bypasses overrides)</span>':'')+'</div>';
+    if((d.bits||[]).length){
+      html+='<table class="tbl"><thead><tr><th>Bit</th><th>Base role</th><th>Role override</th><th>Member override</th><th>Effective</th></tr></thead><tbody>';
+      d.bits.forEach(b=>{
+        html+='<tr><td>'+esc(b.bit)+'</td><td>'+(b.base?'yes':'no')+'</td><td>'+layerLabel(b.role_override)+'</td><td>'+layerLabel(b.user_override)+'</td><td>'+(b.effective?'yes':'no')+'</td></tr>';
+      });
+      html+='</tbody></table>';
+    }
+    html+='</div>';
+  });
+  if(box)box.innerHTML=html;
+}
+
+/* Previews the override matrix's current radios for its selected target —
+   before Save, against the same rules Save's result will be judged by. */
+async function previewPermChange(){
+  const pc=state.permChannel;if(!pc)return;
+  const box=document.getElementById('permPreview');
+  const sel=document.getElementById('permTarget');
+  const val=sel?sel.value:'';
+  if(!val){showToast('Pick a role or member in the override matrix first','error');return}
+  const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
+  const masks=collectOverrideMasks();
+  const body={allow:masks.allow,deny:masks.deny};
+  body[kind==='r'?'role_id':'user_id']=tid;
+  let r;
+  try{r=await api('POST','/channels/'+pc.id+'/access/preview',body)}
+  catch(e){showToast(e.message,'error');return}
+  const members=r.members||[];
+  let html='<p style="font-size:12px;color:var(--text-muted);margin:10px 0 6px">'
+    +(members.length?members.length+' of '+r.evaluated+' member(s) would change:':'No member\'s access would change ('+r.evaluated+' evaluated).')+'</p>';
+  if(members.length){
+    html+='<table class="tbl"><thead><tr><th>Member</th><th>Action</th><th>Now</th><th>After save</th></tr></thead><tbody>';
+    members.forEach(m=>{(m.changes||[]).forEach(c=>{
+      html+='<tr><td>'+esc(m.username)+'</td><td>'+esc(accessActionLabel(c.action))+'</td><td>'+accessVerdict(c.before)+'</td><td>'+accessVerdict(c.after)
+        +(c.after_reason?' <span style="color:var(--text-faint);font-size:12px">— '+esc(c.after_reason)+'</span>':'')+'</td></tr>';
+    })});
+    html+='</tbody></table>';
+  }
+  if(box)box.innerHTML=html;
 }
 
 async function clearPermOverride(){
@@ -1890,6 +2024,7 @@ async function renderRetention(){
   let channels=null;
   try{channels=await api('GET','/channels')}catch(e){}
   const serverDays=(policy&&policy.server_days)||0;
+  state.retentionRevision=policy&&policy.revision;
   state.retentionPolicyChannels=(policy&&policy.channels)||[];
   const overrides={};state.retentionPolicyChannels.forEach(c=>{overrides[c.channel_id]=c.days});
   const windows={};let totalDue=0;
@@ -1912,7 +2047,7 @@ async function renderRetention(){
 
   html+='<div class="section-card"><div class="section-card-header"><h3>Server-wide window</h3></div><div class="section-card-body">';
   html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Keep messages for</div><div class="setting-desc">Applies to every channel without its own override. 0 keeps everything indefinitely, which is the default; otherwise between 1 and 3650 days.</div></div>';
-  html+='<div class="setting-ctrl" style="display:flex;gap:8px;align-items:center"><input class="form-input" id="retentionDays" type="number" min="0" max="3650" style="width:110px" value="'+esc(serverDays)+'"><button class="btn btn-accent" onclick="openApplyRetention()">Apply</button></div></div>';
+  html+='<div class="setting-ctrl" style="display:flex;gap:8px;align-items:center"><input class="form-input" id="retentionDays" type="number" min="0" max="3650" style="width:110px" value="'+esc(serverDays)+'"><button class="btn btn-accent" onclick="openApplyRetention()">Preview change</button></div></div>';
   html+='<div style="color:var(--text-faint);font-size:12px;margin-top:4px">Currently: <strong style="color:var(--text-normal)">'+esc(retentionLabel(serverDays))+'</strong></div>';
   html+='</div></div>';
 
@@ -1941,25 +2076,74 @@ async function renderRetention(){
   return html;
 }
 
-/* Changing the server window is confirmed against what it means, not toggled
-   past on the Settings page: the sweep is continuous and the deletion is
-   permanent. */
-function openApplyRetention(){
-  const el=document.getElementById('retentionDays');
-  const days=parseInt(el?el.value:'',10);
-  if(isNaN(days)||days<0||days>3650){showToast('Window must be 0 (keep forever) or between 1 and 3650 days','error');return}
-  const body=days===0
-    ?'<p style="color:var(--text-muted)">Stop deleting old messages server-wide. Channels with their own override keep it.</p>'
-    :'<p style="color:var(--text-muted)">Every message older than <strong style="color:white">'+days+' day'+(days===1?'':'s')+'</strong> will be deleted permanently, in every channel without its own override, and the sweep keeps running from now on. <strong style="color:var(--red)">Deleted messages cannot be recovered.</strong></p>'
-      +'<p style="color:var(--text-faint);font-size:12px;margin-top:8px">Pinned messages and direct messages are exempt. Saving refreshes the effect preview with the number of messages the next sweep will remove.</p>';
-  openModal('<div class="modal-header"><h3>Apply retention window</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
-    +'<div class="modal-body">'+body+'</div>'
-    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="applyRetention('+days+')">Apply window</button></div>');
+/* Proposed previews are observations, never writes. Only the final explicit
+   confirmation sends the signed proposal back through the existing routes. */
+function readRetentionDays(id){
+  const el=document.getElementById(id);
+  const raw=el?el.value.trim():'';
+  const days=Number(raw);
+  if(!raw||!Number.isInteger(days)||days<0||days>3650){showToast('Window must be 0 (keep forever) or between 1 and 3650 days','error');return null}
+  return days;
 }
 
-async function applyRetention(days){
-  try{await api('PATCH','/settings',{retention_days:String(days)});closeModal();showToast('Retention window updated');renderContent()}
-  catch(e){showToast(e.message,'error')}
+async function openApplyRetention(){
+  const days=readRetentionDays('retentionDays');
+  if(days===null)return;
+  await previewRetentionChange({scope:'server',days:days});
+}
+
+function proposedRetentionLabel(change){
+  if(change.scope==='server')return 'Server-wide window: '+retentionLabel(change.days);
+  if(change.days===null)return 'Remove override for channel #'+change.channel_id+' and use the server policy (including removal of keep-forever protection).';
+  return 'Channel #'+change.channel_id+': '+retentionLabel(change.days);
+}
+
+async function previewRetentionChange(change){
+  openModal('<div class="modal-header"><h3>Preview retention change</h3></div><div class="modal-body" role="status">Calculating affected messages…</div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>');
+  const pending={change:change,revision:state.retentionRevision,preview:null};
+  state.retentionProposal=pending;
+  try{
+    const preview=await api('POST','/retention/preview',{proposed:change,revision:pending.revision});
+    if(state.retentionProposal!==pending)return;
+    pending.preview=preview;
+    let html='<div class="modal-header"><h3>Confirm retention change</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body">';
+    html+='<p><strong>'+esc(proposedRetentionLabel(change))+'</strong></p>';
+    html+='<p style="color:var(--yellow);margin-top:12px">Under the proposed policy, <strong>'+Number(preview.would_delete).toLocaleString()+'</strong> messages are currently eligible for permanent deletion across '+Number(preview.affected_channels).toLocaleString()+' channels.</p>';
+    html+='<p style="color:var(--red);margin-top:8px">Deletion cannot be undone. The policy continues to apply on future maintenance sweeps.</p>';
+    html+='<p style="margin-top:8px">Protected exclusions: '+Number(preview.protected_pinned).toLocaleString()+' pinned messages, '+Number(preview.protected_indefinite).toLocaleString()+' messages kept indefinitely, and '+Number(preview.protected_direct_messages).toLocaleString()+' direct messages. Counts are separate; pinned messages in indefinite channels are counted as indefinite.</p>';
+    html+='<p style="color:var(--text-faint);margin-top:8px">Observed at '+esc(preview.observed_at)+'. Counts can change as messages arrive, age or are pinned. This preview expires after 15 minutes.</p>';
+    html+='<table class="tbl" style="margin-top:12px"><thead><tr><th>Channel</th><th>Proposed window</th><th>Would delete</th><th>Protected</th></tr></thead><tbody>';
+    (preview.channels||[]).forEach(ch=>{html+='<tr><td>'+esc(ch.channel_name)+'</td><td>'+esc(retentionLabel(ch.days))+' ('+esc(ch.source)+')</td><td>'+Number(ch.would_delete).toLocaleString()+'</td><td>'+Number(ch.protected_pinned+ch.protected_indefinite).toLocaleString()+'</td></tr>'});
+    html+='</tbody></table></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button id="applyRetentionPreview" class="btn btn-danger" onclick="applyRetention()">Apply window</button></div>';
+    document.getElementById('modalInner').innerHTML=html;
+  }catch(e){
+    if(state.retentionProposal!==pending)return;
+    state.retentionProposal=null;
+    document.getElementById('modalInner').innerHTML='<div class="modal-header"><h3>Preview unavailable</h3></div><div class="modal-body" role="alert">'+esc(e.message)+'</div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal();renderContent()">Reload policy</button></div>';
+  }
+}
+
+async function applyRetention(){
+  const pending=state.retentionProposal;
+  if(!pending||!pending.preview||pending.applying)return;
+  if(pending.change.scope==='server'&&readRetentionDays('retentionDays')!==pending.change.days){
+    state.retentionProposal=null;closeModal();showToast('The window changed. Preview it again before applying.','error');return;
+  }
+  pending.applying=true;
+  const button=document.getElementById('applyRetentionPreview');if(button)button.disabled=true;
+  const change=pending.change;
+  const headers={'X-Retention-Preview':pending.preview.token};
+  try{
+    if(change.scope==='server')await api('PATCH','/settings',{retention_days:String(change.days)},headers);
+    else if(change.days===null)await api('DELETE','/channels/'+change.channel_id+'/retention',undefined,headers);
+    else await api('PUT','/channels/'+change.channel_id+'/retention',{days:change.days},headers);
+    if(state.retentionProposal!==pending)return;
+    closeModal();showToast('Retention policy updated');renderContent();
+  }catch(e){
+    if(state.retentionProposal!==pending)return;
+    state.retentionProposal=null;
+    document.getElementById('modalInner').innerHTML='<div class="modal-header"><h3>Retention change needs review</h3></div><div class="modal-body" role="alert">'+esc(e.message)+'</div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal();renderContent()">Reload policy</button></div>';
+  }
 }
 
 function openChannelRetention(id,name){
@@ -1970,20 +2154,17 @@ function openChannelRetention(id,name){
     +'<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">An override replaces the server-wide window for this channel, in either direction. <strong style="color:white">0 keeps this channel forever</strong>, even under a server window. <strong style="color:var(--red)">Messages the window removes are deleted permanently.</strong></p>'
     +'<div class="form-group"><label class="form-label" for="chRetDays">Keep messages for (days)</label><input class="form-input" id="chRetDays" type="number" min="0" max="3650" value="'+esc(current)+'"></div>'
     +'</div>'
-    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="saveChannelRetention('+id+')">Save override</button></div>');
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="saveChannelRetention('+id+')">Preview override</button></div>');
 }
 
 async function saveChannelRetention(id){
-  const el=document.getElementById('chRetDays');
-  const days=parseInt(el?el.value:'',10);
-  if(isNaN(days)||days<0||days>3650){showToast('Window must be 0 (keep forever) or between 1 and 3650 days','error');return}
-  try{await api('PUT','/channels/'+id+'/retention',{days:days});closeModal();showToast('Channel retention updated');renderContent()}
-  catch(e){showToast(e.message,'error')}
+  const days=readRetentionDays('chRetDays');
+  if(days===null)return;
+  await previewRetentionChange({scope:'channel',channel_id:id,days:days});
 }
 
 async function clearChannelRetention(id){
-  try{await api('DELETE','/channels/'+id+'/retention');showToast('Channel follows the server policy');renderContent()}
-  catch(e){showToast(e.message,'error')}
+  await previewRetentionChange({scope:'channel',channel_id:id,days:null});
 }
 
 /* ═══ Backups ═══ */

@@ -160,6 +160,9 @@ type Store interface {
 	MarkErasureJobReplayPurged(ctx context.Context, id int64) error
 	DeleteEventsForUser(ctx context.Context, userID int64) (int64, error)
 	ReferencedStoredFiles(ctx context.Context, names []string) (map[string]bool, error)
+	RetentionPolicySnapshot(ctx context.Context) (*db.RetentionPolicySnapshot, error)
+	PreviewRetentionChange(ctx context.Context, change db.RetentionChange, revision string, observed time.Time) (*db.RetentionChangeEffect, error)
+	ApplyRetentionChange(ctx context.Context, actorID int64, change db.RetentionChange, revision string) (string, error)
 	// Retention (B4-11): the policy, the sweep and its run journal.
 	ServerRetentionDays(ctx context.Context) (int, error)
 	ListChannelRetention(ctx context.Context) ([]db.ChannelRetention, error)
@@ -365,6 +368,7 @@ type Store interface {
 	AcknowledgeWarning(ctx context.Context, userID, actionID int64) (bool, error)
 	ListUnacknowledgedWarnings(ctx context.Context, userID int64) ([]db.ModerationNotice, error)
 	ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]db.ModerationAction, error)
+	ListOwnModerationActions(ctx context.Context, userID int64) ([]db.OwnModerationAction, error)
 	ListModerationActionsForReport(ctx context.Context, reportID int64) ([]db.ModerationAction, error)
 	// BanUserWithAction/ForceLogoutWithAction are BanUser/ForceLogoutUser
 	// plus a ledger row, in one transaction (plan item 2) — the ...WithReport

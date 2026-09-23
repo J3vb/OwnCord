@@ -2,8 +2,8 @@
 
 **Status:** 2026-09-08 — owner approved recording all eight ideas and starting
 the first four. RI-01 through RI-04 are implemented and merged into `dev` in
-PR #1573 (commit `3221fe9e`); RI-05 through RI-08 remain backlog ideas. The
-validation record and remaining limits are below.
+PR #1573 (commit `3221fe9e`). RI-05, RI-06, RI-07 and RI-08 are implemented
+on 2026-09-23. The validation record and remaining limits are below.
 
 **Base:** `dev` at `c900953651088120c62ff05d67abc2ffc74c2701`.
 
@@ -14,16 +14,16 @@ remains B6/B10. Implementing one item does not close those phases.
 
 ## Priority and ownership
 
-| ID    | Idea                                           | Value                                                               | Status  | Roadmap alignment                                |
-| ----- | ---------------------------------------------- | ------------------------------------------------------------------- | ------- | ------------------------------------------------ |
-| RI-01 | One owner for client session work              | Prevent obsolete requests and cleanup from affecting a new session  | Merged  | B7 client lifecycle; B9 account/server switching |
-| RI-02 | Previewed local support bundle                 | Make reports reproducible and safe to share                         | Merged  | B6/B9; existing BG-15 contract                   |
-| RI-03 | Guided connection and voice test               | Identify the failed connection stage with useful next steps         | Merged  | B6 connectivity; B9 diagnostics                  |
-| RI-04 | Retry-safe messaging and pending-send recovery | Preserve user intent across lost acknowledgments and restarts       | Merged  | Protocol/persistence contracts; B9 messaging     |
-| RI-05 | Spread reconnect attempts                      | Reduce synchronized retry pressure after a shared outage            | Backlog | B6 capacity; B7 reconnect behavior               |
-| RI-06 | Explain permissions and preview access changes | Help admins understand and safely change effective access           | Backlog | B9 administration                                |
-| RI-07 | Admin attention panel                          | Surface failed maintenance and capacity pressure early              | Backlog | B6 operations; B9 administration                 |
-| RI-08 | Preview destructive policy changes             | Show the impact of proposed retention settings before applying them | Backlog | B9; existing BPR-054 retention controls          |
+| ID    | Idea                                           | Value                                                               | Status      | Roadmap alignment                                |
+| ----- | ---------------------------------------------- | ------------------------------------------------------------------- | ----------- | ------------------------------------------------ |
+| RI-01 | One owner for client session work              | Prevent obsolete requests and cleanup from affecting a new session  | Merged      | B7 client lifecycle; B9 account/server switching |
+| RI-02 | Previewed local support bundle                 | Make reports reproducible and safe to share                         | Merged      | B6/B9; existing BG-15 contract                   |
+| RI-03 | Guided connection and voice test               | Identify the failed connection stage with useful next steps         | Merged      | B6 connectivity; B9 diagnostics                  |
+| RI-04 | Retry-safe messaging and pending-send recovery | Preserve user intent across lost acknowledgments and restarts       | Merged      | Protocol/persistence contracts; B9 messaging     |
+| RI-05 | Spread reconnect attempts                      | Reduce synchronized retry pressure after a shared outage            | Implemented | B6 capacity; B7 reconnect behavior               |
+| RI-06 | Explain permissions and preview access changes | Help admins understand and safely change effective access           | Implemented | B9 administration                                |
+| RI-07 | Admin attention panel                          | Surface failed maintenance and capacity pressure early              | Implemented | B6 operations; B9 administration                 |
+| RI-08 | Preview destructive policy changes             | Show the impact of proposed retention settings before applying them | Implemented | B9; existing BPR-054 retention controls          |
 
 ## First implementation batch
 
@@ -150,6 +150,30 @@ the configured maximum delay; retain prompt cancellation on logout and
 certificate mismatch. Server-requested retry delays should be honored where
 the transport can expose them.
 
+Implemented 2026-09-23 against `dev` at
+`0beee8e4c50ca18823750e381d3a1d6e327029b8`:
+
+- The WebSocket policy samples uniformly from half to all of the existing
+  exponential ceiling (1s, 2s, 4s, ...), capped at `maxReconnectDelayMs` (30s
+  by default). Jitter continues at the cap. Authentication and logout keep
+  their existing exponent resets; session and transport lifecycle ownership
+  are unchanged.
+- Randomness and the reconnect timer/cancellation clock are injectable.
+  `Client/tests/unit/ws-backoff.test.ts` drives 256 independent clients through
+  a shared 20-second outage with a seeded random source and fake clock. It
+  checks first-attempt distribution, spreading at the cap and on recovery,
+  every attempt's delay bounds, and recovery within one configured maximum.
+  Boundary tests cover the random endpoints, exponent growth/reset, and
+  synchronous timer cancellation on logout and certificate mismatch. All 165
+  focused socket/lifecycle tests pass. Running the 16 new cases against the
+  original `ws.ts` fails all 16, including the outage distribution assertion.
+- A transport may attach `retryAfterMs` to its disconnected state report.
+  Valid hints form a minimum wait subject to the configured hard maximum;
+  longer hints are capped, negative/nonfinite hints are ignored, and hints
+  are not retained for the next failure. The current desktop IPC exposes
+  neither handshake headers nor structured retry delays, so it supplies no
+  hint. Native error strings are not interpreted as retry instructions.
+
 ### RI-06 — Permission explanations and impact preview
 
 Let an authorized admin choose a member, channel and action and see the
@@ -158,6 +182,35 @@ authorization predicates and include non-role restrictions. Preview proposed
 changes against the same rules before saving and show whose access changes.
 Do not build a second permission engine in the client or use preview to
 impersonate another user's session.
+
+Implemented 2026-09-23:
+
+- `permissions.Explain` runs the named canonical predicate (`CanViewChannel`,
+  `CanReadContent`, `CanSendMessage`, `CanAddReaction`, `CanJoinVoice`,
+  `AuthorizeVoiceModerator`) and traces the bits it consulted through base
+  role, role override and member override. A test pins that its verdict and
+  reason equal the predicate's for every action over a table of subjects.
+- `GET /admin/api/channels/{id}/access/explain` takes one required action and
+  resolves the member's Subject live through `permissions.Checker.Subject`
+  (role, both layers, active timeout) plus NSFW acknowledgement, and applies
+  session admission (effective ban, unapproved registration) on top. No
+  session is created or used.
+- `POST /admin/api/channels/{id}/access/preview` substitutes the proposed role
+  or member layer into each reachable member's live Subject, evaluates every
+  action before and after, and lists only the members whose decision flips.
+  It writes nothing; the save path keeps its own escalation and hierarchy
+  checks. Both routes sit under `MANAGE_CHANNELS` beside the override editor
+  and are audited (`permission_explain`, `permission_preview`). Both follow
+  the editor's rank rules: below Administrator, a member ranked at or above
+  the caller is refused, and a role-layer preview is refused for a role at or
+  above the caller's rank, so no route reads a peer's or higher-ranked
+  member's ban, timeout, registration or NSFW consent state.
+- An Administrator's decision carries no bit trace, since the predicate
+  consults no bit or override layer for it.
+- The admin panel's channel-permissions modal gains "Explain access" and
+  "Preview matrix change"; both only render the server's answer. The quick
+  "Can access" toggles are not previewed, and role base-permission edits
+  (server-wide) have no preview yet.
 
 ### RI-07 — Admin attention panel
 
@@ -169,6 +222,47 @@ from configuration and measured baselines, with hysteresis to avoid noisy
 alerts. Keep diagnostics local unless the operator explicitly configures
 otherwise.
 
+Implemented 2026-09-23 against `dev` at
+`22f2c8841f4c7a526e73ccd8655055198e4bd4f6`:
+
+- `service.AttentionService` samples once a minute, reusing counters the server
+  already keeps: data-volume free space, the writer pool's cumulative
+  `WaitDuration`, the reconnect-tier totals, and hub broadcast drops plus
+  send-queue overflow disconnects; low-priority typing and presence drops
+  are left out because they lose nothing. It adds the newest backup
+  file as the last successful backup, since a failed backup leaves no file.
+  Each maintenance step reports its outcome under a job name. The Dashboard
+  shows the result to `ADMINISTRATOR` holders through
+  `GET /admin/api/attention`.
+- Each signal is `ok`, `warning`, `critical` or `unknown`. Unknown covers an
+  unsupported platform, a failed read, a first rate sample, a job or backup
+  that has not run yet, or disk space with both disk floors at `0`. It
+  neither raises nor clears a warning.
+- Thresholds come from the new `attention.*` config floors and
+  `server.min_free_disk_mb`. Each rate learns a baseline over ten samples,
+  skipping the first measured minute (the post-restart resume burst). During
+  warm-up reconnects raise nothing, while writer wait and delivery raise at
+  the floor and learn only samples at or below it, so pressure present at boot
+  is raised, not learned. After that each rate raises at the floor or three
+  times the baseline, and learns only from healthy samples. Hysteresis: the
+  first disk level commits at once and a stopped dispatch loop as soon as it
+  is seen, and every other
+  change, including a rate's first warning, must hold for two samples; a rate
+  clears below half its threshold, disk 10% above its floor. A job warns after
+  two consecutive failures and clears on one success. Backups warn at 1.5× the
+  schedule interval and go critical at 3×.
+- Warnings are deduplicated per signal and record first and last observation,
+  occurrences, an action and `recovered_at`. Recovered entries are listed for
+  24 hours and reopen in place. The state is in memory and served only to the
+  admin API; nothing is exported to telemetry. Limit: a restart forgets
+  recovered history, though the next samples re-raise any active condition.
+- Tests: `Server/service/attention_test.go` covers unknown handling, first
+  samples, hysteresis, warm-up, boot pressure, baseline, deduplication,
+  expiry, dispatch, jobs and backups. The route has `Server/admin/handlers_attention_test.go`,
+  the maintenance recording has `TestMaintenance_TickRecordsJobHealth` and
+  `TestMaintenance_StartupRunsRecordJobHealth`, and the
+  panel has `Client/tests/contract/server-admin-static-attention.test.ts`.
+
 ### RI-08 — Destructive policy preview
 
 Calculate the effect of a proposed retention policy before saving it. Show
@@ -179,12 +273,32 @@ and policy revision on apply; concurrent changes must not silently overwrite
 another admin's work. Existing confirmation and current-policy previews
 remain useful parts of this workflow.
 
+RI-08 implementation (2026-09-23), based on `dev` commit
+`0beee8e4c50ca18823750e381d3a1d6e327029b8`:
+
+- Proposed server windows, channel overrides and override removal receive a
+  read-only snapshot with per-channel counts, protected exclusions and UTC
+  observation time. The existing saved-policy preview stays available.
+- A 15-minute signed preview binds the exact edit, actor and durable revision.
+  Apply resolves the current bearer permissions again; a transaction rejects
+  stale revisions with HTTP 409 and a reload/preview message. Server settings,
+  override writes and cascade deletions invalidate outstanding previews, even
+  when a value changes back within the same second.
+- The panel requires preview followed by confirmation, discards canceled or
+  failed previews and displays apply failures without silently retrying.
+- Regression coverage: `Server/db/retention_preview_test.go`,
+  `Server/service/retention_preview_test.go`,
+  `Server/admin/retention_test.go` and the executable admin-panel contract in
+  `Client/tests/contract/server-admin-static-panel.test.ts` cover preview/sweep
+  maths, indefinite override removal, concurrent writes, stale edits, token
+  binding, expiry, permission revocation and confirmation state.
+
 ## Delivery evidence
 
 The first batch is implemented and merged into `dev` in
 [PR #1573](https://github.com/J3vb/OwnCord/pull/1573) (commit `3221fe9e`).
-RI-05 through RI-08 remain backlog ideas. This does not close a broader roadmap
-phase.
+RI-05, RI-06, RI-07 and RI-08 are implemented as described above; no follow-up
+idea remains in the backlog. This does not close a broader roadmap phase.
 
 Verified in the Linux development environment:
 

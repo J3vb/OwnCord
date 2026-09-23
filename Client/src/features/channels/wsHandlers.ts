@@ -22,11 +22,13 @@ import {
 import { updateVoiceUserProfile } from "../../stores/voice.store";
 import { updateDmParticipant } from "../../stores/dm.store";
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
+import { uiStore } from "../../stores/ui.store";
 import { isTextLikeChannel } from "../../lib/types";
 import { markChannelRead } from "../../lib/read-state";
 import { showToast } from "../../lib/toast";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
+import { connectText } from "../../i18n/connect";
 
 /** The channel/role/member snapshot of `ready`. */
 export function applyReadyChannels(payload: Payload<"ready">): void {
@@ -54,7 +56,10 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): number | nul
   // before this ready — distinct from "no channel was active", which
   // must NOT mark-read whatever the auto-select branch just picked.
   let activeChannelCleared = false;
-  if (currentActive === null && payload.channels.length > 0) {
+  // A content view (B9-4) leaves no channel active on purpose; auto-selecting
+  // one would close it.
+  const viewOpen = uiStore.getState().activeView !== null;
+  if (currentActive === null && !viewOpen && payload.channels.length > 0) {
     const firstText = payload.channels.find((ch) => isTextLikeChannel(ch));
     if (firstText !== undefined) {
       setActiveChannel(firstText.id);
@@ -141,7 +146,7 @@ export function handleChannelDelete(payload: Payload<"channel_delete">): void {
     setActiveChannel(firstTextId);
     // The redirect alone reads as the app spontaneously changing channels;
     // say why (ux/channels-members-dms §1.2).
-    showToast("This channel was deleted", "info");
+    showToast(connectText("app.channelDeleted"), "info");
     log.info("Active channel deleted, redirected", { deletedId: payload.id });
   }
 }

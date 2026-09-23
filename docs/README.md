@@ -75,17 +75,18 @@ are deliberately left alone when paths change, so links from commit messages
 keep resolving. Anything here may be stale; the ledger and the plan index carry
 current status.
 
-| Audit                                                                          | Scope                                                                     |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| [audit-2026-08-23-repository-layout.md](audit-2026-08-23-repository-layout.md) | Repository layout and contributor experience (`RL-01`…`RL-22`).           |
-| [audit-2026-08-23-repository-health.md](audit-2026-08-23-repository-health.md) | Full repository health.                                                   |
-| [audit-2026-08-19.md](audit-2026-08-19.md)                                     | Repo health. **States "0 open findings" — untrue since; see the ledger.** |
-| [audit-test-coverage-2026-08-19.md](audit-test-coverage-2026-08-19.md)         | Test audit (`T-*`, a separate register from the `OC-*` ledger).           |
-| [audit-2026-08-04-docs-and-coverage.md](audit-2026-08-04-docs-and-coverage.md) | Documentation accuracy and UI/UX test coverage.                           |
-| [audit-2026-08-04.md](audit-2026-08-04.md)                                     | Security review.                                                          |
-| [audit-test-coverage-2026-07-25.md](audit-test-coverage-2026-07-25.md)         | Test-coverage audit.                                                      |
-| [audit-2026-07-19.md](audit-2026-07-19.md)                                     | Architecture and spec-conformance review.                                 |
-| [audit-2026-04-07.md](audit-2026-04-07.md)                                     | First comprehensive audit.                                                |
+| Audit                                                                                      | Scope                                                                     |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| [audit-2026-09-23-windows-update-relaunch.md](audit-2026-09-23-windows-update-relaunch.md) | Windows client update: why the successor can start late (not conclusive). |
+| [audit-2026-08-23-repository-layout.md](audit-2026-08-23-repository-layout.md)             | Repository layout and contributor experience (`RL-01`…`RL-22`).           |
+| [audit-2026-08-23-repository-health.md](audit-2026-08-23-repository-health.md)             | Full repository health.                                                   |
+| [audit-2026-08-19.md](audit-2026-08-19.md)                                                 | Repo health. **States "0 open findings" — untrue since; see the ledger.** |
+| [audit-test-coverage-2026-08-19.md](audit-test-coverage-2026-08-19.md)                     | Test audit (`T-*`, a separate register from the `OC-*` ledger).           |
+| [audit-2026-08-04-docs-and-coverage.md](audit-2026-08-04-docs-and-coverage.md)             | Documentation accuracy and UI/UX test coverage.                           |
+| [audit-2026-08-04.md](audit-2026-08-04.md)                                                 | Security review.                                                          |
+| [audit-test-coverage-2026-07-25.md](audit-test-coverage-2026-07-25.md)                     | Test-coverage audit.                                                      |
+| [audit-2026-07-19.md](audit-2026-07-19.md)                                                 | Architecture and spec-conformance review.                                 |
+| [audit-2026-04-07.md](audit-2026-04-07.md)                                                 | First comprehensive audit.                                                |
 
 ## Plans
 
@@ -106,6 +107,8 @@ page. Status has owners:
 | Current measured baseline  | [plans/b0-baseline-2026-08-25.md](plans/b0-baseline-2026-08-25.md)                 |
 | Generated-code contracts   | `CLAUDE.md`, "Generated code — never hand-edit"                                    |
 
-A CI job checks that documents on this page do not contradict the ledger's
-counts. Adding a count to a document means adding it to that check's allow-list
-in `scripts/check-doc-counts.mjs`.
+A CI job checks explicitly current summaries against the live ledger's counts.
+Adding a current summary means opting its document into the allow-list in
+`scripts/check-doc-counts.mjs`. Dated baselines and signed scorecards retain
+their as-measured numbers at the cited source commits; never refresh them to
+make the live count check pass.

@@ -320,6 +320,7 @@ type Report struct {
 	CreatedAt     string  `json:"createdAt"`
 	UpdatedAt     string  `json:"updatedAt"`
 	ClosedAt      *string `json:"closedAt"`
+	SourceNsfw    *int64  `json:"sourceNsfw"`
 }
 
 type ReportEvent struct {
@@ -350,6 +351,11 @@ type ReportNote struct {
 	AuthorToken *string `json:"authorToken"`
 	Body        string  `json:"body"`
 	CreatedAt   string  `json:"createdAt"`
+}
+
+type RetentionRevision struct {
+	ID       int64 `json:"id"`
+	Revision int64 `json:"revision"`
 }
 
 type RetentionRun struct {

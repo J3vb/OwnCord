@@ -1,0 +1,78 @@
+/* ── Phase 6: avatars, display names, custom status ── */
+
+/*
+ * Every avatar surface (message row, reply preview, member list, user bar,
+ * profile popup, account card) is a fixed-size circle that until now held a
+ * single letter. An uploaded picture has to fill that same circle exactly,
+ * whatever the source aspect ratio, so it is cover-cropped rather than
+ * letterboxed — the server refuses anything over 1024px but does not force a
+ * square, and a stretched face is worse than a centred crop.
+ */
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
+}
+
+/* The member row grew a second line, so the name column stacks. */
+.member-item .mi-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+.member-item .mi-custom-status {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Profile popup: the @handle under a display name, and the status line. */
+.upp-username-handle {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  margin-top: -2px;
+}
+.upp-username-handle:empty,
+.upp-custom-status:empty {
+  display: none;
+}
+.upp-custom-status {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+/* Status picker: the custom-status input sits below the four options. */
+.status-picker-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+.status-picker-custom {
+  padding: 6px 8px;
+}
+.status-picker-custom-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-input);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+  padding: 6px 8px;
+}
+.status-picker-custom-input:focus {
+  outline: none;
+  border-color: var(--focus-ring);
+}
+
+/* Account tab: the avatar uploader sits under the profile card. */
+.account-avatar-upload {
+  margin: 12px 0 4px;
+}

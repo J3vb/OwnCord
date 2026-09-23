@@ -1,0 +1,154 @@
+/* ── Video Grid ────────────────────────────────────── */
+
+.video-grid-slot {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.video-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  height: 100%;
+  align-content: center;
+  justify-content: center;
+  background: var(--bg-primary);
+}
+
+.video-cell {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: #000; /* intentional: letterbox/pillarbox bars need true black, not theme grey */
+  /* Size set by JS layout calculator — no fixed aspect-ratio */
+}
+
+.video-cell video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.video-cell.track-muted video {
+  visibility: hidden;
+}
+
+.video-username {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  color: var(--on-fill);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-shadow: 0 1px 3px var(--scrim);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--scrim);
+}
+
+.vw-controls .active-ctrl {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* ── Video tile overlay (mute button) ── */
+.video-tile-overlay {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  padding: 6px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.video-cell:hover .video-tile-overlay,
+.video-tile-overlay.muted {
+  opacity: 1;
+}
+.tile-mute-btn {
+  background: var(--scrim);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-normal);
+  padding: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tile-mute-btn:hover {
+  background: var(--scrim-strong);
+}
+.tile-volume-slider {
+  width: 80px;
+  height: 4px;
+  appearance: none;
+  background: var(--scrim-hover);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.tile-volume-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-circle);
+  background: var(--on-fill);
+  cursor: pointer;
+}
+.tile-volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-circle);
+  background: var(--on-fill);
+  border: none;
+  cursor: pointer;
+}
+
+/* ── Video focus mode layout ── */
+.video-grid.focus-mode {
+  display: flex;
+  flex-wrap: nowrap;
+  flex-direction: column;
+  height: 100%;
+}
+.video-focus-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 4px;
+  overflow: hidden;
+}
+.video-focus-main .video-cell {
+  width: 100%;
+  height: 100%;
+}
+.video-focus-strip {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  overflow-x: auto;
+  flex-shrink: 0;
+  height: 90px;
+  background: var(--bg-tertiary);
+}
+.video-focus-strip .video-cell {
+  width: 120px;
+  min-width: 120px;
+  height: 100%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+}
+.video-focus-strip .video-cell video {
+  object-fit: cover;
+}
+.video-focus-strip .video-cell:hover {
+  border-color: var(--accent);
+}

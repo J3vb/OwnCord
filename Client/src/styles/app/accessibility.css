@@ -1,0 +1,44 @@
+/* Accessibility: reduced motion */
+.reduced-motion,
+.reduced-motion * {
+  animation-duration: 0s !important;
+  transition-duration: 0s !important;
+}
+
+/* Accessibility: high contrast */
+/* applyTheme() and applyThemeByName() write theme tokens as *inline* styles
+   on documentElement (built-in themes) and body (custom themes) -- an
+   inline declaration beats a plain class rule on the same element, so these
+   overrides must be !important and must target both elements or they're a
+   silent no-op. */
+.high-contrast,
+.high-contrast body {
+  --text-normal: #ffffff !important;
+  --text-muted: #cccccc !important;
+  --bg-active: rgba(255, 255, 255, 0.15) !important;
+}
+/* High Contrast restores each theme's tested accent text and focus colours,
+   overriding a custom accent's inline values (B9-2, owner decision Q8). */
+.high-contrast body {
+  --accent-text: #a3aaf8 !important;
+  --focus-ring: #a3aaf8 !important;
+}
+.high-contrast body.theme-neon-glow {
+  --accent-text: #2fd0ff !important;
+  --focus-ring: #2fd0ff !important;
+}
+/* Light surfaces need dark text: the white above would be invisible. */
+.high-contrast body.theme-light {
+  --text-normal: #000000 !important;
+  --text-muted: #2e3035 !important;
+  --bg-active: rgba(0, 0, 0, 0.15) !important;
+  --accent-text: #4150c4 !important;
+  --focus-ring: #4752c4 !important;
+}
+
+/* Accessibility: large font — no CSS rule here on purpose. --font-size is
+   written as an inline style on documentElement, which outranks any class
+   rule, so this could only ever be a silent no-op. appearance.ts's
+   applyFontSize() is the single writer and derives the size from both the
+   slider and the toggle (OC-0319). The .large-font class stays as a state
+   marker for anything that wants to hang non-font-size styling off it. */

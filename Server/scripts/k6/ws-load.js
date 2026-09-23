@@ -39,8 +39,8 @@
 //     voice-load.sh SFU cohort — the churn exercises the control plane, not
 //     the media path.
 //   restart — 100 connections at the capacity rate; the workflow (or the
-//     operator) stops the server 30 s into the sustain (60 s ramp + 30 s =
-//     90 s from run start) and boots it again on the same data dir. k6 keeps
+//     operator) stops the server at K6_RESTART_AT (default 135 s from run
+//     start) and boots it again on the same data dir. k6 keeps
 //     sending through the frame's delay_seconds drain window, then reconnects
 //     with last_seq + active_channel_id and measures the resume.
 //   ceiling-search — one ramping-vus scenario stepping connections by
@@ -83,11 +83,14 @@
 //   K6_PEAK_VUS         - Peak simultaneous connections (default: 100)
 //   K6_RAMP             - Ramp-up duration (default: 60s)
 //   K6_SUSTAIN          - Duration at peak (default: 180s)
-//   K6_SEND_INTERVAL_MS - Per-connection send interval (default: 2000)
+//   K6_SEND_INTERVAL_MS - Per-connection send interval (default: 2000).
+//                         ceiling-search requires >= 100: the server admits at
+//                         most 10 sends/second per user (service/message_crud.go)
 //   K6_VOICE_CHANNEL_ID - Voice channel id; unset disables the voice leg
 //   K6_CEILING_CHANNELS - Comma-separated text channel ids the ceiling search
-//                         spreads its cohort over (default: K6_CHANNEL_ID for
-//                         every connection, which sheds above 100)
+//                         spreads its cohort over. Must contain enough distinct
+//                         pre-seeded ids for the configured maximum/rate; unsafe
+//                         lists fail at init. See docs/capacity.md.
 //   K6_RESTART_AT       - Restart drill: seconds from run start to the stop
 //                         (default: the value that equalizes both windows)
 //   K6_RESTART_RECOVERY_S - Restart drill: seconds of outage+reconnect after
@@ -307,23 +310,61 @@ const RAMP_S = seconds(RAMP);
 const SUSTAIN_S = seconds(SUSTAIN);
 const UPLOADS_START_S = RAMP_S + UPLOADS_AT_S;
 
-// The channel THIS VU uses. Identical to CHANNEL_ID on every profile but the
-// ceiling search, which spreads its cohort across K6_CEILING_CHANNELS: one
-// message per SEND_INTERVAL_MS per connection into a SINGLE channel makes step
-// N a load of N/(SEND_INTERVAL_MS/1000) messages per second on that one topic,
-// past the server's topicRateLimitPerSecond (100, a constant in the code) from
-// step 200 up. Every step at or above that is shed by a constant, and the
-// latency it reports is the shed queue's -- so the search could never locate a
-// hardware ceiling above it (OC-0447). Spreading the cohort keeps each
-// channel's rate under the limiter and makes the measurement about hardware.
-// The sender and its channel_focus/typing/resume all use this same id, so a
-// VU's subscription matches the channel it posts in.
-const CHANNEL_IDS = (__ENV.K6_CEILING_CHANNELS || "")
-  .split(",")
-  .map((v) => parseInt(v.trim(), 10))
-  .filter((v) => Number.isFinite(v) && v > 0);
-const VU_CHANNEL_ID =
-  IS_CEILING && CHANNEL_IDS.length > 0 ? CHANNEL_IDS[__VU % CHANNEL_IDS.length] : CHANNEL_ID;
+// OC-0447: never silently run a ceiling search against the topic limiter.
+// Budget HALF its sliding 1 s window, including a fully aligned sender burst.
+// One periodic sender can emit ceil(1000 / interval) messages in that window.
+// Typing uses the separate ephemeral PublishLow path (ws/handlers.go), and
+// presence is global; neither consumes this sequenced channel-topic budget.
+// This is generator shaping, not a change to the server's limit.
+const TOPIC_LIMIT_PER_SECOND = 100; // ws/hub_stats.go; pinned by the offline test
+const CEILING_TOPIC_BUDGET = TOPIC_LIMIT_PER_SECOND / 2;
+// Each user is capped at 10 sends/second (service/message_crud.go
+// `limiter.Allow(ratKey, 10, time.Second)`), so a send interval below the
+// reciprocal makes the server admit only a subset -- the same "code cap
+// masquerading as hardware" defect OC-0447 closed, one layer up. Pinned by the
+// offline test.
+const SEND_LIMIT_PER_SECOND = 10;
+const MIN_SEND_INTERVAL_MS = 1000 / SEND_LIMIT_PER_SECOND;
+let CHANNEL_IDS = [CHANNEL_ID];
+let ceilingMaxVUsPerChannel = 0;
+let ceilingBurstPerVU = 0;
+if (IS_CEILING) {
+  if (
+    !Number.isInteger(CEILING_MAX) ||
+    CEILING_MAX < CEILING_START ||
+    !Number.isInteger(CEILING_STEP) ||
+    CEILING_STEP <= 0 ||
+    !Number.isInteger(SEND_INTERVAL_MS) ||
+    SEND_INTERVAL_MS < MIN_SEND_INTERVAL_MS
+  ) {
+    throw new Error(
+      `ceiling-search requires K6_CEILING_MAX >= 100, K6_CEILING_STEP > 0 and K6_SEND_INTERVAL_MS >= ${MIN_SEND_INTERVAL_MS} (each user is capped at ${SEND_LIMIT_PER_SECOND} sends/second)`,
+    );
+  }
+  CHANNEL_IDS = (__ENV.K6_CEILING_CHANNELS || String(CHANNEL_ID))
+    .split(",")
+    .map((v) => Number(v.trim()));
+  if (
+    CHANNEL_IDS.some((v) => !Number.isSafeInteger(v) || v <= 0) ||
+    new Set(CHANNEL_IDS).size !== CHANNEL_IDS.length
+  ) {
+    throw new Error("K6_CEILING_CHANNELS must contain distinct positive integer channel ids");
+  }
+  ceilingBurstPerVU = Math.ceil(1000 / SEND_INTERVAL_MS);
+  const slotsPerChannel = Math.floor(CEILING_TOPIC_BUDGET / ceilingBurstPerVU);
+  // The observer can own ANY id in the pool. Bound all max+1 ids, rather
+  // than assuming the WebSocket cohort has consecutive ids at a given step.
+  const required = Math.ceil((CEILING_MAX + OBS_VUS) / slotsPerChannel);
+  if (!slotsPerChannel || CHANNEL_IDS.length < required) {
+    throw new Error(
+      `K6_CEILING_CHANNELS needs at least ${required} pre-seeded channels at this maximum/send interval (50% topic-limit headroom)`,
+    );
+  }
+  ceilingMaxVUsPerChannel = Math.ceil((CEILING_MAX + OBS_VUS) / CHANNEL_IDS.length);
+}
+// Posting, focus, typing and resume all use the same channel. __VU is stable
+// across reconnects; arbitrary activation order cannot exceed the pool bound.
+const VU_CHANNEL_ID = IS_CEILING ? CHANNEL_IDS[__VU % CHANNEL_IDS.length] : CHANNEL_ID;
 
 // Restart-drill phase boundaries (OC-0446). The drill's before and after
 // windows are only comparable if they hold the same population for the same
@@ -353,9 +394,31 @@ const RESTART_PHASES = ["ramp", "pre-restart", "recovery", "post-restart", "ramp
 // produced: every connection posts once per SEND_INTERVAL_MS and every OTHER
 // connection receives it. Deliberately loose -- it exists to catch a window
 // that stalled or was never filled, not to re-litigate the budget.
-const RESTART_MIN_SAMPLES = Math.floor(
-  PEAK_VUS * (1000 / SEND_INTERVAL_MS) * (PEAK_VUS - 1) * 0.3 * Math.max(RESTART_AT - RAMP_S, 0),
-);
+if (
+  IS_RESTART &&
+  (!Number.isFinite(RAMP_S) ||
+    RAMP_S < 0 ||
+    !Number.isFinite(SUSTAIN_S) ||
+    !Number.isInteger(RESTART_AT) ||
+    !Number.isInteger(RESTART_RECOVERY_S) ||
+    RESTART_RECOVERY_S <= 0 ||
+    RESTART_AT <= RAMP_S ||
+    RESTART_AT + RESTART_RECOVERY_S >= RUN_S ||
+    !Number.isInteger(PEAK_VUS) ||
+    PEAK_VUS < 2 ||
+    !Number.isInteger(SEND_INTERVAL_MS) ||
+    SEND_INTERVAL_MS <= 0)
+) {
+  throw new Error(
+    "restart requires nonempty pre-restart, recovery and post-restart windows, at least two VUs and a positive send interval",
+  );
+}
+function restartMinSamples(durationS) {
+  return Math.max(
+    1,
+    Math.floor(PEAK_VUS * (1000 / SEND_INTERVAL_MS) * (PEAK_VUS - 1) * 0.3 * durationS),
+  );
+}
 // The storm's fire time: K6_STORM_AT seconds into the sustain, on the
 // scenario clock (scenarioStartMs is exec.scenario.startTime for the VU, the
 // observer's own start for the phase window — both scenarios start at t=0).
@@ -589,8 +652,10 @@ export const options = {
           // workload. A window that stalled, or that the generator never
           // filled, fails here instead of publishing a percentile computed
           // from whatever few frames happened to arrive.
-          "ws_deliveries{phase:pre-restart}": [`count>=${RESTART_MIN_SAMPLES}`],
-          "ws_deliveries{phase:post-restart}": [`count>=${RESTART_MIN_SAMPLES}`],
+          "ws_deliveries{phase:pre-restart}": [`count>=${restartMinSamples(RESTART_AT - RAMP_S)}`],
+          "ws_deliveries{phase:post-restart}": [
+            `count>=${restartMinSamples(RUN_S - RESTART_AT - RESTART_RECOVERY_S)}`,
+          ],
         }
       : {}),
     // A cap in config must never be published as the hardware ceiling. Only
@@ -696,6 +761,9 @@ function ceilingStepThresholds() {
     for (const c of counters) out[`${c}{step:${v}}`] = ["count>=0"];
     // A Gauge aggregates as value; informational like every step key here.
     out[`obs_connected_users{step:${v}}`] = ["value>=0"];
+    for (const channel of CHANNEL_IDS) {
+      out[`ws_messages_sent{step:${v},channel:${channel}}`] = ["count>=0"];
+    }
   }
   return out;
 }
@@ -736,6 +804,10 @@ function passThroughThresholds() {
     for (const c of perPhase) out[`${c}{phase:${p}}`] = ["count>=0"];
     // The one Gauge among the observer's metrics; a Gauge aggregates as value.
     out[`obs_upload_storage_used_mb{phase:${p}}`] = ["value>=0"];
+    // The per-phase acknowledgement/delivery series (operationalTags). The
+    // run-wide budgets above stay the gate; these only materialize.
+    out[`ws_broadcast_latency_ms{phase:${p}}`] = ["p(95)>=0"];
+    out[`ws_delivery_latency_ms{phase:${p}}`] = ["p(95)>=0"];
   }
   // Tier and backpressure come in two shapes: the run total per tier/kind,
   // and the per-phase delta (a sub-metric key takes several comma-separated
@@ -878,6 +950,33 @@ let vuToken = null; // stored session token (a resume does not re-login)
 let vuLastSeq = 0; // highest seq this VU has seen on any connection
 let vuHoldEnd = 0; // wall-clock ms when this VU's first connection ends
 let vuStormDone = false; // the storm already fired for this VU
+// The phase (ms offset within the period) each periodic client timer took on
+// this VU's FIRST connection — see phasedInterval.
+const vuTimerPhase = {};
+
+// phasedInterval is setInterval whose ticks keep the phase the VU's first
+// connection established, across reconnects. The storm reopens every socket
+// in the same instant, and a plain setInterval started from that instant
+// would have all 100 users press Enter in the same few milliseconds every
+// SEND_INTERVAL_MS for the rest of the run — a metronome no population
+// produces, and one that queues N simultaneous sends behind the single
+// SQLite writer (OC-0445: ack p95 went from ~50 ms to ~600 ms at the storm
+// and stayed there, at unchanged throughput and an unchanged 0.4 ms per
+// write). A reconnect changes when a user is connected, not when they type,
+// so the timer re-anchors on its original phase instead.
+function phasedInterval(socket, name, periodMs, fn) {
+  const now = Date.now();
+  if (!(name in vuTimerPhase)) {
+    vuTimerPhase[name] = now % periodMs;
+    socket.setInterval(fn, periodMs);
+    return;
+  }
+  const delay = (((vuTimerPhase[name] - now) % periodMs) + periodMs) % periodMs;
+  socket.setTimeout(function () {
+    fn();
+    socket.setInterval(fn, periodMs);
+  }, delay);
+}
 let vuInVoice = false; // this VU believes it holds a voice session
 // Restart drill: contents of this VU's drain sends that got neither an ack
 // nor an error before the socket closed. VU scope on purpose — the socket
@@ -1091,7 +1190,7 @@ export default function () {
             if (data.id && pendingSends[data.id]) {
               broadcastLatency.add(
                 Date.now() - pendingSends[data.id],
-                stepTags(true) ?? restartTags(),
+                stepTags(true) ?? restartTags() ?? operationalTags(),
               );
               delete pendingSends[data.id];
             }
@@ -1112,7 +1211,10 @@ export default function () {
             const from = sentBy(content);
             const at = sentAt(content);
             if (at && from && from !== vuId && Date.now() - at < 30 * 1000) {
-              deliveryLatency.add(Date.now() - at, stepTags(true) ?? restartTags());
+              deliveryLatency.add(
+                Date.now() - at,
+                stepTags(true) ?? restartTags() ?? operationalTags(),
+              );
               deliveries.add(1, restartTags());
             }
             break;
@@ -1263,8 +1365,10 @@ export default function () {
     // resume (a replay resume sends no ready frame, protocol.md:305-315).
     // The interval keeps running for the whole hold — there is no message
     // cap, because the sustained fan-out IS the load being measured.
-    socket.setInterval(function () {
-      if (!ready && !resumedConn) {
+    phasedInterval(socket, "send", SEND_INTERVAL_MS, function () {
+      // A resumed socket's first phased tick can land before auth_ok; a
+      // frame sent before that is refused, so wait for the session.
+      if (!ready && !(resumedConn && authed)) {
         return;
       }
       const id = `${vuId}-${msgCount}-${Date.now()}`;
@@ -1284,24 +1388,27 @@ export default function () {
           payload: { channel_id: VU_CHANNEL_ID, content: content },
         }),
       );
-      wsMessages.add(1);
+      wsMessages.add(
+        1,
+        IS_CEILING ? { ...stepTags(true), channel: String(VU_CHANNEL_ID) } : undefined,
+      );
       msgCount++;
-    }, SEND_INTERVAL_MS); // chat_send is 10/sec; 1 per 2s is well under it
+    }); // chat_send is 10/sec; 1 per SEND_INTERVAL_MS (2 s) is well under it
 
     // Typing indicators (client->server type is typing_start, not "typing").
-    socket.setInterval(function () {
-      if (ready || resumedConn) {
+    phasedInterval(socket, "typing", 4000, function () {
+      if (ready || (resumedConn && authed)) {
         socket.send(envelope("typing_start", { channel_id: VU_CHANNEL_ID }));
       }
-    }, 4000);
+    });
 
     // Presence updates (client->server type is presence_update; bare
     // "presence" is the server->client broadcast).
-    socket.setInterval(function () {
+    phasedInterval(socket, "presence", 15000, function () {
       if (authed) {
         socket.send(envelope("presence_update", { status: "online" }));
       }
-    }, 15000);
+    });
 
     // Leave voice before the socket goes, so the run exercises the leave path
     // rather than relying on disconnect cleanup to tidy up 25 voice states.
@@ -1351,7 +1458,21 @@ let obsPrev = null;
 //             tagged `sustain`;
 //   sustain — the peak before either of those.
 function obsPhase(nowMs) {
-  const t = (nowMs - obsStart) / 1000;
+  return obsPhaseAt(nowMs, obsStart);
+}
+
+// operationalTags is the per-phase tag for sender acknowledgement and
+// recipient delivery under the operational profile (OC-0445): the same
+// boundaries the observer's obsPhase draws, anchored on this VU's own
+// scenario start (both scenarios start at t=0, as stormFireAt relies on), so a
+// run says WHICH phase missed the budget rather than only that one did.
+function operationalTags() {
+  if (!IS_OPERATIONAL) return undefined;
+  return { phase: obsPhaseAt(Date.now(), exec.scenario.startTime) };
+}
+
+function obsPhaseAt(nowMs, startMs) {
+  const t = (nowMs - startMs) / 1000;
   // The restart drill runs the observer too (OC-0446), and the evidence it is
   // there for is the per-phase writer-wait delta either side of the stop — so
   // its samples carry the RESTART phases. Falling through to the operational
@@ -1359,7 +1480,7 @@ function obsPhase(nowMs) {
   // on a run with no upload leg, leaving no pre/post-restart split at all.
   if (IS_RESTART) return restartPhaseAt(t);
   if (t < RAMP_S) return "ramp";
-  if (IS_OPERATIONAL && nowMs >= stormFireAt(obsStart) && nowMs <= stormFireAt(obsStart) + 30000) {
+  if (IS_OPERATIONAL && nowMs >= stormFireAt(startMs) && nowMs <= stormFireAt(startMs) + 30000) {
     return "storm";
   }
   if (t >= UPLOADS_START_S) return "upload";
@@ -1368,7 +1489,7 @@ function obsPhase(nowMs) {
 
 export function observerScenario() {
   if (!obsStart) {
-    obsStart = Date.now();
+    obsStart = exec.scenario.startTime;
   }
   const start = Date.now();
   const res = http.get(`${HTTP_URL}/api/v1/metrics`);
@@ -1376,6 +1497,10 @@ export function observerScenario() {
   let body;
   try {
     body = res.json();
+    if (IS_RESTART && (res.status !== 200 || !Number.isFinite(body?.uptime_seconds))) {
+      sleep(5);
+      return;
+    }
   } catch (_e) {
     sleep(5);
     return;
@@ -1389,7 +1514,10 @@ export function observerScenario() {
     sleep(5);
     return;
   }
-  const d = (k) => (body[k] || 0) - (obsPrev[k] || 0);
+  // A restart resets process-lifetime counters. Never subtract the old boot
+  // from the new one (negative wait deltas would hide recovery contention).
+  const rebooted = IS_RESTART && body.uptime_seconds < obsPrev.uptime_seconds;
+  const d = (k) => (body[k] || 0) - (rebooted ? 0 : obsPrev[k] || 0);
 
   if (IS_CEILING) {
     // The per-step deltas: the writer-wait pair is the plan's Task 2 observer
@@ -1538,9 +1666,68 @@ export function uploadsScenario() {
 // k6's own text summary is not importable from a script without jslib, so an
 // overridden handleSummary can only emit JSON. The file is the artifact the
 // workflow uploads; stdout carries the same bytes for a local run.
-export function handleSummary(data) {
-  return {
-    stdout: JSON.stringify(data, null, 2),
-    "reports/k6-summary.json": JSON.stringify(data, null, 2),
+// These are planned windows/rates plus observed samples, not a declaration
+// that the server recovered on time or that the topic limiter never fired.
+// The workflow's log gate and population evidence still decide run validity.
+function measurementSummary(data) {
+  const metrics = data.metrics || {};
+  if (IS_CEILING) {
+    return {
+      profile: PROFILE,
+      topic_limit_per_second: TOPIC_LIMIT_PER_SECOND,
+      topic_budget_per_second: CEILING_TOPIC_BUDGET,
+      send_interval_ms: SEND_INTERVAL_MS,
+      channel_ids: CHANNEL_IDS,
+      steps: CEILING_STEPS.map((connections, i) => ({
+        connections,
+        hold_start_s: i * CEILING_PERIOD_S + CEILING_RAMP_S,
+        hold_end_s: (i + 1) * CEILING_PERIOD_S,
+        planned_total_messages_per_second: (connections * 1000) / SEND_INTERVAL_MS,
+        planned_mean_messages_per_second_per_channel:
+          (connections * 1000) / SEND_INTERVAL_MS / CHANNEL_IDS.length,
+        // Conservative at every step: k6 does not promise activation in id order.
+        max_vus_per_channel: Math.min(connections, ceilingMaxVUsPerChannel),
+        max_scheduled_messages_per_channel_in_1s:
+          Math.min(connections, ceilingMaxVUsPerChannel) * ceilingBurstPerVU,
+        channels: CHANNEL_IDS.map((channel) => {
+          const count =
+            metrics[`ws_messages_sent{step:${connections},channel:${channel}}`]?.values?.count || 0;
+          return {
+            channel_id: channel,
+            sent_count: count,
+            observed_send_attempts_per_second: count / CEILING_HOLD_S,
+          };
+        }),
+      })),
+    };
+  }
+  const boundaries = [0, RAMP_S, RESTART_AT, RESTART_AT + RESTART_RECOVERY_S, RUN_S, TOTAL_S];
+  const samples = (metric, phase) => {
+    const values = metrics[`${metric}{phase:${phase}}`]?.values;
+    const count = values?.count || 0;
+    return { p95_ms: count ? values["p(95)"] : null, sample_count: count };
   };
+  return {
+    profile: PROFILE,
+    boundary_clock: "seconds since scenario start; [start_s, end_s); samples assigned at receipt",
+    scheduled_end_s: TOTAL_S,
+    windows: RESTART_PHASES.map((phase, i) => ({
+      phase,
+      role: phase === "post-restart" ? "settled" : phase,
+      start_s: boundaries[i],
+      end_s: phase === "ramp-down" ? null : boundaries[i + 1],
+      duration_s: phase === "ramp-down" ? null : boundaries[i + 1] - boundaries[i],
+      delivery: samples("ws_delivery_latency_ms", phase),
+      acknowledgement: samples("ws_broadcast_latency_ms", phase),
+    })),
+  };
+}
+
+export function handleSummary(data) {
+  // Capacity's metric keys and summary shape stay unchanged; existing tagged
+  // metrics also remain intact for consumers of earlier restart/ceiling runs.
+  const summary =
+    IS_CEILING || IS_RESTART ? { ...data, load_measurement: measurementSummary(data) } : data;
+  const json = JSON.stringify(summary, null, 2);
+  return { stdout: json, "reports/k6-summary.json": json };
 }

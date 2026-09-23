@@ -9,6 +9,7 @@ import type { Compatibility, HealthStatus, ServerProfile } from "@lib/profiles";
 import { loadCredential } from "@lib/credentials";
 import { isValidHost } from "@lib/hostValidation";
 import { createLogger } from "@lib/logger";
+import { connectText } from "../../i18n/connect";
 
 const log = createLogger("server-panel");
 
@@ -126,7 +127,7 @@ export function createServerPanel(
     const panel = createElement("div", { class: "server-panel" });
 
     const header = createElement("div", { class: "server-panel-header" });
-    const heading = createElement("h2", {}, "Servers");
+    const heading = createElement("h2", {}, connectText("servers.heading"));
     header.appendChild(heading);
 
     serverListEl = createElement("div", { class: "server-list" });
@@ -139,7 +140,7 @@ export function createServerPanel(
       class: "btn-add-server",
       type: "button",
     });
-    setText(addBtn, "+ Add Server");
+    setText(addBtn, connectText("servers.addButton"));
     addBtn.addEventListener("click", handleAddServer, { signal });
     footer.appendChild(addBtn);
 
@@ -206,8 +207,12 @@ export function createServerPanel(
         const autoLoginBtn = createElement("button", {
           class: `srv-btn auto-login${isAutoLogin ? " active" : ""}`,
           type: "button",
-          "aria-label": isAutoLogin ? "Disable auto-login" : "Enable auto-login",
-          title: isAutoLogin ? "Auto-login enabled" : "Enable auto-login",
+          "aria-label": connectText(
+            isAutoLogin ? "servers.autoLogin.disable" : "servers.autoLogin.enable",
+          ),
+          title: connectText(
+            isAutoLogin ? "servers.autoLogin.enabled" : "servers.autoLogin.enable",
+          ),
         });
         autoLoginBtn.textContent = "";
         autoLoginBtn.appendChild(createIcon("zap", 14));
@@ -227,7 +232,7 @@ export function createServerPanel(
         const deleteBtn = createElement("button", {
           class: "srv-btn danger",
           type: "button",
-          "aria-label": "Delete server",
+          "aria-label": connectText("servers.delete"),
         });
         deleteBtn.textContent = "";
         deleteBtn.appendChild(createIcon("x", 14));
@@ -290,7 +295,7 @@ export function createServerPanel(
     // Update latency badge
     if (status.latencyMs !== null) {
       const ms = status.latencyMs;
-      setText(els.latency, `${ms}ms`);
+      setText(els.latency, connectText("servers.latency", { ms }));
       els.latency.className = `srv-latency ${ms < 100 ? "good" : ms < 500 ? "warn" : "bad"}`;
     } else {
       setText(els.latency, "");
@@ -299,7 +304,7 @@ export function createServerPanel(
 
     // Update online users count
     if (status.onlineUsers !== null && status.onlineUsers >= 0) {
-      setText(els.onlineUsers, `${status.onlineUsers} online`);
+      setText(els.onlineUsers, connectText("servers.online", { count: status.onlineUsers }));
       els.onlineUsers.className = `srv-online-users ${status.onlineUsers > 0 ? "has-users" : ""}`;
     } else {
       setText(els.onlineUsers, "");
@@ -314,10 +319,10 @@ export function createServerPanel(
     // Only a real mismatch earns a badge; `compatible` and `unreachable` are
     // silence (an unreachable server is not an update requirement).
     if (compatibility === "client-older") {
-      setText(els.compat, "Client update needed");
+      setText(els.compat, connectText("servers.clientUpdateNeeded"));
       els.compat.className = "srv-compat-badge client-older";
     } else if (compatibility === "server-older") {
-      setText(els.compat, "Server update needed");
+      setText(els.compat, connectText("servers.serverUpdateNeeded"));
       els.compat.className = "srv-compat-badge server-older";
     } else {
       setText(els.compat, "");
@@ -333,28 +338,41 @@ export function createServerPanel(
     if (!onAddProfile) return;
 
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", { id: "add-server-title" }, "Add Server");
-    const closeBtn = createElement("button", { class: "modal-close", type: "button" });
+    const title = createElement("h3", { id: "add-server-title" }, connectText("servers.add.title"));
+    // Icon-only button: the aria-label is its whole accessible name.
+    const closeBtn = createElement("button", {
+      class: "modal-close",
+      type: "button",
+      "aria-label": connectText("common.close"),
+    });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
     appendChildren(header, title, closeBtn);
 
     const body = createElement("div", { class: "modal-body" });
     const nameGroup = createElement("div", { class: "form-group" });
-    const nameLabel = createElement("label", { class: "form-label" }, "Server Name");
+    const nameLabel = createElement(
+      "label",
+      { class: "form-label" },
+      connectText("servers.add.nameLabel"),
+    );
     const nameInput = createElement("input", {
       class: "form-input",
       type: "text",
-      placeholder: "My Server",
+      placeholder: connectText("servers.add.namePlaceholder"),
     });
     appendChildren(nameGroup, nameLabel, nameInput);
 
     const hostGroup = createElement("div", { class: "form-group" });
-    const hostLabel = createElement("label", { class: "form-label" }, "Host Address");
+    const hostLabel = createElement(
+      "label",
+      { class: "form-label" },
+      connectText("servers.add.hostLabel"),
+    );
     const hostAddrInput = createElement("input", {
       class: "form-input",
       type: "text",
-      placeholder: "example.com:8443",
+      placeholder: "example.com:8443", // i18n-exempt: example host:port, the same in every language
     });
     appendChildren(hostGroup, hostLabel, hostAddrInput);
 
@@ -362,9 +380,9 @@ export function createServerPanel(
 
     const footer = createElement("div", { class: "modal-footer" });
     const cancelBtn = createElement("button", { class: "btn-ghost", type: "button" });
-    setText(cancelBtn, "Cancel");
+    setText(cancelBtn, connectText("common.cancel"));
     const saveBtn = createElement("button", { class: "btn-primary", type: "button" });
-    setText(saveBtn, "Add Server");
+    setText(saveBtn, connectText("servers.add.submit"));
     appendChildren(footer, cancelBtn, saveBtn);
 
     // Each open modal gets its own Disposable so closeModal() can
@@ -412,7 +430,7 @@ export function createServerPanel(
       // the actual connection path, and vice versa (OC-0187).
       if (!isValidHost(addr)) {
         // Show inline validation error via the host input
-        hostAddrInput.setCustomValidity("Invalid server address (expected host or host:port)");
+        hostAddrInput.setCustomValidity(connectText("servers.add.invalidHost"));
         hostAddrInput.reportValidity();
         return;
       }

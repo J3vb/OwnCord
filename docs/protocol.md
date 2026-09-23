@@ -93,15 +93,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                                       |
-| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                                          |
-| Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`, `mod_action`, `appeal_status`                                                                                                          |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                        |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                     |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                               |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                        |
+| Category           | Has seq? | Examples                                                                                                                                                                                     |
+| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                        |
+| Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
+| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`, `mod_action`, `appeal_status`, `channel_create` (targeted per recipient; see below)                                  |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                      |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                   |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                             |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                      |
 
 **`presence` is split, and only one half is sequenced.** Connect and disconnect
 presence is a normal sequenced global broadcast, so it replays on a warm resume.
@@ -356,7 +356,7 @@ These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
 
 `nsfw`, `nsfw_acknowledged`, `voice_max_users` and `voice_max_video` are always
 present, with their column defaults on an unconfigured channel — `false`,
@@ -368,6 +368,15 @@ different things. `nsfw` is a label the server enforces (see below);
 means nothing; the two voice limits are the values
 the voice-join path enforces with `CHANNEL_FULL` / `VIDEO_LIMIT`, shipped so a
 client can show "3/5" and explain a refusal it could have predicted.
+
+`can_moderate_voice` is whether the caller may mute, deafen, move or disconnect
+voice participants in that channel. It is `permissions.AuthorizeVoiceModerator`,
+the same authorizer the voice-moderation commands enforce in the target's
+channel: the base role must hold `MUTE_MEMBERS`, and the effective permission
+after both override layers must hold `READ_MESSAGES | MUTE_MEMBERS`
+(Administrator bypasses the bits). Target rank and move-destination capacity
+are per-target and stay server-side refusals. No override data is sent. Older
+servers omit it.
 
 `mention_count` is the number of unread messages that mention this user — a
 direct `@username` or an authorized `@everyone`/`@here` — in that channel. It is
@@ -785,13 +794,12 @@ clears its local badge optimistically and the next `ready` confirms.
 
 ## Channel Updates
 
-All channel update messages are broadcast to all connected clients. Triggered by REST API calls from admins.
+Channel messages are triggered by REST API calls from admins and reach only the clients that may view the channel (`channel_delete` excepted).
 
-### channel_create (Server -> Client, broadcast)
+### channel_create (Server -> Client, targeted)
 
 ```json
 {
-  "seq": 60,
   "type": "channel_create",
   "payload": {
     "id": 8,
@@ -803,21 +811,32 @@ All channel update messages are broadcast to all connected clients. Triggered by
     "slow_mode": 0,
     "nsfw": false,
     "voice_max_users": 0,
-    "voice_max_video": 0
+    "voice_max_video": 0,
+    "can_send": true,
+    "can_moderate_voice": false
   }
 }
 ```
 
-`can_send` is an **optional extra field on the targeted form only.** When a role
-or channel-override edit changes who may post, `RefreshChannelVisibility` sends
-each still-visible client its own `channel_create`, and that copy carries this
-viewer's `can_send` — the same value `ready` ships per channel — so the composer
-affordance converges without a reconnect.
+Every `channel_create` is addressed to one client and carries that viewer's own
+`can_send` and `can_moderate_voice` — the same values `ready` ships per channel.
+It has no `seq` and is not replayed: a client that misses one is forced onto a
+full `ready` on resume instead. It is sent in three cases:
 
-The broadcast form omits it: one encoded frame is delivered to a whole audience,
-and a single value would be wrong for some of them. Older servers omit it too.
-**Treat an absent `can_send` as "unchanged", never as `false`** — a client that
-resets on absence would disable the composer on every ordinary broadcast.
+- **Channel creation.** Every connected client that may view the new channel
+  gets its own copy, so a new channel arrives with its verdicts already set.
+- **Visibility refresh.** When a role or channel-override edit changes who may
+  see or post, `RefreshChannelVisibility` sends each still-visible client its
+  own copy, so the composer affordance converges without a reconnect. A role
+  edit or a role- or user-override edit on the channel converges the
+  voice-moderation controls the same way.
+- **Timeout refresh.** When a moderator times a member out or lifts the
+  timeout, or the timeout expires, that member alone gets a fresh copy of
+  every channel they can see, so their `can_send` follows the timeout without
+  a reconnect.
+
+Older servers sent `channel_create` as one shared broadcast without either field.
+**Treat an absent `can_send` or `can_moderate_voice` as "unchanged", never as `false`.**
 
 ### channel_update (Server -> Client, broadcast)
 
@@ -1121,7 +1140,9 @@ immediately rather than only on their next `GET`.
 B5-9: a warning issued, a timeout applied, or a timeout lifted, delivered
 ONLY to the live target — targeted and unsequenced, never replayed. A
 disconnected target simply sees the warning in `ready`'s `notices` on next
-connect, or feels the timeout on their next attempted send.
+connect; every own warning, timeout, removal and lapsed or reversed ban,
+with its ledger id, is readable over REST at `GET /api/v1/users/me/moderation` (see
+[api.md](api.md)).
 
 ```json
 {
@@ -1161,54 +1182,6 @@ A disconnected appellant simply sees the current state on their next
 `id` is the appeal's opaque public id. `state` is one of `assigned`,
 `upheld`, `overturned`, `withdrawn`. `decision_note` is `null` until the
 appeal is decided.
-
-### ready's notices
-
-`ready`'s payload carries a `notices` array: every warning issued to the
-connecting user that they have not yet acknowledged.
-
-```json
-{
-  "notices": [
-    {
-      "id": 42,
-      "kind": "warning",
-      "reason": "at most 500 runes, no control characters",
-      "created_at": "2026-09-05T10:00:00Z"
-    }
-  ]
-}
-```
-
-Acknowledge one with `POST /api/v1/users/me/notices/{id}/ack` (see
-[api.md](api.md)) — own rows only. An acknowledged warning never reappears
-here.
-
----
-
-## Moderator Actions
-
-### mod_action (Server -> Client)
-
-B5-9: a warning issued, a timeout applied, or a timeout lifted, delivered
-ONLY to the live target — targeted and unsequenced, never replayed. A
-disconnected target simply sees the warning in `ready`'s `notices` on next
-connect, or feels the timeout on their next attempted send.
-
-```json
-{
-  "type": "mod_action",
-  "payload": {
-    "id": 42,
-    "kind": "timeout",
-    "reason": "at most 500 runes, no control characters",
-    "expires_at": "2026-09-06T12:00:00Z"
-  }
-}
-```
-
-`kind` is `warning` or `timeout`. `expires_at` is `null` for a warning and
-for a lifted timeout; present for an active timeout.
 
 ### ready's notices
 
@@ -1958,7 +1931,7 @@ tables below add per-type behavioral notes.
 | `reaction_update`     | Yes      | Channel or DM participants                                              |
 | `typing`              | No       | Channel (excl. sender) or DM                                            |
 | `presence`            | Yes      | All clients                                                             |
-| `channel_create`      | Yes      | All clients                                                             |
+| `channel_create`      | No       | Each client that may view the channel (per-recipient)                   |
 | `channel_update`      | Yes      | All clients                                                             |
 | `channel_delete`      | Yes      | All clients                                                             |
 | `voice_state`         | Yes      | All clients                                                             |

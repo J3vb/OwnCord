@@ -26,6 +26,7 @@ natively) followed by a prose explanation and a **Source of truth** file list.
 | [diagnostics.md](diagnostics.md)                       | —                                                | B4-8: every diagnostic surface and that none leaves the machine; the egress inventory the `egress-sites` invariant enforces (every outbound path is manual, configuration-gated or loopback); the runtime no-automatic-telemetry capture; the support-bundle data contract BG-15's B6/B9 implementation must satisfy                                   |
 | [community-services.md](community-services.md)         | —                                                | B5-0: the seven community, content and moderation services B5 adds or changes, each with an abuse-case table (HP-5's twelve topics), a data-ownership table and a lifecycle table against B4-9 erasure, B4-10 markers and B4-11 sweeps; what B5 does not defend against; the `-count=1` document gate in `Server/migrations`                           |
 | [rich-content-inventory.md](rich-content-inventory.md) | —                                                | B5-5: every rich-content fetch path (link previews, YouTube oEmbed, inline images, GIF search and render, attachments, avatars, custom emoji, the plugin `http` capability, operator binary downloads), which side fetches it, and today's address/redirect/byte/time/type/concurrency/cache bounds, with the remaining gaps assigned to B7, B8 and B9 |
+| [b9-ui-contract.md](b9-ui-contract.md)                 | —                                                | B9-2: the shared UI contract every B9 feature PR follows: qualified colour tokens and the Q8 custom-accent fallback, focus, keyboard, polite versus assertive announcements, motion, teardown ownership, and the reusable Playwright checks                                                                                                            |
 | [plugins.md](plugins.md)                               | —                                                | Experimental WASM plugin boundary: off twice and compiled out of releases, no API promise, post-beta candidates, core that never moves                                                                                                                                                                                                                 |
 
 ### Structure vs. behavior
@@ -38,8 +39,10 @@ maps. Where today's code diverges from the target, the UX docs carry dated
 
 [platform-contracts.md](platform-contracts.md) is a third kind again: a _target
 seam_ map. It records where the desktop/browser boundary will be drawn and what
-crosses it, measured against today's code. The seam does not exist yet — B7
-builds it — so read that document as a decision record, not as structure.
+crosses it, measured against today's code. B7 built the desktop side
+(`Client/src/platform/contracts/` and `Client/src/platform/desktop/`). The
+browser side is deferred with B8, so that half of the document is still a
+decision record, not structure.
 
 ## Maintenance rule
 

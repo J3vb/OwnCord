@@ -3,29 +3,45 @@
 
 body.theme-neon-glow {
   /* Backgrounds — deeper, darker */
-  --bg-tertiary: #0d0e10;
+  --bg-tertiary: #0b0c0e;
   --bg-secondary: #111214;
-  --bg-primary: #1a1b1e;
-  --bg-input: #252629;
-  --bg-hover: #1f2023;
-  --bg-active: #2a2b2e;
+  --bg-primary: #17181b;
+  --bg-input: #222328;
+  --bg-hover: #1d1e22;
+  --bg-active: #27282d;
 
   /* Accent — defaults to OC cyan, but accent picker overrides --accent
      so --accent-primary and --accent-gradient follow the user's choice */
   --accent: #00c8ff;
-  --accent-hover: #7b2fff;
-  --accent-active: #6620e0;
+  /* Hover/active are derived the way applyAccent() derives them (B9-2, Q8):
+     cyan takes near-black text, so they step toward white to keep it >= 4.5:1.
+     The brand purple stays the gradient's second stop. */
+  --accent-hover: #26d0ff;
+  --accent-active: #4dd9ff;
+  --on-accent: #000000;
+  --accent-text: #2fd0ff;
+  --focus-ring: #2fd0ff;
   --accent-primary: var(--accent);
-  --accent-secondary: var(--accent-hover);
+  --accent-secondary: #7b2fff;
   --accent-gradient: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
 
   /* Border glow — derived from accent for consistency */
   --border: rgba(0, 200, 255, 0.08);
   --border-strong: rgba(0, 200, 255, 0.15);
   --border-glow: rgba(0, 200, 255, 0.08);
+  /* Control edge: >= 3:1 on --bg-primary and --bg-secondary (B9 Q13) */
+  --border-control: #5f6773;
 
-  /* Text link — follows accent */
-  --text-link: var(--accent);
+  /* Text (Refined Neon, B9 Q13): each >= 4.5:1 on every --bg-* surface */
+  --text-normal: #dfe2e6;
+  --text-muted: #a3a9b2;
+  --header-primary: #f4f5f7;
+  --text-positive: #5cc389;
+  --text-warning: #f2b84b;
+  --text-danger: #ff8f92;
+
+  /* Text link — follows the accent's readable text role */
+  --text-link: var(--accent-text);
 
   /* Semantic colors (theme contract) */
   --color-success: #23a55a;

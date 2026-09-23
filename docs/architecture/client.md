@@ -114,6 +114,60 @@ yet scheduled.
 | Theming             | `src/lib/themes.ts` + `styles/tokens.css`                                              | CSS custom properties; 4 built-in themes + custom overrides                                                                                                                                                                                                                                                                                                                                                  |
 | GIF picker          | `src/lib/gifProvider.ts` + `components/GifPicker.ts`                                   | Calls the user's own server (`/api/v1/gif/*`) through `api.ts` — no provider API key in the bundle. Server answers `503 GIF_DISABLED` when unconfigured: the picker shows "GIFs are not enabled on this server" and `onUnavailable` disables the composer's GIF button (with a `title`/`aria-label` reason) instead of failing silently. Returned media URLs are still pinned to the `klipy.com` CDN.        |
 
+#### Lifecycle ownership
+
+Timers and listeners are owned through two primitives (B7-11):
+
+- **`Disposable`** (`src/lib/disposable.ts`) owns a component, overlay or
+  render lifetime: one `AbortController` whose signal registers listeners,
+  plus cleanups. `addCleanup` returns nothing, so a timer re-armed on every
+  keystroke registers _one_ cleanup that clears the current handle. `destroy`
+  runs cleanups without per-cleanup isolation, so a page-level disposer list
+  that must survive a throwing cleanup (`MainPage`'s `unsubscribers`) stays an
+  array. A per-render child is a child `Disposable` the parent destroys.
+- **`SessionScope`** (`src/lib/sessionScope.ts`) owns session-bound async
+  work: `fork()` per request, isolated cleanups, and completions rejected after
+  the session ends. A request that must outlive the session it was sent from
+  (the logout revocation) runs on a detached scope instead.
+
+`tests/unit/lifecycle-ownership.test.ts` enforces four lexical rules from the
+syntax tree, each with an exact allowlist that fails on a stale entry, so the
+lists only shrink: **R1** a `window`/`document`/`navigator.*` listener carries a
+`signal` or `once` (or is an app-lifetime singleton with a reason); **R2** an
+interval keeps its handle and is cleared in its own file; **R3** a timeout keeps
+its handle (or a signal owns it through `setOwnedTimeout`); **R4** `new
+AbortController` appears only in the primitives and named cancellation tokens.
+`tests/helpers/lifecycle.ts` fails a unit test that ends with a bare
+`window`/`document` listener or a real interval alive, unless its file is on the
+shrink-only `tests/lifecycle-guard-baseline.json`.
+
+The lexical rules cannot see a listener on a signal that outlives what it
+served, so a CDP soak proves the runtime half
+(`tests/e2e/support/lifecycle-probe.ts`). After forced GC it counts listeners,
+nodes, documents, live `AbortController`s, live intervals and timeouts, open
+sockets and peer connections, live tracks and `AudioContext`s, and heap. The bar
+is no growth after warm-up: every count's slope is at most 0.05 per cycle
+(documents and intervals exactly flat), both across pages at the same page age
+and within one page (cycles 6 and 9, after that page's reconnect). Heap stays
+within 1.10× and 25 KB per cycle at equal page age. It runs 20 cycles on every
+`client-fullstack` PR (`tests/e2e/fullstack/long-session.spec.ts`), 10 cycles
+over WebView2 in `client-native` (`tests/e2e/native/long-session.spec.ts`), and
+200 cycles plus 30 idle-connected minutes, in which every count must hold
+exactly and heap grow at most 100 KB per minute, through `npm run test:e2e:soak` (the `long-session-soak` job in
+`nightly-test-depth.yml`). The recorded runs are in
+[b7-0-client-baseline-2026-09-19.md](../plans/b7-0-client-baseline-2026-09-19.md).
+
+A **native voice backend** (Linux, LiveKit in `src-tauri/`) keeps the same rules
+on the TypeScript side, plus three that exist because the resource lives across
+IPC: a Tauri `listen()` subscription is registered on the voice attempt's owner
+and an unlisten that resolves after that owner is gone is called at once (the
+`retainListener` shape in `platform/desktop/pushToTalkService.ts`); every native
+handle (room, track, IPC channel) is released in the same teardown that
+disconnects the web room, behind the `livekitSession` facade, never a second
+teardown path; and native open rooms, live tracks and event channels are
+reported through `getSessionDebugInfo`, where the bar is 0 outside a call and
+no growth across cycles, because the webview counters cannot see Rust memory.
+
 ### Quality tooling
 
 224 test files (~83k LOC — about 2× the source): Vitest unit + integration
@@ -123,9 +177,14 @@ and `client-e2e` runs a 92-test smoke set against the Vite dev server, widening
 to the full suite when the specs or fixtures themselves change — plus a native
 Tauri suite that **is** wired to CI: the `client-native` job on `windows-latest`,
 a 100-minute budget, on pull requests to `main` and `dev`, which builds the app,
-runs the `native-core` Playwright project, then the `native-no-auth` and
-`native-authenticated` projects, then the signed-NSIS install/relaunch
-script), Stryker mutation testing
+runs the `native-core` Playwright project, then the auth, UI and
+native-extra projects listed in `docs/testing-behavior.md`, then the
+signed-NSIS install/relaunch script; and a four-target installed-artifact smoke,
+`client-artifact-smoke.yml`, which installs the Windows x64/ARM64 NSIS and
+Linux x64/ARM64 AppImage + deb bundles on their own architecture and drives
+install, boot, connect, media and recovery — nightly on unsigned builds, and in
+`release.yml` before `publish` on the signed bundles, where it also updates from
+the previous release and rolls back), Stryker mutation testing
 (manual-only), oxlint + type-checked ESLint, Prettier, Knip (non-blocking),
 strict `tsc`. Rust: 84 `cargo test --lib` tests across 10 of the 16 modules,
 blocking in CI together with `cargo clippy -D warnings`.

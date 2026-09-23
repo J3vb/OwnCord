@@ -24,6 +24,8 @@ import {
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
 import { roleHasPermission } from "@lib/permissions";
 import { createAvatarElement } from "@lib/avatar";
+import { readableRoleColor } from "@lib/themes";
+import { shellText } from "../i18n/shell";
 
 /** Options for configuring admin action callbacks on the member list. */
 export interface MemberListOptions {
@@ -97,12 +99,26 @@ const FALLBACK_ROLE_COLORS: Record<string, string> = {
 const MEMBER_COLOR = "var(--role-member, #949ba4)";
 
 /** Ordered role groups used when the server hasn't sent a role list. */
-const FALLBACK_ROLE_GROUPS: readonly RoleGroup[] = [
-  { role: "owner", label: "OWNER", colorVar: FALLBACK_ROLE_COLORS["owner"]! },
-  { role: "admin", label: "ADMIN", colorVar: FALLBACK_ROLE_COLORS["admin"]! },
-  { role: "moderator", label: "MODERATOR", colorVar: FALLBACK_ROLE_COLORS["moderator"]! },
-  { role: "member", label: "MEMBER", colorVar: MEMBER_COLOR },
-] as const;
+function fallbackRoleGroups(): readonly RoleGroup[] {
+  return [
+    {
+      role: "owner",
+      label: shellText("members.role.owner"),
+      colorVar: FALLBACK_ROLE_COLORS["owner"]!,
+    },
+    {
+      role: "admin",
+      label: shellText("members.role.admin"),
+      colorVar: FALLBACK_ROLE_COLORS["admin"]!,
+    },
+    {
+      role: "moderator",
+      label: shellText("members.role.moderator"),
+      colorVar: FALLBACK_ROLE_COLORS["moderator"]!,
+    },
+    { role: "member", label: shellText("members.role.member"), colorVar: MEMBER_COLOR },
+  ];
+}
 
 /**
  * Role groups from the server's `ready` role list (already ordered by position,
@@ -111,7 +127,7 @@ const FALLBACK_ROLE_GROUPS: readonly RoleGroup[] = [
  */
 function roleGroups(): readonly RoleGroup[] {
   const roles = channelsStore.getState().roles;
-  if (roles.length === 0) return FALLBACK_ROLE_GROUPS;
+  if (roles.length === 0) return fallbackRoleGroups();
   return roles.map((r) => {
     const key = r.name.toLowerCase();
     return {
@@ -223,7 +239,11 @@ function createMemberItem(
   // Name + custom status stack. The custom status is only rendered when there
   // is one, so a member without it keeps the single-line row it always had.
   const nameWrap = createElement("div", { class: "mi-text" });
-  const name = createElement("span", { class: "mi-name", style: `color: ${colorVar}` });
+  const name = createElement("span", {
+    class: "mi-name",
+    style: `color: ${readableRoleColor(colorVar)}`,
+    "data-role-color": colorVar,
+  });
   setText(name, memberDisplayName(member));
   nameWrap.appendChild(name);
   const custom = member.customStatus;
@@ -319,16 +339,39 @@ function createMemberItem(
         onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
       });
 
-      // Position at mouse
-      activeMenu.element.style.position = "fixed";
-      activeMenu.element.style.left = `${e.clientX}px`;
-      activeMenu.element.style.top = `${e.clientY}px`;
-      activeMenu.element.style.zIndex = "1000";
-      document.body.appendChild(activeMenu.element);
+      // Position at mouse, kept on screen: a member low in the list at the
+      // 940x500 minimum window opened the menu past the bottom edge, leaving
+      // Force Logout, Ban and Block unreachable. When it does not fit below
+      // the pointer it is anchored by its bottom edge instead. The placement
+      // is re-run whenever the menu resizes, so the ban form expanding later
+      // cannot push Confirm Ban and Block off-screen from either anchor.
+      const menuEl = activeMenu.element;
+      menuEl.style.position = "fixed";
+      menuEl.style.zIndex = "1000";
+      document.body.appendChild(menuEl);
+      const margin = 8;
+      const place = (): void => {
+        const { innerWidth: vw, innerHeight: vh } = window;
+        const height = menuEl.offsetHeight;
+        const left = Math.min(e.clientX, vw - menuEl.offsetWidth - margin);
+        menuEl.style.left = `${Math.max(margin, left)}px`;
+        if (e.clientY + height > vh - margin) {
+          const bottom = Math.min(vh - e.clientY, vh - height - margin);
+          menuEl.style.top = "";
+          menuEl.style.bottom = `${Math.max(margin, bottom)}px`;
+        } else {
+          menuEl.style.bottom = "";
+          menuEl.style.top = `${e.clientY}px`;
+        }
+      };
+      place();
 
       // Close on outside click (deferred so this click doesn't close it)
       const dismiss = new Disposable();
       menuDismiss = dismiss;
+      const resizeObserver = new ResizeObserver(place);
+      resizeObserver.observe(menuEl);
+      dismiss.addCleanup(() => resizeObserver.disconnect());
       setOwnedTimeout(
         dismiss.signal,
         () => {
@@ -356,7 +399,7 @@ function renderList(
 
   if (state.members.size === 0) {
     const emptyState = createElement("div", { class: "member-list-empty" });
-    const msg = createElement("p", { class: "member-list-empty-text" }, "No members online");
+    const msg = createElement("p", { class: "member-list-empty-text" }, shellText("members.empty"));
     emptyState.appendChild(msg);
     root.appendChild(emptyState);
     return;
@@ -408,7 +451,7 @@ function appendGroup(
   const header = createElement(
     "div",
     { class: "member-role-group" },
-    `${group.label} \u2014 ${groupMembers.length}`,
+    shellText("members.groupHeader", { role: group.label, count: groupMembers.length }),
   );
   root.appendChild(header);
 

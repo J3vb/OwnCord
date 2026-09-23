@@ -31,7 +31,7 @@ const mockRoom = vi.hoisted(() => ({
   connect: vi.fn().mockResolvedValue(undefined),
   disconnect: vi.fn().mockResolvedValue(undefined),
   on: vi.fn().mockReturnThis(),
-  removeAllListeners: vi.fn(),
+  off: vi.fn(),
   setE2EEEnabled: vi.fn().mockResolvedValue(undefined),
   localParticipant: {
     setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
@@ -361,7 +361,7 @@ describe("LiveKitSession", () => {
         ...mockRoom,
         connect: vi.fn().mockResolvedValue(undefined),
         disconnect: vi.fn().mockResolvedValue(undefined),
-        removeAllListeners: vi.fn(),
+        off: vi.fn(),
         localParticipant: {
           ...mockRoom.localParticipant,
           setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
@@ -1898,7 +1898,7 @@ describe("LiveKitSession", () => {
       cleanupSpy.mockRestore();
     });
 
-    it("calls room.removeAllListeners before disconnect when room exists", async () => {
+    it("detaches the app's room listeners before disconnect when room exists", async () => {
       // Set up a room via handleVoiceToken
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -1906,10 +1906,15 @@ describe("LiveKitSession", () => {
 
       expect((session as any)._state.type).toBe("connected");
 
+      const onDisconnected = mockRoom.on.mock.calls.findLast(([e]) => e === "disconnected")![1];
       session.leaveVoice(false);
 
-      expect(mockRoom.removeAllListeners).toHaveBeenCalled();
-      expect(mockRoom.disconnect).toHaveBeenCalled();
+      // Only the app's own listeners: livekit's once(Disconnected) cleanups
+      // must still run when disconnect() fires the event.
+      expect(mockRoom.off).toHaveBeenCalledWith("disconnected", onDisconnected);
+      expect(mockRoom.off.mock.invocationCallOrder.at(-1)).toBeLessThan(
+        mockRoom.disconnect.mock.invocationCallOrder.at(-1)!,
+      );
     });
 
     it("sets currentChannelId to null after leave", async () => {
@@ -2453,14 +2458,14 @@ describe("LiveKitSession", () => {
               }),
           ),
         },
-        removeAllListeners: vi.fn(),
+        off: vi.fn(),
         disconnect: vi.fn().mockResolvedValue(undefined),
       } as any;
       const roomB = {
         localParticipant: {
           setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
         },
-        removeAllListeners: vi.fn(),
+        off: vi.fn(),
         disconnect: vi.fn().mockResolvedValue(undefined),
       } as any;
 
@@ -2603,18 +2608,21 @@ describe("LiveKitSession", () => {
       expect(url).toBe("ws://127.0.0.1:7880/livekit");
     });
 
-    it("returns directUrl when serverHost is bare ::1", async () => {
+    it("tunnels an IPv6 loopback directUrl when serverHost is bare ::1", async () => {
       session.setServerHost("::1");
       const url = await (session as any).resolveLiveKitUrl("/livekit", "ws://[::1]:7880/livekit");
-      // Bare IPv6 with multiple colons — detected as local, returns directUrl
-      expect(url).toBe("ws://[::1]:7880/livekit");
+      // Detected as local, but CSP host-sources cannot name an IPv6 literal,
+      // so connect-src has no ws://[::1] entry: the direct URL would be
+      // refused, and it goes through the loopback tunnel instead.
+      expect(url).toBe("ws://127.0.0.1:7881/livekit");
     });
 
-    it("returns directUrl when serverHost is bracketed [::1]:7880", async () => {
+    it("tunnels an IPv6 loopback directUrl when serverHost is bracketed [::1]:7880", async () => {
       session.setServerHost("[::1]:7880");
       const url = await (session as any).resolveLiveKitUrl("/livekit", "ws://[::1]:7880/livekit");
-      // Bracketed IPv6 — host extracted as "::1", detected as local
-      expect(url).toBe("ws://[::1]:7880/livekit");
+      // Bracketed IPv6 — host extracted as "::1", detected as local, and
+      // tunnelled for the same connect-src reason as the bare form.
+      expect(url).toBe("ws://127.0.0.1:7881/livekit");
     });
 
     it("calls ensureLiveKitProxy and returns proxy URL for remote host with slash path", async () => {
@@ -3156,6 +3164,24 @@ describe("LiveKitSession", () => {
     });
   });
 
+  describe("remote video is not paused by adaptiveStream", () => {
+    // The video grid plays each remote camera from its own MediaStream and
+    // never attach()es the track, so adaptiveStream sees no visible element.
+    // LiveKit re-checks on every server stream-state update (an SFU bandwidth
+    // pause and resume) and then pauses the camera for good: in CI a peer
+    // decoded one frame of a rejoined camera and nothing after it.
+    it("builds the Room with adaptiveStream off at the default quality", async () => {
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      const RoomMock = Room as unknown as ReturnType<typeof vi.fn>;
+      const lastOptions = RoomMock.mock.calls.at(-1)![0] as { adaptiveStream?: unknown };
+      expect(lastOptions.adaptiveStream).toBe(false);
+    });
+  });
+
   describe("attemptAutoReconnect (lifecycle)", () => {
     it("returns without reconnecting when signal is aborted during delay", async () => {
       (session as any)._state = {
@@ -3272,7 +3298,8 @@ describe("LiveKitSession", () => {
       // state this._room is null, so the cleanup must target the attempt's
       // own room. A leaked room keeps its listeners and its synchronous
       // Disconnected event spawns a second, uncancellable reconnect loop.
-      expect(mockRoom.removeAllListeners).toHaveBeenCalled();
+      const onDisconnected = mockRoom.on.mock.calls.findLast(([e]) => e === "disconnected")![1];
+      expect(mockRoom.off).toHaveBeenCalledWith("disconnected", onDisconnected);
       expect(mockRoom.disconnect).toHaveBeenCalledTimes(1);
     });
 

@@ -26,6 +26,14 @@ in B3–B10 and the "Phase execution pattern" section. Amended 2026-08-29 —
 [developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md)
 is the implementation supplement for the B3, B7 and B9 structural workstreams
 (see the `_(added 2026-08-29)_` lines); it is not a phase and adds no gate.
+**Audit update, 2026-09-23, at `dev` `8df46055` (B7-18): B7 has built
+everything and HP-7 is signed, but the phase exit is open.** B7-0 through B7-17
+are merged, and the owner signed HP-7 on 2026-09-23. Three items kept the exit
+open: C-10's B7 half, the client voice-join budget, and the decision on
+`tauri-build` for PRs into `dev`. C-10's B7 half closed and the voice-join
+budget was recorded and enforced on 2026-09-23, so one remains. The
+[B7 PRD](b7-shared-client-platform-desktop-parity.prd.md#b7-18-reconciliation-2026-09-23)
+records them, and the B7 section below summarizes them.
 [README.md](README.md) is the status authority when this header and a README
 row disagree.  
 **Planning model:** quality-gated, with no calendar deadline
@@ -925,6 +933,28 @@ without regressing the current application.
 
 **Primary requirements:** BPR-033 through BPR-035.
 
+_(B7-18 reconciliation, 2026-09-23.)_ The milestones behind workstreams 1–17
+are merged into `dev`. The
+[B7 PRD](b7-shared-client-platform-desktop-parity.prd.md)'s milestone table
+links the PR for each one. HP-7 was signed by the owner on 2026-09-23 with
+three stated limits, which carry forward:
+
+- the nightly schedule stays inert until it is carried to `main`;
+- the first release has no Windows ARM64 build to update from, so that update
+  leg is N/A;
+- the owner still has to run the real-desktop Linux device check.
+
+The exit gate is **not yet met**. C-10's B7 half closed on 2026-09-23 (the
+register's C-10 row), as did the client voice-join budget. One item is still
+open:
+
+- the 2026-09-19 decision to run `tauri-build` on PRs into `dev` was not
+  implemented.
+
+Every deferral to B8 is recorded against the artifact it leaves behind, both in
+that PRD's "B7-18 reconciliation" and in B8's "What already exists" list below.
+All B7-tagged `OC-*` findings are fixed, so rule 2 is met.
+
 ### Entry gate
 
 - The complete beta server is stable through B6.
@@ -1016,7 +1046,10 @@ this hold point's desktop-parity text is otherwise unchanged.)_
 - Desktop artifacts pass install, boot, connect, update, rollback, media, and
   recovery smoke on the supported architecture matrix.
 - Startup, bundle, voice-join, and long-session budgets meet or improve the
-  accepted baseline.
+  accepted baseline. _(2026-09-23: the client voice-join budget, the one
+  missing, is the median of seven joins to decoded remote audio at 1,500 ms
+  or less, enforced in `client-fullstack`; baseline in
+  [b7-0-client-baseline-2026-09-19.md](b7-0-client-baseline-2026-09-19.md#b7-voice-join-budget-baseline-2026-09-23).)_
 
 ### Required evidence
 
@@ -1067,8 +1100,25 @@ below is preserved unchanged as the plan of record for when it is reopened.
   mount-order/CSP constraints it records for B8, in `Server/api/router.go`;
 - B7's typed platform contracts and the rule that no native Tauri import
   lives outside the desktop adapter, as designed in
-  `docs/architecture/platform-contracts.md` (B7 workstreams 1–2 build the
-  adapter itself; `Client/src/platform/` does not exist yet).
+  `docs/architecture/platform-contracts.md`. _(B7-18, 2026-09-23: built by
+  B7-3/B7-4/B7-5, #1630, #1635, #1646.)_ What B8 inherits:
+  - 21 type-only contracts in `Client/src/platform/contracts/`;
+  - the desktop implementations in `Client/src/platform/desktop/`;
+  - 23 behaviour suites in `Client/tests/unit/platform/*.suite.ts`, which
+    run against the desktop adapter through `*.desktop.test.ts`;
+  - the native-import rule in `Client/eslint.config.js`;
+  - `Client/tests/unit/platform-contracts-counts.test.ts`.
+
+  B8 adds `Client/src/platform/browser/` and runs the same suites against it
+  (L-02's browser half).
+
+- B7-6's build split (#1633): the shared `Client/vite.config.ts` and the
+  desktop overlay `Client/vite.config.desktop.ts`. `build:desktop` is the
+  desktop target, and plain `build` is an alias for it, so B8's `build:web`
+  can take the plain name (L-03's `build:web` half). C-10's browser-mode origin
+  allowlist and BG-04's browser parity are the other B8 halves. BG-04 is
+  measured against the desktop artifact smoke in
+  `.github/workflows/client-artifact-smoke.yml` (B7-17, #1737).
 
 **Objective:** implement the optional server-hosted browser client from the
 shared application, with honest secure-context, offline, push, and mobile
@@ -1495,7 +1545,10 @@ and re-enter the scorecard when it does._
 _Audit update, 2026-09-06, at `61ac2b9`:_ B0–B4 remain accepted; B5-0..B5-9
 and B5-11 are merged, with B5-12's initial reconciliation also merged.
 B5-10 is in progress. Complete the existing B5 exit follow-ups and final
-reconciliation before B6 entry. The 2026-08-29 sequence below is retained
+reconciliation before B6 entry. _Reconciled 2026-09-23 at `6fd8cc0c`:_ B5-10
+merged as #1555; B5 is not accepted — the plan's [exit-gate
+reconciliation](b5-community-content-moderation-2026-09-04.md#exit-gate-reconciliation-2026-09-23)
+names what remains. The 2026-08-29 sequence below is retained
 as historical execution evidence, not today's instruction to start B3.
 
 _Updated 2026-08-29._ B0 and B1 are complete (HP-0 accepted 2026-08-25, HP-1

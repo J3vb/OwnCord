@@ -33,6 +33,8 @@ window.__test = {
   renderRetention: renderRetention,
   saveChannelRetention: saveChannelRetention,
   clearChannelRetention: clearChannelRetention,
+  openApplyRetention: openApplyRetention,
+  closeModal: closeModal,
   applyRetention: applyRetention
 };
 </script>`;
@@ -61,10 +63,34 @@ interface Bridge {
   renderRetention: () => Promise<string>;
   saveChannelRetention: (id: number) => Promise<void>;
   clearChannelRetention: (id: number) => Promise<void>;
-  applyRetention: (days: number) => Promise<void>;
+  openApplyRetention: () => Promise<void>;
+  closeModal: () => void;
+  applyRetention: () => Promise<void>;
 }
 
 type Responder = (path: string, method: string) => { status?: number; json?: unknown };
+
+const proposedPreview = {
+  token: "signed-preview",
+  revision: "revision-1",
+  observed_at: "2026-09-23T12:30:00Z",
+  would_delete: 42,
+  affected_channels: 1,
+  protected_pinned: 2,
+  protected_indefinite: 3,
+  protected_direct_messages: 4,
+  channels: [
+    {
+      channel_id: 7,
+      channel_name: "archive <script>",
+      days: 30,
+      source: "server",
+      would_delete: 42,
+      protected_pinned: 2,
+      protected_indefinite: 0,
+    },
+  ],
+};
 
 const ADMINISTRATOR = 0x40000000;
 
@@ -136,7 +162,7 @@ describe("Server/admin/static/index.html — panel behaviour", () => {
   // localStorage, and every retry ended at a false "session expired".
   it("completes a two-factor sign-in through /auth/verify-totp (OC-0350)", async () => {
     const calls: FetchCall[] = [];
-    const respond: Responder = (p) => {
+    const respond: Responder = (p, method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/api/v1/auth/login")
         return { json: { requires_2fa: true, partial_token: "PARTIAL-123" } };
@@ -178,7 +204,7 @@ describe("Server/admin/static/index.html — panel behaviour", () => {
 
   it("keeps the challenge alive after a rejected code, then clears it on Back (OC-0350)", async () => {
     const calls: FetchCall[] = [];
-    const respond: Responder = (p) => {
+    const respond: Responder = (p, method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/api/v1/auth/login")
         return { json: { requires_2fa: true, partial_token: "PARTIAL-123" } };
@@ -244,7 +270,7 @@ describe("Server/admin/static/index.html — panel behaviour", () => {
       status: "offline",
       banned: false,
     }));
-    const respond: Responder = (p) => {
+    const respond: Responder = (p, method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/users?")) return { json: users };
       if (p === "/registrations") return { json: [] };
@@ -282,7 +308,7 @@ describe("Server/admin/static/index.html — panel behaviour", () => {
       status: "offline",
       banned: false,
     }));
-    const respond: Responder = (p) => {
+    const respond: Responder = (p, method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/users?")) return { json: users };
       if (p === "/registrations") return { json: [] };
@@ -304,7 +330,7 @@ describe("Server/admin/static/index.html — panel behaviour", () => {
   it("keeps the active action filter in the dropdown when the page no longer contains it (OC-0373)", async () => {
     const calls: FetchCall[] = [];
     const entries = [{ id: 1, action: "message_delete", actor_id: 1, target_type: "message" }];
-    const respond: Responder = (p) => {
+    const respond: Responder = (p, method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) return { json: entries };
       return { json: {} };
@@ -376,17 +402,19 @@ describe("Server/admin/static/index.html — panel behaviour", () => {
   // no caller at all, so a policy that continuously and irreversibly deletes
   // message history could be neither set, inspected, overridden nor
   // previewed.
-  it("renders the policy with its effect preview and drives all four retention routes (OC-0389)", async () => {
+  it("preserves the saved-policy preview and confirms all retention writes (OC-0389, RI-08)", async () => {
     const calls: FetchCall[] = [];
-    const respond: Responder = (p) => {
+    const respond: Responder = (p, method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/retention")
         return {
           json: {
             server_days: 30,
+            revision: "revision-1",
             channels: [{ channel_id: 7, days: 0, updated_by: 1, updated_at: "" }],
           },
         };
+      if (p === "/retention/preview" && method === "POST") return { json: proposedPreview };
       if (p === "/retention/preview")
         return {
           json: [
@@ -432,23 +460,155 @@ describe("Server/admin/static/index.html — panel behaviour", () => {
     expect(html).toContain("openChannelRetention(5,");
     expect(html).toContain("clearChannelRetention(7)");
 
-    // PUT, DELETE and the server-wide PATCH all reach the mounted routes.
+    // Every edit previews first, then explicit confirmation reaches its route.
     booted.bridge.state.retentionPolicyChannels = [{ channel_id: 5, days: 0 }];
     const doc = booted.dom.window.document;
     doc.getElementById("modalInner")!.innerHTML = '<input id="chRetDays" value="14">';
     await booted.bridge.saveChannelRetention(5);
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+    await booted.bridge.applyRetention();
     expect(
       calls.find((c) => c.path === "/channels/5/retention" && c.method === "PUT")?.body,
     ).toEqual({ days: 14 });
 
     await booted.bridge.clearChannelRetention(7);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    expect(doc.getElementById("modalInner")!.textContent).toContain(
+      "removal of keep-forever protection",
+    );
+    await booted.bridge.applyRetention();
     expect(calls.some((c) => c.path === "/channels/7/retention" && c.method === "DELETE")).toBe(
       true,
     );
 
-    await booted.bridge.applyRetention(90);
+    // Each apply re-renders #content without awaiting it; let that settle so
+    // it cannot replace the input below mid-preview.
+    await new Promise((resolve) => booted.dom.window.setTimeout(resolve, 0));
+    doc.getElementById("content")!.innerHTML = '<input id="retentionDays" value="90">';
+    await booted.bridge.openApplyRetention();
+    await booted.bridge.applyRetention();
     expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
       retention_days: "90",
     });
+  });
+  it("binds the confirmation to the proposed window and shows its observation and exclusions", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, (p) =>
+      p === "/retention/preview" ? { json: proposedPreview } : { json: { needs_setup: false } },
+    );
+    dom = booted.dom;
+    const { bridge } = booted;
+    const doc = dom.window.document;
+    bridge.state.retentionRevision = "revision-1";
+    doc.getElementById("content")!.innerHTML = '<input id="retentionDays" value="14">';
+    await bridge.openApplyRetention();
+    expect(calls.find((c) => c.method === "POST" && c.path === "/retention/preview")?.body).toEqual(
+      { proposed: { scope: "server", days: 14 }, revision: "revision-1" },
+    );
+    const modal = doc.getElementById("modalInner")!;
+    expect(modal.textContent).toContain("42 messages");
+    expect(modal.textContent).toContain(
+      "2 pinned messages, 3 messages kept indefinitely, and 4 direct messages",
+    );
+    expect(modal.textContent).toContain(proposedPreview.observed_at);
+    expect(modal.textContent).toContain("14 days");
+    expect(modal.querySelector("script")).toBeNull();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    await bridge.applyRetention();
+    const apply = calls.find((c) => c.method === "PATCH");
+    expect(apply?.body).toEqual({ retention_days: "14" });
+    expect(apply?.headers["X-Retention-Preview"]).toBe("signed-preview");
+  });
+
+  it("requires another preview after edits, cancellation, or a failed preview", async () => {
+    const calls: FetchCall[] = [];
+    let failed = false;
+    const booted = await boot(calls, (p) =>
+      p === "/retention/preview"
+        ? failed
+          ? { status: 500, json: { message: "Cannot count messages" } }
+          : { json: proposedPreview }
+        : { json: { needs_setup: false } },
+    );
+    dom = booted.dom;
+    const { bridge } = booted;
+    const doc = dom.window.document;
+    bridge.state.retentionRevision = "revision-1";
+    doc.getElementById("content")!.innerHTML = '<input id="retentionDays" value="14">';
+    await bridge.openApplyRetention();
+    (doc.getElementById("retentionDays") as HTMLInputElement).value = "1";
+    await bridge.applyRetention();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    await bridge.openApplyRetention();
+    bridge.closeModal();
+    await bridge.applyRetention();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    failed = true;
+    await bridge.openApplyRetention();
+    expect(doc.getElementById("modalInner")!.textContent).toContain("Cannot count messages");
+    expect(doc.getElementById("applyRetentionPreview")).toBeNull();
+    await bridge.applyRetention();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it.each([409, 403])(
+    "shows apply rejection (%s) and requires a reload and new preview",
+    async (status) => {
+      const calls: FetchCall[] = [];
+      const message =
+        status === 409
+          ? "Retention policy changed; reload and preview again. Nothing was saved."
+          : "MANAGE_SERVER permission required";
+      const booted = await boot(calls, (p, method) =>
+        method === "DELETE"
+          ? { status, json: { message } }
+          : p === "/retention/preview"
+            ? { json: proposedPreview }
+            : { json: { needs_setup: false } },
+      );
+      dom = booted.dom;
+      const { bridge } = booted;
+      bridge.state.retentionRevision = "revision-1";
+      await bridge.clearChannelRetention(7);
+      await bridge.applyRetention();
+      expect(dom.window.document.getElementById("modalInner")!.textContent).toContain(message);
+      expect(dom.window.document.getElementById("applyRetentionPreview")).toBeNull();
+      await bridge.applyRetention();
+      expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+    },
+  );
+  it("discards a late preview after cancellation and sends only one apply while pending", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, (p) =>
+      p === "/retention/preview" ? { json: proposedPreview } : { json: { needs_setup: false } },
+    );
+    dom = booted.dom;
+    const { bridge } = booted;
+    bridge.state.retentionRevision = "revision-1";
+    const originalFetch = dom.window.fetch;
+    let release = () => {};
+    let pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    dom.window.fetch = (async (...args: Parameters<typeof fetch>) => {
+      const response = await originalFetch(...args);
+      await pending;
+      return response;
+    }) as typeof fetch;
+    const preview = bridge.clearChannelRetention(7);
+    bridge.closeModal();
+    release();
+    await preview;
+    expect(bridge.state.retentionProposal).toBeNull();
+    expect(dom.window.document.getElementById("modal")!.classList.contains("visible")).toBe(false);
+    await bridge.clearChannelRetention(7);
+    pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const apply = bridge.applyRetention();
+    await bridge.applyRetention();
+    expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+    release();
+    await apply;
   });
 });
