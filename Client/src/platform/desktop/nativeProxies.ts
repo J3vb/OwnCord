@@ -6,6 +6,7 @@
 // session, and the class there now delegates here.
 import { invoke } from "@tauri-apps/api/core";
 import { createLogger } from "@lib/logger";
+import { isLinuxDesktop } from "../../features/voice/native/platform";
 import type { NativeProxies } from "../contracts/nativeProxies";
 
 // --- HTTP ------------------------------------------------------------------
@@ -141,8 +142,9 @@ async function resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise
     // Only a loopback direct URL the CSP's connect-src admits is used as-is.
     // Anything else (LiveKit Cloud, a TLS LiveKit on another host) goes
     // through the tunnel like a remote server's, so the webview never needs
-    // an https:/wss: connect source.
-    if (isLocal && directUrl && isLoopbackDirectUrl(directUrl)) {
+    // an https:/wss: connect source. Linux voice is native (Rust), outside
+    // the webview's CSP, so it keeps any local server's direct URL.
+    if (isLocal && directUrl && (isLinuxDesktop() || isLoopbackDirectUrl(directUrl))) {
       livekitLog.debug("LiveKit URL resolved via direct (local)", { url: directUrl });
       return directUrl;
     }
