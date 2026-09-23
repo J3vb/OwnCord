@@ -18,7 +18,8 @@
 import { expect, type CDPSession, type Page } from "@playwright/test";
 
 export interface LifecycleSample {
-  /** Cycle number, or -1 for the idle-phase samples. */
+  /** Cycle number, -1 for an asserted idle-phase sample, or -2 for an idle
+   *  sample taken before the app's own auto-idle transition. */
   cycle: number;
   cycleAt: number;
   documents: number;
@@ -173,6 +174,21 @@ export async function sampleLifecycle(
   cdp: CDPSession,
   cycle: number,
 ): Promise<LifecycleSample> {
+  // Timers are read twice, at least a second apart, and the lower read counts:
+  // a short timer the app is running at that instant (a debounce, a re-armed
+  // poll) is not accumulation, while a leaked one is still pending on both
+  // reads. A single read caught one such timer in 80 samples of the long run.
+  const readLedger = () =>
+    page.evaluate(() => {
+      const state = (
+        window as unknown as {
+          __ocTimerLedger?: { timeouts: Set<number>; intervals: Set<number> };
+        }
+      ).__ocTimerLedger;
+      return { timeouts: state?.timeouts.size ?? 0, intervals: state?.intervals.size ?? 0 };
+    });
+  const firstLedger = await readLedger();
+  const firstLedgerAt = Date.now();
   // Two retainers exist only because the soak observes the page. V8 keeps
   // every console argument alive while an inspector session is attached
   // (livekit logs its E2EE worker, which reaches the whole Room), and the
@@ -198,15 +214,12 @@ export async function sampleLifecycle(
   await cdp.send("HeapProfiler.collectGarbage");
   const counters = await cdp.send("Memory.getDOMCounters");
   const heap = await cdp.send("Runtime.getHeapUsage");
-  const ledger = await page.evaluate(() => {
-    const state = (
-      window as unknown as { __ocTimerLedger?: { timeouts: Set<number>; intervals: Set<number> } }
-    ).__ocTimerLedger;
-    return {
-      timeouts: state?.timeouts.size ?? 0,
-      intervals: state?.intervals.size ?? 0,
-    };
-  });
+  await page.waitForTimeout(Math.max(0, firstLedgerAt + 1000 - Date.now()));
+  const secondLedger = await readLedger();
+  const ledger = {
+    timeouts: Math.min(firstLedger.timeouts, secondLedger.timeouts),
+    intervals: Math.min(firstLedger.intervals, secondLedger.intervals),
+  };
   return {
     cycle,
     cycleAt: Date.now(),

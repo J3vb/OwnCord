@@ -41,6 +41,8 @@ import { openSettings, switchSettingsTab } from "../helpers";
 
 const CYCLES = Number(process.env.OWNCORD_SOAK_CYCLES ?? 20);
 const IDLE_MIN = Number(process.env.OWNCORD_SOAK_IDLE_MIN ?? 0);
+/** src/lib/autoIdle.ts's AUTO_IDLE_DELAY_MS. */
+const AUTO_IDLE_MS = 10 * 60_000;
 /** Phases of the 10-cycle page (`cycle % 10`) sampled for the within-page pair. */
 const WITHIN_PAGE_PHASES = new Set([6, 9]);
 
@@ -314,12 +316,17 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
     // be exactly equal across the idle samples — a poller that allocates per
     // tick (health, connection stats, presence, heartbeat) shows up here. The PR
     // soak does not run it (OWNCORD_SOAK_IDLE_MIN defaults to 0); the long run
-    // does.
+    // does. After ten quiet minutes the app flips the user to Idle
+    // (AUTO_IDLE_DELAY_MS, src/lib/autoIdle.ts), a designed one-time change, so
+    // samples before that transition (plus a minute) are kept as -2 and only the
+    // later ones must be equal.
     if (IDLE_MIN > 0) {
-      const end = Date.now() + IDLE_MIN * 60_000;
+      const start = Date.now();
+      const end = start + IDLE_MIN * 60_000;
       while (Date.now() < end) {
         await new Promise((resolve) => setTimeout(resolve, Math.min(5 * 60_000, end - Date.now())));
-        samples.push(await sampleLifecycle(alice, cdp, -1));
+        const settled = Date.now() - start >= AUTO_IDLE_MS + 60_000;
+        samples.push(await sampleLifecycle(alice, cdp, settled ? -1 : -2));
       }
     }
   } finally {
