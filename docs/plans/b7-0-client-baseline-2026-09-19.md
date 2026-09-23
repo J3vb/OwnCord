@@ -762,9 +762,10 @@ tracks and contexts), and heap moved about 5 B per minute (4 330 328 → 4 330 4
 **Every lifecycle bar passed.** The run as a whole reported a failure, by design:
 the soak's strict console check caught one more occurrence of OC-0452 (the E2EE
 over-warning at voice join, about seven seconds after the cycle-180 sample).
-That check stays strict until OC-0452 is fixed, so a long run can show it.
-OC-0452 is being fixed in a separate follow-up PR (branch
-`fm/e2ee-join-false-warning`) that lands after this one.
+OC-0452 was fixed after this run by a follow-up PR (branch
+`fm/e2ee-join-false-warning`): a remote sender's `InvalidKey` now degrades only
+once it outlasts a short grace window, and the soak excuses livekit-client's own
+bare log line while still failing on the app's degraded-call error.
 
 The absolute node and listener levels are lower here than in the 20-cycle runs
 (1355 against 2693 nodes, 160 against 163 listeners), and equally flat. The long
