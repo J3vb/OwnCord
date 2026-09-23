@@ -20,10 +20,10 @@ import { openSettings, switchSettingsTab } from "../helpers";
 import {
   evaluateBars,
   formatBars,
-  quiesce,
   sampleLifecycle,
   type LifecycleSample,
 } from "../support/lifecycle-probe";
+import { quiesce } from "../support/quiesce";
 
 const CYCLES = 10;
 const SAMPLED = new Set([0, 5, 6, 9, 10]);

@@ -31,16 +31,23 @@ import { expectDecodedMedia, joinVoice, mediaStats } from "../support/media";
 import type { TestServer } from "../support/server";
 import {
   installTimerLedger,
-  quiesce,
   sampleLifecycle,
   evaluateBars,
   formatBars,
   describeLiveListeners,
+  type SlopeCeilings,
 } from "../support/lifecycle-probe";
+import { quiesce } from "../support/quiesce";
 import { openSettings, switchSettingsTab } from "../helpers";
 
 const CYCLES = Number(process.env.OWNCORD_SOAK_CYCLES ?? 20);
 const IDLE_MIN = Number(process.env.OWNCORD_SOAK_IDLE_MIN ?? 0);
+/**
+ * Phase-series ceilings for a metric with a known leak that survives the
+ * re-login navigation (the plan's PENDING_METRICS). 11c fixed the leaks the
+ * soak found, so it is empty and every metric holds the plan's 0.05 per cycle.
+ */
+const PENDING_METRICS: SlopeCeilings = {};
 /** src/lib/autoIdle.ts's AUTO_IDLE_DELAY_MS. */
 const AUTO_IDLE_MS = 10 * 60_000;
 /** Phases of the 10-cycle page (`cycle % 10`) sampled for the within-page pair. */
@@ -347,7 +354,7 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
     });
   }
 
-  const bars = evaluateBars(samples);
+  const bars = evaluateBars(samples, PENDING_METRICS);
   console.log(`lifecycle soak (${CYCLES} cycles):\n${formatBars(bars)}`);
 
   expect(pageErrors, "no page errors across the run").toEqual([]);

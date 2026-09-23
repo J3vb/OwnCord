@@ -125,6 +125,40 @@ describe("lifecycle soak pass bars", () => {
     expect(bar(evaluateBars(worse, { listeners: 0.2 }), "listeners").pass).toBe(false);
   });
 
+  it("fails a leak confined to one page (B7-11c's within-page pair)", () => {
+    // Every page grows the same way and the re-login releases it, so each
+    // phase series is flat; only the page-6/9 pair sees it.
+    const perPage = [
+      sample(5),
+      sample(6, { listeners: 50 }),
+      sample(9, { listeners: 53 }),
+      sample(10),
+      sample(15),
+      sample(16, { listeners: 50 }),
+      sample(19, { listeners: 53 }),
+      sample(20),
+    ];
+    const listeners = bar(evaluateBars(perPage), "listeners");
+    expect(listeners.pass).toBe(false);
+    expect(listeners.bar).toContain("page 0: 50→53");
+    // A phase-series ceiling never loosens the within-page bar.
+    expect(bar(evaluateBars(perPage, { listeners: 2 }), "listeners").pass).toBe(false);
+  });
+
+  it("leaves samples taken right after a reconnect or logout out of the page pair", () => {
+    const bars = evaluateBars([
+      sample(5, { nodes: 101 }),
+      sample(6),
+      sample(9),
+      sample(10, { nodes: 90 }),
+      sample(15, { nodes: 101 }),
+      sample(16),
+      sample(19),
+      sample(20, { nodes: 90 }),
+    ]);
+    expect(bar(bars, "nodes").pass).toBe(true);
+  });
+
   it("returns nothing when there is no sample", () => {
     expect(evaluateBars([])).toEqual([]);
     expect(evaluateBars([sample(5)])).toEqual([]);
