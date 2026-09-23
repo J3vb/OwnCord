@@ -14,7 +14,7 @@ import type { AudioElements } from "../../lib/audioElements";
 import type { DeviceManager } from "../../lib/deviceManager";
 import type { E2EEManager } from "../../lib/livekitE2EE";
 import type { SessionState } from "./sessionState";
-import { releaseRoom } from "./releaseRoom";
+import { detachRoom, releaseRoom } from "./releaseRoom";
 
 // Same logger tag as before the extraction, so the join log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -307,7 +307,7 @@ export class JoinOrchestration {
               channelId,
               queuedChannelId: queuedJoin.channelId,
             });
-            localRoom.removeAllListeners();
+            detachRoom(localRoom);
             localRoom
               .disconnect()
               .catch((err) => log.debug("Failed to disconnect room during cleanup", err));
@@ -340,7 +340,7 @@ export class JoinOrchestration {
               return "superseded";
             }
             if (localRoom === null) throw connectErr;
-            localRoom.removeAllListeners();
+            detachRoom(localRoom);
             // oxlint-disable-next-line no-await-in-loop -- sequential retry: must arm E2EE before the next connect attempt
             localRoom = await this.createRoom(channelId);
             if (!this.ownsConnectAttempt(myGeneration)) {

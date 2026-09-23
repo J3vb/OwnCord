@@ -52,7 +52,7 @@ function makeRoom() {
       rooms.events.push(`disconnect:${index}`);
     }),
     on: vi.fn().mockReturnThis(),
-    removeAllListeners: vi.fn(),
+    off: vi.fn(),
     setE2EEEnabled: vi.fn().mockResolvedValue(undefined),
     localParticipant: {
       setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),

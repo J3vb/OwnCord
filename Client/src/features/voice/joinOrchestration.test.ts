@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Room } from "livekit-client";
+import { Room, RoomEvent } from "livekit-client";
 import type { SessionState } from "./sessionState";
 
 const store = vi.hoisted(() => ({ currentChannelId: null as number | null }));
@@ -14,11 +14,13 @@ vi.mock("../../lib/logger", () => ({
 }));
 
 import { JoinOrchestration, type JoinHost } from "./joinOrchestration";
+import { onRoom } from "./releaseRoom";
 
 function fakeRoom(state = "connected"): Room {
   return {
     state,
-    removeAllListeners: vi.fn(),
+    on: vi.fn(),
+    off: vi.fn(),
     disconnect: vi.fn(async () => {}),
   } as unknown as Room;
 }
@@ -84,8 +86,10 @@ describe("disconnectSupersededLocalRoom", () => {
   it("disconnects only the passed room and re-syncs modules when idle", () => {
     const { host, join } = setup();
     const room = fakeRoom();
+    const onDisconnected = vi.fn();
+    onRoom(room, RoomEvent.Disconnected, onDisconnected);
     join.disconnectSupersededLocalRoom(room);
-    expect(room.removeAllListeners).toHaveBeenCalled();
+    expect(room.off).toHaveBeenCalledWith(RoomEvent.Disconnected, onDisconnected);
     expect(room.disconnect).toHaveBeenCalled();
     expect(host.syncModuleRooms).toHaveBeenCalledOnce();
     expect(host.leaveVoice).not.toHaveBeenCalled();

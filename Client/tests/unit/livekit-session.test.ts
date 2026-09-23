@@ -31,7 +31,7 @@ const mockRoom = vi.hoisted(() => ({
   connect: vi.fn().mockResolvedValue(undefined),
   disconnect: vi.fn().mockResolvedValue(undefined),
   on: vi.fn().mockReturnThis(),
-  removeAllListeners: vi.fn(),
+  off: vi.fn(),
   setE2EEEnabled: vi.fn().mockResolvedValue(undefined),
   localParticipant: {
     setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
@@ -361,7 +361,7 @@ describe("LiveKitSession", () => {
         ...mockRoom,
         connect: vi.fn().mockResolvedValue(undefined),
         disconnect: vi.fn().mockResolvedValue(undefined),
-        removeAllListeners: vi.fn(),
+        off: vi.fn(),
         localParticipant: {
           ...mockRoom.localParticipant,
           setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
@@ -1898,7 +1898,7 @@ describe("LiveKitSession", () => {
       cleanupSpy.mockRestore();
     });
 
-    it("calls room.removeAllListeners before disconnect when room exists", async () => {
+    it("detaches the app's room listeners before disconnect when room exists", async () => {
       // Set up a room via handleVoiceToken
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -1906,10 +1906,15 @@ describe("LiveKitSession", () => {
 
       expect((session as any)._state.type).toBe("connected");
 
+      const onDisconnected = mockRoom.on.mock.calls.findLast(([e]) => e === "disconnected")![1];
       session.leaveVoice(false);
 
-      expect(mockRoom.removeAllListeners).toHaveBeenCalled();
-      expect(mockRoom.disconnect).toHaveBeenCalled();
+      // Only the app's own listeners: livekit's once(Disconnected) cleanups
+      // must still run when disconnect() fires the event.
+      expect(mockRoom.off).toHaveBeenCalledWith("disconnected", onDisconnected);
+      expect(mockRoom.off.mock.invocationCallOrder.at(-1)).toBeLessThan(
+        mockRoom.disconnect.mock.invocationCallOrder.at(-1)!,
+      );
     });
 
     it("sets currentChannelId to null after leave", async () => {
@@ -2453,14 +2458,14 @@ describe("LiveKitSession", () => {
               }),
           ),
         },
-        removeAllListeners: vi.fn(),
+        off: vi.fn(),
         disconnect: vi.fn().mockResolvedValue(undefined),
       } as any;
       const roomB = {
         localParticipant: {
           setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
         },
-        removeAllListeners: vi.fn(),
+        off: vi.fn(),
         disconnect: vi.fn().mockResolvedValue(undefined),
       } as any;
 
@@ -3293,7 +3298,8 @@ describe("LiveKitSession", () => {
       // state this._room is null, so the cleanup must target the attempt's
       // own room. A leaked room keeps its listeners and its synchronous
       // Disconnected event spawns a second, uncancellable reconnect loop.
-      expect(mockRoom.removeAllListeners).toHaveBeenCalled();
+      const onDisconnected = mockRoom.on.mock.calls.findLast(([e]) => e === "disconnected")![1];
+      expect(mockRoom.off).toHaveBeenCalledWith("disconnected", onDisconnected);
       expect(mockRoom.disconnect).toHaveBeenCalledTimes(1);
     });
 

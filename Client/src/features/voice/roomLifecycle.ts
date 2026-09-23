@@ -28,6 +28,7 @@ import {
   bumpGeneration,
 } from "../../lib/screenShare";
 import { attachDiagnosticListeners } from "../../lib/livekitDiagnostics";
+import { detachRoom, onRoom } from "./releaseRoom";
 import type { RoomEventHandlers } from "../../lib/roomEventHandlers";
 import { parseUserId, type SessionState } from "./sessionState";
 import { isLinuxDesktop } from "./native/platform";
@@ -243,16 +244,21 @@ export class RoomLifecycle {
   }
 
   private wireRoomEvents(newRoom: Room): void {
-    newRoom.on(RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
-    newRoom.on(RoomEvent.TrackUnsubscribed, this._eventHandlers.handleTrackUnsubscribed);
-    newRoom.on(RoomEvent.Disconnected, this._eventHandlers.handleDisconnected);
-    newRoom.on(RoomEvent.ActiveSpeakersChanged, this._eventHandlers.handleActiveSpeakersChanged);
-    newRoom.on(
+    onRoom(newRoom, RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
+    onRoom(newRoom, RoomEvent.TrackUnsubscribed, this._eventHandlers.handleTrackUnsubscribed);
+    onRoom(newRoom, RoomEvent.Disconnected, this._eventHandlers.handleDisconnected);
+    onRoom(
+      newRoom,
+      RoomEvent.ActiveSpeakersChanged,
+      this._eventHandlers.handleActiveSpeakersChanged,
+    );
+    onRoom(
+      newRoom,
       RoomEvent.AudioPlaybackStatusChanged,
       this._eventHandlers.handleAudioPlaybackChanged,
     );
-    newRoom.on(RoomEvent.LocalTrackPublished, this._eventHandlers.handleLocalTrackPublished);
-    newRoom.on(RoomEvent.ParticipantPermissionsChanged, (_previous, participant) => {
+    onRoom(newRoom, RoomEvent.LocalTrackPublished, this._eventHandlers.handleLocalTrackPublished);
+    onRoom(newRoom, RoomEvent.ParticipantPermissionsChanged, (_previous, participant) => {
       if (
         participant !== newRoom.localParticipant ||
         this._room !== newRoom ||
@@ -266,7 +272,7 @@ export class RoomLifecycle {
     });
     // OC-0002: the only SDK-level signal that the E2EE worker died after the
     // key exchange already succeeded — see roomEventHandlers.ts for detail.
-    newRoom.on(RoomEvent.EncryptionError, this._eventHandlers.handleEncryptionError);
+    onRoom(newRoom, RoomEvent.EncryptionError, this._eventHandlers.handleEncryptionError);
     attachDiagnosticListeners(newRoom);
   }
 
@@ -323,7 +329,7 @@ export class RoomLifecycle {
     this._audioElements.setScreenshareGainListener(null);
     const room = this._room;
     if (room !== null) {
-      room.removeAllListeners();
+      detachRoom(room);
       room.disconnect().catch((err) => log.warn("room.disconnect() error (non-fatal)", err));
     }
     // Clear client-side E2EE state (ECDH keypair, room key, peer keys), and

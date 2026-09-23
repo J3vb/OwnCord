@@ -10,7 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DisconnectReason, Track } from "livekit-client";
+import { DisconnectReason, RoomEvent, Track } from "livekit-client";
 import type {
   LocalTrackPublication,
   Participant,
@@ -21,6 +21,7 @@ import type {
 } from "livekit-client";
 
 import { createRoomEventHandlers } from "@lib/roomEventHandlers";
+import { onRoom } from "../../src/features/voice/releaseRoom";
 import type { RoomEventDeps } from "@lib/roomEventHandlers";
 import { voiceStore } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
@@ -53,7 +54,8 @@ interface Harness {
   room: {
     canPlaybackAudio: boolean;
     startAudio: ReturnType<typeof vi.fn>;
-    removeAllListeners: ReturnType<typeof vi.fn>;
+    on: ReturnType<typeof vi.fn>;
+    off: ReturnType<typeof vi.fn>;
     disconnect: ReturnType<typeof vi.fn>;
   };
   spies: {
@@ -75,7 +77,8 @@ function build(over: Partial<RoomEventDeps> = {}): Harness {
   const room = {
     canPlaybackAudio: true,
     startAudio: vi.fn().mockResolvedValue(undefined),
-    removeAllListeners: vi.fn(),
+    on: vi.fn(),
+    off: vi.fn(),
     disconnect: vi.fn().mockResolvedValue(undefined),
   };
   const spies = {
@@ -697,6 +700,7 @@ describe("handleDisconnected", () => {
 
   it("auto-reconnects on an unexpected disconnect", () => {
     const h = build();
+    onRoom(h.room as unknown as Room, RoomEvent.Disconnected, h.handlers.handleDisconnected);
 
     h.handlers.handleDisconnected(DisconnectReason.SERVER_SHUTDOWN);
 
@@ -704,7 +708,8 @@ describe("handleDisconnected", () => {
     expect(h.audioElements.cleanupAllAudioElements).toHaveBeenCalled();
     expect(h.spies.setRoom).toHaveBeenCalledWith(null);
     expect(h.spies.syncModuleRooms).toHaveBeenCalled();
-    expect(h.room.removeAllListeners).toHaveBeenCalled();
+    // Only the app's own listener goes; livekit's disconnect cleanups stay.
+    expect(h.room.off).toHaveBeenCalledWith(RoomEvent.Disconnected, h.handlers.handleDisconnected);
     expect(h.room.disconnect).toHaveBeenCalled();
     expect(h.spies.setReconnectAc).toHaveBeenCalledWith(expect.any(AbortController));
     expect(h.spies.attemptAutoReconnect).toHaveBeenCalledWith(
