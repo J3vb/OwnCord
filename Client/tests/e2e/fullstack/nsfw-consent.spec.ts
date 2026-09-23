@@ -13,6 +13,7 @@ import type { Browser, Page } from "@playwright/test";
 import { test, expect, login } from "./fixtures";
 import { installRealTransport } from "../support/real-transport";
 import type { TestServer } from "../support/server";
+import { openSettings } from "../helpers";
 
 const EVIDENCE = process.env.OWNCORD_E2E_EVIDENCE_DIR;
 
@@ -252,5 +253,82 @@ test.describe("B9-7 NSFW consent gate (real server)", () => {
       await device2.context.close();
       expect(device2.transport.errors).toEqual([]);
     }
+  });
+});
+
+test.describe("B9-7 NSFW remote regate focus (real server)", () => {
+  test("a remote regate moves focus from the replaced composer to the gate, never out of an open dialog", async ({
+    bob,
+    server,
+  }) => {
+    const owner = server.owner!.token;
+    const channels = (await server.api("/api/v1/channels/", undefined, owner)) as {
+      id: number;
+      name: string;
+      type: string;
+    }[];
+    const general = channels.find((c) => c.name === "general" && c.type === "text")!;
+    const bobApi = (
+      (await server.api("/api/v1/auth/login", {
+        username: "bob",
+        password: "OwnCord-E2E-pass-123!",
+      })) as { token: string }
+    ).token;
+    const composer = bob.locator("[data-testid='message-input'] textarea");
+    const withdrawElsewhere = () =>
+      server.api(
+        `/api/v1/channels/${general.id}/nsfw-acknowledgement`,
+        undefined,
+        bobApi,
+        "DELETE",
+      );
+
+    // 1. A moderator labels the channel while bob types: the composer is
+    //    removed with the content, so focus goes to the gate heading.
+    await channelItem(bob, "general").click();
+    await composer.click();
+    await composer.fill("typing when labelled");
+    await server.api(`/admin/api/channels/${general.id}`, { nsfw: true }, owner, "PATCH");
+    await expect(gate(bob)).toBeVisible();
+    await expect(bob.locator(".nsfw-gate-title")).toBeFocused();
+    await shot(bob, "09-relabel-while-typing-focus-on-gate");
+
+    // 2. Consent, then withdraw from another session while typing: the
+    //    nsfw_ack frame regates this device and focus follows to the heading.
+    await bob.getByTestId("nsfw-gate-continue").click();
+    await expect(composer).toBeFocused();
+    await composer.fill("typing when withdrawn elsewhere");
+    await withdrawElsewhere();
+    await expect(gate(bob)).toBeVisible();
+    await expect(composer).toHaveCount(0);
+    await expect(bob.locator(".nsfw-gate-title")).toBeFocused();
+    await shot(bob, "10-remote-withdraw-while-typing-focus-on-gate");
+
+    // 3. Consent again, open Settings, withdraw elsewhere: the channel regates
+    //    behind the dialog and focus stays inside it.
+    await bob.getByTestId("nsfw-gate-continue").click();
+    await expect(bar(bob)).toBeVisible();
+    await openSettings(bob);
+    const overlay = bob.getByTestId("settings-overlay");
+    const focusInDialog = () =>
+      bob.evaluate(() =>
+        Boolean(
+          document
+            .querySelector("[data-testid='settings-overlay']")
+            ?.contains(document.activeElement),
+        ),
+      );
+    await expect.poll(focusInDialog).toBe(true);
+    await withdrawElsewhere();
+    await expect(gate(bob)).toBeAttached();
+    await expect(bar(bob)).toHaveCount(0);
+    await bob.waitForTimeout(500);
+    expect(await focusInDialog()).toBe(true);
+    await expect(bob.locator(".nsfw-gate-title")).not.toBeFocused();
+    await shot(bob, "11-remote-withdraw-settings-keeps-focus");
+    await bob.keyboard.press("Escape");
+    await expect(overlay).not.toHaveClass(/open/);
+    await expect(gate(bob)).toBeVisible();
+    await shot(bob, "12-settings-closed-gate-behind");
   });
 });
