@@ -241,7 +241,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     currentChannelId = null;
   }
 
-  function mountChannel(channelId: number, channelName: string, channelType?: ChannelType): void {
+  function mountChannel(
+    channelId: number,
+    channelName: string,
+    channelType?: ChannelType,
+    focusGate = true,
+  ): void {
     if (currentChannelId === channelId) return;
 
     const previousChannelId = currentChannelId;
@@ -584,10 +589,15 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
             if (state === "consented") mountConsentBar();
             return;
           }
-          const gateHadFocus = slots.messagesSlot.contains(document.activeElement);
+          // A remount caused elsewhere (another device, a moderator, a
+          // reconnect) takes focus only from the content it replaces, never
+          // from an open dialog or another part of the app.
+          const active = document.activeElement;
+          const gateHadFocus = slots.messagesSlot.contains(active);
+          const focusGate = gateHadFocus || active === null || active === document.body;
           const name = channelsStore.getState().channels.get(channelId)?.name ?? channelName;
           destroyChannel();
-          mountChannel(channelId, name, channelType);
+          mountChannel(channelId, name, channelType, focusGate);
           if (state === "gated") onContentGated?.();
           else if (gateHadFocus) focusFallback?.();
         },
@@ -597,6 +607,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       clearChannelContent(channelId);
       nsfwConsentUi = createNsfwGate({
         channelName,
+        focusOnMount: focusGate,
         onAccept: () =>
           api.acknowledgeNsfw(channelId).then(() => {
             if (ownsAccountSession()) setNsfwAcknowledged(channelId, true);

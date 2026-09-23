@@ -2247,6 +2247,55 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
+    it("lets the gate take focus when the reader opens the channel", () => {
+      seedChannel(true, false);
+      const ctrl = createChannelController(consentOpts());
+      ctrl.mountChannel(CH, "spicy");
+
+      expect(capturedNsfwOpts.value.focusOnMount).toBe(true);
+      ctrl.destroyChannel();
+    });
+
+    it("keeps focus in an open dialog when another device withdraws consent", async () => {
+      seedChannel(true, true);
+      const opts = consentOpts();
+      document.body.appendChild(opts.slots.messagesSlot);
+      const dialogBtn = document.createElement("button");
+      document.body.appendChild(dialogBtn);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(CH, "spicy");
+      dialogBtn.focus();
+
+      setNsfwAcknowledged(CH, false); // nsfw_ack from a second device
+      await settle();
+
+      expect(mockCreateNsfwGate).toHaveBeenCalledTimes(1);
+      expect(capturedNsfwOpts.value.focusOnMount).toBe(false);
+      expect(document.activeElement).toBe(dialogBtn);
+      ctrl.destroyChannel();
+      dialogBtn.remove();
+      opts.slots.messagesSlot.remove();
+    });
+
+    it("lets the gate take focus when the reader withdraws from the bar", async () => {
+      seedChannel(true, true);
+      const opts = consentOpts();
+      document.body.appendChild(opts.slots.messagesSlot);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(CH, "spicy");
+      const revokeBtn = document.createElement("button");
+      opts.slots.messagesSlot.appendChild(revokeBtn);
+      revokeBtn.focus();
+
+      await capturedBarOpts.value.onRevoke();
+      await settle();
+
+      expect(mockCreateNsfwGate).toHaveBeenCalledTimes(1);
+      expect(capturedNsfwOpts.value.focusOnMount).toBe(true);
+      ctrl.destroyChannel();
+      opts.slots.messagesSlot.remove();
+    });
+
     it("moves focus somewhere reachable after the reader declines", () => {
       seedChannel(true);
       const focusFallback = vi.fn(() => {

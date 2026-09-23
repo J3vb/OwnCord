@@ -46,6 +46,22 @@ describe("NsfwGate component", () => {
     gate.destroy?.();
   });
 
+  it("leaves focus where it is when mounted without focusOnMount", () => {
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+    const gate = createNsfwGate({
+      channelName: "spicy",
+      onAccept: () => Promise.resolve(),
+      onCancel: vi.fn(),
+      focusOnMount: false,
+    });
+    gate.mount(container);
+    expect(document.activeElement).toBe(outside);
+    gate.destroy?.();
+    outside.remove();
+  });
+
   it("keeps the gate busy until the server confirms, without dropping focus", async () => {
     let confirm!: () => void;
     const onAccept = vi.fn(() => new Promise<void>((r) => (confirm = r)));

@@ -29,12 +29,14 @@ export interface NsfwGateOptions {
   readonly onAccept: () => Promise<void>;
   /** The reader declined: leave the channel. */
   readonly onCancel: () => void;
+  /** Move focus to the gate's heading on mount (default true). */
+  readonly focusOnMount?: boolean;
 }
 
 let nextGateId = 0;
 
 export function createNsfwGate(options: NsfwGateOptions): MountableComponent {
-  const { channelName, onAccept, onCancel } = options;
+  const { channelName, onAccept, onCancel, focusOnMount = true } = options;
   const disposable = new Disposable();
   let root: HTMLElement | null = null;
 
@@ -129,7 +131,7 @@ export function createNsfwGate(options: NsfwGateOptions): MountableComponent {
     appendChildren(card, iconWrap, title, body, scope, error, actions);
     root.appendChild(card);
     container.appendChild(root);
-    title.focus();
+    if (focusOnMount) title.focus();
   }
 
   function destroy(): void {
