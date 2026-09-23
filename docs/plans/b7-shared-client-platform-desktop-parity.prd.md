@@ -569,4 +569,4 @@ already exists" list names the same artifacts:
 
 ---
 
-_Status: B7-0 to B7-17 complete and HP-7 signed. B7-18 reconciled on 2026-09-23. The phase exit is open on three items; see [B7-18 reconciliation](#b7-18-reconciliation-2026-09-23)._
+_Status: B7-0 to B7-17 complete and HP-7 signed. B7-18 reconciled on 2026-09-23. The phase exit is open on two items (the voice-join budget closed 2026-09-23); see [B7-18 reconciliation](#b7-18-reconciliation-2026-09-23)._
