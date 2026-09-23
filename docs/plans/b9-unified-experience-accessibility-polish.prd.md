@@ -40,10 +40,11 @@ connection banner, identity-key prompt) out of the startup catalog brought it to
 records the keyed sidebar reconciler (`Client/src/lib/reconcile.ts`), the
 measured before/after (a DM/unread change replaced every row at the base; only
 the changed row is rebuilt now), the vertical roving keyboard navigation, the
-long-list scroll/reflow fix and the failing controls. One budget decision is
-open: with `dev` `838bab09` merged this lane measures startup 94,486 B of the
-shared 95,000 B and MainPage 64,434 B — 434 B over the shared 64,000 B budget —
-escalated to firstmate; no earlier budget note is erased.
+long-list scroll/reflow fix and the failing controls. With `dev` `838bab09`
+merged this lane measures startup 94,506 B of the shared 95,000 B and MainPage
+64,449 B; firstmate raised the shared MainPage budget 64,000 -> 64,500 B
+(decision 014) with a dated note naming B9-21, keeping every earlier note,
+re-baseline at B9-26.
 **B9-7 implemented — native AT recordings pending owner — 2026-09-23**:
 [the plan's implementation record](../../.claude/plans/b9-7-nsfw-consent-gate.plan.md#implementation-record-2026-09-23) records the server-backed
 consent authority, the one pre-request admission point, the gate before composition, the alternate entry points and the zero pre-consent

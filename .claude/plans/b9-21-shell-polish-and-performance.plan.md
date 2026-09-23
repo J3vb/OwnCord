@@ -201,8 +201,9 @@ render path as a fallback; fail closed and record a blocker instead.
 No new owner decision is introduced by this milestone. The PRD's unresolved entry decisions still apply; stop if implementation would require a new product, UX or scope choice.
 
 One budget decision is open and escalated to firstmate (see the record below): the
-MainPage chunk measure exceeds the shared 64,000 B budget by 434 B after this
-lane; the raise is requested rather than erasing earlier notes.
+MainPage chunk measure exceeded the shared 64,000 B budget after this lane;
+firstmate raised it to 64,500 B (decision 014) with a dated note naming B9-21,
+keeping every earlier note. No open question remains.
 
 ## Implementation record — 2026-09-23
 
@@ -265,11 +266,11 @@ were edited.
   `overlays` (75 tests).
 - **Native AT (NVDA/Orca) recordings and OS-zoom checks are owner-run and remain
   pending**, consistent with the other B9 lanes.
-- **Bundle budgets:** startup closure 94,486 B of the shared 95,000 B;
-  MainPage 64,434 B — **434 B over** the shared 64,000 B budget. This lane adds
-  ~1.1 KB of MainPage (the reconciler and the keyed render paths, all startup
-  code). The raise is requested (see open budget decision); no earlier budget
-  note is erased.
+- **Bundle budgets:** startup closure 94,506 B of the shared 95,000 B;
+  MainPage 64,449 B. This lane adds ~1.1 KB of MainPage (the reconciler and the
+  keyed render paths, all startup code), taking it past the shared 64,000 B
+  budget; firstmate raised the budget to 64,500 B (decision 014) with a dated
+  note naming B9-21, keeping every earlier note, re-baseline at B9-26.
 
 ### Requirements and register
 
