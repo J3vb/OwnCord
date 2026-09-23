@@ -26,7 +26,7 @@ export function detachRoom(room: Room): void {
   appListeners.delete(room);
 }
 
-/** Discard a Room: drop its listeners, remove the devicechange listener its
+/** Discard a Room: drop the app's listeners (detachRoom), remove the devicechange listener its
  *  constructor put on navigator.mediaDevices, then disconnect it. livekit
  *  removes that listener only when a Room that has left "disconnected"
  *  disconnects, so a Room discarded before connect() would otherwise stay
