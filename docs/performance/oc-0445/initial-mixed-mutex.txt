@@ -1,0 +1,12 @@
+File: ws.test
+Build ID: 5256e4c9100c343b90320d69d969dc01047e4d53
+Type: delay
+Time: 2026-09-23 09:45:12 JST
+Showing nodes accounting for 13.44s, 99.89% of 13.46s total
+Dropped 335 nodes (cum <= 0.07s)
+      flat  flat%   sum%        cum   cum%
+    13.44s 99.89% 99.89%     13.44s 99.89%  sync.(*Mutex).Unlock
+         0     0% 99.89%     13.38s 99.46%  github.com/J3vb/OwnCord/Server/ws.BenchmarkOperationalBurst.func1.5
+         0     0% 99.89%     12.35s 91.80%  github.com/J3vb/OwnCord/Server/service.(*UploadService).Reserve (inline)
+         0     0% 99.89%     12.35s 91.80%  github.com/J3vb/OwnCord/Server/service.(*UploadService).reserve
+         0     0% 99.89%      1.01s  7.51%  github.com/J3vb/OwnCord/Server/service.(*UploadService).Record

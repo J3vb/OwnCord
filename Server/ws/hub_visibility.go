@@ -62,7 +62,7 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 	// events to the whole server. Resolve the DM's real audience (its
 	// participants, intersected with who is actually connected) instead,
 	// mirroring the IsDMParticipant membership rule hasChannelAccess uses.
-	var ref permissions.ChannelRef
+	ref := permissions.ChannelRef{ID: channelID}
 	if h.db != nil {
 		ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
 		if err != nil {
@@ -101,11 +101,20 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 	// Resolved per USER, not memoised per role: channel_user_overrides is the
 	// last layer of the resolution order, so two members of the same role can
 	// legitimately disagree about one channel and a per-role memo would hand
-	// one of them the other's verdict. The verdict is CanViewChannel over
-	// subjectFor (cached service or live checker); an unresolvable user is
-	// left out.
+	// one of them the other's verdict. Both paths use CanViewChannel; an
+	// unresolvable user is left out. The cached path asks only for visibility:
+	// Subject also resolves a live timeout, which CanViewChannel does not
+	// consult. Doing that for every recipient made voice churn compete with
+	// chat for thousands of needless database reads (OC-0445). Write/admission
+	// gates still use Subject.
 	audience := make([]int64, 0, len(userIDs))
 	for _, uid := range userIDs {
+		if h.perms != nil {
+			if h.perms.CanViewChannel(ctx, uid, ref) {
+				audience = append(audience, uid)
+			}
+			continue
+		}
 		sub, err := h.subjectFor(ctx, uid, channelID)
 		if err != nil {
 			continue

@@ -1,0 +1,11 @@
+goos: linux
+goarch: amd64
+pkg: github.com/J3vb/OwnCord/Server/ws
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkOperationalBurst/mixed-2         	       1	 189840230 ns/op	       166.9 ack-p95-ms	       174.4 ack-p99-ms	       167.7 delivery-p95-ms	       176.2 delivery-p99-ms	      5100 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2         	       1	 427643000 ns/op	       354.4 ack-p95-ms	       372.8 ack-p99-ms	       356.1 delivery-p95-ms	       377.0 delivery-p99-ms	      5100 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2         	       1	 156009546 ns/op	       129.7 ack-p95-ms	       135.0 ack-p99-ms	       130.2 delivery-p95-ms	       136.0 delivery-p99-ms	      5100 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2         	       1	 182262380 ns/op	       133.8 ack-p95-ms	       150.5 ack-p99-ms	       134.6 delivery-p95-ms	       151.4 delivery-p99-ms	      5100 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2         	       1	 167904559 ns/op	       141.1 ack-p95-ms	       144.5 ack-p99-ms	       141.5 delivery-p95-ms	       144.8 delivery-p99-ms	      5100 timeout-reads/op
+PASS
+ok  	github.com/J3vb/OwnCord/Server/ws	1.515s

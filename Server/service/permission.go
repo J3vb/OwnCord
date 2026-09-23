@@ -126,6 +126,28 @@ func (s *PermissionService) Subject(ctx context.Context, userID, channelID int64
 	return sub, nil
 }
 
+// CanViewChannel resolves only the inputs to the visibility predicate.
+// Timeouts restrict sending, reactions and voice admission, not visibility.
+// Calling Subject here would nevertheless query HasActiveTimeout once per
+// recipient of every voice broadcast (OC-0445). Role and override data use
+// the existing invalidation-aware cache; DM membership is still read live.
+// No partially resolved Subject escapes for a write gate to accidentally use.
+func (s *PermissionService) CanViewChannel(ctx context.Context, userID int64, ch permissions.ChannelRef) bool {
+	if ch.Type == "dm" {
+		member, err := s.st.IsDMParticipant(ctx, userID, ch.ID)
+		return err == nil && permissions.CanViewChannel(permissions.Subject{Channel: ch, DMParticipant: member}) == nil
+	}
+	cp, err := s.getOrPopulate(ctx, userID)
+	if err != nil || cp == nil {
+		return false
+	}
+	return permissions.CanViewChannel(permissions.Subject{
+		RolePerms: cp.rolePerms,
+		Override:  cp.overrides[ch.ID],
+		Channel:   ch,
+	}) == nil
+}
+
 // GetRoleForUser returns the user's role, using the cache when available.
 func (s *PermissionService) GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error) {
 	cp, err := s.getOrPopulate(ctx, userID)

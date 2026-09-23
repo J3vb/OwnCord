@@ -1,0 +1,23 @@
+File: ws.test
+Build ID: 3d1e0af8032a4119197f712e11077202505d5319
+Type: delay
+Time: 2026-09-23 09:52:15 JST
+Showing nodes accounting for 3978.55us, 100% of 3978.55us total
+Dropped 31 nodes (cum <= 19.89us)
+Showing top 15 nodes out of 36
+      flat  flat%   sum%        cum   cum%
+ 3896.33us 97.93% 97.93%  3896.33us 97.93%  runtime.unlock (partial-inline)
+         0     0% 97.93%  3704.56us 93.11%  runtime.systemstack
+         0     0% 97.93%  3687.64us 92.69%  runtime.gcBgMarkWorker
+         0     0% 97.93%  3687.64us 92.69%  runtime.gcMarkDone
+         0     0% 97.93%  3669.86us 92.24%  runtime.forEachP (inline)
+         0     0% 97.93%  3669.86us 92.24%  runtime.forEachPInternal
+         0     0% 97.93%  3626.19us 91.14%  runtime.gcMarkDone.forEachP.func5
+         0     0% 97.93%   146.10us  3.67%  runtime.schedule
+         0     0% 97.93%   144.65us  3.64%  runtime.findRunnable
+         0     0% 97.93%   140.47us  3.53%  runtime.goschedImpl
+         0     0% 97.93%   137.67us  3.46%  runtime.runSafePointFn
+         0     0% 97.93%   137.49us  3.46%  runtime.gopreempt_m (inline)
+         0     0% 97.93%    91.24us  2.29%  runtime.morestack
+         0     0% 97.93%    91.24us  2.29%  runtime.newstack
+   82.22us  2.07%   100%    82.22us  2.07%  runtime._LostContendedRuntimeLock

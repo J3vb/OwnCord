@@ -1,0 +1,26 @@
+goos: linux
+goarch: amd64
+pkg: github.com/J3vb/OwnCord/Server/ws
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkOperationalBurst/chat-2         	       1	 112086910 ns/op	       101.1 ack-p95-ms	       102.9 ack-p99-ms	       102.6 delivery-p95-ms	       104.9 delivery-p99-ms	       100.0 timeout-reads/op
+BenchmarkOperationalBurst/chat-2         	       1	 120661490 ns/op	       108.7 ack-p95-ms	       110.1 ack-p99-ms	       109.6 delivery-p95-ms	       111.3 delivery-p99-ms	       100.0 timeout-reads/op
+BenchmarkOperationalBurst/chat-2         	       1	  91802671 ns/op	        83.53 ack-p95-ms	        87.08 ack-p99-ms	        84.85 delivery-p95-ms	        88.69 delivery-p99-ms	       100.0 timeout-reads/op
+BenchmarkOperationalBurst/chat-2         	       1	  91846473 ns/op	        79.95 ack-p95-ms	        87.83 ack-p99-ms	        81.07 delivery-p95-ms	        87.05 delivery-p99-ms	       100.0 timeout-reads/op
+BenchmarkOperationalBurst/chat-2         	       1	  99228874 ns/op	        93.22 ack-p95-ms	        94.40 ack-p99-ms	        92.89 delivery-p95-ms	        95.37 delivery-p99-ms	       100.0 timeout-reads/op
+BenchmarkOperationalBurst/chat-2         	       1	  91255840 ns/op	        84.21 ack-p95-ms	        87.39 ack-p99-ms	        86.34 delivery-p95-ms	        89.04 delivery-p99-ms	       100.0 timeout-reads/op
+BenchmarkOperationalBurst/chat-2         	       1	 114214065 ns/op	        99.60 ack-p95-ms	       105.5 ack-p99-ms	       100.8 delivery-p95-ms	       105.4 delivery-p99-ms	       100.0 timeout-reads/op
+BenchmarkOperationalBurst/chat-2         	       1	 116528742 ns/op	       104.1 ack-p95-ms	       106.3 ack-p99-ms	       109.7 delivery-p95-ms	       112.8 delivery-p99-ms	       100.0 timeout-reads/op
+BenchmarkOperationalBurst/chat-2         	       1	  92196282 ns/op	        83.15 ack-p95-ms	        85.94 ack-p99-ms	        83.59 delivery-p95-ms	        86.81 delivery-p99-ms	       100.0 timeout-reads/op
+BenchmarkOperationalBurst/chat-2         	       1	 104039203 ns/op	        89.18 ack-p95-ms	        90.55 ack-p99-ms	        87.82 delivery-p95-ms	        92.03 delivery-p99-ms	       100.0 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2        	       1	 270764402 ns/op	       179.3 ack-p95-ms	       186.3 ack-p99-ms	       181.8 delivery-p95-ms	       200.9 delivery-p99-ms	      5100 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2        	       1	 251704999 ns/op	       221.6 ack-p95-ms	       228.5 ack-p99-ms	       222.8 delivery-p95-ms	       230.2 delivery-p99-ms	      5100 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2        	       1	 240634294 ns/op	       175.7 ack-p95-ms	       181.3 ack-p99-ms	       178.0 delivery-p95-ms	       189.3 delivery-p99-ms	      5100 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2        	       1	 246984441 ns/op	       206.4 ack-p95-ms	       207.1 ack-p99-ms	       215.7 delivery-p95-ms	       223.3 delivery-p99-ms	      5100 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2        	       1	 241767484 ns/op	       162.7 ack-p95-ms	       175.1 ack-p99-ms	       163.8 delivery-p95-ms	       178.8 delivery-p99-ms	      5100 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2        	       1	 232186044 ns/op	       143.0 ack-p95-ms	       148.8 ack-p99-ms	       144.8 delivery-p95-ms	       150.3 delivery-p99-ms	      5100 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2        	       1	 233288544 ns/op	       131.5 ack-p95-ms	       135.4 ack-p99-ms	       163.1 delivery-p95-ms	       169.3 delivery-p99-ms	      5100 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2        	       1	 223978086 ns/op	       188.7 ack-p95-ms	       192.2 ack-p99-ms	       208.6 delivery-p95-ms	       217.6 delivery-p99-ms	      5100 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2        	       1	 238970276 ns/op	       173.5 ack-p95-ms	       174.5 ack-p99-ms	       190.9 delivery-p95-ms	       194.4 delivery-p99-ms	      5100 timeout-reads/op
+BenchmarkOperationalBurst/mixed-2        	       1	 248999118 ns/op	       216.7 ack-p95-ms	       226.6 ack-p99-ms	       220.5 delivery-p95-ms	       229.9 delivery-p99-ms	      5100 timeout-reads/op
+PASS
+ok  	github.com/J3vb/OwnCord/Server/ws	4.920s

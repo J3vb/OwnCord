@@ -1,0 +1,23 @@
+File: ws.test
+Build ID: 567699790ead927b81ff16b49b894f999853b472
+Type: delay
+Time: 2026-09-23 09:51:16 JST
+Showing nodes accounting for 35.64s, 100% of 35.64s total
+Dropped 8 nodes (cum <= 0.18s)
+Showing top 15 nodes out of 19
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%     23.50s 65.94%  database/sql.(*DB).connectionOpener
+         0     0%     0%     23.50s 65.94%  database/sql.OpenDB.gowrap1
+    23.50s 65.94% 65.94%     23.50s 65.94%  runtime.selectgo
+    12.14s 34.06%   100%     12.14s 34.06%  runtime.chanrecv1
+         0     0%   100%     11.82s 33.18%  github.com/J3vb/OwnCord/Server/ws_test.TestMain (inline)
+         0     0%   100%     11.82s 33.18%  go.uber.org/goleak.VerifyTestMain
+         0     0%   100%     11.82s 33.18%  main.main
+         0     0%   100%     11.82s 33.18%  runtime.main
+         0     0%   100%     11.82s 33.18%  testing.(*M).Run
+         0     0%   100%     11.81s 33.15%  testing.(*B).Run
+         0     0%   100%     11.81s 33.15%  testing.(*B).runN
+         0     0%   100%     11.81s 33.15%  testing.runBenchmarks
+         0     0%   100%     11.81s 33.15%  testing.runBenchmarks.func1
+         0     0%   100%     11.72s 32.89%  testing.(*B).run
+         0     0%   100%     11.72s 32.89%  testing.(*benchState).processBench

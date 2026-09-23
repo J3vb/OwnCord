@@ -1,0 +1,9 @@
+goos: linux
+goarch: amd64
+pkg: github.com/J3vb/OwnCord/Server/ws
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkOperationalAudience-2   	   49077	     75290 ns/op	         0 timeout-reads/op	    7608 B/op	      97 allocs/op
+BenchmarkOperationalAudience-2   	   46437	     82365 ns/op	         0 timeout-reads/op	    7608 B/op	      97 allocs/op
+BenchmarkOperationalAudience-2   	   44659	     76371 ns/op	         0 timeout-reads/op	    7608 B/op	      97 allocs/op
+PASS
+ok  	github.com/J3vb/OwnCord/Server/ws	14.156s

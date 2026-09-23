@@ -1,0 +1,23 @@
+File: ws.test
+Build ID: 5256e4c9100c343b90320d69d969dc01047e4d53
+Type: delay
+Time: 2026-09-23 09:45:12 JST
+Showing nodes accounting for 60.69s, 97.01% of 62.56s total
+Dropped 228 nodes (cum <= 0.31s)
+Showing top 15 nodes out of 68
+      flat  flat%   sum%        cum   cum%
+    47.16s 75.39% 75.39%     47.16s 75.39%  runtime.selectgo
+         0     0% 75.39%     24.93s 39.85%  database/sql.(*DB).retry
+         0     0% 75.39%     24.89s 39.79%  database/sql.(*DB).conn
+         0     0% 75.39%     24.57s 39.28%  github.com/J3vb/OwnCord/Server/ws.BenchmarkOperationalBurst.func1.4
+         0     0% 75.39%     20.72s 33.12%  github.com/J3vb/OwnCord/Server/service.(*MessageService).SendMessage
+         0     0% 75.39%     20.72s 33.12%  github.com/J3vb/OwnCord/Server/ws.(*HandlerRegistry).DispatchV2
+         0     0% 75.39%     20.72s 33.12%  github.com/J3vb/OwnCord/Server/ws.(*Hub).handleMessage
+         0     0% 75.39%     20.72s 33.12%  github.com/J3vb/OwnCord/Server/ws.handleChatSendV2
+         0     0% 75.39%     20.49s 32.75%  github.com/J3vb/OwnCord/Server/ws.BenchmarkOperationalBurst.func1.3
+         0     0% 75.39%     13.69s 21.88%  github.com/J3vb/OwnCord/Server/ws.BenchmarkOperationalBurst.func1.5
+    13.53s 21.62% 97.01%     13.53s 21.62%  sync.(*Mutex).Lock (inline)
+         0     0% 97.01%     13.36s 21.35%  github.com/J3vb/OwnCord/Server/service.(*UploadService).Reserve (inline)
+         0     0% 97.01%     13.36s 21.35%  github.com/J3vb/OwnCord/Server/service.(*UploadService).reserve
+         0     0% 97.01%     11.41s 18.23%  database/sql.(*DB).BeginTx
+         0     0% 97.01%     11.41s 18.23%  database/sql.(*DB).BeginTx.func1

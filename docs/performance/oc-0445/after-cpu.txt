@@ -1,0 +1,10 @@
+File: ws.test
+Build ID: 3d1e0af8032a4119197f712e11077202505d5319
+Type: cpu
+Time: 2026-09-23 09:52:01 JST
+Duration: 14.12s, Total samples = 14.95s (105.88%)
+Active filters:
+   focus=HasActiveTimeout
+Showing nodes accounting for 0, 0% of 14.95s total
+      flat  flat%   sum%        cum   cum%
+Focus expression matched no samples
