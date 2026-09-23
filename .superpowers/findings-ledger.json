@@ -10432,7 +10432,7 @@
       "line": 81,
       "severity": "medium",
       "why": "With the shared limiter closed, PresenceSender retries once at limiter.getRemainingMs(), i.e. the end of the client's own 10s window measured from its send; the server's one-update-per-10s window is measured from receipt, slightly later, so the retry arrives early, is answered RATE_LIMITED and is never retried - the client shows (and saves) the new status while users.status and every other member keep the previous one.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-22",
       "hunt": "e2e-n14-native-extra",
       "lens": "run-the-thing",
@@ -10440,7 +10440,11 @@
       "repro": "Client/tests/e2e/native/native-extra.spec.ts test.fixme \"back-to-back status changes reach the server\" (tray picks dnd then offline within 10s, poll /admin/api/users).",
       "evidence": "Windows native CI run https://github.com/J3vb/OwnCord/actions/runs/35793973530 (tray test attempt 1: dnd stored, webview log \"[dispatcher] Server error {code: RATE_LIMITED}\" ~10s later, server still \"dnd\" after 25s).",
       "suggestedFix": "Re-arm the retry when a presence_update is answered RATE_LIMITED (or add slack past the server window) so the latest chosen status always reaches the server.",
-      "fix": null
+      "fix": {
+        "commit": "57ff16a1bf1e952790127c9d401cc455f486678d",
+        "test": "Client/tests/unit/presence-sender.test.ts",
+        "revertProof": "pass"
+      }
     }
   ]
 }

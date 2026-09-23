@@ -263,8 +263,8 @@ test("tray Status picks set the saved and server-side presence", async ({
   await expect(shown).toHaveText("Do Not Disturb");
   await expect.poll(() => storedStatus(nativeServer)).toBe("dnd");
 
-  // Later picks fall inside the server's one-update-per-10s budget, where
-  // delivery is the fixme below; here they are checked locally.
+  // Later picks fall inside the server's one-update-per-10s budget, so only
+  // the local UI is checked here; the test below covers server delivery.
   // "offline" is the tray's legacy spelling of invisible.
   await trayPick(page, "offline");
   await expect(shown).toHaveText("Invisible");
@@ -272,15 +272,11 @@ test("tray Status picks set the saved and server-side presence", async ({
   await expect(shown).toHaveText("Online");
 });
 
-// Product bug: with the rate limit closed, PresenceSender (lib/presence.ts)
-// retries once when its own 10s window ends. The server's window started when
-// it received the previous update, slightly later, so the retry lands early,
-// is answered RATE_LIMITED and is never retried: the server (and every other
-// member) keeps the previous status while this client shows the new one.
-test.fixme("back-to-back status changes reach the server", async ({
-  nativePage: page,
-  nativeServer,
-}) => {
+// OC-0451: with the rate limit closed, PresenceSender (lib/presence.ts) queues
+// the later change past the server's receipt-measured 10s window and re-arms
+// the retry when the server still answers RATE_LIMITED, so the last requested
+// status reaches the server. Reverting that fix must fail this test.
+test("back-to-back status changes reach the server", async ({ nativePage: page, nativeServer }) => {
   await ensureLoggedIn(page);
   await trayPick(page, "dnd");
   await expect.poll(() => storedStatus(nativeServer)).toBe("dnd");
