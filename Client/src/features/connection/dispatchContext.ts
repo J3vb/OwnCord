@@ -32,6 +32,8 @@ export type DispatchApi = Pick<ApiClient, "listBlocks"> &
       | "getMessages"
       | "getMessagesAround"
       | "listDmRequests"
+      | "decideDmRequest"
+      | "getDmChannels"
       | "getOwnModeration"
       | "getMyAppeals"
     >
