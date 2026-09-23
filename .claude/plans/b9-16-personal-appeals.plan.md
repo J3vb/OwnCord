@@ -277,7 +277,10 @@ At `2f59d93ad21bfd00ae34e1982d2f891e3ad86aa0` (`fm/b9-16-impl`), the tested
 client code: every command below ran on that content. The review fixes that
 followed (neutral withdraw-409 text, the appeal byte limit, the BANNED
 refusal's operator-contact guidance) are covered by the PR's CI at its final
-head.
+head. At that head, on dev `1d37c034`, the startup closure measures 91,812 B,
+which is over the old 91,000 B budget. The PR therefore takes the owner's
+shared B9 startup budget of 93,000 B (the same `bundle-budgets.json` line as
+#1764).
 
 | Check           | Command                                                                                                                                                                          | Result                                                                                         |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
