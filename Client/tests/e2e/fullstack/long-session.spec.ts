@@ -67,6 +67,11 @@ const EXPECTED_CONSOLE_ERRORS = [
   // LiveKit's signaling socket, dropped by the every-5th-cycle reconnect; the
   // message's own text, not a bare "reconnect" substring.
   /error reading from signal stream \{room: channel-\d+.*WS closed unexpectedly with code 100[06]/,
+  // livekit-client's own log of a receive-side key race at join (OC-0452).
+  // Anchored to its bare message: the app's judgement of it is the
+  // `[roomEventHandlers] LiveKit E2EE encryption error` line, which a race
+  // that persists still prints and this list does not excuse.
+  /^InvalidKey: Decryption failed: /,
 ];
 
 const test = base.extend<{ alice: Page }>({
