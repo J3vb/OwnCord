@@ -902,6 +902,30 @@ func (s *ModerationService) ListActionsForReport(ctx context.Context, reportID i
 	return rows, nil
 }
 
+// OwnModerationAction is one row of GET /api/v1/users/me/moderation.
+// Appealable applies Submit's own eligibility rules: an appealable kind
+// with no appeal filed against it yet.
+type OwnModerationAction struct {
+	db.OwnModerationAction
+	Appealable bool
+}
+
+// ListOwnActions is the caller's own restart-safe sanctions read (B9 Q6):
+// userID's own ledger rows, read from storage, with no permission bit —
+// the query is scoped to target_id = userID and selects no field a member
+// may not see.
+func (s *ModerationService) ListOwnActions(ctx context.Context, userID int64) ([]OwnModerationAction, error) {
+	rows, err := s.st.ListOwnModerationActions(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
+	}
+	out := make([]OwnModerationAction, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, OwnModerationAction{OwnModerationAction: r, Appealable: appealableKinds[r.Kind] && r.AppealID == nil})
+	}
+	return out, nil
+}
+
 // AcknowledgeWarning marks actionID acknowledged for userID — own rows
 // only (POST /api/v1/users/me/notices/{id}/ack, session auth). ErrNotFound
 // covers a foreign id, an already-acknowledged one, and a non-warning id

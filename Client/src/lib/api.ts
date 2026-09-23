@@ -98,6 +98,27 @@ export interface RecoveryKitStatus {
   readonly used_at: string | null;
 }
 
+/** One row of GET /users/me/moderation: the caller's own warning, timeout,
+ *  removal or (lapsed) ban, read from the server's ledger, so it survives a
+ *  restart. `id` is the `action_id` an appeal takes. Mirrors
+ *  Server/api/moderation_handler.go's ownModerationActionResponse. */
+export interface OwnModerationAction {
+  readonly id: number;
+  readonly kind: "warning" | "timeout" | "removal" | "ban";
+  readonly reason: string;
+  readonly created_at: string;
+  readonly expires_at: string | null;
+  readonly lifted_at: string | null;
+  readonly acknowledged_at: string | null;
+  /** An appealable kind with no appeal filed against it yet. */
+  readonly appealable: boolean;
+  /** The appeal filed against this row: its opaque public id and state. */
+  readonly appeal: {
+    readonly id: string;
+    readonly state: "open" | "assigned" | "upheld" | "overturned" | "withdrawn";
+  } | null;
+}
+
 interface SessionsListResponse {
   readonly sessions: SessionInfo[];
 }
@@ -426,6 +447,10 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     getRecoveryKitStatus(signal?: AbortSignal): Promise<RecoveryKitStatus> {
       return request<RecoveryKitStatus>("GET", "/users/me/recovery-kit", undefined, signal);
+    },
+
+    getOwnModeration(signal?: AbortSignal): Promise<OwnModerationAction[]> {
+      return request<OwnModerationAction[]>("GET", "/users/me/moderation", undefined, signal);
     },
 
     getSessions(signal?: AbortSignal): Promise<SessionInfo[]> {
