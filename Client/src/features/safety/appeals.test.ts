@@ -324,6 +324,9 @@ describe("tracking appeals", () => {
       (b) => b.closest("li")!.dataset["testid"],
     );
     expect(withdrawable).toEqual(["safety-appeal-O", "safety-appeal-S", "safety-appeal-E"]);
+    q<HTMLButtonElement>(pane, "[data-testid='safety-appeal-E'] .safety-appeal-withdraw").click();
+    expect(panelOf(pane).textContent).toContain("no longer exists");
+    expect(panelOf(pane).textContent).not.toContain("No reason was given.");
     ac.abort();
   });
 
@@ -365,14 +368,14 @@ describe("tracking appeals", () => {
     ac.abort();
   });
 
-  it("says a decided appeal can no longer be withdrawn", async () => {
+  it("says a closed appeal can no longer be withdrawn", async () => {
     const { pane, ac, api } = await mount([], [appeal({ id: "O" })]);
     api.withdrawAppeal.mockRejectedValueOnce(new ApiClientError(409, "CONFLICT", "x"));
     q<HTMLButtonElement>(pane, ".safety-appeal-withdraw").click();
     api.getMyAppeals.mockClear();
     primaryOf(pane).click();
     await flush();
-    expect(errorOf(pane).textContent).toBe("This appeal was already decided.");
+    expect(errorOf(pane).textContent).toBe("This appeal can no longer be withdrawn.");
     expect(api.getMyAppeals).toHaveBeenCalledTimes(1);
     ac.abort();
   });

@@ -39,6 +39,10 @@ function kindText(kind: MyAppeal["action_kind"]): string {
   return t(`kind.${kind}`);
 }
 
+function reasonText(reason: string): string {
+  return reason === "" ? t("notice.noReason") : t("notice.reason", { reason });
+}
+
 /**
  * Replace `list`'s children, keeping focus on the control with the same
  * data-focus-key when one had it, else on `fallback`.
@@ -175,7 +179,7 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
     setPending(false);
     showError("");
     setText(panelTitle, title);
-    setText(panelReason, reason === "" ? t("notice.noReason") : t("notice.reason", { reason }));
+    setText(panelReason, reason);
     const filing = next.mode === "file";
     fields.hidden = !filing;
     warning.hidden = filing;
@@ -243,7 +247,7 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
       const known = err instanceof ApiClientError && (err.status === 404 || err.status === 409);
       showError(
         known
-          ? at(err.status === 404 ? "withdraw.gone" : "withdraw.decided")
+          ? at(err.status === 404 ? "withdraw.gone" : "withdraw.closed")
           : at("withdraw.failed"),
       );
       if (known) refreshOwnModeration();
@@ -269,23 +273,14 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
       "data-testid": `safety-appeal-${a.id}`,
     });
     const erased = a.action_kind === "";
+    const reason = erased ? at("appeals.erased") : reasonText(a.action_reason);
     const head = createElement("p", { class: "safety-history-head" });
     head.append(
       createElement("strong", {}, kindText(a.action_kind)),
       erased ? "" : ` · ${formatWhen(a.action_created_at)}`,
     );
     li.appendChild(head);
-    li.appendChild(
-      createElement(
-        "p",
-        { class: "safety-history-reason" },
-        erased
-          ? at("appeals.erased")
-          : a.action_reason === ""
-            ? t("notice.noReason")
-            : t("notice.reason", { reason: a.action_reason }),
-      ),
-    );
+    li.appendChild(createElement("p", { class: "safety-history-reason" }, reason));
     const parts = [
       // i18n-exempt: a catalog key built from the wire state
       at("appeals.state", { state: t(`appeal.${a.state}`) }),
@@ -328,7 +323,7 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
           show(
             { mode: "withdraw", appealId: a.id, opener },
             at("withdraw.title", { kind: kindText(a.action_kind), date }),
-            erased ? "" : a.action_reason,
+            reason,
           );
         },
         { signal },
@@ -382,7 +377,7 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
           show(
             { mode: "file", actionId: row.id, opener },
             at("form.title", { kind, date }),
-            row.reason,
+            reasonText(row.reason),
           );
         },
         { signal },

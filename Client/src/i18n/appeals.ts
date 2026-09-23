@@ -45,6 +45,6 @@ export const appealsText = defineCatalog("appeals", {
   "withdraw.keep": "Keep appeal",
   "withdraw.done": "Appeal withdrawn.",
   "withdraw.failed": "Your appeal wasn't withdrawn. Try again.",
-  "withdraw.decided": "This appeal was already decided.",
+  "withdraw.closed": "This appeal can no longer be withdrawn.",
   "withdraw.gone": "This appeal no longer exists.",
 });
