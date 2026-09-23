@@ -10,6 +10,8 @@ import type {
   NativeVoiceDevices,
   NativeVoiceEnvelope,
   NativeVoiceResources,
+  NativeVoiceScreenSources,
+  NativeVoiceScreenStarted,
 } from "../contracts/nativeVoice";
 
 export const NATIVE_VOICE_EVENT = "native-voice";
@@ -24,10 +26,20 @@ export const nativeVoice: NativeVoice = {
     invoke<void>("native_voice_set_microphone", { session, enabled }),
   setSubscribed: (session, identity, sid, subscribed) =>
     invoke<void>("native_voice_set_subscribed", { session, identity, sid, subscribed }),
+  setVolume: (session, identity, volume) =>
+    invoke<void>("native_voice_set_volume", { session, identity, volume }),
+  setScreenshareVolume: (session, identity, volume) =>
+    invoke<void>("native_voice_set_screenshare_volume", { session, identity, volume }),
   publishCamera: (session, options) =>
     invoke<string>("native_voice_publish_camera", { session, options }),
   unpublishCamera: (session, sid) =>
     invoke<void>("native_voice_unpublish_camera", { session, sid }),
+  screenSources: () => invoke<NativeVoiceScreenSources>("native_voice_screen_sources"),
+  startScreen: (session, source, capture) =>
+    invoke<NativeVoiceScreenStarted>("native_voice_start_screen", { session, source, capture }),
+  publishScreen: (session, capture, options) =>
+    invoke<string>("native_voice_publish_screen", { session, capture, options }),
+  stopScreen: (session, capture) => invoke<void>("native_voice_stop_screen", { session, capture }),
   debugInfo: () => invoke<NativeVoiceResources>("native_voice_debug_info"),
   listDevices: () => invoke<NativeVoiceDevices>("native_voice_list_devices"),
   setDevice: (session, kind, deviceId) =>

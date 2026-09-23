@@ -1399,8 +1399,10 @@ jobs:
       # nine spec files were dead coverage. They reuse the binary built above
       # (native-no-auth drives the real connect page and auth flows;
       # native-authenticated logs in once and exercises layout, channel nav,
-      # chat, DMs, settings, appearance and overlays). The persistent fixture
-      # needs the LiveKit binary the same way native-core does.
+      # chat, DMs, settings, appearance and overlays; native-extra covers
+      # window state, tray status, reload/DevTools keys, external links and
+      # push-to-talk). The persistent fixture needs the LiveKit binary the same
+      # way native-core does.
       # Own output paths: Playwright clears its output directory and the
       # reporters overwrite theirs when a run starts, so sharing native-core's
       # would erase the core diagnostics before they are uploaded.
@@ -1413,6 +1415,7 @@ jobs:
         run: >-
           npx playwright test --config playwright.config.native.ts
           --project native-no-auth --project native-authenticated
+          --project native-extra
           --output test-results/native-suites
       - name: Preserve native core and suite diagnostics before building installers
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
