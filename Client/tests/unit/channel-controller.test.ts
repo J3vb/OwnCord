@@ -2127,6 +2127,48 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
+    it("closes the content overlays when the mounted channel falls behind the gate", async () => {
+      seedChannel(true, true);
+      const onContentGated = vi.fn();
+      const ctrl = createChannelController({ ...consentOpts(), onContentGated });
+      ctrl.mountChannel(CH, "spicy");
+
+      setNsfwAcknowledged(CH, false); // revoked on another device
+      await settle();
+      expect(onContentGated).toHaveBeenCalledTimes(1);
+
+      setNsfwAcknowledged(CH, true); // consenting again opens, nothing to close
+      await settle();
+      expect(onContentGated).toHaveBeenCalledTimes(1);
+
+      updateChannel({ id: CH, nsfw: false });
+      await settle();
+      expect(onContentGated).toHaveBeenCalledTimes(1);
+
+      updateChannel({ id: CH, nsfw: true }); // labelled while in view
+      await settle();
+      expect(onContentGated).toHaveBeenCalledTimes(2);
+      ctrl.destroyChannel();
+    });
+
+    it("drops the withdraw bar when the label is removed from a consented channel", async () => {
+      seedChannel(true, true);
+      const opts = consentOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(CH, "spicy");
+      expect(mockConsentBarMount).toHaveBeenCalledTimes(1);
+
+      updateChannel({ id: CH, nsfw: false });
+      await settle();
+
+      expect(mockConsentBarDestroy).toHaveBeenCalledTimes(1);
+      expect(mockConsentBarMount).toHaveBeenCalledTimes(1);
+      expect(mockCreateNsfwGate).not.toHaveBeenCalled();
+      expect(mockMessageListMount).toHaveBeenLastCalledWith(opts.slots.messagesSlot);
+      expect(ctrl.currentChannelId).toBe(CH);
+      ctrl.destroyChannel();
+    });
+
     it("destroys an unaccepted gate when the channel unmounts", () => {
       seedChannel(true);
       const ctrl = createChannelController(consentOpts());

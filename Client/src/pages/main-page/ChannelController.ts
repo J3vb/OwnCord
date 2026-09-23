@@ -76,6 +76,9 @@ export interface ChannelControllerOptions {
   };
   readonly chatHeaderName: HTMLSpanElement | null;
   readonly chatHeaderRefs: ChatHeaderRefs | null;
+  /** Close every overlay showing channel content (pins, search, lightbox)
+   *  when the mounted channel falls behind the NSFW gate. */
+  readonly onContentGated?: () => void;
 }
 
 export interface ChannelController {
@@ -114,6 +117,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     slots,
     chatHeaderName,
     chatHeaderRefs,
+    onContentGated,
   } = opts;
 
   let currentChannelId: number | null = null;
@@ -541,12 +545,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // reconnect's ready — remounts the channel on the other side of the gate.
     composerGatingUnsubs.push(
       channelsStore.subscribeSelector(
-        (s) => nsfwConsentRequired(s.channels.get(channelId)),
-        () => {
+        (s) => {
+          const ch = s.channels.get(channelId);
+          if (ch?.nsfw !== true) return "none";
+          return nsfwConsentRequired(ch) ? "gated" : "consented";
+        },
+        (state) => {
           if (currentChannelId !== channelId) return;
           const name = channelsStore.getState().channels.get(channelId)?.name ?? channelName;
           destroyChannel();
           mountChannel(channelId, name, channelType);
+          if (state === "gated") onContentGated?.();
         },
       ),
     );

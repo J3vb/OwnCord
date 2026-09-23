@@ -841,6 +841,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       chatHeaderName: chatAreaResult.chatHeaderName,
       chatHeaderRefs: chatAreaResult.chatHeaderRefs,
+      onContentGated: () => {
+        chatAreaResult.closeOverlays();
+        closeActiveLightbox();
+      },
     });
 
     // Wire voice error callback to toast

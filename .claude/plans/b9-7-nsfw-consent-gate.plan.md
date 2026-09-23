@@ -215,7 +215,8 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
 - **Alternate entry points.** The pins panel does not open behind the gate,
   search behind it offers only server-wide search (the server already omits
   unacknowledged channels there), and a jump into a gated channel defers to the
-  gate without a toast. The global embed/media caches are URL-keyed and only
+  gate without a toast. When the mounted channel falls behind the gate, the
+  pins panel, the search overlay and the image lightbox close. The global embed/media caches are URL-keyed and only
   read while rendering a consented row, so they are not cleared.
 - **Files beyond the table:** `stores/messages.store.ts` and
   `features/messaging/historyWindows.ts` (the scoped scrub), the two loaders in
@@ -226,7 +227,7 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
 
 ### Evidence
 
-Implementation on base `166d71e4`; Node 26.9.0, vitest 4.1.11, Playwright
+Implementation `bca39fe4822052cc73094df74b6ed81e75c04e5d` on base `166d71e4`; Node 26.9.0, vitest 4.1.11, Playwright
 1.63.0 Chromium, Linux.
 
 | Check                                                                                                                                                                                                    | Result                                                                      |

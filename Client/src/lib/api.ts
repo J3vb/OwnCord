@@ -878,8 +878,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         position?: number;
         archived?: boolean;
         /**
-         * Age-restriction label. Stored, broadcast and audited by the server,
-         * which applies no content behaviour of its own to a flagged channel.
+         * Age-restriction label. The server withholds a labelled channel's
+         * content from anyone who has not acknowledged it (B5-7); clearing
+         * the label drops every acknowledgement.
          */
         nsfw?: boolean;
         /**

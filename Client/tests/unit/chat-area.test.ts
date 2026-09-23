@@ -312,6 +312,15 @@ describe("createChatArea", () => {
     expect(mockSearchCleanup).toHaveBeenCalledTimes(1);
   });
 
+  it("closeOverlays closes the pinned panel and the search overlay", () => {
+    const result = createChatArea(makeOptions());
+
+    result.closeOverlays();
+
+    expect(mockPinnedCleanup).toHaveBeenCalledTimes(1);
+    expect(mockSearchCleanup).toHaveBeenCalledTimes(1);
+  });
+
   it("registers a global message-jump handler and unregisters it on cleanup", () => {
     // Drop any handler an earlier test in this file left installed.
     setMessageJumpHandler(() => {})();
