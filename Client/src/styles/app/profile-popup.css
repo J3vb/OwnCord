@@ -157,7 +157,7 @@
   border: none;
   border-radius: var(--radius-sm);
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-family: inherit;
   font-size: var(--font-size-sm);
   font-weight: 500;

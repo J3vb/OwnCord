@@ -120,7 +120,7 @@
   flex-shrink: 0;
 }
 .status-picker-dot:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 /* In the user bar the dot sits on the avatar corner, not inline next to
@@ -147,7 +147,7 @@
 /* Rows are tabindex="0" menuitems, not buttons, so they need their own
    focus ring instead of relying on native button focus styling. */
 .status-picker-option:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 .status-picker-option-dot {
@@ -161,6 +161,6 @@
 }
 .status-picker-option-check {
   display: flex;
-  color: var(--accent);
+  color: var(--accent-text);
   flex-shrink: 0;
 }

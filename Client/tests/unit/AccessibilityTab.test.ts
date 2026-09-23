@@ -51,6 +51,8 @@ describe("AccessibilityTab — reduced-motion arbitration (OC-0232)", () => {
     });
 
     localStorage.clear();
+    // Start with "Sync with OS" off (its default is on) so the test turns it on.
+    localStorage.setItem("owncord:settings:syncOsMotion", "false");
     document.documentElement.classList.remove("reduced-motion");
 
     controller = new AbortController();

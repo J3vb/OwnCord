@@ -13,10 +13,16 @@ body.theme-neon-glow {
   /* Accent — defaults to OC cyan, but accent picker overrides --accent
      so --accent-primary and --accent-gradient follow the user's choice */
   --accent: #00c8ff;
-  --accent-hover: #7b2fff;
-  --accent-active: #6620e0;
+  /* Hover/active are derived the way applyAccent() derives them (B9-2, Q8):
+     cyan takes near-black text, so they step toward white to keep it >= 4.5:1.
+     The brand purple stays the gradient's second stop. */
+  --accent-hover: #26d0ff;
+  --accent-active: #4dd9ff;
+  --on-accent: #000000;
+  --accent-text: #00c8ff;
+  --focus-ring: #00c8ff;
   --accent-primary: var(--accent);
-  --accent-secondary: var(--accent-hover);
+  --accent-secondary: #7b2fff;
   --accent-gradient: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
 
   /* Border glow — derived from accent for consistency */
@@ -24,8 +30,8 @@ body.theme-neon-glow {
   --border-strong: rgba(0, 200, 255, 0.15);
   --border-glow: rgba(0, 200, 255, 0.08);
 
-  /* Text link — follows accent */
-  --text-link: var(--accent);
+  /* Text link — follows the accent's readable text role */
+  --text-link: var(--accent-text);
 
   /* Semantic colors (theme contract) */
   --color-success: #23a55a;

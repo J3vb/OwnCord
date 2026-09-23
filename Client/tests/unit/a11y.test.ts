@@ -238,6 +238,43 @@ describe("focusDialog", () => {
     expect(document.activeElement).not.toBe(outside);
   });
 
+  it("focuses the fallback when the opener is gone by close time", () => {
+    const opener = document.createElement("button");
+    const fallback = document.createElement("button");
+    container.append(opener, fallback);
+    opener.focus();
+
+    const dialog = document.createElement("div");
+    applyDialogSemantics(dialog);
+    container.appendChild(dialog);
+    const restore = focusDialog(dialog, () => fallback);
+
+    opener.remove(); // e.g. the dialog deleted the row that opened it
+    dialog.remove();
+    restore();
+    expect(document.activeElement).toBe(fallback);
+  });
+
+  it("prefers a still-connected opener over the fallback, and ignores a detached fallback", () => {
+    const opener = document.createElement("button");
+    const fallback = document.createElement("button");
+    container.append(opener, fallback);
+    opener.focus();
+
+    const dialog = document.createElement("div");
+    applyDialogSemantics(dialog);
+    container.appendChild(dialog);
+    focusDialog(dialog, () => fallback)();
+    expect(document.activeElement).toBe(opener);
+
+    const detached = document.createElement("button");
+    fallback.focus();
+    const restore = focusDialog(dialog, () => detached);
+    fallback.remove();
+    restore();
+    expect(document.activeElement).not.toBe(detached);
+  });
+
   it("skips a display:none control that is earlier in DOM order than the first visible one", () => {
     // A hidden field (e.g. a group-name input revealed only after a
     // selection) sits first in DOM order. Browsers refuse to focus a

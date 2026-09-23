@@ -631,6 +631,7 @@ function buildVoiceAudioTabInner(
     const isOn = loadPref<boolean>(item.key, item.fallback);
     const toggle = createToggle(isOn, {
       signal,
+      label: item.label,
       onChange: (nowOn) => {
         savePref(item.key, nowOn);
         // Reapply audio processing constraints to the live mic track

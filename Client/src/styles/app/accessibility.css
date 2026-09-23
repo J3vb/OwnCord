@@ -17,6 +17,24 @@
   --text-muted: #cccccc !important;
   --bg-active: rgba(255, 255, 255, 0.15) !important;
 }
+/* High Contrast restores each theme's tested accent text and focus colours,
+   overriding a custom accent's inline values (B9-2, owner decision Q8). */
+.high-contrast body {
+  --accent-text: #949cf7 !important;
+  --focus-ring: #949cf7 !important;
+}
+.high-contrast body.theme-neon-glow {
+  --accent-text: #00c8ff !important;
+  --focus-ring: #00c8ff !important;
+}
+/* Light surfaces need dark text: the white above would be invisible. */
+.high-contrast body.theme-light {
+  --text-normal: #000000 !important;
+  --text-muted: #2e3035 !important;
+  --bg-active: rgba(0, 0, 0, 0.15) !important;
+  --accent-text: #4752c4 !important;
+  --focus-ring: #4752c4 !important;
+}
 
 /* Accessibility: large font — no CSS rule here on purpose. --font-size is
    written as an inline style on documentElement, which outranks any class

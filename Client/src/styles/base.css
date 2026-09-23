@@ -40,12 +40,17 @@ button {
   color: inherit;
 }
 
-/* Restore focus ring for keyboard nav; mouse clicks stay clean */
+/* Restore focus ring for keyboard nav; mouse clicks stay clean. Links and
+   script-focusable widgets (role="switch" toggles, radio swatches, roving
+   cells) get the same ring; tabindex="-1" containers such as a dialog taking
+   initial focus do not. --focus-ring is >= 3:1 on every theme (B9-2). */
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--accent);
+select:focus-visible,
+a[href]:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
