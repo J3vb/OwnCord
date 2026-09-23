@@ -91,7 +91,10 @@ from _XRead`, both arches, intermittent). libwebrtc's audio device module
 - Harness fixes the runners exposed: Git Bash's GNU `tar` read `D:\...` as a
   remote host (`install-livekit.mjs` now names `System32\tar.exe`); WMI's
   process query outlasted its budget on `windows-11-arm` (`killInstalled` now
-  kills by image name); the Linux driver's `press()` always sent Escape.
+  kills by image name); the Linux driver's `press()` always sent Escape; and
+  a Linux WebDriver click could land mid-animation (the settings panel scales
+  in), so `click()` now waits for finite animations to settle, as Playwright
+  does on Windows.
 
 ## Summary
 
