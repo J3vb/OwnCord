@@ -238,7 +238,10 @@ moved (through the Refined Neon tokens, #1764). The server contract is on
 ### Evidence
 
 Node 26.9.0, vitest 4.1.11, Playwright 1.63.0 Chromium, Linux, head
-`0cc53ab6` (pre-squash; the PR's CI run is the exact-SHA record).
+`0cc53ab6` (pre-squash; the PR's CI run is the exact-SHA record). The
+removal focus moved from the next request's Accept to its row after that
+head; the unit, mocked and fullstack assertions for the row (and its focus
+ring) are recorded by the PR's CI run, not by the counts below.
 
 | Check                                                                                                                                                                                               | Result                                   |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
@@ -287,8 +290,8 @@ the `GET /dms` fallback existed.
   `dialog` named by its heading, with Cancel focused first. No stranger
   content beyond the B9-5 text reaches the tree. **NVDA and Orca recordings
   are owner-run and pending.**
-- **Focus:** every decision and confirm button's ring meets Q1 (2px, 3:1;
-  e2e `focusIndicator`); Tab stays inside the confirm; removal moves focus to
+- **Focus:** every decision and confirm button's ring, and the request
+  row's ring after a removal, meets Q1 (2px, 3:1; e2e `focusIndicator`); Tab stays inside the confirm; removal moves focus to
   the next request's row or the heading (unit and e2e); Accept lands on the
   conversation's composer (fullstack).
 - **Contrast:** button labels, the help line, the outcome, the in-row error
