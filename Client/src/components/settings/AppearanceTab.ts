@@ -5,7 +5,7 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, applyTheme, THEMES, createToggle } from "./helpers";
 import type { ThemeName } from "./helpers";
-import { getActiveThemeName, restoreTheme } from "@lib/themes";
+import { applyAccent, getActiveThemeName, restoreTheme } from "@lib/themes";
 import {
   applyFontSize,
   effectiveFontSize,
@@ -113,6 +113,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const compactLabel = createElement("span", { class: "setting-label" }, "Compact Mode");
   const compactToggle = createToggle(currentCompact, {
     signal,
+    label: "Compact Mode",
     onChange: (isNowCompact) => {
       savePref("compactMode", isNowCompact);
       document.documentElement.classList.toggle("compact-mode", isNowCompact);
@@ -137,14 +138,6 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
   const currentAccent = loadPref<string>("accentColor", defaultAccent);
 
-  // oxlint-disable-next-line consistent-function-scoping -- co-located with saveAccent for readability
-  function applyAccent(color: string): void {
-    // Set on both documentElement and body so the accent wins over
-    // theme class specificity (body.theme-neon-glow sets --accent)
-    document.documentElement.style.setProperty("--accent", color);
-    document.body.style.setProperty("--accent", color);
-  }
-
   function saveAccent(color: string): void {
     hasStoredAccent = true;
     savePref("accentColor", color);
@@ -164,7 +157,15 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     placeholder: defaultAccent.replace("#", ""),
     value: currentAccent.replace("#", ""),
     style: "width:120px",
+    "aria-label": "Custom accent color (hex)",
+    "aria-describedby": "accent-contrast-note",
   });
+  // Owner decision Q8 (B9-2): disclose the readable-colour fallback.
+  const accentNote = createElement(
+    "p",
+    { class: "setting-desc", id: "accent-contrast-note" },
+    "Custom colours may reduce readability; text and focus indicators fall back to a readable colour when needed, and High Contrast restores tested colours.",
+  );
 
   function syncDisplayedAccent(color: string): void {
     for (const child of swatchesRow.children) {
@@ -224,7 +225,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   );
 
   appendChildren(hexInputRow, hexPrefix, hexInput);
-  appendChildren(section, accentHeader, swatchesRow, hexInputRow);
+  appendChildren(section, accentHeader, swatchesRow, hexInputRow, accentNote);
 
   // Apply stored preferences on render
   if (currentTheme === null) {

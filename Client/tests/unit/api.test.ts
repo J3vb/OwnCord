@@ -525,6 +525,26 @@ describe("API Client", () => {
       expect(fetchCallOpts().method).toBe("GET");
     });
 
+    it("getOwnModeration GETs /users/me/moderation", async () => {
+      const body = [
+        {
+          id: 42,
+          kind: "timeout",
+          reason: "cool off",
+          created_at: "2026-09-23 10:00:00",
+          expires_at: "2026-09-23 11:00:00",
+          lifted_at: null,
+          acknowledged_at: null,
+          appealable: true,
+          appeal: null,
+        },
+      ];
+      mockFetch.mockResolvedValue(jsonResponse(body));
+      await expect(api.getOwnModeration()).resolves.toEqual(body);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/moderation");
+      expect(fetchCallOpts().method).toBe("GET");
+    });
+
     it("regenerateRecoveryCodes POSTs the password to /users/me/totp/recovery-codes", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ backup_codes: ["AAAAA-BBBBB"] }));
       await expect(api.regenerateRecoveryCodes("pw")).resolves.toEqual({

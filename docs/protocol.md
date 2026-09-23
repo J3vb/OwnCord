@@ -1136,7 +1136,9 @@ immediately rather than only on their next `GET`.
 B5-9: a warning issued, a timeout applied, or a timeout lifted, delivered
 ONLY to the live target — targeted and unsequenced, never replayed. A
 disconnected target simply sees the warning in `ready`'s `notices` on next
-connect, or feels the timeout on their next attempted send.
+connect; every own warning, timeout, removal and lapsed or reversed ban,
+with its ledger id, is readable over REST at `GET /api/v1/users/me/moderation` (see
+[api.md](api.md)).
 
 ```json
 {
@@ -1176,54 +1178,6 @@ A disconnected appellant simply sees the current state on their next
 `id` is the appeal's opaque public id. `state` is one of `assigned`,
 `upheld`, `overturned`, `withdrawn`. `decision_note` is `null` until the
 appeal is decided.
-
-### ready's notices
-
-`ready`'s payload carries a `notices` array: every warning issued to the
-connecting user that they have not yet acknowledged.
-
-```json
-{
-  "notices": [
-    {
-      "id": 42,
-      "kind": "warning",
-      "reason": "at most 500 runes, no control characters",
-      "created_at": "2026-09-05T10:00:00Z"
-    }
-  ]
-}
-```
-
-Acknowledge one with `POST /api/v1/users/me/notices/{id}/ack` (see
-[api.md](api.md)) — own rows only. An acknowledged warning never reappears
-here.
-
----
-
-## Moderator Actions
-
-### mod_action (Server -> Client)
-
-B5-9: a warning issued, a timeout applied, or a timeout lifted, delivered
-ONLY to the live target — targeted and unsequenced, never replayed. A
-disconnected target simply sees the warning in `ready`'s `notices` on next
-connect, or feels the timeout on their next attempted send.
-
-```json
-{
-  "type": "mod_action",
-  "payload": {
-    "id": 42,
-    "kind": "timeout",
-    "reason": "at most 500 runes, no control characters",
-    "expires_at": "2026-09-06T12:00:00Z"
-  }
-}
-```
-
-`kind` is `warning` or `timeout`. `expires_at` is `null` for a warning and
-for a lifted timeout; present for an active timeout.
 
 ### ready's notices
 

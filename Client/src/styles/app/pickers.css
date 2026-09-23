@@ -1,0 +1,224 @@
+/* ── Emoji Picker ── */
+.emoji-picker {
+  position: absolute;
+  z-index: 200;
+  bottom: 100%;
+  right: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  width: 320px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  display: none;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.emoji-picker.open {
+  display: block;
+}
+
+/* Mention autocomplete — anchored above the composer, same shell as the pickers */
+.mention-autocomplete {
+  position: absolute;
+  z-index: 200;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.mention-autocomplete .ma-list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.ma-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.ma-item--active,
+.ma-item:hover {
+  background: var(--bg-modifier-hover);
+}
+.ma-item .ma-name {
+  color: var(--text-normal);
+  font-weight: 500;
+}
+.ma-item .ma-detail {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The `:shortcode` popup shows what it is about to insert, so a row reads as
+   the emoji rather than as its name. Fixed width keeps the labels aligned
+   whether the preview is a glyph or a custom-emoji image. */
+.emoji-autocomplete .ea-preview {
+  width: 20px;
+  min-width: 20px;
+  font-size: 18px;
+  line-height: 1;
+  text-align: center;
+}
+.emoji-autocomplete .ea-preview .custom-emoji {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  vertical-align: middle;
+  margin: 0;
+}
+/* A custom emoji in the picker grid fills its cell like a glyph would. */
+.ep-emoji-custom .custom-emoji {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  vertical-align: middle;
+  margin: 0;
+}
+.ep-header {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.ep-search {
+  width: 100%;
+  background: var(--bg-tertiary);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text-normal);
+  font-size: 13px;
+}
+.ep-search::placeholder {
+  color: var(--text-micro);
+}
+.ep-category-label {
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ep-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  padding: 4px 8px 8px;
+}
+.ep-emoji {
+  width: 100%;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  transition: background 0.1s;
+}
+.ep-emoji:hover {
+  background: var(--bg-hover);
+}
+
+/* ── GIF Picker ── */
+.gif-picker {
+  position: absolute;
+  z-index: 200;
+  bottom: 100%;
+  right: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  width: 320px;
+  height: 400px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  display: none;
+  overflow: hidden;
+  margin-bottom: 4px;
+  flex-direction: column;
+}
+.gif-picker.open {
+  display: flex;
+}
+.gp-header {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.gp-search {
+  width: 100%;
+  background: var(--bg-tertiary);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text-normal);
+  font-size: 13px;
+}
+.gp-search::placeholder {
+  color: var(--text-micro);
+}
+.gp-attribution {
+  font-size: 10px;
+  color: var(--text-micro);
+  padding: 4px 0 0;
+  text-align: center;
+}
+.gp-grid-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+.gp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.gp-item {
+  position: relative;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  transition: transform 0.1s;
+}
+.gp-item:hover {
+  transform: scale(1.03);
+}
+.klipy-watermark {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  height: 18px;
+  width: auto;
+  pointer-events: none;
+  opacity: 0.9;
+}
+.gp-img {
+  width: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  min-height: 80px;
+  background: var(--bg-tertiary);
+}
+.gp-loading {
+  padding: 48px 0;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+.gp-empty {
+  padding: 48px 0;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 13px;
+}

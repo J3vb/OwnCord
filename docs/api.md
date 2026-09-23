@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 170 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 171 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -177,6 +177,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/uploads`                                                    |
 | PATCH   | `/api/v1/users/me/`                                                  |
 | POST    | `/api/v1/users/me/avatar`                                            |
+| GET     | `/api/v1/users/me/moderation`                                        |
 | POST    | `/api/v1/users/me/notices/{id}/ack`                                  |
 | PUT     | `/api/v1/users/me/password`                                          |
 | GET     | `/api/v1/users/me/recovery-kit`                                      |
@@ -796,7 +797,7 @@ Broadcasts a `user_update` on success, exactly like the PATCH above.
 The bytes are stored as an ordinary attachment with no channel, and
 `users.avatar` is set to `/api/v1/files/{id}`. That URL is what makes the
 picture readable: `GET /api/v1/files/{id}` normally serves an unlinked
-attachment only to its uploader, and additionally admits one that some user's
+attachment only to its uploader (administrators included), and additionally admits one that some user's
 avatar currently points at — so an avatar is readable by every authenticated
 user for exactly as long as it is in use, and stops being readable the moment
 it is replaced.
@@ -2243,6 +2244,23 @@ report's REPORTER may read it (their own filing, already visible via
 `GET /api/v1/reports/mine`), but `notes` is always `[]` for them — internal
 notes never reach the person who filed the report.
 
+The evidence snapshot is content from the report's source channel
+(`channel_id`), so it follows that channel's NSFW consent (B5-7, decision
+13): while the channel is labelled, `evidence` is `[]` and
+`evidence_withheld` is `NSFW_ACKNOWLEDGEMENT_REQUIRED` unless the caller
+has acknowledged it themselves (`PUT /api/v1/channels/{id}/nsfw-acknowledgement`)
+— no bit, `ADMINISTRATOR` included, bypasses this. Label and
+acknowledgement are read on every request, so a revoke, an unlabel and
+relabel, or a label added after filing applies to the next read. When the
+source channel has been deleted, the snapshot stays readable only if that
+channel was never labelled while the report existed (`reports.source_nsfw`,
+migration 052). Otherwise, including when that is unknown, `evidence` is
+`[]` and `evidence_withheld` is `SOURCE_CHANNEL_UNAVAILABLE`. `evidence_withheld` is omitted when the
+snapshot is returned. Files the snapshot references are served by
+`GET /api/v1/files/{id}` under that route's own channel and consent checks.
+Once the source channel is deleted the file is unlinked, and that route
+serves it only to its uploader — `ADMINISTRATOR` included.
+
 ---
 
 ### POST /api/v1/moderation/queue/{id}/assign
@@ -2512,10 +2530,70 @@ Acknowledge a warning — own rows only. `{id}` is the ledger row id from
 
 ---
 
+### GET /api/v1/users/me/moderation
+
+The caller's own sanctions, read from the ledger, so they survive a restart
+that live `mod_action` frames and `ready.notices` do not cover: every
+`warning`, `timeout`, `removal` and `ban` row that another moderator applied
+to the caller, newest first. Kicks are left out because nothing persists to
+appeal. Self-targeted rows are left out too: a moderator's own channel purge
+is recorded against the moderator but is not a sanction against them. A `ban` row can
+only reach a caller whose ban has lapsed or been reversed, since a currently
+banned caller cannot authenticate. A currently banned user still appeals out
+of band, as [Appeals](#appeals) describes. Rows leave this list when the
+retention sweep retires them (`moderation.action_retention_days`).
+**Auth:** Required (session). Rate-limited: 30 per minute per IP.
+
+#### Response 200 OK
+
+```json
+[
+  {
+    "id": 42,
+    "kind": "timeout",
+    "reason": "cool off",
+    "created_at": "2026-09-23 10:00:00",
+    "expires_at": "2026-09-23 11:00:00",
+    "lifted_at": null,
+    "acknowledged_at": null,
+    "appealable": true,
+    "appeal": null
+  },
+  {
+    "id": 17,
+    "kind": "warning",
+    "reason": "be nice",
+    "created_at": "2026-09-20 09:12:44",
+    "expires_at": null,
+    "lifted_at": null,
+    "acknowledged_at": "2026-09-20 09:30:01",
+    "appealable": false,
+    "appeal": { "id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9", "state": "open" }
+  }
+]
+```
+
+`id` is the ledger id that [`POST /api/v1/appeals`](#post-apiv1appeals) takes
+as `action_id` and that the acknowledgement route above takes. `appealable`
+follows the rules the appeal route itself applies: an appealable kind with no
+appeal filed against it yet, in any state. `appeal` is the appeal filed
+against this row (its opaque public id and state), or `null`. The response
+never includes the acting moderator, who lifted the action, the linked
+report, evidence, or moderator notes.
+
+#### Errors
+
+| Status | Code           | Cause                       |
+| ------ | -------------- | --------------------------- |
+| 429    | `RATE_LIMITED` | more than 30 reads a minute |
+
+---
+
 ## Appeals
 
 Rate-limited appeals against a moderation action (BPR-073, plan decision 8).
-`action_id` is the moderator-action ledger's own id (`GET
+`action_id` is the moderator-action ledger's own id (the caller's own `GET
+/api/v1/users/me/moderation` row `id`, `GET
 /api/v1/moderation/users/{id}/actions`'s `id`, or the `id` a live
 `mod_action` frame or a `ready` notice already carried to the target) — not
 an opaque public id; only reports and appeals carry one of those.

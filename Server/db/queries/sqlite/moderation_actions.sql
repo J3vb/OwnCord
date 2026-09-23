@@ -121,3 +121,21 @@ SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
 DELETE FROM moderation_actions
  WHERE (kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < sqlc.arg(cutoff))
     OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < sqlc.arg(cutoff));
+
+-- name: ListOwnModerationActions :many
+-- GET /api/v1/users/me/moderation (B9 Q6): the caller's own warning,
+-- timeout, removal and ban rows with their appeal, newest first. Member-safe
+-- by construction -- no actor, lifted_by, report link or appeal body is
+-- selected. Kicks are left out (nothing persists to appeal). A ban row can
+-- only reach a caller whose ban has lapsed or been reversed, because
+-- AuthMiddleware refuses a currently banned one. appeals.action_id is
+-- UNIQUE, so the join adds at most one row per action. Self-targeted rows
+-- (a moderator's own channel purge) are not sanctions and are left out; a
+-- row whose actor was erased (NULL) is kept.
+SELECT m.id, m.kind, m.reason, m.created_at, m.expires_at, m.lifted_at,
+       m.acknowledged_at, a.public_id AS appeal_id, a.state AS appeal_state
+  FROM moderation_actions m
+  LEFT JOIN appeals a ON a.action_id = m.id
+ WHERE m.target_id = ? AND m.kind IN ('warning', 'timeout', 'removal', 'ban')
+   AND m.actor_id IS NOT m.target_id
+ ORDER BY m.created_at DESC, m.id DESC;

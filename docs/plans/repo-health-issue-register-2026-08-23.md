@@ -74,13 +74,16 @@ together as if each row were a unique defect:
 
 ## Canonical findings-ledger truth
 
+Current summary: this table tracks the live ledger, independently of dated
+baselines and scorecards.
+
 | Status    |   Count |
 | --------- | ------: |
-| Fixed     |     445 |
+| Fixed     |     446 |
 | Open      |       1 |
 | Declined  |       4 |
 | Duplicate |       1 |
-| **Total** | **451** |
+| **Total** | **452** |
 
 As of 2026-09-23, `OC-0446` and `OC-0447` (the k6 channel-spreading and
 restart-measurement harness fixes) and `OC-0448` (release tags moved only after

@@ -1,0 +1,166 @@
+/* ── User Bar ── */
+.user-bar {
+  height: 52px;
+  background: rgba(17, 18, 20, 0.6);
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.user-bar .ub-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-circle);
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  color: white;
+  cursor: pointer;
+}
+/* The status picker's own trigger dot now lives here instead of a separate
+   static dot — same corner, but it's the real thing: colored per status and
+   clickable to open the picker. Sizing/border override lives with the rest
+   of the status-picker rules below. */
+.user-bar .ub-status-picker-wrap {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+}
+/* UserBar.ts toggles this whenever canSetStatus() is false (socket down, or
+   no ws send path at all) -- without it the dot, dropdown options and
+   custom-status input all stay fully interactive, so anything picked or
+   typed while disconnected is silently dropped instead of refused. */
+.user-bar .ub-status-picker-wrap.ub-status-picker--disabled {
+  pointer-events: none;
+  opacity: 0.5;
+}
+.user-bar .ub-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.user-bar .ub-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+.user-bar .ub-status {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+.user-bar .ub-controls {
+  display: flex;
+  gap: 2px;
+}
+.user-bar .ub-controls button {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: all 0.1s;
+}
+.user-bar .ub-controls button:hover {
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+.user-bar .ub-controls button.active-ctrl {
+  color: var(--red);
+}
+
+/* Status picker: the root is the inline anchor (trigger dot lives here and
+   must always be visible); the popup chrome + its display:none/open toggle
+   belong on the dropdown child, which is what StatusPicker.ts actually
+   toggles (status-picker-dropdown--open). This block used to be a verbatim
+   holdover from the pre-component popup and hid the whole picker. */
+.status-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.status-picker-dropdown {
+  position: absolute;
+  bottom: 60px;
+  left: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  display: none;
+  min-width: 160px;
+}
+.status-picker-dropdown--open {
+  display: block;
+}
+/* Trigger dot: only inline style is `background` (StatusPicker.ts), so the
+   size has to live here or the dot collapses to 0x0 and becomes both
+   invisible and unclickable. */
+.status-picker-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-circle);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.status-picker-dot:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+/* In the user bar the dot sits on the avatar corner, not inline next to
+   text — bigger, with a ring so it reads against any avatar picture. */
+.user-bar .status-picker-dot {
+  width: 12px;
+  height: 12px;
+  border: 3px solid rgba(17, 18, 20, 0.6);
+}
+.status-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-normal);
+  transition: background 0.1s ease;
+}
+.status-picker-option:hover {
+  background: var(--bg-hover);
+}
+/* Rows are tabindex="0" menuitems, not buttons, so they need their own
+   focus ring instead of relying on native button focus styling. */
+.status-picker-option:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.status-picker-option-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-circle);
+  flex-shrink: 0;
+}
+.status-picker-option-label {
+  flex: 1;
+}
+.status-picker-option-check {
+  display: flex;
+  color: var(--accent-text);
+  flex-shrink: 0;
+}

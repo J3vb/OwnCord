@@ -320,6 +320,7 @@ type Report struct {
 	CreatedAt     string  `json:"createdAt"`
 	UpdatedAt     string  `json:"updatedAt"`
 	ClosedAt      *string `json:"closedAt"`
+	SourceNsfw    *int64  `json:"sourceNsfw"`
 }
 
 type ReportEvent struct {

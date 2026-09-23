@@ -149,4 +149,14 @@ describe("vad-worklet.js VadProcessor timing (128-sample render quanta @48kHz)",
     expect(periodMs).toBeGreaterThan(35);
     expect(periodMs).toBeLessThan(65);
   });
+
+  it("acknowledges stop from its final process() call", () => {
+    // audioPipeline.ts closes the AudioContext on this acknowledgement.
+    const proc = freshUngatedProcessor();
+    postMessageMock(proc).mockClear();
+    proc.port.onmessage({ data: { type: "stop" } });
+
+    expect(proc.process([[frame(LOUD)]])).toBe(false);
+    expect(postMessageMock(proc)).toHaveBeenCalledWith({ type: "stopped" });
+  });
 });

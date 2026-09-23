@@ -1979,8 +1979,9 @@ the plan named were all real, and the socket one had no test bearing on it.
   filter: `EmitEvents` routes them through B5-6's sender-aware audience first,
   which the pre-existing interface-ordering tests pin.
 - **Path 3, attachments.** `AttachmentAccess` carries the channel's label;
-  `UploadService.Authorize` runs DM participation → channel visibility →
-  **consent → the administrator early return** → unlinked ownership, so a
+  `UploadService.Authorize` runs DM participation → channel visibility
+  (administrators exempt) → unlinked ownership (administrators included) →
+  **consent**, so a
   non-member learns nothing from the label
   (`TestUploadAuthorize_NonMemberGetsTheSameRefusalLabelledOrNot`) and an
   administrator acknowledges like anyone else — decision 13
@@ -2943,6 +2944,45 @@ audit implements none of them, and it does not judge B5-10's unfinished work.
   and attachment retrieval through the real service/HTTP paths, with
   authorized and refused cases. This is the existing server-side consent
   contract and must close before the B9 interface is built.
+
+  **Evidence, 2026-09-23 — ready for owner acceptance, not accepted.**
+  `ReportService.Get` (`Server/service/report.go`, `evidenceWithheld`), the
+  only read of the snapshot, applies decision 13 to it: a labelled source
+  channel's evidence reaches a caller only with their own acknowledgement,
+  with no bit or administrator bypass, and label and acknowledgement are
+  read on every request. After the source channel is deleted, migration
+  `052_report_source_nsfw` decides: its sticky `reports.source_nsfw` is set
+  from the label at filing and by any later labelling (two triggers, never
+  cleared), and the snapshot stays readable only when it records that the
+  channel was never labelled — labelled or unknown (a pre-052 report whose
+  channel was already gone) is withheld. A withheld response carries
+  `evidence: []` and `evidence_withheld` (`NSFW_ACKNOWLEDGEMENT_REQUIRED` or
+  `SOURCE_CHANNEL_UNAVAILABLE`, documented in `docs/api.md`). Snapshot files
+  are served only through `GET /api/v1/files/{id}`, whose
+  `UploadService.Authorize` gate applies the same consent to a linked file;
+  once the source channel is deleted the file is unlinked and served only to
+  its uploader, with no administrator bypass (the deletion subtest reads it
+  as a moderator and as an administrator).
+  `Server/api/moderation_evidence_consent_test.go` drives both reads over
+  HTTP — the queue detail for the text, the file route for the attachment —
+  for message and attachment reports, with consent changed through the real
+  acknowledge/revoke routes and `ChannelService`'s relabel and delete:
+  refused before acknowledgement, authorized after, refused again after
+  revocation (`TestModerationEvidence_AcknowledgeAndRevoke`); per-moderator
+  consent (`TestModerationEvidence_ConsentIsPerModerator`); no administrator
+  bypass (`TestModerationEvidence_AdministratorHasNoBypass`); unlabel,
+  relabel, and a label added after filing
+  (`TestModerationEvidence_SourceChannelRelabelling`); deletion of a
+  labelled, an ordinary, a once-labelled and an unknown-label source channel
+  (`TestModerationEvidence_SourceChannelDeletion`); and an unlabelled control
+  (`TestModerationEvidence_UnlabelledSourceNeedsNoAcknowledgement`).
+  `Server/db/report_source_nsfw_test.go` pins 052's backfill and the
+  triggers' stickiness, and `052_report_source_nsfw.down.sql` joins the
+  rehearsed reversals. Revert-proof: skipping the gate, ignoring the
+  acknowledgement, reading a deleted channel's flag as always or never
+  labelled, and dropping either trigger each turn the matching tests red.
+  Security-review status stays in the private review trail.
+
 - **Condition 6 — B5-11 follow-up:** prove that current device-subscription
   consent and current block state govern every queued/retried delivery.
   Revoke a subscription and apply a block between attempts; assert that

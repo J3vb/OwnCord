@@ -10,7 +10,13 @@
 // layout: cycles 5/15/25 are the mid-session series, cycles 10/20/30 the
 // post-logout series.
 import { describe, expect, it } from "vitest";
-import { evaluateBars, formatBars, type LifecycleSample } from "../e2e/support/lifecycle-probe";
+import {
+  evaluateBars,
+  formatBars,
+  idleHeapSlope,
+  IDLE_HEAP_BAR_SLOPE,
+  type LifecycleSample,
+} from "../e2e/support/lifecycle-probe";
 
 function sample(cycle: number, overrides: Partial<LifecycleSample> = {}): LifecycleSample {
   return {
@@ -125,6 +131,59 @@ describe("lifecycle soak pass bars", () => {
     expect(bar(evaluateBars(worse, { listeners: 0.2 }), "listeners").pass).toBe(false);
   });
 
+  it("fails a leak confined to one page (B7-11c's within-page pair)", () => {
+    // Every page grows the same way and the re-login releases it, so each
+    // phase series is flat; only the page-6/9 pair sees it.
+    const perPage = [
+      sample(5),
+      sample(6, { listeners: 50 }),
+      sample(9, { listeners: 53 }),
+      sample(10),
+      sample(15),
+      sample(16, { listeners: 50 }),
+      sample(19, { listeners: 53 }),
+      sample(20),
+    ];
+    const listeners = bar(evaluateBars(perPage), "listeners");
+    expect(listeners.pass).toBe(false);
+    expect(listeners.bar).toContain("page 0: 50→53");
+    // A phase-series ceiling never loosens the within-page bar.
+    expect(bar(evaluateBars(perPage, { listeners: 2 }), "listeners").pass).toBe(false);
+  });
+
+  it("leaves the samples at the 5-cycle marks (reconnect, logout) out of the page pair", () => {
+    const bars = evaluateBars([
+      sample(5, { nodes: 101 }),
+      sample(6),
+      sample(9),
+      sample(10, { nodes: 90 }),
+      sample(15, { nodes: 101 }),
+      sample(16),
+      sample(19),
+      sample(20, { nodes: 90 }),
+    ]);
+    expect(bar(bars, "nodes").pass).toBe(true);
+  });
+
+  it("compares heap only at the post-reconnect and post-logout phases", () => {
+    const bars = evaluateBars([
+      sample(5),
+      sample(9, { heapUsed: 1_000_000 }),
+      sample(10),
+      sample(15),
+      sample(19, { heapUsed: 1_500_000 }),
+      sample(20),
+    ]);
+    expect(bar(bars, "heapUsed").pass).toBe(true);
+    const grown = evaluateBars([
+      sample(5, { heapUsed: 1_000_000 }),
+      sample(10),
+      sample(15, { heapUsed: 1_500_000 }),
+      sample(20),
+    ]);
+    expect(bar(grown, "heapUsed").pass).toBe(false);
+  });
+
   it("returns nothing when there is no sample", () => {
     expect(evaluateBars([])).toEqual([]);
     expect(evaluateBars([sample(5)])).toEqual([]);
@@ -135,5 +194,28 @@ describe("lifecycle soak pass bars", () => {
     expect(report.split("\n")[0]).toMatch(/metric \| warm \| final \| slope \| bar \| pass/);
     expect(report).toContain("listeners");
     expect(report).toContain("heapUsed");
+  });
+});
+
+describe("idle heap bar", () => {
+  const idle = (minute: number, heapUsed: number, cycle = -1) =>
+    sample(cycle, { cycleAt: minute * 60_000, heapUsed });
+
+  it("measures the heap slope per minute over the settled idle samples only", () => {
+    const samples = [
+      sample(200, { heapUsed: 50_000_000 }),
+      idle(5, 40_000_000, -2),
+      idle(15, 1_000_000),
+      idle(20, 1_500_000),
+      idle(25, 2_000_000),
+    ];
+    expect(idleHeapSlope(samples)).toBeCloseTo(100_000);
+  });
+
+  it("fails a poller that retains 1 MB a minute and passes a flat idle heap", () => {
+    const leaking = [idle(15, 0), idle(20, 5_000_000), idle(25, 10_000_000)];
+    expect(idleHeapSlope(leaking)).toBeGreaterThan(IDLE_HEAP_BAR_SLOPE);
+    const flat = [idle(15, 4_330_328), idle(20, 4_330_400), idle(25, 4_330_416)];
+    expect(idleHeapSlope(flat)).toBeLessThanOrEqual(IDLE_HEAP_BAR_SLOPE);
   });
 });

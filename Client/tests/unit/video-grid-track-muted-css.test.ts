@@ -7,13 +7,12 @@
 // hide a stalled remote camera's last frame. If app.css has no rule for that
 // class, the toggle is a no-op and the viewer keeps seeing a frozen frame
 // with no indication the track stalled.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readAppCss } from "../helpers/app-css";
 import { describe, it, expect } from "vitest";
 
 describe("VideoGrid track-muted CSS", () => {
   it("app.css hides the video element while .video-cell.track-muted is active", () => {
-    const css = readFileSync(join(process.cwd(), "src/styles/app.css"), "utf8");
+    const css = readAppCss();
 
     // Look for a rule targeting the video (or the cell itself) scoped under
     // .video-cell.track-muted -- accept either ordering / whitespace.
