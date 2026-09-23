@@ -1,6 +1,6 @@
 # B9 — Unified feature experience, accessibility and polish
 
-**Status:** DRAFT — 2026-09-23. Implementation is limited to the Q9 foundation lane (B9-0 → B9-3); B9-0 and B9-1 are done, and B9-2 is implemented.
+**Status:** DRAFT — 2026-09-23. Implementation is limited to the Q9 foundation lane (B9-0 → B9-3); B9-0 and B9-1 are done, and B9-2 and B9-3 are implemented.
 **Entry gate: NOT MET.** This document is not permission to bypass it.
 **Owner decisions:** Q1–Q12 decided 2026-09-23 ([Open questions](#open-questions)). The Q9
 amendment lets the serialized foundation lane B9-0 → B9-3 start now; B9-4 onward keeps the gate order.
@@ -12,6 +12,9 @@ unchanged at merge base `3c7dd486`) and before/after evidence.
 **B9-2 implemented — native AT recordings and owner visual acceptance pending — 2026-09-23**:
 [b9-shared-a11y-evidence-2026-09-23.md](b9-shared-a11y-evidence-2026-09-23.md) records the Q1/Q8 token matrix, the shared-controls
 fixture and the keyboard, motion and reflow checks; [b9-ui-contract.md](../architecture/b9-ui-contract.md) is the usage contract.
+**B9-3 implemented — native AT recordings and OS-zoom check pending owner — 2026-09-23**:
+[b9-text-inventory-2026-09-23.md](b9-text-inventory-2026-09-23.md) records the text seam, the 1,409-literal inventory with owners, the
+Q7 native/server boundary, the exclusions and the English and expansion checks; `Client/scripts/check-ui-strings.mjs` is the shrink-only gate.
 
 > **Drafted:** 2026-09-23. **Planning branch:** `docs/b9-unified-experience-plan`.
 > **Exact base:** `0beee8e4c50ca18823750e381d3a1d6e327029b8`, checked-out `dev`.
@@ -186,7 +189,7 @@ every smaller number. All product rows additionally depend on the entry gate.
 | [B9-0](../../.claude/plans/b9-0-entry-evidence-and-decisions.plan.md)    | Verify entry evidence and settle the execution contract                 | Entry evidence preparation only                                                                                                  | entry; 8, 10        | Done                                                        |
 | [B9-1](../../.claude/plans/b9-1-css-source-split.plan.md)                | Split app.css without changing its output                               | B9-0                                                                                                                             | 11                  | Complete — native AT recordings pending owner               |
 | [B9-2](../../.claude/plans/b9-2-shared-accessibility-and-tokens.plan.md) | Apply the agreed shared accessibility and token rules                   | B9-1                                                                                                                             | 7, 8                | Implemented — native AT and visual acceptance pending owner |
-| [B9-3](../../.claude/plans/b9-3-english-text-boundary.plan.md)           | Introduce the English text and formatting boundary                      | B9-2                                                                                                                             | 6                   | Pending                                                     |
+| [B9-3](../../.claude/plans/b9-3-english-text-boundary.plan.md)           | Introduce the English text and formatting boundary                      | B9-2                                                                                                                             | 6                   | Implemented — native AT and OS zoom pending owner           |
 | [B9-4](../../.claude/plans/b9-4-shared-navigation.plan.md)               | Add the agreed shared navigation integration points                     | B9-3                                                                                                                             | 7, 8                | Pending                                                     |
 | [B9-5](../../.claude/plans/b9-5-message-requests-inbox.plan.md)          | Show the Message Requests inbox and safe text preview                   | B9-4                                                                                                                             | 1, 8                | Pending                                                     |
 | [B9-6](../../.claude/plans/b9-6-message-request-decisions.plan.md)       | Accept, ignore, delete or block a Message Request                       | B9-5                                                                                                                             | 1, 8                | Pending                                                     |

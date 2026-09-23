@@ -1,6 +1,6 @@
 # Plan: B9-3 — Introduce the English text and formatting boundary
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings and OS-zoom check pending owner — 2026-09-23 on branch `fm/b9-3-impl` from `dev` `4830b23c`; inventory and evidence in `docs/plans/b9-text-inventory-2026-09-23.md`.
 
 > **Milestone:** B9-3 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `refactor/b9-3-english-text-boundary`; branch from current `dev`, PR to `dev` only.
@@ -37,6 +37,37 @@ at the actual implementation base; record drift before coding.
 | 1   | Accessibility labels and descriptions are literal English values in toggle definitions.                                         | `Client/src/components/settings/AccessibilityTab.ts:10-64`                                                |
 | 2   | Counts and dynamic status text are assembled in UI code.                                                                        | `Client/src/pages/main-page/SidebarDmSection.ts:130-133`; `Client/src/components/UpdateNotifier.ts:20-26` |
 | 3   | The UI toolkit has a dedicated setText call path, which extraction must preserve rather than replacing with HTML interpolation. | `Client/src/components/NsfwGate.ts:56-68`; `Client/src/components/message-list/embeds.ts:157-164`         |
+
+### Drift at the implementation base (2026-09-23)
+
+Re-read at `4830b23cd96c6ca3874054e214104b3869e3b359`. `git diff 0beee8e4 4830b23c`
+over the three rows' files changes only `AccessibilityTab.ts`: B9-2 replaced
+two `false` defaults with `SYNC_OS_MOTION_DEFAULT` (three lines, no copy). Every
+cited line range still holds. The inventory itself is larger than three rows:
+1,409 unextracted literals in 114 files, owned B9-18 (381), B9-19 (407) and
+B9-20 (621); detail in the inventory document.
+
+### Implementation decisions and file-table amendments
+
+- **Baseline keyed by file and text, not line.** A line-keyed baseline breaks on
+  every unrelated edit above a literal, in every lane. The scan reports the line
+  of each failure; the per-file owner stands in for the reason, and
+  `// i18n-exempt: <reason>` carries a per-literal reason. Same shape as B7-11's
+  lifecycle allowlists.
+- **Formatting locale `en-US`** (`TEXT_LOCALE`), the language of the catalogs.
+  Today's call sites use the host locale, `en-US` and `en-GB`; the owning
+  extraction records any visible change when it moves them.
+- **The pilot catalog is `src/i18n/settings.ts`**, keyed `accessibility.*`; B9-20
+  extends it rather than creating it.
+- **Expansion is test-only.** `setTextTransformForTesting(expandText)` is called
+  by unit tests and, in the e2e spec, through the dev server's module graph; the
+  app ships no switch.
+
+| File                                                                         | Why                                                                  |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `Client/scripts/ui-strings-baseline.json` (new)                              | The shrink-only baseline the scan compares against                   |
+| `Client/scripts/check-ui-strings.d.mts` (new)                                | Types so the unit test can drive the scanner directly                |
+| `Client/tests/e2e/b9-text-expansion.spec.ts` (new; B9-18 plans to extend it) | The journey's English and expanded checks at 940×500 with 20 px text |
 
 ## Patterns to mirror
 
