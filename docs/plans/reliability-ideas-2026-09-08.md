@@ -209,10 +209,14 @@ Implemented 2026-09-23 against `dev` at
   unsupported platform, a failed read, a first rate sample, or a job or backup
   that has not run yet. It neither raises nor clears a warning.
 - Thresholds come from the new `attention.*` config floors and
-  `server.min_free_disk_mb`. Each rate learns a baseline over ten samples and
-  raises nothing meanwhile. After that it raises at the floor or three times
-  the baseline, and learns only from healthy samples. Hysteresis: a level must
-  hold for two samples; a rate clears below half its threshold, disk 10% above
+  `server.min_free_disk_mb`. Each rate learns a baseline over ten samples,
+  skipping the first measured minute (the post-restart resume burst). During
+  warm-up reconnects raise nothing, while writer wait and delivery raise at
+  the floor and learn only samples at or below it, so pressure present at boot
+  is raised, not learned. After that each rate raises at the floor or three
+  times the baseline, and learns only from healthy samples. Hysteresis: the
+  first measured level commits at once, and every later change must hold for
+  two samples; a rate clears below half its threshold, disk 10% above
   its floor. A job warns after two consecutive failures and clears on one
   success. Backups warn at 1.5× the schedule interval and go critical at 3×.
 - Warnings are deduplicated per signal and record first and last observation,
@@ -221,7 +225,7 @@ Implemented 2026-09-23 against `dev` at
   admin API; nothing is exported to telemetry. Limit: a restart forgets
   recovered history, though the next samples re-raise any active condition.
 - Tests: `Server/service/attention_test.go` covers unknown handling, first
-  samples, hysteresis, warm-up, baseline, deduplication, expiry, dispatch,
+  samples, hysteresis, warm-up, boot pressure, baseline, deduplication, expiry, dispatch,
   jobs and backups. The route has `Server/admin/handlers_attention_test.go`,
   the maintenance recording has `TestMaintenance_TickRecordsJobHealth`, and the
   panel has `Client/tests/contract/server-admin-static-attention.test.ts`.

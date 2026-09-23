@@ -32,13 +32,16 @@ const AttentionInterval = time.Minute
 
 const (
 	// attentionSustain is how many consecutive samples a new disk or rate
-	// level must repeat before it is committed, so one noisy minute neither
-	// raises nor clears a warning.
+	// level must repeat before it is committed (the first measured level
+	// commits at once), so one noisy minute neither raises nor clears a
+	// warning.
 	attentionSustain = 2
 	// Rate signals learn a baseline (an exponentially weighted mean of their
-	// healthy samples) and raise at the configured floor or
-	// attentionBaselineFactor times that baseline, whichever is higher, once
-	// attentionBaselineWarmup samples have been folded in.
+	// healthy samples, skipping the first measured interval) and raise at the
+	// configured floor or attentionBaselineFactor times that baseline,
+	// whichever is higher, once attentionBaselineWarmup samples have been
+	// folded in. Until then reconnects raise nothing and the other rates
+	// raise at the floor, learning only samples at or below it.
 	attentionBaselineFactor = 3.0
 	attentionBaselineAlpha  = 0.1
 	attentionBaselineWarmup = 10
@@ -276,8 +279,9 @@ func (s *AttentionService) Evaluate(ctx context.Context, now time.Time) {
 	})
 	s.evalRate(&s.reconnects, r.reconnects, now, rateSpec{
 		id: "reconnects", label: "Client reconnects", unit: "/min", floor: s.thresholds.ReconnectsPerMin,
-		title:  "Clients are reconnecting more than usual",
-		action: "Check network, reverse-proxy and TLS stability, and Server Logs for disconnect causes.",
+		title:       "Clients are reconnecting more than usual",
+		action:      "Check network, reverse-proxy and TLS stability, and Server Logs for disconnect causes.",
+		quietWarmup: true,
 	})
 	s.evalRate(&s.delivery, r.deliveryDrops, now, rateSpec{
 		id: "delivery", label: "Delivery pressure", unit: "/min", floor: s.thresholds.DeliveryDropsPerMin,

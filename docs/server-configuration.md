@@ -244,11 +244,15 @@ unlinking — is never pruned; only its content is bounded.
 ### Admin attention panel (`attention`)
 
 Warning floors for the Dashboard's attention panel (RI-07). The server samples
-each signal once a minute; a disk or rate level must hold for two samples to
-raise or clear, a raised rate clears only below half its threshold, and a
-disk warning clears only 10% above its floor. Each rate first learns a
-baseline over ten samples (raising nothing meanwhile) and then raises at this
-floor or three times that baseline, whichever is higher. Critical disk is
+each signal once a minute. The first measured level shows at once; after
+that a disk or rate level must hold for two samples to raise or clear, a
+raised rate clears only below half its threshold, and a disk warning clears
+only 10% above its floor. Each rate learns a baseline over ten samples,
+skipping the first measured minute (the resume burst after a restart), and
+then raises at this floor or three times that baseline, whichever is higher.
+During those ten samples reconnects raise nothing, while writer wait and
+delivery raise at the floor and learn only samples at or below it, so
+pressure present at boot is raised rather than learned. Critical disk is
 `server.min_free_disk_mb`. Attention state stays on the server: it is served
 only to `ADMINISTRATOR` holders through `GET /admin/api/attention` and is not
 exported to telemetry. Below each key's minimum the default applies, with a
