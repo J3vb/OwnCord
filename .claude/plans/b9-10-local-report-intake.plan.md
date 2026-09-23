@@ -208,8 +208,10 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
 - **My reports** (`features/reports/myReports.ts`) is the Settings Safety tab's
   first section (Q2): kind, reason, where it stands (state and outcome as one
   English phrase) and when, from `GET /reports/mine` only, with loading, empty,
-  error/Retry and late-result handling. An unknown state or a missing date
-  shows as unavailable; nothing reads the moderation queue.
+  error/Retry and late-result handling. If the section's chunk fails to load,
+  the pane shows a `role="alert"` message instead of staying blank. An unknown
+  state or a missing date shows as unavailable; nothing reads the moderation
+  queue.
 - **Typed DTOs.** `api.ts` gains `fileReport`, `getMyReports`,
   `FileReportRequest` and `OwnReportSummary`, apart from any moderator shape.
 
@@ -222,12 +224,14 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
   `api.ts`; `destinations.ts` registers `safety`. B9-15/16 add their sections to
   `features/reports/safetyPane.ts`'s pane (or move it to a shared home).
 - **Budget.** The form, the openers and My reports load on first use
-  (`import()`), and the two entry labels live in their own small catalog
-  (`i18n/reportEntry.ts`), so MainPage stays inside its 60,000 B budget.
+  (`import()`), and the two entry labels and the Safety tab's load error live
+  in their own small catalog (`i18n/reportEntry.ts`), so MainPage stays inside
+  its 60,000 B budget.
 - **Keyboard reach for users.** Member rows were click-only, so the profile,
   and its Report button, could not be reached from the keyboard. A row is now a
   named `role="button"` with `tabindex="0"` that opens the profile on Enter or
-  Space. Q1 requires it for this journey.
+  Space; `aria-describedby` points at its presence and custom status, which the
+  button role would otherwise hide. Q1 requires it for this journey.
 - **The dialog's close button** was 22 px wide (the shared `.modal-close`);
   `.report-dialog .modal-close` gives it Q1's 24×24 minimum without touching
   other modals.
@@ -247,7 +251,10 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
 ### Evidence
 
 Base `166d71e4`; Node 26.9.0, vitest 4.1.11, Playwright Chromium headless
-shell 151, Go 1.26.7, Linux.
+shell 151, Go 1.26.7, Linux. The counts and sizes below predate the review
+round's fixes (member-row description, user-report fallback focus, Safety load
+error), whose tests are in `member-list`, `sidebar-member-section` and
+`myReports`.
 
 | Check                                                                                                                                                                                                                                                     | Result                                                   |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
@@ -302,7 +309,8 @@ the accessible-name check misread both failed before their fixes.
 - **Focus:** focus moves to the first radio on open, to the field at fault on
   error, stays on Send while pending and after a refusal, and returns to the
   opener on cancel and success (the composer if the row was re-rendered; the
-  member row for a user report). After Retry succeeds in My reports, focus
+  member row for a user report, found again by its `data-testid` if the list
+  re-rendered). After Retry succeeds in My reports, focus
   moves to its heading. Every focus ring measured ≥ 5.03:1 at ≥ 2 px.
 - **Contrast:** measured on the rendered dialog and My reports in dark,
   neon-glow, midnight and light, each with and without High Contrast; the
