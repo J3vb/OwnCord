@@ -24,7 +24,7 @@
   overflow: hidden;
 }
 .member-item .mi-custom-status {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -33,7 +33,7 @@
 
 /* Profile popup: the @handle under a display name, and the status line. */
 .upp-username-handle {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
   margin-top: -2px;
 }
@@ -42,8 +42,8 @@
   display: none;
 }
 .upp-custom-status {
-  font-size: 13px;
-  color: var(--text-secondary, var(--text-muted));
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
   margin: 4px 0;
   overflow-wrap: anywhere;
 }
@@ -60,11 +60,11 @@
 .status-picker-custom-input {
   width: 100%;
   box-sizing: border-box;
-  background: var(--bg-input, var(--bg-active));
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 4px);
-  color: var(--text-primary);
-  font-size: 13px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
   padding: 6px 8px;
 }
 .status-picker-custom-input:focus {

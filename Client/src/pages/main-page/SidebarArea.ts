@@ -256,8 +256,6 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     auditBtn.style.display = canViewAuditLog() ? "" : "none";
     if (moderationBtn !== null) {
       moderationBtn.style.display = canModerateMembers() ? "" : "none";
-      // Three buttons do not fit one 260px row; see sidebar.css.
-      serverHeader.classList.toggle("with-moderation", canModerateMembers());
     }
   };
   syncAuditBtn();

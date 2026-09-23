@@ -2957,22 +2957,17 @@ describe("SidebarArea", () => {
       it("is hidden without the bit, and follows a role list that arrives or changes later", () => {
         signInAs("Member", Permission.SEND_MESSAGES);
         const result = mount({ destinations: destinations() });
-        // The header wraps its buttons only while the entry is shown.
-        const header = q(result, "moderation-btn")!.parentElement!;
         expect(q(result, "moderation-btn")?.style.display).toBe("none");
-        expect(header.classList.contains("with-moderation")).toBe(false);
 
         setRoles([
           { id: 9, name: "Member", color: null, permissions: Permission.MODERATE_MEMBERS },
         ]);
         channelsStore.flush();
         expect(q(result, "moderation-btn")?.style.display).not.toBe("none");
-        expect(header.classList.contains("with-moderation")).toBe(true);
 
         setRoles([{ id: 9, name: "Member", color: null, permissions: Permission.SEND_MESSAGES }]);
         channelsStore.flush();
         expect(q(result, "moderation-btn")?.style.display).toBe("none");
-        expect(header.classList.contains("with-moderation")).toBe(false);
         cleanup(result);
       });
 

@@ -27,19 +27,19 @@
   justify-content: center;
 }
 .nsfw-gate-title {
-  font-size: 18px;
+  font-size: var(--font-size-xl);
   font-weight: 700;
   color: var(--text-normal);
   margin-bottom: 8px;
 }
 .nsfw-gate-body {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   line-height: 1.6;
   color: var(--text-muted);
   margin-bottom: 8px;
 }
 .nsfw-gate-note {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.5;
   color: var(--text-muted);
   margin-bottom: 20px;
@@ -54,10 +54,10 @@
   display: none;
 }
 .nsfw-gate-error {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   color: var(--text-danger);
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 .nsfw-gate-actions button[aria-disabled="true"] {
   cursor: progress;
@@ -71,17 +71,17 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 12px;
-  padding: 6px 16px;
-  font-size: 13px;
+  gap: var(--space-1) var(--space-3);
+  padding: 6px var(--space-4);
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
 }
 .nsfw-consent-bar-revoke {
   min-height: 24px;
-  padding: 2px 8px;
+  padding: 2px var(--space-2);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--text-link);
   font: inherit;

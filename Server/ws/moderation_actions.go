@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // modActionPayload is the mod_action frame's payload (B5-9): targeted,
@@ -32,8 +34,106 @@ func buildModAction(id int64, kind, reason string, expiresAt *time.Time) []byte 
 // mirroring BroadcastModQueue): a disconnected target simply sees the
 // warning on next connect (ready's notices) or the timeout on their next
 // attempted send (the predicates), so a missed frame here costs nothing.
+//
+// A timeout issued or lifted also re-sends the target's per-channel can_send
+// (RefreshUserChannels), and an issued one schedules the same refresh for
+// just after it expires — nothing else announces a natural expiry. The
+// timer re-resolves live, so one outliving a lift or a superseding timeout
+// only re-sends verdicts that are still current.
 func (h *Hub) NotifyModAction(userID, actionID int64, kind, reason string, expiresAt *time.Time) {
 	h.SendToUserLow(userID, buildModAction(actionID, kind, reason, expiresAt))
+	if kind != "timeout" {
+		return
+	}
+	h.RefreshUserChannels(userID)
+	if expiresAt != nil {
+		h.scheduleTimeoutExpiryRefresh(userID, *expiresAt)
+	}
+}
+
+// scheduleTimeoutExpiryRefresh runs RefreshUserChannels for userID just
+// after expiresAt. The second of slack covers expires_at's whole-second
+// storage.
+//
+// ponytail: in-memory timer, lost on restart; RearmTimeoutExpiries re-arms
+// every active timeout's at startup.
+func (h *Hub) scheduleTimeoutExpiryRefresh(userID int64, expiresAt time.Time) {
+	time.AfterFunc(time.Until(expiresAt)+timeoutExpiryRefreshSlack, func() {
+		select {
+		case <-h.stop:
+			return
+		default:
+		}
+		h.RefreshUserChannels(userID)
+	})
+}
+
+// RearmTimeoutExpiries schedules the expiry refresh for every timeout active
+// right now, replacing the timers a previous process armed and lost. Called
+// once at startup (no context), so the list is read against Background.
+func (h *Hub) RearmTimeoutExpiries() {
+	if h.db == nil {
+		return
+	}
+	active, err := h.readers.Dispatch.ListActiveTimeoutExpiries(context.Background())
+	if err != nil {
+		slog.Warn("hub: RearmTimeoutExpiries could not list active timeouts", "err", err)
+		return
+	}
+	for _, t := range active {
+		h.scheduleTimeoutExpiryRefresh(t.UserID, t.ExpiresAt)
+	}
+}
+
+// timeoutExpiryRefreshSlack is how long after a timeout's expires_at
+// NotifyModAction's scheduled refresh runs, so HasActiveTimeout already
+// reads it as expired.
+const timeoutExpiryRefreshSlack = time.Second
+
+// RefreshUserChannels re-sends userID's live client a channel_create for
+// every non-DM channel it can see, each carrying its CURRENT can_send and
+// can_moderate_voice — RefreshChannelVisibility's per-recipient send, for a
+// change that moves only this one user's verdicts: a timeout issued, lifted
+// or expiring (Subject.TimedOut). Visibility itself cannot move on such a
+// change, so hidden channels are skipped rather than sent a channel_delete
+// that would only disclose their IDs; DM payloads carry no can_send. Bumps
+// the visibility watermark like RefreshChannelVisibility, so a user offline
+// or mid-reconnect right now resumes onto a fresh ready instead of replaying
+// past the change with stale verdicts.
+func (h *Hub) RefreshUserChannels(userID int64) {
+	h.MarkVisibilityChanged()
+	defer h.bumpVisibilityWatermark()
+	if h.db == nil || h.GetClient(userID) == nil {
+		return
+	}
+	ctx := context.Background()
+	channels, err := h.readers.Visibility.ListChannels(ctx)
+	if err != nil {
+		slog.Warn("hub: RefreshUserChannels could not list channels", "user_id", userID, "err", err)
+		return
+	}
+	for i := range channels {
+		ch := &channels[i]
+		if ch.Type == "dm" {
+			continue
+		}
+		sub, err := h.subjectFor(ctx, userID, ch.ID)
+		if err != nil {
+			continue
+		}
+		sub.Channel = channelRef(ch)
+		if permissions.CanViewChannel(sub) != nil {
+			continue
+		}
+		// Re-resolved per send, like RefreshChannelVisibility: a reconnect
+		// can replace the client during the lookups above.
+		live := h.GetClient(userID)
+		if live == nil {
+			return
+		}
+		live.sendMsg(buildChannelCreateFor(ch,
+			permissions.CanSendMessage(sub) == nil, permissions.AuthorizeVoiceModerator(sub) == nil))
+	}
 }
 
 // MuteForTimeout applies the voice half of a timeout on userID's current

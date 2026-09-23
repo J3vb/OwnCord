@@ -53,11 +53,11 @@
   overflow: hidden;
 }
 .dm-header-unread-badge {
-  background: var(--red);
-  color: white;
-  border-radius: 10px;
+  background: var(--danger-fill);
+  color: var(--on-fill);
+  border-radius: var(--radius-pill);
   padding: 0 6px;
-  font-size: 0.65rem;
+  font-size: var(--font-size-xxs);
   font-weight: 700;
   min-width: 16px;
   text-align: center;
@@ -71,9 +71,9 @@
   background: var(--bg-tertiary);
   color: var(--text-normal);
   border: 1px solid var(--border-strong, var(--border));
-  border-radius: 10px;
+  border-radius: var(--radius-pill);
   padding: 0 6px;
-  font-size: 0.65rem;
+  font-size: var(--font-size-xxs);
   font-weight: 700;
   min-width: 16px;
   text-align: center;
@@ -90,7 +90,7 @@
   background: transparent;
   border: none;
   color: var(--text-link);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   cursor: pointer;
   text-align: left;
   transition: color 0.15s;
@@ -104,7 +104,7 @@
 /* Compact member list when inside sidebar */
 .sidebar-members-section .member-role-group {
   padding: 8px 12px 2px;
-  font-size: 10px;
+  font-size: var(--font-size-xxs);
 }
 .sidebar-members-section .member-item {
   padding: 2px 8px;
@@ -122,7 +122,7 @@
   border-width: 2px;
 }
 .sidebar-members-section .member-item .mi-name {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 /* ── Banned members (sidebar — the only route back to a banned row) ── */
 .sidebar-banned-section {
@@ -131,7 +131,7 @@
 }
 .banned-header {
   padding: 8px 6px 2px;
-  font-size: 10px;
+  font-size: var(--font-size-xxs);
   font-weight: 700;
   color: var(--text-faint);
   text-transform: uppercase;
@@ -145,7 +145,7 @@
 }
 .banned-name {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted, var(--text-faint));
   overflow: hidden;
   text-overflow: ellipsis;
@@ -155,9 +155,9 @@
   padding: 1px 8px;
   background: transparent;
   border: 1px solid var(--border-glow, var(--border));
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   color: var(--text-link);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   cursor: pointer;
   transition: color 0.15s;
 }
@@ -166,7 +166,7 @@
 }
 .member-role-group {
   padding: 16px 16px 4px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--text-faint);
   text-transform: uppercase;
@@ -196,7 +196,7 @@
   justify-content: center;
   font-weight: 700;
   font-size: 13px;
-  color: white;
+  color: var(--on-fill);
 }
 .member-item .mi-status {
   position: absolute;
@@ -208,7 +208,7 @@
   border: 3px solid var(--bg-secondary);
 }
 .member-item .mi-name {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -44,6 +44,7 @@ export function applyThemeByName(name: string): void {
   }
 
   localStorage.setItem(STORAGE_KEY_ACTIVE, name);
+  reclampRoleColors();
 }
 
 /** Returns the currently active theme name, defaulting to "neon-glow". */
@@ -87,6 +88,44 @@ function themeSurfaces(): Rgb[] {
     surfaces.push(rgb);
   }
   return surfaces;
+}
+
+/** Clamped role colours by requested colour, for the current theme's surfaces. */
+const roleTextCache = new Map<string, string>();
+
+/**
+ * A role colour used as text, e.g. a username (B9 Q13 role clamp).
+ *
+ * Role colours are server-set, so nothing else stands between an admin's
+ * `#ff0000` and a name that cannot be read. The rule and the math are the
+ * custom accent's `--accent-text` (deriveAccentTokens): the colour is used only
+ * where it reads at 4.5:1 on every theme surface, otherwise the name is
+ * `--text-normal`. `color` may be any CSS colour, including a `var(--role-*)`
+ * fallback; the result is a normalised `#rrggbb` or `var(--text-normal)`, never
+ * the raw string. Render the element with `data-role-color` holding `color`
+ * so a theme switch can clamp it again.
+ */
+export function readableRoleColor(color: string): string {
+  let out = roleTextCache.get(color);
+  if (out === undefined) {
+    const probe = document.createElement("span");
+    probe.style.color = color;
+    document.body.appendChild(probe);
+    const rgb = parseColor(getComputedStyle(probe).color);
+    probe.remove();
+    const text = rgb === null ? null : deriveAccentTokens(rgb, themeSurfaces()).text;
+    out = text ?? "var(--text-normal)";
+    roleTextCache.set(color, out);
+  }
+  return out;
+}
+
+/** Re-clamp every rendered role colour against the theme now applied. */
+function reclampRoleColors(): void {
+  roleTextCache.clear();
+  for (const el of document.querySelectorAll<HTMLElement>("[data-role-color]")) {
+    el.style.color = readableRoleColor(el.dataset["roleColor"] ?? "");
+  }
 }
 
 /**
