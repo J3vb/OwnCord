@@ -4,6 +4,7 @@
  */
 
 import { createElement, setText } from "@lib/dom";
+import { connectText } from "../i18n/connect";
 
 export interface ServerBannerControl {
   readonly element: HTMLDivElement;
@@ -32,7 +33,7 @@ export function createServerBanner(): ServerBannerControl {
     clearCountdown();
     let remaining = seconds;
     root.classList.add("visible");
-    setText(root, `Server restarting in ${remaining} seconds...`);
+    setText(root, connectText("banner.restarting", { seconds: remaining }));
 
     intervalId = setInterval(() => {
       remaining -= 1;
@@ -41,20 +42,20 @@ export function createServerBanner(): ServerBannerControl {
         showReconnecting();
         return;
       }
-      setText(root, `Server restarting in ${remaining} seconds...`);
+      setText(root, connectText("banner.restarting", { seconds: remaining }));
     }, 1000);
   }
 
   function showReconnecting(): void {
     clearCountdown();
     root.classList.add("visible");
-    setText(root, "Reconnecting...");
+    setText(root, connectText("banner.reconnecting"));
   }
 
   function showDisconnected(): void {
     clearCountdown();
     root.classList.add("visible");
-    setText(root, "Disconnected");
+    setText(root, connectText("banner.disconnected"));
   }
 
   function showSignedInElsewhere(onUseHere: () => void): void {
@@ -63,10 +64,10 @@ export function createServerBanner(): ServerBannerControl {
     const useHere = createElement(
       "button",
       { class: "reconnecting-banner-action", type: "button" },
-      "Use here",
+      connectText("banner.useHere"),
     );
     useHere.addEventListener("click", onUseHere, { once: true });
-    root.replaceChildren("Signed in elsewhere ", useHere);
+    root.replaceChildren(`${connectText("banner.signedInElsewhere")} `, useHere);
   }
 
   function hide(): void {

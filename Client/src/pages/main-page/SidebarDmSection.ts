@@ -11,6 +11,7 @@ import { setSidebarMode } from "@stores/ui.store";
 import { isChannelMuted } from "@lib/channel-mutes";
 import type { CountSource } from "../../features/navigation/destinations";
 import { navigationText } from "../../i18n/navigation";
+import { shellText } from "../../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,9 +48,13 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   // --- Header ---
   const dmHeader = createElement("div", { class: "category" });
   const dmArrow = createElement("span", { class: "category-arrow" }, "\u25BC");
-  const dmLabelEl = createElement("span", { class: "category-name" }, "DIRECT MESSAGES");
+  const dmLabelEl = createElement("span", { class: "category-name" }, shellText("dm.heading"));
   const dmUnreadBadge = createElement("span", { class: "dm-header-unread-badge" });
-  const dmAddBtn = createElement("button", { class: "category-add-btn", title: "New DM" }, "+");
+  const dmAddBtn = createElement(
+    "button",
+    { class: "category-add-btn", title: shellText("dm.new") },
+    "+",
+  );
   dmAddBtn.style.opacity = "1";
   appendChildren(dmHeader, dmArrow, dmLabelEl, dmUnreadBadge);
 
@@ -87,7 +92,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     {
       class: "sidebar-dm-view-all",
     },
-    "View all messages",
+    shellText("dm.viewAll"),
   );
 
   viewAllBtn.addEventListener("click", () => {
@@ -156,7 +161,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
 
     // Show/hide "View All" button based on DM count (respect collapsed state)
     if (dmChannels.length > 3) {
-      setText(viewAllBtn, `View all messages (${dmChannels.length})`);
+      setText(viewAllBtn, shellText("dm.viewAllCount", { count: dmChannels.length }));
       viewAllBtn.style.display = dmCollapsed ? "none" : "";
     } else {
       viewAllBtn.style.display = "none";

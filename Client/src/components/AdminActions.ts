@@ -6,6 +6,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { appendPurgeSection } from "./purge-prompt";
+import { shellText } from "../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,13 +41,13 @@ export interface MemberContextMenuOptions {
   onChangeRole(newRole: string): Promise<void>;
 }
 
-/** Ban duration choices offered in the ban flow (label → hours; 0 = permanent). */
-const BAN_DURATIONS: readonly { readonly label: string; readonly hours: number }[] = [
-  { label: "Forever", hours: 0 },
-  { label: "1 hour", hours: 1 },
-  { label: "1 day", hours: 24 },
-  { label: "7 days", hours: 24 * 7 },
-  { label: "30 days", hours: 24 * 30 },
+/** Ban duration choices offered in the ban flow (label key → hours; 0 = permanent). */
+const BAN_DURATIONS = [
+  { key: "ban.forever", hours: 0 },
+  { key: "ban.oneHour", hours: 1 },
+  { key: "ban.oneDay", hours: 24 },
+  { key: "ban.sevenDays", hours: 24 * 7 },
+  { key: "ban.thirtyDays", hours: 24 * 30 },
 ] as const;
 
 export interface ChannelContextMenuOptions {
@@ -102,7 +103,7 @@ function withConfirmation(
   confirmLabel: string,
   onConfirm: () => void | Promise<void>,
   signal: AbortSignal,
-  pendingLabel = "Working...",
+  pendingLabel = shellText("common.working"),
 ): void {
   let confirming = false;
   let running = false;
@@ -175,7 +176,7 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
         : "context-menu__item context-menu__item--danger",
       "data-testid": "block-toggle",
     },
-    options.isBlocked ? "Unblock" : "Block",
+    shellText(options.isBlocked ? "member.unblock" : "member.block"),
   );
   if (options.isBlocked) {
     let unblockRunning = false;
@@ -185,12 +186,12 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
         e.stopPropagation();
         if (unblockRunning) return;
         unblockRunning = true;
-        setText(blockItem, "Unblocking...");
+        setText(blockItem, shellText("member.unblocking"));
         blockItem.classList.add("context-menu__item--pending");
         const done = (): void => {
           unblockRunning = false;
           blockItem.classList.remove("context-menu__item--pending");
-          setText(blockItem, "Unblock");
+          setText(blockItem, shellText("member.unblock"));
         };
         void options.onToggleBlock().then(done, done);
       },
@@ -199,10 +200,10 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
   } else {
     withConfirmation(
       blockItem,
-      "Are you sure?",
+      shellText("common.areYouSure"),
       () => options.onToggleBlock(),
       disposable.signal,
-      "Blocking...",
+      shellText("member.blocking"),
     );
   }
 
@@ -228,7 +229,7 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
       {
         class: "context-menu__item",
       },
-      "Change Role",
+      shellText("member.changeRole"),
     );
 
     const roleSub = createElement("div", { class: "context-menu__submenu" });
@@ -291,14 +292,14 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
         class: "context-menu__item context-menu__item--danger",
         "data-testid": "force-logout",
       },
-      "Force Logout",
+      shellText("member.forceLogout"),
     );
     withConfirmation(
       kickItem,
-      "Log them out?",
+      shellText("member.forceLogoutConfirm"),
       () => options.onKick(),
       disposable.signal,
-      "Logging out...",
+      shellText("member.loggingOut"),
     );
     menu.appendChild(kickItem);
   }
@@ -329,7 +330,7 @@ function appendBanFlow(
     {
       class: "context-menu__item context-menu__item--danger",
     },
-    "Ban",
+    shellText("member.ban"),
   );
   const banReasonRow = createElement("div", {
     class: "context-menu__reason",
@@ -338,7 +339,7 @@ function appendBanFlow(
   const banReasonInput = createElement("input", {
     class: "form-input",
     type: "text",
-    placeholder: "Reason (optional)",
+    placeholder: shellText("member.banReason"),
     maxlength: "200",
     "data-testid": "ban-reason-input",
     style: "width:100%;font-size:12px",
@@ -349,13 +350,13 @@ function appendBanFlow(
     style: "width:100%;font-size:12px;margin-top:4px",
   });
   for (const d of BAN_DURATIONS) {
-    const opt = createElement("option", { value: String(d.hours) }, d.label);
+    const opt = createElement("option", { value: String(d.hours) }, shellText(d.key));
     banDurationSelect.appendChild(opt);
   }
   const banConfirm = createElement(
     "div",
     { class: "context-menu__item context-menu__item--danger", "data-testid": "ban-confirm" },
-    "Confirm Ban",
+    shellText("member.banConfirm"),
   );
   appendChildren(banReasonRow, banReasonInput, banDurationSelect, banConfirm);
 
@@ -382,12 +383,12 @@ function appendBanFlow(
   function submitBan(): void {
     if (banRunning) return;
     banRunning = true;
-    setText(banConfirm, "Banning...");
+    setText(banConfirm, shellText("member.banning"));
     banConfirm.classList.add("context-menu__item--pending");
     const done = (): void => {
       banRunning = false;
       banConfirm.classList.remove("context-menu__item--pending");
-      setText(banConfirm, "Confirm Ban");
+      setText(banConfirm, shellText("member.banConfirm"));
     };
     const durationHours = Number.parseInt(banDurationSelect.value, 10) || 0;
     void options.onBan(banReasonInput.value.trim(), durationHours).then(done, done);
@@ -425,7 +426,7 @@ export function createChannelContextMenu(options: ChannelContextMenuOptions): Co
 
   // Edit Channel
   const editItem = createMenuItem(
-    "Edit Channel",
+    shellText("channel.edit"),
     "context-menu__item",
     () => options.onEdit(),
     disposable.signal,
@@ -434,7 +435,7 @@ export function createChannelContextMenu(options: ChannelContextMenuOptions): Co
 
   // Create Channel
   const createItem = createMenuItem(
-    "Create Channel",
+    shellText("channel.create"),
     "context-menu__item",
     () => options.onCreate(),
     disposable.signal,
@@ -449,14 +450,14 @@ export function createChannelContextMenu(options: ChannelContextMenuOptions): Co
     {
       class: "context-menu__item context-menu__item--danger",
     },
-    "Delete Channel",
+    shellText("channel.delete"),
   );
   withConfirmation(
     deleteItem,
-    "Are you sure?",
+    shellText("common.areYouSure"),
     () => options.onDelete(),
     disposable.signal,
-    "Deleting...",
+    shellText("common.deleting"),
   );
   menu.appendChild(deleteItem);
 

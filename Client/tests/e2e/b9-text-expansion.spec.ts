@@ -108,3 +108,186 @@ test.describe("B9-3 Accessibility tab text", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// B9-18: connect, shell and navigation text. The expanded run switches the
+// seam on the connect page before signing in, so every surface below is built
+// after the switch: the main page on login, the quick switcher when it opens,
+// and a fresh connect page when "Add new server" leaves the session.
+// ---------------------------------------------------------------------------
+
+/** Q1's largest text at the minimum window, applied by the real startup path. */
+async function startAtLargestText(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    localStorage.setItem("owncord:settings:fontSize", "20");
+    localStorage.setItem("owncord:settings:largeFont", "true");
+  });
+  await mockTauriFullSessionWithMessages(page);
+  await page.goto("/");
+}
+
+/** Expanded catalog text for `english`: bracketed, with the padding after it. */
+const expanded = (english: string): RegExp =>
+  new RegExp(`^⟦${english.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} .+⟧$`);
+
+/**
+ * Whole and on screen: its text does not overflow its own box, and no
+ * ancestor that clips (overflow other than visible) cuts it off sideways.
+ */
+async function expectWhole(el: ReturnType<Page["locator"]>): Promise<void> {
+  await el.scrollIntoViewIfNeeded();
+  await expect(el).toBeInViewport();
+  const clippedBy = await el.evaluate((n) => {
+    if (n.scrollWidth > n.clientWidth + 1) return "its own box";
+    const r = n.getBoundingClientRect();
+    if (r.width === 0) return "zero width";
+    for (let p = n.parentElement; p !== null; p = p.parentElement) {
+      if (getComputedStyle(p).overflowX === "visible") continue;
+      const q = p.getBoundingClientRect();
+      if (r.left < q.left - 1 || r.right > q.right + 1) return p.className || p.tagName;
+    }
+    return null;
+  });
+  expect(clippedBy).toBeNull();
+}
+
+test.describe("B9-18 connect and shell text", () => {
+  test.use({ viewport: { width: 940, height: 500 } });
+
+  test("reads the catalogs' English copy on the connect page and in the shell", async ({
+    page,
+  }) => {
+    await startAtLargestText(page);
+    await expect(page.locator(".server-panel-header h2")).toHaveText("Servers");
+    await expect(page.locator(".btn-add-server")).toHaveText("+ Add Server");
+    await expect(page.locator(".brand-tagline")).toHaveText(
+      "Self-hosted chat — Your server, your rules",
+    );
+    await expect(page.locator("label[for='host']")).toHaveText("Server Address");
+    await expect(page.locator(".form-switch a")).toHaveText("Need an account? Register");
+    await expect(page.getByRole("button", { name: "Toggle password visibility" })).toBeVisible();
+
+    await navigateToMainPageReady(page);
+    const sidebar = page.locator("[data-testid='unified-sidebar']");
+    await expect(sidebar.locator(".server-online")).toHaveText(/^\d+ online$/);
+    await expect(sidebar.locator("[data-testid='invite-btn']")).toHaveText("Invite");
+    await expect(sidebar.locator(".sidebar-dm-section .category-name")).toHaveText(
+      "DIRECT MESSAGES",
+    );
+    await expect(sidebar.locator(".sidebar-members-header .category-name")).toHaveText("MEMBERS");
+    await page.getByRole("button", { name: "Switch server", exact: true }).click();
+    const overlay = page.locator("[data-testid='quick-switch-overlay']");
+    await expect(overlay.getByRole("dialog", { name: "Switch server" })).toBeVisible();
+    await expect(overlay.locator(".quick-switch-footer")).toHaveText("Press Escape to cancel");
+  });
+
+  test("keeps expanded shell and connect text whole, named and operable at 940×500 with 20px text", async ({
+    page,
+  }, testInfo) => {
+    await startAtLargestText(page);
+    test.skip(!(await expandCatalogText(page)), "needs the dev server's modules");
+
+    // Sign in: the main page renders entirely through the expanded seam.
+    await navigateToMainPageReady(page);
+    const sidebar = page.locator("[data-testid='unified-sidebar']");
+    await expect(sidebar.locator(".server-online")).toHaveText(/^⟦\d+ online .+⟧$/);
+    // The header wraps its buttons instead of squeezing out the server name.
+    await expectWhole(sidebar.locator(".server-online"));
+    await expect(sidebar.locator(".server-name")).toHaveText("Test Server");
+    await expectWhole(sidebar.locator(".server-name"));
+    for (const [el, english] of [
+      [sidebar.locator("[data-testid='invite-btn']"), "Invite"],
+      [sidebar.locator("[data-testid='audit-log-btn']"), "Audit Log"],
+      [sidebar.locator(".sidebar-dm-section .category-name"), "DIRECT MESSAGES"],
+      [sidebar.locator(".sidebar-members-header .category-name"), "MEMBERS"],
+    ] as const) {
+      await expect(el).toHaveText(expanded(english));
+      await expectWhole(el);
+    }
+    expect(await findUnnamedControls(sidebar)).toEqual([]);
+    const userBar = page.locator("[data-testid='user-bar']");
+    expect(await findUnnamedControls(userBar)).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+    await testInfo.attach("shell-expanded-940x500-20px.png", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+
+    // The quick switcher: named by expanded text, reachable, Escape closes it
+    // and focus goes back to its opener.
+    const switchBtn = userBar.locator("[data-testid='disconnect-btn']");
+    await expect(switchBtn).toHaveAccessibleName(expanded("Switch server"));
+    await switchBtn.focus();
+    await page.keyboard.press("Enter");
+    const overlay = page.locator("[data-testid='quick-switch-overlay']");
+    const dialog = overlay.getByRole("dialog");
+    await expect(dialog).toHaveAccessibleName(expanded("Switch server"));
+    for (const [el, english] of [
+      [overlay.locator(".quick-switch-header h2"), "Switch Server"],
+      [overlay.locator(".quick-switch-footer"), "Press Escape to cancel"],
+      [overlay.locator(".add-new .quick-switch-name"), "Add new server"],
+    ] as const) {
+      await expect(el).toHaveText(expanded(english));
+      await expectWhole(el);
+    }
+    expect(await findUnnamedControls(overlay)).toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(overlay).toHaveCount(0);
+    await expect(switchBtn).toBeFocused();
+
+    // "Add new server" leaves for a freshly built connect page.
+    await switchBtn.click();
+    await overlay.locator("[data-testid='add-server-btn']").click();
+    await expect(page.locator(".connect-form")).toBeVisible({ timeout: 5_000 });
+    for (const [el, english] of [
+      [page.locator(".server-panel-header h2"), "Servers"],
+      [page.locator(".btn-add-server"), "+ Add Server"],
+      [page.locator("label[for='host']"), "Server Address"],
+      [page.locator("label[for='username']"), "Username"],
+      [page.locator("label[for='password']"), "Password"],
+      [page.locator(".connect-form .btn-text"), "Login"],
+      [page.locator(".form-switch a"), "Need an account? Register"],
+      [
+        page.locator("[data-testid='recover-account-link']"),
+        "Lost your password or 2FA device? Recover your account",
+      ],
+    ] as const) {
+      await expect(el).toHaveText(expanded(english));
+      await expectWhole(el);
+    }
+    await expect(page.locator(".password-toggle")).toHaveAccessibleName(
+      expanded("Toggle password visibility"),
+    );
+    expect(await findUnnamedControls(page.locator(".connect-form"))).toEqual([]);
+
+    // Register mode re-renders the title, the submit label and the switch link.
+    await page.locator(".form-switch a").click();
+    await expect(page.locator(".form-switch a")).toHaveText(
+      expanded("Already have an account? Login"),
+    );
+    await expect(page.locator(".connect-form .btn-text")).toHaveText(expanded("Register"));
+
+    // The Add Server dialog, opened and dismissed from the keyboard.
+    await page.locator(".btn-add-server").focus();
+    await page.keyboard.press("Enter");
+    const addDialog = page.getByRole("dialog", { name: expanded("Add Server") });
+    await expect(addDialog).toBeVisible();
+    for (const [el, english] of [
+      [addDialog.locator("label", { hasText: "Server Name" }), "Server Name"],
+      [addDialog.locator("label", { hasText: "Host Address" }), "Host Address"],
+      [addDialog.locator(".btn-ghost"), "Cancel"],
+      [addDialog.locator(".btn-primary"), "Add Server"],
+    ] as const) {
+      await expect(el).toHaveText(expanded(english));
+      await expectWhole(el);
+    }
+    expect(await findUnnamedControls(addDialog)).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+    await testInfo.attach("connect-expanded-940x500-20px.png", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+    await page.keyboard.press("Escape");
+    await expect(addDialog).toHaveCount(0);
+  });
+});

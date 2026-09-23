@@ -7,6 +7,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { shellText } from "../i18n/shell";
 
 /** Server-side bounds on one purge request (docs/api.md). */
 export const PURGE_MIN_COUNT = 1;
@@ -50,7 +51,7 @@ export function appendPurgeSection(menu: HTMLElement, opts: PurgeSectionOptions)
   const trigger = createElement(
     "div",
     { class: opts.itemClass, "data-testid": "ctx-purge-messages" },
-    "Purge Messages…",
+    shellText("purge.trigger"),
   );
 
   const form = createElement("div", {
@@ -70,12 +71,12 @@ export function appendPurgeSection(menu: HTMLElement, opts: PurgeSectionOptions)
   const hint = createElement(
     "div",
     { style: "font-size:11px;color:var(--text-muted);margin-top:4px" },
-    `Deletes the newest ${PURGE_MIN_COUNT}–${PURGE_MAX_COUNT} messages.`,
+    shellText("purge.hint", { min: PURGE_MIN_COUNT, max: PURGE_MAX_COUNT }),
   );
   const confirm = createElement(
     "div",
     { class: opts.dangerItemClass, "data-testid": "purge-confirm" },
-    "Confirm Purge",
+    shellText("purge.confirm"),
   );
   appendChildren(form, countInput, hint, confirm);
 
@@ -99,10 +100,10 @@ export function appendPurgeSection(menu: HTMLElement, opts: PurgeSectionOptions)
   function submit(): void {
     if (running) return;
     running = true;
-    setText(confirm, "Purging…");
+    setText(confirm, shellText("purge.running"));
     const done = (): void => {
       running = false;
-      setText(confirm, "Confirm Purge");
+      setText(confirm, shellText("purge.confirm"));
       opts.onDone?.();
     };
     const result = opts.onPurge(clampPurgeCount(countInput.value));

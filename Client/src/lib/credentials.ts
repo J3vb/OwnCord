@@ -9,6 +9,7 @@ import { desktop } from "../platform/desktop";
 import type { SavedCredential, SavedLoginResponse } from "../platform/contracts/credentials";
 import type { AuthResponse } from "./types";
 import { authStore } from "@stores/auth.store";
+import { connectText } from "../i18n/connect";
 
 export type { SavedCredential, SavedLoginResponse };
 
@@ -76,12 +77,14 @@ export function parseRelayedLogin(relayed: SavedLoginResponse): AuthResponse {
   if (relayed.status < 200 || relayed.status >= 300) {
     const code = typeof body?.error === "string" ? body.error : "UNKNOWN";
     const message =
-      typeof body?.message === "string" ? body.message : `Login failed (${relayed.status})`;
+      typeof body?.message === "string"
+        ? body.message
+        : connectText("session.loginFailedStatus", { status: relayed.status });
     throw new ApiClientError(relayed.status, code, message);
   }
 
   if (body === null) {
-    throw new Error("Login failed: the server returned an unreadable response.");
+    throw new Error(connectText("session.loginUnreadable"));
   }
   return body as unknown as AuthResponse;
 }

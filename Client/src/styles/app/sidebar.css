@@ -7,14 +7,28 @@
   flex-shrink: 0;
   overflow: hidden;
 }
+/* The header wraps its buttons onto a second, right-aligned row rather than
+   squeezing the server icon and name to nothing: Invite and Audit Log beside
+   a server name are already wider than the sidebar in English, and longer
+   labels more so. */
 .unified-sidebar-header {
-  height: 44px;
-  padding: 0 14px;
+  min-height: 44px;
+  padding: 8px 14px;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 10px;
+  row-gap: 6px;
   border-bottom: 1px solid var(--border-glow, var(--border));
   flex-shrink: 0;
+}
+.unified-sidebar-header .server-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 6em;
+  min-width: 0;
+  overflow: hidden;
 }
 /* Invite, Audit Log and Moderation are wider together than the sidebar, so
    with the Moderation entry shown the header wraps the buttons that do not
@@ -29,6 +43,7 @@
   row-gap: 6px;
 }
 .unified-sidebar-header .server-icon-sm {
+  flex-shrink: 0;
   width: 28px;
   height: 28px;
   border-radius: var(--radius-md);

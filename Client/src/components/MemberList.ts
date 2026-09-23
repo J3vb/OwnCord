@@ -24,6 +24,7 @@ import {
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
 import { roleHasPermission } from "@lib/permissions";
 import { createAvatarElement } from "@lib/avatar";
+import { shellText } from "../i18n/shell";
 
 /** Options for configuring admin action callbacks on the member list. */
 export interface MemberListOptions {
@@ -97,12 +98,26 @@ const FALLBACK_ROLE_COLORS: Record<string, string> = {
 const MEMBER_COLOR = "var(--role-member, #949ba4)";
 
 /** Ordered role groups used when the server hasn't sent a role list. */
-const FALLBACK_ROLE_GROUPS: readonly RoleGroup[] = [
-  { role: "owner", label: "OWNER", colorVar: FALLBACK_ROLE_COLORS["owner"]! },
-  { role: "admin", label: "ADMIN", colorVar: FALLBACK_ROLE_COLORS["admin"]! },
-  { role: "moderator", label: "MODERATOR", colorVar: FALLBACK_ROLE_COLORS["moderator"]! },
-  { role: "member", label: "MEMBER", colorVar: MEMBER_COLOR },
-] as const;
+function fallbackRoleGroups(): readonly RoleGroup[] {
+  return [
+    {
+      role: "owner",
+      label: shellText("members.role.owner"),
+      colorVar: FALLBACK_ROLE_COLORS["owner"]!,
+    },
+    {
+      role: "admin",
+      label: shellText("members.role.admin"),
+      colorVar: FALLBACK_ROLE_COLORS["admin"]!,
+    },
+    {
+      role: "moderator",
+      label: shellText("members.role.moderator"),
+      colorVar: FALLBACK_ROLE_COLORS["moderator"]!,
+    },
+    { role: "member", label: shellText("members.role.member"), colorVar: MEMBER_COLOR },
+  ];
+}
 
 /**
  * Role groups from the server's `ready` role list (already ordered by position,
@@ -111,7 +126,7 @@ const FALLBACK_ROLE_GROUPS: readonly RoleGroup[] = [
  */
 function roleGroups(): readonly RoleGroup[] {
   const roles = channelsStore.getState().roles;
-  if (roles.length === 0) return FALLBACK_ROLE_GROUPS;
+  if (roles.length === 0) return fallbackRoleGroups();
   return roles.map((r) => {
     const key = r.name.toLowerCase();
     return {
@@ -356,7 +371,7 @@ function renderList(
 
   if (state.members.size === 0) {
     const emptyState = createElement("div", { class: "member-list-empty" });
-    const msg = createElement("p", { class: "member-list-empty-text" }, "No members online");
+    const msg = createElement("p", { class: "member-list-empty-text" }, shellText("members.empty"));
     emptyState.appendChild(msg);
     root.appendChild(emptyState);
     return;
@@ -408,7 +423,7 @@ function appendGroup(
   const header = createElement(
     "div",
     { class: "member-role-group" },
-    `${group.label} \u2014 ${groupMembers.length}`,
+    shellText("members.groupHeader", { role: group.label, count: groupMembers.length }),
   );
   root.appendChild(header);
 

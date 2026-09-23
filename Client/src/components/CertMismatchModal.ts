@@ -11,6 +11,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import type { MountableComponent } from "@lib/safe-render";
+import { connectText } from "../i18n/connect";
 
 export interface CertMismatchModalOptions {
   readonly host: string;
@@ -37,12 +38,16 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
 
     // Header
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", { id: "cert-mismatch-title" }, "Certificate Warning");
+    const title = createElement(
+      "h3",
+      { id: "cert-mismatch-title" },
+      connectText("cert.mismatch.title"),
+    );
     const closeBtn = createElement("button", {
       class: "modal-close",
       type: "button",
       // Icon-only control — the aria-label is its entire accessible name.
-      "aria-label": "Close",
+      "aria-label": connectText("common.close"),
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
@@ -56,21 +61,16 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
     warning.appendChild(createIcon("triangle-alert", 24));
 
     const certTitle = createElement("div", { class: "cert-title" });
-    setText(certTitle, "Certificate Changed");
+    setText(certTitle, connectText("cert.mismatch.heading"));
 
     const desc = createElement("div", { class: "cert-desc" });
-    setText(
-      desc,
-      "The server's TLS certificate fingerprint has changed. " +
-        "This could mean the server regenerated its certificate, " +
-        "or it could indicate a security issue.",
-    );
+    setText(desc, connectText("cert.mismatch.description"));
 
     const details = createElement("div", { class: "cert-details" });
 
-    const hostRow = buildRow("Host", host, false);
-    const storedRow = buildRow("Previous", storedFingerprint, true);
-    const newRow = buildRow("Current", newFingerprint, true);
+    const hostRow = buildRow(connectText("cert.host"), host, false);
+    const storedRow = buildRow(connectText("cert.mismatch.previous"), storedFingerprint, true);
+    const newRow = buildRow(connectText("cert.mismatch.current"), newFingerprint, true);
     appendChildren(details, hostRow, storedRow, newRow);
 
     appendChildren(body, warning, certTitle, desc, details);
@@ -82,14 +82,14 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
       class: "btn-ghost",
       type: "button",
     });
-    setText(rejectBtn, "Disconnect");
+    setText(rejectBtn, connectText("cert.mismatch.reject"));
     rejectBtn.addEventListener("click", onReject, { signal: disposable.signal });
 
     const acceptBtn = createElement("button", {
       class: "btn-danger",
       type: "button",
     });
-    setText(acceptBtn, "Accept New Certificate");
+    setText(acceptBtn, connectText("cert.mismatch.accept"));
     acceptBtn.addEventListener("click", onAccept, { signal: disposable.signal });
 
     appendChildren(footer, rejectBtn, acceptBtn);
@@ -161,11 +161,15 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
     trapFocus(modal, disposable.signal);
 
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", { id: "cert-first-use-title" }, "New Server Certificate");
+    const title = createElement(
+      "h3",
+      { id: "cert-first-use-title" },
+      connectText("cert.firstUse.title"),
+    );
     const closeBtn = createElement("button", {
       class: "modal-close",
       type: "button",
-      "aria-label": "Close",
+      "aria-label": connectText("common.close"),
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
@@ -178,22 +182,16 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
     warning.appendChild(createIcon("triangle-alert", 24));
 
     const certTitle = createElement("div", { class: "cert-title" });
-    setText(certTitle, "Confirm the certificate fingerprint");
+    setText(certTitle, connectText("cert.firstUse.heading"));
 
     const desc = createElement("div", { class: "cert-desc" });
-    setText(
-      desc,
-      "This is the first connection to this server, so its certificate is not " +
-        "yet trusted. Verify the fingerprint below out-of-band (e.g. with the " +
-        "server operator) before trusting it — on an untrusted network an " +
-        "attacker could present a fake certificate.",
-    );
+    setText(desc, connectText("cert.firstUse.description"));
 
     const details = createElement("div", { class: "cert-details" });
     appendChildren(
       details,
-      buildRow("Host", host, false),
-      buildRow("Fingerprint", fingerprint, true),
+      buildRow(connectText("cert.host"), host, false),
+      buildRow(connectText("cert.firstUse.fingerprint"), fingerprint, true),
     );
 
     appendChildren(body, warning, certTitle, desc, details);
@@ -201,11 +199,11 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
     const footer = createElement("div", { class: "modal-footer" });
 
     const rejectBtn = createElement("button", { class: "btn-ghost", type: "button" });
-    setText(rejectBtn, "Cancel");
+    setText(rejectBtn, connectText("common.cancel"));
     rejectBtn.addEventListener("click", onReject, { signal: disposable.signal });
 
     const acceptBtn = createElement("button", { class: "btn-danger", type: "button" });
-    setText(acceptBtn, "Trust This Certificate");
+    setText(acceptBtn, connectText("cert.firstUse.accept"));
     acceptBtn.addEventListener("click", onAccept, { signal: disposable.signal });
 
     appendChildren(footer, rejectBtn, acceptBtn);
@@ -282,11 +280,15 @@ export function createIdentityMismatchModal(
     trapFocus(modal, disposable.signal);
 
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", { id: "identity-mismatch-title" }, "Identity Warning");
+    const title = createElement(
+      "h3",
+      { id: "identity-mismatch-title" },
+      connectText("identity.title"),
+    );
     const closeBtn = createElement("button", {
       class: "modal-close",
       type: "button",
-      "aria-label": "Close",
+      "aria-label": connectText("common.close"),
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
@@ -299,23 +301,17 @@ export function createIdentityMismatchModal(
     warning.appendChild(createIcon("shield-alert", 24));
 
     const certTitle = createElement("div", { class: "cert-title" });
-    setText(certTitle, "Identity Key Changed");
+    setText(certTitle, connectText("identity.heading"));
 
     const desc = createElement("div", { class: "cert-desc" });
-    setText(
-      desc,
-      "This participant's end-to-end encryption identity key no longer matches " +
-        "the one pinned on first contact. This usually means they reinstalled or " +
-        "switched device, but it could also indicate that the server swapped their " +
-        "key. Verify the new key out-of-band before trusting it.",
-    );
+    setText(desc, connectText("identity.description"));
 
     const details = createElement("div", { class: "cert-details" });
-    details.appendChild(buildRow("Participant", username, false));
+    details.appendChild(buildRow(connectText("identity.participant"), username, false));
     // Only when the new key's fingerprint is available — a null one would render
     // a misleading blank "Unknown" row and defeats the out-of-band check.
     if (fingerprint !== null) {
-      details.appendChild(buildRow("New key", fingerprint, true));
+      details.appendChild(buildRow(connectText("identity.newKey"), fingerprint, true));
     }
 
     appendChildren(body, warning, certTitle, desc, details);
@@ -323,11 +319,11 @@ export function createIdentityMismatchModal(
     const footer = createElement("div", { class: "modal-footer" });
 
     const rejectBtn = createElement("button", { class: "btn-ghost", type: "button" });
-    setText(rejectBtn, "Cancel");
+    setText(rejectBtn, connectText("common.cancel"));
     rejectBtn.addEventListener("click", onReject, { signal: disposable.signal });
 
     const acceptBtn = createElement("button", { class: "btn-danger", type: "button" });
-    setText(acceptBtn, "Trust New Key");
+    setText(acceptBtn, connectText("identity.accept"));
     acceptBtn.addEventListener("click", onAccept, { signal: disposable.signal });
 
     appendChildren(footer, rejectBtn, acceptBtn);
@@ -376,7 +372,7 @@ function buildRow(label: string, value: string, isFingerprint: boolean): HTMLDiv
   setText(labelEl, label);
   const valueClass = isFingerprint ? "cert-value cert-fingerprint" : "cert-value";
   const valueEl = createElement("span", { class: valueClass });
-  setText(valueEl, value || "Unknown");
+  setText(valueEl, value || connectText("common.unknown"));
   appendChildren(row, labelEl, valueEl);
   return row;
 }

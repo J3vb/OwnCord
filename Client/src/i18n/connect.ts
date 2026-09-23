@@ -1,0 +1,152 @@
+import { defineCatalog } from "./format";
+
+/**
+ * Connect, sign-in, trust and session copy (B9-18): the connect page and its
+ * server panel, login and recovery forms, the incompatible-server notice, the
+ * certificate and identity trust prompts, the post-login overlay, the
+ * connection banner and the session messages main.ts raises. It ships in the
+ * startup chunk, so it also holds the few shell messages raised by startup
+ * modules (the render fallback, the channel-deleted notice, the DM helpers the
+ * dispatcher reaches) and keeps shell.ts, the main page's catalog, out of it.
+ */
+export const connectText = defineCatalog("connect", {
+  "common.cancel": "Cancel",
+  "common.close": "Close",
+  "common.unknown": "Unknown",
+  "common.settings": "Settings",
+
+  "brand.tagline": "Self-hosted chat — Your server, your rules",
+  "profiles.defaultName": "Local Server",
+  "profiles.saveFailed": "Could not save server profiles",
+  "settings.notAuthenticated": "Not authenticated",
+
+  "servers.heading": "Servers",
+  "servers.addButton": "+ Add Server",
+  "servers.autoLogin.disable": "Disable auto-login",
+  "servers.autoLogin.enable": "Enable auto-login",
+  "servers.autoLogin.enabled": "Auto-login enabled",
+  "servers.delete": "Delete server",
+  "servers.latency": "{ms}ms",
+  "servers.online": "{count} online",
+  "servers.clientUpdateNeeded": "Client update needed",
+  "servers.serverUpdateNeeded": "Server update needed",
+  "servers.add.title": "Add Server",
+  "servers.add.nameLabel": "Server Name",
+  "servers.add.namePlaceholder": "My Server",
+  "servers.add.hostLabel": "Host Address",
+  "servers.add.submit": "Add Server",
+  "servers.add.invalidHost": "Invalid server address (expected host or host:port)",
+
+  "incompatible.clientOlder":
+    "{host}: this client speaks protocol epoch {clientEpoch} but the server needs {serverEpoch}; update the client.",
+  "incompatible.serverOlder":
+    "{host}: this client speaks protocol epoch {clientEpoch} but the server only speaks {serverEpoch}; update the server.",
+  "incompatible.unknown":
+    "{host}: this client cannot speak to this server — the protocol epochs differ.",
+  "incompatible.updateClient": "Update client",
+  "incompatible.leave": "Choose another server",
+
+  "login.subtitle": "Connect to your server",
+  "login.title": "Login",
+  "login.registerTitle": "Register",
+  "login.hostLabel": "Server Address",
+  "login.usernameLabel": "Username",
+  "login.passwordLabel": "Password",
+  "login.rememberPassword": "Remember password",
+  "login.autoConnect": "Auto connect",
+  "login.inviteLabel": "Invite Code",
+  "login.toRegister": "Need an account? Register",
+  "login.toLogin": "Already have an account? Login",
+  "login.recoverLink": "Lost your password or 2FA device? Recover your account",
+  "login.togglePassword": "Toggle password visibility",
+  "login.connecting": "Connecting…",
+  "login.loggingIn": "Logging in…",
+  "login.registering": "Registering…",
+  "login.registrationClosed": "Registration closed",
+  "login.autoConnecting": "Auto-connecting...",
+  "login.recoveryUnavailable": "Account recovery is unavailable.",
+  "registration.closedNotice": "Registration is closed on this server.",
+  "registration.approvalNotice":
+    "Registration requires admin approval. You can register now, but an admin must approve your account before you can sign in.",
+  "registration.pendingApproval":
+    "Registration received. An admin has to approve your account before you can sign in.",
+
+  "validation.hostRequired": "Server address is required.",
+  "validation.usernameRequired": "Username is required.",
+  "validation.passwordRequired": "Password is required.",
+  "validation.passwordTooShort": "Password must be at least {min} characters.",
+  "validation.placeholderPassword":
+    "That is the saved-password placeholder, not a password. Choose a different one.",
+  "validation.inviteRequired": "Invite code is required for registration.",
+
+  "totp.title": "Two-Factor Authentication",
+  "totp.description":
+    "Enter the 6-digit code from your authenticator app, or an emergency recovery code.",
+  "totp.placeholder": "000000 or XXXXX-XXXXX",
+  "totp.inputLabel": "Authentication or recovery code",
+  "totp.verify": "Verify",
+  "totp.verifying": "Verifying…",
+  "totp.failed": "Verification failed.",
+
+  "recover.title": "Account Recovery",
+  "recover.description":
+    "Sign back in without your password or two-factor device. This sets a new password and signs out every other device.",
+  "recover.usernameLabel": "Username",
+  "recover.secretLabel": "Recovery kit secret or a recovery credential from your server owner",
+  "recover.passwordLabel": "New password",
+  "recover.submit": "Recover account",
+  "recover.submitting": "Recovering…",
+  "recover.secretRequired": "Enter your recovery kit secret or recovery credential.",
+  "recover.passwordTooShort": "New password must be at least {min} characters.",
+  "recover.failed": "Recovery failed.",
+
+  "cert.mismatch.title": "Certificate Warning",
+  "cert.mismatch.heading": "Certificate Changed",
+  "cert.mismatch.description":
+    "The server's TLS certificate fingerprint has changed. This could mean the server regenerated its certificate, or it could indicate a security issue.",
+  "cert.mismatch.previous": "Previous",
+  "cert.mismatch.current": "Current",
+  "cert.mismatch.reject": "Disconnect",
+  "cert.mismatch.accept": "Accept New Certificate",
+  "cert.firstUse.title": "New Server Certificate",
+  "cert.firstUse.heading": "Confirm the certificate fingerprint",
+  "cert.firstUse.description":
+    "This is the first connection to this server, so its certificate is not yet trusted. Verify the fingerprint below out-of-band (e.g. with the server operator) before trusting it — on an untrusted network an attacker could present a fake certificate.",
+  "cert.firstUse.fingerprint": "Fingerprint",
+  "cert.firstUse.accept": "Trust This Certificate",
+  "cert.host": "Host",
+  "identity.title": "Identity Warning",
+  "identity.heading": "Identity Key Changed",
+  "identity.description":
+    "This participant's end-to-end encryption identity key no longer matches the one pinned on first contact. This usually means they reinstalled or switched device, but it could also indicate that the server swapped their key. Verify the new key out-of-band before trusting it.",
+  "identity.participant": "Participant",
+  "identity.newKey": "New key",
+  "identity.accept": "Trust New Key",
+
+  "connected.title": "Connected!",
+  "connected.loggedInAs": "Logged in as {username}",
+  "connected.loading": "Loading server data...",
+  "connected.ready": "Ready!",
+
+  "banner.restarting": "Server restarting in {seconds} seconds...",
+  "banner.reconnecting": "Reconnecting...",
+  "banner.disconnected": "Disconnected",
+  "banner.signedInElsewhere": "Signed in elsewhere",
+  "banner.useHere": "Use here",
+
+  "session.expired": "Your session expired — sign in again.",
+  "session.passwordRemoveFailed": "Could not remove the saved password — it is still stored",
+  "session.credentialsSaveFailed": "Could not save credentials — auto-login won't work",
+  "session.savedLoginUnavailable":
+    "Saved-password login is unavailable here — please type your password.",
+  "session.autoLoginFailed": "Auto-login failed",
+  "session.autoLoginFailedDetail": "Auto-login failed: {message}",
+  "session.loginFailedStatus": "Login failed ({status})",
+  "session.loginUnreadable": "Login failed: the server returned an unreadable response.",
+
+  "app.renderFailed": "Something went wrong rendering this section.",
+  "app.channelDeleted": "This channel was deleted",
+  "app.dmNoMessages": "No messages yet",
+  "app.dmCreateFailed": "Failed to create DM",
+  "app.dmCreateGroupFailed": "Failed to create group DM",
+});
