@@ -278,6 +278,9 @@ pre-B9-7 behaviour of loading under the overlay), 15 unit tests
 - **Focus:** the heading takes focus on mount, so a stray Enter is never
   consent; accept keeps focus through saving (`aria-disabled`, not
   `disabled`) and after a failure; revoking lands focus on the gate heading.
+  A regate caused elsewhere (another device, a moderator, `ready`, a server
+  refusal) takes focus only from the channel content it replaces (list,
+  typing indicator or composer) or from `<body>`, never from an open dialog.
   When the gate that held focus is removed, focus moves to the composer after
   accepting, or to the sidebar after declining or Escape, never `<body>`.
   Focus rings measured at Q1 in every theme and High Contrast.
