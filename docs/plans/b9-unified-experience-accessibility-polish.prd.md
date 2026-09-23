@@ -21,16 +21,19 @@ Q7 native/server boundary, the exclusions and the English and expansion checks; 
 **B9-4 implemented — native AT recordings pending owner — 2026-09-23**:
 [the plan's implementation record](../../.claude/plans/b9-4-shared-navigation.plan.md#implementation-record-2026-09-23) records the Q2 destination map as
 code (`Client/src/features/navigation/`), the plug-in and shared-file reservation rules, the inert-view transitions and the failing controls.
+**B9-5 implemented — native AT recordings and OS-zoom check pending owner — 2026-09-23**:
+[the plan's implementation record](../../.claude/plans/b9-5-message-requests-inbox.plan.md#implementation-record-2026-09-23) records the
+Message Requests inbox (`Client/src/features/message-requests/`): snapshot/frame reconciliation, account scoping, the text-only
+preview with zero automatic fetches, the Q2 count and the failing controls.
 **B9-18 implemented — native AT recordings pending owner — 2026-09-23**:
 [the plan's implementation record](../../.claude/plans/b9-18-english-shell-connect.plan.md#implementation-record-2026-09-23) records the
 connect and shell catalogs, the 388-literal extraction, the sidebar-header reflow fix and the budget measurement.
 English text is unchanged except the intended thousands grouping of numeric parameters of 1,000 or more ("1,234 online"), accepted by
 the owner on 2026-09-23; the plan lists the affected keys.
-Budget note: the MainPage gzip budget is raised from 60,000 B to 61,000 B (2026-09-23, decided by firstmate on the owner's standing
-instruction to take recommended calls). The +2,175 B is catalog keys and lookup calls from moving shell text behind the B9-3 seam, with
-no new copy. B9-19 must justify its own increase with measured numbers. Re-measured after merging dev 5682b410 (2026-09-23): dev had
-used up the headroom, so the same catalog cost failed the gate, and the startup budget is raised 91,000 → 93,000 B (92,265 B measured)
-and MainPage 61,000 → 63,000 B (62,271 B measured), pending the owner's confirmation.
+Budget note (2026-09-23, firstmate decision 010): B9 feature lanes share one budget, startup 93,000 B (was 91,000 B) and MainPage
+64,000 B (was 60,512 B), superseding the earlier MainPage 61,000 B decision; re-baseline at B9-26. B9-18's cost is catalog keys and
+lookup calls from moving text behind the B9-3 seam, with no new copy; with dev ff349278 merged it measures startup 92,884 B and MainPage
+62,443 B.
 
 > **Drafted:** 2026-09-23. **Planning branch:** `docs/b9-unified-experience-plan`.
 > **Exact base:** `0beee8e4c50ca18823750e381d3a1d6e327029b8`, checked-out `dev`.
@@ -213,7 +216,7 @@ every smaller number. All product rows additionally depend on the entry gate.
 | [B9-2](../../.claude/plans/b9-2-shared-accessibility-and-tokens.plan.md) | Apply the agreed shared accessibility and token rules                   | B9-1                                                                                                                             | 7, 8                | Implemented — native AT and visual acceptance pending owner |
 | [B9-3](../../.claude/plans/b9-3-english-text-boundary.plan.md)           | Introduce the English text and formatting boundary                      | B9-2                                                                                                                             | 6                   | Implemented — native AT and OS zoom pending owner           |
 | [B9-4](../../.claude/plans/b9-4-shared-navigation.plan.md)               | Add the agreed shared navigation integration points                     | B9-3                                                                                                                             | 7, 8                | Implemented — native AT pending owner                       |
-| [B9-5](../../.claude/plans/b9-5-message-requests-inbox.plan.md)          | Show the Message Requests inbox and safe text preview                   | B9-4                                                                                                                             | 1, 8                | Pending                                                     |
+| [B9-5](../../.claude/plans/b9-5-message-requests-inbox.plan.md)          | Show the Message Requests inbox and safe text preview                   | B9-4                                                                                                                             | 1, 8                | Implemented — native AT and OS zoom pending owner           |
 | [B9-6](../../.claude/plans/b9-6-message-request-decisions.plan.md)       | Accept, ignore, delete or block a Message Request                       | B9-5                                                                                                                             | 1, 8                | Pending                                                     |
 | [B9-7](../../.claude/plans/b9-7-nsfw-consent-gate.plan.md)               | Make NSFW consent an authoritative pre-load gate                        | B9-4                                                                                                                             | 3, 8                | Pending                                                     |
 | [B9-8](../../.claude/plans/b9-8-external-content-consent.plan.md)        | Apply external-content consent before broker or provider work           | B9-7, B9-3                                                                                                                       | 2, 8                | Pending                                                     |

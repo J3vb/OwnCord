@@ -65,6 +65,12 @@ RETURNING id;
 SELECT id FROM moderation_actions
  WHERE target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now');
 
+-- name: ListActiveTimeoutExpiries :many
+-- Every currently-active timeout's target and expiry, across all users, so
+-- the hub can re-arm its in-memory expiry refresh after a restart.
+SELECT target_id, expires_at FROM moderation_actions
+ WHERE kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now');
+
 -- name: ListUnacknowledgedWarnings :many
 -- ready's notices slot: every warning issued to userID that has not yet
 -- been acknowledged.

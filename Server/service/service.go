@@ -83,6 +83,9 @@ type Services struct {
 	// so the metrics route can read its counters; MessageService gets it
 	// separately, through SetPushNotifier.
 	PushDispatch *PushDispatcher
+	// Attention is the admin attention panel's state (RI-07), nil until the
+	// composition root builds it over the hub's counters.
+	Attention *AttentionService
 }
 
 // New creates all domain services wired together.

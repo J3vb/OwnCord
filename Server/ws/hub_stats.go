@@ -50,6 +50,13 @@ func (h *Hub) BackpressureStats() (queueDisconnects, highFallbacks, lowDrops uin
 	return h.bpQueueDisconnects.Load(), h.bpHighFallbacks.Load(), h.bpLowDrops.Load()
 }
 
+// DeliveryDropCount is the attention panel's delivery-pressure counter: hub
+// broadcast drops plus send-queue overflow disconnects. Low-priority drops
+// are excluded because they lose nothing and disconnect nobody.
+func (h *Hub) DeliveryDropCount() uint64 {
+	return h.broadcastDrops.Load() + h.bpQueueDisconnects.Load()
+}
+
 // ConnRejectCount returns how many WebSocket upgrade requests were refused by
 // the max_ws_connections capacity guardrail. Safe to call from any goroutine.
 func (h *Hub) ConnRejectCount() uint64 {

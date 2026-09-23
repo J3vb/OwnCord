@@ -59,12 +59,19 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   appendChildren(dmHeader, dmArrow, dmLabelEl, dmUnreadBadge);
 
   // Its own badge, not a share of the unread one: a request is not a message
-  // the reader has, and it never raises the unread or mention totals.
+  // the reader has, and it never raises the unread or mention totals. It is a
+  // button into DM mode, where "Message Requests (N)" sits: with no DM rows
+  // and no "View all", it is a first-contact reader's only way in.
   const pending = opts.pendingRequests;
   if (pending !== undefined) {
-    const requestsBadge = createElement("span", {
+    const requestsBadge = createElement("button", {
+      type: "button",
       class: "dm-header-requests-badge",
       "data-testid": "dm-requests-badge",
+    });
+    requestsBadge.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setSidebarMode("dms");
     });
     const requestsCount = createElement("span", { "aria-hidden": "true" });
     const requestsLabel = createElement("span", { class: "sr-only" });
