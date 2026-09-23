@@ -24,6 +24,8 @@ For media, run `node tests/e2e/scripts/install-livekit.mjs` and set `OWNCORD_E2E
 
 Browser full-stack tests replace desktop IPC only: HTTP, WebSocket, authentication, storage and key exchange go through the real server. Browser API probes observe peer connections and inject microphone, device, RTT and worker-key faults. These tests must not add badges, toasts or CSS classes to manufacture their expected result. Native tests separately cover Rust IPC and certificate validation.
 
+`fullstack/voice-join-budget.spec.ts` is the client voice-join budget. It times seven joins into a live call, each on a fresh application socket, from the click to "Voice Connected" with the peer's audio decoding, and holds the median to `Client/voice-join-budget.json`. Change the budget only with a CI measurement recorded in `docs/plans/b7-0-client-baseline-2026-09-19.md`.
+
 Server update tests build two real main packages using a Go overlay for the ephemeral signing key, upstream HTTP destination and PID journal. Production signature verification, staging, atomic replacement and restart code remain intact. Tests check that a broken download reaches the artifact, fails, leaves the installed hash unchanged and clears staging. A valid signed release is applied through the admin UI; the successor must serve the new version, preserve messages, accept new traffic and, in the media variant, resume decoded audio.
 
 Native builds use `native-test-config.mjs` for a separate application identifier, a serial CDP port and WebView settings passed through Tauri’s API (elevated WebView2 ignores environment overrides). Each fresh native process clears only the `com.owncord.e2e` profile; an installer relaunch retains it.

@@ -16,6 +16,16 @@ owner on 2026-09-23 ([#1735](https://github.com/J3vb/OwnCord/pull/1735)).
 **All fourteen decisions were settled 2026-09-04** (the owner delegated them;
 thirteen as drafted, decision 7 strengthened). Private advisory disposition
 is still an exit obligation; this source audit does not certify its closure.
+**Reconciled 2026-09-23 at `dev` `6fd8cc0c`** ([exit-gate
+reconciliation](#exit-gate-reconciliation-2026-09-23)): B5-0 through B5-11
+are merged (B5-10 as [#1555](https://github.com/J3vb/OwnCord/pull/1555),
+after the audit snapshot above). Condition 6's push follow-up is proven
+([#1742](https://github.com/J3vb/OwnCord/pull/1742)) and Condition 5's
+upload follow-up is evidenced
+([#1565](https://github.com/J3vb/OwnCord/pull/1565)); both are ready for
+owner acceptance and neither is accepted. **B5 is not accepted:** those two
+acceptances, advisory disposition (Condition 7), the exit-SHA measurement and
+B5-12's final pass remain.
 
 **Roadmap section:** ["B5 — Add community, content, and moderation
 services"](repo-health-roadmap-2026-08-23.md) — objective, entry gate, eleven
@@ -2813,6 +2823,11 @@ and signed decisions; do not count a merged implementation as an accepted
 phase exit or overwrite B5-10's ongoing evidence. BPR-053 reconciliation is
 assigned explicitly to B6 workstream 18.
 
+**Status, 2026-09-23:** the `docs/api.md` NSFW prose and the safe-fetch
+inventory's gate descriptions are reconciled (see the [exit-gate
+reconciliation](#exit-gate-reconciliation-2026-09-23)); the final pass at the
+exit SHA is still owed.
+
 **Register corrections**, each with the evidence already in "Verify before you
 implement":
 
@@ -2997,6 +3012,55 @@ audit implements none of them, and it does not judge B5-10's unfinished work.
   no subsequent delivery uses the withdrawn authority. Preserve the
   existing trust, NSFW, membership and online-state checks. This belongs to
   B5's revocable push service, alongside B8's already-planned client UX.
+
+  **Evidence, 2026-09-23 — ready for owner acceptance, not accepted.** No
+  production change was needed: `PushDispatcher.attemptOne`
+  (`Server/service/push_dispatch.go`) runs `subscriptionStillCurrent` and
+  `stillEligible` immediately before every attempt, the first included
+  (`Server/service/push_dispatch_revalidate.go`). The first re-reads the
+  subscription row the saved request was encrypted for, so a revoked,
+  re-keyed or rotated-away device is refused. The second asks the
+  recipient-blocks-author pair, then re-checks DM trust, online state,
+  channel access and NSFW acknowledgement. Both fail closed on a lookup
+  error. `TestPushDispatch_Condition6_WithdrawnAuthorityGovernsEveryAttempt`
+  (`Server/service/push_dispatch_consent_test.go`) sends through the real
+  `SendMessage` hook and withdraws through the paths a user reaches,
+  `PushService.Revoke` and `BlockService.BlockUser`. It withdraws at every
+  point a delivery can be pending: queued before its first attempt, and
+  after each of the first and second attempts. The withdrawn recipient's
+  endpoint sees exactly as many fetches as it had before the withdrawal and
+  none after. An untouched recipient in the same dispatch still gets its
+  whole retry budget and is delivered, so the refusal is not a blanket stop.
+  The existing R3 tests in `push_dispatch_test.go` (`RecheckBeforeEachAttempt_*`:
+  trust, NSFW acknowledgement, channel access, online state, credential and
+  VAPID-key rotation, lookup failures, unchanged work still retries) are
+  unchanged and pass. Revert-proof: skipping either per-attempt check turns
+  all three of its boundary cases red. Security-review status stays in the
+  private review trail. B5-12's final reconciliation is not claimed here.
+
+### Exit-gate reconciliation, 2026-09-23
+
+Measured against `dev` `6fd8cc0c` by reading merges, this plan's evidence
+blocks and the ledger; no gate was re-run, so this is **not** the exit
+measurement. "Exit-SHA measurement" below means the shared remainder every
+condition carries: the gates re-run on the exit SHA, `gate-evidence` green
+and the owner's exit acceptance. **B5 is not accepted.**
+
+| #          | State at `6fd8cc0c`                                                                                   | Evidence                                                                                                                                                                                                                                                                                                                              | What remains (owner · size)                                                                                                                                                                                                                                           |
+| ---------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1          | Merged; no follow-up was carried                                                                      | B5-6, [#1549](https://github.com/J3vb/OwnCord/pull/1549), its five bypass tests                                                                                                                                                                                                                                                       | Exit-SHA measurement only                                                                                                                                                                                                                                             |
+| 2          | Merged; the narrowing was accepted at HP-5                                                            | B5-1, [#1541](https://github.com/J3vb/OwnCord/pull/1541), the adversarial suite; decision 14 signed at HP-5 ([#1547](https://github.com/J3vb/OwnCord/pull/1547), [#1550](https://github.com/J3vb/OwnCord/pull/1550)); BG-19 re-tagged in [#1546](https://github.com/J3vb/OwnCord/pull/1546)                                           | Exit-SHA measurement only                                                                                                                                                                                                                                             |
+| 3          | Merged; the evidence-consent follow-up is **accepted** (2026-09-23)                                   | B5-7, [#1551](https://github.com/J3vb/OwnCord/pull/1551); the content gate resolved at dispatch, [#1629](https://github.com/J3vb/OwnCord/pull/1629) (OC-0449); the follow-up, [#1735](https://github.com/J3vb/OwnCord/pull/1735), acceptance recorded in [#1740](https://github.com/J3vb/OwnCord/pull/1740); BG-18 re-tagged in #1546 | Exit-SHA measurement only                                                                                                                                                                                                                                             |
+| 4          | Merged; the evidence-consent follow-up is **accepted** (2026-09-23)                                   | B5-8 [#1552](https://github.com/J3vb/OwnCord/pull/1552), B5-9 [#1553](https://github.com/J3vb/OwnCord/pull/1553), B5-10 [#1555](https://github.com/J3vb/OwnCord/pull/1555) (merged 2026-09-06, after the audit snapshot); #1735                                                                                                       | Exit-SHA measurement. B5-10's evidence notes handler-level appeal-route tests as a follow-up; the exit gate does not name them, so they gate only if the owner says so                                                                                                |
+| 5          | Follow-up implemented and evidenced; **ready for owner acceptance, not accepted**                     | B5-2, [#1543](https://github.com/J3vb/OwnCord/pull/1543); the follow-up, [#1565](https://github.com/J3vb/OwnCord/pull/1565) (`a356d88b`), evidence in B5-2's "Exit-gate follow-up, 2026-09-08" block                                                                                                                                  | The owner's review and written acceptance of #1565 (owner · small: a recorded sign-off), then the exit-SHA measurement                                                                                                                                                |
+| 6          | Follow-up proven; **ready for owner acceptance, not accepted**                                        | B5-4 [#1545](https://github.com/J3vb/OwnCord/pull/1545), B5-11 [#1548](https://github.com/J3vb/OwnCord/pull/1548); per-attempt revalidation, #1629 (OC-0450); the proof, [#1742](https://github.com/J3vb/OwnCord/pull/1742) (`TestPushDispatch_Condition6_WithdrawnAuthorityGovernsEveryAttempt`)                                     | The owner's written acceptance of #1742 (owner · small: a recorded sign-off); `TestNoAutomaticTelemetry_Capture` and `TestEgressAllowIsLive` green at the exit SHA                                                                                                    |
+| 7          | Open                                                                                                  | The private review trail                                                                                                                                                                                                                                                                                                              | Advisory disposition, including SEC-04's unfilled advisory ID (owner · private; not sized here)                                                                                                                                                                       |
+| **rule 2** | Satisfied                                                                                             | All five B5-tagged `OC-*` rows are `fixed` (#1546). The ledger's one open entry, OC-0445, is an operational delivery-budget finding owned by B6 (B6-10), not B5                                                                                                                                                                       | None                                                                                                                                                                                                                                                                  |
+| B5-12      | Register corrections 1–5 and the three roadmap amendments done; both audit-carryover prose items done | #1546; this reconciliation corrects `docs/api.md`'s `nsfw` field and channel-admin prose to B5-7's enforcement, and gives the safe-fetch rows in [diagnostics.md](../architecture/diagnostics.md) push dispatch's gate                                                                                                                | The final pass on the measured exit SHA: this header, the README row, the roadmap, the register's B5 halves (SEC-04, BG-05, BG-12, BG-13, BG-14, BG-18, BG-19) and the traceability rows BPR-060..063 and BPR-070..073 (exit PR author · ~1 day, the step's own size) |
+
+The required rollback evidence is present at `6fd8cc0c`: `Server/rollback/`
+carries a `.down.sql` for each of `044`–`050` (and for `051`–`053`); the
+rehearsal is re-run as part of the exit-SHA measurement.
 
 Keep security validation and advisory disposition in the private review
 trail. Close these items and B5-12's final reconciliation on the measured

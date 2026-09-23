@@ -28,9 +28,10 @@ is the implementation supplement for the B3, B7 and B9 structural workstreams
 (see the `_(added 2026-08-29)_` lines); it is not a phase and adds no gate.
 **Audit update, 2026-09-23, at `dev` `8df46055` (B7-18): B7 has built
 everything and HP-7 is signed, but the phase exit is open.** B7-0 through B7-17
-are merged, and the owner signed HP-7 on 2026-09-23. Three items keep the exit
+are merged, and the owner signed HP-7 on 2026-09-23. Three items kept the exit
 open: C-10's B7 half, the client voice-join budget, and the decision on
-`tauri-build` for PRs into `dev`. The
+`tauri-build` for PRs into `dev`. C-10's B7 half closed and the voice-join
+budget was recorded and enforced on 2026-09-23, so one remains. The
 [B7 PRD](b7-shared-client-platform-desktop-parity.prd.md#b7-18-reconciliation-2026-09-23)
 records them, and the B7 section below summarizes them.
 [README.md](README.md) is the status authority when this header and a README
@@ -943,10 +944,10 @@ three stated limits, which carry forward:
   leg is N/A;
 - the owner still has to run the real-desktop Linux device check.
 
-The exit gate is **not yet met**. C-10's B7 half, the third item B7-18 found,
-closed on 2026-09-23 (the register's C-10 row). Two items are still open:
+The exit gate is **not yet met**. C-10's B7 half closed on 2026-09-23 (the
+register's C-10 row), as did the client voice-join budget. One item is still
+open:
 
-- no client voice-join budget has been recorded;
 - the 2026-09-19 decision to run `tauri-build` on PRs into `dev` was not
   implemented.
 
@@ -1045,7 +1046,10 @@ this hold point's desktop-parity text is otherwise unchanged.)_
 - Desktop artifacts pass install, boot, connect, update, rollback, media, and
   recovery smoke on the supported architecture matrix.
 - Startup, bundle, voice-join, and long-session budgets meet or improve the
-  accepted baseline.
+  accepted baseline. _(2026-09-23: the client voice-join budget, the one
+  missing, is the median of seven joins to decoded remote audio at 1,500 ms
+  or less, enforced in `client-fullstack`; baseline in
+  [b7-0-client-baseline-2026-09-19.md](b7-0-client-baseline-2026-09-19.md#b7-voice-join-budget-baseline-2026-09-23).)_
 
 ### Required evidence
 
@@ -1541,7 +1545,10 @@ and re-enter the scorecard when it does._
 _Audit update, 2026-09-06, at `61ac2b9`:_ B0–B4 remain accepted; B5-0..B5-9
 and B5-11 are merged, with B5-12's initial reconciliation also merged.
 B5-10 is in progress. Complete the existing B5 exit follow-ups and final
-reconciliation before B6 entry. The 2026-08-29 sequence below is retained
+reconciliation before B6 entry. _Reconciled 2026-09-23 at `6fd8cc0c`:_ B5-10
+merged as #1555; B5 is not accepted — the plan's [exit-gate
+reconciliation](b5-community-content-moderation-2026-09-04.md#exit-gate-reconciliation-2026-09-23)
+names what remains. The 2026-08-29 sequence below is retained
 as historical execution evidence, not today's instruction to start B3.
 
 _Updated 2026-08-29._ B0 and B1 are complete (HP-0 accepted 2026-08-25, HP-1
