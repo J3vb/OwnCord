@@ -51,15 +51,21 @@ describe("deriveAccentTokens (Q8)", () => {
     expect(t.hover).toBe(toHex([75, 86, 206]));
   });
 
-  it("falls back for text and focus below 3:1, and honours 3:1 or more", () => {
-    // 2.74:1 on the dark theme: keep the theme's tested colour.
-    expect(deriveAccentTokens(parseColor("#5865f2")!, DARK_SURFACES).text).toBeNull();
-    // 4.05:1 at worst on the same surfaces: the user's colour is used.
-    expect(deriveAccentTokens(parseColor("#3ba55d")!, DARK_SURFACES).text).toBe("#3ba55d");
+  it("uses the accent as text only at 4.5:1 and as a focus ring only at 3:1", () => {
+    // 2.74:1 on the dark theme: neither use.
+    const blurple = deriveAccentTokens(parseColor("#5865f2")!, DARK_SURFACES);
+    expect([blurple.text, blurple.focus]).toEqual([null, null]);
+    // 3.64:1 at worst: a focus ring, but not text.
+    const green = deriveAccentTokens(parseColor("#3ba55d")!, DARK_SURFACES);
+    expect([green.text, green.focus]).toEqual([null, "#3ba55d"]);
+    // 6.44:1 at worst: both.
+    const cyan = deriveAccentTokens(parseColor("#00c8ff")!, DARK_SURFACES);
+    expect([cyan.text, cyan.focus]).toEqual(["#00c8ff", "#00c8ff"]);
   });
 
   it("fails closed when no surface could be measured", () => {
-    expect(deriveAccentTokens(parseColor("#ffffff")!, []).text).toBeNull();
+    const t = deriveAccentTokens(parseColor("#ffffff")!, []);
+    expect([t.text, t.focus]).toEqual([null, null]);
   });
 
   it("keeps --on-accent at 4.5:1 or more on the fill, hover and active for every accent", () => {

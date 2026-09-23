@@ -95,9 +95,9 @@ function themeSurfaces(): Rgb[] {
  * Must run after the theme is applied, both so it wins over the theme's
  * --accent via inline-style specificity and so the contrast check reads the
  * theme's surfaces. Fills take the user's colour; --on-accent, --accent-hover
- * and --accent-active are derived from it; --accent-text and --focus-ring take
- * it only when it reads at 3:1 or better, and otherwise keep the theme's
- * tested colours (B9-2, owner decision Q8). High Contrast overrides those two
+ * and --accent-active are derived from it; --accent-text takes it only at 4.5:1
+ * or better and --focus-ring only at 3:1 or better, otherwise each keeps the
+ * theme's tested colour (B9-2, owner decision Q8 as aligned with Q1). High Contrast overrides those two
  * again from app/accessibility.css. An unparseable colour applies nothing.
  */
 export function applyAccent(color: string): void {
@@ -120,9 +120,12 @@ export function applyAccent(color: string): void {
   }
   // Body only: the light theme writes its tested --accent-text/--focus-ring
   // inline on documentElement, and removing them here must not erase those.
-  for (const prop of ["--accent-text", "--focus-ring"]) {
-    if (tokens.text === null) body.removeProperty(prop);
-    else body.setProperty(prop, tokens.text);
+  for (const [prop, value] of [
+    ["--accent-text", tokens.text],
+    ["--focus-ring", tokens.focus],
+  ] as const) {
+    if (value === null) body.removeProperty(prop);
+    else body.setProperty(prop, value);
   }
 }
 

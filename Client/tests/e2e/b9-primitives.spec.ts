@@ -1,6 +1,10 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { mockTauriConnect, mockTauriFullSessionWithMessages, navigateToMainPageReady } from "./helpers";
+import {
+  mockTauriConnect,
+  mockTauriFullSessionWithMessages,
+  navigateToMainPageReady,
+} from "./helpers";
 import {
   Q1,
   findUnnamedControls,
@@ -125,8 +129,9 @@ test.describe("B9-2 token matrix (Q1 thresholds, Q8 accent policy)", () => {
           at += onAccentPairs.length;
           const unqualified = check(extraPairs, at, 0);
 
-          // Q8: the accent is the text/focus colour only at >= 3:1 on every
-          // surface, and never under High Contrast.
+          // Q8 as aligned with Q1: the accent is the text colour only at
+          // >= 4.5:1 and the focus ring only at >= 3:1 on every surface, and
+          // neither under High Contrast.
           const surfaces = await Promise.all(SURFACES.map((s) => tokenHex(page, s)));
           const accentMin =
             accent === null
@@ -134,13 +139,15 @@ test.describe("B9-2 token matrix (Q1 thresholds, Q8 accent policy)", () => {
               : Math.min(
                   ...surfaces.map((s) => contrastRatio(parseColor(accent)!, parseColor(s)!)),
                 );
-          const expected =
-            accent !== null && !highContrast && accentMin >= 3 ? accent : THEME_ACCENT_TEXT[theme];
+          const honoured = (min: number): string =>
+            accent !== null && !highContrast && accentMin >= min
+              ? accent
+              : THEME_ACCENT_TEXT[theme];
           const accentText = await tokenHex(page, "--accent-text");
           const focusRing = await tokenHex(page, "--focus-ring");
-          if (accentText !== expected || focusRing !== expected) {
+          if (accentText !== honoured(Q1.text) || focusRing !== honoured(Q1.focus)) {
             failures.push(
-              `${label}: --accent-text ${accentText} / --focus-ring ${focusRing}, expected ${expected}`,
+              `${label}: --accent-text ${accentText} (expected ${honoured(Q1.text)}), --focus-ring ${focusRing} (expected ${honoured(Q1.focus)})`,
             );
           }
           rows.push({
@@ -149,6 +156,7 @@ test.describe("B9-2 token matrix (Q1 thresholds, Q8 accent policy)", () => {
             accent: accent ?? "theme default",
             accentMinOnSurfaces: accent === null ? null : Number(accentMin.toFixed(2)),
             accentText,
+            focusRing,
             onAccent: await tokenHex(page, "--on-accent"),
             text,
             focus,
@@ -184,6 +192,15 @@ test.describe("B9-2 shared-controls fixture", () => {
         };
 
         expect(await findUnnamedControls(fixture)).toEqual([]);
+
+        // Pointer targets (2.5.8): 24x24 CSS px; an inline text link is exempt.
+        const small = await fixture.locator("button, input, .toggle").evaluateAll((els) =>
+          els
+            .map((el) => [el.className || el.tagName, el.getBoundingClientRect()] as const)
+            .filter(([, r]) => r.width < 24 || r.height < 24)
+            .map(([name, r]) => `${name} ${Math.round(r.width)}x${Math.round(r.height)}`),
+        );
+        expect(small).toEqual([]);
 
         // Normal state.
         for (const [name, selector] of [
@@ -274,9 +291,9 @@ test.describe("B9-2 keyboard journey at large text and reduced motion", () => {
 
     // OS reduced motion (the config default) reaches the app with no setting.
     await expect(page.locator("html")).toHaveClass(/reduced-motion/);
-    expect(await fixture.locator(".modal").evaluate((el) => getComputedStyle(el).animationDuration)).toBe(
-      "0s",
-    );
+    expect(
+      await fixture.locator(".modal").evaluate((el) => getComputedStyle(el).animationDuration),
+    ).toBe("0s");
 
     await fixture.locator(".modal").focus();
     await page.keyboard.press("Tab"); // close
@@ -415,7 +432,9 @@ test.describe("B9-2 reflow at the minimum window", () => {
           await expect(control).toBeInViewport();
           expect(await control.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
         }
-        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(
+          0,
+        );
         await testInfo.attach(`reflow-${label.replaceAll(/\W+/g, "-")}.png`, {
           body: await page.screenshot(),
           contentType: "image/png",

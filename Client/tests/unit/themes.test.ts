@@ -114,15 +114,20 @@ describe("applyAccent (B9-2, owner decision Q8)", () => {
       expect(style.getPropertyValue("--accent-hover")).toBe("#58b375");
       expect(style.getPropertyValue("--accent-active")).toBe("#76c08e");
     }
-    expect(body.getPropertyValue("--accent-text")).toBe("#3ba55d");
+    // 3.64:1 at worst: a focus ring (>= 3:1) but not text (< 4.5:1).
+    expect(body.getPropertyValue("--accent-text")).toBe("");
     expect(body.getPropertyValue("--focus-ring")).toBe("#3ba55d");
+
+    applyAccent("#57f287"); // 7.3:1 at worst: both uses
+    expect(body.getPropertyValue("--accent-text")).toBe("#57f287");
+    expect(body.getPropertyValue("--focus-ring")).toBe("#57f287");
   });
 
   it("keeps the theme's text and focus colours when the accent reads below 3:1", () => {
     setDarkSurfaces();
     // A tested theme value on documentElement (the light theme writes one there).
     html.setProperty("--accent-text", "#4752c4");
-    applyAccent("#3ba55d");
+    applyAccent("#57f287");
     applyAccent("#5865f2"); // 2.74:1 on #313338
     expect(body.getPropertyValue("--accent")).toBe("#5865f2");
     expect(body.getPropertyValue("--accent-text")).toBe("");

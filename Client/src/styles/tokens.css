@@ -26,7 +26,7 @@
      accent fill; --accent-text is the accent used AS text; --focus-ring is
      every focus indicator. Each theme sets tested values; a custom accent
      overrides them in lib/themes.ts applyAccent(), which keeps the theme's
-     text and focus colours whenever the custom one would read below 3:1.
+     text colour below 4.5:1 and its focus colour below 3:1.
      See docs/architecture/b9-ui-contract.md. */
   --on-accent: #ffffff;
   --accent-text: #949cf7;

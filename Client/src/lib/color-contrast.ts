@@ -4,8 +4,9 @@
  * The owner's Q8 decision (docs/plans/b9-unified-experience-accessibility-polish.prd.md):
  * a custom accent is honoured for fills; `--on-accent`, `--accent-hover` and
  * `--accent-active` are derived from it; and where the accent is itself the
- * text or the focus indicator but reads below 3:1 on the theme's surfaces,
- * those two uses fall back to the theme's tested colour.
+ * text (below 4.5:1) or the focus indicator (below 3:1) on the theme's
+ * surfaces, that use falls back to the theme's tested colour. The split by use
+ * is the owner's 2026-09-23 clarification aligning Q8 with Q1.
  *
  * Pure functions only, so the Playwright contrast checks can import the same
  * math the app uses.
@@ -21,8 +22,9 @@ export type Rgb = readonly [number, number, number];
 export const ON_ACCENT_DARK = "#000000";
 export const ON_ACCENT_LIGHT = "#ffffff";
 
-/** Q8: below this, an accent is not used as text or as a focus indicator. */
-export const ACCENT_TEXT_MIN_CONTRAST = 3;
+/** Q1/Q8: below these, an accent is not used as text / as a focus indicator. */
+export const ACCENT_TEXT_MIN_CONTRAST = 4.5;
+export const ACCENT_FOCUS_MIN_CONTRAST = 3;
 
 /**
  * Parse `#rgb`, `#rrggbb` or a computed `rgb()`/`rgba()` string. Alpha is
@@ -75,8 +77,10 @@ export interface AccentTokens {
   readonly onAccent: string;
   readonly hover: string;
   readonly active: string;
-  /** The accent as text/focus colour, or null to keep the theme's tested one. */
+  /** The accent as a text colour, or null to keep the theme's tested one. */
   readonly text: string | null;
+  /** The accent as the focus ring, or null to keep the theme's tested one. */
+  readonly focus: string | null;
 }
 
 /**
@@ -99,5 +103,6 @@ export function deriveAccentTokens(accent: Rgb, surfaces: readonly Rgb[]): Accen
     active: toHex(mix(accent, away, 0.3)),
     // No surfaces means nothing was measurable: fail closed to the theme colour.
     text: surfaces.length > 0 && minContrast >= ACCENT_TEXT_MIN_CONTRAST ? toHex(accent) : null,
+    focus: surfaces.length > 0 && minContrast >= ACCENT_FOCUS_MIN_CONTRAST ? toHex(accent) : null,
   };
 }
