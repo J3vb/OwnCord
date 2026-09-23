@@ -7,6 +7,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { connectText } from "../i18n/connect";
 
 export interface ConnectedOverlayOptions {
   readonly serverName: string;
@@ -73,7 +74,7 @@ export function createConnectedOverlay(options: ConnectedOverlayOptions): Connec
     {
       class: "connected-text",
     },
-    "Connected!",
+    connectText("connected.title"),
   );
 
   const userText = createElement(
@@ -81,7 +82,7 @@ export function createConnectedOverlay(options: ConnectedOverlayOptions): Connec
     {
       class: "connected-user",
     },
-    `Logged in as ${username}`,
+    connectText("connected.loggedInAs", { username }),
   );
 
   const motdEl = createElement("div", { class: "connected-motd" });
@@ -92,7 +93,7 @@ export function createConnectedOverlay(options: ConnectedOverlayOptions): Connec
   // Loader with spinner
   const loader = createElement("div", { class: "connected-loader" });
   const spinner = createElement("div", { class: "spinner" });
-  const loaderText = createElement("span", {}, "Loading server data...");
+  const loaderText = createElement("span", {}, connectText("connected.loading"));
   appendChildren(loader, spinner, loaderText);
 
   appendChildren(overlay, iconWrap, connectedText, userText, motdEl, loader);
@@ -107,7 +108,7 @@ export function createConnectedOverlay(options: ConnectedOverlayOptions): Connec
     spinner.style.display = "none";
     loaderText.textContent = "";
     loaderText.appendChild(createIcon("check", 16));
-    loaderText.appendChild(document.createTextNode(" Ready!"));
+    loaderText.appendChild(document.createTextNode(` ${connectText("connected.ready")}`));
 
     const timer = setTimeout(() => {
       if (!disposable.signal.aborted) {

@@ -24,7 +24,13 @@
   flex: 1 1 calc(100% - 38px);
   min-width: 0;
 }
+.unified-sidebar-header .server-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .unified-sidebar-header .server-icon-sm {
+  flex-shrink: 0;
   width: 28px;
   height: 28px;
   border-radius: var(--radius-md);

@@ -8,6 +8,7 @@ import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
+import { shellText } from "../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,8 +46,10 @@ function maskCode(code: string): string {
 
 function formatInviteInfo(invite: InviteItem): string {
   const uses =
-    invite.maxUses !== null ? `${invite.uses}/${invite.maxUses} uses` : `${invite.uses} uses`;
-  return `Created by ${invite.createdBy} \u00B7 ${uses}`;
+    invite.maxUses !== null
+      ? shellText("invite.usesOfMax", { uses: invite.uses, max: invite.maxUses })
+      : shellText("invite.uses", { uses: invite.uses });
+  return shellText("invite.meta", { creator: invite.createdBy, uses });
 }
 
 // ---------------------------------------------------------------------------
@@ -81,7 +84,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
 
       const copyBtn = createElement("button", { class: "invite-item__copy" });
       copyBtn.appendChild(createIcon("external-link", 14));
-      copyBtn.appendChild(document.createTextNode(" Copy"));
+      copyBtn.appendChild(document.createTextNode(` ${shellText("invite.copy")}`));
       copyBtn.addEventListener(
         "click",
         () => {
@@ -93,7 +96,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
       // Revoking kills a live invite link — two-click confirm, then an
       // in-flight state so a slow revoke isn't clicked twice.
       const revokeBtn = createElement("button", { class: "invite-item__revoke" });
-      const revokeLabel = document.createTextNode(" Revoke");
+      const revokeLabel = document.createTextNode(` ${shellText("invite.revoke")}`);
       revokeBtn.appendChild(createIcon("trash-2", 14));
       revokeBtn.appendChild(revokeLabel);
       let confirming = false;
@@ -105,7 +108,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
           clearTimeout(disarmTimer);
           disarmTimer = null;
         }
-        revokeLabel.nodeValue = " Revoke";
+        revokeLabel.nodeValue = ` ${shellText("invite.revoke")}`;
         revokeBtn.classList.remove("invite-item__revoke--confirming");
       };
       revokeBtn.addEventListener(
@@ -114,7 +117,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
           if (revoking) return;
           if (!confirming) {
             confirming = true;
-            revokeLabel.nodeValue = " Sure?";
+            revokeLabel.nodeValue = ` ${shellText("invite.revokeConfirm")}`;
             revokeBtn.classList.add("invite-item__revoke--confirming");
             disarmTimer = setTimeout(disarm, CONFIRM_TIMEOUT_MS);
             return;
@@ -126,7 +129,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
           confirming = false;
           revoking = true;
           revokeBtn.disabled = true;
-          revokeLabel.nodeValue = " Revoking...";
+          revokeLabel.nodeValue = ` ${shellText("invite.revoking")}`;
           void options
             .onRevokeInvite(invite.code)
             .then(() => {
@@ -137,8 +140,8 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
               revoking = false;
               revokeBtn.disabled = false;
               revokeBtn.classList.remove("invite-item__revoke--confirming");
-              revokeLabel.nodeValue = " Revoke";
-              options.onError?.("Failed to revoke invite");
+              revokeLabel.nodeValue = ` ${shellText("invite.revoke")}`;
+              options.onError?.(shellText("invite.revokeFailed"));
             });
         },
         { signal: disposable.signal },
@@ -158,9 +161,12 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
   function mount(container: Element): void {
     // Header
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", { id: "invite-manager-title" }, "Server Invites");
+    const title = createElement("h3", { id: "invite-manager-title" }, shellText("invite.title"));
     // Icon-only button: without a label a screen reader announces just "button".
-    const closeBtn = createElement("button", { class: "modal-close", "aria-label": "Close" });
+    const closeBtn = createElement("button", {
+      class: "modal-close",
+      "aria-label": shellText("common.close"),
+    });
     closeBtn.appendChild(createIcon("x", 14));
     closeBtn.addEventListener("click", () => options.onClose(), { signal: disposable.signal });
     appendChildren(header, title, closeBtn);
@@ -168,14 +174,14 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
     // Body
     const body = createElement("div", { class: "modal-body" });
     listEl = createElement("div", { class: "invite-manager__list" });
-    emptyEl = createElement("div", { class: "invite-manager__empty" }, "No active invites");
+    emptyEl = createElement("div", { class: "invite-manager__empty" }, shellText("invite.empty"));
     appendChildren(body, listEl, emptyEl);
 
     // Footer
     const footer = createElement("div", { class: "modal-footer" });
     const createBtn = createElement("button", { class: "invite-manager__create btn-modal-save" });
     createBtn.appendChild(createIcon("external-link", 14));
-    const createLabel = document.createTextNode(" Create Invite");
+    const createLabel = document.createTextNode(` ${shellText("invite.create")}`);
     createBtn.appendChild(createLabel);
     createBtn.addEventListener(
       "click",
@@ -183,10 +189,10 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
         // Without this guard an impatient double-click mints two invites.
         if (createBtn.disabled) return;
         createBtn.disabled = true;
-        createLabel.nodeValue = " Creating...";
+        createLabel.nodeValue = ` ${shellText("invite.creating")}`;
         const done = (): void => {
           createBtn.disabled = false;
-          createLabel.nodeValue = " Create Invite";
+          createLabel.nodeValue = ` ${shellText("invite.create")}`;
         };
         void options
           .onCreateInvite()
@@ -197,7 +203,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
           })
           .catch(() => {
             done();
-            options.onError?.("Failed to create invite");
+            options.onError?.(shellText("invite.createFailed"));
           });
       },
       { signal: disposable.signal },

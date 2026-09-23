@@ -58,6 +58,7 @@ import { saveUserStatus } from "@lib/userStatus";
 import { getActivePresenceSender } from "@lib/presence";
 
 import { desktop } from "./platform/desktop";
+import { connectText } from "./i18n/connect";
 
 // Gate the log level before anything logs: debug entries are serialized and
 // persisted to disk, so in production the level must filter real work, not
@@ -121,7 +122,7 @@ void desktop.pushToTalk.init();
 
 const appEl = document.getElementById("app");
 if (!appEl) {
-  throw new Error("Missing #app element");
+  throw new Error("Missing #app element"); // i18n-exempt: developer error, index.html always ships #app
 }
 
 // The active page. `currentPage` further down holds the mounted page
@@ -148,7 +149,7 @@ function handleUnauthorized(): void {
   // attempt) is not a session "expiring" — the login form's own catch block
   // already surfaces that failure. Only warn about a session that was live.
   if (authStore.getState().isAuthenticated) {
-    setTransientError("Your session expired — sign in again.");
+    setTransientError(connectText("session.expired"));
   }
   clearAuth();
 }
@@ -246,7 +247,7 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
 
   const modal = createCertMismatchModal({
     host: evt.host,
-    storedFingerprint: evt.storedFingerprint ?? "Unknown",
+    storedFingerprint: evt.storedFingerprint ?? connectText("common.unknown"),
     newFingerprint: evt.fingerprint,
     onAccept: () => {
       modal.destroy?.();
@@ -490,7 +491,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           log.warn("Credential delete failed — the saved password is still stored", {
             host,
           });
-          setTransientError("Could not remove the saved password — it is still stored");
+          setTransientError(connectText("session.passwordRemoveFailed"));
         }
       })();
     }
@@ -499,7 +500,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         .then((ok) => {
           if (!ok && owner.isCurrent()) {
             log.warn("Credential save failed — auto-login will not work for this server");
-            setTransientError("Could not save credentials — auto-login won't work");
+            setTransientError(connectText("session.credentialsSaveFailed"));
           }
         })
         .catch(() => {
@@ -597,7 +598,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       const saved = profileManager.getAll();
       if (saved.length > 0) return saved;
       // Fallback: show a default local server entry
-      return [{ name: "Local Server", host: "localhost:8443" }];
+      return [{ name: connectText("profiles.defaultName"), host: "localhost:8443" }];
     }
 
     // Persist a profile mutation, surfacing a failure instead of letting it
@@ -607,7 +608,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // the in-memory store as the only record of the change.
     function persistProfiles(): void {
       void profileManager.saveProfiles().catch(() => {
-        setTransientError("Could not save server profiles");
+        setTransientError(connectText("profiles.saveFailed"));
       });
     }
 
@@ -704,9 +705,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           attempt.assertCurrent();
           pageOwner.assertCurrent();
           if (!relayed) {
-            throw new Error(
-              "Saved-password login is unavailable here — please type your password.",
-            );
+            throw new Error(connectText("session.savedLoginUnavailable"));
           }
           // The relayed body is the same AuthResponse shape api.login returns,
           // so from here the flow is literally the typed-password one.
@@ -734,9 +733,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             // Approval mode (B4-1): no session yet — an admin decides. The
             // dedicated notice is B9's; until then the form's message line
             // carries it.
-            connectPage.showError(
-              "Registration received. An admin has to approve your account before you can sign in.",
-            );
+            connectPage.showError(connectText("registration.pendingApproval"));
             return;
           }
           const remember = connectPage.getRememberPassword();
@@ -895,9 +892,10 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         // credential read was still pending) must not paint an error over
         // the login that superseded it.
         if (!autoLoginCancelled && pageOwner.isCurrent() && attempt.isCurrent()) {
-          const message = err instanceof Error ? err.message : "Auto-login failed";
+          const message =
+            err instanceof Error ? err.message : connectText("session.autoLoginFailed");
           log.warn("Auto-login failed", { host: profile.host, error: message });
-          connectPage.showError(`Auto-login failed: ${message}`);
+          connectPage.showError(connectText("session.autoLoginFailedDetail", { message }));
         }
       }
     }

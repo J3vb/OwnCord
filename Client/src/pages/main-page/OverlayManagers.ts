@@ -19,6 +19,7 @@ import { setActiveChannel } from "@stores/channels.store";
 import { setMessagePinned } from "@stores/messages.store";
 import { resolveAuthor } from "@components/message-list/formatting";
 import { resolveDisplayName } from "@lib/avatar";
+import { shellText } from "../../i18n/shell";
 
 const log = createLogger("overlays");
 
@@ -245,8 +246,8 @@ export function createInviteManagerController(opts: {
           // No silent success: a copy the user can't see is indistinguishable
           // from a clipboard permission failure.
           void navigator.clipboard.writeText(code).then(
-            () => showToast("Invite code copied", "success"),
-            () => showToast("Couldn't copy the invite code", "error"),
+            () => showToast(shellText("invite.copied"), "success"),
+            () => showToast(shellText("invite.copyFailed"), "error"),
           );
         },
         onClose: close,
@@ -256,8 +257,8 @@ export function createInviteManagerController(opts: {
         },
       });
     },
-    errorLog: "Failed to open invite manager",
-    errorToast: "Failed to load invites",
+    errorLog: "Failed to open invite manager", // i18n-exempt: developer log line, never shown
+    errorToast: shellText("invite.loadFailed"),
   });
 
   return { open: controller.open, cleanup: controller.close };
@@ -322,14 +323,14 @@ export function createPinnedPanelController(opts: {
             })
             .catch((err: unknown) => {
               log.error("Failed to unpin message", { msgId, error: String(err) });
-              showToast("Failed to unpin message", "error");
+              showToast(shellText("pins.unpinFailed"), "error");
             });
         },
         onClose: close,
       });
     },
-    errorLog: "Failed to load pinned messages",
-    errorToast: "Failed to load pinned messages",
+    errorLog: "Failed to load pinned messages", // i18n-exempt: developer log line, never shown
+    errorToast: shellText("pins.loadFailed"),
   });
 
   async function toggle(): Promise<void> {
@@ -388,7 +389,7 @@ export function createSearchOverlayController(opts: {
         } catch (err) {
           if (err instanceof DOMException && err.name === "AbortError") throw err;
           log.error("Search failed", { query, error: String(err) });
-          showToast("Search failed", "error");
+          showToast(shellText("search.failed"), "error");
           throw err;
         }
       },

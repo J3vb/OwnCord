@@ -4,6 +4,8 @@
 // owner-issued recovery credential; the server tells them apart by shape.
 
 import { createElement, setText, appendChildren } from "@lib/dom";
+import { connectText } from "../../i18n/connect";
+import { recoverText } from "../../i18n/recover";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -65,20 +67,25 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
     "data-testid": "recover-overlay",
   });
   const card = createElement("div", { class: "totp-card" });
-  const title = createElement("h2", { class: "totp-title" }, "Account Recovery");
+  const title = createElement("h2", { class: "totp-title" }, recoverText("recover.title"));
   const description = createElement(
     "p",
     { class: "totp-subtitle" },
-    "Sign back in without your password or two-factor device. This sets a new password and signs out every other device.",
+    recoverText("recover.description"),
   );
-  const username = buildField("recover-username", "Username", "text", "username");
-  const secret = buildField(
-    "recover-secret",
-    "Recovery kit secret or a recovery credential from your server owner",
+  const username = buildField(
+    "recover-username",
+    recoverText("recover.usernameLabel"),
     "text",
-    "off",
+    "username",
   );
-  const password = buildField("recover-password", "New password", "password", "new-password");
+  const secret = buildField("recover-secret", recoverText("recover.secretLabel"), "text", "off");
+  const password = buildField(
+    "recover-password",
+    recoverText("recover.passwordLabel"),
+    "password",
+    "new-password",
+  );
   const error = createElement("div", {
     class: "totp-subtitle",
     role: "alert",
@@ -88,12 +95,12 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
   const submit = createElement(
     "button",
     { class: "btn-primary", type: "button", "data-testid": "recover-submit" },
-    "Recover account",
+    recoverText("recover.submit"),
   );
   const cancel = createElement(
     "button",
     { class: "totp-back", type: "button", "data-testid": "recover-cancel" },
-    "Cancel",
+    recoverText("common.cancel"),
   );
   appendChildren(
     card,
@@ -117,14 +124,14 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
   }
 
   function validate(host: string, user: string, key: string, pw: string): string | null {
-    if (!host) return "Server address is required.";
-    if (!user) return "Username is required.";
-    if (!key) return "Enter your recovery kit secret or recovery credential.";
+    if (!host) return connectText("validation.hostRequired");
+    if (!user) return connectText("validation.usernameRequired");
+    if (!key) return recoverText("recover.secretRequired");
     if (pw.length < MIN_PASSWORD_LENGTH) {
-      return `New password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+      return recoverText("recover.passwordTooShort", { min: MIN_PASSWORD_LENGTH });
     }
     if (pw === ctx.placeholder) {
-      return "That is the saved-password placeholder, not a password. Choose a different one.";
+      return connectText("validation.placeholderPassword");
     }
     return null;
   }
@@ -144,7 +151,7 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
     }
     setText(error, "");
     submit.disabled = true;
-    setText(submit, "Recovering…");
+    setText(submit, recoverText("recover.submitting"));
     try {
       await ctx.onRecover(host, user, key, pw);
       // Signed in: the recovery root is spent, and neither it nor the new
@@ -153,11 +160,11 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
       ctx.usernameInput.value = user;
       ctx.onRecovered();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Recovery failed.";
+      const message = err instanceof Error ? err.message : recoverText("recover.failed");
       setText(error, message.length > 200 ? message.slice(0, 200) + "..." : message);
     } finally {
       submit.disabled = false;
-      setText(submit, "Recover account");
+      setText(submit, recoverText("recover.submit"));
     }
   }
 
