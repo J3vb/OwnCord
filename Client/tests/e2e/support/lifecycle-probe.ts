@@ -279,7 +279,10 @@ const COUNT_METRICS: readonly CountMetric[] = [
  * and each page's samples must hold the plan's bar. Heap is not asserted within
  * a page: V8 compiles and tiers up code as a page ages (about 1 MB of `(code)`
  * over five cycles in a heap-snapshot diff), so page age, not a leak, moves it;
- * the phase series compare heap at equal page age.
+ * heap is compared only in the phase series taken right after a reconnect or
+ * logout (`cycle % 5 === 0`), 11a's calibrated series. The later page ages
+ * (cycles 6 and 9) are where that tier-up still moves it: one 20-cycle run grew
+ * 413 KB between cycles 9 and 19 with every count flat.
  *
  * `slopeCeilings` raises the phase-series ceiling of a metric with a known,
  * recorded leak that survives the navigation, so the gate still fails on any
@@ -355,6 +358,7 @@ export function evaluateBars(
   let heapFirst: number | null = null;
   let heapLast = 0;
   for (const [phase, group] of groups) {
+    if (phase % 5 !== 0) continue;
     const values = group.map((s) => s.heapUsed);
     const measured = slope(group.map((s) => ({ x: s.cycle, y: s.heapUsed })));
     if (Math.abs(measured) >= Math.abs(heapSlope)) {

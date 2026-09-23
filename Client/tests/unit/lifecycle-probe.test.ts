@@ -159,6 +159,25 @@ describe("lifecycle soak pass bars", () => {
     expect(bar(bars, "nodes").pass).toBe(true);
   });
 
+  it("compares heap only at the post-reconnect and post-logout phases", () => {
+    const bars = evaluateBars([
+      sample(5),
+      sample(9, { heapUsed: 1_000_000 }),
+      sample(10),
+      sample(15),
+      sample(19, { heapUsed: 1_500_000 }),
+      sample(20),
+    ]);
+    expect(bar(bars, "heapUsed").pass).toBe(true);
+    const grown = evaluateBars([
+      sample(5, { heapUsed: 1_000_000 }),
+      sample(10),
+      sample(15, { heapUsed: 1_500_000 }),
+      sample(20),
+    ]);
+    expect(bar(grown, "heapUsed").pass).toBe(false);
+  });
+
   it("returns nothing when there is no sample", () => {
     expect(evaluateBars([])).toEqual([]);
     expect(evaluateBars([sample(5)])).toEqual([]);
