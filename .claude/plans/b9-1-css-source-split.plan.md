@@ -1,6 +1,6 @@
 # Plan: B9-1 — Split app.css without changing its output
 
-**Status:** COMPLETE — 2026-09-23 at `dev` `c80c8094`; evidence in `docs/plans/b9-css-split-evidence-2026-09-23.md`.
+**Status:** COMPLETE — native AT recordings pending owner — 2026-09-23 at `dev` `c80c8094`; evidence in `docs/plans/b9-css-split-evidence-2026-09-23.md`.
 
 > **Milestone:** B9-1 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `refactor/b9-1-css-source-split`; branch from current `dev`, PR to `dev` only.
