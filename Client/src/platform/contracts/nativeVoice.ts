@@ -17,13 +17,16 @@ export interface NativeVoiceAudioOptions {
   echoCancellation: boolean;
   noiseSuppression: boolean;
   autoGainControl: boolean;
+  /** RNNoise after the engine's processing (the web path's worklet). */
+  enhancedNoiseSuppression: boolean;
 }
 
 /** Host-side resource counts for the facade's debug surface. */
 export interface NativeVoiceResources {
   rooms: number;
   localTracks: number;
-  admRefs: number;
+  /** Open microphone input streams (0 while muted). */
+  captureStreams: number;
   /** Remote audio tracks being read into the playout mixer. */
   audioStreams: number;
   /** Open frame-socket connections (remote renderers plus camera upload). */
@@ -65,8 +68,7 @@ export interface NativeVoiceEnvelope {
 }
 
 export interface NativeVoiceDevice {
-  /** The host's identifier: the capture device's name, or the output
-   *  host's stable device id. */
+  /** The audio host's stable device id. */
   id: string;
   name: string;
 }

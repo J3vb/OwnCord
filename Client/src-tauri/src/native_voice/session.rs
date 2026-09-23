@@ -1,7 +1,8 @@
 //! One native LiveKit room: connect over the loopback proxy URL, E2EE with the
-//! room key the TypeScript key exchange hands over, microphone publish and
-//! capture through libwebrtc's audio device module (ADM), remote playout
-//! through our own mixer (`playout.rs`, for per-user volume), camera
+//! room key the TypeScript key exchange hands over, microphone capture and
+//! processing through our own input stream (`capture.rs`, for RNNoise),
+//! remote playout through our own mixer (`playout.rs`, for per-user
+//! volume), camera
 //! publish and remote video through the session's frame socket
 //! (`video.rs`), and a stream of room events for the webview. No Tauri types here so the interop example
 //! (`examples/native_voice_interop.rs`) drives exactly the code the app runs.
@@ -11,15 +12,15 @@ use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
 use livekit::options::{TrackPublishOptions, VideoEncoding};
 use livekit::prelude::*;
-use livekit::rtc_engine::lk_runtime::LkRuntime;
-use livekit::webrtc::audio_source::RtcAudioSource;
+use livekit::webrtc::audio_source::native::NativeAudioSource;
+use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
 use livekit::webrtc::native::frame_cryptor::EncryptionState;
-use livekit::webrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
 use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
 use serde::Serialize;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use super::capture::{self, Apm, Capture};
 use super::playout::{self, Playout};
 use super::video::{FrameServer, Observer};
 
@@ -230,13 +231,15 @@ fn map_event(ev: RoomEvent) -> Option<Event> {
 }
 
 /// Microphone audio processing, from the same preferences the web path feeds
-/// `audioCaptureDefaults` (libwebrtc's APM stands in for RNNoise on Linux).
+/// `audioCaptureDefaults`, plus its Enhanced Noise Suppression (RNNoise).
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioOptions {
     pub echo_cancellation: bool,
     pub noise_suppression: bool,
     pub auto_gain_control: bool,
+    #[serde(default)]
+    pub enhanced_noise_suppression: bool,
 }
 
 /// Rust-side resource counts for the facade's debug surface (B7-11: the
@@ -246,7 +249,8 @@ pub struct AudioOptions {
 pub struct Resources {
     pub rooms: usize,
     pub local_tracks: usize,
-    pub adm_refs: usize,
+    /// Open microphone input streams (0 while muted).
+    pub capture_streams: usize,
     /// Remote audio tracks being read into the playout mixer.
     pub audio_streams: usize,
     /// Open frame-socket connections (remote renderers plus camera upload).
@@ -259,12 +263,10 @@ pub struct Resources {
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
-    /// Capture: the device name (the Linux device modules leave the GUID
-    /// empty). Playout: the output host's stable device id.
+    /// The audio host's stable device id.
     pub id: String,
     pub name: String,
-    /// The position a switch selects by (the device module's index for
-    /// capture).
+    /// The device's position in its list, what a switch selects by.
     #[serde(skip)]
     pub index: u16,
 }
@@ -278,26 +280,8 @@ pub struct Devices {
     pub outputs: Vec<DeviceInfo>,
 }
 
-fn inputs_of(audio: &PlatformAudio) -> Vec<DeviceInfo> {
-    audio
-        .recording_devices()
-        .map(|d| DeviceInfo {
-            id: d.name.clone(),
-            name: d.name,
-            index: d.index as u16,
-        })
-        .collect()
-}
-
-fn devices_of(audio: &PlatformAudio) -> Devices {
-    Devices {
-        inputs: inputs_of(audio),
-        outputs: playout::list_outputs(),
-    }
-}
-
 /// The index to switch to: the first device whose id is `requested`,
-/// otherwise the module's default (the first listed), flagged as a fallback
+/// otherwise the default (the first listed), flagged as a fallback
 /// unless the default was what was asked for (an empty id). `None` when
 /// nothing is listed.
 pub(super) fn resolve_device(requested: &str, listed: &[DeviceInfo]) -> (Option<u16>, bool) {
@@ -307,47 +291,12 @@ pub(super) fn resolve_device(requested: &str, listed: &[DeviceInfo]) -> (Option<
     }
 }
 
-/// The selected capture device: its name (empty: the default) and the
-/// device-module index last applied for it, which a hot-plug can shift.
-#[derive(Default)]
-struct Selection {
-    name: String,
-    index: Option<u16>,
-}
-
-/// Select device `index` the way `PlatformAudio`'s hot-swap does (stop,
-/// select, re-init and restart a stream that was running), but by index. The
-/// stream is restarted even when the selection fails, and left untouched when
-/// `index` is the one already `applied`.
-fn switch_stream(
-    applied: Option<u16>,
-    index: u16,
-    running: bool,
-    stop: impl Fn() -> bool,
-    select: impl Fn() -> bool,
-    init: impl Fn() -> bool,
-    start: impl Fn() -> bool,
-) -> Result<(), String> {
-    if applied == Some(index) {
-        return Ok(());
+/// The audio host's capture and playout devices, in or out of a call.
+pub fn list_devices() -> Devices {
+    Devices {
+        inputs: capture::list_inputs(),
+        outputs: playout::list_outputs(),
     }
-    if running && !stop() {
-        return Err("stopping the audio stream failed".into());
-    }
-    let selected = select();
-    if running && !(init() && start()) {
-        return Err("restarting the audio stream failed".into());
-    }
-    if !selected {
-        return Err("selecting the audio device failed".into());
-    }
-    Ok(())
-}
-
-/// Enumerate with a device module that lives only for the call (no session).
-pub fn list_devices_transient() -> Result<Devices, String> {
-    let audio = PlatformAudio::new().map_err(|e| e.to_string())?;
-    Ok(devices_of(&audio))
 }
 
 /// The device kinds the web path's `switchActiveDevice` names.
@@ -418,12 +367,16 @@ type CameraSlot = Arc<Mutex<Option<CameraPublication>>>;
 pub struct NativeSession {
     room: Room,
     key_provider: KeyProvider,
-    audio: Option<PlatformAudio>,
+    /// Set by `enable_audio`: the processing capture and playout share.
+    apm: Option<Arc<Apm>>,
     mic: Option<LocalTrackPublication>,
+    /// The published microphone's source, fed by `capture` (none when the
+    /// interop example published a synthetic one).
+    mic_source: Option<NativeAudioSource>,
     camera: CameraSlot,
     frames: FrameServer,
     playout: Playout,
-    input: Selection,
+    capture: Capture,
     forwarder: tokio::task::JoinHandle<()>,
 }
 
@@ -465,12 +418,13 @@ impl NativeSession {
         Ok(Self {
             room,
             key_provider,
-            audio: None,
+            apm: None,
             mic: None,
+            mic_source: None,
             camera,
             frames,
             playout,
-            input: Selection::default(),
+            capture: Capture::default(),
             forwarder,
         })
     }
@@ -504,33 +458,26 @@ impl NativeSession {
         self.room.local_participant().identity().to_string()
     }
 
-    /// Bring up playout on the default output device and the platform ADM for
-    /// capture. The app calls this right after connect, independent of
-    /// whether the microphone is ever published. The ADM's own playout is
-    /// switched to its synthetic mode, which keeps the decode pipeline (and
-    /// the echo canceller's reference) running without a device, so that
-    /// remote audio plays only through the gained mix in `playout.rs`.
-    pub fn enable_platform_audio(&mut self, opts: AudioOptions) -> Result<(), String> {
-        if self.audio.is_some() {
-            return Ok(());
+    /// Set up the audio processing and open playout on the default output
+    /// device. The app calls this right after connect, independent of
+    /// whether the microphone is ever published. The SDK's device module is
+    /// never acquired, so its playout stays in the synthetic mode that keeps
+    /// the decode pipeline running without a device, and remote audio plays
+    /// only through the gained mix in `playout.rs`, which is also what the
+    /// echo canceller hears. A box with no sound server logs and carries on
+    /// listen-only.
+    pub fn enable_audio(&mut self, opts: AudioOptions) {
+        if self.apm.is_some() {
+            return;
         }
+        let apm = Apm::new(&opts);
+        self.playout.set_reference(apm.clone());
+        self.capture
+            .configure(apm.clone(), opts.enhanced_noise_suppression);
+        self.apm = Some(apm);
         if let Err(e) = self.playout.set_device("") {
             log::warn!("[native_voice] playout unavailable: {e}");
         }
-        let audio = PlatformAudio::new().map_err(|e| e.to_string())?;
-        LkRuntime::instance()
-            .pc_factory()
-            .set_adm_playout_enabled(false);
-        audio
-            .configure_audio_processing(AudioProcessingOptions {
-                echo_cancellation: opts.echo_cancellation,
-                noise_suppression: opts.noise_suppression,
-                auto_gain_control: opts.auto_gain_control,
-                ..Default::default()
-            })
-            .map_err(|e| e.to_string())?;
-        self.audio = Some(audio);
-        Ok(())
     }
 
     /// Enable or disable the microphone. The first enable publishes; after
@@ -539,63 +486,38 @@ impl NativeSession {
     /// while muted so the system's in-use indicator goes out — the same
     /// contract as `stopMicTrackOnMute` on the web path.
     pub async fn set_microphone(&mut self, enabled: bool) -> Result<(), String> {
-        if enabled {
-            self.reselect_input();
-        }
         let Some(publication) = &self.mic else {
             if !enabled {
                 return Ok(());
             }
-            let source = self
-                .audio
-                .as_ref()
-                .ok_or("no audio device module — platform audio unavailable")?
-                .rtc_source();
-            return self.publish_audio(source).await;
+            // Unbuffered (queue 0): the capture callback hands over whole
+            // 10 ms frames and never waits.
+            let source =
+                NativeAudioSource::new(AudioSourceOptions::default(), capture::SAMPLE_RATE, 1, 0);
+            self.capture.start(source.clone())?;
+            self.mic_source = Some(source.clone());
+            let published = self.publish_audio(RtcAudioSource::Native(source)).await;
+            if published.is_err() {
+                self.capture.stop();
+                self.mic_source = None;
+            }
+            return published;
         };
         if enabled {
-            if let Some(audio) = &self.audio {
-                audio.start_recording().map_err(|e| e.to_string())?;
+            // The interop example publishes its own source and captures nothing.
+            if let Some(source) = &self.mic_source {
+                self.capture.start(source.clone())?;
             }
             publication.unmute();
         } else {
             publication.mute();
-            if let Some(audio) = &self.audio {
-                if let Err(e) = audio.stop_recording() {
-                    log::warn!("[native_voice] stop_recording failed: {e}");
-                }
-            }
+            self.capture.stop();
         }
         Ok(())
     }
 
-    /// Point a stopped capture stream at the selected device's current index
-    /// before it starts again.
-    fn reselect_input(&mut self) {
-        let Some(audio) = &self.audio else { return };
-        let runtime = LkRuntime::instance();
-        let f = runtime.pc_factory();
-        if f.recording_is_initialized() {
-            return;
-        }
-        let selection = &mut self.input;
-        let (index, fell_back) = resolve_device(&selection.name, &inputs_of(audio));
-        if fell_back {
-            log::warn!(
-                "[native_voice] capture device {} not found; using the default",
-                selection.name
-            );
-        }
-        let Some(index) = index else { return };
-        let selected = f.set_recording_device(index);
-        selection.index = selected.then_some(index);
-        if !selected {
-            log::warn!("[native_voice] selecting capture device {index} failed");
-        }
-    }
-
-    /// Publish any audio source as the microphone track. The app passes the
-    /// ADM source; the interop example passes a synthetic sine.
+    /// Publish any audio source as the microphone track. The app passes its
+    /// capture's source; the interop example passes a synthetic sine.
     pub async fn publish_audio(&mut self, source: RtcAudioSource) -> Result<(), String> {
         let track = LocalAudioTrack::create_audio_track("microphone", source);
         let publication = self
@@ -721,53 +643,13 @@ impl NativeSession {
             .set_gain(identity, playout::Volume::ScreenShare, volume);
     }
 
-    pub fn devices(&self) -> Result<Devices, String> {
-        self.audio
-            .as_ref()
-            .map(devices_of)
-            .ok_or_else(|| "no audio device module — platform audio unavailable".to_string())
-    }
-
-    /// Switch the capture or playout device in place (a running stream is
-    /// restarted). An empty id selects the default, the first listed device.
+    /// Switch the capture or playout device (a running stream moves to it).
+    /// An empty id selects the default, the first listed device.
     pub fn set_device(&mut self, kind: &str, device_id: &str) -> Result<(), String> {
-        let kind = DeviceKind::parse(kind)?;
-        if kind == DeviceKind::Output {
-            return self.playout.set_device(device_id);
+        match DeviceKind::parse(kind)? {
+            DeviceKind::Output => self.playout.set_device(device_id),
+            DeviceKind::Input => self.capture.set_device(device_id),
         }
-        let audio = self
-            .audio
-            .as_ref()
-            .ok_or("no audio device module — platform audio unavailable")?;
-        let (index, fell_back) = resolve_device(device_id, &inputs_of(audio));
-        let index = index.ok_or("no capture device")?;
-        // PlatformAudio only switches by GUID, which is empty on Linux; the
-        // runtime its device module lives in exposes the index-based calls.
-        let runtime = LkRuntime::instance();
-        let f = runtime.pc_factory();
-        let selection = &mut self.input;
-        let switched = switch_stream(
-            selection.index,
-            index,
-            f.recording_is_initialized(),
-            || f.stop_recording(),
-            || f.set_recording_device(index),
-            || f.init_recording(),
-            || f.start_recording(),
-        );
-        selection.index = switched.is_ok().then_some(index);
-        switched?;
-        selection.name = if fell_back {
-            String::new()
-        } else {
-            device_id.to_string()
-        };
-        if fell_back {
-            return Err(format!(
-                "capture device {device_id} not found; switched to the default"
-            ));
-        }
-        Ok(())
     }
 
     pub fn resources(&self) -> Resources {
@@ -775,17 +657,18 @@ impl NativeSession {
             rooms: 1,
             local_tracks: usize::from(self.mic.is_some())
                 + usize::from(self.camera.lock().unwrap().is_some()),
-            adm_refs: self.audio.as_ref().map_or(0, PlatformAudio::ref_count),
+            capture_streams: self.capture.streams(),
             audio_streams: self.playout.readers(),
             video_sockets: self.frames.sockets(),
             threads: process_threads(),
         }
     }
 
-    /// Leave the room and release every native handle. Dropping the last
-    /// `PlatformAudio` disables the ADM; dropping the frame server closes
-    /// its listener and every frame socket.
+    /// Leave the room and release every native handle: the capture and
+    /// playout streams close with the session, and dropping the frame server
+    /// closes its listener and every frame socket.
     pub async fn close(mut self) {
+        self.capture.stop();
         self.release_camera().await;
         if let Some(publication) = self.mic.take() {
             let _ = self
@@ -798,7 +681,6 @@ impl NativeSession {
             log::warn!("[native_voice] room close: {e}");
         }
         self.forwarder.abort();
-        self.audio.take();
     }
 }
 
@@ -964,79 +846,6 @@ mod tests {
         assert_eq!(resolve_device("Built-in", &shifted), (Some(3), false));
         assert_eq!(resolve_device("unplugged", &[]), (None, true));
         assert_eq!(resolve_device("", &[]), (None, false));
-    }
-
-    #[test]
-    fn a_failed_selection_still_restarts_the_running_stream() {
-        use std::cell::RefCell;
-        let calls = RefCell::new(Vec::new());
-        let step = |name: &'static str, ok: bool| {
-            let calls = &calls;
-            move || {
-                calls.borrow_mut().push(name);
-                ok
-            }
-        };
-        let result = switch_stream(
-            None,
-            2,
-            true,
-            step("stop", true),
-            step("select", false),
-            step("init", true),
-            step("start", true),
-        );
-        assert!(result.is_err());
-        assert_eq!(*calls.borrow(), ["stop", "select", "init", "start"]);
-
-        calls.borrow_mut().clear();
-        let result = switch_stream(
-            None,
-            2,
-            false,
-            step("stop", true),
-            step("select", true),
-            step("init", true),
-            step("start", true),
-        );
-        assert!(result.is_ok());
-        assert_eq!(*calls.borrow(), ["select"]);
-    }
-
-    #[test]
-    fn an_unchanged_index_leaves_the_running_stream_alone() {
-        use std::cell::RefCell;
-        let calls = RefCell::new(Vec::new());
-        let step = |name: &'static str| {
-            let calls = &calls;
-            move || {
-                calls.borrow_mut().push(name);
-                true
-            }
-        };
-        let result = switch_stream(
-            Some(2),
-            2,
-            true,
-            step("stop"),
-            step("select"),
-            step("init"),
-            step("start"),
-        );
-        assert!(result.is_ok());
-        assert!(calls.borrow().is_empty());
-
-        let result = switch_stream(
-            Some(3),
-            2,
-            true,
-            step("stop"),
-            step("select"),
-            step("init"),
-            step("start"),
-        );
-        assert!(result.is_ok());
-        assert_eq!(*calls.borrow(), ["stop", "select", "init", "start"]);
     }
 
     #[test]

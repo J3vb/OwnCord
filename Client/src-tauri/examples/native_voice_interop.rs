@@ -286,9 +286,9 @@ mod linux {
 
         // Device enumeration must be callable on a headless box: an error
         // (no sound server) is reported, never a crash.
-        let devices = owncord_client_lib::native_voice::session::list_devices_transient();
+        let devices = owncord_client_lib::native_voice::session::list_devices();
         emit(
-            serde_json::json!({ "event": { "type": "devices", "ok": devices.is_ok(), "detail": match &devices { Ok(d) => format!("{} in / {} out", d.inputs.len(), d.outputs.len()), Err(e) => e.clone() } } }),
+            serde_json::json!({ "event": { "type": "devices", "ok": true, "detail": format!("{} in / {} out", devices.inputs.len(), devices.outputs.len()) } }),
         );
 
         let mut session =

@@ -205,7 +205,12 @@ describe("RoomLifecycle on the Linux native backend", () => {
     const room = await lifecycle.createRoom(1);
     expect(room).toBe(nativeRoom);
     expect(createNativeRoom).toHaveBeenCalledWith(
-      { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        enhancedNoiseSuppression: false,
+      },
       expect.any(Function),
       expect.any(Function),
     );

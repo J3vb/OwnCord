@@ -123,7 +123,7 @@ vi.mock("../../src/platform/desktop", () => ({
       },
       disconnect: (session: number) => {
         host.commands.push(["disconnect", [session]]);
-        return Promise.resolve({ rooms: 0, localTracks: 0, admRefs: 0, threads: 40 });
+        return Promise.resolve({ rooms: 0, localTracks: 0, captureStreams: 0, threads: 40 });
       },
       setMicrophone: (...args: unknown[]) => {
         host.commands.push(["setMicrophone", args]);
@@ -147,7 +147,7 @@ vi.mock("../../src/platform/desktop", () => ({
       },
       debugInfo: () => {
         host.commands.push(["debugInfo", []]);
-        return Promise.resolve({ rooms: 1, localTracks: 1, admRefs: 1, threads: 41 });
+        return Promise.resolve({ rooms: 1, localTracks: 1, captureStreams: 1, threads: 41 });
       },
       onEvent: (handler: (e: NativeVoiceEnvelope) => void) => {
         host.handlers.add(handler);
@@ -233,7 +233,12 @@ describe("LiveKitSession on the Linux native backend", () => {
       [
         "ws://127.0.0.1:7881/livekit",
         "tok",
-        { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          enhancedNoiseSuppression: false,
+        },
       ],
     ]);
     expect(host.commands[2]).toEqual(["setMicrophone", [1, true]]);

@@ -17,6 +17,7 @@
 //! session serves them on its own token-authenticated loopback socket
 //! (`video.rs`), whose URL the connect result carries. Key material and the
 //! frame-socket token are never logged.
+pub mod capture;
 pub mod playout;
 pub mod session;
 pub mod video;
@@ -175,11 +176,8 @@ pub async fn native_voice_connect<R: Runtime>(
     });
     let mut connected_key = Some(key.clone());
     let mut session = NativeSession::connect(&url, &token, key, on_event).await?;
-    // Playout is needed even for a listen-only join. A headless box has no
-    // sound server: log and carry on, the mic publish reports it again.
-    if let Err(e) = session.enable_platform_audio(audio) {
-        log::warn!("[native_voice] platform audio unavailable: {e}");
-    }
+    // Playout is needed even for a listen-only join.
+    session.enable_audio(audio);
     let identity = session.local_identity();
     let mut inner = state.inner.lock().await;
     let rotated = inner.key_after_connect(id, connected_key.as_deref().unwrap_or_default());
@@ -203,18 +201,14 @@ pub async fn native_voice_connect<R: Runtime>(
     })
 }
 
-/// Enumerate the platform audio devices. Uses the live session's device
-/// module when there is one, otherwise a transient one (the settings tab
-/// lists devices outside a call).
+/// Enumerate the audio host's capture and playout devices, in or out of a
+/// call (the settings tab lists devices outside one).
 #[tauri::command]
-pub async fn native_voice_list_devices(
-    state: tauri::State<'_, NativeVoiceState>,
-) -> Result<session::Devices, String> {
-    let inner = state.inner.lock().await;
-    match &inner.session {
-        Some((_, s)) => s.devices(),
-        None => session::list_devices_transient(),
-    }
+pub async fn native_voice_list_devices() -> Result<session::Devices, String> {
+    // Enumerating talks to the sound server and blocks.
+    tokio::task::spawn_blocking(session::list_devices)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Select the capture (`kind == "audioinput"`) or playout (`"audiooutput"`)
