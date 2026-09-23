@@ -7,6 +7,8 @@ import type {
   NativeVoice,
   NativeVoiceDevices,
   NativeVoiceEnvelope,
+  NativeVoiceScreenSources,
+  NativeVoiceScreenStarted,
 } from "../../../src/platform/contracts/nativeVoice";
 
 export interface NativeControl {
@@ -17,6 +19,13 @@ export interface NativeControl {
   publishesCameraAs(sid: string): void;
   /** The host reports these devices on the next enumeration. */
   hasDevices(devices: NativeVoiceDevices): void;
+  /** The host reports these shareable sources, then answers the next
+   *  screen capture start and publish with these. */
+  sharesScreenAs(
+    sources: NativeVoiceScreenSources,
+    started: NativeVoiceScreenStarted,
+    sid: string,
+  ): void;
   /** Every host command issued so far, as `[name, payload]`. */
   commands(): Array<[string, unknown]>;
   /** The host delivers a room event. Resolves once it has been delivered. */
@@ -60,9 +69,11 @@ export function describeNativeVoiceSuite(
       ]);
     });
 
-    check("scopes microphone, subscription and disconnect to a session id", async () => {
+    check("scopes microphone, subscription, volume and disconnect to a session id", async () => {
       await ctx.subject.setMicrophone(7, true);
       await ctx.subject.setSubscribed(7, "user-9", "TR_1", false);
+      await ctx.subject.setVolume(7, "user-9", 0.5);
+      await ctx.subject.setScreenshareVolume(7, "user-9", 0.25);
       await ctx.subject.disconnect(7);
       await ctx.subject.clearRoomKey();
       expect(ctx.native.commands()).toEqual([
@@ -71,6 +82,8 @@ export function describeNativeVoiceSuite(
           "native_voice_set_subscribed",
           { session: 7, identity: "user-9", sid: "TR_1", subscribed: false },
         ],
+        ["native_voice_set_volume", { session: 7, identity: "user-9", volume: 0.5 }],
+        ["native_voice_set_screenshare_volume", { session: 7, identity: "user-9", volume: 0.25 }],
         ["native_voice_disconnect", { session: 7 }],
         ["native_voice_clear_key", undefined],
       ]);
@@ -90,6 +103,30 @@ export function describeNativeVoiceSuite(
       expect(ctx.native.commands()).toEqual([
         ["native_voice_publish_camera", { session: 7, options: camera }],
         ["native_voice_unpublish_camera", { session: 7, sid: "TR_cam" }],
+      ]);
+    });
+
+    check("lists shareable sources, and starts, publishes and stops a capture", async () => {
+      const sources: NativeVoiceScreenSources = {
+        portal: false,
+        sources: [{ id: "screen:1", kind: "screen", title: "DP-1", thumbnail: null }],
+      };
+      const capture = { fps: 30, maxWidth: 1920, maxHeight: 1080 };
+      const publish = { width: 1920, height: 1080, maxBitrate: 6_000_000, maxFramerate: 30 };
+      ctx.native.sharesScreenAs(sources, { capture: 2, width: 1920, height: 1080 }, "TR_screen");
+      await expect(ctx.subject.screenSources()).resolves.toEqual(sources);
+      await expect(ctx.subject.startScreen(7, "screen:1", capture)).resolves.toEqual({
+        capture: 2,
+        width: 1920,
+        height: 1080,
+      });
+      await expect(ctx.subject.publishScreen(7, 2, publish)).resolves.toBe("TR_screen");
+      await ctx.subject.stopScreen(7, 2);
+      expect(ctx.native.commands()).toEqual([
+        ["native_voice_screen_sources", undefined],
+        ["native_voice_start_screen", { session: 7, source: "screen:1", capture }],
+        ["native_voice_publish_screen", { session: 7, capture: 2, options: publish }],
+        ["native_voice_stop_screen", { session: 7, capture: 2 }],
       ]);
     });
 

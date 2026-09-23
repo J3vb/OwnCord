@@ -102,11 +102,12 @@ function buildVoiceAudioTabInner(
   registerCameraInvalidation: CameraInvalidationRegistrar,
 ): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
-  // Linux voice runs in the native audio engine (docs/architecture/voice-e2ee.md,
-  // phase 1b): its capture path exposes no gain or level hook and its playout
-  // no gain, so the volume and sensitivity controls below would be dead there.
-  // They are built as usual and removed at the end, with one note in their
-  // place; the prefs keep being written so another platform's profile is untouched.
+  // Linux voice runs in the native audio engine (docs/architecture/voice-e2ee.md):
+  // its capture path exposes no gain or level hook, so the input volume and
+  // sensitivity controls below would be dead there. They are built as usual and
+  // removed at the end, with one note in their place; the prefs keep being
+  // written so another platform's profile is untouched. Output volume works:
+  // the engine's playout mixer applies it with each user's volume.
   const nativeAudio = isLinuxDesktop();
 
   // Input device selector
@@ -645,22 +646,15 @@ function buildVoiceAudioTabInner(
   }
 
   if (nativeAudio) {
-    for (const control of [
-      inputVolumeHeader,
-      inputVolumeRow,
-      sensitivityHeader,
-      meterWrap,
-      outputVolumeHeader,
-      outputVolumeRow,
-    ])
+    for (const control of [inputVolumeHeader, inputVolumeRow, sensitivityHeader, meterWrap])
       control.remove();
     const note = createElement(
       "p",
       { class: "setting-desc", "data-testid": "native-audio-note" },
-      "On Linux, audio runs in the app's native engine. Volume and voice sensitivity are " +
-        "handled by the engine's automatic gain control and silence detection, so the input " +
-        "volume, input sensitivity and output volume controls are not available here. Use " +
-        "your system mixer to adjust levels.",
+      "On Linux, audio runs in the app's native engine. Your microphone level and voice " +
+        "sensitivity are handled by the engine's automatic gain control and silence " +
+        "detection, so the input volume and input sensitivity controls are not available " +
+        "here. Use your system mixer to adjust your microphone level.",
     );
     inputSelect.after(note);
   }

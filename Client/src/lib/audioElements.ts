@@ -93,6 +93,11 @@ export class AudioElements {
    *  element map so a volume chosen before the track attaches still applies. */
   private screenshareVolumeByUser = new Map<number, number>();
 
+  /** Told after a screen-share volume, mute or the output volume changes, for
+   *  a room that plays screen-share audio itself rather than through the
+   *  elements here (the Linux native room). */
+  private screenshareGainListener: (() => void) | null = null;
+
   /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier: number;
 
@@ -121,6 +126,16 @@ export class AudioElements {
   private getEffectiveScreenshareVolume(userId: number): number {
     const userVol = this.screenshareVolumeByUser.get(userId) ?? 1;
     return Math.max(0, Math.min(1, userVol * this.outputVolumeMultiplier));
+  }
+
+  /** The gain a user's screen-share audio plays at: its effective volume, or
+   *  0 while muted. */
+  getScreenshareGain(userId: number): number {
+    return this.getScreenshareAudioMuted(userId) ? 0 : this.getEffectiveScreenshareVolume(userId);
+  }
+
+  setScreenshareGainListener(listener: (() => void) | null): void {
+    this.screenshareGainListener = listener;
   }
 
   // --- Track subscription handlers ---
@@ -277,6 +292,7 @@ export class AudioElements {
         audioEl.volume = effective;
       }
     }
+    this.screenshareGainListener?.();
   }
 
   // --- Screenshare audio ---
@@ -286,6 +302,7 @@ export class AudioElements {
     // Always store, even before the audio track attaches — the stored value
     // is applied in handleTrackSubscribedAudio when the element appears.
     this.screenshareVolumeByUser.set(userId, clamped);
+    this.screenshareGainListener?.();
     const audioEls = this.screenshareAudioElements.get(userId);
     if (audioEls === undefined) return;
     const effective = this.getEffectiveScreenshareVolume(userId);
@@ -299,6 +316,7 @@ export class AudioElements {
 
   muteScreenshareAudio(userId: number, muted: boolean): void {
     this.screenshareAudioMutedByUser.set(userId, muted);
+    this.screenshareGainListener?.();
     const audioEls = this.screenshareAudioElements.get(userId);
     if (audioEls === undefined) return;
     for (const el of audioEls) el.muted = muted;
