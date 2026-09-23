@@ -1,5 +1,5 @@
 {
-  "nextId": 455,
+  "nextId": 459,
   "findings": [
     {
       "id": "OC-0001",
@@ -10530,6 +10530,78 @@
       "lens": "run-the-thing",
       "finder": "fm/oc-0445-fable",
       "suggestedFix": "Measure before touching: one checkout per send (UpdateReadState inside the message transaction, ignoring its error to keep it best-effort) halves the hops; batching writePump frames or lowering per-frame TLS cost shortens each hop. Neither is justified by a real-population shape yet."
+    },
+    {
+      "id": "OC-0455",
+      "title": "A remote camera freezes for good after the SFU pauses and resumes it",
+      "file": "Client/src/features/voice/roomLifecycle.ts",
+      "line": 161,
+      "severity": "medium",
+      "why": "The Room was built with adaptiveStream on (every quality but source), but the video grid plays each remote camera from its own MediaStream and never calls RemoteVideoTrack.attach(), so LiveKit observes no element. RemoteVideoTrack.setStreamState(Active) re-evaluates visibility on every server StreamStateUpdate, which the SFU sends when it resumes a video it paused for bandwidth; with no visible element LiveKit emits VisibilityChanged(false) and the publication sends disabled: true, so the SFU stops forwarding that camera for the rest of the subscription. The tile freezes on its last frame while audio keeps playing. CI run 35838844777 (media.spec.ts wrong-key positive control) shows it: after the rejoin the peer decoded exactly one video frame in 30 s while its audio energy and samples kept rising and no decrypt error was logged. It needs a congested link, so a loopback run does not reproduce it.",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "ci-flake-media-e2e",
+      "lens": "fullstack-e2e-flake",
+      "finder": "media-e2e-flake",
+      "fix": {
+        "commit": "59cc8825",
+        "test": "Client/tests/unit/livekit-session.test.ts",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0456",
+      "title": "livekit-client throws uncaught when an E2EE enable ack names a peer who already left",
+      "file": "Client/patches/livekit-client+2.22.3.patch",
+      "line": 1,
+      "severity": "low",
+      "why": "livekit-client 2.22.3 E2EEManager.onWorkerMessage handles the worker's ack of each enable message by looking the participant up, and throws TypeError(\"couldn't set encryption status, participant not found...\") when it is gone. A peer can leave between the post and the ack: a quick leave right after publishing, or the local room full-reconnecting (a server leave with STATE_MISMATCH) and re-posting enable for every peer while one of them leaves. The throw is an uncaught error from a worker message handler that nothing in the app can catch; no state is lost, but it surfaces as a page error. Seen twice in the long-session soak (CI runs 35846526468 and 35857549279), on the peer that holds the room open. Fixed with a patch-package patch that skips the status event for a missing participant.",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "ci-flake-media-e2e",
+      "lens": "fullstack-e2e-flake",
+      "finder": "media-e2e-flake",
+      "fix": {
+        "commit": "1a6748d6",
+        "test": "Client/tests/unit/livekit-e2ee-enable-ack.test.ts",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0457",
+      "title": "Leaving a voice room strips livekit's own disconnect cleanup, so its timers outlive the room",
+      "file": "Client/src/features/voice/releaseRoom.ts",
+      "line": 24,
+      "severity": "low",
+      "why": "Every room teardown (leaveVoice, the reconnect teardown, releaseRoom, the superseded-join discard) called room.removeAllListeners() before room.disconnect(). That also removed the listeners livekit-client registers on its own Room, among them the once(Disconnected) cleanups that clear its 10 s wait for a LocalTrackSubscribed publication and release deferred track callbacks. After a quick camera toggle the SFU confirms a subscription to a track the client already unpublished, so the 10 s timer and its closure (which reaches the Room) survived the leave and fired later with a 'could not find local track publication' warning. The long-session soak counts pending timeouts, and failed its timeouts bar whenever a sample landed inside that window (reproduced locally on three runners at once under load).",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "ci-flake-media-e2e",
+      "lens": "fullstack-e2e-flake",
+      "finder": "media-e2e-flake",
+      "fix": {
+        "commit": "a6793f07",
+        "test": "Client/src/features/voice/releaseRoom.test.ts",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0458",
+      "title": "The long-session soak read its DOM node count once, so one node in flux failed the growth bar",
+      "file": "Client/tests/e2e/support/lifecycle-probe.ts",
+      "line": 179,
+      "severity": "low",
+      "why": "sampleLifecycle took a single Memory.getDOMCounters read after the GC. In CI run 35886832029 (attempt 2) page 0 sampled 2739, 2738 and 2739 nodes at cycles 5, 6 and 9 while the trace's DOM snapshots showed an identical attached DOM (717 nodes) at all three: one retained, detached node was in flux at the cycle-6 read, and the within-page series (slope 0.33 > 0.05) failed as growth. 24 heap-snapshotted local samples read a stable 2739 with a bounded detached set, so the reading was noise, not a leak. The sampler now reads the DOM counters after a GC until two reads a second apart agree (at most four), as the timer ledger already double-reads; the pass bar is unchanged, and a leaked node is present on every read.",
+      "status": "fixed",
+      "found": "2026-09-23",
+      "hunt": "ci-flake-media-e2e",
+      "lens": "fullstack-e2e-flake",
+      "finder": "media-e2e-flake",
+      "fix": {
+        "commit": "5fe4845e",
+        "test": "Client/tests/e2e/fullstack/long-session.spec.ts",
+        "revertProof": "n/a"
+      }
     }
   ]
 }

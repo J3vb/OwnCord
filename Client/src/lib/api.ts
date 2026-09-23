@@ -119,10 +119,25 @@ export interface OwnModerationAction {
   /** An appealable kind with no appeal filed against it yet. */
   readonly appealable: boolean;
   /** The appeal filed against this row: its opaque public id and state. */
-  readonly appeal: {
-    readonly id: string;
-    readonly state: "open" | "assigned" | "upheld" | "overturned" | "withdrawn";
-  } | null;
+  readonly appeal: { readonly id: string; readonly state: AppealState } | null;
+}
+
+export type AppealState = "open" | "assigned" | "upheld" | "overturned" | "withdrawn";
+
+/** One row of GET /appeals/mine: never the assignee or who decided it.
+ *  Mirrors Server/api/appeal_handler.go's appealMineResponse. */
+export interface MyAppeal {
+  /** The opaque public id withdraw takes. */
+  readonly id: string;
+  /** The appealed action's kind, reason and time; all "" once that action is erased. */
+  readonly action_kind: OwnModerationAction["kind"] | "";
+  readonly action_reason: string;
+  readonly action_created_at: string;
+  readonly state: AppealState;
+  /** Set only once the appeal is decided (upheld or overturned). */
+  readonly decision_note: string | null;
+  readonly created_at: string;
+  readonly decided_at: string | null;
 }
 
 interface SessionsListResponse {
@@ -500,6 +515,26 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
      *  acknowledged (or not theirs). */
     acknowledgeNotice(actionId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("POST", `/users/me/notices/${actionId}/ack`, undefined, signal);
+    },
+
+    /** Files an appeal against the caller's own moderation action (its ledger id).
+     *  409 ALREADY_APPEALED, 429 RATE_LIMITED, 404 when not theirs or gone. */
+    fileAppeal(actionId: number, body: string, signal?: AbortSignal): Promise<{ id: string }> {
+      return request<{ id: string }>("POST", "/appeals/", { action_id: actionId, body }, signal);
+    },
+
+    getMyAppeals(signal?: AbortSignal): Promise<MyAppeal[]> {
+      return request<MyAppeal[]>("GET", "/appeals/mine", undefined, signal);
+    },
+
+    /** Open or assigned appeals only: 409 once decided or withdrawn, 404 when not the caller's. */
+    withdrawAppeal(publicId: string, signal?: AbortSignal): Promise<void> {
+      return request<void>(
+        "POST",
+        `/appeals/${encodeURIComponent(publicId)}/withdraw`,
+        undefined,
+        signal,
+      );
     },
 
     getSessions(signal?: AbortSignal): Promise<SessionInfo[]> {
