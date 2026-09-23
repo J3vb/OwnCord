@@ -172,16 +172,26 @@ func (s *ChannelService) resolveOverrideUser(ctx context.Context, actorRole *db.
 	if err := requireGrantableChannelOverride(actorRole, curAllow|allow, curDeny|deny); err != nil {
 		return nil, err
 	}
-	if !permissions.HasAdmin(actorRole.Permissions) {
-		targetRole, err := s.st.GetRoleByID(ctx, user.RoleID)
-		if err != nil {
-			return nil, fmt.Errorf("%w: failed to fetch target role: %w", ErrInternal, err)
-		}
-		if targetRole != nil && targetRole.Position >= actorRole.Position {
-			return nil, fmt.Errorf("cannot manage a user ranked at or above your own%.0w", ErrForbidden)
-		}
+	if err := s.requireOutranks(ctx, actorRole, user); err != nil {
+		return nil, err
 	}
 	return user, nil
+}
+
+// requireOutranks is the user-hierarchy rule: user's role must sit below the
+// actor's own rank. ADMINISTRATOR bypasses it.
+func (s *ChannelService) requireOutranks(ctx context.Context, actorRole *db.Role, user *db.User) error {
+	if permissions.HasAdmin(actorRole.Permissions) {
+		return nil
+	}
+	targetRole, err := s.st.GetRoleByID(ctx, user.RoleID)
+	if err != nil {
+		return fmt.Errorf("%w: failed to fetch target role: %w", ErrInternal, err)
+	}
+	if targetRole != nil && targetRole.Position >= actorRole.Position {
+		return fmt.Errorf("cannot manage a user ranked at or above your own%.0w", ErrForbidden)
+	}
+	return nil
 }
 
 // PutUserOverride validates and writes a per-user override, audits it, and

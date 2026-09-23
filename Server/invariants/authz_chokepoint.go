@@ -142,7 +142,7 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	// The channel family's override guards (B3-8 part 2) — moved from the
 	// admin handlers with their code; the rows moved with them.
 	"service.requireGrantableChannelOverride":           {classAdminPerimeter, "refuses an override that grants past the actor's own role", calls{"HasAdmin": 1}},
-	"service.(*ChannelService).resolveOverrideUser":     {classAdminPerimeter, "role-hierarchy check on the target user; admin bypass", calls{"HasAdmin": 1}},
+	"service.(*ChannelService).requireOutranks":         {classAdminPerimeter, "role-hierarchy check on the target user; admin bypass", calls{"HasAdmin": 1}},
 	"service.(*MessageService).GetAccessibleChannelIDs": {classAdminShortCircuit, "an administrator searches every channel; skips the override query", calls{"HasAdmin": 1}},
 	"service.(*PermissionService).getOrPopulate":        {classAdminShortCircuit, "cache fill skips the override query for an administrator", calls{"HasAdmin": 1}},
 	"service.(*PermissionService).Subject":              {classAdminShortCircuit, "skips the live, uncached TimedOut lookup for an administrator (B5-9)", calls{"HasAdmin": 1}},

@@ -1284,6 +1284,10 @@ function renderChannelPermsModal(){
     opts+='<option value="u:'+u.id+'">'+esc(u.username)+(u.has?' (override)':'')+'</option>';
   });
   opts+='</optgroup>';
+  let memberOpts='<option value="">— pick a member —</option>';
+  picked.forEach(u=>{memberOpts+='<option value="'+u.id+'">'+esc(u.username)+'</option>'});
+  let actionOpts='';
+  ACCESS_ACTIONS.forEach(a=>{actionOpts+='<option value="'+a[0]+'">'+esc(a[1])+'</option>'});
 
   openModal('<div class="modal-header"><h3>Channel Permissions — #'+esc(pc.name)+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
     +'<div class="modal-body">'
@@ -1294,8 +1298,16 @@ function renderChannelPermsModal(){
     +'<select class="form-input" id="permTarget" style="appearance:auto" onchange="renderPermMatrix()">'+opts+'</select></div>'
     +'<p style="color:var(--text-faint);font-size:12px;margin:0 0 10px">Resolution order: base role permissions → role override → member override. A member deny beats a role allow; Administrator bypasses everything.</p>'
     +'<div id="permMatrix"></div>'
+    +'<div id="permPreview"></div>'
+    +'</div>'
+    +'<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--bg-active)">'
+    +'<div class="form-group"><label class="form-label">Explain access</label>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap"><select class="form-input" id="explainUser" style="appearance:auto;flex:1;min-width:0">'+memberOpts+'</select>'
+    +'<select class="form-input" id="explainAction" style="appearance:auto;flex:1;min-width:0">'+actionOpts+'</select>'
+    +'<button class="btn btn-ghost" onclick="explainAccess()">Explain</button></div></div>'
+    +'<div id="permExplain"></div>'
     +'</div></div>'
-    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveChannelPerms()">Save</button></div>');
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-ghost" onclick="previewPermChange()">Preview matrix change</button><button class="btn btn-accent" onclick="saveChannelPerms()">Save</button></div>');
   renderPermMatrix();
 }
 
@@ -1304,6 +1316,7 @@ function renderChannelPermsModal(){
 function renderPermMatrix(){
   const pc=state.permChannel;if(!pc)return;
   const box=document.getElementById('permMatrix');if(!box)return;
+  const pv=document.getElementById('permPreview');if(pv)pv.innerHTML='';
   const sel=document.getElementById('permTarget');
   const val=sel?sel.value:'';
   if(!val){box.innerHTML='<p style="color:var(--text-faint);font-size:12px">Pick a role or member above to edit its per-channel bits.</p>';return}
@@ -1350,6 +1363,85 @@ function permTargetPath(){
   if(!pc||!val)return null;
   const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
   return '/channels/'+pc.id+(kind==='r'?'/permissions/':'/user-permissions/')+tid;
+}
+
+/* ═══ Access explanation and change preview (RI-06) ═══ */
+/* Both ask the server, which runs the canonical authorization predicates over
+   the member's live state — this panel never decides access itself, and
+   neither request acts as the member. Both reads are audited. */
+const ACCESS_ACTIONS=[
+  ['view_channel','View channel'],
+  ['read_content','Read content'],
+  ['send_message','Send messages'],
+  ['add_reaction','Add reactions'],
+  ['join_voice','Join voice'],
+  ['moderate_voice','Moderate voice'],
+];
+function accessActionLabel(a){const f=ACCESS_ACTIONS.find(x=>x[0]===a);return f?f[1]:a}
+function accessVerdict(ok){return ok?'<span style="color:var(--green)">Allowed</span>':'<span style="color:var(--red)">Denied</span>'}
+function layerLabel(v){return v==='allow'?'allow':v==='deny'?'deny':'—'}
+
+async function explainAccess(){
+  const pc=state.permChannel;if(!pc)return;
+  const box=document.getElementById('permExplain');
+  const uid=(document.getElementById('explainUser')||{}).value;
+  const action=(document.getElementById('explainAction')||{}).value;
+  if(!uid){showToast('Pick a member first','error');return}
+  let r;
+  try{
+    r=await api('GET','/channels/'+pc.id+'/access/explain?user_id='+encodeURIComponent(uid)+'&action='+encodeURIComponent(action));
+  }catch(e){showToast(e.message,'error');return}
+  const rs=r.restrictions||{};
+  const facts=['Role: '+esc(r.role_name||'none')];
+  if(rs.banned)facts.push('<span style="color:var(--red)">banned</span>');
+  if(rs.registration_status&&rs.registration_status!=='active')facts.push('registration '+esc(rs.registration_status));
+  if(rs.timed_out)facts.push('<span style="color:var(--yellow)">timed out</span>');
+  if(rs.channel_nsfw)facts.push('NSFW '+(rs.nsfw_acknowledged?'acknowledged':'not acknowledged'));
+  if(rs.channel_archived)facts.push('channel archived');
+  let html='<p style="font-size:12px;color:var(--text-muted);margin:8px 0">'+esc(r.username)+' · '+facts.join(' · ')+'</p>';
+  (r.decisions||[]).forEach(d=>{
+    html+='<div style="margin:8px 0"><div style="font-size:13px"><b>'+esc(accessActionLabel(d.action))+'</b>: '+accessVerdict(d.allowed)
+      +(d.reason?' <span style="color:var(--text-faint)">— '+esc(d.reason)+'</span>':'')
+      +(d.administrator_bypass?' <span style="color:var(--text-faint)">(Administrator bypasses overrides)</span>':'')+'</div>';
+    if((d.bits||[]).length){
+      html+='<table class="tbl"><thead><tr><th>Bit</th><th>Base role</th><th>Role override</th><th>Member override</th><th>Effective</th></tr></thead><tbody>';
+      d.bits.forEach(b=>{
+        html+='<tr><td>'+esc(b.bit)+'</td><td>'+(b.base?'yes':'no')+'</td><td>'+layerLabel(b.role_override)+'</td><td>'+layerLabel(b.user_override)+'</td><td>'+(b.effective?'yes':'no')+'</td></tr>';
+      });
+      html+='</tbody></table>';
+    }
+    html+='</div>';
+  });
+  if(box)box.innerHTML=html;
+}
+
+/* Previews the override matrix's current radios for its selected target —
+   before Save, against the same rules Save's result will be judged by. */
+async function previewPermChange(){
+  const pc=state.permChannel;if(!pc)return;
+  const box=document.getElementById('permPreview');
+  const sel=document.getElementById('permTarget');
+  const val=sel?sel.value:'';
+  if(!val){showToast('Pick a role or member in the override matrix first','error');return}
+  const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
+  const masks=collectOverrideMasks();
+  const body={allow:masks.allow,deny:masks.deny};
+  body[kind==='r'?'role_id':'user_id']=tid;
+  let r;
+  try{r=await api('POST','/channels/'+pc.id+'/access/preview',body)}
+  catch(e){showToast(e.message,'error');return}
+  const members=r.members||[];
+  let html='<p style="font-size:12px;color:var(--text-muted);margin:10px 0 6px">'
+    +(members.length?members.length+' of '+r.evaluated+' member(s) would change:':'No member\'s access would change ('+r.evaluated+' evaluated).')+'</p>';
+  if(members.length){
+    html+='<table class="tbl"><thead><tr><th>Member</th><th>Action</th><th>Now</th><th>After save</th></tr></thead><tbody>';
+    members.forEach(m=>{(m.changes||[]).forEach(c=>{
+      html+='<tr><td>'+esc(m.username)+'</td><td>'+esc(accessActionLabel(c.action))+'</td><td>'+accessVerdict(c.before)+'</td><td>'+accessVerdict(c.after)
+        +(c.after_reason?' <span style="color:var(--text-faint);font-size:12px">— '+esc(c.after_reason)+'</span>':'')+'</td></tr>';
+    })});
+    html+='</tbody></table>';
+  }
+  if(box)box.innerHTML=html;
 }
 
 async function clearPermOverride(){
