@@ -7,8 +7,8 @@ import {
   type Rgb,
 } from "../../src/lib/color-contrast";
 
-const DARK_SURFACES: Rgb[] = ["#313338", "#2b2d31", "#1e1f22", "#383a40"].map(
-  (c) => parseColor(c)!,
+const DARK_SURFACES: Rgb[] = ["#313338", "#2b2d31", "#1e1f22", "#383a40"].map((c) =>
+  parseColor(c)!,
 );
 
 describe("parseColor", () => {

@@ -1,6 +1,6 @@
 # Plan: B9-2 — Apply the agreed shared accessibility and token rules
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings and owner visual acceptance pending — 2026-09-23 on branch `fm/b9-2-impl` from `dev` `3c55f811`; evidence in `docs/plans/b9-shared-a11y-evidence-2026-09-23.md`, contract in `docs/architecture/b9-ui-contract.md`.
 
 > **Milestone:** B9-2 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-2-shared-accessibility-and-tokens`; branch from current `dev`, PR to `dev` only.
@@ -37,6 +37,35 @@ at the actual implementation base; record drift before coding.
 | 1   | Tokens already define semantic colors, theme aliases and transition durations. Extend this vocabulary rather than replacing OwnCord identity. | `Client/src/styles/tokens.css:6-84`                                                              |
 | 2   | Focus rings exist in base CSS; modalFactory composes dialog semantics and a focus trap with Disposable.                                       | `Client/src/styles/base.css:34-50`; `Client/src/lib/modalFactory.ts:71-99`                       |
 | 3   | Large Font has a single writer and a minimum-size policy already; this is regression protection, not a new OC-0319 fix.                       | `Client/src/lib/appearance.ts:14-56`; `Client/src/components/settings/AccessibilityTab.ts:53-63` |
+
+### Drift at the implementation base (2026-09-23)
+
+`git diff 0beee8e4 3c55f811` over the three inventory rows' files
+(`tokens.css`, `base.css`, `modalFactory.ts`, `appearance.ts`,
+`AccessibilityTab.ts`, `a11y.ts`): **no change**. All three rows hold as
+written. B9-1 moved app.css into `Client/src/styles/app/*.css`, so "CSS owners
+from B9-1" means those fragments plus `login.css` and `theme-neon-glow.css`.
+Measuring at the base found more than the inventory lists. The dark default
+accent reads 2.74:1 as text or focus ring. The neon-glow default accent carried
+white text at 1.96:1. The light theme's link, status and warning text reads
+1.5–3.8:1, and High Contrast in the light theme drew white text on white.
+Settings switches had no accessible name. The OS reduced-motion setting was
+ignored unless the user turned on "Sync with OS", which defaulted to off.
+
+### File-table amendments (implementation)
+
+Q8's derivation happens at apply time, and Q1 requires the OS motion setting to
+be honoured. Neither fits inside the table below, so the implementation also
+touches these files:
+
+| File                                                                                                                  | Why                                                                                   |
+| --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `Client/src/lib/color-contrast.ts` (new), `Client/src/lib/themes.ts`                                                  | WCAG math and `applyAccent()`, the single writer of the Q8 derived tokens             |
+| `Client/src/components/settings/AppearanceTab.ts`, `helpers.ts`                                                       | use `applyAccent`, the Q8 disclosure, the light theme's tested tokens, named switches |
+| `Client/src/components/settings/AdvancedTab.ts`, `VoiceAudioTab.ts`                                                   | pass the now-required switch label                                                    |
+| `Client/src/lib/os-motion.ts`, `Client/src/lib/appearance.ts`, `AccessibilityTab.ts`                                  | Q1: reduced motion from the OS or the toggle; Sync with OS on by default              |
+| `Client/tests/unit/*` (affected suites, `color-contrast.test.ts` new), `Client/tests/e2e/settings-tabs-extra.spec.ts` | coverage; preconditions updated where Q1 changed the intended motion default          |
+| `docs/plans/b9-shared-a11y-evidence-2026-09-23.md` (new), `docs/architecture/README.md`                               | evidence record; index row for the contract                                           |
 
 ## Patterns to mirror
 
@@ -184,3 +213,5 @@ render path as a fallback; fail closed and record a blocker instead.
 **Options and consequences:** Qualify every built-in theme and provide a contrast-safe fallback for arbitrary custom accents; or require/warn users to adjust custom themes themselves. Fallback preserves readable controls but can alter chosen colors; warnings preserve exact choices but cannot establish an all-settings contrast claim.
 
 **Drafting recommendation (historical):** Qualify built-ins and high-contrast mode, retain identity, and approve a safe fallback for essential text/focus indicators. The owner must decide how custom accents are constrained or disclosed.
+
+**Clarified 2026-09-23 by the owner (during B9-2):** Q8 accent-as-text threshold aligned to Q1's 4.5:1; 3:1 applies to focus/non-text. The accent is used as text only at 4.5:1 or better and as the focus indicator only at 3:1 or better, against the minimum over the four `--bg-*` surfaces. Below either, that use falls back to the theme's tested colour, and fills are unchanged. Recorded in the PRD's Q8 block.

@@ -186,7 +186,11 @@ test.describe("B9-2 shared-controls fixture", () => {
         const fixture = await mountSharedControls(page);
         const failures: string[] = [];
         const measured: Record<string, number> = {};
-        const measure = async (name: string, ratio: number, min = Q1.text): Promise<void> => {
+        const measure = async (
+          name: string,
+          ratio: number,
+          min: number = Q1.text,
+        ): Promise<void> => {
           measured[name] = Number(ratio.toFixed(2));
           if (ratio < min) failures.push(`${name} ${ratio.toFixed(2)} < ${min}`);
         };
@@ -194,12 +198,15 @@ test.describe("B9-2 shared-controls fixture", () => {
         expect(await findUnnamedControls(fixture)).toEqual([]);
 
         // Pointer targets (2.5.8): 24x24 CSS px; an inline text link is exempt.
-        const small = await fixture.locator("button, input, .toggle").evaluateAll((els) =>
-          els
-            .map((el) => [el.className || el.tagName, el.getBoundingClientRect()] as const)
-            .filter(([, r]) => r.width < 24 || r.height < 24)
-            .map(([name, r]) => `${name} ${Math.round(r.width)}x${Math.round(r.height)}`),
-        );
+        // Layout size, not getBoundingClientRect: a dialog's open animation
+        // scales its contents while it runs.
+        const small = await fixture
+          .locator("button, input, .toggle")
+          .evaluateAll((els) =>
+            (els as HTMLElement[])
+              .filter((el) => el.offsetWidth < 24 || el.offsetHeight < 24)
+              .map((el) => `${el.className || el.tagName} ${el.offsetWidth}x${el.offsetHeight}`),
+          );
         expect(small).toEqual([]);
 
         // Normal state.
@@ -470,7 +477,7 @@ test.describe("B9-2 checks fail when the behaviour is removed (controls)", () =>
     await page.keyboard.press("Tab");
     await expect(fixture.locator(".btn-modal-save")).toBeFocused();
     expect((await focusIndicator(page)).problems).toContain("no outline");
-    await breakRing.evaluate((el) => el.remove());
+    await breakRing.evaluate((el) => (el as Element).remove());
     expect((await focusIndicator(page)).problems).toEqual([]);
 
     // Low-contrast text.
