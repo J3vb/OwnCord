@@ -34,6 +34,7 @@ export const shellText = defineCatalog("shell", {
   "member.loggingOut": "Logging out...",
   "member.ban": "Ban",
   "member.banReason": "Reason (optional)",
+  "member.banDuration": "Ban duration",
   "member.banConfirm": "Confirm Ban",
   "member.banning": "Banning...",
 

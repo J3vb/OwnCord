@@ -347,6 +347,7 @@ function appendBanFlow(
   const banDurationSelect = createElement("select", {
     class: "form-input",
     "data-testid": "ban-duration-select",
+    "aria-label": shellText("member.banDuration"),
     style: "width:100%;font-size:12px;margin-top:4px",
   });
   for (const d of BAN_DURATIONS) {
