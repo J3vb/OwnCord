@@ -42,7 +42,7 @@ export function nameText(name: string): string {
   return name === "" ? t("name.unknown") : name;
 }
 
-function memberName(id: number): string {
+export function memberName(id: number): string {
   const member = membersStore.getState().members.get(id);
   return member === undefined ? t("name.unknown") : memberDisplayName(member);
 }

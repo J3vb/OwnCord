@@ -28,6 +28,10 @@ function channels(): void {
 function wire(over: Partial<ModerationReportDetail> = {}): ModerationReportDetail {
   return {
     id: "a1b2",
+    reporter_id: 3,
+    notes: [],
+    events: [],
+    actions: [],
     target_type: "message",
     channel_id: PLAIN,
     reason: "harassment",
@@ -106,19 +110,23 @@ describe("parseAttachments", () => {
 });
 
 describe("mapDetail", () => {
-  it("orders the snapshot around the reported message and keeps nothing else", () => {
+  it("orders the snapshot around the reported message and never keeps an upload id", () => {
     const d = mapDetail({
       ...wire(),
-      notes: [{ id: 1, author_id: 9, body: "internal note", created_at: "" }],
-      events: [{ actor_id: 9, action: "assigned", detail: "", created_at: "" }],
-    } as ModerationReportDetail);
+      notes: [{ id: 1, author_id: 9, body: "internal note", created_at: "2026-09-05 11:00:00" }],
+      events: [{ actor_id: 9, action: "assigned", detail: "", created_at: "2026-09-05 11:00:00" }],
+    });
     expect(d.evidence.kind).toBe("shown");
     if (d.evidence.kind !== "shown") return;
     expect(d.evidence.rows.map((r) => r.seq)).toEqual([-1, 0, 1]);
-    const kept = JSON.stringify(d);
-    expect(kept).not.toContain("internal note");
-    expect(kept).not.toContain("assigned");
-    expect(kept).not.toContain("upload-secret-id");
+    // B9-12: notes stay apart from the history; neither carries anything else.
+    expect(d.notes).toEqual([
+      { authorId: 9, body: "internal note", createdAt: "2026-09-05 11:00:00" },
+    ]);
+    expect(d.history).toEqual([
+      { kind: "event", action: "assigned", detail: "", actorId: 9, at: "2026-09-05 11:00:00" },
+    ]);
+    expect(JSON.stringify(d)).not.toContain("upload-secret-id");
   });
 
   it("keeps the server's withholding", () => {

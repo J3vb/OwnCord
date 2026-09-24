@@ -2,9 +2,10 @@
  * The Moderation Center adapter (B9-11): the one place the B5-8 queue and
  * report wire shapes become the view's model.
  *
- * It keeps only what the view renders. Notes, events and actions (B9-12's)
- * are dropped, and an attachment keeps its name, type and size but never its
- * id, so nothing past this point can fetch the file.
+ * It keeps only what the view renders: an attachment keeps its name, type and
+ * size but never its id, so nothing past this point can fetch the file.
+ * Internal notes stay apart from the history (B9-12), which merges the
+ * report's own events and the moderator actions taken with it in time order.
  *
  * Evidence is only ever narrowed here, never widened: the server's
  * `evidence_withheld` is final, and evidence the server did return is still
@@ -13,6 +14,7 @@
  */
 
 import type { ModerationQueueRow, ModerationReportDetail } from "@lib/api";
+import { parseTimestamp } from "@components/message-list/formatting";
 import { NSFW_ACKNOWLEDGEMENT_REQUIRED, nsfwContentBlocked } from "../content-consent/nsfw";
 
 export interface QueueItem {
@@ -49,8 +51,35 @@ export type Evidence =
   | { readonly kind: "consent"; readonly channelId: number }
   | { readonly kind: "unavailable" };
 
+/** An internal note: moderators only, never either party. */
+export interface ReportNote {
+  readonly authorId: number;
+  readonly body: string;
+  readonly createdAt: string;
+}
+
+export type HistoryEntry =
+  /** A report_events row: created, assigned, noted or closed. */
+  | {
+      readonly kind: "event";
+      readonly action: string;
+      readonly detail: string;
+      readonly actorId: number;
+      readonly at: string;
+    }
+  /** A moderator action taken with this report; its reason is shown to the member. */
+  | {
+      readonly kind: "action";
+      readonly action: string;
+      readonly reason: string;
+      readonly actorId: number;
+      readonly at: string;
+      readonly liftedAt: string | null;
+    };
+
 export interface ReportDetail {
   readonly id: string;
+  readonly reporterId: number;
   readonly channelId: number | null;
   readonly detail: string;
   readonly state: string;
@@ -59,6 +88,8 @@ export interface ReportDetail {
   readonly createdAt: string;
   readonly closedAt: string | null;
   readonly evidence: Evidence;
+  readonly notes: readonly ReportNote[];
+  readonly history: readonly HistoryEntry[];
 }
 
 export function mapQueueRow(w: ModerationQueueRow): QueueItem {
@@ -121,9 +152,38 @@ function mapEvidence(w: ModerationReportDetail): Evidence {
   };
 }
 
+/** Sort key: an unreadable time goes last rather than breaking the order. */
+function timeOf(raw: string): number {
+  const ms = raw === "" ? Number.NaN : parseTimestamp(raw).getTime();
+  return Number.isNaN(ms) ? Number.MAX_SAFE_INTEGER : ms;
+}
+
+function mapHistory(w: ModerationReportDetail): HistoryEntry[] {
+  const entries: HistoryEntry[] = [
+    ...(w.events ?? []).map((e) => ({
+      kind: "event" as const,
+      action: e.action,
+      detail: e.detail,
+      actorId: e.actor_id,
+      at: e.created_at,
+    })),
+    ...(w.actions ?? []).map((a) => ({
+      kind: "action" as const,
+      action: a.kind,
+      reason: a.reason,
+      actorId: a.actor_id,
+      at: a.created_at,
+      liftedAt: a.lifted_at ?? null,
+    })),
+  ];
+  // Stable: rows at the same second keep the server's order, events first.
+  return entries.toSorted((a, b) => timeOf(a.at) - timeOf(b.at));
+}
+
 export function mapDetail(w: ModerationReportDetail): ReportDetail {
   return {
     id: w.id,
+    reporterId: w.reporter_id,
     channelId: w.channel_id ?? null,
     detail: w.detail,
     state: w.state,
@@ -132,5 +192,11 @@ export function mapDetail(w: ModerationReportDetail): ReportDetail {
     createdAt: w.created_at,
     closedAt: w.closed_at ?? null,
     evidence: mapEvidence(w),
+    notes: (w.notes ?? []).map((n) => ({
+      authorId: n.author_id,
+      body: n.body,
+      createdAt: n.created_at,
+    })),
+    history: mapHistory(w),
   };
 }
