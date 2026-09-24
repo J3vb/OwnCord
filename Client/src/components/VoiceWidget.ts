@@ -560,7 +560,11 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     // hidden while nothing is wrong, but when the user is in listen-only mode
     // the state needs a reason and a next step (BPR-092), not just a button.
     micNoticeEl = createElement("div", {
-      class: "vw-mic-notice setting-desc",
+      // No `setting-desc`: its margin/font would apply even while this live
+      // region is empty (it stays rendered but empty outside listen-only mode
+      // so a screen reader hears it fill, not appear filled), adding a stray
+      // gap to every voice session. `.vw-mic-notice` owns its own type.
+      class: "vw-mic-notice",
       "data-testid": "vw-mic-notice",
       role: "status",
       "aria-live": "polite",

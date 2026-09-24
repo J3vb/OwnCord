@@ -523,6 +523,10 @@ describe("VoiceWidget", () => {
 
     const notice = container.querySelector("[data-testid='vw-mic-notice']") as HTMLDivElement;
     expect(notice.getAttribute("role")).toBe("status");
+    // No `setting-desc`: its `margin-top`/font rules apply even while this live
+    // region is empty (it stays rendered), adding a stray gap to every voice
+    // session and clobbering `.vw-mic-notice`'s own type.
+    expect(notice.classList.contains("setting-desc")).toBe(false);
     expect(notice.textContent).toContain("Grant microphone access");
 
     // The state clears: the text goes, but the live region stays rendered so
