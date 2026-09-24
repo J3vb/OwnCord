@@ -10,8 +10,10 @@ Neon), in
 Every B9 feature PR builds its screens from the tokens and patterns below and
 runs the shared checks in `Client/tests/e2e/support/b9-accessibility.ts`
 against its own journey. The bar is Q1's WCAG 2.2 AA-oriented checklist, not a
-certification claim. Automated checks supplement the owner's NVDA/Orca review;
-they never replace it.
+certification claim. Automated checks supplement the owner's review; the owner
+**declined the native NVDA/Orca recordings on 2026-09-24**, so the automated
+checks and the owner OS 200 % zoom checks are the acceptance evidence and no
+lane is blocked by the absent recordings.
 
 Four interpretations of Q1/Q8 made while implementing B9-2 were accepted by
 the owner on 2026-09-23:

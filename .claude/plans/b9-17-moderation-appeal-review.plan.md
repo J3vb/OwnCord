@@ -1,6 +1,6 @@
 # Plan: B9-17 — Review and decide appeals without overexposing information
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch `fm/b9-17-impl` from `dev` `c215cadeb4e16bff71f9ecac5261b50b27f0a453`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-24 on branch `fm/b9-17-impl` from `dev` `c215cadeb4e16bff71f9ecac5261b50b27f0a453`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
 
 > **Milestone:** B9-17 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-17-moderation-appeal-review`; branch from current `dev`, PR to `dev` only.
@@ -306,5 +306,6 @@ thresholds in dark, neon-glow, midnight and light, each with and without High
 Contrast (ratios attached as `b9-17-contrast-*.json`); at 940×500 with 20 px
 Large Font nothing scrolls sideways and every control and line scrolls into
 view (screenshot attached). Custom-accent fallback is inherited unchanged
-from B9-2 (no new colour). **Owner-run pending:** NVDA (Windows) and Orca
-(Linux) recordings, and the 200 % OS-zoom check.
+from B9-2 (no new colour). **Owner-run pending:** the 200 % OS-zoom check.
+NVDA (Windows) and Orca (Linux) recordings were declined by the owner
+2026-09-24.

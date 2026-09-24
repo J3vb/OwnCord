@@ -1,9 +1,9 @@
 # Plan: B9-23 — Polish account, privacy, recovery and settings journeys
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-24 on branch
 `fm/b9-23-impl` from `dev` `1a3a7b1d`, merging `dev` `9c5f5d67` (#1774, the
 moderation queue); the outcome and evidence are in
-[Implementation record](#implementation-record-2026-09-24).
+[Implementation record](#implementation-record--2026-09-24).
 
 > **Milestone:** B9-23 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-23-account-settings-polish`; branch from current `dev`, PR to `dev` only.
@@ -295,8 +295,9 @@ the lane's own.
 - **Before/after screenshots** of the account pane, the password-change error
   and the deletion disclosure were captured on the same 1280×800 hardware at
   the base and the branch heads; attached to the PR.
-- **Native AT (NVDA/Orca) recordings and OS-zoom checks are owner-run and remain
-  pending**, consistent with the other B9 lanes.
+- **Native AT (NVDA/Orca) recordings were declined by the owner 2026-09-24; the
+  OS-zoom checks are owner-run and remain pending**, consistent with the other
+  B9 lanes.
 - **Bundle budgets** (`npm run check:budgets` at the merged head): startup
   closure 94,405 B of the shared 95,500 B; MainPage 63,982 B of the unchanged
   64,000 B. This lane adds ~447 B of startup (the shared feedback helpers,
@@ -307,7 +308,8 @@ the lane's own.
 
 BPR-090 (coherent desktop navigation/state/feedback) and BPR-091 (keyboard,
 focus, contrast, reflow, announcements/errors) get their automated evidence
-here; the visual acceptance and native AT half remain owner-run.
+here; the visual acceptance and OS-zoom half remain owner-run; the native
+recordings were declined 2026-09-24.
 
 ### Drift from the plan
 

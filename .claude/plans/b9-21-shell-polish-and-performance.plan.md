@@ -1,6 +1,6 @@
 # Plan: B9-21 — Polish desktop shell navigation without rebuilding it on every update
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-21-impl` from `dev` `55589d43`, merging `dev` `838bab09` (B9-7); the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-21-impl` from `dev` `55589d43`, merging `dev` `838bab09` (B9-7); the outcome and evidence are in [Implementation record](#implementation-record--2026-09-23).
 
 > **Milestone:** B9-21 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-21-shell-polish-and-performance`; branch from current `dev`, PR to `dev` only.
@@ -268,8 +268,9 @@ were edited.
   also pass unchanged: `channel-sidebar`, `sidebar-header`, `sidebar-menus`,
   `b9-navigation`, `a11y-smoke`, `b9-text-expansion`, `server-profiles`,
   `overlays` (75 tests).
-- **Native AT (NVDA/Orca) recordings and OS-zoom checks are owner-run and remain
-  pending**, consistent with the other B9 lanes.
+- **Native AT (NVDA/Orca) recordings were declined by the owner 2026-09-24; the
+  OS-zoom checks are owner-run and remain pending**, consistent with the other
+  B9 lanes.
 - **Bundle budgets** (`npm run check:budgets` at `841ad52f`): startup closure
   94,732 B of the shared 95,000 B; MainPage 63,611 B of the unchanged 64,000 B. This lane adds ~1.1 KB of
   MainPage (the reconciler and the keyed render paths, all startup code); the
@@ -280,7 +281,8 @@ were edited.
 
 BPR-090 (coherent desktop navigation, preserved performance) and BPR-091
 (keyboard, focus, reflow) get their automated evidence here; the visual
-acceptance and native AT half remain owner-run. Register C-13's "measured
+acceptance and the OS-zoom half remain owner-run; the native recordings were
+declined 2026-09-24. Register C-13's "measured
 incremental sidebar updates" clause is addressed: the `TODO(H16)` is gone and
 the O(n) rebuild is replaced by a keyed, measured update.
 

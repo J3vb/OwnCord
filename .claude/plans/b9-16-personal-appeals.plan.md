@@ -1,6 +1,6 @@
 # Plan: B9-16 — Submit and track a local appeal
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-16-impl` from `dev` `287a4905a88dbbee7024a365073f11fedf4439fc` (after B9-15 #1757); drift, decisions and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-16-impl` from `dev` `287a4905a88dbbee7024a365073f11fedf4439fc` (after B9-15 #1757); drift, decisions and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-16 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-16-personal-appeals`; branch from current `dev`, PR to `dev` only.
@@ -323,6 +323,6 @@ Automated, in `tests/e2e/b9-personal-appeals.spec.ts`:
   940×500 with 20px Large Font the tab has no horizontal overflow and the
   text, Send, Cancel and Withdraw scroll into view when focused.
 
-**Owner-run, pending:** NVDA (Windows) and Orca (Linux) recordings of the
-journey: the Appeal names, the form and its alert, "Appeal sent.", a live
-status change, and the withdraw confirmation.
+**Owner-run:** NVDA (Windows) and Orca (Linux) recordings of the journey were
+declined by the owner 2026-09-24: the Appeal names, the form and its alert,
+"Appeal sent.", a live status change, and the withdraw confirmation.

@@ -1,6 +1,6 @@
 # Plan: B9-18 — Extract connect, shell and navigation text
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-18-impl` from `dev` `166d71e4`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-18-impl` from `dev` `166d71e4`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-18 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `refactor/b9-18-english-shell-connect`; branch from current `dev`, PR to `dev` only.
@@ -349,11 +349,11 @@ restructuring; MainPage stays at 64,000 B. Re-baselined at B9-26.
 - **Screen reader:** accessible names come from the same catalog as the
   visible text. The B9-18 expansion case finds no unnamed control in the sidebar,
   user bar, quick switcher, login form or Add Server dialog. **NVDA and Orca
-  recordings are owner-run and pending.**
+  recordings were declined by the owner 2026-09-24.**
 - **Focus:** the quick switcher still restores focus to its opener.
 - **Contrast, reduced motion:** no colours, tokens or animations changed.
 - **Zoom/reflow:** at 940×500 with 20 px Large Font and expanded text, the
   checked sidebar, quick-switcher, connect-page and Add Server text is whole,
   on screen and not cut off by any clipping ancestor, with no horizontal page
   scroll; screenshots are attached to the Playwright report. OS zoom 200 %
-  is owner-run and pending.
+  is still owner-run and pending.

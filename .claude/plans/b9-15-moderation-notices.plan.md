@@ -1,6 +1,6 @@
 # Plan: B9-15 — Show authorized warnings, restrictions and action status to recipients
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-15-impl` from `dev` `166d71e44ce5dfde6455e3f108ce88a8def9c88f`; drift, decisions and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-15-impl` from `dev` `166d71e44ce5dfde6455e3f108ce88a8def9c88f`; drift, decisions and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-15 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-15-moderation-notices`; branch from current `dev`, PR to `dev` only.
@@ -333,7 +333,7 @@ Automated, in `tests/e2e/b9-moderation-notices.spec.ts`:
   940×500 with 20px Large Font the banner has no horizontal overflow, scrolls
   within 40vh and leaves both notices' controls and the composer reachable.
 
-**Owner-run, pending:** NVDA (Windows) and Orca (Linux) recordings of the
-journey: a live warning announced once, the banner read with its reason and
-date, Acknowledge and its result, the timeout reason on the composer and a
-voice channel.
+**Owner-run:** NVDA (Windows) and Orca (Linux) recordings of the journey were
+declined by the owner 2026-09-24: a live warning announced once, the banner
+read with its reason and date, Acknowledge and its result, the timeout reason
+on the composer and a voice channel.

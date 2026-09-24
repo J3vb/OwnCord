@@ -1,6 +1,6 @@
 # Plan: B9-4 — Add the agreed shared navigation integration points
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-4-impl` from `dev` `500f99a4`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-4-impl` from `dev` `500f99a4`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 Implemented at `71737d93ab1f917d05081894b1ddc2f64ffdfbe4`; the review fixes that
 followed on the branch are folded into the implementation decisions below.
@@ -297,8 +297,8 @@ and page teardown destroying the view (`main-page.test.ts`).
 - **Screen reader:** the view is a `region` named by its `h2`. Its Close button
   is named "Close <view>". Entries carry `aria-current="page"` while their view
   is open. The DM header badge reads "N pending message requests" from
-  `.sr-only` text, with the digit hidden. **NVDA and Orca recordings are
-  owner-run and pending.**
+  `.sr-only` text, with the digit hidden. **NVDA and Orca recordings were
+  declined by the owner 2026-09-24.**
 - **Focus:** the heading receives focus on open. On close, focus returns to the
   opener, or to the returned channel's composer once the opener is gone or
   hidden. Permission loss and switching views follow the same rules (unit).

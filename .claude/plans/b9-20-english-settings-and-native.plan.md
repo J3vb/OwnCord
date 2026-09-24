@@ -1,6 +1,6 @@
 # Plan: B9-20 — Extract settings, account and desktop-owned text
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — merged [#1772](https://github.com/J3vb/OwnCord/pull/1772); OS-zoom check pending owner, native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `refactor/b9-20-english-settings-and-native`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-20 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `refactor/b9-20-english-settings-and-native`; branch from current `dev`, PR to `dev` only.
@@ -286,7 +286,7 @@ was held by another lane.
 | Block          | Status                                                                                                                                                                                                                                                                                       |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Keyboard       | Automated at 940×500 with expanded text: every settings tab, Account included, is reached with ArrowDown/Home and scanned for unnamed controls; the account deletion form is opened, submitted and cancelled with Enter, Tab and Space; the voice widget's Mute toggles with Space and Enter |
-| Screen reader  | Automated: accessible names come from the catalog in English and expanded. NVDA (Windows) and Orca (Linux) recordings **pending owner**                                                                                                                                                      |
+| Screen reader  | Automated: accessible names come from the catalog in English and expanded. NVDA (Windows) and Orca (Linux) recordings **declined by the owner 2026-09-24**                                                                                                                                   |
 | Focus          | No change: the tabs and dialogs keep B9-2's focus handling                                                                                                                                                                                                                                   |
 | Contrast       | No change: no colour or token changed; B9-2's Q1/Q8 matrix applies                                                                                                                                                                                                                           |
 | Reduced motion | No change: no animation changed                                                                                                                                                                                                                                                              |

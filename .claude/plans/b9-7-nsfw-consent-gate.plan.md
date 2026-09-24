@@ -1,6 +1,6 @@
 # Plan: B9-7 — Make NSFW consent an authoritative pre-load gate
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-7-impl` from `dev` `166d71e4`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-7-impl` from `dev` `166d71e4`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-7 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-7-nsfw-consent-gate`; branch from current `dev`, PR to `dev` only.
@@ -273,8 +273,8 @@ pre-B9-7 behaviour of loading under the overlay), 15 unit tests
 - **Screen reader:** the gate is a `section` named by its heading and described
   by its body and scope/privacy text; saving sets `aria-busy`; a failure is a
   `role="alert"`. Nothing from the channel is in the tree before consent,
-  because nothing is mounted. **NVDA and Orca recordings are owner-run and
-  pending.**
+  because nothing is mounted. **NVDA and Orca recordings were declined by the
+  owner 2026-09-24.**
 - **Focus:** the heading takes focus on mount, so a stray Enter is never
   consent; accept keeps focus through saving (`aria-disabled`, not
   `disabled`) and after a failure; revoking lands focus on the gate heading.

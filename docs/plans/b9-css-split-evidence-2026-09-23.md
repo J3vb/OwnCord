@@ -151,11 +151,11 @@ server:
 The PNGs (3.5 MB a side) are not committed. The spec regenerates them from any
 two builds.
 
-| Check                                   | Status                                                                                                                    |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Desktop screenshots, before/after       | **Run** in headless Chromium, with the result above. No native WebView2/WebKitGTK window on this host.                    |
-| Keyboard, focus, contrast, motion, zoom | **Run** as computed-style samples, with the result above. Native OS zoom and OS motion settings: not run.                 |
-| NVDA / Orca                             | **Owner-run, pending.** Q1 names the repository owner as the accessibility reviewer; an agent cannot run a screen reader. |
+| Check                                   | Status                                                                                                                                                                     |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop screenshots, before/after       | **Run** in headless Chromium, with the result above. No native WebView2/WebKitGTK window on this host.                                                                     |
+| Keyboard, focus, contrast, motion, zoom | **Run** as computed-style samples, with the result above. Native OS zoom and OS motion settings: not run.                                                                  |
+| NVDA / Orca                             | **Declined by the owner 2026-09-24.** Q1 named the repository owner as the accessibility reviewer; the owner will not record them and no lane is blocked by their absence. |
 
 <details>
 <summary>Capture spec and config: save as <code>Client/test-results/b9-evidence/pw.config.ts</code> and <code>capture.spec.ts</code> (gitignored), run from <code>Client/</code></summary>

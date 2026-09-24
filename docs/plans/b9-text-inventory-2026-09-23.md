@@ -194,11 +194,11 @@ production-bundle config (`test:e2e:prod`), which has no module to reach.
 
 ### Accessibility blocks (BPR-091) for this journey
 
-| Block          | Status                                                                                                                                                                                         |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Keyboard       | Automated: Space toggles a switch after expansion. Tab order is unchanged from B9-2's fixture checks (no DOM change)                                                                           |
-| Screen reader  | Automated: each switch's accessible name is its catalog label in English and expanded. NVDA (Windows) and Orca (Linux) recordings **pending owner**: this host has no display or screen reader |
-| Focus          | No change: the tab's DOM and focus handling are unchanged; B9-2's focus-ring checks apply                                                                                                      |
-| Contrast       | No change: no colour or token changed; B9-2's Q1/Q8 matrix applies                                                                                                                             |
-| Reduced motion | No change: the toggles' behaviour is unchanged (37 existing tests)                                                                                                                             |
-| Zoom/reflow    | Automated at 940×500 with 20 px text and Large Font, English and expanded. OS zoom 200 % on a native window **pending owner**                                                                  |
+| Block          | Status                                                                                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Keyboard       | Automated: Space toggles a switch after expansion. Tab order is unchanged from B9-2's fixture checks (no DOM change)                                                   |
+| Screen reader  | Automated: each switch's accessible name is its catalog label in English and expanded. NVDA (Windows) and Orca (Linux) recordings **declined by the owner 2026-09-24** |
+| Focus          | No change: the tab's DOM and focus handling are unchanged; B9-2's focus-ring checks apply                                                                              |
+| Contrast       | No change: no colour or token changed; B9-2's Q1/Q8 matrix applies                                                                                                     |
+| Reduced motion | No change: the toggles' behaviour is unchanged (37 existing tests)                                                                                                     |
+| Zoom/reflow    | Automated at 940×500 with 20 px text and Large Font, English and expanded. OS zoom 200 % on a native window **pending owner**                                          |

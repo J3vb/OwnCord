@@ -1,6 +1,6 @@
 # Plan: B9-5 — Show the Message Requests inbox and safe text preview
 
-**Status:** IMPLEMENTED — native AT recordings and OS-zoom check pending owner — 2026-09-23 on branch `fm/b9-5-impl` from `dev` `166d71e4`, carried to `fm/b9-5-impl-v2` with `dev` `5682b410` merged in; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-5-impl` from `dev` `166d71e4`, carried to `fm/b9-5-impl-v2` with `dev` `5682b410` merged in; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-5 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-5-message-requests-inbox`; branch from current `dev`, PR to `dev` only.
@@ -302,7 +302,8 @@ re-run, and every one failed. Each was restored before commit.
   is a list item whose `h3` is the sender, so heading navigation walks the
   requests. The status is one `role="status"` that speaks only on change
   (unit), and the badge reads "N pending message requests". No avatar URL
-  reaches the DOM. **NVDA and Orca recordings are owner-run and pending.**
+  reaches the DOM. **NVDA and Orca recordings were declined by the owner
+  2026-09-24.**
 - **Focus:** the heading takes focus on open, and the Close and list rings
   meet Q1 at 2px and 3:1 or better (e2e `focusIndicator`). The list keeps
   focus and its element through live updates (unit). On close, focus goes to
@@ -324,4 +325,4 @@ re-run, and every one failed. Each was restored before commit.
 - **Zoom/reflow:** at 940×500 with 20 px Large Font, every request's text is
   reachable and in view. The long unbroken string wraps, and neither the list
   nor the page scrolls sideways (e2e, screenshot attached). The OS 200 % zoom
-  check is owner-run and pending.
+  check is still owner-run and pending.
