@@ -29,6 +29,7 @@ interface Call<T> {
 let lists: Call<ModerationQueueRow[]>[];
 let details: Call<ModerationReportDetail>[];
 let acks: number[];
+let ackResult: Promise<void>;
 let view: AbortController;
 let closed: number;
 
@@ -41,7 +42,7 @@ const api = {
   getModerationReport: (id: string, signal?: AbortSignal) => deferred(details, id, signal),
   acknowledgeNsfw: (channelId: number) => {
     acks.push(channelId);
-    return Promise.resolve();
+    return ackResult;
   },
 } as unknown as ApiClient;
 
@@ -134,6 +135,7 @@ beforeEach(() => {
   lists = [];
   details = [];
   acks = [];
+  ackResult = Promise.resolve();
   closed = 0;
   view = new AbortController();
   resetChannelsStore();
@@ -300,6 +302,37 @@ describe("a report's detail", () => {
     await flush();
     expect(root.querySelector(".mod-report")?.textContent).toContain("In review");
   });
+
+  it("keeps focus in the view when a background re-read of the open report fails", async () => {
+    const root = await withQueue(["a"]);
+    await openReport(root, "a");
+    expect(document.activeElement?.tagName).toBe("H3");
+    await queueFrame();
+    lists[1]!.resolve([row("a")]);
+    await flush();
+    details[1]!.reject(new Error("offline"));
+    await flush();
+    expect(root.querySelector(".mod-report")).toBeNull();
+    expect(alerts(root)).toContain("Couldn't load this report.");
+    const retry = document.activeElement as HTMLButtonElement;
+    expect(root.contains(retry)).toBe(true);
+    expect(retry.textContent).toBe("Try again");
+    expect(retry.hidden).toBe(false);
+  });
+
+  it("still takes focus when a mod_queue refresh replaces the read a click started", async () => {
+    const root = await withQueue(["a"]);
+    rows(root)[0]!.focus();
+    rows(root)[0]!.click();
+    await queueFrame();
+    lists[1]!.resolve([row("a")]);
+    await flush();
+    expect(details.map((c) => c.arg)).toEqual(["a", "a"]);
+    expect(details[0]!.signal?.aborted).toBe(true);
+    details[1]!.resolve(detail("a"));
+    await flush();
+    expect(document.activeElement).toBe(root.querySelector(".mod-report h3"));
+  });
 });
 
 describe("authority", () => {
@@ -376,6 +409,32 @@ describe("NSFW consent", () => {
     await flush();
     expect(root.querySelector("[data-testid=nsfw-gate]")).toBeNull();
     expect(root.textContent).toContain("evidence of a");
+  });
+
+  it("an acknowledgement answered after another report was opened leaves that report alone", async () => {
+    const root = await withQueue(["a", "b"]);
+    setNsfwAcknowledged(SPICY, false);
+    await openReport(
+      root,
+      "a",
+      detail("a", {
+        channel_id: SPICY,
+        evidence: [],
+        evidence_withheld: "NSFW_ACKNOWLEDGEMENT_REQUIRED",
+      }),
+    );
+    await vi.waitFor(() => expect(root.querySelector("[data-testid=nsfw-gate]")).not.toBeNull());
+    let acknowledge!: () => void;
+    ackResult = new Promise<void>((r) => (acknowledge = r));
+    root.querySelector<HTMLButtonElement>("[data-testid=nsfw-gate-continue]")!.click();
+    await openReport(root, "b");
+    expect(root.textContent).toContain("evidence of b");
+
+    acknowledge();
+    await flush();
+    expect(acks).toEqual([SPICY]);
+    expect(details.map((c) => c.arg)).toEqual(["a", "b"]);
+    expect(root.textContent).toContain("evidence of b");
   });
 
   it("declining the gate closes the report", async () => {
