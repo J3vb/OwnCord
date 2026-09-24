@@ -23,6 +23,18 @@ test("native voice connects, exposes controls, mutes, deafens and disconnects", 
   await expect(widget.getByRole("button", { name: "Camera", exact: true })).toBeVisible();
   await expect(widget.getByRole("button", { name: "Screenshare", exact: true })).toBeVisible();
 
+  // B9-24: the transport-stats readout is a real button a keyboard user can
+  // reach and operate, and the moderator-status live region exists from mount.
+  const signal = widget.locator("[data-testid='vw-signal']");
+  await expect(signal).toHaveAttribute("aria-expanded", "false");
+  await signal.focus();
+  await page.keyboard.press("Enter");
+  await expect(widget.locator(".vw-stats")).toHaveClass(/visible/);
+  await expect(signal).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("Enter");
+  await expect(widget.locator(".vw-stats")).not.toHaveClass(/visible/);
+  await expect(widget.locator("[data-testid='vw-mod-status']")).toHaveAttribute("role", "status");
+
   const mute = widget.getByRole("button", { name: "Mute", exact: true });
   await expect(mute).toHaveAttribute("aria-pressed", "false");
   await mute.click();

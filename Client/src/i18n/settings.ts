@@ -240,6 +240,7 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.default": "Default",
   "voiceAudio.inputVolume": "Input Volume",
   "voiceAudio.inputSensitivity": "Input Sensitivity",
+  "voiceAudio.sensitivityValue": "Sensitivity {value}%",
   "voiceAudio.outputDevice": "Output Device",
   "voiceAudio.outputVolume": "Output Volume",
   "voiceAudio.streamQuality": "Stream Quality",

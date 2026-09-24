@@ -16,30 +16,33 @@
   padding: 4px 8px;
   font-size: var(--font-size-xs);
 }
+/* The header is read text, so it uses the qualified --text-* status tokens,
+   not the --green/--yellow/--red fills (which miss Q1's 4.5:1 on the widget's
+   --bg-secondary: --green reads 4.34:1, --red 3.66:1). */
 .vw-connected {
-  color: var(--green);
+  color: var(--text-positive);
   font-weight: 700;
 }
 /* In-progress lifecycle states use amber; the call is not yet secured/live. */
 .vw-connected.vw-securing,
 .vw-connected.vw-reconnecting {
-  color: var(--yellow);
+  color: var(--text-warning);
 }
 .vw-secured {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  color: var(--green);
+  color: var(--text-positive);
   font-size: var(--font-size-xs);
   font-weight: 600;
 }
 /* OC-0002: the E2EE worker died after the key exchange already succeeded —
    still shown (never silently hidden), but never green/"Secured" again. */
 .vw-secured.vw-secured--degraded {
-  color: var(--red);
+  color: var(--text-danger);
 }
 .vw-timer {
-  color: var(--green);
+  color: var(--text-positive);
   font-size: var(--font-size-xs);
   opacity: 0.8;
   font-variant-numeric: tabular-nums;
@@ -77,13 +80,16 @@
   background: var(--bg-hover);
   color: var(--text-normal);
 }
+/* The active icon is a UI component (Q1 1.4.11, 3:1): --red reads 2.32:1 on
+   its own 20% tint, so the icon uses --text-danger (4.32:1) while the tint
+   stays a redundant cue behind the aria-pressed state and the icon swap. */
 .vw-controls button.active-ctrl {
   background: color-mix(in srgb, var(--red) 20%, transparent);
-  color: var(--red);
+  color: var(--text-danger);
 }
 .vw-controls button.disconnect {
   background: transparent;
-  color: var(--red);
+  color: var(--text-danger);
 }
 .vw-controls button.disconnect:hover {
   background: color-mix(in srgb, var(--red) 15%, transparent);

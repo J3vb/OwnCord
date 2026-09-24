@@ -25,6 +25,7 @@ export const voiceText = defineCatalog("voice", {
   "widget.volume": "Volume",
   "widget.mutedByModerator": "You were muted by a moderator",
   "widget.deafenedByModerator": "You were deafened by a moderator",
+  "widget.moderatedMutedDeafened": "You were muted and deafened by a moderator",
   "widget.sharing": "Sharing",
   "widget.quality": "Connection quality",
   "widget.transportStatistics": "Transport Statistics",

@@ -158,7 +158,16 @@ function buildVoiceAudioTabInner(
   const meterWrap = createElement("div", { class: "mic-meter-wrap" });
   const meterBar = createElement("div", { class: "mic-meter-bar" });
   const meterLevel = createElement("div", { class: "mic-meter-level" });
-  const meterThreshold = createElement("div", { class: "mic-meter-threshold" });
+  // A range, not a pointer-only div: the threshold is adjustable by keyboard
+  // as well as drag (Q1 — every action reachable, no pointer-only control).
+  const meterThreshold = createElement("div", {
+    class: "mic-meter-threshold",
+    role: "slider",
+    tabindex: "0",
+    "aria-label": t("voiceAudio.inputSensitivity"),
+    "aria-valuemin": "0",
+    "aria-valuemax": "100",
+  });
   meterBar.appendChild(meterLevel);
   meterBar.appendChild(meterThreshold);
   meterWrap.appendChild(meterBar);
@@ -171,6 +180,11 @@ function buildVoiceAudioTabInner(
     //         sensitivity 0 (max gating) → handle at RIGHT (100%).
     // This matches Discord: drag LEFT = easier to pass, RIGHT = harder.
     meterThreshold.style.left = `${100 - sensitivity}%`;
+    meterThreshold.setAttribute("aria-valuenow", String(100 - sensitivity));
+    meterThreshold.setAttribute(
+      "aria-valuetext",
+      t("voiceAudio.sensitivityValue", { value: sensitivity }),
+    );
   }
   updateThresholdIndicator(currentSensitivity);
 
@@ -220,6 +234,26 @@ function buildVoiceAudioTabInner(
     "click",
     (e: MouseEvent) => {
       applySensitivity(sensitivityFromPointer(e.clientX));
+    },
+    { signal },
+  );
+
+  // Keyboard: standard slider semantics over the gate threshold the handle
+  // shows (aria-valuenow = 100 - sensitivity), so ArrowRight/End move the
+  // handle right exactly as a drag does; aria-valuetext announces the
+  // sensitivity itself.
+  meterThreshold.addEventListener(
+    "keydown",
+    (e: KeyboardEvent) => {
+      const threshold = 100 - currentSensitivity;
+      let next: number;
+      if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = 100;
+      else if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = threshold - 5;
+      else if (e.key === "ArrowRight" || e.key === "ArrowUp") next = threshold + 5;
+      else return;
+      e.preventDefault();
+      applySensitivity(100 - Math.max(0, Math.min(100, next)));
     },
     { signal },
   );

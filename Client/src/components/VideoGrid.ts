@@ -188,8 +188,39 @@ export function createVideoGrid(): VideoGridComponent {
     });
   }
 
+  /** The tile control the user is currently focused on, if any. `rebuildFocusLayout`
+   *  detaches and re-appends every cell (and `removeStream` drops one), which
+   *  blurs a focused overlay control to `<body>` — so both capture this first
+   *  and restore it after, keeping focus predictable as tiles move or leave
+   *  (Q1 focus stability). Keyed on the tile's `data-user-id` and the control's
+   *  `data-tile-control` role, not node identity. */
+  function captureFocusedControl(): { userId: number; control: string } | null {
+    if (root === null) return null;
+    const active = document.activeElement;
+    if (active === null || !root.contains(active)) return null;
+    const cell = active.closest(".video-cell");
+    const control = (active as HTMLElement).dataset["tileControl"];
+    if (cell === null || control === undefined) return null;
+    const userId = Number(cell.getAttribute("data-user-id"));
+    if (Number.isNaN(userId)) return null;
+    return { userId, control };
+  }
+
+  /** Put focus back on a captured tile control, or — when that tile is gone
+   *  (its peer left) — on the grid itself, so focus never drops to `<body>`
+   *  and never lands on another peer's identically named control. */
+  function restoreFocusedControl(saved: { userId: number; control: string } | null): void {
+    if (saved === null || root === null) return;
+    const target = root.querySelector<HTMLElement>(
+      `.video-cell[data-user-id='${saved.userId}'] [data-tile-control='${saved.control}']`,
+    );
+    (target ?? root).focus();
+  }
+
   function rebuildFocusLayout(): void {
     if (root === null) return;
+
+    const savedFocus = captureFocusedControl();
 
     // Clear root children (we'll re-append in focus layout order)
     while (root.firstChild) root.removeChild(root.firstChild);
@@ -202,6 +233,7 @@ export function createVideoGrid(): VideoGridComponent {
         root.appendChild(entry.el);
       }
       applyGridSizes();
+      restoreFocusedControl(savedFocus);
       return;
     }
 
@@ -237,6 +269,8 @@ export function createVideoGrid(): VideoGridComponent {
     if (stripArea.childElementCount > 0) {
       root.appendChild(stripArea);
     }
+
+    restoreFocusedControl(savedFocus);
   }
 
   function setFocusedTile(tileId: number | null): void {
@@ -348,6 +382,9 @@ export function createVideoGrid(): VideoGridComponent {
         value: String(currentVolume),
         class: "tile-volume-slider",
         "aria-label": voiceText("widget.volume"),
+        // Lets a tile rebuild or removal put focus back on the same control
+        // (captureFocusedControl), not just the tile.
+        "data-tile-control": "volume",
       });
 
       volumeSlider.addEventListener("input", () => {
@@ -376,6 +413,7 @@ export function createVideoGrid(): VideoGridComponent {
       const muteBtn = createElement("button", {
         class: "tile-mute-btn",
         "aria-label": muted ? voiceText("widget.control.unmute") : voiceText("widget.control.mute"),
+        "data-tile-control": "mute",
       });
       muteBtn.appendChild(muted ? volumeXIcon() : volumeIcon());
       if (muted) overlay.classList.add("muted");
@@ -439,6 +477,10 @@ export function createVideoGrid(): VideoGridComponent {
     const entry = cells.get(userId);
     if (entry === undefined) return;
 
+    // Capture the focused tile control before detaching, so a user tabbing
+    // through the overlay keeps a focus target when this tile leaves (Q1).
+    const savedFocus = captureFocusedControl();
+
     if (entry.trackCleanup) {
       entry.trackCleanup();
       entry.trackCleanup = undefined;
@@ -462,6 +504,7 @@ export function createVideoGrid(): VideoGridComponent {
     } else {
       updateLayout();
     }
+    restoreFocusedControl(savedFocus);
   }
 
   /** Remove every tile (trackCleanup + srcObject=null via removeStream).
@@ -481,6 +524,9 @@ export function createVideoGrid(): VideoGridComponent {
     root = createElement("div", {
       class: "video-grid",
       "data-testid": "video-grid",
+      // Programmatic fallback target: when the focused tile control is gone
+      // (its peer left), focus lands here rather than dropping to <body>.
+      tabindex: "-1",
     });
     container.appendChild(root);
 
