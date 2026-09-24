@@ -493,3 +493,35 @@
   position: relative;
   min-height: 18rem;
 }
+/* ── B9-17 Reports / Appeals tabs ── */
+.mod-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+.mod-tab {
+  min-height: 24px;
+  padding: var(--space-1) var(--space-3);
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.mod-tab:hover {
+  color: var(--text-normal);
+}
+.mod-tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--header-primary);
+}
+.mod-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.mod-panel[hidden],
+.mod-center-toolbar[hidden] {
+  display: none;
+}

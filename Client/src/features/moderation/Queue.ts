@@ -33,6 +33,11 @@
  * above the reader) and the report is read again: if the reader lost the
  * permission, that read's own 403 clears the view. An action that gets no
  * answer may still have been recorded, so the history is read, not guessed.
+ *
+ * Appeals (B9-17): the view is two tabs, Reports and Appeals (AppealQueue.ts,
+ * rendered the first time its tab is chosen). A 403 in either tab clears
+ * both. An appeal's linked report opens here by id, outside the filter, and
+ * its read is authorized again like any other.
  */
 
 import {
@@ -58,8 +63,23 @@ import {
   type ActionDraft,
   type ActionWrite,
 } from "./ActionForms";
-import { mapDetail, mapQueueRow, type QueueItem, type ReportDetail } from "./api";
-import { buildReportDetail, dateText, nameText, reportTitle, stateText } from "./Evidence";
+import { renderAppeals, type AppealsView } from "./AppealQueue";
+import {
+  isStatus,
+  itemFromDetail,
+  mapDetail,
+  mapQueueRow,
+  type QueueItem,
+  type ReportDetail,
+} from "./api";
+import {
+  buildReportDetail,
+  dateText,
+  memberName,
+  nameText,
+  reportTitle,
+  stateText,
+} from "./Evidence";
 import { buildHistory } from "./History";
 import { modQueueStore } from "./store";
 import { buildWorkflow, type WorkflowWrite } from "./Workflow";
@@ -81,15 +101,112 @@ type Write = WorkflowWrite | ActionWrite;
 const isAction = (w: Write): w is ActionWrite =>
   w.kind === "warning" || w.kind === "timeout" || w.kind === "lift";
 
-function isStatus(err: unknown, status: number, code?: string): boolean {
-  return (
-    err instanceof ApiClientError &&
-    err.status === status &&
-    (code === undefined || err.code === code)
-  );
+interface ReportsView {
+  readonly deny: () => void;
+  /** Open a report by id, kept open outside the filter (an appeal's link). */
+  readonly openLinked: (id: string) => void;
 }
 
+const TABS = ["reports", "appeals"] as const;
+
 export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContext): void {
+  const seq = ++viewSeq;
+  const tablist = createElement("div", {
+    class: "mod-tabs",
+    role: "tablist",
+    "aria-label": t("tabs.label"),
+  });
+  const tabs = TABS.map((name) =>
+    createElement(
+      "button",
+      {
+        type: "button",
+        class: "mod-tab",
+        role: "tab",
+        id: `mod-tab-${seq}-${name}`,
+        "aria-controls": `mod-panel-${seq}-${name}`,
+        "data-testid": `mod-tab-${name}`,
+      },
+      t(name === "reports" ? "tabs.reports" : "tabs.appeals"),
+    ),
+  );
+  const panels = TABS.map((name) =>
+    createElement("div", {
+      class: "mod-panel",
+      role: "tabpanel",
+      id: `mod-panel-${seq}-${name}`,
+      "aria-labelledby": `mod-tab-${seq}-${name}`,
+    }),
+  );
+  tablist.append(...tabs);
+  appendChildren(root, tablist, ...panels);
+
+  let appeals: AppealsView | null = null;
+  const reports = renderReports(panels[0]!, ctx, () => appeals?.deny());
+
+  /** Show one tab; activation follows focus (the WAI-ARIA tabs pattern). */
+  function choose(index: number, focus: boolean): void {
+    tabs.forEach((tab, i) => {
+      tab.setAttribute("aria-selected", String(i === index));
+      tab.tabIndex = i === index ? 0 : -1;
+      panels[i]!.hidden = i !== index;
+    });
+    if (focus) tabs[index]!.focus();
+    if (index === 1 && appeals === null) {
+      appeals = renderAppeals(panels[1]!, ctx, {
+        onDenied: reports.deny,
+        openReport: (id) => {
+          choose(0, false);
+          // The appeal's control is now hidden: let the report take focus.
+          (document.activeElement as HTMLElement | null)?.blur();
+          reports.openLinked(id);
+        },
+      });
+    }
+  }
+  const { signal } = ctx;
+  tabs.forEach((tab, i) => tab.addEventListener("click", () => choose(i, false), { signal }));
+  tablist.addEventListener(
+    "keydown",
+    (e: KeyboardEvent) => {
+      const at = tabs.indexOf(document.activeElement as HTMLButtonElement);
+      if (at < 0) return;
+      const to =
+        e.key === "ArrowRight"
+          ? (at + 1) % tabs.length
+          : e.key === "ArrowLeft"
+            ? (at + tabs.length - 1) % tabs.length
+            : e.key === "Home"
+              ? 0
+              : e.key === "End"
+                ? tabs.length - 1
+                : -1;
+      if (to < 0) return;
+      e.preventDefault();
+      choose(to, true);
+    },
+    { signal },
+  );
+  signal.addEventListener("abort", () => clearChildren(root), { once: true });
+  choose(0, false);
+}
+
+function actionErrorText(w: ActionWrite, err: unknown): string {
+  if (isStatus(err, 403, "SELF_REVIEW")) return t("write.selfReview");
+  if (isStatus(err, 403)) return t("act.refused");
+  if (isStatus(err, 404) && w.kind === "lift") return t("act.liftNone");
+  if (isStatus(err, 400) && (err as ApiClientError).message !== "") {
+    return t("act.invalid", { message: (err as ApiClientError).message });
+  }
+  // No answer, or an internal failure: the action may still have been recorded.
+  return err instanceof ApiClientError ? errorText(err, t("act.unknown")) : t("act.unknown");
+}
+
+function renderReports(
+  root: HTMLElement,
+  ctx: FeatureViewContext,
+  onDenied: () => void,
+): ReportsView {
   const { signal, api } = ctx;
   let filter: (typeof FILTERS)[number] = FILTERS[0];
   let items: readonly QueueItem[] = [];
@@ -114,6 +231,8 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   let ownWrite: string | null = null;
   /** The open report, kept after the reader's own write took it out of the filter. */
   let offList: QueueItem | null = null;
+  /** A report opened by id from an appeal, kept open whatever the filter. */
+  let linked: string | null = null;
 
   const filterId = `mod-filter-${++viewSeq}`;
   const toolbar = createElement("div", { class: "mod-center-toolbar" });
@@ -222,6 +341,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     selected = null;
     ownWrite = null;
     offList = null;
+    linked = null;
     draft = NO_DRAFT;
     dropActDraft();
     syncCurrent();
@@ -232,6 +352,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
 
   /** The server refused: nothing the reader held stays on screen. */
   function deny(): void {
+    if (denied) return;
     const hadFocus = root.contains(document.activeElement);
     denied = true;
     writing = null;
@@ -252,6 +373,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     if (hadFocus) {
       root.closest(".feature-view")?.querySelector<HTMLElement>(".feature-view-title")?.focus();
     }
+    onDenied();
   }
 
   function renderRow(item: QueueItem): HTMLLIElement {
@@ -319,11 +441,14 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
           if (items.some((i) => i.id === selected)) {
             offList = null;
             if (refreshDetail) loadDetail(selected, false);
-          } else if (was !== undefined && (selected === ownWrite || offList === was)) {
+          } else if (
+            was !== undefined &&
+            (selected === ownWrite || selected === linked || offList === was)
+          ) {
             if (offList === null) setText(detailStatus, t("detail.leftFilter"));
             offList = was;
             if (refreshDetail) loadDetail(selected, false);
-          } else {
+          } else if (selected !== linked) {
             clearDetail(t("detail.gone"));
           }
         }
@@ -477,16 +602,6 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     return t(isStatus(err, 400) ? "write.invalid" : "write.error");
   }
 
-  function actionErrorText(w: ActionWrite, err: unknown): string {
-    if (isStatus(err, 403, "SELF_REVIEW")) return t("write.selfReview");
-    if (isStatus(err, 403)) return t("act.refused");
-    if (isStatus(err, 404) && w.kind === "lift") return t("act.liftNone");
-    if (isStatus(err, 400) && (err as ApiClientError).message !== "") {
-      return t("act.invalid", { message: (err as ApiClientError).message });
-    }
-    // No answer, or an internal failure: the action may still have been recorded.
-    return err instanceof ApiClientError ? errorText(err, t("act.unknown")) : t("act.unknown");
-  }
   const WRITE_CONFLICT = {
     assign: "conflict.assign",
     note: "conflict.note",
@@ -580,7 +695,11 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
         detailReq = null;
         readSettled();
         detailSlot.removeAttribute("aria-busy");
-        const item = itemFor(id);
+        let item = itemFor(id);
+        if (item === undefined && linked === id) {
+          item = itemFromDetail(wire, memberName);
+          offList = item;
+        }
         if (item === undefined) {
           clearDetail(t("detail.gone"));
           return;
@@ -638,7 +757,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     () => {
       filter = FILTERS.find((f) => f.value === select.value) ?? FILTERS[0];
       ownWrite = null;
-      offList = null;
+      if (selected !== linked) offList = null;
       loadList(true, false);
     },
     { signal },
@@ -694,4 +813,12 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   );
 
   loadList(true, false);
+  return {
+    deny,
+    openLinked: (id) => {
+      if (denied) return;
+      if (itemFor(id) === undefined) linked = id;
+      open(id);
+    },
+  };
 }
