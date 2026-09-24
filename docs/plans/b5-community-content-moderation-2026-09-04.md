@@ -15,17 +15,21 @@ moderation-evidence consent follow-up (Conditions 3 and 4) was accepted by the
 owner on 2026-09-23 ([#1735](https://github.com/J3vb/OwnCord/pull/1735)).
 **All fourteen decisions were settled 2026-09-04** (the owner delegated them;
 thirteen as drafted, decision 7 strengthened). Private advisory disposition
-is still an exit obligation; this source audit does not certify its closure.
+was an exit obligation; **the owner closed exit condition 7 on 2026-09-24
+without publishing an advisory** — SEC-04 was fixed by B5-2
+([#1543](https://github.com/J3vb/OwnCord/pull/1543)) and its placeholder
+advisory ID is retired.
 **Reconciled 2026-09-23 at `dev` `6fd8cc0c`** ([exit-gate
 reconciliation](#exit-gate-reconciliation-2026-09-23)): B5-0 through B5-11
 are merged (B5-10 as [#1555](https://github.com/J3vb/OwnCord/pull/1555),
 after the audit snapshot above). Condition 6's push follow-up is proven
 ([#1742](https://github.com/J3vb/OwnCord/pull/1742)) and Condition 5's
 upload follow-up is evidenced
-([#1565](https://github.com/J3vb/OwnCord/pull/1565)); both are ready for
-owner acceptance and neither is accepted. **B5 is not accepted:** those two
-acceptances, advisory disposition (Condition 7), the exit-SHA measurement and
-B5-12's final pass remain.
+([#1565](https://github.com/J3vb/OwnCord/pull/1565)); **both are accepted by
+the owner on 2026-09-24**, and **exit condition 7 was closed by the owner on
+2026-09-24 without publishing an advisory** (SEC-04 fixed by B5-2
+[#1543](https://github.com/J3vb/OwnCord/pull/1543)). **B5 is not accepted:**
+only the exit-SHA measurement and B5-12's final pass remain.
 
 **Roadmap section:** ["B5 — Add community, content, and moderation
 services"](repo-health-roadmap-2026-08-23.md) — objective, entry gate, eleven
@@ -273,10 +277,10 @@ was strengthened** on review and is marked. Each records what was chosen and
 why, so a later reader can overturn one on its reasoning rather than
 rediscovering the question.
 
-**Two items remain genuinely the owner's, and neither is due yet** — they are
-actions, not decisions: filling SEC-04's advisory ID (decision 12; needed at
-the exit, and the same shape as SEC-01's row in B4), and signing HP-5's
-scorecard, which carries the exit-condition acceptance in decision 14.
+**One item remains genuinely the owner's, and it is not due yet** — an
+action, not a decision: signing HP-5's scorecard, which carries the
+exit-condition acceptance in decision 14. (SEC-04's advisory ID was the other,
+and the owner retired it on 2026-09-24 without publishing an advisory.)
 
 1. **SEC-03 / C-09 phase split.** **Settled: split, as drafted.** B5 builds
    the server boundary (`Server/safefetch`: parse, resolve, classify,
@@ -401,10 +405,11 @@ scorecard, which carries the exit-condition acceptance in decision 14.
     while the work that satisfies it sits in a later phase, so either the
     condition moves or the work does — and moving the work is the smaller,
     truer change. The alternative (drop B5-2 to B6) would need exit condition
-    5 reworded, which is a roadmap amendment for no gain. **Owner action, not
-    due until the exit:** SEC-04's advisory ID (`GHSA-____-____-____`) must be
-    filled or the row closed, because exit condition 7 is "no unresolved B5
-    security advisory remains" — the same shape as SEC-01's row in B4.
+    5 reworded, which is a roadmap amendment for no gain. **Owner action,
+    resolved 2026-09-24:** SEC-04's placeholder advisory ID
+    (`GHSA-____-____-____`) was retired rather than filled — the owner closed
+    exit condition 7 without publishing an advisory, since B5-2 (#1543) fixed
+    the underlying issue.
 13. **NSFW acknowledgement storage and revocation.** **Settled as drafted.**
     One row per user per channel, server-side, so a new device inherits the
     acknowledgement without re-prompting. Message, attachment, search and
@@ -1104,7 +1109,8 @@ says so. `service.Services` gained no field. Six generated surfaces, not
 five: regenerate `dbinventory` when a `db.` reference moves.
 
 **SEC-04.** Closed here per decision 12: re-tag from `B3/B6` to `B3/B5`. That
-edit is B5-12's; the advisory ID is the owner's, due at the exit.
+edit is B5-12's; the advisory ID was the owner's, and the owner retired it on
+2026-09-24 without publishing an advisory.
 
 **Not included, deliberately.** No emoji size column and no per-user
 accounting of emoji (the bounded exclusion above). No change to avatar
@@ -2842,7 +2848,8 @@ implement":
    `docs/trust-model.md`'s C-09 Status line so the two stop contradicting each
    other.
 4. `SEC-04`'s phase tag per decision 12, and its advisory ID filled or
-   the row closed — exit condition 7 depends on it.
+   the row closed — exit condition 7 depends on it. (Closed by the owner
+   2026-09-24 without an advisory; the placeholder is retired.)
 5. `BG-18` and `BG-19` re-tagged to record where the client halves of exit
    conditions 2 and 3 live (decision 14), following B4's precedent of
    pairing a narrowed condition with a re-tagged row.
@@ -2892,7 +2899,7 @@ PR — not silently into a later one.
   cross-reference appended so it names the same split back.
 - **SEC-04.** Before: Phase `B3/B6`. Now: Phase `B3/B5` per decision 12;
   closure text records B5-2 (#1543, `123b07d8`) as closing the server half and
-  flags the advisory ID as the owner's action, due at the B5 exit (condition 7) — this step cannot fill `GHSA-____-____-____`.
+  flags the advisory ID as the owner's action, due at the B5 exit (condition 7) — this step cannot fill `GHSA-____-____-____`. **Closed by the owner 2026-09-24:** the placeholder is retired without an advisory.
 - **BG-18 / BG-19.** Before: Phase `B5/B9`, plain exit evidence. Now: each row
   prepends its own decision-14 split sentence. BG-18 names B5-7 as its server
   half and exit condition 3, B9 the client half. BG-19's client remainder
@@ -2923,7 +2930,7 @@ PR — not silently into a later one.
 **Not included:** no `.superpowers/findings-ledger.json` row was touched — the
 ledger stays the sole authority for `OC-*` status, and this step only records
 what it and `git`/`gh` already say. No production code changed. SEC-04's
-advisory ID remains the owner's to fill at the B5 exit.
+advisory ID was retired by the owner on 2026-09-24 without an advisory.
 
 ## Exit gate
 
@@ -2939,7 +2946,7 @@ shape, and the `gate-evidence` job blocks tagging an ungated SHA.
 | 4          | Report, moderation, and appeal state machines enforce least privilege and immutable safe audit                               | B5-8, B5-9, B5-10 — the role matrix, the adversarial hierarchy cases, BPR-071's deletion unlinking, and audit rows on the B2-6 foundation with B4-10 actor tokens                                                                                                                               |
 | 5          | Storage quotas and disk headroom fail safely under concurrency and restart                                                   | B5-2's concurrency and restart tests under `-race`, not arithmetic tests. **This condition restates SEC-04's closure line, which is why decision 12 must settle SEC-04's phase before the exit.**                                                                                               |
 | 6          | Push subscriptions are per server/device, opt-in, revocable, and contain no sensitive default payload                        | B5-4 and B5-11, plus `TestNoAutomaticTelemetry_Capture` and `TestEgressAllowIsLive` green                                                                                                                                                                                                       |
-| 7          | No unresolved B5 security advisory remains                                                                                   | Closed at the exit, as B4 did, not per step — advisories go through GitHub Security Advisories and never into a commit, issue or PR description. **SEC-04's unfilled `GHSA-____-____-____` is the known open item.**                                                                            |
+| 7          | No unresolved B5 security advisory remains                                                                                   | **Met — closed by the owner 2026-09-24 without publishing an advisory.** The only known open item was SEC-04's unfilled `GHSA-____-____-____`; B5-2 ([#1543](https://github.com/J3vb/OwnCord/pull/1543)) fixed the underlying issue and the placeholder is retired. Advisory material still goes through GitHub Security Advisories, never a commit, issue or PR description. |
 | **rule 2** | No `OC-*` finding tagged B5 is open, unless re-tagged with a written reason in the scorecard                                 | **Already satisfied at the base commit** — all five are `fixed` in the ledger; B5-12 records it. The open `SEC-03`, `SEC-04`, `S-03` and six `BG-*` rows are not `OC-*`, but the same discipline applies: each closes in its step or is re-tagged in writing.                                   |
 
 **Audit carryovers, 2026-09-06, measured by source and test inspection at
@@ -3013,7 +3020,7 @@ audit implements none of them, and it does not judge B5-10's unfinished work.
   existing trust, NSFW, membership and online-state checks. This belongs to
   B5's revocable push service, alongside B8's already-planned client UX.
 
-  **Evidence, 2026-09-23 — ready for owner acceptance, not accepted.** No
+  **Evidence, 2026-09-23 — accepted by the owner 2026-09-24.** No
   production change was needed: `PushDispatcher.attemptOne`
   (`Server/service/push_dispatch.go`) runs `subscriptionStillCurrent` and
   `stillEligible` immediately before every attempt, the first included
@@ -3052,15 +3059,23 @@ and the owner's exit acceptance. **B5 is not accepted.**
 | 2          | Merged; the narrowing was accepted at HP-5                                                            | B5-1, [#1541](https://github.com/J3vb/OwnCord/pull/1541), the adversarial suite; decision 14 signed at HP-5 ([#1547](https://github.com/J3vb/OwnCord/pull/1547), [#1550](https://github.com/J3vb/OwnCord/pull/1550)); BG-19 re-tagged in [#1546](https://github.com/J3vb/OwnCord/pull/1546)                                           | Exit-SHA measurement only                                                                                                                                                                                                                                             |
 | 3          | Merged; the evidence-consent follow-up is **accepted** (2026-09-23)                                   | B5-7, [#1551](https://github.com/J3vb/OwnCord/pull/1551); the content gate resolved at dispatch, [#1629](https://github.com/J3vb/OwnCord/pull/1629) (OC-0449); the follow-up, [#1735](https://github.com/J3vb/OwnCord/pull/1735), acceptance recorded in [#1740](https://github.com/J3vb/OwnCord/pull/1740); BG-18 re-tagged in #1546 | Exit-SHA measurement only                                                                                                                                                                                                                                             |
 | 4          | Merged; the evidence-consent follow-up is **accepted** (2026-09-23)                                   | B5-8 [#1552](https://github.com/J3vb/OwnCord/pull/1552), B5-9 [#1553](https://github.com/J3vb/OwnCord/pull/1553), B5-10 [#1555](https://github.com/J3vb/OwnCord/pull/1555) (merged 2026-09-06, after the audit snapshot); #1735                                                                                                       | Exit-SHA measurement. B5-10's evidence notes handler-level appeal-route tests as a follow-up; the exit gate does not name them, so they gate only if the owner says so                                                                                                |
-| 5          | Follow-up implemented and evidenced; **ready for owner acceptance, not accepted**                     | B5-2, [#1543](https://github.com/J3vb/OwnCord/pull/1543); the follow-up, [#1565](https://github.com/J3vb/OwnCord/pull/1565) (`a356d88b`), evidence in B5-2's "Exit-gate follow-up, 2026-09-08" block                                                                                                                                  | The owner's review and written acceptance of #1565 (owner · small: a recorded sign-off), then the exit-SHA measurement                                                                                                                                                |
-| 6          | Follow-up proven; **ready for owner acceptance, not accepted**                                        | B5-4 [#1545](https://github.com/J3vb/OwnCord/pull/1545), B5-11 [#1548](https://github.com/J3vb/OwnCord/pull/1548); per-attempt revalidation, #1629 (OC-0450); the proof, [#1742](https://github.com/J3vb/OwnCord/pull/1742) (`TestPushDispatch_Condition6_WithdrawnAuthorityGovernsEveryAttempt`)                                     | The owner's written acceptance of #1742 (owner · small: a recorded sign-off); `TestNoAutomaticTelemetry_Capture` and `TestEgressAllowIsLive` green at the exit SHA                                                                                                    |
-| 7          | Open                                                                                                  | The private review trail                                                                                                                                                                                                                                                                                                              | Advisory disposition, including SEC-04's unfilled advisory ID (owner · private; not sized here)                                                                                                                                                                       |
+| 5          | Follow-up implemented and evidenced; **accepted by the owner 2026-09-24**                            | B5-2, [#1543](https://github.com/J3vb/OwnCord/pull/1543); the follow-up, [#1565](https://github.com/J3vb/OwnCord/pull/1565) (`a356d88b`), evidence in B5-2's "Exit-gate follow-up, 2026-09-08" block                                                                                                                                  | Exit-SHA measurement only                                                                                                                                                                                                                                            |
+| 6          | Follow-up proven; **accepted by the owner 2026-09-24**                                               | B5-4 [#1545](https://github.com/J3vb/OwnCord/pull/1545), B5-11 [#1548](https://github.com/J3vb/OwnCord/pull/1548); per-attempt revalidation, #1629 (OC-0450); the proof, [#1742](https://github.com/J3vb/OwnCord/pull/1742) (`TestPushDispatch_Condition6_WithdrawnAuthorityGovernsEveryAttempt`)                                     | Exit-SHA measurement; `TestNoAutomaticTelemetry_Capture` and `TestEgressAllowIsLive` green at the exit SHA                                                                                                                                                            |
+| 7          | **Met — closed by the owner 2026-09-24**                                                             | SEC-04 fixed by B5-2 ([#1543](https://github.com/J3vb/OwnCord/pull/1543)); the owner closed condition 7 without publishing an advisory and retired the placeholder ID                                                                                                                                                                     | None                                                                                                                                                                                                                                                                  |
 | **rule 2** | Satisfied                                                                                             | All five B5-tagged `OC-*` rows are `fixed` (#1546). The ledger's one open entry, OC-0445, is an operational delivery-budget finding owned by B6 (B6-10), not B5                                                                                                                                                                       | None                                                                                                                                                                                                                                                                  |
 | B5-12      | Register corrections 1–5 and the three roadmap amendments done; both audit-carryover prose items done | #1546; this reconciliation corrects `docs/api.md`'s `nsfw` field and channel-admin prose to B5-7's enforcement, and gives the safe-fetch rows in [diagnostics.md](../architecture/diagnostics.md) push dispatch's gate                                                                                                                | The final pass on the measured exit SHA: this header, the README row, the roadmap, the register's B5 halves (SEC-04, BG-05, BG-12, BG-13, BG-14, BG-18, BG-19) and the traceability rows BPR-060..063 and BPR-070..073 (exit PR author · ~1 day, the step's own size) |
 
 The required rollback evidence is present at `6fd8cc0c`: `Server/rollback/`
 carries a `.down.sql` for each of `044`–`050` (and for `051`–`053`); the
 rehearsal is re-run as part of the exit-SHA measurement.
+
+**Owner decisions, 2026-09-24.** The owner accepted exit conditions 5
+([#1565](https://github.com/J3vb/OwnCord/pull/1565)) and 6
+([#1742](https://github.com/J3vb/OwnCord/pull/1742)), and closed exit
+condition 7 without publishing an advisory: SEC-04's underlying issue was
+fixed by B5-2 ([#1543](https://github.com/J3vb/OwnCord/pull/1543)), so its
+placeholder advisory ID is retired. The only B5 items still outstanding are
+the exit-SHA measurement and B5-12's final pass; **B5 itself is not accepted.**
 
 Keep security validation and advisory disposition in the private review
 trail. Close these items and B5-12's final reconciliation on the measured

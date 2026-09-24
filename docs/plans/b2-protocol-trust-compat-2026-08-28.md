@@ -846,7 +846,7 @@ where each goes:
 | C-09       | **B2** (contract) / B7 (client) | beside the report                                                                        | contract in B2-7 docs (PR #1443, `88c7a824`) — done; code in B7 |
 | SEC-03     | **B5** (decided 2026-08-29)     | beside the report                                                                        | B5 item 11 — see evidence below                                 |
 | SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                               | B4                                                              |
-| SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it)                                               | B6                                                              |
+| SEC-04     | **B3/B5**                       | no advisory — fixed by B5-2 (#1543); placeholder retired by the owner 2026-09-24          | B5 (B5-2) — done                                                |
 | OC-0324    | **B4**                          | beside the report; no advisory — the tracked ledger already carries this finding in full | B4                                                              |
 
 An acceptance test demonstrates the defect, so it is exploit detail: it stays
@@ -854,7 +854,10 @@ local until its fix lands, then lands publicly in the same PR. The two
 advisories (SEC-01, SEC-04) are created by the owner in the GitHub UI (Security → Advisories →
 New draft), not by CLI with the report text; their IDs are recorded in
 `docs/security-findings/README.md`, which is local. Public commits, issues and
-PR bodies never name the mechanism (`docs/security.md`).
+PR bodies never name the mechanism (`docs/security.md`). **SEC-04 closed
+2026-09-24:** re-tagged to B5 (fixed by B5-2, [#1543](https://github.com/J3vb/OwnCord/pull/1543))
+and the owner retired its placeholder ID without publishing an advisory; only
+SEC-01 remains an owner advisory action.
 
 **Evidence, 2026-08-29** — branch `feat/b2-9-hp2` from `dev` `88c7a824`;
 PR #1444 to `dev`, squash-merged 2026-08-29 as `2bfc5e30`. HP-2 cites this
@@ -883,14 +886,18 @@ block for exit-gate condition 7.
   tests in the tree: S-01 and the SEC-02 server half (B2-5, PR #1440 →
   `67fdd18d`), the C-09 contract (B2-7, PR #1443 → `88c7a824`; the client
   code is B7's). Rows that stay where the table puts them: SEC-03 → B5
-  (above), OC-0324 and SEC-01 → B4, SEC-04 → B6. Exit-gate condition 7 ("no
+  (above), OC-0324 and SEC-01 → B4, SEC-04 → B5 (re-tagged from B6; fixed by
+  B5-2 [#1543](https://github.com/J3vb/OwnCord/pull/1543), placeholder
+  retired 2026-09-24). Exit-gate condition 7 ("no
   unresolved B2 security advisory remains") is therefore met on the B2-owned
   set: zero B2-owned rows open, and no advisory was needed for any of them.
 - **Advisories for the deferred rows** — created by the owner in the GitHub
   UI (Security → Advisories → New draft), never by CLI, report text never
   leaves the local package. IDs, once created (the local
   `docs/security-findings/README.md` is the record of which report each maps
-  to): SEC-01 — `GHSA-____-____-____`; SEC-04 — `GHSA-____-____-____`.
+  to): SEC-01 — `GHSA-____-____-____`; SEC-04 — placeholder retired
+  2026-09-24 (fixed by B5-2, [#1543](https://github.com/J3vb/OwnCord/pull/1543);
+  no advisory published).
 - Pre-squash SHAs: `355b1fc1` (records #1443's squash SHA in the B2-7
   block), `be8454d0` (item 1, SEC-03 verdict), the commit carrying this
   bullet (item 2, table closure); HP-2's commits are listed in its own block.
