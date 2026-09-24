@@ -556,7 +556,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       contentContainer
         .querySelector<HTMLElement>(`[data-testid="${captured.row}"]`)
         ?.querySelectorAll<HTMLElement>(ROW_FOCUSABLE_SELECTOR)
-        [captured.index]?.focus({ preventScroll: true });
+        .item(captured.index)
+        ?.focus({ preventScroll: true });
     }
   }
 

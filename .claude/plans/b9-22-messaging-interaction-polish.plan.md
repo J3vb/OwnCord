@@ -48,8 +48,9 @@ inventory did not name, found while implementing:
 - **A virtualized rebuild dropped keyboard focus to `<body>`.** `renderWindow`'s
   rebuild path aborts the row-scoped listeners and `clearChildren` detaches every
   row, so the focused action button vanished and focus fell to the document. The
-  fix captures the focused control's `data-testid` (and its row's) before the
-  rebuild and restores it on the replacement row.
+  fix captures the focused control's `data-testid` (or, lacking one, its
+  position among its row's focusable controls) before the rebuild and restores
+  it on the replacement row without scrolling.
 - **The pinned panel's row actions were `display: none` until hover**, so the
   Jump/Unpin buttons could never be focused or reached by Tab — a hover-only
   action, not merely an invisible one. They now reveal on `:focus-within` with
@@ -209,9 +210,10 @@ thresholds). No token files were edited and no Aurora treatment was adopted.
 ### What changed
 
 - **Focus survives a virtualized rebuild (`MessageList.ts`).** `renderWindow`
-  captures the focused control's `data-testid` (falling back to the row's first
-  focusable control via the row's `data-testid`) before `clearChildren`, and
-  restores it on the replacement row. A rebuild triggered by anything but the
+  captures the focused control's `data-testid` (falling back to its position
+  among the row's focusable controls, for reaction chips, links and the reply
+  bar) before `clearChildren`, and restores it on the replacement row with
+  `preventScroll`, so a reader scrolling away is not pulled back. A rebuild triggered by anything but the
   reader's own interaction keeps the keyboard user where they were instead of
   dumping focus on `<body>` (Q1: stable location through async update).
 - **The scroll-to-bottom button is named** (`aria-label` from the new
@@ -220,8 +222,8 @@ thresholds). No token files were edited and no Aurora treatment was adopted.
   switched from `display: none` (unfocusable) to `opacity`/`pointer-events`
   revealed on `:hover` **or** `:focus-within`; the message action bar's
   `:focus-within` reveal (present since earlier work) is now regression-pinned.
-  The codeblock-copy and GIF play controls gained the same `:focus-within`
-  reveal.
+  The codeblock-copy, GIF play and video download-overlay controls gained the
+  same `:focus-within` reveal.
 - **Search overlay is a real combobox** (`SearchOverlay.ts`): `role="combobox"`,
   `aria-controls`, `aria-activedescendant` re-pointed on every render (skipping
   an empty set), and a `role="status"` live region for searching/empty/failed.
