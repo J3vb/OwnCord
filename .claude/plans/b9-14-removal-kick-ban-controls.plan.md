@@ -223,6 +223,8 @@ merged in.
   already removed answers 500, because `writeServiceError` has no case for
   `ErrDeletedMessage` on this route; the client shows "Couldn't confirm this
   action. Check the history before trying again." and reads the report again.
+  The client stops offering removal once the report's history has a removal,
+  so this is left only for a message its author deleted after the report.
 
 ### What shipped
 
@@ -236,26 +238,34 @@ merged in.
   a force logout, and the copy says they can sign in again), "Ban member"
   (BAN_MEMBERS). An unknown role (pre-`ready`, or not in the role list) holds
   none. The bit is read again when the confirmation is accepted, so an offer
-  made before a demotion is not sent.
+  made before a demotion is not sent. Once the report's history has a
+  removal, removal is no longer offered and the section says "The reported
+  message was already removed." instead; kick and ban stay offered.
 - **Confirmation** (the B9-6 `message-requests/decisions.ts` destructive
   confirm, built on `createModal`): a named modal dialog stating the effect
   (removal deletes for everyone on the server, not a local hide; kick signs
   them out everywhere and they can come back; ban keeps them out and is not
   undone from the Moderation Center), Cancel first and focused, Escape and
-  the backdrop cancel, focus back on the opener.
+  the backdrop cancel, focus back on the opener (or, when a role change
+  rebuilt the report meanwhile, the rebuilt button for the same action, else
+  the report heading).
 - **Committed outcome and refusals** (`Queue.ts`): each is one report-linked
   write (`POST /moderation/queue/{id}/act`, `{kind, reason}`) under B9-12's
   one-at-a-time guard, then the queue and report are read again. The status
   line speaks only after the server answers ("Message removed for everyone.",
   "Logged out of every session. They can sign in again.", "Member banned.
-  They were disconnected and can't sign in again."). A 403 on removal says
-  the reader can't manage messages in its channel; on kick or ban it says the
-  role doesn't allow it or theirs isn't below the reader's (the server doesn't
+  They were disconnected and can't sign in again."). A 403 on removal is told
+  apart by the server's message: an archived channel says so ("its channel is
+  archived"), a permission refusal says the reader can't manage messages in
+  its channel, and any other shows the server's own words; on kick or ban it
+  says the role doesn't allow it or theirs isn't below the reader's (the server doesn't
   say which); no answer says the action could not be confirmed.
 - **Live authority** (`Queue.ts`): a change to the reader's role or to the
   role list rebuilds the open report, so an action the role no longer holds
   stops being offered without a server round trip (focus stays on the same
-  control, or the report heading if it went).
+  control, or the report heading if it went). While a read of the report is
+  in flight the rebuild is skipped, so that read is not aborted; it renders
+  with the current role itself.
 - **History**: a kick row reads "Logged out of every session".
 - **Effective voice controls** (`stores/channels.store.ts`,
   `components/ChannelSidebar.ts`, `channel-sidebar/volume-menu.ts`): the
@@ -272,7 +282,7 @@ merged in.
 ### Implementation decisions and file-table amendments
 
 - **No `permissions.ts` helper.** The three bits are read with the existing
-  `currentUserPermissions`/`hasPermission` inside the lazy Moderation Center
+  `currentUserHasPermission` inside the lazy Moderation Center
   chunk (`mayEnforce`), so nothing new lands in the startup or MainPage
   chunks; the voice gate is the server's per-channel verdict, not a role
   helper. `VoiceCallbacks.ts` is unchanged (its sends were already
