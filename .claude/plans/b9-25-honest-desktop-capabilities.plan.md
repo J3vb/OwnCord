@@ -275,8 +275,8 @@ new keys.
   and the cannot-read-the-OS wording; `dispatcher.test.ts` pins when a dial
   counts as failed; `server-banner.test.ts` adds the offline vs server wording,
   "Reconnecting..." until a dial fails, a Retry that stays usable across
-  repeated clicks, the
-  Retry-still-offered-when-offline case, the live-region announcement, and the
+  repeated clicks and keeps keyboard focus when a network flap re-renders the
+  notice, the Retry-still-offered-when-offline case, the live-region announcement, and the
   countdown-not-re-announced property; `update-notifier.test.ts` adds the
   once-per-phase announcement and the available-update announcement;
   `voice-widget.test.ts` adds the mic notice fill/empty (the live region stays
