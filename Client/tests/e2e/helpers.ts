@@ -481,9 +481,9 @@ export function buildTauriMockScript(opts: {
    *  and external images can be exercised. Without it every broker call is
    *  refused as "unavailable" (the mocked suite has no external network).
    *  `preview` keys on the requested URL; `image` keys on `url:<url>` or
-   *  `handle:<handle>`. A preview value that is a bare failure-class string
-   *  refuses just that request; a request with no entry keeps the refusing
-   *  default. */
+   *  `handle:<handle>`. A preview or image value that is a bare failure-class
+   *  string refuses just that request; a request with no entry keeps the
+   *  refusing default. */
   externalContent?: {
     preview?: Record<string, Record<string, unknown> | string>;
     image?: Record<string, number[] | string>;
@@ -821,7 +821,13 @@ export function buildTauriMockScript(opts: {
         if (cmd === "external_image") {
           var source = args?.handle !== undefined ? "handle:" + args.handle : "url:" + args.url;
           var bytes = window.__mockExternalImage[source];
-          if (bytes !== undefined) return new Uint8Array(bytes).buffer;
+          if (bytes !== undefined) {
+            // A string names a broker refusal class (blocked-destination,
+            // oversized, wrong-type, ...), exactly like the preview mock; an
+            // array is the image's bytes.
+            if (typeof bytes === "string") throw bytes;
+            return new Uint8Array(bytes).buffer;
+          }
           throw "unavailable";
         }
         const error = new Error("Unexpected IPC command: " + cmd);

@@ -17,6 +17,8 @@ import {
   grantExternalConsent,
   MOCK_LOGIN_RESPONSE,
   navigateToMainPageReady,
+  openSettings,
+  switchSettingsTab,
 } from "./helpers";
 import {
   Q1,
@@ -57,23 +59,23 @@ interface ExternalOption {
   readonly image?: Record<string, number[] | string>;
 }
 
-async function mockSession(page: Page, externalContent: ExternalOption = {}): Promise<void> {
+async function mockSession(
+  page: Page,
+  externalContent: ExternalOption = {},
+  gifTrending?: { readonly status: number; readonly body: unknown },
+): Promise<void> {
+  const httpRoutes: Array<{ pattern: string; status: number; body: unknown }> = [
+    { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+    { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+    { pattern: "/messages", status: 200, body: { messages: [RICH_MESSAGE], has_more: false } },
+    { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
+  ];
+  if (gifTrending !== undefined) {
+    httpRoutes.push({ pattern: "/api/v1/gif/trending", ...gifTrending });
+  }
   await page.route("https://www.youtube.com/**", (route) => route.abort());
   await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        {
-          pattern: "/messages",
-          status: 200,
-          body: { messages: [RICH_MESSAGE], has_more: false },
-        },
-        { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
-      ],
-      simulateWsFlow: true,
-      externalContent,
-    }),
+    buildTauriMockScript({ httpRoutes, simulateWsFlow: true, externalContent }),
   );
   await page.goto("/");
 }
@@ -153,6 +155,31 @@ test.describe("B9-9 rich-content states", () => {
     });
   }
 
+  test("a policy refusal of the inline image offers no retry and is not a Tab stop", async ({
+    page,
+  }) => {
+    await mockSession(page, { image: { [`url:${IMAGE}`]: "blocked-destination" } });
+    await navigateToMainPageReady(page);
+
+    await expect(imageWrap(page)).toHaveAttribute("data-media-state", "failed");
+    // A policy refusal is not retryable (matches the preview path and the plan).
+    await expect(imageWrap(page).locator(".msg-media-retry")).toBeHidden();
+    const img = imageWrap(page).locator("img");
+    // The refused image stays hidden, so it is neither shown nor reachable as
+    // the "Open image" control that would open an empty lightbox.
+    await expect(img).toBeHidden();
+    expect(await img.evaluate((el) => (el as HTMLImageElement).tabIndex)).toBe(0);
+    const focusable = await img.evaluate((el) => {
+      el.focus();
+      return document.activeElement === el;
+    });
+    // A hidden element cannot take focus, so it never becomes the Tab stop.
+    expect(focusable).toBe(false);
+    await expect(imageWrap(page).locator(".msg-media-fallback-text")).toHaveText(
+      "Image unavailable",
+    );
+  });
+
   test("a transient image failure is retried on demand through the broker", async ({ page }) => {
     // First ask is refused; the second is served. The mock's image map is keyed
     // by URL, so toggling it between renders simulates the broker recovering.
@@ -171,6 +198,38 @@ test.describe("B9-9 rich-content states", () => {
 
     await imageWrap(page).locator(".msg-media-retry").click();
     await expect.poll(() => brokerImageCalls(page)).toBeGreaterThan(before);
+    await expect(imageWrap(page)).toHaveAttribute("data-media-state", "loaded");
+    const img = imageWrap(page).locator("img");
+    await expect(img).toBeFocused();
+
+    await page.keyboard.press("Space");
+    const lightbox = page.locator(".image-lightbox");
+    await expect(lightbox).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(lightbox).toHaveCount(0);
+    await expect(img).toBeFocused();
+  });
+
+  test("a consent reset re-conceals the failed image and no stale retry can fetch", async ({
+    page,
+  }) => {
+    await mockSession(page, {});
+    await navigateToMainPageReady(page);
+    await expect(imageWrap(page)).toHaveAttribute("data-media-state", "failed");
+    await expect(imageWrap(page).locator(".msg-media-retry")).toBeVisible();
+    const before = await brokerImageCalls(page);
+
+    // B9-8 preserved: the Text & Images reset revokes the grant and re-conceals
+    // the item, so the retry control is gone and no further broker call occurs.
+    await openSettings(page);
+    await switchSettingsTab(page, "Text & Images");
+    await page.getByRole("button", { name: "Reset external content consent" }).click();
+    await page.keyboard.press("Escape");
+    await expect(card(page).locator(".msg-embed-concealed")).toHaveCount(2);
+    await expect(imageWrap(page)).toHaveCount(0);
+
+    await page.waitForTimeout(300);
+    expect(await brokerImageCalls(page)).toBe(before);
   });
 
   test("an inline image is keyboard operable and the lightbox contains then restores focus", async ({
@@ -204,9 +263,11 @@ test.describe("B9-9 rich-content states", () => {
     await expect(retry).toHaveAttribute("aria-label", "Retry image");
     await retry.focus();
     await expect(retry).toBeFocused();
+    const before = await brokerImageCalls(page);
     await page.keyboard.press("Enter");
-    // Activating it re-asks, so the failed state is re-entered at least once.
+    await expect.poll(() => brokerImageCalls(page)).toBeGreaterThan(before);
     await expect(imageWrap(page)).toHaveAttribute("data-media-state", "failed");
+    await expect(retry).toBeFocused();
   });
 
   test("the rich-content controls are named and pass contrast at Q1 thresholds", async ({
@@ -243,6 +304,34 @@ test.describe("B9-9 rich-content states", () => {
       contentType: "application/json",
     });
     expect(failures).toEqual([]);
+  });
+
+  test("a transient GIF failure is a typed retry, not the empty state", async ({ page }) => {
+    // The server's GIF proxy answers 502; the picker must not read as
+    // "No GIFs found" and must offer a bounded retry.
+    await mockSession(page, {}, { status: 502, body: { error: "BAD_GATEWAY" } });
+    await navigateToMainPageReady(page);
+    await page.locator(".gif-btn").click();
+    const picker = page.locator(".gif-picker");
+    await expect(picker).toBeVisible();
+
+    await expect(picker.locator(".gp-empty")).toHaveCount(0);
+    await expect(picker.locator(".msg-media-fallback-text")).toHaveText("Couldn't load GIFs");
+    const retry = picker.locator(".msg-media-retry");
+    await expect(retry).toBeVisible();
+    await expect(retry).toHaveAttribute("aria-label", "Retry");
+
+    // Activating the retry re-queries (the proxy answers 502 again) and
+    // keyboard focus moves to the search field rather than falling to <body>
+    // when the retry is replaced. The loading line may flash past, so assert
+    // the durable outcome (the re-asked failure) and the focus, not the flash.
+    const before = await gifTrendingCalls(page);
+    await retry.focus();
+    await retry.click();
+    await expect.poll(() => gifTrendingCalls(page)).toBeGreaterThan(before);
+    await expect(picker.locator(".gp-search")).toBeFocused();
+    await expect(picker.locator(".msg-media-fallback-text")).toHaveText("Couldn't load GIFs");
+    await expect(picker.locator(".msg-media-retry")).toBeVisible();
   });
 
   test("no required motion under reduced motion; GIF controls stay present", async ({ page }) => {
@@ -298,6 +387,22 @@ async function brokerImageCalls(page: Page): Promise<number> {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ((window as any).__invokeLog as Array<{ cmd: string }>).filter(
         (e) => e.cmd === "external_image",
+      ).length,
+  );
+}
+
+/** Count the GIF proxy's trending requests through the native HTTP mock. */
+async function gifTrendingCalls(page: Page): Promise<number> {
+  return page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __invokeLog: Array<{ cmd: string; args?: { clientConfig?: { url?: string } } }>;
+        }
+      ).__invokeLog.filter(
+        (e) =>
+          e.cmd === "plugin:http|fetch" &&
+          (e.args?.clientConfig?.url ?? "").includes("/api/v1/gif/trending"),
       ).length,
   );
 }
