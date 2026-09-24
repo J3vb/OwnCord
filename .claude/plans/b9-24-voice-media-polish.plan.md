@@ -74,10 +74,10 @@ implementing — each is a Q1 gap the plan's Tasks 2/Task 4 ask to fix:
   `rebuildFocusLayout` detaches and re-appends every cell and `removeStream`
   removes one; the focused overlay control vanished with it. Focus is now
   captured by `data-user-id`/`data-tile-control` and restored to the replacement
-  tile, else the first remaining tile's same control, else the grid itself.
+  tile, else the grid itself — never another peer's identically named control.
 - **The mic sensitivity threshold in Voice & Audio was pointer-only** (drag or
   click), so it had no keyboard path; it is now a `role="slider"` with
-  arrow/Home/End support and `aria-valuenow`.
+  arrow/Home/End support.
 
 ## Patterns to mirror
 
@@ -225,8 +225,8 @@ this record is the lane's own.
 
 - **Keyboard path on the transport-stats readout (BPR-091).** The quality
   signal was a `div` toggling `.vw-stats`; it is now a `<button>` with
-  `aria-expanded`, an Enter/Space keydown guard for the app's global keybinds,
-  and `data-testid="vw-signal"`. It is local UI, never frozen by
+  `aria-expanded` and `data-testid="vw-signal"`; Enter and Space use the
+  native button activation (no extra keydown listener). It is local UI, never frozen by
   `updateFrozen`, so it stays reachable while the socket is down.
 - **Qualified status text (BPR-091, Q1 contrast).** `VoiceWidget`'s header,
   secured badge, timer and `QUALITY_COLORS` map now use the `--text-*`
@@ -247,19 +247,23 @@ this record is the lane's own.
 - **Focus survives a tile rebuild or removal (BPR-091 focus stability).**
   `captureFocusedControl` records the focused `(userId, control)` before
   `rebuildFocusLayout`/`removeStream` detaches cells and puts focus back on the
-  replacement tile's same control, else the first remaining tile's, else the
-  grid itself (`tabindex="-1"`), which is never `<body>`.
+  replacement tile's same control, else the grid itself (`tabindex="-1"`), so
+  focus never drops to `<body>` or lands on another peer's control.
 - **The mic sensitivity threshold is keyboard operable (BPR-091).** It is now
-  a `role="slider"` with `aria-valuemin/max/now`, ArrowLeft/Down − 5,
-  ArrowRight/Up + 5, Home 0 and End 100, sharing `applySensitivity` with the
-  pointer path.
+  a `role="slider"` over the gate threshold the handle shows:
+  `aria-valuenow` is `100 − sensitivity` and `aria-valuetext` announces the
+  sensitivity ("Sensitivity N%"). ArrowLeft/Down − 5, ArrowRight/Up + 5, Home 0
+  and End 100 move the handle the way the key points, matching a drag, and
+  share `applySensitivity` with the pointer path.
 
 ### Evidence
 
-- **Unit (vitest, jsdom):** `tests/unit/b9-voice-polish.test.ts` (8) pins the
-  button/aria-expanded toggle, the Enter/Space path, the moderator-status
-  announcement and clearing, tile control keys, and the three focus-restore
-  cases; `tests/unit/b9-voice-polish-css.test.ts` (10) parses `app.css` for the
+- **Unit (vitest, jsdom):** `tests/unit/b9-voice-polish.test.ts` (7) pins the
+  button/aria-expanded toggle, the moderator-status announcement and clearing,
+  tile control keys, and the three focus-restore cases (same control; grid,
+  not another peer's control, when the focused peer or the last tile leaves);
+  `tests/unit/voice-audio-tab.test.ts` pins the slider's ArrowRight/Home/End
+  direction; `tests/unit/b9-voice-polish-css.test.ts` (10) parses `app.css` for the
   `:focus-within` reveal, the 24×24 tile-mute box and every status-token move.
   The full client unit suite is green: 255 files, 6125 passed | 152 expected
   fail. `tsc --noEmit`, `typecheck:e2e`, `oxlint --deny-warnings`,
