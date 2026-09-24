@@ -199,20 +199,25 @@ Re-read at `dev` `6671f2283f448afebe896eac993219df0529b692` (B9-8 merged as
   "loaded" / "failed").
 - **Bounded, explicit retry.** A shared `renderFailureStatus` (in
   `attachments.ts`) renders one status line plus a named retry button for the
-  preview and inline-image paths and the GIF picker. The retry is shown only
-  for the transient `unavailable` class on previews; a policy refusal
+  preview and inline-image paths and the GIF picker. On previews and inline
+  images the retry is shown only for the transient `unavailable` class
+  (including an image whose bytes fail to decode); a policy refusal
   (`blocked-destination`, `too-many-redirects`, `oversized`, `wrong-type`,
   `expired-handle`) is never auto-retried and offers no retry. A retry clears
   the cached refusal and calls the same `previewExternal`/`loadExternalImage`
   seam, which rechecks consent and the current partition (B9-8 preserved).
+  While it re-asks, the retry stays mounted and focused with `aria-disabled`;
+  focus then moves to the loaded image, or to the preview's link when the
+  retry goes away, and the GIF picker's retry hands focus to the search field.
 - **Keyboard-operable controls.** The inline external image is now a
   `role="button"`, `tabindex="0"` control named "Open image from {host}" with
-  Enter/Space opening the lightbox. The lightbox is `role="dialog"`,
-  `aria-modal`, takes focus on open (its named close button), traps Tab on that
-  single stop, and restores focus to the opener on close.
+  Enter/Space opening the lightbox; it stays hidden, and so out of the Tab
+  order, until its bytes load. The lightbox is `role="dialog"` named after the
+  image, `aria-modal`, takes focus on open (its named close button), traps Tab
+  on that single stop, and restores focus to the opener on close.
 - **Provider attribution and copy.** New copy lives in `i18n/content.ts`
   (lazy: previews, images, GIF picker) and `i18n/mediaControls.ts` (startup:
-  the lightbox name only), per the B9-3 catalog rule; the ratchet baseline
+  the lightbox close button only), per the B9-3 catalog rule; the ratchet baseline
   shrank by the two now-extracted literals. The YouTube play button already
   names YouTube and keeps its `aria-describedby` note (B9-8).
 - **Reduced motion and media controls.** No new animation was added; the
@@ -242,7 +247,10 @@ Re-read at `dev` `6671f2283f448afebe896eac993219df0529b692` (B9-8 merged as
   are unmodified.
 - **Bundle:** startup closure 94,872 B / 95,000 B (+271 B, the startup
   `mediaControls` catalog and the lightbox focus code); MainPage 63,709 B /
-  64,000 B (+37 B). No budget change; no note appended.
+  64,000 B (+37 B). No budget change; no note appended. Re-measured on Linux
+  after the review fixes (which dropped two unused startup keys), base
+  `1a3a7b1d` → this change: startup closure 93,150 → 93,384 B (+234 B),
+  MainPage 63,841 → 63,890 B (+49 B, 110 B headroom).
 - **Lint:** `npm run lint` (oxlint, cycles, eslint) and both typechecks clean.
 - **Native:** NVDA (Windows) and Orca (Linux) recordings are owner-run and
   pending; the native broker traffic proof remains B9-8's
