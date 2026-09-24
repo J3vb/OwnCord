@@ -67,6 +67,7 @@
   transition: opacity 0.15s;
 }
 .video-cell:hover .video-tile-overlay,
+.video-cell:focus-within .video-tile-overlay,
 .video-tile-overlay.muted {
   opacity: 1;
 }
@@ -76,6 +77,9 @@
   border-radius: var(--radius-sm);
   color: var(--text-normal);
   padding: 4px;
+  /* 24x24 minimum pointer target (Q1 2.5.8); the icon stays 16px. */
+  min-width: 24px;
+  min-height: 24px;
   cursor: pointer;
   display: flex;
   align-items: center;

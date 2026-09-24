@@ -34,11 +34,14 @@ export interface VoiceWidgetOptions {
   onScreenshareToggle(): void;
 }
 
+/** Connection-quality colour, used both for the signal bars (a fill, where
+ *  --green/--yellow/--red are fine) and for the ping text beside them (text,
+ *  which Q1 requires at 4.5:1). The qualified text tokens carry both roles. */
 const QUALITY_COLORS: Record<QualityLevel, string> = {
-  excellent: "var(--green, #23a559)",
-  fair: "var(--yellow, #f0b232)",
-  poor: "var(--red, #f23f43)",
-  bad: "var(--red, #f23f43)",
+  excellent: "var(--text-positive, #62c28c)",
+  fair: "var(--text-warning, #f2b84b)",
+  poor: "var(--text-danger, #ff9a9c)",
+  bad: "var(--text-danger, #ff9a9c)",
 };
 
 const QUALITY_BARS: Record<QualityLevel, number> = {
@@ -84,12 +87,17 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let cameraBtn: HTMLButtonElement | null = null;
   let shareBtn: HTMLButtonElement | null = null;
   let disconnectBtn: HTMLButtonElement | null = null;
+  /** Persistent polite status for a moderator-imposed mute/deafen. The
+   *  disabled controls carry only a `title`, which a screen reader never
+   *  reaches (a disabled button cannot take focus), so the reason is announced
+   *  here instead — once, when it appears. */
+  let modStatusEl: HTMLDivElement | null = null;
 
   // Listen-only mode: "Grant Microphone" button
   let grantMicBtn: HTMLButtonElement | null = null;
 
   // Connection stats
-  let signalWrap: HTMLDivElement | null = null;
+  let signalWrap: HTMLButtonElement | null = null;
   let pingLabel: HTMLSpanElement | null = null;
   let statsPane: HTMLDivElement | null = null;
   let statsPoller: ConnectionStatsPoller | null = null;
@@ -290,6 +298,20 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       swapIcon(cameraBtn, voice.localCamera ? "camera-off" : "camera");
       cameraBtn.setAttribute("aria-pressed", String(voice.localCamera));
     }
+    // Announce a moderator-imposed state once (render runs on every store
+    // change; the text only changes when the state actually does, so a
+    // screen reader does not re-read it on unrelated updates).
+    if (modStatusEl !== null) {
+      const text =
+        serverMuted && serverDeafened
+          ? t("widget.moderatedMutedDeafened")
+          : serverMuted
+            ? t("widget.mutedByModerator")
+            : serverDeafened
+              ? t("widget.deafenedByModerator")
+              : "";
+      if (modStatusEl.textContent !== text) setText(modStatusEl, text);
+    }
     shareBtn?.classList.toggle("active-ctrl", voice.localScreenshare);
     shareBtn?.classList.toggle("sharing-active", voice.localScreenshare);
     if (shareBtn) {
@@ -345,15 +367,35 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     timerEl = createElement("span", { class: "vw-timer" }, "00:00");
     channelNameEl = createElement("span", { class: "vw-channel" }, t("widget.channelFallback"));
 
-    signalWrap = createElement("div", { class: "vw-signal", "aria-label": t("widget.quality") });
+    // A button, not a clickable div: the quality readout toggles the transport
+    // stats pane, and a pointer-only control is unreachable by keyboard (Q1).
+    // aria-expanded reflects the pane it owns.
+    signalWrap = createElement("button", {
+      type: "button",
+      class: "vw-signal",
+      "aria-label": t("widget.quality"),
+      "aria-expanded": "false",
+      "data-testid": "vw-signal",
+    });
     signalWrap.appendChild(createSignalIcon(4, QUALITY_COLORS.excellent, 14));
     pingLabel = createElement("span", { class: "vw-ping" }, "—");
     pingLabel.style.color = QUALITY_COLORS.excellent;
     signalWrap.appendChild(pingLabel);
+
+    function toggleStatsPane(): void {
+      if (statsPane === null || signalWrap === null) return;
+      const open = statsPane.classList.toggle("visible");
+      signalWrap.setAttribute("aria-expanded", String(open));
+    }
+    signalWrap.addEventListener("click", toggleStatsPane, { signal: disposable.signal });
     signalWrap.addEventListener(
-      "click",
-      () => {
-        statsPane?.classList.toggle("visible");
+      "keydown",
+      (e: KeyboardEvent) => {
+        // Enter and Space already fire click on a real button; this only
+        // guards against the app's global keybinds swallowing them.
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        toggleStatsPane();
       },
       { signal: disposable.signal },
     );
@@ -491,7 +533,16 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       { signal: disposable.signal },
     );
 
-    appendChildren(root, header, statsPane, grantMicBtn, controls);
+    // A live region present from mount (screen readers skip one inserted
+    // already filled) that only fills when a moderator-imposed state lands.
+    modStatusEl = createElement("div", {
+      class: "vw-mod-status sr-only",
+      role: "status",
+      "aria-live": "polite",
+      "data-testid": "vw-mod-status",
+    });
+
+    appendChildren(root, header, statsPane, modStatusEl, grantMicBtn, controls);
 
     render();
 
@@ -568,6 +619,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     cameraBtn = null;
     shareBtn = null;
     disconnectBtn = null;
+    modStatusEl = null;
     grantMicBtn = null;
     signalWrap = null;
     pingLabel = null;

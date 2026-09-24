@@ -158,7 +158,16 @@ function buildVoiceAudioTabInner(
   const meterWrap = createElement("div", { class: "mic-meter-wrap" });
   const meterBar = createElement("div", { class: "mic-meter-bar" });
   const meterLevel = createElement("div", { class: "mic-meter-level" });
-  const meterThreshold = createElement("div", { class: "mic-meter-threshold" });
+  // A range, not a pointer-only div: the threshold is adjustable by keyboard
+  // as well as drag (Q1 — every action reachable, no pointer-only control).
+  const meterThreshold = createElement("div", {
+    class: "mic-meter-threshold",
+    role: "slider",
+    tabindex: "0",
+    "aria-label": t("voiceAudio.inputSensitivity"),
+    "aria-valuemin": "0",
+    "aria-valuemax": "100",
+  });
   meterBar.appendChild(meterLevel);
   meterBar.appendChild(meterThreshold);
   meterWrap.appendChild(meterBar);
@@ -171,6 +180,7 @@ function buildVoiceAudioTabInner(
     //         sensitivity 0 (max gating) → handle at RIGHT (100%).
     // This matches Discord: drag LEFT = easier to pass, RIGHT = harder.
     meterThreshold.style.left = `${100 - sensitivity}%`;
+    meterThreshold.setAttribute("aria-valuenow", String(sensitivity));
   }
   updateThresholdIndicator(currentSensitivity);
 
@@ -220,6 +230,25 @@ function buildVoiceAudioTabInner(
     "click",
     (e: MouseEvent) => {
       applySensitivity(sensitivityFromPointer(e.clientX));
+    },
+    { signal },
+  );
+
+  // Keyboard: standard slider semantics — ArrowLeft/Down decrement the
+  // aria-valuenow (sensitivity), ArrowRight/Up increment it, Home/End jump to
+  // the edges. The handle's visual position is inverted by design (left = more
+  // sensitive), but the announced value is the plain sensitivity number.
+  meterThreshold.addEventListener(
+    "keydown",
+    (e: KeyboardEvent) => {
+      let next: number;
+      if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = 100;
+      else if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = currentSensitivity - 5;
+      else if (e.key === "ArrowRight" || e.key === "ArrowUp") next = currentSensitivity + 5;
+      else return;
+      e.preventDefault();
+      applySensitivity(Math.max(0, Math.min(100, next)));
     },
     { signal },
   );

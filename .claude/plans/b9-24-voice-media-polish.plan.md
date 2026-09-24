@@ -1,6 +1,6 @@
 # Plan: B9-24 — Polish voice and video controls and their accessibility
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch `fm/b9-24-impl` from `dev` `35f0b246`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
 
 > **Milestone:** B9-24 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-24-voice-media-polish`; branch from current `dev`, PR to `dev` only.
@@ -42,6 +42,42 @@ The planning base also includes orphan-camera cleanup after reconnect/disable
 (`Client/src-tauri/src/native_voice/session.rs:809-875`) and its regressions
 (`Client/src-tauri/src/native_voice/session.rs:1049-1113`). Preserve these
 when exercising media controls; no native-session rewrite belongs in this PR.
+
+### Drift at the implementation base (2026-09-24)
+
+Re-read at `35f0b246` (`dev`, B9-14/B9-20 merged). All three inventory rows
+still hold; line numbers moved (B9-14 added the `can_moderate_voice` verdict
+to the participant menu, B9-20 moved the voice/settings copy behind the `voice`
+and `settings` catalogs). Facts the inventory did not name, found while
+implementing — each is a Q1 gap the plan's Tasks 2/Task 4 ask to fix:
+
+- **The transport-stats toggle was a `div` with a click handler.** The quality
+  readout is the only control that expands `.vw-stats`, and a pointer-only div
+  is unreachable by Tab/Enter (Q1 keyboard, "no hover-only action"). It is now
+  a `<button>` with `aria-expanded`.
+- **The voice header and ping used fill colours as text.** `.vw-connected`,
+  `.vw-secured`, `.vw-timer` and the ping read `var(--green)`/`var(--yellow)`/
+  `var(--red)`, which measure 4.34:1 / 7.30:1 / 3.66:1 on the widget's
+  `--bg-secondary`; `--green` and `--red` miss the Q1 4.5:1 text bar. They now
+  use the qualified `--text-positive`/`--text-warning`/`--text-danger`.
+- **The active mute/deafen icon read 2.32:1 on its own 20 % red tint** (Q1
+  1.4.11, 3:1 for UI components); it moves to `--text-danger` (4.32:1) while the
+  tint stays and `aria-pressed` plus the icon swap carry the state.
+- **A moderator-imposed mute/deafen was announced nowhere.** The disabled
+  controls carry only a `title`, which a disabled button can never surface to a
+  screen reader. A `.sr-only` `role="status"` region now carries the reason.
+- **The video tile audio overlay was `opacity: 0` until hover**, so its volume
+  slider and mute button could not be seen or focused by keyboard (same
+  hover-only shape as B9-22's pinned-panel actions); it now also reveals on
+  `:focus-within`, and the mute button gets a 24×24 target.
+- **A tile rebuild or removal dropped keyboard focus to `<body>`.**
+  `rebuildFocusLayout` detaches and re-appends every cell and `removeStream`
+  removes one; the focused overlay control vanished with it. Focus is now
+  captured by `data-user-id`/`data-tile-control` and restored to the replacement
+  tile, else the first remaining tile's same control, else the grid itself.
+- **The mic sensitivity threshold in Voice & Audio was pointer-only** (drag or
+  click), so it had no keyboard path; it is now a `role="slider"` with
+  arrow/Home/End support and `aria-valuenow`.
 
 ## Patterns to mirror
 
@@ -174,3 +210,85 @@ render path as a fallback; fail closed and record a blocker instead.
 ## Open questions
 
 No new owner decision is introduced by this milestone. The PRD's unresolved entry decisions still apply; stop if implementation would require a new product, UX or scope choice.
+
+## Implementation record — 2026-09-24
+
+Branch `fm/b9-24-impl`; base `dev` `35f0b246` (B9-14/B9-20 merged). The owner's
+decisions applied are in
+[b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md#q13--visual-direction)
+(Q13: Refined Neon tokens; Aurora components adoptable per lane; Q1/Q8
+thresholds). No token file was edited, no Aurora treatment was adopted, and the
+shared PRD's status table and per-lane status paragraphs were not touched —
+this record is the lane's own.
+
+### What changed
+
+- **Keyboard path on the transport-stats readout (BPR-091).** The quality
+  signal was a `div` toggling `.vw-stats`; it is now a `<button>` with
+  `aria-expanded`, an Enter/Space keydown guard for the app's global keybinds,
+  and `data-testid="vw-signal"`. It is local UI, never frozen by
+  `updateFrozen`, so it stays reachable while the socket is down.
+- **Qualified status text (BPR-091, Q1 contrast).** `VoiceWidget`'s header,
+  secured badge, timer and `QUALITY_COLORS` map now use the `--text-*`
+  status tokens; the ping text is the same element that carries the bar colour,
+  so the token split (fill vs text) is what lets one map serve both.
+  `.vw-controls button.active-ctrl` and `.disconnect` move their icon colour to
+  `--text-danger`: the previous `--red` on its own 20 % tint read 2.32:1.
+- **A moderator mute/deafen is announced once.** A `.sr-only` `role="status"`
+  region (`.vw-mod-status`) carries "You were muted/deafened by a moderator"
+  (and a combined line) and clears when the restriction lifts; text is only
+  rewritten when it actually changes, so a render on an unrelated store update
+  does not re-announce.
+- **No hover-only action in the video grid (BPR-091).** `.video-cell:focus-within
+.video-tile-overlay` reveals the tile's volume slider and mute button on
+  focus, matching B9-22's pinned-panel fix; the mute button gains a 24×24
+  minimum (`min-width`/`min-height`) and the two controls carry
+  `data-tile-control` keys.
+- **Focus survives a tile rebuild or removal (BPR-091 focus stability).**
+  `captureFocusedControl` records the focused `(userId, control)` before
+  `rebuildFocusLayout`/`removeStream` detaches cells and puts focus back on the
+  replacement tile's same control, else the first remaining tile's, else the
+  grid itself (`tabindex="-1"`), which is never `<body>`.
+- **The mic sensitivity threshold is keyboard operable (BPR-091).** It is now
+  a `role="slider"` with `aria-valuemin/max/now`, ArrowLeft/Down − 5,
+  ArrowRight/Up + 5, Home 0 and End 100, sharing `applySensitivity` with the
+  pointer path.
+
+### Evidence
+
+- **Unit (vitest, jsdom):** `tests/unit/b9-voice-polish.test.ts` (8) pins the
+  button/aria-expanded toggle, the Enter/Space path, the moderator-status
+  announcement and clearing, tile control keys, and the three focus-restore
+  cases; `tests/unit/b9-voice-polish-css.test.ts` (10) parses `app.css` for the
+  `:focus-within` reveal, the 24×24 tile-mute box and every status-token move.
+  The full client unit suite is green: 255 files, 6125 passed | 152 expected
+  fail. `tsc --noEmit`, `typecheck:e2e`, `oxlint --deny-warnings`,
+  `lint:cycles`, `eslint`, prettier and `scripts/check-ui-strings.mjs` are
+  clean; no new UI text escaped a catalog.
+- **E2E (mocked Chromium, `--workers=1`, non-1420 port):**
+  `tests/e2e/b9-voice-polish.spec.ts` — 7 tests: the stats toggle is a
+  keyboard button with a Q1 focus ring; every voice control is named; a
+  server mute announces once and clears; the header meets 4.5:1; the widget
+  reflows at 940×500 with 20px text; the tile overlay reveals on focus (and
+  hides again off-tile); the tile mute target is ≥ 24×24. The affected
+  existing suites were re-run green: `voice-widget`, `video-grid`,
+  `voice-lifecycle`, `voice-channel`, `voice-e2ee-verify` (41),
+  `b9-text-expansion` (10, incl. the B9-20 expanded voice-controls case) and
+  `settings-voice-audio` (10).
+- **Budgets:** `npm run check:budgets` — startup 96,374 B (97,000), MainPage
+  62,039 B (64,000), livekit 133,372 B, livekitSession 23,005 B. No budget was
+  raised; CSS additions are small and the widget text tokens cost nothing.
+- **Native (owner-run / CI):** `Client/tests/e2e/native/voice-controls.spec.ts`
+  gains the stats-toggle keyboard check and the moderator-status role probe to
+  the existing live journey (mute/deafen/disconnect over the real backend).
+  NVDA (Windows) and Orca (Linux) recordings remain owner-run, tracked with
+  B9-26; no automated proxy is claimed for them.
+
+### Requirement map
+
+BPR-090 (coherent desktop media controls/feedback, performance preserved),
+BPR-091 (keyboard, focus, contrast, announcements, reflow) and BPR-092 (honest
+media control state) get their automated evidence here. Voice transport,
+LiveKit connection logic and media pipelines are unchanged: only the interaction
+and visual layer moved. The B9-14 per-channel voice-moderation behaviour and the
+B9-3 catalog seam (English byte-identical) are preserved.
