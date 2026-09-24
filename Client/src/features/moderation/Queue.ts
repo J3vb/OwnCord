@@ -55,6 +55,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   let gate: MountableComponent | null = null;
   let listReq: Disposable | null = null;
   let detailReq: Disposable | null = null;
+  let detailFocus = false;
   let denied = false;
 
   const filterId = `mod-filter-${++viewSeq}`;
@@ -263,7 +264,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
             api.acknowledgeNsfw(channelId, signal).then(() => {
               if (signal.aborted) return;
               setNsfwAcknowledged(channelId, true);
-              if (selected !== null) loadDetail(selected, true);
+              if (forReport !== null && selected === forReport.id) loadDetail(forReport.id, true);
             }),
           onCancel: closeToRow,
         });
@@ -301,10 +302,12 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     focusList(was);
   }
 
-  function loadDetail(id: string, takeFocus: boolean): void {
+  function loadDetail(id: string, askedFocus: boolean): void {
+    const takeFocus = askedFocus || (detailReq !== null && detailFocus);
     detailReq?.destroy();
     const req = new Disposable();
     detailReq = req;
+    detailFocus = takeFocus;
     setDetailError("");
     if (takeFocus) {
       gate?.destroy?.();
@@ -347,9 +350,11 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
           loadList(false, false);
           return;
         }
+        const hadFocus = detailSlot.contains(document.activeElement);
         dropDetail();
         setText(detailStatus, "");
         setDetailError(t("detail.error"));
+        if (hadFocus) detailRetry.focus();
       },
     );
   }
