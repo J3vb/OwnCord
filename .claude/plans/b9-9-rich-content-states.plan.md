@@ -276,7 +276,7 @@ Re-read at `dev` `6671f2283f448afebe896eac993219df0529b692` (B9-8 merged as
      to refuse an image by failure class (it previously answered only bytes or a
      blanket `unavailable`); no other scenario was genuinely missing.
 - **Consent preserved:** `b9-content-consent.spec.ts`, `message-media.spec.ts`
-  — 42 passed; B9-8's zero-fetch-before-consent and its reset journey are
+  — 26 passed; B9-8's zero-fetch-before-consent and its reset journey are
   unmodified.
 - **Bundle:** startup closure 94,872 B / 95,000 B (+271 B, the startup
   `mediaControls` catalog and the lightbox focus code); MainPage 63,709 B /
