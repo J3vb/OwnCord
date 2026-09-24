@@ -13,6 +13,7 @@ import { errorText } from "@lib/api";
 import type { RecoveryKitStatus } from "@lib/api";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { accountText as t } from "../../i18n/account";
+import { focusIsOurs } from "./helpers";
 
 const MUTED = "color:var(--text-muted);font-size:13px;margin-bottom:12px";
 // --text-danger is the qualified error-text token; --red (the fill) reads
@@ -148,15 +149,15 @@ function buildPasswordConfirm(
   appendChildren(btnRow, submitBtn, cancelBtn);
   appendChildren(area, pwInput, errorEl, btnRow);
 
-  const close = (hadFocus = area.contains(document.activeElement)): void => {
+  const close = (): void => {
     // The submit button that was focused is inside `area`, which is about to
     // hide; focus the trigger that replaces it so focus never falls to <body>
-    // (B9-23). Only reclaim focus if it was inside this area.
+    // (B9-23). Only reclaim focus if the user has not moved it elsewhere.
     area.style.display = "none";
     trigger.style.display = "";
     pwInput.value = "";
     setText(errorEl, "");
-    if (hadFocus) trigger.focus();
+    if (focusIsOurs(area)) trigger.focus();
   };
   trigger.addEventListener(
     "click",
@@ -167,7 +168,7 @@ function buildPasswordConfirm(
     },
     { signal },
   );
-  cancelBtn.addEventListener("click", () => close(), { signal });
+  cancelBtn.addEventListener("click", close, { signal });
   submitBtn.addEventListener(
     "click",
     () => {
@@ -178,16 +179,15 @@ function buildPasswordConfirm(
       }
       pwInput.value = "";
       setText(errorEl, "");
-      const hadFocus = area.contains(document.activeElement);
       submitBtn.disabled = true;
       setText(submitBtn, opts.busyLabel);
       void opts
         .onSubmit(pw)
-        .then(() => close(hadFocus))
+        .then(close)
         .catch((err: unknown) => {
           setText(errorEl, errorText(err, t("recovery.requestFailed")));
           submitBtn.disabled = false;
-          if (hadFocus) submitBtn.focus();
+          if (focusIsOurs(submitBtn)) submitBtn.focus();
         })
         .finally(() => {
           submitBtn.disabled = false;

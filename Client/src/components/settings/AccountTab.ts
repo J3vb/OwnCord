@@ -23,7 +23,7 @@ import {
 } from "@components/message-list/attachments";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { buildRecoveryKitSection, buildRegenerateCodes, buildShownOnce } from "./RecoverySections";
-import { outcomeEl, showOutcome } from "./helpers";
+import { focusIsOurs, outcomeEl, showOutcome } from "./helpers";
 import { accountText as t } from "../../i18n/account";
 
 const log = createLogger("AccountTab");
@@ -313,7 +313,6 @@ function buildProfileFields(
       // Both are sent unconditionally, empty string included: "" is how the
       // API says "clear it", and omitting a field means "leave it alone".
       showOutcome(statusEl, "error", "");
-      const hadFocus = document.activeElement === saveBtn;
       saveBtn.disabled = true;
       setText(saveBtn, t("profile.saving"));
       void options
@@ -330,7 +329,7 @@ function buildProfileFields(
         .finally(() => {
           saveBtn.disabled = false;
           setText(saveBtn, t("profile.save"));
-          if (hadFocus) saveBtn.focus();
+          if (focusIsOurs(saveBtn)) saveBtn.focus();
         });
     },
     { signal },
@@ -420,13 +419,12 @@ function buildPasswordSection(
       setText(pwError, "");
       // In-flight state: a second click would burn an attempt against the
       // server's lockout counter with the same credentials.
-      const hadFocus = document.activeElement === pwBtn;
       pwBtn.disabled = true;
       setText(pwBtn, t("password.changing"));
       const finish = (): void => {
         pwBtn.disabled = false;
         setText(pwBtn, t("password.change"));
-        if (hadFocus) pwBtn.focus();
+        if (focusIsOurs(pwBtn)) pwBtn.focus();
       };
       void options
         .onChangePassword(oldVal, newVal)
@@ -482,7 +480,7 @@ function buildPasswordSection(
 function buildTotpEnrollForm(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
-  onEnrolled: (restoreFocus: boolean) => void,
+  onEnrolled: () => void,
 ): HTMLDivElement {
   const wrapper = createElement("div", {});
 
@@ -540,25 +538,25 @@ function buildTotpEnrollForm(
         return;
       }
       setText(errorEl, "");
-      const hadFocus = formArea.contains(document.activeElement);
       submitBtn.disabled = true;
       setText(submitBtn, t("totp.requesting"));
 
       void options
         .onEnableTotp(pw)
         .then((result) => {
+          const restoreFocus = focusIsOurs(formArea);
           formArea.style.display = "none";
           buildTotpConfirmArea(enrollArea, options, pw, result, signal, onEnrolled);
           enrollArea.style.display = "block";
           submitBtn.disabled = false;
           setText(submitBtn, t("totp.submit"));
-          if (hadFocus) enrollArea.querySelector<HTMLElement>("button, input")?.focus();
+          if (restoreFocus) enrollArea.querySelector<HTMLElement>("button, input")?.focus();
         })
         .catch((err: unknown) => {
           setText(errorEl, errorText(err, t("totp.enableFailed")));
           submitBtn.disabled = false;
           setText(submitBtn, t("totp.submit"));
-          if (hadFocus) submitBtn.focus();
+          if (focusIsOurs(submitBtn)) submitBtn.focus();
         });
     },
     { signal },
@@ -574,7 +572,7 @@ function buildTotpConfirmArea(
   password: string,
   result: { qr_uri: string; backup_codes: string[] },
   signal: AbortSignal,
-  onEnrolled: (restoreFocus: boolean) => void,
+  onEnrolled: () => void,
 ): void {
   // Clear previous content immutably (remove children)
   while (container.firstChild) {
@@ -649,20 +647,19 @@ function buildTotpConfirmArea(
         return;
       }
       setText(confirmError, "");
-      const hadFocus = document.activeElement === confirmBtn;
       confirmBtn.disabled = true;
       setText(confirmBtn, t("totp.verifying"));
 
       void options
         .onConfirmTotp(password, code)
         .then(() => {
-          onEnrolled(hadFocus);
+          onEnrolled();
         })
         .catch((err: unknown) => {
           setText(confirmError, errorText(err, t("totp.enableFailed")));
           confirmBtn.disabled = false;
           setText(confirmBtn, t("totp.verify"));
-          if (hadFocus) confirmBtn.focus();
+          if (focusIsOurs(confirmBtn)) confirmBtn.focus();
         });
     },
     { signal },
@@ -675,7 +672,7 @@ function buildTotpConfirmArea(
 function buildTotpDisableView(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
-  onDisabled: (restoreFocus: boolean) => void,
+  onDisabled: () => void,
 ): HTMLDivElement {
   const wrapper = createElement("div", {});
 
@@ -738,12 +735,11 @@ function buildTotpDisableView(
   cancelBtn.addEventListener(
     "click",
     () => {
-      const hadFocus = confirmArea.contains(document.activeElement);
       confirmArea.style.display = "none";
       disableBtn.style.display = "";
       pwInput.value = "";
       setText(errorEl, "");
-      if (hadFocus) disableBtn.focus();
+      if (focusIsOurs(confirmArea)) disableBtn.focus();
     },
     { signal },
   );
@@ -757,14 +753,13 @@ function buildTotpDisableView(
         return;
       }
       setText(errorEl, "");
-      const hadFocus = confirmArea.contains(document.activeElement);
       confirmBtn.disabled = true;
       setText(confirmBtn, t("totp.disabling"));
 
       void options
         .onDisableTotp(pw)
         .then(() => {
-          onDisabled(hadFocus);
+          onDisabled();
         })
         .catch((err: unknown) => {
           const requiredByServer = err instanceof ApiClientError && err.code === "FORBIDDEN";
@@ -774,7 +769,7 @@ function buildTotpDisableView(
           );
           confirmBtn.disabled = false;
           setText(confirmBtn, t("totp.confirmDisable"));
-          if (hadFocus) confirmBtn.focus();
+          if (focusIsOurs(confirmBtn)) confirmBtn.focus();
         });
     },
     { signal },
@@ -809,11 +804,12 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
 
   const contentArea = createElement("div", {});
 
-  function render(restoreFocus = false): void {
+  function render(afterSubmit = false): void {
     const enabled = authStore.getState().user?.totp_enabled === true;
     // The control the user just activated is being replaced, and removing it
-    // drops focus to <body> (B9-23). The caller records whether it had focus
-    // before disabling it; move focus to the first rebuilt control instead.
+    // drops focus to <body> (B9-23). Unless the user has moved focus
+    // elsewhere, move it to the first rebuilt control instead.
+    const restoreFocus = afterSubmit && focusIsOurs(contentArea);
 
     // Status text uses the qualified --text-* tokens, not white on the
     // --green fill (3.2:1, below Q1's 4.5:1 for this 12px bold text); the
@@ -827,10 +823,10 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
     }
 
     if (enabled) {
-      contentArea.appendChild(buildTotpDisableView(options, signal, render));
+      contentArea.appendChild(buildTotpDisableView(options, signal, () => render(true)));
       contentArea.appendChild(buildRegenerateCodes(options, signal));
     } else {
-      contentArea.appendChild(buildTotpEnrollForm(options, signal, render));
+      contentArea.appendChild(buildTotpEnrollForm(options, signal, () => render(true)));
     }
     if (restoreFocus) {
       contentArea.querySelector<HTMLElement>("button, [tabindex]")?.focus();
@@ -1093,11 +1089,11 @@ function buildSessionsSection(
   appendChildren(btnRow, confirmBtn, cancelBtn);
   appendChildren(confirmArea, warning, errorEl, btnRow);
 
-  const closeConfirm = (hadFocus = confirmArea.contains(document.activeElement)): void => {
+  const closeConfirm = (): void => {
     confirmArea.style.display = "none";
     revokeAllBtn.style.display = "";
     setText(errorEl, "");
-    if (hadFocus) revokeAllBtn.focus();
+    if (focusIsOurs(confirmArea)) revokeAllBtn.focus();
   };
   revokeAllBtn.addEventListener(
     "click",
@@ -1108,11 +1104,10 @@ function buildSessionsSection(
     },
     { signal },
   );
-  cancelBtn.addEventListener("click", () => closeConfirm(), { signal });
+  cancelBtn.addEventListener("click", closeConfirm, { signal });
   confirmBtn.addEventListener(
     "click",
     () => {
-      const hadFocus = confirmArea.contains(document.activeElement);
       confirmBtn.disabled = true;
       setText(errorEl, "");
       void options
@@ -1121,13 +1116,13 @@ function buildSessionsSection(
           // A revoked current session is handled by the page: auth is
           // cleared and the app leaves. Otherwise refresh what is left.
           if (result.current_session_revoked || signal.aborted) return;
-          closeConfirm(hadFocus);
+          closeConfirm();
           load();
         })
         .catch((err: unknown) => {
           setText(errorEl, errorText(err, t("devices.signOutEverywhereFailed")));
           confirmBtn.disabled = false;
-          if (hadFocus) confirmBtn.focus();
+          if (focusIsOurs(confirmBtn)) confirmBtn.focus();
         })
         .finally(() => {
           confirmBtn.disabled = false;
@@ -1271,12 +1266,11 @@ function buildDeleteAccountSection(
   cancelBtn.addEventListener(
     "click",
     () => {
-      const hadFocus = confirmArea.contains(document.activeElement);
       confirmArea.style.display = "none";
       deleteBtn.style.display = "";
       passwordInput.value = "";
       setText(errorEl, "");
-      if (hadFocus) deleteBtn.focus();
+      if (focusIsOurs(confirmArea)) deleteBtn.focus();
     },
     { signal },
   );
@@ -1291,7 +1285,6 @@ function buildDeleteAccountSection(
         return;
       }
       setText(errorEl, "");
-      const hadFocus = confirmArea.contains(document.activeElement);
       confirmBtn.disabled = true;
       setText(confirmBtn, t("delete.deleting"));
 
@@ -1304,7 +1297,7 @@ function buildDeleteAccountSection(
           setText(errorEl, errorText(err, t("delete.failed")));
           confirmBtn.disabled = false;
           setText(confirmBtn, t("delete.confirm"));
-          if (hadFocus) confirmBtn.focus();
+          if (focusIsOurs(confirmBtn)) confirmBtn.focus();
         });
     },
     { signal },
@@ -1396,10 +1389,9 @@ export function buildAccountTab(
     editInput.focus();
   };
   const closeEditForm = () => {
-    const hadFocus = editForm.contains(document.activeElement);
     editForm.style.display = "none";
     setText(usernameError, "");
-    if (hadFocus) editOpener.focus();
+    if (focusIsOurs(editForm)) editOpener.focus();
   };
 
   editUserProfileBtn.addEventListener("click", openEditForm, { signal });
