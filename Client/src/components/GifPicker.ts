@@ -8,7 +8,11 @@ import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
 import type { GifApi, GifResult } from "@lib/gifProvider";
-import { fetchExternalImage, recoverEvictedImage } from "@components/message-list/attachments";
+import {
+  fetchExternalImage,
+  recoverEvictedImage,
+  renderFailureStatus,
+} from "@components/message-list/attachments";
 import {
   admitDerived,
   externalAllowed,
@@ -16,6 +20,7 @@ import {
   requestExternalItem,
 } from "../features/content-consent/external";
 import { externalConsentText } from "../i18n/externalConsent";
+import { contentText } from "../i18n/content";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -109,12 +114,19 @@ export function createGifPicker(options: GifPickerOptions): {
   );
 
   // Loading indicator
-  const loadingEl = createElement("div", { class: "gp-loading" });
+  const loadingEl = createElement("div", { class: "gp-loading", role: "status" });
   setText(loadingEl, "Loading...");
 
   // Empty state
   const emptyEl = createElement("div", { class: "gp-empty" });
   setText(emptyEl, "No GIFs found");
+
+  /** Transient failure: the same calm line as before plus a bounded retry,
+   *  which re-runs the last query under the picker's current consent. */
+  function showLoadError(message: string, retry: () => void): void {
+    clearChildren(gridArea);
+    gridArea.appendChild(renderFailureStatus(message, contentText("gif.retry"), retry));
+  }
 
   // ── Rendering ──
 
@@ -220,11 +232,21 @@ export function createGifPicker(options: GifPickerOptions): {
         options.onUnavailable?.(GIF_UNAVAILABLE_MESSAGE);
       }
       if (requestId === currentRequestId) {
-        clearChildren(gridArea);
-        const errEl = createElement("div", { class: "gp-empty" });
-        const fallback = err instanceof Error ? err.message : "Failed to load GIFs";
-        setText(errEl, disabled ? GIF_UNAVAILABLE_MESSAGE : fallback);
-        gridArea.appendChild(errEl);
+        if (disabled) {
+          clearChildren(gridArea);
+          const errEl = createElement("div", { class: "gp-empty", role: "status" });
+          setText(errEl, GIF_UNAVAILABLE_MESSAGE);
+          gridArea.appendChild(errEl);
+        } else {
+          // A transient provider/network failure keeps the query and offers a
+          // bounded retry; it never turns into the empty-results state (B9-9).
+          showLoadError(contentText("gif.failed"), () => {
+            // The retry is replaced by the loading line, so keyboard focus
+            // moves to the search field rather than falling to <body>.
+            searchInput.focus();
+            void loadGifs(searchInput.value.trim());
+          });
+        }
       }
     }
   }

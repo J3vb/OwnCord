@@ -1,6 +1,6 @@
 # Plan: B9-9 — Polish approved rich-content loading, failure and media controls
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch `fm/b9-9-impl` from `dev` `6671f228`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24). This file carries the status and evidence for this lane; the shared PRD status table is updated by the single docs lane (firstmate scope change, 2026-09-24).
 
 > **Milestone:** B9-9 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-9-rich-content-states`; branch from current `dev`, PR to `dev` only.
@@ -169,3 +169,89 @@ render path as a fallback; fail closed and record a blocker instead.
 ## Open questions
 
 No new owner decision is introduced by this milestone. The PRD's unresolved entry decisions still apply; stop if implementation would require a new product, UX or scope choice.
+
+## Drift at the implementation base (2026-09-24)
+
+Re-read at `dev` `6671f2283f448afebe896eac993219df0529b692` (B9-8 merged as
+[#1771](https://github.com/J3vb/OwnCord/pull/1771)):
+
+- The three inventory rows hold, moved by the B9-8 consent gate: preview
+  rendering and its refusal path are now `embeds.ts:60-114` (`fetchOgMeta`) and
+  `:125-215`; YouTube activation is `media.ts:178-286`; the GIF picker's
+  provider branch is `GifPicker.ts:200-260`.
+- Row 3 moved: YouTube playback is already a `<button>` named "Play on
+  YouTube" (B9-8), not a `div`; the remaining gap is the inline image, which was
+  pointer-only.
+- Not in the table: every refusal collapsed to `EMPTY_OG`/`null` at the render
+  seam (`embeds.ts:77-95`, `media.ts:329-333`), so a policy refusal and a
+  network failure were indistinguishable and no retry existed.
+- Bundle base: startup closure 94,601 B / 95,000 B, MainPage 63,672 B / 64,000 B.
+
+## Implementation record (2026-09-24)
+
+### Implementation decisions and file-table amendments
+
+- **Typed view states.** A preview's broker answer is kept as an
+  `OgLoad` (`{ok:true, meta}` | `{ok:false, failure}`) through the cache,
+  in-flight map and re-ask map (`embeds.ts`), so a refusal renders as
+  `data-embed-state="failed"` plus `data-embed-failure` and never as a loaded
+  card. An inline external image carries `data-media-state` ("loading" /
+  "loaded" / "failed").
+- **Bounded, explicit retry.** A shared `renderFailureStatus` (in
+  `attachments.ts`) renders one status line plus a named retry button for the
+  preview and inline-image paths and the GIF picker. On previews and inline
+  images the retry is shown only for the transient `unavailable` class
+  (including an image whose bytes fail to decode); a policy refusal
+  (`blocked-destination`, `too-many-redirects`, `oversized`, `wrong-type`,
+  `expired-handle`) is never auto-retried and offers no retry. A retry clears
+  the cached refusal and calls the same `previewExternal`/`loadExternalImage`
+  seam, which rechecks consent and the current partition (B9-8 preserved).
+  While it re-asks, the retry stays mounted and focused with `aria-disabled`;
+  focus then moves to the loaded image, or to the preview's link when the
+  retry goes away, and the GIF picker's retry hands focus to the search field.
+- **Keyboard-operable controls.** The inline external image is now a
+  `role="button"`, `tabindex="0"` control named "Open image from {host}" with
+  Enter/Space opening the lightbox; it stays hidden, and so out of the Tab
+  order, until its bytes load. The lightbox is `role="dialog"` named after the
+  image, `aria-modal`, takes focus on open (its named close button), traps Tab
+  on that single stop, and restores focus to the opener on close.
+- **Provider attribution and copy.** New copy lives in `i18n/content.ts`
+  (lazy: previews, images, GIF picker) and `i18n/mediaControls.ts` (startup:
+  the lightbox close button only), per the B9-3 catalog rule; the ratchet baseline
+  shrank by the two now-extracted literals. The YouTube play button already
+  names YouTube and keeps its `aria-describedby` note (B9-8).
+- **Reduced motion and media controls.** No new animation was added; the
+  failure line and retry are static, and the freeze/play GIF control and the
+  bundled Klipy watermark are untouched.
+- **Files beyond the table:** `i18n/mediaControls.ts` (new, the startup-safe
+  slice) and `scripts/ui-strings-baseline.json` (shrunk by two literals). The
+  bundled per-file retry for server video/audio attachments was dropped: the
+  plan's inventory is the external rich-content set, and the added UI pushed
+  the shared startup budget over its 95,000 B ceiling. Media attachments keep
+  the existing honest `.msg-media-failed` dim-with-download state. No
+  navigation, token, style-import, store or dispatcher change.
+
+### Evidence
+
+- **Unit:** `npx vitest run tests/unit src` — 292 files, 6,553 passed, 152
+  expected-fail. New named cases: the typed preview failed state and its
+  bounded retry (`embeds.test.ts`), the inline-image failed state/retry and
+  "never reads as loaded" (`media.test.ts`), the picker's typed failure and
+  retry (`gif-picker.test.ts`).
+- **Mocked shell:** `npx playwright test tests/e2e/b9-rich-content.spec.ts
+--workers=1` — 14 passed (loaded vs failed, all six `ExternalContentFailure`
+  variants, retry on demand through the broker, keyboard lightbox open/contain/
+  restore, Q1 names/contrast, reduced motion, 940×500 reflow at 20 px and 200 %).
+- **Consent preserved:** `b9-content-consent.spec.ts`, `message-media.spec.ts`
+  — 40 passed unchanged; B9-8's zero-fetch-before-consent and its reset journey
+  are unmodified.
+- **Bundle:** startup closure 94,872 B / 95,000 B (+271 B, the startup
+  `mediaControls` catalog and the lightbox focus code); MainPage 63,709 B /
+  64,000 B (+37 B). No budget change; no note appended. Re-measured on Linux
+  after the review fixes (which dropped two unused startup keys), base
+  `1a3a7b1d` → this change: startup closure 93,150 → 93,384 B (+234 B),
+  MainPage 63,841 → 63,890 B (+49 B, 110 B headroom).
+- **Lint:** `npm run lint` (oxlint, cycles, eslint) and both typechecks clean.
+- **Native:** NVDA (Windows) and Orca (Linux) recordings are owner-run and
+  pending; the native broker traffic proof remains B9-8's
+  `tests/e2e/native/b9-content-consent.spec.ts` (CI `native-core`).

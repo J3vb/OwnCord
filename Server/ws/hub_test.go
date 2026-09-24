@@ -524,8 +524,13 @@ func TestHub_HandleMessage_InvalidJSON(t *testing.T) {
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
 
+// The hub is wired with a real MessageService: the chat rate limit lives in
+// SendMessage, so without one every send would be a recovered nil dereference
+// and the "error" replies counted below would say nothing about rate limiting.
 func TestHub_ChatSend_RateLimit(t *testing.T) {
-	hub, database := newTestHub(t)
+	database := openTestDB(t)
+	limiter := auth.NewRateLimiter()
+	hub := newTestHubDeps(t, database, limiter, service.New(database, limiter))
 	go hub.Run()
 	defer hub.Stop()
 
@@ -545,30 +550,44 @@ func TestHub_ChatSend_RateLimit(t *testing.T) {
 		"payload": payload,
 	})
 
-	// Send 12 messages rapidly — 11th and beyond should be rate-limited.
-	for range 12 {
-		hub.HandleMessageForTest(c, raw)
+	// One real send, then exhaust the user's chat window (10 per second) so
+	// the next two are refused however slowly the runner goes.
+	hub.HandleMessageForTest(c, raw)
+	for range 10 {
+		limiter.Allow(auth.Key("chat", user.ID), 10, time.Second)
 	}
+	hub.HandleMessageForTest(c, raw)
+	hub.HandleMessageForTest(c, raw)
 
-	// Drain all messages, count errors — error replies are sent synchronously
-	// by handleMessage, so they are already buffered on the send channel.
-	errCount := 0
+	// handleMessage sends its replies synchronously, so they are already
+	// buffered on the send channel.
+	sendOK, rateLimited, otherErr := 0, 0, 0
 drainLoop:
 	for {
 		select {
 		case got := <-send:
 			var resp map[string]any
-			if err := json.Unmarshal(got, &resp); err == nil {
-				if resp["type"] == "error" {
-					errCount++
+			if err := json.Unmarshal(got, &resp); err != nil {
+				continue
+			}
+			switch resp["type"] {
+			case "chat_send_ok":
+				sendOK++
+			case "error":
+				payload, _ := resp["payload"].(map[string]any)
+				if payload["code"] == "RATE_LIMITED" {
+					rateLimited++
+				} else {
+					otherErr++
 				}
 			}
 		default:
 			break drainLoop
 		}
 	}
-	if errCount == 0 {
-		t.Error("expected at least one rate-limit error response")
+	if sendOK != 1 || rateLimited != 2 || otherErr != 0 {
+		t.Errorf("3 sends around an exhausted window: got %d chat_send_ok, %d RATE_LIMITED, %d other errors; want 1, 2, 0",
+			sendOK, rateLimited, otherErr)
 	}
 }
 

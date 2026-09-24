@@ -311,9 +311,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // Switchable content slot
   // ---------------------------------------------------------------------------
 
-  const contentSlot = createElement("div", {
-    style: "flex:1;display:flex;flex-direction:column;overflow:hidden;",
-  });
+  const contentSlot = createElement("div", { class: "sidebar-content" });
   sidebarWrapper.appendChild(contentSlot);
 
   // ---------------------------------------------------------------------------
@@ -669,9 +667,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
     clearChildren(contentSlot);
 
-    const innerSlot = createElement("div", {
-      style: "flex:1;overflow:hidden;display:flex;flex-direction:column;",
-    });
+    const innerSlot = createElement("div", { class: "sidebar-content-inner" });
 
     if (mode === "channels") {
       // --- DM section (above channels, below server header) ---
@@ -698,12 +694,6 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
       // Inject the channel sidebar content into contentSlot.
       contentSlot.appendChild(innerSlot);
-
-      // Hide the redundant channel-sidebar-header (server name + invite are now in the unified header)
-      const oldSidebarHeader = innerSlot.querySelector(".channel-sidebar-header");
-      if (oldSidebarHeader !== null) {
-        (oldSidebarHeader as HTMLElement).style.display = "none";
-      }
 
       // --- Member list (below DM section) ---
       // Same wiring lives in SidebarMemberSection; this used to be a private

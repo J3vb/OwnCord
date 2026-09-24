@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ApiClient } from "@lib/api";
+import { cascadedDeclaration, keyword } from "../helpers/app-css";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before any import that triggers store or lib loading
@@ -795,25 +796,25 @@ describe("SidebarArea", () => {
     });
 
     it("hides old channel-sidebar-header inside the mounted channel sidebar", () => {
-      // Make channel sidebar mount function create a header element
-      (createChannelSidebar as MockedFn).mockReturnValue({
-        mount: vi.fn().mockImplementation((el: HTMLElement) => {
-          const header = document.createElement("div");
-          header.className = "channel-sidebar-header";
-          el.appendChild(header);
-        }),
-        destroy: vi.fn(),
-      });
-
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
-      const oldHeader = container.querySelector(".channel-sidebar-header") as HTMLElement;
-      if (oldHeader !== null) {
-        expect(oldHeader.style.display).toBe("none");
-      }
+      // The channel sidebar mounts into the inner slot, whose stylesheet hides
+      // its header (jsdom applies no CSS, so the rule is asserted directly).
+      const inner = container.querySelector(".sidebar-content > .sidebar-content-inner");
+      expect(getMockMount(createChannelSidebar as MockedFn)).toHaveBeenCalledWith(inner);
+      expect(
+        keyword(cascadedDeclaration(".sidebar-content-inner .channel-sidebar-header", "display")),
+      ).toBe("none");
 
       cleanup(result);
+    });
+
+    it("keeps the channel list a floor the member section yields to (B9 Q1 reflow)", () => {
+      expect(cascadedDeclaration(".sidebar-content-inner", "min-height")).toBeDefined();
+      expect(cascadedDeclaration(".sidebar-members-section", "flex-shrink")?.value).toMatchObject({
+        value: 1,
+      });
     });
   });
 

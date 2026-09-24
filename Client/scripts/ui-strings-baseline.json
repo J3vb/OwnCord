@@ -259,7 +259,6 @@
   "src/components/GifPicker.ts": {
     "owner": "B9-19",
     "strings": {
-      "Failed to load GIFs": 1,
       "GIF": 2,
       "GIFs": 1,
       "GIFs are not enabled on this server": 1,
@@ -386,7 +385,6 @@
   "src/components/message-list/media.ts": {
     "owner": "B9-19",
     "strings": {
-      "Image": 2,
       "Loading...": 1,
       "YouTube": 1,
       "YouTube Video": 2,

@@ -570,7 +570,7 @@ describe("GifPicker", () => {
   // ── Error state ───────────────────────────────────────────────────────────
 
   describe("error state", () => {
-    it("shows error message when getTrendingGifs throws", async () => {
+    it("shows a typed failure line with a bounded retry, not the raw error", async () => {
       vi.mocked(getTrendingGifs).mockRejectedValue(new Error("Network error"));
 
       const { picker } = makePicker();
@@ -580,13 +580,37 @@ describe("GifPicker", () => {
       await Promise.resolve();
       await Promise.resolve(); // extra tick for rejection path
 
-      const errEl = picker.element.querySelector(".gp-empty");
-      expect(errEl).not.toBeNull();
-      expect(errEl!.textContent).toBe("Network error");
+      // The transient state must not look like the empty-results state.
+      expect(picker.element.querySelector(".gp-empty")).toBeNull();
+      const status = picker.element.querySelector(".msg-media-fallback-text");
+      expect(status?.textContent).toBe("Couldn't load GIFs");
+      expect(status?.textContent).not.toContain("Network error");
+      expect(picker.element.querySelector(".msg-media-retry")).not.toBeNull();
       picker.destroy();
     });
 
-    it("shows generic fallback message when thrown value is not an Error", async () => {
+    it("retries the last query when the retry is activated", async () => {
+      vi.mocked(getTrendingGifs)
+        .mockRejectedValueOnce(new Error("Network error"))
+        .mockResolvedValue(TRENDING_GIFS);
+
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      const before = vi.mocked(getTrendingGifs).mock.calls.length;
+
+      picker.element.querySelector<HTMLButtonElement>(".msg-media-retry")!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(vi.mocked(getTrendingGifs).mock.calls.length).toBeGreaterThan(before);
+      expect(picker.element.querySelectorAll(".gp-item").length).toBe(TRENDING_GIFS.length);
+      picker.destroy();
+    });
+
+    it("shows the typed failure for a non-Error rejection too", async () => {
       vi.mocked(getTrendingGifs).mockRejectedValue("oops");
 
       const { picker } = makePicker();
@@ -596,9 +620,9 @@ describe("GifPicker", () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      const errEl = picker.element.querySelector(".gp-empty");
-      expect(errEl).not.toBeNull();
-      expect(errEl!.textContent).toBe("Failed to load GIFs");
+      expect(picker.element.querySelector(".msg-media-fallback-text")?.textContent).toBe(
+        "Couldn't load GIFs",
+      );
       picker.destroy();
     });
   });

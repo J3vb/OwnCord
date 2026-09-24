@@ -122,10 +122,19 @@ func TestPanicBreaker_CallsFatalFn(t *testing.T) {
 	fatal := make(chan struct{})
 	h.fatalFn = func() { close(fatal) }
 
-	// replayBuf is nil, so deliverBroadcast panics on Push — inside the
-	// closure whose deferred seqMu unlock keeps the lock state clean across
-	// the recover, unlike a hand-rolled unlock would.
-	bad := broadcastMsg{channelID: 0, msg: []byte(`{"type":"x"}`)}
+	// Each frame makes deliverBroadcast panic through the dispatch-side NSFW
+	// hook. It must be an explicit panic, not a nil dereference: on Windows a
+	// recovered nil dereference is a hardware exception whose frame can land
+	// below a small goroutine stack and corrupt the heap (golang/go#81238).
+	// The hook is package-global, so it fires only for this test's channel.
+	const panicChannelID = int64(81238)
+	nsfwDispatchResolveRaceHook = func(channelID int64) {
+		if channelID == panicChannelID {
+			panic("injected dispatch panic")
+		}
+	}
+	t.Cleanup(func() { nsfwDispatchResolveRaceHook = nil })
+	bad := broadcastMsg{nsfwChannelID: panicChannelID, msg: []byte(`{"type":"x"}`)}
 	h.broadcast <- bad
 	h.broadcast <- bad
 	h.broadcast <- bad
