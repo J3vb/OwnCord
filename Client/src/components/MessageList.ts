@@ -76,6 +76,9 @@ const SCROLL_BOTTOM_THRESHOLD = 100;
 /** Number of items to render beyond visible viewport in each direction. */
 const OVERSCAN = 20;
 
+/** Controls a keyboard user can land on inside a rendered row. */
+const ROW_FOCUSABLE_SELECTOR = "button, [tabindex='0'], a[href]";
+
 /** Regex for direct image URLs in message content. */
 const IMAGE_URL_RE = /\.(?:png|jpe?g|gif|webp)(?:\?[^\s]*)?(?:\s|$)/i;
 
@@ -518,11 +521,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * stable location through async update/removal). The row's own key survives
    * the rebuild because rows are keyed by message id; a control with its own
    * `data-testid` (the action buttons) is restored exactly, and a focusable
-   * row without one (a reply bar) falls back to the row's first focusable
-   * control. Null when focus is outside the rendered window, so an unrelated
-   * rebuild never pulls focus back into the list.
+   * without one (a reaction chip, a reply bar, a link) is restored by its
+   * position among the row's focusable controls. Null when focus is outside
+   * the rendered window, so an unrelated rebuild never pulls focus back into
+   * the list. Restoring never scrolls, so a reader scrolling away from the
+   * focused row or a history-prepend anchor is not pulled back to it.
    */
-  function captureRowFocus(): { own: string | null; row: string | null } | null {
+  function captureRowFocus(): { own: string | null; row: string | null; index: number } | null {
     const active = document.activeElement;
     if (
       !(active instanceof HTMLElement) ||
@@ -532,20 +537,26 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       return null;
     }
     const row = active.closest<HTMLElement>("[data-testid]");
-    return { own: active.dataset.testid ?? null, row: row?.dataset.testid ?? null };
+    const index =
+      row === null ? -1 : [...row.querySelectorAll(ROW_FOCUSABLE_SELECTOR)].indexOf(active);
+    return { own: active.dataset.testid ?? null, row: row?.dataset.testid ?? null, index };
   }
 
-  function restoreRowFocus(captured: { own: string | null; row: string | null } | null): void {
+  function restoreRowFocus(
+    captured: { own: string | null; row: string | null; index: number } | null,
+  ): void {
     if (captured === null || contentContainer === null) return;
     if (captured.own !== null) {
-      contentContainer.querySelector<HTMLElement>(`[data-testid="${captured.own}"]`)?.focus();
+      contentContainer
+        .querySelector<HTMLElement>(`[data-testid="${captured.own}"]`)
+        ?.focus({ preventScroll: true });
       return;
     }
-    if (captured.row !== null) {
+    if (captured.row !== null && captured.index >= 0) {
       contentContainer
         .querySelector<HTMLElement>(`[data-testid="${captured.row}"]`)
-        ?.querySelector<HTMLElement>("button, [tabindex='0'], a[href]")
-        ?.focus();
+        ?.querySelectorAll<HTMLElement>(ROW_FOCUSABLE_SELECTOR)
+        [captured.index]?.focus({ preventScroll: true });
     }
   }
 

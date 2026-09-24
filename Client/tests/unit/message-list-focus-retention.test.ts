@@ -124,6 +124,65 @@ describe("MessageList focus retention across a virtualized rebuild (B9-22)", () 
     list.destroy?.();
   });
 
+  it("restores focus to the same reaction chip, not the row's first control", async () => {
+    const tada = (): HTMLElement | undefined =>
+      [...container.querySelectorAll<HTMLElement>("[data-testid='message-2'] .reaction-chip")].find(
+        (c) => c.dataset.emoji === "🎉",
+      );
+    const reactions = [
+      { emoji: "👍", count: 1, me: false },
+      { emoji: "🎉", count: 1, me: false },
+    ];
+    setMessages(1, [
+      makeMessage({ id: 1, user: { id: 2, username: "Bob", avatar: null } }),
+      makeMessage({ id: 2, user: { id: 2, username: "Bob", avatar: null }, reactions }),
+    ]);
+    const list = createMessageList(options);
+    list.mount(container);
+
+    const chip = tada();
+    expect(chip).toBeDefined();
+    chip!.focus();
+
+    // A reaction update rewrites an existing row, forcing the full rebuild.
+    const msgs = messagesStore.getState().messagesByChannel.get(1)!;
+    setMessages(
+      1,
+      msgs.map((m) =>
+        m.id === 2 ? { ...m, reactions: [reactions[0]!, { emoji: "🎉", count: 2, me: true }] } : m,
+      ),
+    );
+    await messagesStore.flush();
+
+    const restored = tada();
+    expect(restored).not.toBe(chip);
+    expect(document.activeElement).toBe(restored);
+
+    list.destroy?.();
+  });
+
+  it("restores focus without scrolling the list to the focused row", async () => {
+    const list = createMessageList(options);
+    list.mount(container);
+    container.querySelector<HTMLButtonElement>("[data-testid='msg-reply-2']")!.focus();
+
+    const focusSpy = vi.spyOn(HTMLElement.prototype, "focus");
+    const msgs = messagesStore.getState().messagesByChannel.get(1)!;
+    setMessages(
+      1,
+      msgs.map((m) =>
+        m.id === 2 ? { ...m, content: "edited", editedAt: "2024-01-15T12:01:00Z" } : m,
+      ),
+    );
+    await messagesStore.flush();
+
+    expect(focusSpy).toHaveBeenCalledTimes(1);
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+    focusSpy.mockRestore();
+
+    list.destroy?.();
+  });
+
   it("leaves focus alone when it was outside the rendered window", async () => {
     const list = createMessageList(options);
     list.mount(container);

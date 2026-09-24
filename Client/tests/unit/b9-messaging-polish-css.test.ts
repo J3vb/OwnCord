@@ -8,7 +8,7 @@
 // (tests/helpers/app-css.ts) rather than the rendered DOM. The e2e spec proves
 // the computed behavior.
 import type { Declaration } from "lightningcss";
-import { cascadedDeclaration, hasRule } from "../helpers/app-css";
+import { cascadedDeclaration, keyword } from "../helpers/app-css";
 import { describe, it, expect } from "vitest";
 
 /** A length declaration's px value, or undefined for anything else. */
@@ -32,17 +32,20 @@ function varToken(d: ReturnType<typeof cascadedDeclaration>): string | undefined
 }
 
 describe("B9-22 messaging hover/focus parity and target size", () => {
+  // pointerEvents is what the reveal must restore where the base rule sets
+  // `pointer-events: none`; undefined where the base never disables it.
   it.each([
-    ".message:focus-within .msg-actions-bar",
-    ".msg-codeblock-wrap:focus-within .msg-codeblock-copy",
-    ".msg-image:focus-within .gif-play-btn",
-    ".msg-video:focus-within .msg-media-overlay",
-    ".pinned-msg:focus-within .pinned-msg__actions",
-  ])("reveals %s without hover", (selector) => {
+    { selector: ".message:focus-within .msg-actions-bar", pointerEvents: "auto" },
+    { selector: ".msg-codeblock-wrap:focus-within .msg-codeblock-copy", pointerEvents: "auto" },
+    { selector: ".msg-image:focus-within .gif-play-btn", pointerEvents: undefined },
+    { selector: ".msg-video:focus-within .msg-media-overlay", pointerEvents: undefined },
+    { selector: ".pinned-msg:focus-within .pinned-msg__actions", pointerEvents: "auto" },
+  ])("reveals $selector without hover", ({ selector, pointerEvents }) => {
     expect(
-      hasRule(selector),
-      `expected ${selector} so the control is reachable without a pointer`,
-    ).toBe(true);
+      keyword(cascadedDeclaration(selector, "opacity")),
+      `expected ${selector} to make the control visible without a pointer`,
+    ).toBe("1");
+    expect(keyword(cascadedDeclaration(selector, "pointer-events"))).toBe(pointerEvents);
   });
 
   it("gives the attachment remove button a 24x24 target", () => {

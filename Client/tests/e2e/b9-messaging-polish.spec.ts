@@ -99,37 +99,33 @@ test.describe("B9-22 message reading", () => {
     await reply.scrollIntoViewIfNeeded();
     await reply.focus();
     await expect(reply).toBeFocused();
-    const node = await reply.elementHandle();
+    await reply.evaluate((el) => el.setAttribute("data-before-rebuild", ""));
 
-    // A live message arrives, replacing rendered rows. Focus must land back on
-    // the same row's action control rather than dropping to <body>.
-    await page.evaluate(() => {
+    // An edit to a rendered row is not a suffix append, so it forces the full
+    // rebuild that replaces every row node. Focus must land on the same row's
+    // action control on the new node rather than dropping to <body>.
+    await page.evaluate((id) => {
       const w = window as unknown as { __tauriEmitEvent: (e: string, d: string) => void };
       w.__tauriEmitEvent(
         "ws-message",
         JSON.stringify({
-          type: "chat_message",
+          type: "chat_edited",
           payload: {
-            id: 9999,
+            message_id: id,
             channel_id: 1,
-            user: { id: 2, username: "otheruser", avatar: "" },
-            content: "just arrived",
-            timestamp: new Date().toISOString(),
-            edited_at: null,
-            attachments: [],
-            reactions: [],
-            reply_to: null,
-            pinned: false,
-            deleted: false,
+            content: "edited in place",
+            edited_at: new Date().toISOString(),
           },
         }),
       );
-    });
+    }, RENDERED);
 
-    await expect(page.locator("[data-testid='message-9999']")).toBeVisible();
+    await expect(page.locator(`[data-testid='message-${RENDERED}']`)).toContainText(
+      "edited in place",
+    );
     const restored = page.locator(`[data-testid='msg-reply-${RENDERED}']`);
     await expect(restored).toBeFocused();
-    expect(await restored.elementHandle()).not.toBe(node);
+    await expect(restored).not.toHaveAttribute("data-before-rebuild");
   });
 
   test("the scroll-to-bottom control has an accessible name", async ({ page }) => {
