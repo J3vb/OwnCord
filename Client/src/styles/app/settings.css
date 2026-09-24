@@ -85,6 +85,23 @@
   overflow-y: auto;
   padding: 48px 40px;
   max-width: 720px;
+  /* B9-23 reflow: a flex child refuses to shrink below its content's
+     min-content width without this, so long user text (a display name, a
+     device label) pushed the panel into horizontal overflow at the 940x500
+     minimum window with 20px text instead of wrapping. */
+  min-width: 0;
+}
+/* User/server-provided row text wraps rather than clipping (B9-23). */
+.account-header-name,
+.account-field-value,
+.settings-sidebar-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.account-header,
+.account-field,
+.settings-sidebar-profile {
+  min-width: 0;
 }
 .settings-content h1 {
   font-size: var(--font-size-xl);

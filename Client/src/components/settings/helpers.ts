@@ -2,7 +2,7 @@
  * Shared helpers and constants for settings tabs.
  */
 
-import { createElement, appendChildren } from "@lib/dom";
+import { createElement, appendChildren, setText } from "@lib/dom";
 import { applyThemeByName } from "@lib/themes";
 import { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref } from "@lib/preferences";
 
@@ -176,6 +176,43 @@ export function appendToggleRows(
     appendChildren(row, info, toggle);
     section.appendChild(row);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Form feedback (B9-2 UI contract)
+// ---------------------------------------------------------------------------
+
+/**
+ * The account/recovery forms' inline messages. They use the shared
+ * `.form-error`/`.form-status`/`.form-warning` classes, so the text colour is
+ * the qualified `--text-danger`/`--text-positive`/`--text-warning` token
+ * rather than the fill tokens (`--red`, `--green`, `--yellow`), which read
+ * below 4.5:1 on several surfaces, and the message is announced: `role=alert`
+ * for an error, `role=status` (polite) otherwise. Colour is never the only
+ * signal — the copy says which it is.
+ */
+export type Outcome = "error" | "success" | "warning";
+
+const OUTCOME_CLASS: Readonly<Record<Outcome, string>> = {
+  error: "form-error",
+  success: "form-status",
+  warning: "form-warning",
+};
+
+/** An empty inline message element for `outcome`, with its live role set. */
+export function outcomeEl(outcome: Outcome, testId?: string): HTMLDivElement {
+  return createElement("div", {
+    class: OUTCOME_CLASS[outcome],
+    role: outcome === "error" ? "alert" : "status",
+    ...(testId === undefined ? {} : { "data-testid": testId }),
+  });
+}
+
+/** Show `text` in `el` as `outcome` ('' clears it). */
+export function showOutcome(el: HTMLElement, outcome: Outcome, text: string): void {
+  el.className = OUTCOME_CLASS[outcome];
+  el.setAttribute("role", outcome === "error" ? "alert" : "status");
+  setText(el, text);
 }
 
 // ---------------------------------------------------------------------------

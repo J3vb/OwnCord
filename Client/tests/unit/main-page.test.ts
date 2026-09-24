@@ -1155,7 +1155,10 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     await vi.waitFor(() => {
       expect(status!.textContent).toBe(warning);
     });
-    expect(status!.style.color).toBe("var(--yellow)");
+    // B9-23: the inline warning is the qualified .form-warning class with a
+    // polite status role, not an inline --yellow (1.89:1 on light).
+    expect(status!.classList.contains("form-warning")).toBe(true);
+    expect(status!.getAttribute("role")).toBe("status");
     expect(container.textContent).not.toContain("Password changed successfully.");
   });
 

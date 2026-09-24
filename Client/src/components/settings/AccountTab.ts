@@ -23,6 +23,7 @@ import {
 } from "@components/message-list/attachments";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { buildRecoveryKitSection, buildRegenerateCodes, buildShownOnce } from "./RecoverySections";
+import { outcomeEl, showOutcome } from "./helpers";
 import { accountText as t } from "../../i18n/account";
 
 const log = createLogger("AccountTab");
@@ -203,10 +204,7 @@ function buildAvatarUploader(
     { class: "ac-btn", "data-testid": "avatar-upload-btn" },
     t("profile.changeAvatar"),
   );
-  const errorEl = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-top:6px",
-    "data-testid": "avatar-error",
-  });
+  const errorEl = outcomeEl("error", "avatar-error");
 
   uploadBtn.addEventListener("click", () => input.click(), { signal });
 
@@ -299,10 +297,8 @@ function buildProfileFields(
   });
   aboutInput.value = user?.about ?? "";
 
-  const statusEl = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-bottom:8px",
-    "data-testid": "profile-error",
-  });
+  const statusEl = outcomeEl("error", "profile-error");
+  statusEl.style.marginBottom = "8px";
   const saveBtn = createElement(
     "button",
     { class: "ac-btn", "data-testid": "profile-save-btn" },
@@ -316,21 +312,19 @@ function buildProfileFields(
       const about = aboutInput.value.trim();
       // Both are sent unconditionally, empty string included: "" is how the
       // API says "clear it", and omitting a field means "leave it alone".
-      statusEl.style.color = "var(--red)";
-      setText(statusEl, "");
+      showOutcome(statusEl, "error", "");
       saveBtn.disabled = true;
       setText(saveBtn, t("profile.saving"));
       void options
         .onUpdateProfile({ display_name: displayName, about })
         .then(() => {
-          statusEl.style.color = "var(--green)";
-          setText(statusEl, t("profile.saved"));
+          showOutcome(statusEl, "success", t("profile.saved"));
           onSaved(
             displayName.length > 0 ? displayName : (authStore.getState().user?.username ?? ""),
           );
         })
         .catch((err: unknown) => {
-          setText(statusEl, errorText(err, t("profile.saveFailed")));
+          showOutcome(statusEl, "error", errorText(err, t("profile.saveFailed")));
         })
         .finally(() => {
           saveBtn.disabled = false;
@@ -358,6 +352,25 @@ function buildProfileFields(
 // Password section builder
 // ---------------------------------------------------------------------------
 
+/** A labelled password field for the password-change form. */
+function passwordField(
+  id: string,
+  label: string,
+  placeholder: string,
+): { wrapper: HTMLDivElement; input: HTMLInputElement } {
+  const wrapper = createElement("div", {});
+  const labelEl = createElement("label", { class: "form-label", for: id }, label);
+  const input = createElement("input", {
+    class: "form-input",
+    type: "password",
+    id,
+    placeholder,
+    style: "margin:4px 0 12px",
+  });
+  appendChildren(wrapper, labelEl, input);
+  return { wrapper, input };
+}
+
 function buildPasswordSection(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
@@ -371,28 +384,14 @@ function buildPasswordSection(
     t("password.sectionTitle"),
   );
 
-  const oldPw = createElement("input", {
-    class: "form-input",
-    type: "password",
-    placeholder: t("password.old"),
-    style: "margin-bottom:12px",
-  });
-  const newPw = createElement("input", {
-    class: "form-input",
-    type: "password",
-    placeholder: t("password.new"),
-    style: "margin-bottom:12px",
-  });
-  const confirmPw = createElement("input", {
-    class: "form-input",
-    type: "password",
-    placeholder: t("password.confirm"),
-    style: "margin-bottom:12px",
-  });
-  const pwError = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-bottom:8px",
-    "data-testid": "pw-change-status",
-  });
+  const oldField = passwordField("pw-old", t("password.old"), t("password.old"));
+  const newField = passwordField("pw-new", t("password.new"), t("password.new"));
+  const confirmField = passwordField("pw-confirm", t("password.confirm"), t("password.confirm"));
+  const oldPw = oldField.input;
+  const newPw = newField.input;
+  const confirmPw = confirmField.input;
+  const pwError = outcomeEl("error", "pw-change-status");
+  pwError.style.marginBottom = "8px";
   const pwBtn = createElement("button", { class: "ac-btn" }, t("password.change"));
   let pwSuccessTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -403,7 +402,7 @@ function buildPasswordSection(
       const newVal = newPw.value;
       const confirmVal = confirmPw.value;
 
-      pwError.style.color = "var(--red)";
+      showOutcome(pwError, "error", "");
       if (oldVal.length === 0) {
         setText(pwError, t("password.enterCurrent"));
         return;
@@ -441,28 +440,34 @@ function buildPasswordSection(
             // other sessions could not be revoked. The warning is the
             // instruction to revoke them by hand, so it stays in the form
             // — no green "changed successfully", no three-second fade.
-            pwError.style.color = "var(--yellow)";
-            setText(pwError, warning);
+            showOutcome(pwError, "warning", warning);
           } else {
-            pwError.style.color = "var(--green)";
-            setText(pwError, t("password.changed"));
+            showOutcome(pwError, "success", t("password.changed"));
             pwSuccessTimer = setTimeout(() => {
-              setText(pwError, "");
-              pwError.style.color = "var(--red)";
+              showOutcome(pwError, "error", "");
               pwSuccessTimer = null;
             }, 3000);
           }
           finish();
         })
         .catch((err: unknown) => {
-          setText(pwError, errorText(err, t("password.changeFailed")));
+          showOutcome(pwError, "error", errorText(err, t("password.changeFailed")));
           finish();
         });
     },
     { signal },
   );
 
-  appendChildren(wrapper, separator, pwHeader, oldPw, newPw, confirmPw, pwError, pwBtn);
+  appendChildren(
+    wrapper,
+    separator,
+    pwHeader,
+    oldField.wrapper,
+    newField.wrapper,
+    confirmField.wrapper,
+    pwError,
+    pwBtn,
+  );
   return wrapper;
 }
 
@@ -502,10 +507,8 @@ function buildTotpEnrollForm(
     style: "margin-bottom:12px",
     "data-testid": "totp-password-input",
   });
-  const errorEl = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-bottom:8px",
-    "data-testid": "totp-error",
-  });
+  const errorEl = outcomeEl("error", "totp-error");
+  errorEl.style.marginBottom = "8px";
   const submitBtn = createElement("button", { class: "ac-btn" }, t("totp.submit"));
 
   appendChildren(formArea, pwInput, errorEl, submitBtn);
@@ -618,10 +621,8 @@ function buildTotpConfirmArea(
     "data-testid": "totp-code-input",
   });
 
-  const confirmError = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-bottom:8px",
-    "data-testid": "totp-error",
-  });
+  const confirmError = outcomeEl("error", "totp-error");
+  confirmError.style.marginBottom = "8px";
 
   const confirmBtn = createElement(
     "button",
@@ -694,10 +695,8 @@ function buildTotpDisableView(
     style: "margin-bottom:12px",
     "data-testid": "totp-password-input",
   });
-  const errorEl = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-bottom:8px",
-    "data-testid": "totp-error",
-  });
+  const errorEl = outcomeEl("error", "totp-error");
+  errorEl.style.marginBottom = "8px";
   const btnRow = createElement("div", { style: "display:flex;gap:8px" });
   const confirmBtn = createElement(
     "button",
@@ -797,28 +796,32 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
 
   const contentArea = createElement("div", {});
 
-  function render(): void {
+  function render(keepFocus = false): void {
     const enabled = authStore.getState().user?.totp_enabled === true;
+    // Capture before clearing: the control the user just activated is being
+    // replaced, and removing it drops focus to <body> (B9-23). Move focus to
+    // the first control of the rebuilt area instead.
+    const hadFocusInside = keepFocus && contentArea.contains(document.activeElement);
 
-    if (enabled) {
-      statusBadge.textContent = t("totp.enabled");
-      statusBadge.style.background = "var(--green, #3ba55d)";
-      statusBadge.style.color = "#fff";
-    } else {
-      statusBadge.textContent = t("totp.disabled");
-      statusBadge.style.background = "var(--bg-active)";
-      statusBadge.style.color = "var(--text-muted)";
-    }
+    // Status text uses the qualified --text-* tokens, not white on the
+    // --green fill (3.2:1, below Q1's 4.5:1 for this 12px bold text); the
+    // words "Enabled"/"Disabled" carry the state, colour is not the signal.
+    statusBadge.textContent = enabled ? t("totp.enabled") : t("totp.disabled");
+    statusBadge.style.background = "var(--bg-tertiary)";
+    statusBadge.style.color = enabled ? "var(--text-positive)" : "var(--text-muted)";
 
     while (contentArea.firstChild) {
       contentArea.removeChild(contentArea.firstChild);
     }
 
     if (enabled) {
-      contentArea.appendChild(buildTotpDisableView(options, signal, render));
+      contentArea.appendChild(buildTotpDisableView(options, signal, () => render(true)));
       contentArea.appendChild(buildRegenerateCodes(options, signal));
     } else {
-      contentArea.appendChild(buildTotpEnrollForm(options, signal, render));
+      contentArea.appendChild(buildTotpEnrollForm(options, signal, () => render(true)));
+    }
+    if (hadFocusInside) {
+      contentArea.querySelector<HTMLElement>("button, [tabindex]")?.focus();
     }
   }
 
@@ -1059,12 +1062,11 @@ function buildSessionsSection(
   });
   const warning = createElement(
     "div",
-    { style: "color:var(--red);font-size:13px;margin-bottom:12px;line-height:1.4" },
+    { style: "color:var(--text-danger);font-size:13px;margin-bottom:12px;line-height:1.4" },
     t("devices.signOutEverywhereWarning"),
   );
-  const errorEl = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-bottom:8px",
-  });
+  const errorEl = outcomeEl("error");
+  errorEl.style.marginBottom = "8px";
   const btnRow = createElement("div", { style: "display:flex;gap:8px" });
   const confirmBtn = createElement(
     "button",
@@ -1105,6 +1107,10 @@ function buildSessionsSection(
           // cleared and the app leaves. Otherwise refresh what is left.
           if (result.current_session_revoked || signal.aborted) return;
           closeConfirm();
+          // The confirm button was focused and is now hidden; hand focus to
+          // the trigger that is back on screen rather than drop it to <body>
+          // (B9-23 focus stability across a rebuilt section).
+          revokeAllBtn.focus();
           load();
         })
         .catch((err: unknown) => {
@@ -1153,7 +1159,7 @@ function buildDeleteAccountSection(
     "div",
     {
       class: "settings-section-title",
-      style: "color:var(--red)",
+      style: "color:var(--text-danger)",
     },
     t("delete.sectionTitle"),
   );
@@ -1185,7 +1191,7 @@ function buildDeleteAccountSection(
   const warningText = createElement(
     "div",
     {
-      style: "color:var(--red);font-size:13px;margin-bottom:12px;line-height:1.4",
+      style: "color:var(--text-danger);font-size:13px;margin-bottom:12px;line-height:1.4",
     },
     // B7-15c owner decision: no retention window here. Erasure hard-deletes
     // the account's messages and attachments at once (Server/db/erasure.go),
@@ -1193,18 +1199,25 @@ function buildDeleteAccountSection(
     t("delete.warning"),
   );
 
+  const passwordLabel = createElement(
+    "label",
+    { class: "form-label", for: "delete-account-password" },
+    // Same text as the placeholder, so the field's accessible name is
+    // unchanged by gaining a real <label> (B9-23).
+    t("totp.passwordPlaceholder"),
+  );
   const passwordInput = createElement("input", {
     class: "form-input",
     type: "password",
+    id: "delete-account-password",
     placeholder: t("totp.passwordPlaceholder"),
-    style: "margin-bottom:12px",
+    style: "margin:4px 0 12px",
     "data-testid": "delete-account-password",
+    "aria-describedby": "delete-account-error",
   });
 
-  const errorEl = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-bottom:8px",
-    "data-testid": "delete-account-error",
-  });
+  const errorEl = outcomeEl("error", "delete-account-error");
+  errorEl.style.marginBottom = "8px";
 
   const btnRow = createElement("div", { style: "display:flex;gap:8px" });
   const confirmBtn = createElement(
@@ -1225,7 +1238,7 @@ function buildDeleteAccountSection(
   );
 
   appendChildren(btnRow, confirmBtn, cancelBtn);
-  appendChildren(confirmArea, warningText, passwordInput, errorEl, btnRow);
+  appendChildren(confirmArea, warningText, passwordLabel, passwordInput, errorEl, btnRow);
 
   // Show confirmation area
   deleteBtn.addEventListener(
@@ -1341,6 +1354,8 @@ export function buildAccountTab(
     type: "text",
     placeholder: t("profile.newUsername"),
     "data-testid": "username-edit-input",
+    "aria-label": t("profile.newUsername"),
+    "aria-describedby": "username-edit-error",
   });
   const saveBtn = createElement("button", { class: "ac-btn" }, t("common.save"));
   const cancelBtn = createElement(
@@ -1350,9 +1365,9 @@ export function buildAccountTab(
   );
   appendChildren(editForm, editInput, saveBtn, cancelBtn);
 
-  const usernameError = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-top:4px",
-  });
+  const usernameError = outcomeEl("error");
+  usernameError.id = "username-edit-error";
+  usernameError.style.marginTop = "4px";
   editForm.appendChild(usernameError);
 
   const openEditForm = () => {
