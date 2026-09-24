@@ -11,15 +11,17 @@
  *
  * Feature 2 (voice moderation menu) reuses the ws_send capture pattern from
  * social.parity.spec.ts to assert the exact outgoing message, not just the
- * resulting DOM.
+ * resulting DOM. The menu follows each channel's server-computed
+ * can_moderate_voice (B9-14, Q5), so every case sets that verdict, and the
+ * role it is set against, explicitly.
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  mockTauriFullSessionWithVoice,
   navigateToMainPage,
   navigateToMainPageReady,
+  emitWsMessage,
   emitWsMessageAndWait,
   MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
@@ -183,12 +185,66 @@ test.describe("@parity Custom emoji — shortcode autocomplete and render", () =
 });
 
 // ---------------------------------------------------------------------------
-// Feature 2: voice-moderation context menu gating
+// Feature 2: voice-moderation context menu gating (can_moderate_voice)
 // ---------------------------------------------------------------------------
 
-test.describe("@parity Voice moderation menu — admin can moderate", () => {
+// The local user's role name comes from `auth_ok`, which
+// buildTauriMockScript hardcodes to "admin" (MOCK_AUTH_OK) — not
+// overridable via readyOverrides.members, so a member-role *user* can't be
+// simulated without editing the shared mock builder. What the menu reads is
+// the voice channel's can_moderate_voice (the server's verdict after channel
+// overrides) and, only when that is absent, the *permission bits behind that
+// role name* (permissionsForRole("admin") against `ready.roles`), which
+// readyOverrides.roles does control.
+const ADMIN_WITHOUT_MUTE = MOCK_ROLES.map((r) =>
+  r.name === "admin" ? { ...r, permissions: 0x3 } : r,
+);
+
+/** A voice session where "Voice Chat" (10) carries `verdict` as its
+ *  can_moderate_voice (null: the server sent none). */
+async function mockVoiceSession(
+  page: Page,
+  verdict: boolean | null,
+  roles: readonly unknown[] = MOCK_ROLES,
+): Promise<void> {
+  const channels = MOCK_CHANNELS_WITH_CATEGORIES.map((ch) =>
+    ch.id === 10 && verdict !== null ? { ...ch, can_moderate_voice: verdict } : ch,
+  );
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+      ],
+      simulateWsFlow: true,
+      wsHandlers: voiceWsHandlers(),
+      readyOverrides: {
+        channels,
+        members: MOCK_MEMBERS_MULTI_ROLE,
+        voice_states: MOCK_VOICE_STATE,
+        // buildTauriMockScript's typed `readyOverrides` doesn't list `roles`,
+        // but buildReadyPayload (its implementation) does support it — this
+        // cast bridges that gap without touching the shared helper file.
+        roles,
+      } as unknown as Parameters<typeof buildTauriMockScript>[0]["readyOverrides"],
+    }),
+  );
+}
+
+/** Right-click participant `uid` in "Voice Chat" and return the open menu. */
+async function openMenu(page: Page, uid = 2) {
+  const row = page.locator(`.voice-user-item[data-voice-uid='${uid}']`);
+  await expect(row).toBeVisible({ timeout: 5_000 });
+  await row.click({ button: "right" });
+  const menu = page.locator(".user-vol-menu");
+  await expect(menu).toBeVisible({ timeout: 3_000 });
+  return menu;
+}
+
+test.describe("@parity Voice moderation menu — the server says this user can moderate here", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSessionWithVoice(page);
+    await mockVoiceSession(page, true);
     await page.addInitScript(captureScript);
     await page.goto("/");
     await navigateToMainPageReady(page);
@@ -198,14 +254,8 @@ test.describe("@parity Voice moderation menu — admin can moderate", () => {
     page,
   }) => {
     // User 2 is a remote participant of "Voice Chat" (channel 10) in
-    // MOCK_VOICE_STATE — the local user (admin, all permissions) may
-    // moderate it.
-    const row = page.locator(".voice-user-item[data-voice-uid='2']");
-    await expect(row).toBeVisible({ timeout: 5_000 });
-    await row.click({ button: "right" });
-
-    const menu = page.locator(".user-vol-menu");
-    await expect(menu).toBeVisible({ timeout: 3_000 });
+    // MOCK_VOICE_STATE, where the server's verdict is true.
+    const menu = await openMenu(page);
     const muteItem = menu.locator("[data-action='server-mute']");
     const disconnectItem = menu.locator("[data-action='voice-disconnect']");
     await expect(muteItem).toHaveText("Server Mute");
@@ -226,12 +276,7 @@ test.describe("@parity Voice moderation menu — admin can moderate", () => {
   });
 
   test("Disconnect fires voice_mod_kick", async ({ page }) => {
-    const row = page.locator(".voice-user-item[data-voice-uid='3']");
-    await expect(row).toBeVisible({ timeout: 5_000 });
-    await row.click({ button: "right" });
-
-    const menu = page.locator(".user-vol-menu");
-    await expect(menu).toBeVisible({ timeout: 3_000 });
+    const menu = await openMenu(page, 3);
     await menu.locator("[data-action='voice-disconnect']").click();
 
     const call = await waitForCapturedCall(
@@ -245,46 +290,60 @@ test.describe("@parity Voice moderation menu — admin can moderate", () => {
     expect(parsed.type).toBe("voice_mod_kick");
     expect(parsed.payload).toEqual({ user_id: 3 });
   });
+
+  test("an override edit's targeted channel_create takes the section away, and back", async ({
+    page,
+  }) => {
+    const voiceChat = MOCK_CHANNELS_WITH_CATEGORIES.find((ch) => ch.id === 10)!;
+    await emitWsMessage(page, {
+      type: "channel_create",
+      payload: { ...voiceChat, can_moderate_voice: false },
+    });
+    await expect(async () => {
+      const menu = await openMenu(page);
+      await expect(menu.locator("[data-action='server-mute']")).toHaveCount(0, { timeout: 500 });
+      await page.mouse.click(5, 5);
+    }).toPass({ timeout: 5_000 });
+
+    await emitWsMessage(page, {
+      type: "channel_create",
+      payload: { ...voiceChat, can_moderate_voice: true },
+    });
+    await expect(async () => {
+      const menu = await openMenu(page);
+      await expect(menu.locator("[data-action='server-mute']")).toHaveCount(1, { timeout: 500 });
+      await page.mouse.click(5, 5);
+    }).toPass({ timeout: 5_000 });
+    // Nothing was sent by merely offering and withdrawing the section.
+    expect(
+      (await getCapturedCalls(page)).filter((c) => (c.message ?? "").includes("voice_mod_")),
+    ).toEqual([]);
+  });
 });
 
-// The local user's role name comes from `auth_ok`, which
-// buildTauriMockScript hardcodes to "admin" (MOCK_AUTH_OK) — not
-// overridable via readyOverrides.members, so a member-role *user* can't be
-// simulated without editing the shared mock builder. What canModerateVoice()
-// actually reads is the *permission bits behind that role name*
-// (permissionsForRole("admin") against the `ready.roles` list), which
-// readyOverrides.roles does control. Stripping MUTE_MEMBERS from "admin"
-// there is a faithful stand-in for "local user's role lacks voice-moderation
-// permission" without touching helpers.ts.
-async function mockVoiceSessionWithoutModPermission(page: Page): Promise<void> {
-  const rolesWithoutMute = MOCK_ROLES.map((r) =>
-    r.name === "admin" ? { ...r, permissions: 0x3 } : r,
-  );
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-      ],
-      simulateWsFlow: true,
-      wsHandlers: voiceWsHandlers(),
-      readyOverrides: {
-        channels: MOCK_CHANNELS_WITH_CATEGORIES,
-        members: MOCK_MEMBERS_MULTI_ROLE,
-        voice_states: MOCK_VOICE_STATE,
-        // buildTauriMockScript's typed `readyOverrides` doesn't list `roles`,
-        // but buildReadyPayload (its implementation) does support it — this
-        // cast bridges that gap without touching the shared helper file.
-        roles: rolesWithoutMute,
-      } as unknown as Parameters<typeof buildTauriMockScript>[0]["readyOverrides"],
-    }),
-  );
-}
+test.describe("@parity Voice moderation menu — a channel override denies it", () => {
+  test.beforeEach(async ({ page }) => {
+    // The role holds every bit (ADMINISTRATOR), but the server's verdict for
+    // this channel is false: the channel's answer wins, with no hint.
+    await mockVoiceSession(page, false);
+    await page.goto("/");
+    await navigateToMainPageReady(page);
+  });
+
+  test("the moderation section is not offered, though the role would allow it", async ({
+    page,
+  }) => {
+    const menu = await openMenu(page);
+    await expect(menu.locator(".settings-slider")).toBeVisible();
+    await expect(menu.locator("[data-action='server-mute']")).toHaveCount(0);
+    await expect(menu.locator("[data-action='voice-disconnect']")).toHaveCount(0);
+    await expect(menu.locator("[data-action='voice-mod-unavailable']")).toHaveCount(0);
+  });
+});
 
 test.describe("@parity Voice moderation menu — gated without MUTE_MEMBERS", () => {
   test.beforeEach(async ({ page }) => {
-    await mockVoiceSessionWithoutModPermission(page);
+    await mockVoiceSession(page, false, ADMIN_WITHOUT_MUTE);
     await page.goto("/");
     await navigateToMainPageReady(page);
   });
@@ -292,17 +351,31 @@ test.describe("@parity Voice moderation menu — gated without MUTE_MEMBERS", ()
   test("the moderation section is not offered when the local role lacks MUTE_MEMBERS", async ({
     page,
   }) => {
-    const row = page.locator(".voice-user-item[data-voice-uid='2']");
-    await expect(row).toBeVisible({ timeout: 5_000 });
-    await row.click({ button: "right" });
-
     // The per-user volume control (available to everyone) still opens...
-    const menu = page.locator(".user-vol-menu");
-    await expect(menu).toBeVisible({ timeout: 3_000 });
+    const menu = await openMenu(page);
     await expect(menu.locator(".settings-slider")).toBeVisible();
 
-    // ...but the moderation section, which is gated on MUTE_MEMBERS, is gone.
+    // ...but the moderation section is gone.
     await expect(menu.locator("[data-action='server-mute']")).toHaveCount(0);
     await expect(menu.locator("[data-action='voice-disconnect']")).toHaveCount(0);
+  });
+});
+
+test.describe("@parity Voice moderation menu — no verdict from the server", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockVoiceSession(page, null);
+    await page.goto("/");
+    await navigateToMainPageReady(page);
+  });
+
+  test("offers no action and says why to a role that holds MUTE_MEMBERS", async ({ page }) => {
+    const menu = await openMenu(page);
+    await expect(menu.locator("[data-action='server-mute']")).toHaveCount(0);
+    await expect(menu.locator("[data-action='voice-disconnect']")).toHaveCount(0);
+    const why = menu.locator("[data-action='voice-mod-unavailable']");
+    await expect(why).toHaveText(
+      "Voice moderation unavailable: the server hasn't confirmed you can moderate this channel.",
+    );
+    await expect(why).toHaveAttribute("aria-disabled", "true");
   });
 });

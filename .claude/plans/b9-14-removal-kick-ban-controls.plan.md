@@ -1,6 +1,6 @@
 # Plan: B9-14 — Finish narrow removal, kick, ban and effective voice controls
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings and OS-zoom check pending owner — 2026-09-24 on branch `fm/b9-14-impl` from `dev` `c215cadeb4e16bff71f9ecac5261b50b27f0a453`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
 
 > **Milestone:** B9-14 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-14-removal-kick-ban-controls`; branch from current `dev`, PR to `dev` only.
@@ -176,3 +176,188 @@ render path as a fallback; fail closed and record a blocker instead.
 **Options and consequences:** Provide a narrow server-computed capability projection for the caller in each channel; or expose sufficient authorized overrides for a complete client derivation. The first keeps policy canonical and payload small; the second duplicates more permission logic and data. Role-only controls with eventual server refusal do not close SEC-02's effective-permission UI requirement.
 
 **Drafting recommendation (historical):** Approve a minimal server-derived projection as a separately planned prerequisite PR; settle its payload, refresh semantics and owner before B9-14. Do not silently widen B9-14 into a server authorization rewrite.
+
+## Implementation record (2026-09-24)
+
+### Drift at the implementation base
+
+Re-read at `c215cade` (B9-13 #1784 merged); `dev` then moved to `646f2a43`
+(B9-22 #1785, messaging accessibility, no moderation or sidebar file) and was
+merged in.
+
+- **Q5 is met.** The prerequisite server PR merged as
+  [#1732](https://github.com/J3vb/OwnCord/pull/1732) (`22f2c884`): each
+  channel in `ready` carries `can_moderate_voice`
+  (`Server/ws/serve_ready.go:158-172`, `:245`, `channelCanModerateVoice`:
+  base MUTE_MEMBERS, then effective READ|MUTE_MEMBERS after both override
+  layers), and every targeted `channel_create` carries the caller's current
+  verdict (`Server/ws/hub_visibility.go:299`, `:332`). It is refreshed on
+  override edits (`RefreshChannelVisibility`), role-mask edits and a member's
+  role change (`RefreshAllChannelVisibility`, `Server/admin/handlers_roles.go`,
+  `handlers_users.go`), and a timeout (`RefreshUserChannels`,
+  `Server/ws/moderation_actions.go:93-135`). The client type already declared
+  it (`Client/src/lib/types.ts:161-168`, `:480-485`); the channels store did
+  not keep it. The refresh uses `channel_create`, not the `channel_update`
+  Q5's text names; the client treats both the same way (absent = unchanged).
+- Row 1: `createVoiceModerationCallbacks` is now
+  `Client/src/pages/main-page/VoiceCallbacks.ts:146-175`; unchanged in
+  substance (fire-and-forget, no optimistic state; a refusal arrives as an
+  `error` frame the dispatcher toasts).
+- Row 2: `canModerateVoice` is `Client/src/components/ChannelSidebar.ts:185`
+  and `roleHasPermission` `Client/src/lib/permissions.ts:49`; still
+  role-level at the base.
+- Row 3: unchanged (`docs/plans/hp-5-scorecard-2026-09-05.md:184-199`).
+- Row 4: superseded by the Q5 bullet above: the ready channel now carries
+  `can_moderate_voice` beside `can_send` (`Server/ws/serve_ready.go:242-245`).
+- The report-linked act route already accepts `removal`, `kick` and `ban`
+  (`Server/api/moderation_queue_handler.go:337-411`,
+  `Server/service/moderation.go:604-647`): MODERATE_MEMBERS for the route,
+  then MANAGE_MESSAGES in the message's channel (with READ) for removal
+  (`message_crud.go:526-548`, no rank rule), KICK_MEMBERS plus rank for kick
+  (`forceLogout`, `:798-848`, revokes every session and drops the socket),
+  BAN_MEMBERS plus rank for ban; all refusals are 403 `FORBIDDEN` with no code
+  telling a missing bit from rank. Removal of a message report needs no
+  `message_id` (the server takes the report's target). Everything B9-14 needs
+  is on `dev`: no server, protocol, schema or migration change.
+- Observed, not changed (server, out of scope): removing a message that is
+  already removed answers 500, because `writeServiceError` has no case for
+  `ErrDeletedMessage` on this route; the client shows "Couldn't confirm this
+  action. Check the history before trying again." and reads the report again.
+
+### What shipped
+
+- **Removal, kick and ban** (`features/moderation/ActionForms.ts`), after
+  warning, timeout and lift in the report's Actions section, to the moderator
+  holding an open report (as B9-13): one reason field ("Reason for a removal,
+  log-out or ban", optional, 500 characters, control characters sent as
+  spaces) and one button per action the reader's role holds, each on its own
+  bit (HP-5): "Remove reported message" (MANAGE_MESSAGES, and only on a
+  report about a message), "Log out of every session" (KICK_MEMBERS: kick is
+  a force logout, and the copy says they can sign in again), "Ban member"
+  (BAN_MEMBERS). An unknown role (pre-`ready`, or not in the role list) holds
+  none. The bit is read again when the confirmation is accepted, so an offer
+  made before a demotion is not sent.
+- **Confirmation** (the B9-6 `message-requests/decisions.ts` destructive
+  confirm, built on `createModal`): a named modal dialog stating the effect
+  (removal deletes for everyone on the server, not a local hide; kick signs
+  them out everywhere and they can come back; ban keeps them out and is not
+  undone from the Moderation Center), Cancel first and focused, Escape and
+  the backdrop cancel, focus back on the opener.
+- **Committed outcome and refusals** (`Queue.ts`): each is one report-linked
+  write (`POST /moderation/queue/{id}/act`, `{kind, reason}`) under B9-12's
+  one-at-a-time guard, then the queue and report are read again. The status
+  line speaks only after the server answers ("Message removed for everyone.",
+  "Logged out of every session. They can sign in again.", "Member banned.
+  They were disconnected and can't sign in again."). A 403 on removal says
+  the reader can't manage messages in its channel; on kick or ban it says the
+  role doesn't allow it or theirs isn't below the reader's (the server doesn't
+  say which); no answer says the action could not be confirmed.
+- **Live authority** (`Queue.ts`): a change to the reader's role or to the
+  role list rebuilds the open report, so an action the role no longer holds
+  stops being offered without a server round trip (focus stays on the same
+  control, or the report heading if it went).
+- **History**: a kick row reads "Logged out of every session".
+- **Effective voice controls** (`stores/channels.store.ts`,
+  `components/ChannelSidebar.ts`, `channel-sidebar/volume-menu.ts`): the
+  store keeps each channel's `can_moderate_voice` (ready sets it; a targeted
+  `channel_create` replaces it, and one without the field leaves it). The
+  participant menu reads the row's channel verdict when it opens: true offers
+  Server Mute/Deafen, Move and Disconnect; false offers none, whatever the
+  role; absent offers none and, only to a role holding MUTE_MEMBERS, says
+  "Voice moderation unavailable: the server hasn't confirmed you can moderate
+  this channel." (disabled text). Rank, timeouts and destination access stay
+  server refusals, surfaced by the existing error toast. No override data is
+  read or exposed; `VoiceCallbacks.ts` needed no change.
+
+### Implementation decisions and file-table amendments
+
+- **No `permissions.ts` helper.** The three bits are read with the existing
+  `currentUserPermissions`/`hasPermission` inside the lazy Moderation Center
+  chunk (`mayEnforce`), so nothing new lands in the startup or MainPage
+  chunks; the voice gate is the server's per-channel verdict, not a role
+  helper. `VoiceCallbacks.ts` is unchanged (its sends were already
+  server-authorized, with no optimistic state).
+- **Files beyond the table**, each narrow wiring: `lib/api.ts` (the act
+  request type gains `removal | kick | ban`; the shared single-writer file, as
+  B9-11..13 did), `stores/channels.store.ts` (keep the server's
+  `can_moderate_voice`, one optional field; the only way the sidebar can read
+  it), `components/channel-sidebar/volume-menu.ts` (the disabled reason),
+  `features/moderation/{Queue,History,api}.ts` (send and word the writes,
+  rebuild on role change, the kick history label, the report's
+  `target_type`), the `moderation` and `voice` catalogs, the colocated
+  `features/moderation/effective-controls.test.ts` (the plan's proposed unit
+  test), `tests/unit/channel-sidebar.test.ts`, and the mocked
+  `tests/e2e/b9-moderation-actions.spec.ts` (the Q1 checks).
+- **Not touched:** navigation, MainPage, dispatcher registration, tokens,
+  styles (no CSS: the section and dialog reuse `mod-work-form`, `modal-*`,
+  `btn-danger`), the catalog API, and the PRD (its shared status table and
+  per-lane paragraphs are left alone; this record is the status).
+- **Budget.** Before/after at the base (`build:budget`): startup closure
+  96,130 → 96,151 B of 97,000 B, MainPage 61,325 → 61,418 B of 64,000 B; no
+  budget change. The actions, dialog and copy load with the lazy Moderation
+  Center chunk; the growth is the store field and the sidebar gate. After
+  merging `646f2a43` (B9-22) the head measures startup 96,210 B and MainPage
+  61,681 B, still within budget.
+
+### Evidence
+
+Base `c215cade`, `dev` `646f2a43` merged; Node 26.9.0, vitest 4.1.11,
+Playwright 1.63.0 Chromium, Go 1.26.7, Linux. Local Playwright ran on ports
+1437 (dev server) and 4183 (preview, with
+`OWNCORD_SERVER_ALLOWED_ORIGINS=http://localhost:4183` and a local-only
+fixture base URL), never 1420 or 4173.
+
+| Check                                                                                               | Result                                                 |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `npx vitest run --maxWorkers=4` (whole client, after merging `646f2a43`)                            | 312 files, 6,793 passed, 152 expected-fail             |
+| `src/features/moderation/effective-controls.test.ts` + `tests/unit/channel-sidebar.test.ts`         | 23 + 118 passed                                        |
+| Failing control: the same two files against the base source (production files reverted, tests kept) | 21 fail, as intended                                   |
+| Playwright mocked: `emoji-voicemod.parity`, `sidebar-menus`, `b9-moderation-actions` (23)           | 17 and 23 passed; against the base 3 parity cases fail |
+| Playwright fullstack (real Go server): `b9-moderation-actions` (B9-13's test and B9-14's)           | 2 passed; against the base B9-14's fails               |
+| `npm run typecheck`, `typecheck:build`, `typecheck:e2e`, `npm run lint`                             | clean                                                  |
+| `npm run build:budget && npm run check:budgets`                                                     | all ok                                                 |
+
+**Permission matrix** (fullstack, synthetic accounts: alice owner; bob in the
+client under single-bit roles, all MODERATE_MEMBERS plus one bit, positions
+47-50 below Moderator; carol reporter and a plain member; dave the subject,
+signed in on a second client):
+
+| Case                                          | Offered in the client                         | Server answer / effect                                                 |
+| --------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------- |
+| Member (carol)                                | no Moderation Center                          | act `ban` 403                                                          |
+| MODERATE_MEMBERS + MANAGE_MESSAGES            | Remove reported message only                  | API kick/ban 403; removal 204, gone on dave's client, ledger `removal` |
+| MODERATE_MEMBERS + KICK_MEMBERS (live change) | Log out of every session only, with no reload | 204; dave's client leaves the app; ledger `kick`                       |
+| MODERATE_MEMBERS + BAN_MEMBERS, dave superior | Ban member; shows the refusal                 | 403, ledger unchanged                                                  |
+| Demoted with the confirm dialog open          | offer withdrawn; confirming sends nothing     | no request, ledger unchanged                                           |
+| Demoted while his frames are lost             | stale offer; shows the refusal                | 403, ledger unchanged                                                  |
+| BAN_MEMBERS, dave a member                    | Ban member                                    | 204; ledger `ban`; history "You issued: Ban"                           |
+| TLS, backup, update                           | never offered by any of these controls        | owner-only, unchanged (HP-5)                                           |
+
+**Voice override matrix** (unit and mocked Playwright; the server side is
+#1732's own tests, and a live LiveKit session is not run locally): verdict
+true offers the four actions and sends `voice_mod_mute {channel_id, user_id}`
+and `voice_mod_kick {user_id}`; verdict false (an override denying a role
+that holds every bit) offers none and no hint; a role without MUTE_MEMBERS
+gets none; one channel's verdict never applies to another; a targeted
+`channel_create` flips it both ways at the next open and one without the
+field leaves it; no verdict offers none and gives the reason to a
+MUTE_MEMBERS role only. Timeout voice ownership and media state are not
+touched: the menu only decides what to offer, and a refusal is the existing
+error toast.
+
+**Accessibility** (mocked Playwright, `b9-moderation-actions.spec.ts`):
+keyboard order Lift timeout → reason → Remove → Log out → Ban, each operable
+with Enter/Space; the dialog is `role="dialog"` with `aria-modal`, named by
+its heading, Cancel focused, Tab and Shift+Tab stay inside, Escape cancels
+and returns focus to the opener; outcomes are announced in the
+`role="status"` line only after the answer and refusals in `role="alert"`;
+no unnamed control; dialog targets at least 24×24 px and no animation; text
+and focus contrast of the new controls and the dialog at the Q1 thresholds
+in dark, neon-glow, midnight and light, each with and without High Contrast
+(per-theme ratios attached as `b9-14-contrast-*.json`); at 940×500 with
+20 px Large Font the actions and the dialog stay in view with no sideways
+scroll (screenshot attached). The voice menu's disabled reason is text with
+`aria-disabled`; the menu's own keyboard access is B9-24's scope and is
+unchanged here. Custom-accent fallback is inherited unchanged from B9-2 (no
+new colour). **Owner-run pending:** NVDA (Windows) and Orca (Linux)
+recordings, and the 200 % OS-zoom check.

@@ -1,6 +1,7 @@
 /**
  * Per-user context menu on a voice participant row: local playback volume for
- * everyone, plus a moderation section for users whose role holds MUTE_MEMBERS.
+ * everyone, plus a moderation section where the server says this user may
+ * moderate voice in the row's channel (can_moderate_voice).
  */
 
 import { Disposable } from "@lib/disposable";
@@ -10,7 +11,8 @@ import { voiceText as t } from "../../i18n/voice";
 
 /** Moderation section wiring. Passed only when the local user may moderate
  *  voice; the menu renders the section iff this is present, so the permission
- *  decision stays with the caller (which knows the role list). */
+ *  decision stays with the caller (which knows the channel's verdict). A string
+ *  instead is why the section is unavailable, shown as disabled text. */
 export interface VoiceModMenuOptions {
   /** Current moderator-imposed state of the target, for the toggle labels. */
   readonly serverMuted: boolean;
@@ -36,7 +38,7 @@ export function showUserVolumeMenu(
   x: number,
   y: number,
   lifetimeSignal: AbortSignal,
-  mod?: VoiceModMenuOptions,
+  mod?: VoiceModMenuOptions | string,
 ): void {
   // Remove any existing context menus and destroy their dismiss owners
   document.querySelectorAll(".user-vol-menu").forEach((el) => {
@@ -110,7 +112,21 @@ export function showUserVolumeMenu(
   });
   menu.appendChild(resetBtn);
 
-  if (mod !== undefined) {
+  if (typeof mod === "string") {
+    menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+    menu.appendChild(
+      createElement(
+        "div",
+        {
+          class: "context-menu-item",
+          "aria-disabled": "true",
+          "data-action": "voice-mod-unavailable",
+          style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
+        },
+        mod,
+      ),
+    );
+  } else if (mod !== undefined) {
     appendModerationSection(menu, mod, () => {
       menu.remove();
     });

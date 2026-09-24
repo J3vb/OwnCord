@@ -84,6 +84,8 @@ export interface ReportDetail {
   readonly reporterId: number;
   /** The reported account; 0 once it is erased. */
   readonly subjectId: number;
+  /** What was reported: "message" is the one a removal can act on. */
+  readonly targetType: string;
   readonly channelId: number | null;
   readonly detail: string;
   readonly state: string;
@@ -202,6 +204,7 @@ export function mapDetail(w: ModerationReportDetail): ReportDetail {
     id: w.id,
     reporterId: w.reporter_id,
     subjectId: w.subject_id,
+    targetType: w.target_type,
     channelId: w.channel_id ?? null,
     detail: w.detail,
     state: w.state,

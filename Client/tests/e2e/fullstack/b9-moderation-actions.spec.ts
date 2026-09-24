@@ -10,6 +10,8 @@
  * voice half is skipped, and the client must say so; the applied case is the
  * mocked tests/e2e/b9-moderation-actions.spec.ts. Every outcome is read back
  * from the server's own ledger. Synthetic accounts and content only.
+ *
+ * The second test is B9-14's removal, kick and ban (described there).
  */
 
 import { test, expect, login } from "./fixtures";
@@ -219,5 +221,178 @@ test.describe("Moderation actions (real server)", () => {
     expect(
       (await post(server, `/api/v1/moderation/users/${id("dave")}/untimeout`, bobToken)).status,
     ).toBe(403);
+  });
+});
+
+// B9-14: removal, kick (force logout) and ban from a report. bob drives the
+// client through single-bit roles (MODERATE_MEMBERS plus one of
+// MANAGE_MESSAGES, KICK_MEMBERS, BAN_MEMBERS) the owner swaps under him; dave
+// is signed in on a second client, so the removal and the kick are seen
+// there. Every outcome is read back from the server's own ledger.
+test.describe("Removal, kick and ban (real server)", () => {
+  const MANAGE_MESSAGES = 0x10000;
+  const KICK_MEMBERS = 0x40000;
+  const BAN_MEMBERS = 0x80000;
+
+  test("each action needs its own bit, is confirmed, and shows the server's answer", async ({
+    page,
+    aliceTransport,
+    bobTransport,
+    server,
+  }) => {
+    const owner = server.owner!.token;
+    for (const name of ["carol", "dave"]) {
+      await server.api("/api/v1/auth/register", {
+        username: name,
+        password: TEST_PASSWORD,
+        invite_code: server.owner!.invite_code,
+      });
+    }
+    const users = (await server.api("/admin/api/users", undefined, owner)) as {
+      id: number;
+      username: string;
+    }[];
+    const id = (name: string) => users.find((u) => u.username === name)!.id;
+    const setRole = (userId: number, roleId: number) =>
+      server.api(`/admin/api/users/${userId}`, { role_id: roleId }, owner, "PATCH");
+    const role = async (name: string, permissions: number, position: number) =>
+      (
+        (await server.api("/admin/api/roles", { name, permissions, position }, owner)) as {
+          id: number;
+        }
+      ).id;
+    const kinds = async () =>
+      (
+        (await server.api(
+          `/api/v1/moderation/users/${id("dave")}/actions`,
+          undefined,
+          owner,
+        )) as LedgerRow[]
+      ).map((r) => r.kind);
+
+    const base = MEMBER_BITS | MODERATE_MEMBERS;
+    // All ranked below Moderator, and above a member.
+    const warden = await role("Warden", base, 50);
+    const remover = await role("Remover", base | MANAGE_MESSAGES, 49);
+    const kicker = await role("Kicker", base | KICK_MEMBERS, 48);
+    const banner = await role("Banner", base | BAN_MEMBERS, 47);
+    await setRole(id("bob"), remover);
+
+    // dave posts the message carol reports, from his own client.
+    const dave = (bobTransport as typeof bobTransport & { page: typeof page }).page;
+    await login(dave, server, "dave");
+    const text = `synthetic-removal-${crypto.randomUUID()}`;
+    const composer = dave.locator("[data-testid='message-input'] textarea");
+    await composer.fill(text);
+    await composer.press("Enter");
+    await expect(dave.locator(".msg-text", { hasText: text })).toBeVisible();
+    const channels = (await server.api("/api/v1/channels/", undefined, owner)) as {
+      id: number;
+      name: string;
+      type: string;
+    }[];
+    const general = channels.find((c) => c.name === "general" && c.type === "text")!;
+    const history = await server.api(`/api/v1/channels/${general.id}/messages`, undefined, owner);
+    const messageId = history.messages.find((m: { content: string }) => m.content === text).id;
+    const carol = await token(server, "carol");
+    const report = (
+      await server.api(
+        "/api/v1/reports",
+        { target_type: "message", target_id: String(messageId), reason: "spam", detail: "" },
+        carol,
+      )
+    ).id as string;
+
+    // Server authority, straight from the server: a member may not act, and
+    // a role without the bit may not either.
+    const bobToken = await token(server, "bob");
+    const act = (auth: string, kind: string) =>
+      post(server, `/api/v1/moderation/queue/${report}/act`, auth, { kind, reason: "" });
+    expect((await act(carol, "ban")).status).toBe(403);
+    expect((await act(bobToken, "kick")).status).toBe(403);
+    expect((await act(bobToken, "ban")).status).toBe(403);
+    expect(await kinds()).toEqual([]);
+
+    await login(page, server, "bob");
+    await page.getByTestId("moderation-btn").click();
+    const center = page.getByRole("region", { name: "Moderation" });
+    const acts = center.getByTestId("mod-report").getByTestId("mod-act");
+    const status = center.getByTestId("mod-write-status");
+    const alert = center.getByRole("alert").filter({ hasText: /./ });
+    const dialog = page.getByTestId("mod-confirm-dialog");
+    const offered = () =>
+      acts
+        .getByRole("button")
+        .filter({ hasText: /^(Remove reported message|Log out of every session|Ban member)$/ })
+        .allTextContents();
+    await center.getByTestId("mod-queue-row").click();
+    await center.getByRole("button", { name: "Take this report" }).click();
+    await expect(status).toHaveText("You're now reviewing this report.");
+
+    // Remover: removal only. It deletes the message for everyone, dave included.
+    await expect.poll(offered).toEqual(["Remove reported message"]);
+    await acts
+      .getByRole("textbox", { name: "Reason for a removal, log-out or ban" })
+      .fill("synthetic removal reason");
+    await acts.getByRole("button", { name: "Remove reported message" }).click();
+    await dialog.getByRole("button", { name: "Remove message" }).click();
+    await expect(status).toHaveText("Message removed for everyone.");
+    await expect(dave.locator(".msg-text", { hasText: text })).toHaveCount(0);
+    expect(await kinds()).toEqual(["removal"]);
+
+    // Kicker: the offer follows the role change with no server round trip;
+    // the kick ends dave's session on his client.
+    await setRole(id("bob"), kicker);
+    await expect.poll(offered).toEqual(["Log out of every session"]);
+    await acts.getByRole("button", { name: "Log out of every session" }).click();
+    await dialog.getByRole("button", { name: "Log out" }).click();
+    await expect(status).toHaveText("Logged out of every session. They can sign in again.");
+    await expect(dave.getByTestId("app-layout")).toHaveCount(0, { timeout: 30_000 });
+    expect((await kinds()).toSorted()).toEqual(["kick", "removal"]);
+
+    // Banner, against a superior: the client can't see ranks, so the server's
+    // refusal is shown and nothing is recorded.
+    await setRole(id("bob"), banner);
+    await expect.poll(offered).toEqual(["Ban member"]);
+    await setRole(id("dave"), MODERATOR_ROLE_ID);
+    await acts.getByRole("button", { name: "Ban member" }).click();
+    await dialog.getByRole("button", { name: "Ban", exact: true }).click();
+    await expect(alert).toHaveText(
+      "The server refused this action: your role doesn't allow it, or their role isn't below yours.",
+    );
+    await expect(status).toHaveText("");
+    await setRole(id("dave"), MEMBER_ROLE_ID);
+
+    // Demoted with the dialog open: the confirmation sends nothing.
+    await acts.getByRole("button", { name: "Ban member" }).click();
+    await setRole(id("bob"), warden);
+    await expect.poll(offered).toEqual([]);
+    await dialog.getByRole("button", { name: "Ban", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+
+    // Demoted while his frames are lost: the stale offer reaches the server,
+    // which refuses it.
+    await setRole(id("bob"), banner);
+    await expect.poll(offered).toEqual(["Ban member"]);
+    aliceTransport.filterServerMessages(() => false);
+    await setRole(id("bob"), warden);
+    await acts.getByRole("button", { name: "Ban member" }).click();
+    await dialog.getByRole("button", { name: "Ban", exact: true }).click();
+    await expect(alert).toHaveText(
+      "The server refused this action: your role doesn't allow it, or their role isn't below yours.",
+    );
+    aliceTransport.filterServerMessages(undefined);
+    expect((await kinds()).toSorted()).toEqual(["kick", "removal"]);
+
+    // Banner again, against a member: banned, and recorded with the report.
+    await setRole(id("bob"), banner);
+    await expect.poll(offered).toEqual(["Ban member"]);
+    await acts.getByRole("button", { name: "Ban member" }).click();
+    await dialog.getByRole("button", { name: "Ban", exact: true }).click();
+    await expect(status).toHaveText(
+      "Member banned. They were disconnected and can't sign in again.",
+    );
+    expect((await kinds()).toSorted()).toEqual(["ban", "kick", "removal"]);
+    await expect(center.getByTestId("mod-history")).toContainText("You issued: Ban");
   });
 });

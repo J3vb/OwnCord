@@ -29,6 +29,7 @@ const KINDS = {
   warning: "kind.warning",
   timeout: "kind.timeout",
   removal: "kind.removal",
+  kick: "kind.kick",
   ban: "kind.ban",
 } as const;
 

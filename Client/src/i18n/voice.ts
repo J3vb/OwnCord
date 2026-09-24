@@ -55,6 +55,8 @@ export const voiceText = defineCatalog("voice", {
   "volume.serverUndeafen": "Server Undeafen",
   "volume.moveTo": "Move to",
   "volume.disconnect": "Disconnect",
+  "volume.modUnknown":
+    "Voice moderation unavailable: the server hasn't confirmed you can moderate this channel.",
 
   "call.incoming": "Incoming call",
   "call.accept": "Accept",

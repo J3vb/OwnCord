@@ -33,6 +33,10 @@
  * above the reader) and the report is read again: if the reader lost the
  * permission, that read's own 403 clears the view. An action that gets no
  * answer may still have been recorded, so the history is read, not guessed.
+ *
+ * Removal, kick and ban (B9-14) go through the report the same way. A change
+ * to the reader's role rebuilds the open report, so an action their role no
+ * longer holds stops being offered before the server has to refuse it.
  */
 
 import {
@@ -54,6 +58,7 @@ import type { FeatureViewContext } from "../navigation/destinations";
 import {
   buildActionForms,
   emptyActionDraft,
+  ENFORCE,
   UNITS,
   type ActionDraft,
   type ActionWrite,
@@ -79,7 +84,7 @@ let viewSeq = 0;
 
 type Write = WorkflowWrite | ActionWrite;
 const isAction = (w: Write): w is ActionWrite =>
-  w.kind === "warning" || w.kind === "timeout" || w.kind === "lift";
+  w.kind !== "assign" && w.kind !== "note" && w.kind !== "close";
 
 function isStatus(err: unknown, status: number, code?: string): boolean {
   return (
@@ -415,7 +420,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     });
     if (acts.element !== null) view.element.appendChild(acts.element);
     if (!acts.takesInput) {
-      if (`${actDraft.warn}${actDraft.reason}`.trim() !== "")
+      if (`${actDraft.warn}${actDraft.reason}${actDraft.enforce}`.trim() !== "")
         setText(writeAlert, t("act.draftLost"));
       actDraft = { id: detail.id, ...emptyActionDraft() };
     }
@@ -453,9 +458,9 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     if (w.kind === "close") return api.closeModerationReport(id, w.outcome, signal);
     if (w.kind === "lift") return api.liftTimeout(w.userId, signal);
     const body: ModerationActRequest =
-      w.kind === "warning"
-        ? { kind: "warning", reason: w.reason }
-        : { kind: "timeout", reason: w.reason, duration_seconds: w.amount * UNITS[w.unit].seconds };
+      w.kind === "timeout"
+        ? { kind: "timeout", reason: w.reason, duration_seconds: w.amount * UNITS[w.unit].seconds }
+        : { kind: w.kind, reason: w.reason };
     return api.actOnModerationReport(id, body, signal);
   }
 
@@ -463,6 +468,8 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   function doneText(w: Write, answer: unknown): string {
     if (w.kind === "warning") return t("done.warning");
     if (w.kind === "lift") return t("done.lift");
+    if (w.kind === "removal" || w.kind === "kick" || w.kind === "ban")
+      return t(ENFORCE[w.kind].doneKey);
     if (w.kind === "timeout") {
       const length = t(UNITS[w.unit].lengthKey, { count: w.amount });
       const voice = (answer as { voice?: unknown } | undefined)?.voice;
@@ -479,7 +486,12 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
 
   function actionErrorText(w: ActionWrite, err: unknown): string {
     if (isStatus(err, 403, "SELF_REVIEW")) return t("write.selfReview");
-    if (isStatus(err, 403)) return t("act.refused");
+    if (isStatus(err, 403)) {
+      // Kick and ban each have their own bit, which a role change can take
+      // while MODERATE_MEMBERS stays, so a refusal is not only about rank.
+      if (w.kind === "removal") return t("act.refusedRemoval");
+      return t(w.kind === "kick" || w.kind === "ban" ? "act.refusedEnforce" : "act.refused");
+    }
     if (isStatus(err, 404) && w.kind === "lift") return t("act.liftNone");
     if (isStatus(err, 400) && (err as ApiClientError).message !== "") {
       return t("act.invalid", { message: (err as ApiClientError).message });
@@ -517,6 +529,8 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
           actDraft.reason = "";
           actDraft.amount = "";
         }
+        if (actDraft.id === id && (w.kind === "removal" || w.kind === "kick" || w.kind === "ban"))
+          actDraft.enforce = "";
         if (selected !== id) {
           writing = null;
           return;
@@ -652,7 +666,18 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     { signal },
   );
 
+  /** The open report again, for a role change that moves what may be offered. */
+  function reoffer(): void {
+    const d = shown;
+    // A write's own re-read rebuilds it anyway.
+    if (d === null || writing !== null) return;
+    const item = itemFor(d.id);
+    if (item !== undefined) showDetail(item, d, false);
+  }
+
   const unsubs = [
+    authStore.subscribeSelector((s) => s.user?.role ?? "", reoffer),
+    channelsStore.subscribeSelector((s) => s.roles, reoffer),
     // mod_queue carries no report data: read the queue (and the open report) again.
     modQueueStore.subscribe(() => loadList(false, true)),
     // mod_queue is never replayed, so a reconnect reads again too.

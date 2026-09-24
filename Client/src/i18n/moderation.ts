@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
-/** The Moderation Center queue, report evidence (B9-11), review workflow (B9-12), BPR-071, and
- *  warning and timeout actions (B9-13), BPR-072. */
+/** The Moderation Center queue, report evidence (B9-11), review workflow (B9-12), BPR-071,
+ *  warning and timeout actions (B9-13), and removal, kick and ban (B9-14), BPR-072. */
 export const moderationText = defineCatalog("moderation", {
   intro:
     "Reports sent to this server's moderators. Reports about you are never shown here, and reports you sent show no internal notes.",
@@ -119,6 +119,32 @@ export const moderationText = defineCatalog("moderation", {
   "done.timeoutSkipped":
     "Timed out for {length}: they can't send messages or react. Their voice wasn't changed: they weren't in a voice channel where you can moderate voice, or the mute didn't take effect.",
   "done.lift": "Timeout lifted: they can send messages and react again.",
+  "enforce.label": "Reason for a removal, log-out or ban",
+  "enforce.hint":
+    "Optional, up to 500 characters. Recorded with this report; the member sees the reason for a removal or ban.",
+  "enforce.removal": "Remove reported message",
+  "enforce.kick": "Log out of every session",
+  "enforce.ban": "Ban member",
+  "confirm.removal.title": "Remove the reported message?",
+  "confirm.removal.body":
+    "It's deleted on the server for everyone, not just hidden from you. You can't restore it.",
+  "confirm.removal.confirm": "Remove message",
+  "confirm.kick.title": "Log this member out of every session?",
+  "confirm.kick.body":
+    "Every device they're signed in on is disconnected now. They can sign in again; to keep them out, ban them instead.",
+  "confirm.kick.confirm": "Log out",
+  "confirm.ban.title": "Ban this member?",
+  "confirm.ban.body":
+    "They're disconnected now and can't sign in again. You can't undo a ban from the Moderation Center.",
+  "confirm.ban.confirm": "Ban",
+  "confirm.cancel": "Cancel",
+  "act.refusedEnforce":
+    "The server refused this action: your role doesn't allow it, or their role isn't below yours.",
+  "act.refusedRemoval":
+    "The server refused to remove this message: you can't manage messages in its channel.",
+  "done.removal": "Message removed for everyone.",
+  "done.kick": "Logged out of every session. They can sign in again.",
+  "done.ban": "Member banned. They were disconnected and can't sign in again.",
   "length.minutes": { one: "{count} minute", other: "{count} minutes" },
   "length.hours": { one: "{count} hour", other: "{count} hours" },
   "length.days": { one: "{count} day", other: "{count} days" },
@@ -146,6 +172,7 @@ export const moderationText = defineCatalog("moderation", {
   "kind.warning": "Warning",
   "kind.timeout": "Timeout",
   "kind.removal": "Message removed",
+  "kind.kick": "Logged out of every session",
   "kind.ban": "Ban",
   "kind.other": "Moderator action",
 });
