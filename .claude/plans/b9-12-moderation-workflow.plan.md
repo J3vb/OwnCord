@@ -1,6 +1,6 @@
 # Plan: B9-12 — Assign, annotate and close reports with immutable history
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch `fm/b9-12-impl` from `dev` `9c5f5d67f29bc2313adb227a6e2c1d60abc962c6`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
 
 > **Milestone:** B9-12 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-12-moderation-workflow`; branch from current `dev`, PR to `dev` only.
@@ -169,3 +169,173 @@ render path as a fallback; fail closed and record a blocker instead.
 ## Open questions
 
 No new owner decision is introduced by this milestone. The PRD's unresolved entry decisions still apply; stop if implementation would require a new product, UX or scope choice.
+
+## Implementation record (2026-09-24)
+
+### Drift at the implementation base
+
+Re-read at `9c5f5d67` (B9-11 #1774 merged). Every inventory row still holds;
+the line ranges moved:
+
+- Row 1: the routes are `Server/api/moderation_queue_handler.go:120-130`
+  (`MountModerationQueueRoutes`); assign also takes `?force=1`, which this
+  milestone does not offer (Task 1: no arbitrary reassignment).
+- Row 2: `addNoteRequest`/`closeReportRequest` are `:88-94`; the detail DTO
+  (`:61-86`) carries `notes`, `events` (`moderationEventResponse`, `:52-57`)
+  and `actions` (`moderationActionResponse`, `Server/api/moderation_handler.go:42-53`).
+- Row 3: `guardConfidentiality` / `GuardSelfReviewFor` are
+  `Server/service/report.go:437-464`, `Get` `:538-573`, `Assign` `:581-622`,
+  `Note` `:627-660`, `Close` `:666-693`. Contract facts the client relies on:
+  a reporter reads their own report but gets no notes and a 403
+  `SELF_REVIEW` on every write; the subject gets 404 everywhere; assign is 409
+  when someone else holds the report or it closed; a note is 409 once the
+  report closed and 400 for an empty body, more than 4,000 runes or any C0
+  control character (line breaks included); close is 409 when already closed
+  and does not require the closer to hold the report; the events are
+  `created` (actor 0, detail = reason), `assigned`, `noted`, `closed`
+  (detail = outcome); erasure sets an event's actor to 0; the retention sweep
+  deletes a closed report's notes and evidence and keeps its events.
+
+B9-11 left no server gap: no server, protocol, schema or migration change.
+
+### What shipped
+
+- **Review controls** (`features/moderation/Workflow.ts`). An unassigned
+  report offers "Take this report" (plain assign, never `force`); once the
+  reader holds it, an internal-note field and a close form with a required
+  outcome (Action taken, No action needed, Already reported; nothing
+  preselected; "a closed report can't be reopened"). A report someone else
+  holds, the reader's own filing and a closed report offer no control, each
+  with a sentence saying why.
+- **Writes and conflicts** (`Queue.ts`). One write at a time, even across a
+  re-read that rebuilds the controls; whatever the answer, the queue and the
+  report are read again, so the server's state replaces the view's guess.
+  409 says which race was lost ("Another moderator took this report first",
+  "Your note wasn't saved: this report was closed", "already closed by
+  another moderator"); 403 `SELF_REVIEW` says so without leaving; any other
+  403 is B9-11's refusal (every report and the draft go); 404 closes the
+  report and re-reads the queue; a failed save keeps the note for another
+  try. A report the reader just closed leaves the active list without the
+  "no longer in this list" notice, and the status says it is under
+  Show: Closed.
+- **Draft lifetime.** The unsaved note lives only for its report while the
+  view is live: switching report, refusal, 404, the view closing, role loss
+  and sign-out drop it; a re-read that takes the note field away (someone
+  else took or closed the report) drops it and says so. A background re-read
+  keeps the draft, focus and caret.
+- **History** (`History.ts`, adapter in `api.ts`). Internal notes in their own
+  section (author, UTC-parsed local date, text), never mixed into the history.
+  The history merges report events and the moderator actions taken with the
+  report in time order (stable; unreadable times last); an action's reason is
+  labelled "Reason shown to the member". Read-only by construction: no
+  control inside either. Erased actors read "A deleted account", an unknown
+  event "… updated the report", notes removed by retention "Note text is no
+  longer kept …", and the reporter's own view says why notes are hidden.
+
+### Implementation decisions and file-table amendments
+
+- **Note and close require holding the report.** The server lets any
+  moderator note or close; the client offers them only to the moderator who
+  took the report, so one moderator never overwrites another's review
+  (Task 2) and there is no take-over (Task 1). This only narrows what the
+  server allows.
+- **Line breaks are sent as spaces**, and the hint says so: the server
+  refuses every control character, so a multi-line note would always fail.
+- **Files beyond the table**, each narrow wiring: `lib/api.ts` (the three
+  write methods and the detail's `reporter_id`/`notes`/`events`/`actions`
+  fields — the shared single-writer file, as B9-11 did for its reads),
+  `features/moderation/{Evidence,Queue}.ts` (export `memberName`; compose the
+  review into B9-11's detail), `styles/app/chat-area.css` (B9-11's
+  moderation fragment; tokens only, no import change),
+  `tests/e2e/b9-moderation-workflow.spec.ts` (the Q1 checks, mocked), and
+  B9-11's `evidence.test.ts`/`queue.test.ts` fixtures (the new wire fields;
+  the adapter test that pinned "notes and events are dropped" now pins that
+  they are kept apart, and still that no upload id is kept).
+- **Not touched:** navigation, MainPage, dispatcher, global stores (read-only
+  use of `authStore` and `membersStore`), tokens, the catalog API, the PRD.
+- **Budget.** Measured at the base: startup 93,955 B, MainPage 63,980 B; with
+  this change 94,100 B of 95,500 B and 63,978 B of 64,000 B, no budget change.
+  The review, history and copy load with the lazy Moderation Center chunk;
+  the startup growth is the three API methods and the grouped CSS.
+
+### Evidence
+
+Base `9c5f5d67`; Node 26.9.0, vitest 4.1.11, Playwright Chromium, Go 1.26.7,
+Linux.
+
+| Check                                                                                                      | Result                                      |
+| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `npx vitest run --maxWorkers=4` (whole client)                                                             | 307 files, 6,665 passed, 152 expected-fail  |
+| `src/features/moderation/{workflow,queue,evidence}.test.ts`                                                | 48 passed                                   |
+| `npm run typecheck`, `typecheck:build`, `typecheck:e2e`, `npm run lint` (oxlint, cycles, eslint)           | clean                                       |
+| `npm run build:budget && npm run check:budgets`                                                            | all ok; startup 94,100 B, MainPage 63,978 B |
+| Playwright (dev server): `b9-moderation-workflow`, `b9-moderation-queue`, `b9-navigation`                  | 28 passed                                   |
+| Playwright fullstack (real Go server): `fullstack/b9-moderation-workflow`, `fullstack/b9-moderation-queue` | 1 and 2 passed                              |
+| `npx prettier --check` (changed files), `npm run check:docs`                                               | clean, passed                               |
+
+**Role matrix and audit walkthrough** (fullstack, synthetic accounts: alice
+owner and second moderator, bob moderator in the client then demoted, carol
+and dave reporters and subjects):
+
+| Role                         | Offered in the client                      | Server answer                                  |
+| ---------------------------- | ------------------------------------------ | ---------------------------------------------- |
+| Moderator, report unassigned | Take this report                           | assign 204                                     |
+| Moderator holding it         | Add note, Close with outcome               | notes 204, close 204                           |
+| Another moderator holds it   | nothing ("Another moderator is reviewing") | stale Take → 409, view shows alice as assignee |
+| Reporter as moderator        | nothing; notes hidden                      | assign 403 `SELF_REVIEW`                       |
+| Subject as moderator         | report not listed                          | assign, notes, close 404                       |
+| Demoted moderator            | view, draft and reports gone               | assign, notes, close 403                       |
+
+Bob takes carol's report from the keyboard, adds a two-line note (saved as one
+line), then, with his `mod_queue` frames held back, alice closes it while he
+writes a second note: his save gets 409 and says the report closed. Alice then
+takes another report before bob's stale Take: 409, and the re-read shows her.
+Under Show: Closed the history reads, in order, "Report sent for Harassment",
+"You took the report", "You added an internal note", "alice closed the
+report: Action taken", matching the server's `events`
+(`created, assigned, noted, closed`) and `notes`; the closed report has no
+textarea, input or button. Nothing scrolls sideways at 940×500. Retention is
+covered by the unit suite (closed report with a `noted` event and no notes),
+not the fullstack run: the sweep's window is days.
+
+**Failing controls.** Each guard was removed in turn and the moderation unit
+suite re-run; each failed and was restored: the reporter's no-controls branch,
+the other-moderator no-controls branch (3 tests), 403-on-write denies, the
+draft-lost notice, the own-close "not gone" case, focus restored by key, the
+per-report draft reset, and one-write-at-a-time (3 tests).
+
+### Accessibility (Q1)
+
+- **Keyboard:** the note field, Add note, the outcome group (one Tab stop,
+  arrows within) and Close report follow in reading order; Enter submits;
+  an empty note or no outcome is refused locally with the error on the field
+  or group and focus moved to it; B9-11's Escape path is unchanged
+  (`b9-moderation-workflow.spec.ts`, keyboard and outcome tests). No
+  hover-only action.
+- **Screen reader:** the review is a region named "Review"; the note field
+  is labelled, described by its privacy hint and its error; the outcome is a
+  fieldset with a legend, described by its error; Close report is described
+  by "can't be reopened". Success is announced once through a `role="status"`
+  region and conflicts and refusals through a `role="alert"` region, both
+  outside the rebuilt report so they exist before their text changes. Every
+  control has a name (`findUnnamedControls`). Refusal and role loss remove the
+  notes, history and draft from the tree. **NVDA and Orca recordings are
+  owner-run and pending.**
+- **Focus:** after a write or a background re-read, focus returns to the
+  same control (caret kept in the note field); when that control is gone (a
+  take or close), it goes to the report heading, or to the list after the
+  report leaves it; never to `<body>`.
+- **Contrast:** measured in dark, neon-glow, midnight and light, each with
+  and without High Contrast: notes heading, byline and text, history hint,
+  entry, date and action reason, review heading and state, note label and
+  hint, outcome legend and labels, close hint, and both buttons, all ≥ 4.5:1;
+  focus on the note field, Add note, the outcome radio and Close report
+  ≥ 3:1 (JSON attached per theme). No state relies on colour: each is a
+  sentence.
+- **Targets:** buttons, the note field and each outcome label ≥ 24×24 CSS px.
+- **Motion:** the review, history entries, notes and outcome labels have no
+  animation or transition.
+- **Zoom/reflow:** at 940×500 with 20 px Large Font every control, note and
+  history entry scrolls into view and the view does not scroll sideways
+  (screenshot attached); long text wraps. The OS 200 % zoom check is
+  owner-run and pending with the native recordings.

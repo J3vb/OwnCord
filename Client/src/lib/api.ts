@@ -215,10 +215,12 @@ export interface ModerationQueueRow {
   readonly closed_at?: string;
 }
 
-/** GET /moderation/queue/{id}: the fields B9-11 reads. The server also sends
- *  notes, events and actions (B9-12's); nothing here keeps them. */
+/** GET /moderation/queue/{id}: the fields the Moderation Center reads (B9-11,
+ *  B9-12). Mirrors Server/api/moderation_queue_handler.go's
+ *  moderationReportDetailResponse. */
 export interface ModerationReportDetail {
   readonly id: string;
+  readonly reporter_id: number;
   readonly target_type: string;
   readonly channel_id?: number;
   readonly reason: string;
@@ -239,7 +241,35 @@ export interface ModerationReportDetail {
   }[];
   /** NSFW_ACKNOWLEDGEMENT_REQUIRED or SOURCE_CHANNEL_UNAVAILABLE when withheld. */
   readonly evidence_withheld?: string;
+  /** Internal notes: always empty for the report's own reporter, and once
+   *  the retention sweep has run on a closed report. */
+  readonly notes: readonly {
+    readonly id: number;
+    readonly author_id: number;
+    readonly body: string;
+    readonly created_at: string;
+  }[];
+  /** report_events, oldest first: created, assigned, noted, closed. Actor 0
+   *  is the server (created) or an erased account. */
+  readonly events: readonly {
+    readonly actor_id: number;
+    readonly action: string;
+    readonly detail: string;
+    readonly created_at: string;
+  }[];
+  /** Moderator actions taken with this report. */
+  readonly actions: readonly {
+    readonly id: number;
+    readonly kind: string;
+    readonly actor_id: number;
+    readonly reason: string;
+    readonly created_at: string;
+    readonly lifted_at?: string;
+  }[];
 }
+
+/** POST /moderation/queue/{id}/close outcomes (Server/service/report.go). */
+export type ModerationOutcome = "actioned" | "no_action" | "duplicate";
 
 /** The four recipient transitions of a pending Message Request (docs/api.md). */
 export type DmRequestDecision = "accept" | "ignore" | "delete" | "block";
@@ -649,6 +679,40 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         "GET",
         `/moderation/queue/${encodeURIComponent(id)}`,
         undefined,
+        signal,
+      );
+    },
+
+    /** Take a report (B9-12): 409 when another moderator already holds it or it closed. */
+    assignModerationReport(id: string, signal?: AbortSignal): Promise<void> {
+      return request<void>(
+        "POST",
+        `/moderation/queue/${encodeURIComponent(id)}/assign`,
+        undefined,
+        signal,
+      );
+    },
+
+    /** Add an internal note: 409 once the report is closed. */
+    addModerationNote(id: string, body: string, signal?: AbortSignal): Promise<void> {
+      return request<void>(
+        "POST",
+        `/moderation/queue/${encodeURIComponent(id)}/notes`,
+        { body },
+        signal,
+      );
+    },
+
+    /** Close a report with its outcome: 409 when it is already closed. */
+    closeModerationReport(
+      id: string,
+      outcome: ModerationOutcome,
+      signal?: AbortSignal,
+    ): Promise<void> {
+      return request<void>(
+        "POST",
+        `/moderation/queue/${encodeURIComponent(id)}/close`,
+        { outcome },
         signal,
       );
     },

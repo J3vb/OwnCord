@@ -68,6 +68,10 @@ function row(id: string, over: Partial<ModerationQueueRow> = {}): ModerationQueu
 function detail(id: string, over: Partial<ModerationReportDetail> = {}): ModerationReportDetail {
   return {
     id,
+    reporter_id: 3,
+    notes: [],
+    events: [],
+    actions: [],
     target_type: "message",
     reason: "spam",
     detail: "",

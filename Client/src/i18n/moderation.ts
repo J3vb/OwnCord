@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** The Moderation Center queue and report evidence (B9-11, BPR-071). */
+/** The Moderation Center queue, report evidence (B9-11) and review workflow (B9-12), BPR-071. */
 export const moderationText = defineCatalog("moderation", {
   intro:
     "Reports sent to this server's moderators. Reports about you are never shown here, and reports you sent show no internal notes.",
@@ -54,4 +54,60 @@ export const moderationText = defineCatalog("moderation", {
   "evidence.channelFallback": "this channel",
   "evidence.unavailable":
     "This evidence can't be shown: the channel it came from can no longer be checked.",
+  "work.title": "Review",
+  "work.ownReport": "You sent this report, so another moderator has to review it.",
+  "work.unassigned": "No one is reviewing this report yet. Take it to add notes and close it.",
+  "work.assign": "Take this report",
+  "work.mine": "You're reviewing this report.",
+  "work.other":
+    "Another moderator is reviewing this report. Only they can add notes to it or close it here.",
+  "work.noteLabel": "Internal note",
+  "work.noteHint":
+    "Only moderators can read notes: the reporter and the reported account never see them. Line breaks are saved as spaces.",
+  "work.addNote": "Add note",
+  "work.noteEmpty": "Write a note first.",
+  "work.outcomeLabel": "Outcome",
+  "work.close": "Close report",
+  "work.outcomeEmpty": "Choose an outcome first.",
+  "work.closedHint": "A closed report can't be reopened or changed. Its history stays as it is.",
+  "outcome.actioned": "Action taken",
+  "outcome.no_action": "No action needed",
+  "outcome.duplicate": "Already reported",
+  "outcome.subject_erased": "The reported account was deleted",
+  "outcome.unknown": "outcome unavailable",
+  "done.assign": "You're now reviewing this report.",
+  "done.note": "Note added.",
+  "done.close": "Report closed. It is listed under Show: Closed, with its history.",
+  "conflict.assign": "Another moderator took this report first.",
+  "conflict.note": "Your note wasn't saved: this report was closed.",
+  "conflict.close": "This report was already closed by another moderator.",
+  "draft.lost": "This report can no longer take your note, so the unsaved note was discarded.",
+  "write.selfReview": "You sent this report, so you can't review it.",
+  "write.invalid": "The server didn't accept this. Check the note for unusual characters.",
+  "write.error": "Couldn't save this change. Try again.",
+  "notes.title": "Internal notes",
+  "notes.hidden": "Internal notes are hidden from you because you sent this report.",
+  "notes.none": "No notes yet.",
+  "notes.pruned":
+    "Note text is no longer kept: this server removes it some time after a report closes.",
+  "notes.by": "{name}, {date}",
+  "history.title": "History",
+  "history.hint": "Recorded by the server. History can't be edited or deleted.",
+  "history.none": "No history recorded.",
+  "history.created": "Report sent for {reason}",
+  "history.assigned": "{name} took the report",
+  "history.noted": "{name} added an internal note",
+  "history.closed": "{name} closed the report: {outcome}",
+  "history.other": "{name} updated the report",
+  "history.action": "{name} issued: {kind}",
+  "history.reason": "Reason shown to the member: {reason}",
+  "history.lifted": "Lifted {date}",
+  "history.system": "The server",
+  "name.you": "You",
+  "name.erased": "A deleted account",
+  "kind.warning": "Warning",
+  "kind.timeout": "Timeout",
+  "kind.removal": "Message removed",
+  "kind.ban": "Ban",
+  "kind.other": "Moderator action",
 });

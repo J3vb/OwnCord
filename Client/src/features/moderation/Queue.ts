@@ -14,12 +14,19 @@
  * trigger a fresh read. Withdrawing NSFW consent takes the evidence off screen
  * at once; closing the view, losing the permission, signing out or switching
  * profile removes it all, from the DOM and from memory.
+ *
+ * Review (B9-12): taking, noting and closing a report are single writes. One
+ * write runs at a time; whatever the answer, the report is read again, so a
+ * conflict with another moderator (409) shows the server's current state
+ * rather than this view's guess. An unsaved note lives only while the report
+ * can still take it and the view is live.
  */
 
 import { ApiClientError, type ModerationQueueFilter } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
+import { authStore } from "@stores/auth.store";
 import { channelsStore, setNsfwAcknowledged } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { moderationText as t } from "../../i18n/moderation";
@@ -27,7 +34,9 @@ import { nsfwContentBlocked } from "../content-consent/nsfw";
 import type { FeatureViewContext } from "../navigation/destinations";
 import { mapDetail, mapQueueRow, type QueueItem, type ReportDetail } from "./api";
 import { buildReportDetail, dateText, nameText, reportTitle, stateText } from "./Evidence";
+import { buildHistory } from "./History";
 import { modQueueStore } from "./store";
+import { buildWorkflow, type WorkflowWrite } from "./Workflow";
 
 const FILTERS = [
   { value: "", labelKey: "filter.active", countKey: "count.active" },
@@ -57,6 +66,11 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   let detailReq: Disposable | null = null;
   let detailFocus = false;
   let denied = false;
+  /** The unsaved note, for the report it was typed on. */
+  let draft = { id: "", text: "" };
+  let writing = false;
+  /** A report this reader just closed: leaving the list is expected, not news. */
+  let closedHere: string | null = null;
 
   const filterId = `mod-filter-${++viewSeq}`;
   const toolbar = createElement("div", { class: "mod-center-toolbar" });
@@ -91,6 +105,12 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   );
   detailRetry.hidden = true;
   const detailSlot = createElement("div", { class: "mod-report-slot" });
+  const writeStatus = createElement("p", {
+    class: "mod-center-status",
+    role: "status",
+    "data-testid": "mod-write-status",
+  });
+  const writeAlert = createElement("p", { class: "form-error", role: "alert" });
   appendChildren(
     root,
     createElement("p", { class: "mod-center-intro" }, t("intro")),
@@ -102,6 +122,8 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     detailStatus,
     detailFailure,
     detailRetry,
+    writeStatus,
+    writeAlert,
     detailSlot,
   );
 
@@ -146,6 +168,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     const was = selected;
     dropDetail();
     selected = null;
+    draft = { id: "", text: "" };
     syncCurrent();
     setDetailError("");
     setText(detailStatus, message);
@@ -161,9 +184,11 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     dropDetail();
     items = [];
     selected = null;
+    draft = { id: "", text: "" };
     clearChildren(list);
     for (const el of [toolbar, list, retry, detailRetry]) el.hidden = true;
-    for (const el of [status, detailStatus, detailFailure]) setText(el, "");
+    for (const el of [status, detailStatus, detailFailure, writeStatus, writeAlert])
+      setText(el, "");
     setText(failure, t("denied"));
     if (hadFocus) {
       root.closest(".feature-view")?.querySelector<HTMLElement>(".feature-view-title")?.focus();
@@ -231,7 +256,8 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
         setText(status, t(forFilter.countKey, { count: items.length }));
         if (retryHadFocus) focusList(null);
         if (selected !== null) {
-          if (!items.some((i) => i.id === selected)) clearDetail(t("detail.gone"));
+          if (!items.some((i) => i.id === selected))
+            clearDetail(selected === closedHere ? "" : t("detail.gone"));
           else if (refreshDetail) loadDetail(selected, false);
         }
       },
@@ -277,11 +303,35 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   }
 
   function showDetail(item: QueueItem, detail: ReportDetail, takeFocus: boolean): void {
-    const hadFocus = detailSlot.contains(document.activeElement);
-    const retryHadFocus = document.activeElement === detailRetry;
+    const active = document.activeElement;
+    const hadFocus = detailSlot.contains(active);
+    const retryHadFocus = active === detailRetry;
+    // A re-read rebuilds the report: put focus back on the same control.
+    const focusKey = hadFocus && active instanceof HTMLElement ? active.dataset.focus : undefined;
+    const caret =
+      active instanceof HTMLTextAreaElement
+        ? ([active.selectionStart, active.selectionEnd] as const)
+        : null;
     dropDetail();
     shown = detail;
     const view = buildReportDetail(item, detail, mountGate);
+    const me = authStore.getState().user?.id ?? -1;
+    view.element.append(...buildHistory(detail, me));
+    const work = buildWorkflow({
+      detail,
+      me,
+      draft: draft.id === detail.id ? draft.text : "",
+      onDraft: (text) => {
+        draft = { id: detail.id, text };
+      },
+      onWrite: (w) => write(detail.id, w),
+      signal,
+    });
+    view.element.appendChild(work.element);
+    if (draft.id === detail.id && !work.takesNotes) {
+      if (draft.text.trim() !== "") setText(writeAlert, t("draft.lost"));
+      draft = { id: "", text: "" };
+    }
     view.element.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
@@ -293,7 +343,74 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       { signal },
     );
     detailSlot.appendChild(view.element);
-    if (takeFocus || hadFocus || retryHadFocus) view.heading.focus();
+    const again =
+      focusKey === undefined || takeFocus
+        ? null
+        : view.element.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`);
+    if (again !== null) {
+      again.focus();
+      if (caret !== null && again instanceof HTMLTextAreaElement) {
+        again.setSelectionRange(caret[0], caret[1]);
+      }
+    } else if (takeFocus || hadFocus || retryHadFocus) view.heading.focus();
+  }
+
+  const WRITE_DONE = { assign: "done.assign", note: "done.note", close: "done.close" } as const;
+  const WRITE_CONFLICT = {
+    assign: "conflict.assign",
+    note: "conflict.note",
+    close: "conflict.close",
+  } as const;
+
+  /** Send one review write, then read the report again whatever the answer. */
+  function write(id: string, w: WorkflowWrite): void {
+    if (writing || denied) return;
+    writing = true;
+    setText(writeStatus, "");
+    setText(writeAlert, "");
+    const req =
+      w.kind === "assign"
+        ? api.assignModerationReport(id, signal)
+        : w.kind === "note"
+          ? api.addModerationNote(id, w.body, signal)
+          : api.closeModerationReport(id, w.outcome, signal);
+    req.then(
+      () => {
+        writing = false;
+        if (signal.aborted) return;
+        if (w.kind === "note" && draft.id === id) draft = { id: "", text: "" };
+        if (w.kind === "close") closedHere = id;
+        if (selected !== id) return;
+        setText(writeStatus, t(WRITE_DONE[w.kind]));
+        // The list shows state and assignee too; it re-reads the report after.
+        loadList(false, true);
+      },
+      (err: unknown) => {
+        writing = false;
+        if (signal.aborted) return;
+        if (isStatus(err, 403) && (err as ApiClientError).code !== "SELF_REVIEW") {
+          deny();
+          return;
+        }
+        if (selected !== id) return;
+        if (isStatus(err, 404)) {
+          clearDetail(t("detail.notFound"));
+          loadList(false, false);
+          return;
+        }
+        setText(
+          writeAlert,
+          isStatus(err, 409)
+            ? t(WRITE_CONFLICT[w.kind])
+            : isStatus(err, 403)
+              ? t("write.selfReview")
+              : isStatus(err, 400)
+                ? t("write.invalid")
+                : t("write.error"),
+        );
+        loadList(false, true);
+      },
+    );
   }
 
   function closeToRow(): void {
@@ -365,6 +482,9 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       detailSlot.querySelector<HTMLElement>("h3")?.focus();
       return;
     }
+    if (draft.id !== id) draft = { id: "", text: "" };
+    setText(writeStatus, "");
+    setText(writeAlert, "");
     selected = id;
     syncCurrent();
     loadDetail(id, true);
@@ -420,6 +540,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       dropDetail();
       items = [];
       selected = null;
+      draft = { id: "", text: "" };
       clearChildren(root);
     },
     { once: true },

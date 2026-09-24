@@ -388,6 +388,7 @@
 .mod-queue-who,
 .mod-queue-state,
 .mod-queue-when,
+.mod-history-when,
 .mod-report-facts dt {
   color: var(--text-muted);
   font-size: var(--font-size-sm);
@@ -413,11 +414,14 @@
 .mod-report-facts dd,
 .mod-report-note,
 .mod-evidence-text,
-.mod-evidence-files {
+.mod-evidence-files,
+.mod-history {
   overflow-wrap: anywhere;
 }
 .mod-report-note,
-.mod-evidence-text {
+.mod-evidence-text,
+.mod-note-body,
+.mod-history-reason {
   margin: var(--space-1) 0 0;
   white-space: pre-wrap;
 }
@@ -452,6 +456,37 @@
   margin: var(--space-1) 0 0;
   padding-inline-start: var(--space-4);
   color: var(--text-muted);
+}
+/* ── B9-12 review: notes, history and the take/note/close controls ── */
+.mod-history,
+.mod-notes {
+  margin: var(--space-1) 0;
+  padding-inline-start: var(--space-4);
+}
+.mod-history-item,
+.mod-note {
+  margin-bottom: var(--space-2);
+}
+.mod-history-when {
+  display: block;
+}
+.mod-work-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+.mod-work-outcomes {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.mod-work-outcome {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 24px;
 }
 /* The B9-7 gate fills a positioned slot. */
 .mod-evidence-gate {
