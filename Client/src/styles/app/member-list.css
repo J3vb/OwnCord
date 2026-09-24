@@ -17,7 +17,11 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
+  /* Yields to the channel list's floor (.sidebar-content-inner) and scrolls
+     its members instead, however long the list or the dragged height, but
+     keeps its header and resize handle in view. */
+  flex-shrink: 1;
+  min-height: calc(var(--font-size, 16px) * 2);
 }
 .sidebar-members-header {
   padding: 8px 8px 4px 16px;
@@ -41,15 +45,25 @@
 }
 /* ── DM Section (sidebar — positioned above channels) ── */
 .sidebar-dm-section {
-  border-bottom: 1px solid var(--border-glow, var(--border));
-  flex-shrink: 0;
+  /* Its header and "View all" sit in the sidebar column at their full height;
+     only the list yields, scrolling its rows (B9 Q1 reflow). */
+  display: contents;
+}
+.sidebar-dm-section + .sidebar-content-inner {
+  border-top: 1px solid var(--border-glow, var(--border));
 }
 .sidebar-dm-list {
-  overflow: hidden;
+  overflow-y: auto;
+  min-height: 0;
   transition: max-height 0.2s;
+}
+/* About one row stays in view, however short the sidebar. */
+.sidebar-dm-list:not(:empty) {
+  min-height: calc(var(--font-size, 16px) * 2);
 }
 .sidebar-dm-section .category.collapsed + .sidebar-dm-list {
   max-height: 0 !important;
+  min-height: 0;
   overflow: hidden;
 }
 .dm-header-unread-badge {
