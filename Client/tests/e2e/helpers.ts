@@ -1042,6 +1042,20 @@ export async function submitLogin(page: Page): Promise<void> {
 }
 
 /**
+ * Pre-grant "Load automatically" external-content consent (B9-8) for the
+ * mocked server, so a spec about rendering media is not stopped at the
+ * concealed stand-in. Call before `page.goto`.
+ */
+export async function grantExternalConsent(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "owncord:settings:externalContentConsent",
+      JSON.stringify({ "localhost:8443": "auto" }),
+    );
+  });
+}
+
+/**
  * Login and wait for the main app layout to appear.
  */
 export async function navigateToMainPage(page: Page): Promise<void> {

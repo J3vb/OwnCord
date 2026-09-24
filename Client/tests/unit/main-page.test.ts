@@ -11,6 +11,13 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// B9-8: this suite exercises content the viewer has already consented to;
+// the consent gate itself is proven in src/features/content-consent/external.test.ts.
+vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
+  externalAllowed: () => true,
+}));
+
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({
     debug: vi.fn(),

@@ -78,6 +78,12 @@ type Hub struct {
 	// dispatch loop dead, so nothing else makes the outage observable.
 	dispatchExited atomic.Bool
 
+	// runDone closes when Run returns, after dispatchExited is set. Stop and
+	// GracefulStopContext only signal the loop; whoever started Run joins it
+	// here (Done) before releasing what the loop reads. Made by NewHub; nil
+	// on the struct-literal hubs internal tests build.
+	runDone chan struct{}
+
 	// fatalFn runs when the panic breaker trips (3 panics/60s). A hub that
 	// panicked three times in a minute has unknown state, so production exits
 	// the process and lets the supervisor restart it rather than serving
@@ -200,6 +206,9 @@ type Hub struct {
 // panics more than 3 times within a 60-second window it stops permanently to
 // avoid a tight crash loop.
 func (h *Hub) Run() {
+	if h.runDone != nil {
+		defer close(h.runDone)
+	}
 	h.running.Store(true)
 	defer h.dispatchExited.Store(true)
 	var panicCount int
@@ -291,6 +300,13 @@ func (h *Hub) Run() {
 // Stop signals Run to exit. Safe to call multiple times.
 func (h *Hub) Stop() {
 	h.stopOnce.Do(func() { close(h.stop) })
+}
+
+// Done returns a channel that closes once Run has returned, with
+// DispatchAlive already false. Stop and GracefulStopContext do not wait for
+// that, so a caller that must know the loop is gone waits here.
+func (h *Hub) Done() <-chan struct{} {
+	return h.runDone
 }
 
 // StopLiveKit stops and reaps the owned companion before a restart handoff.

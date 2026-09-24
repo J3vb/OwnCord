@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"slices"
 	"testing"
+	"time"
 )
 
 // The composite-close contract, as three properties. Before B3-3's rewrite
@@ -101,6 +102,58 @@ func TestAppClose_IsIdempotent(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("closer ran %d times, want exactly 1", calls)
+	}
+}
+
+// fakeDispatchHub is a hub whose dispatch loop exits only when the test
+// says so: stopped closes when GracefulStopContext is called, and done is
+// the loop's own exit.
+type fakeDispatchHub struct {
+	stopped chan struct{}
+	done    chan struct{}
+}
+
+func (h *fakeDispatchHub) GracefulStopContext(context.Context) { close(h.stopped) }
+func (h *fakeDispatchHub) Done() <-chan struct{}               { return h.done }
+
+// TestStopHub_WaitsForTheDispatchLoopToExit pins the join the hub close step
+// adds after GracefulStopContext. That call only signals the loop; without
+// the join Run could return with dispatch still alive, which is what the
+// event-persistence row of the stage-failure test caught intermittently.
+func TestStopHub_WaitsForTheDispatchLoopToExit(t *testing.T) {
+	hub := &fakeDispatchHub{stopped: make(chan struct{}), done: make(chan struct{})}
+	returned := make(chan error, 1)
+	go func() { returned <- stopHub(context.Background(), hub) }()
+
+	<-hub.stopped
+	select {
+	case err := <-returned:
+		t.Fatalf("stopHub returned (%v) while the dispatch loop was still running", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(hub.done)
+	select {
+	case err := <-returned:
+		if err != nil {
+			t.Fatalf("stopHub() = %v, want nil once the loop exited", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stopHub did not return after the dispatch loop exited")
+	}
+}
+
+// TestStopHub_BoundedByTheShutdownBudget pins that the join cannot wedge
+// Close: a loop that never exits costs the step its budget, reported as an
+// error, and the walk goes on to the steps below it.
+func TestStopHub_BoundedByTheShutdownBudget(t *testing.T) {
+	hub := &fakeDispatchHub{stopped: make(chan struct{}), done: make(chan struct{})}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := stopHub(ctx, hub)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stopHub() = %v, want it to report the expired budget", err)
 	}
 }
 

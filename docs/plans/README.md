@@ -89,7 +89,7 @@ Planning documents are not trackers. Do not read a defect count out of one.
 | Phase order and gates      | [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md)             |
 | Current measured baseline  | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                             |
 
-Current ledger summary (updated 2026-09-23): **452 fixed / 1 open / 4 declined / 1 duplicate = 458**
+Current ledger summary (updated 2026-09-23): **453 fixed / 1 open / 4 declined / 1 duplicate = 459**
 (OC-0455 to OC-0457, the product causes of the fullstack media e2e flakes, and
 OC-0458, the soak's single-read DOM node sample, are recorded and fixed;
 the fourth observed failure, CI run 35813785291 on PR #1719 (`long-session.spec.ts:176`, the

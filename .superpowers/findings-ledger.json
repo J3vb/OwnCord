@@ -1,5 +1,5 @@
 {
-  "nextId": 459,
+  "nextId": 460,
   "findings": [
     {
       "id": "OC-0001",
@@ -10517,19 +10517,20 @@
     },
     {
       "id": "OC-0454",
-      "title": "A simultaneous burst of N chat sends acknowledges the last sender ~N x 6 ms later on 2 vCPUs",
-      "file": "Server/db/db.go",
-      "line": 271,
+      "title": "A simultaneous burst of N chat sends acknowledges the last sender roughly N hops later; the hop is per-frame fan-out CPU, not the writer checkout",
+      "file": "Server/ws/serve_pumps.go",
+      "line": 17,
       "severity": "low",
-      "why": "Every chat send takes the single SQLite writer connection twice (the message transaction, then UpdateReadState) and each checkout is held only 0.4-0.6 ms, but the pool handoff to the next waiter takes ~5.5-6 ms because the woken sender competes for the two vCPUs with the previous send's 100-recipient TLS fan-out (writePump wakeups) and the per-statement helper goroutines. Under spread-out arrivals the queue is empty and a send acknowledges in ~5 ms; when N senders hit the writer in the same instant they serialize and the last one waits ~N x 6 ms. The operational profile's storm made all 100 senders phase-locked (OC-0445) and measured exactly that (~600 ms). A real population rarely synchronizes 100 keystrokes, but a burst of 20-30 (a shared reaction to one event) would cost the last sender 120-180 ms on the reference hardware, so the shape is worth knowing rather than a defect to fix blind.",
-      "repro": "Remove the phase preservation from Server/scripts/k6/ws-load.js: replace the three phasedInterval(socket, name, period, fn) calls with plain socket.setInterval(fn, period), so every socket's timers restart from the storm instant, then run the operational profile and read ws_broadcast_latency_ms{phase:upload}: about 500-750 ms p95 at 50 sends/s, against 40-90 ms with the same throughput spread out. Locally, count writer checkouts (sql.DBStats) and time the driver connection between ResetSession and IsValid: hold 0.4 ms, gap ~6 ms, both unchanged by the burst.",
-      "evidence": "Runs 35852682786 (10 s buckets: 573/520/524/554/582/506/557/531 ms p95 from t=180 s on self_signed, 3-69 ms before) and 35856013841/35856019988 (phase-preserved: 41-96 ms p95). Local 2-core measurements 2026-09-23: checkout hold 0.40-0.60 ms, idle gap 5.5-6.1 ms, ~5000 checkouts per 30 s, before and after the storm; chat_send arrival histogram 10 vs 100 per 50 ms slot. runtime/metrics sched latency p50 0.4-0.65 ms, p99 5-25 ms, unchanged.",
+      "why": "When N senders hit the server in the same instant their sends serialize on the single SQLite writer, so the last sender's acknowledgement waits N hops. Re-profiled 2026-09-23 (perf/oc-0454-single-writer-checkout), the hop is not the checkout: the message transaction holds the writer 0.31-0.33 ms p50 (0.72-0.85 ms p95) under the burst, and the gap to the next holder is 0.44-0.49 ms p50. The rest is CPU. A 100-sender burst makes 100 transactions plus 100 x 100 = 10,000 WebSocket frames inside about 100 ms, and every frame is its own TLS record and write syscall (coder/websocket flushes each message; there is no API to write several before one flush). writePump is 57% of server CPU and the write syscall alone 30%. Two vCPUs are saturated for the burst window while the 2 s average is ~0.2 cores, so the writer's next waiter queues behind fan-out goroutines. Each send also took the writer twice (message transaction, then the author's UpdateReadState). That second checkout is now folded into the transaction: writer waits halved, but the burst p95 moved only ~7%, because the checkouts were never the dominant cost. Separately, about half of what ws-load.js reports as acknowledgement latency in a burst is the generator: each k6 VU parses up to 99 inbound chat_message frames before it sees its own chat_send_ok. Server-side, client-send to ack-written was 72/115 ms p50/p95 against 160/318 ms measured by k6 on the same run. A real population rarely presses Enter in unison. The residual shape is a property of per-frame fan-out cost, not a correctness defect.",
+      "repro": "K6_SEND_PHASE=aligned (ws-load.js, default spread) puts every VU's sends on the same epoch-aligned 2 s boundary. Locally: server pinned to CPUs 0-1 with taskset, k6 v1.3.0 pinned to 2-3, capacity profile, K6_PEAK_VUS=100 K6_RAMP=30s K6_SUSTAIN=90s, TLS self_signed, no voice leg. Read ws_broadcast_latency_ms from k6-summary.json, and db_writer_wait_count/_seconds deltas from /api/v1/metrics.",
+      "evidence": "Original: runs 35852682786 (10 s buckets: 573/520/524/554/582/506/557/531 ms p95 from t=180 s on self_signed, 3-69 ms before) and 35856013841/35856019988 (phase-preserved: 41-96 ms p95); local 2-core timing then put the checkout hold at 0.40-0.60 ms and the idle gap at 5.5-6.1 ms. Re-measured 2026-09-23 on a 4-CPU sandbox with the split above, interleaved, dev (20bcfdf8) vs one-checkout fix (8c49f320). Aligned: ack p50/p95/p99 160/318/345 and 154/319/355 ms on dev, 143/298/322 and 146/296/324 ms on the fix; delivery p95 318/320 vs 299/297 ms. Writer waits per 60 s of sustain 6030/5944 on dev vs 2972/3019 on the fix, wait time 191/180 s vs 158/155 s. Spread (default): ack 4/18/29 vs 4/18/30 ms, delivery p95 20 vs 19 ms, unchanged. Diagnostic build (not committed), aligned: server-side client-send to chat_send_ok written 72/115 ms p50/p95 on dev and 60-65/110-116 ms on the fix; SendMessage service time 65/108 ms vs 51-55/100-105 ms; writer transaction hold 0.31-0.33 ms p50; gap between holds 0.44-0.49 ms p50. 30 s CPU profile under the burst: ws.writePump 57% cumulative, write syscall 30%, SQLite work ~10%; the block profile's only send-path wait is database/sql.(*DB).conn (BeginTx 58%, UpdateReadState 40% on dev).",
       "status": "open",
       "found": "2026-09-23",
       "hunt": "oc-0445-diagnosis",
       "lens": "run-the-thing",
       "finder": "fm/oc-0445-fable",
-      "suggestedFix": "Measure before touching: one checkout per send (UpdateReadState inside the message transaction, ignoring its error to keep it best-effort) halves the hops; batching writePump frames or lowering per-frame TLS cost shortens each hop. Neither is justified by a real-population shape yet."
+      "suggestedFix": "Done: one writer checkout per send (the author's read-state upsert runs inside CreateMessageWithMentions / CreateMessageDelivery). What remains is per-frame fan-out cost: one TLS record and one write syscall per frame per recipient. Coalescing queued frames into one flush needs support coder/websocket does not expose (or a connection wrapper), so it is not a small change and is not justified by a real-population shape yet. Cheaper per-frame trims exist (writePumpWrite builds a context.WithTimeout per frame, ~7% of CPU) but would not change the shape.",
+      "note": "2026-09-23: kept open. The one-checkout change (8c49f320, perf/oc-0454-single-writer-checkout) halves writer checkouts and takes ~7% off the aligned-burst p95. The per-hop cost it was filed against turned out to be fan-out CPU plus generator-side backlog, so the shape remains."
     },
     {
       "id": "OC-0455",
@@ -10601,6 +10602,28 @@
         "commit": "5fe4845e",
         "test": "Client/tests/e2e/fullstack/long-session.spec.ts",
         "revertProof": "n/a"
+      }
+    },
+    {
+      "id": "OC-0459",
+      "status": "fixed",
+      "title": "App.Run could return with the hub dispatch goroutine still running",
+      "file": "Server/internal/app/lifecycle.go",
+      "line": 313,
+      "severity": "low",
+      "why": "Affected property: when Run returns, every goroutine a started stage spawned has exited. The hub close step called GracefulStopContext, which only closes the hub's stop channel and never waits for Run to return. On an early start failure right after the hub stage (event-persistence, router), the `go hub.Run()` StartRuntime spawned may not even have been scheduled yet, so Close finished and Run returned with DispatchAlive still true and the loop yet to run. Not a test bug: TestAppRun_EveryStageFailure_ReleasesEverythingItStarted asserts exactly the contract, and failed intermittently in CI's deadlock-tag pass (2026-09-23, on a PR that touched no Server code) with \"hub dispatch is still alive after Run returned\".",
+      "repro": "cd Server && go test -race -tags deadlock -c -o app.test ./internal/app/, then run app.test -test.run 'TestAppRun_EveryStageFailure_ReleasesEverythingItStarted/event-persistence' -test.count=200 -test.cpu=1,2 alongside six busy-loop processes on a 4-core box: 24 of 400 failed on dev at 233b93f. An idle -count=200 run passed, which is why it surfaced only as a rare CI flake.",
+      "suggestedFix": "Give the hub a Done channel closed when Run returns, and have the app's hub close step wait on it after GracefulStopContext, bounded by the shutdown budget.",
+      "confidence": "high",
+      "found": "2026-09-23",
+      "hunt": "ci-flake-2026-09-23",
+      "lens": "ordering-boundary",
+      "finder": "claude",
+      "fixed": "2026-09-23",
+      "fix": {
+        "commit": "bbebc39",
+        "test": "Server/internal/app/close_test.go TestStopHub_WaitsForTheDispatchLoopToExit / TestStopHub_BoundedByTheShutdownBudget; Server/ws/observability_test.go TestDone_ClosesOnlyOnceDispatchHasExited",
+        "revertProof": "both TestStopHub_* fail with the join removed from stopHub; the stress repro above goes from 24/400 failed to 400/400 passed"
       }
     }
   ]

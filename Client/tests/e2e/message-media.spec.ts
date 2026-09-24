@@ -15,11 +15,16 @@ import zlib from "node:zlib";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
+  grantExternalConsent,
   MOCK_LOGIN_RESPONSE,
   MOCK_PINNED_MESSAGES,
   navigateToMainPage,
   waitForWsReady,
 } from "./helpers";
+
+// These specs cover what loads once the viewer consented (B9-8); the consent
+// gate itself is b9-content-consent.spec.ts.
+test.beforeEach(({ page }) => grantExternalConsent(page));
 
 // ---------------------------------------------------------------------------
 // Fixtures
