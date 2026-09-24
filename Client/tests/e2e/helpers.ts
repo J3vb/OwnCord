@@ -481,12 +481,11 @@ export function buildTauriMockScript(opts: {
    *  and external images can be exercised. Without it every broker call is
    *  refused as "unavailable" (the mocked suite has no external network).
    *  `preview` keys on the requested URL; `image` keys on `url:<url>` or
-   *  `handle:<handle>`. A preview value that is a bare failure-class string
-   *  refuses just that request; a request with no entry keeps the refusing
-   *  default. */
+   *  `handle:<handle>`. A preview or image value that is a bare failure-class
+   *  string refuses just that request; a request with no entry keeps the
+   *  refusing default. */
   externalContent?: {
     preview?: Record<string, Record<string, unknown> | string>;
-    /** Each entry is the image's bytes, or a broker refusal-class string. */
     image?: Record<string, number[] | string>;
   };
 }): string {
