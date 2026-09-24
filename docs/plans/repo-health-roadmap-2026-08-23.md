@@ -1285,7 +1285,12 @@ the checkpoint at which the owner confirms or revises B10's cut list.)_
 - Message Requests, moderation, appeals, NSFW consent, and external content
   preserve server security and privacy rules.
 - Accessibility tests and manual assistive-technology checks have no release
-  blocker.
+  blocker. _(amended 2026-09-24, owner decision: the manual screen-reader check
+  is dropped; the automated accessibility evidence every B9 lane carries (ARIA
+  name/role and keyboard/focus tests) satisfies the screen-reader clause. The
+  remaining manual checks — keyboard, pointer, contrast, focus, zoom/reflow and
+  reduced motion — stay in full; "assistive-technology checks" no longer
+  includes a manual screen-reader pass.)_
 - Phone/tablet layouts expose all required navigation and actions. _(amended
   2026-09-18, owner decision: deferred to post-beta with B8 — there is no
   phone/tablet client in the beta.)_
@@ -1299,7 +1304,11 @@ the checkpoint at which the owner confirms or revises B10's cut list.)_
 - automated accessibility reports and manual keyboard/screen-reader/touch
   checklist (_amended 2026-09-18, owner decision: keyboard, screen reader,
   zoom, reflow, contrast, and reduced-motion checks stay in full for the
-  desktop beta; the touch-device half moves with B8_);
+  desktop beta; the touch-device half moves with B8_); _(amended 2026-09-24,
+  owner decision: the manual screen-reader half of that checklist is dropped —
+  the automated accessibility evidence satisfies the screen-reader clause — so
+  the manual checklist keeps keyboard, pointer, contrast, focus, zoom/reflow
+  and reduced motion_);
 - visual regression and responsive evidence (_amended 2026-09-18: responsive
   device evidence moves with B8; desktop visual regression stays_);
 - privacy/network inspection for consent-gated content;
