@@ -1,6 +1,6 @@
 # Plan: B9-10 — Report local messages, users and attachments and show own report status
 
-**Status:** IMPLEMENTED — native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-10-impl` from `dev` `166d71e44ce5dfde6455e3f108ce88a8def9c88f`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-10-impl` from `dev` `166d71e44ce5dfde6455e3f108ce88a8def9c88f`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-10 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-10-local-report-intake`; branch from current `dev`, PR to `dev` only.
@@ -351,4 +351,4 @@ the accessible-name check misread both failed before their fixes.
   native recordings were declined 2026-09-24.
 
 BPR-070's evidence row and status are not changed here: its B9 half closes at
-B9-26's joined journey with the owner's native recordings.
+B9-26's joined journey.

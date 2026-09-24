@@ -1,6 +1,6 @@
 # Plan: B9-21 — Polish desktop shell navigation without rebuilding it on every update
 
-**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-21-impl` from `dev` `55589d43`, merging `dev` `838bab09` (B9-7); the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-21-impl` from `dev` `55589d43`, merging `dev` `838bab09` (B9-7); the outcome and evidence are in [Implementation record](#implementation-record--2026-09-23).
 
 > **Milestone:** B9-21 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-21-shell-polish-and-performance`; branch from current `dev`, PR to `dev` only.
