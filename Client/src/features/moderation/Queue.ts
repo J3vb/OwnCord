@@ -212,6 +212,9 @@ function actionErrorText(w: ActionWrite, err: unknown): string {
     return t(w.kind === "kick" || w.kind === "ban" ? "act.refusedEnforce" : "act.refused");
   }
   if (isStatus(err, 404) && w.kind === "lift") return t("act.liftNone");
+  // 409 ALREADY_DELETED (B9-14's removal of an already-removed message): a
+  // known end state, not the uncertain "may still have been recorded" answer.
+  if (isStatus(err, 409, "ALREADY_DELETED")) return t("act.alreadyDeleted");
   if (isStatus(err, 400) && (err as ApiClientError).message !== "") {
     return t("act.invalid", { message: (err as ApiClientError).message });
   }

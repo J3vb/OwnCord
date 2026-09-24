@@ -436,6 +436,25 @@ describe("refusals", () => {
     expect(acts(root)).toBeNull();
   });
 
+  it("maps a 409 ALREADY_DELETED to the already-removed text, not the unknown one", async () => {
+    // B9-14's removal of a message the author already deleted. Sent as a
+    // timeout here because this catalog file owns no removal form yet (B9-14
+    // is a separate PR); the mapping is on the code, not the action kind.
+    const root = await opened(held("r1"));
+    await timeOut(root, "10");
+    writes[0]!.reject(
+      refused(409, "ALREADY_DELETED", "message is deleted: cannot delete this message"),
+    );
+    await flush();
+    expect(alerts(root)).toBe(
+      "That message was already removed, so there is nothing left to remove.",
+    );
+    // A refusal, not the uncertain "no answer" case: the report is still read
+    // again, as for every other refusal.
+    expect(details.at(-1)!.arg).toBe("r1");
+    expect(lists).toHaveLength(2);
+  });
+
   it("closes the report when the act route says it is gone", async () => {
     const root = await opened(held("r1"));
     await timeOut(root, "10");

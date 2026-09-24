@@ -111,6 +111,7 @@ export const moderationText = defineCatalog("moderation", {
     "The server refused this action. You can act only on members whose role is below yours.",
   "act.invalid": "The server didn't accept this: {message}",
   "act.liftNone": "There's no timeout to lift: it has ended or was already lifted.",
+  "act.alreadyDeleted": "That message was already removed, so there is nothing left to remove.",
   "act.unknown": "Couldn't confirm this action. Check the history before trying again.",
   "act.draftLost":
     "You can no longer act on this report here, so the unsaved reason was discarded.",

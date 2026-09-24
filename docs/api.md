@@ -244,6 +244,7 @@ endpoints return plain-text errors — see their section):
 | `INVALID_INPUT` / `BAD_REQUEST` | 400         | Malformed body, missing required fields, invalid query params, or an upload exceeding the size limit (oversize uploads are rejected 400, not 413; the only 413 in the API is the plugin-install endpoint's plain-text "plugin upload too large") |
 | `CONFLICT`                      | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                           |
 | `DUPLICATE_REPORT`              | 409         | The reporter already has an open or assigned report against this exact target (B5-8)                                                                                                                                                             |
+| `ALREADY_DELETED`               | 409         | The target of a removal was already soft-deleted, e.g. the author deleted the reported message first (B9-14)                                                                                                                                     |
 | `ALREADY_APPEALED`              | 409         | An appeal against this moderation action already exists, in any state — decided appeals can never be re-appealed (B5-10)                                                                                                                         |
 | `SELF_REVIEW`                   | 403         | A moderator acting on their own filed report, deciding/assigning the appeal of an action they themselves took where another eligible moderator exists, or being that appeal's own appellant (B5-8/B5-10)                                         |
 | `REVERSAL_FAILED`               | 409         | Overturning an appeal hit a genuine error applying its ledger reversal — nothing committed, including the decision itself (B5-10)                                                                                                                |
@@ -2375,7 +2376,9 @@ for the removed message exactly like the channel purge route does.
 Same shape as `POST /api/v1/moderation/users/{id}/warn`/`timeout` below,
 plus the report read's own `403 SELF_REVIEW` (also given when the caller
 files the report and then tries to act on it themselves) and `404 NOT_FOUND`
-(missing report, or the caller is its subject).
+(missing report, or the caller is its subject). A `removal` whose target
+message is already deleted answers `409 ALREADY_DELETED` (never 404, which
+would read as the report itself being gone).
 
 ---
 
