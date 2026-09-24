@@ -8,12 +8,11 @@
  * tab switch and on closing the overlay).
  */
 
-import { createElement, appendChildren, setText } from "@lib/dom";
+import { createElement, appendChildren, setText, focusIsOurs } from "@lib/dom";
 import { errorText } from "@lib/api";
 import type { RecoveryKitStatus } from "@lib/api";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { accountText as t } from "../../i18n/account";
-import { focusIsOurs } from "./helpers";
 
 const MUTED = "color:var(--text-muted);font-size:13px;margin-bottom:12px";
 // --text-danger is the qualified error-text token; --red (the fill) reads

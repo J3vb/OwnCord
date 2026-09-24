@@ -41,6 +41,14 @@ function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPa
 
 const testProfiles: SimpleProfile[] = [{ name: "Test Server", host: "localhost:8443" }];
 
+/** What Chromium does to a focused control once it is disabled; jsdom does not. */
+function dropFocusToBody(): void {
+  const sink = document.createElement("button");
+  document.body.appendChild(sink);
+  sink.focus();
+  sink.remove();
+}
+
 describe("ConnectPage", () => {
   let container: HTMLDivElement;
 
@@ -185,6 +193,32 @@ describe("ConnectPage", () => {
     });
     expect(errorBanner.getAttribute("role")).toBe("alert");
     expect(passwordInput.getAttribute("aria-describedby")).toBe(errorBanner.id);
+    expect(document.activeElement).toBe(passwordInput);
+
+    page.destroy?.();
+  });
+
+  it("returns focus to the password field after the server rejects a login", async () => {
+    const onLogin = vi.fn().mockRejectedValue(new Error("Invalid credentials"));
+    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
+    page.mount(container);
+
+    (container.querySelector("#host") as HTMLInputElement).value = "localhost:8443";
+    (container.querySelector("#username") as HTMLInputElement).value = "testuser";
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.value = "long-enough-password";
+    passwordInput.focus();
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(passwordInput.disabled).toBe(true);
+    dropFocusToBody();
+
+    const errorBanner = container.querySelector(".error-banner")!;
+    await vi.waitFor(() => {
+      expect(errorBanner.textContent).toContain("Invalid credentials");
+    });
+    expect(errorBanner.getAttribute("role")).toBe("alert");
     expect(document.activeElement).toBe(passwordInput);
 
     page.destroy?.();

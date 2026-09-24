@@ -1,7 +1,7 @@
 // LoginForm — login/register form sub-component for ConnectPage.
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
-import { createElement, setText, appendChildren, qs, setOwnedTimeout } from "@lib/dom";
+import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
@@ -188,6 +188,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // the banner/shake, but the overlay must stay up so the code can be
   // re-entered — see updateTotpOverlay().
   let totpPending = false;
+  // What had focus when a request disabled the form, restored when it settles.
+  let focusBeforeBusy: Element | null = null;
 
   // --- cached DOM references ---
   let formTitle: HTMLHeadingElement;
@@ -639,6 +641,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // ---------------------------------------------------------------------------
 
   function transitionTo(state: FormState, error?: string, field: FieldId | null = null): void {
+    const wasBusy = isBusy(formState);
+    const focused = document.activeElement;
     formState = state;
     errorMessage = error ?? "";
     // A validation error names its field; a server error names none. Kept on
@@ -653,6 +657,22 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     updateTotpOverlay();
     updateAutoConnectOverlay();
     updateFormInputsDisabled();
+
+    // Disabling the inputs drops a focused one to <body>; once the request
+    // settles, put focus back where the user submitted from.
+    if (!wasBusy && isBusy(state)) {
+      focusBeforeBusy = focused;
+    } else if (wasBusy && !isBusy(state)) {
+      const restore = focusBeforeBusy;
+      focusBeforeBusy = null;
+      if (restore instanceof HTMLElement && restore !== document.body && focusIsOurs(restore)) {
+        restore.focus();
+      }
+    }
+  }
+
+  function isBusy(state: FormState): boolean {
+    return state === "loading" || state === "connecting" || state === "auto-connecting";
   }
 
   /** The input a banner error for `field` belongs to. */
@@ -664,8 +684,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   }
 
   function updateSubmitButton(): void {
-    const isLoading =
-      formState === "loading" || formState === "connecting" || formState === "auto-connecting";
+    const isLoading = isBusy(formState);
     // A closed server refuses registration outright — disable the control and
     // let the notice state why, rather than collecting a doomed attempt.
     const refused = isRegisterRefused();
@@ -774,8 +793,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   }
 
   function updateFormInputsDisabled(): void {
-    const disable =
-      formState === "loading" || formState === "connecting" || formState === "auto-connecting";
+    const disable = isBusy(formState);
     hostInput.disabled = disable;
     usernameInput.disabled = disable;
     passwordInput.disabled = disable;
@@ -1013,6 +1031,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     } finally {
       totpSubmitBtn.disabled = false;
       setText(totpSubmitBtn, connectText("totp.verify"));
+      if (totpPending && focusIsOurs(totpSubmitBtn)) totpSubmitBtn.focus();
     }
   }
 

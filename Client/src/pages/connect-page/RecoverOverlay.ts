@@ -3,7 +3,7 @@
 // startup bundle. The secret field takes a recovery kit secret or an
 // owner-issued recovery credential; the server tells them apart by shape.
 
-import { createElement, setText, appendChildren } from "@lib/dom";
+import { createElement, setText, appendChildren, focusIsOurs } from "@lib/dom";
 import { connectText } from "../../i18n/connect";
 import { recoverText } from "../../i18n/recover";
 
@@ -172,6 +172,9 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
     } finally {
       submit.disabled = false;
       setText(submit, recoverText("recover.submit"));
+      if (!element.classList.contains("totp-overlay--hidden") && focusIsOurs(submit)) {
+        submit.focus();
+      }
     }
   }
 

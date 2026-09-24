@@ -4,7 +4,7 @@
  * and separated field rows.
  */
 
-import { createElement, appendChildren, setText } from "@lib/dom";
+import { createElement, appendChildren, setText, focusIsOurs } from "@lib/dom";
 import type { UserStatus } from "@lib/types";
 import { ApiClientError, errorText } from "@lib/api";
 import type { SessionInfo } from "@lib/api";
@@ -23,7 +23,7 @@ import {
 } from "@components/message-list/attachments";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { buildRecoveryKitSection, buildRegenerateCodes, buildShownOnce } from "./RecoverySections";
-import { focusIsOurs, outcomeEl, showOutcome } from "./helpers";
+import { outcomeEl, showOutcome } from "./helpers";
 import { accountText as t } from "../../i18n/account";
 
 const log = createLogger("AccountTab");

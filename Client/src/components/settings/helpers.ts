@@ -219,17 +219,6 @@ export function showOutcome(el: HTMLElement, outcome: Outcome, text: string): vo
   setText(el, text);
 }
 
-/**
- * Whether focus is still ours to move after a control was disabled, hidden or
- * rebuilt: it fell to `<body>` (Chromium blurs a disabled or hidden focused
- * control) or is still inside `owner`. False once the user has moved it
- * elsewhere, so an async result never pulls focus out of the field they are in.
- */
-export function focusIsOurs(owner: Element): boolean {
-  const active = document.activeElement;
-  return active === null || active === document.body || owner.contains(active);
-}
-
 // ---------------------------------------------------------------------------
 // Theme application
 // ---------------------------------------------------------------------------
