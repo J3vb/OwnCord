@@ -313,6 +313,7 @@ function buildProfileFields(
       // Both are sent unconditionally, empty string included: "" is how the
       // API says "clear it", and omitting a field means "leave it alone".
       showOutcome(statusEl, "error", "");
+      const hadFocus = document.activeElement === saveBtn;
       saveBtn.disabled = true;
       setText(saveBtn, t("profile.saving"));
       void options
@@ -329,6 +330,7 @@ function buildProfileFields(
         .finally(() => {
           saveBtn.disabled = false;
           setText(saveBtn, t("profile.save"));
+          if (hadFocus) saveBtn.focus();
         });
     },
     { signal },
@@ -418,11 +420,13 @@ function buildPasswordSection(
       setText(pwError, "");
       // In-flight state: a second click would burn an attempt against the
       // server's lockout counter with the same credentials.
+      const hadFocus = document.activeElement === pwBtn;
       pwBtn.disabled = true;
       setText(pwBtn, t("password.changing"));
       const finish = (): void => {
         pwBtn.disabled = false;
         setText(pwBtn, t("password.change"));
+        if (hadFocus) pwBtn.focus();
       };
       void options
         .onChangePassword(oldVal, newVal)
@@ -536,6 +540,7 @@ function buildTotpEnrollForm(
         return;
       }
       setText(errorEl, "");
+      const hadFocus = formArea.contains(document.activeElement);
       submitBtn.disabled = true;
       setText(submitBtn, t("totp.requesting"));
 
@@ -547,11 +552,13 @@ function buildTotpEnrollForm(
           enrollArea.style.display = "block";
           submitBtn.disabled = false;
           setText(submitBtn, t("totp.submit"));
+          if (hadFocus) enrollArea.querySelector<HTMLElement>("button, input")?.focus();
         })
         .catch((err: unknown) => {
           setText(errorEl, errorText(err, t("totp.enableFailed")));
           submitBtn.disabled = false;
           setText(submitBtn, t("totp.submit"));
+          if (hadFocus) submitBtn.focus();
         });
     },
     { signal },

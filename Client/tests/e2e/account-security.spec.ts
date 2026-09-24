@@ -214,9 +214,11 @@ test.describe("Settings > Account — profile edit", () => {
     ]);
 
     await page.locator("[data-testid='display-name-input']").fill("Ada");
-    await page.locator("[data-testid='profile-save-btn']").click();
+    await page.locator("[data-testid='profile-save-btn']").focus();
+    await page.keyboard.press("Enter");
 
     await expect(page.locator("[data-testid='profile-error']")).toHaveText("display_name too long");
+    await expect(page.locator("[data-testid='profile-save-btn']")).toBeFocused();
     await expect(page.locator("[data-testid='display-name-input']")).toHaveValue("Ada");
     await expect(page.locator(".account-header-name")).toHaveText("testuser");
     await expect(
@@ -346,10 +348,14 @@ test.describe("Settings > Account — enable and confirm 2FA", () => {
     // Enable reveals the password step; the QR is only shown after it succeeds.
     await section.locator("[data-testid='totp-enable-btn']").click();
     await section.locator("[data-testid='totp-password-input']").fill("password123");
-    await section.locator("button", { hasText: "Submit" }).click();
+    await section.locator("button", { hasText: "Submit" }).focus();
+    await page.keyboard.press("Enter");
 
     await expect(section.locator("[data-testid='totp-qr-uri']")).toHaveText(QUIET_URI);
     await expect(section.locator("[data-testid='totp-backup-codes']")).toContainText(CODES[0]!);
+    // The focused Submit is hidden with the password step; focus moves to the
+    // first control of the code step (the one-time codes' copy button).
+    await expect(section.locator("[data-testid='totp-copy-backup-codes']")).toBeFocused();
     await expect(section.locator("[data-testid='totp-status-badge']")).toHaveText("Disabled");
 
     const enableCall = await waitForFetch(page, requestTo("POST", "/users/me/totp/enable"));

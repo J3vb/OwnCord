@@ -205,10 +205,13 @@ test.describe("B9-23 account settings feedback and disclosure", () => {
     await pane.locator("#pw-old").fill("wrongold");
     await pane.locator("#pw-new").fill("newpassword123");
     await pane.locator("#pw-confirm").fill("newpassword123");
-    await pane.getByRole("button", { name: "Change Password" }).click();
+    const changeBtn = pane.getByRole("button", { name: "Change Password" });
+    await changeBtn.focus();
+    await page.keyboard.press("Enter");
 
     const status = pane.locator("[data-testid='pw-change-status']");
     await expect(status).toHaveText("Incorrect old password");
+    await expect(changeBtn).toBeFocused();
     await expect(status).toHaveAttribute("role", "alert");
     await expect(status).toHaveClass(/form-error/);
 
