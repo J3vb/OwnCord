@@ -270,8 +270,9 @@ B9-11 left no server gap: no server, protocol, schema or migration change.
   the adapter test that pinned "notes and events are dropped" now pins that
   they are kept apart, and still that no upload id is kept).
 - **Not touched:** navigation, MainPage, dispatcher, global stores (read-only
-  use of `authStore` and `membersStore`), tokens, the catalog API. The PRD
-  gets only its B9-12 status line and row.
+  use of `authStore` and `membersStore`), tokens, the catalog API, the PRD
+  (its shared status table and per-lane paragraphs are left alone so other
+  open B9 PRs do not conflict; this record is the status).
 - **Budget.** Measured at the base: startup 93,955 B, MainPage 63,980 B; with
   this change 94,100 B of 95,500 B and 63,978 B of 64,000 B, no budget change.
   The review, history and copy load with the lazy Moderation Center chunk;
