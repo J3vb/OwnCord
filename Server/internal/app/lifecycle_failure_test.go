@@ -148,7 +148,9 @@ func TestAppRun_ListenerBindFailure_ReleasesEverythingItStarted(t *testing.T) {
 func waitForHealth(t *testing.T, port int, runErr <-chan error) {
 	t.Helper()
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
-	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
+	// Startup migrates a fresh DB; under -race on a loaded Windows CI runner that
+	// alone has taken 15s, so the deadline leaves generous headroom.
+	for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); {
 		resp, healthErr := http.Get(healthURL) //nolint:gosec // G107: loopback URL built from the test's own port
 		if healthErr == nil {
 			_, _ = io.Copy(io.Discard, resp.Body)

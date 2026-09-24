@@ -3,10 +3,12 @@ package ws
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
-	"strings"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // fullV2Registry registers the same handler set NewHub wires, so the
@@ -175,9 +177,24 @@ func TestMigrationComplete_ConstructorHandlerParity(t *testing.T) {
 }
 
 // TestAllV2Types_SmokeDispatch verifies that dispatching a minimal command
-// for every V2-registered type does not panic (validates deps wiring).
+// for every V2-registered type does not panic (validates deps wiring). It runs
+// the registry NewHub wires over a migrated DB and real services, so any
+// panic is a failure: a deps type assertion that no longer matches, or a
+// handler dereferencing a dependency the hub leaves nil. Zero-value deps would
+// make the handlers nil-dereference instead, and on Windows a recovered nil
+// dereference is a hardware exception whose frame can land below a small
+// goroutine stack and corrupt the heap (golang/go#81238).
 func TestAllV2Types_SmokeDispatch(t *testing.T) {
-	r := fullV2Registry()
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	limiter := auth.NewRateLimiter()
+	r := newTestHub(t, database, limiter, service.New(database, limiter)).registry
 
 	// Minimal command for each V2 type — just needs Type() and UserID().
 	cmds := map[string]Command{
@@ -215,17 +232,10 @@ func TestAllV2Types_SmokeDispatch(t *testing.T) {
 			t.Errorf("no smoke command defined for V2 type %q", typ)
 			continue
 		}
-		// We only care that the deps type assertion succeeds (no "interface
-		// conversion" panic). Nil-pointer panics from zero-value DB/Limiter
-		// fields are expected and harmless for this smoke test.
 		func() {
 			defer func() {
 				if rec := recover(); rec != nil {
-					msg := fmt.Sprintf("%v", rec)
-					if strings.Contains(msg, "interface conversion") {
-						t.Errorf("V2 type %q: deps type assertion failed: %v", typ, rec)
-					}
-					// nil-pointer panics are expected with zero-value deps
+					t.Errorf("V2 type %q panicked: %v", typ, rec)
 				}
 			}()
 			// Bypass DispatchV2's own recover so we can inspect the panic value.

@@ -524,8 +524,13 @@ func TestHub_HandleMessage_InvalidJSON(t *testing.T) {
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
 
+// The hub is wired with a real MessageService: the chat rate limit lives in
+// SendMessage, so without one every send would be a recovered nil dereference
+// and the "error" replies counted below would say nothing about rate limiting.
 func TestHub_ChatSend_RateLimit(t *testing.T) {
-	hub, database := newTestHub(t)
+	database := openTestDB(t)
+	limiter := auth.NewRateLimiter()
+	hub := newTestHubDeps(t, database, limiter, service.New(database, limiter))
 	go hub.Run()
 	defer hub.Stop()
 
@@ -545,30 +550,42 @@ func TestHub_ChatSend_RateLimit(t *testing.T) {
 		"payload": payload,
 	})
 
-	// Send 12 messages rapidly — 11th and beyond should be rate-limited.
+	// Send 12 messages rapidly — the 11th and 12th should be rate-limited.
 	for range 12 {
 		hub.HandleMessageForTest(c, raw)
 	}
 
-	// Drain all messages, count errors — error replies are sent synchronously
-	// by handleMessage, so they are already buffered on the send channel.
-	errCount := 0
+	// Drain the replies — handleMessage sends them synchronously, so they are
+	// already buffered on the send channel. The limit is 10 sends per second.
+	sendOK, rateLimited, otherErr := 0, 0, 0
 drainLoop:
 	for {
 		select {
 		case got := <-send:
 			var resp map[string]any
-			if err := json.Unmarshal(got, &resp); err == nil {
-				if resp["type"] == "error" {
-					errCount++
+			if err := json.Unmarshal(got, &resp); err != nil {
+				continue
+			}
+			switch resp["type"] {
+			case "chat_send_ok":
+				sendOK++
+			case "error":
+				payload, _ := resp["payload"].(map[string]any)
+				if payload["code"] == "RATE_LIMITED" {
+					rateLimited++
+				} else {
+					otherErr++
 				}
 			}
 		default:
 			break drainLoop
 		}
 	}
-	if errCount == 0 {
-		t.Error("expected at least one rate-limit error response")
+	// The window slides, so a runner slow enough to spread the sends past one
+	// second may see fewer refusals; every send must still be one or the other.
+	if otherErr != 0 || sendOK+rateLimited != 12 || sendOK > 10 || rateLimited == 0 {
+		t.Errorf("12 sends: got %d chat_send_ok, %d RATE_LIMITED, %d other errors; want at most 10 sent, the rest rate-limited",
+			sendOK, rateLimited, otherErr)
 	}
 }
 
