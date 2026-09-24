@@ -38,6 +38,7 @@ import {
   URL_REGEX,
 } from "./content-parser";
 import { clearEmbedCaches, renderGenericLinkPreview } from "./embeds";
+import type { ExternalContentFailure } from "../../platform/contracts/externalContent";
 
 // The lightbox lives in attachments.ts, which renders attachment images and
 // must not import this module (that import was a cycle); re-exported here for
@@ -326,9 +327,11 @@ export function renderInlineImage(url: string): HTMLDivElement {
   // same-origin blob: URL, never from the webview loading `url` itself.
   const img = createElement("img", {
     alt: contentText("image.alt", { host }),
-    style:
-      "max-width: 100%; max-height: 350px; display: block; border-radius: 4px; cursor: pointer;",
+    style: "max-width: 100%; max-height: 350px; border-radius: 4px; cursor: pointer;",
   });
+  // Hidden until its bytes load: a loading or refused image is neither shown
+  // nor reachable as a control, so it can never open an empty lightbox.
+  img.hidden = true;
   wrap.appendChild(img);
 
   if (isKlipyUrl(url)) {
@@ -341,49 +344,54 @@ export function renderInlineImage(url: string): HTMLDivElement {
     wrap.appendChild(watermark);
   }
 
-  // On error: clear min-height so the wrapper collapses instead of
-  // holding a 200px empty reservation that can oscillate with virtual scroll.
-  const collapse = (): void => {
-    log.error("Image failed to load", { url });
-    wrap.style.minHeight = "";
-  };
-  recoverEvictedImage(img, { url });
-  img.addEventListener("error", collapse, { once: true });
-
   // The failure line and its bounded retry sit beside the image; the image is
   // hidden, not discarded, so retry can reuse it and tests keep one element.
-  const failure = renderFailureStatus(contentText("image.failed"), contentText("image.retry"), () =>
-    load(),
+  const failure = renderFailureStatus(
+    contentText("image.failed"),
+    contentText("image.retry"),
+    () => {
+      if (wrap.dataset.mediaState !== "loading") load();
+    },
   );
   failure.hidden = true;
   wrap.appendChild(failure);
+  const retry = failure.querySelector("button")!;
 
-  const showFailure = (): void => {
-    collapse();
+  // On failure: clear min-height so the wrapper collapses instead of
+  // holding a 200px empty reservation that can oscillate with virtual scroll.
+  const showFailure = (kind: ExternalContentFailure): void => {
+    log.error("Image failed to load", { url, failure: kind });
+    wrap.style.minHeight = "";
     // A refusal (blocked destination, wrong type, oversized, expired) is kept
     // distinct from a loaded image; the failure line never reads as success.
     wrap.dataset.mediaState = "failed";
     img.hidden = true;
+    // Only a transient "unavailable" answer is worth re-asking.
+    retry.hidden = kind !== "unavailable";
+    retry.removeAttribute("aria-disabled");
     failure.hidden = false;
   };
+  recoverEvictedImage(img, { url });
+  // Bytes that fail to decode, or an evicted image the broker can no longer
+  // re-fetch, land in the same typed failed state.
+  img.addEventListener("error", () => showFailure("unavailable"));
 
   // On load: clear min-height reservation and cache the natural rendered
   // height so future virtual-scroll rebuilds start at the correct size.
   // Measure synchronously — deferring to rAF loses the race with
   // ResizeObserver which can rebuild the DOM before the rAF fires.
-  img.addEventListener(
-    "load",
-    () => {
-      log.debug("Image loaded", { url: url.slice(0, 80), naturalH: img.naturalHeight });
-      wrap.style.minHeight = "";
-      const h = wrap.offsetHeight;
-      if (h > 0) cacheImageHeight(url, h);
-      wrap.dataset.mediaState = "loaded";
-      img.hidden = false;
-      failure.hidden = true;
-    },
-    { once: true },
-  );
+  img.addEventListener("load", () => {
+    log.debug("Image loaded", { url: url.slice(0, 80), naturalH: img.naturalHeight });
+    // A retry that succeeds hands keyboard focus from the retry to the image.
+    const refocus = failure.contains(document.activeElement);
+    wrap.style.minHeight = "";
+    wrap.dataset.mediaState = "loaded";
+    img.hidden = false;
+    failure.hidden = true;
+    const h = wrap.offsetHeight;
+    if (h > 0) cacheImageHeight(url, h);
+    if (refocus) img.focus();
+  });
 
   // Observe GIFs for visibility-based freeze/unfreeze + play/pause button.
   // When the animateGifs pref is disabled, start frozen so the first frame is
@@ -416,14 +424,14 @@ export function renderInlineImage(url: string): HTMLDivElement {
   function load(): void {
     // A retry rechecks consent and the current partition: a revoked grant
     // makes loadExternalImage refuse again with nothing fetched.
+    // A visible retry stays mounted (and focused) while it re-asks.
     wrap.dataset.mediaState = "loading";
     wrap.style.minHeight = `${cachedH ?? 200}px`;
-    failure.hidden = true;
+    retry.setAttribute("aria-disabled", "true");
     if (img.hasAttribute("src")) img.removeAttribute("src");
     void loadExternalImage({ url }).then((result) => {
       if (!result.ok) {
-        log.debug("External image refused", { failure: result.failure });
-        showFailure();
+        showFailure(result.failure);
         return;
       }
       img.src = result.value;

@@ -952,7 +952,7 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   // itself so the Tab cycle never escapes to the page behind it.
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");
-  overlay.setAttribute("aria-label", mediaControlsText("lightbox.close"));
+  overlay.setAttribute("aria-label", alt);
   overlay.tabIndex = -1;
 
   const imgWrap = createElement("div", { class: "image-lightbox-wrap" });

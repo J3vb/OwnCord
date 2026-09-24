@@ -241,6 +241,9 @@ export function createGifPicker(options: GifPickerOptions): {
           // A transient provider/network failure keeps the query and offers a
           // bounded retry; it never turns into the empty-results state (B9-9).
           showLoadError(contentText("gif.failed"), () => {
+            // The retry is replaced by the loading line, so keyboard focus
+            // moves to the search field rather than falling to <body>.
+            searchInput.focus();
             void loadGifs(searchInput.value.trim());
           });
         }

@@ -522,7 +522,8 @@
   color: var(--text-muted);
 }
 .msg-embed-status[hidden],
-.msg-media-fallback[hidden] {
+.msg-media-fallback[hidden],
+.msg-image img[hidden] {
   display: none;
 }
 .msg-media-fallback-text {

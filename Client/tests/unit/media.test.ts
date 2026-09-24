@@ -390,6 +390,63 @@ describe("media.ts", () => {
       expect(wrap.querySelector("img")!.hidden).toBe(true);
     });
 
+    it("offers no retry for a policy refusal", async () => {
+      imageMock.mockResolvedValue({ ok: false, failure: "blocked-destination" });
+      const wrap = renderInlineImage("https://example.com/blocked.png");
+      document.body.appendChild(wrap);
+      await vi.waitFor(() => {
+        expect(wrap.dataset.mediaState).toBe("failed");
+      });
+      expect(wrap.querySelector<HTMLElement>(".msg-media-fallback")!.hidden).toBe(false);
+      expect(wrap.querySelector<HTMLButtonElement>(".msg-media-retry")!.hidden).toBe(true);
+    });
+
+    it("keeps the image hidden and unopenable until its bytes load", async () => {
+      let settle!: (r: unknown) => void;
+      imageMock.mockReturnValueOnce(new Promise((r) => (settle = r)) as never);
+      const wrap = renderInlineImage("https://example.com/slow.png");
+      document.body.appendChild(wrap);
+      const img = wrap.querySelector("img")!;
+      expect(wrap.dataset.mediaState).toBe("loading");
+      expect(img.hidden).toBe(true);
+
+      settle(imageResponse("image/png"));
+      await awaitImgSrc(wrap);
+      fireImgLoad(wrap);
+      expect(img.hidden).toBe(false);
+    });
+
+    it("an image that fails after the broker served it lands in the failed state", async () => {
+      const wrap = renderInlineImage("https://example.com/undecodable.png");
+      document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
+
+      fireImgError(wrap);
+
+      expect(wrap.dataset.mediaState).toBe("failed");
+      expect(wrap.querySelector<HTMLElement>(".msg-media-fallback")!.hidden).toBe(false);
+    });
+
+    it("keeps keyboard focus on the retry while it re-asks, then hands it to the image", async () => {
+      imageMock.mockResolvedValueOnce({ ok: false, failure: "unavailable" });
+      const wrap = renderInlineImage("https://example.com/refocus.png");
+      document.body.appendChild(wrap);
+      await vi.waitFor(() => {
+        expect(wrap.dataset.mediaState).toBe("failed");
+      });
+      const retry = wrap.querySelector<HTMLButtonElement>(".msg-media-retry")!;
+      retry.focus();
+
+      imageMock.mockResolvedValueOnce(imageResponse("image/png"));
+      retry.click();
+      expect(document.activeElement).toBe(retry);
+      expect(retry.getAttribute("aria-disabled")).toBe("true");
+
+      await awaitImgSrc(wrap);
+      fireImgLoad(wrap);
+      expect(document.activeElement).toBe(wrap.querySelector("img"));
+    });
+
     it("does not cache height of 0", async () => {
       const url = "https://example.com/zero-height.png";
       const wrap = renderInlineImage(url);
@@ -837,6 +894,17 @@ describe("media.ts", () => {
       expect(img).not.toBeNull();
       expect(img.getAttribute("src")).toBe("https://example.com/pic.jpg");
       expect(img.getAttribute("alt")).toBe("My photo");
+    });
+
+    it("names the dialog after the image, not after its close button", () => {
+      openImageLightbox("https://example.com/pic.jpg", "My photo");
+
+      const dialog = document.body.querySelector(".image-lightbox")!;
+      expect(dialog.getAttribute("role")).toBe("dialog");
+      expect(dialog.getAttribute("aria-label")).toBe("My photo");
+      expect(dialog.querySelector(".image-lightbox-close")!.getAttribute("aria-label")).toBe(
+        "Close image",
+      );
     });
 
     it("contains a close button", () => {

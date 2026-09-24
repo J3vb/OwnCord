@@ -175,10 +175,16 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   const apply = (load: OgLoad): void => {
     wrap.removeAttribute("aria-busy");
     delete wrap.dataset.embedFailure;
+    retryEl.removeAttribute("aria-disabled");
+    // A refusal is not retryable by policy or type; only a transient
+    // "unavailable" answer is worth re-asking (B9-9). A retry that goes away
+    // while focused hands focus to the card's link, never to <body>.
+    const retryable = !load.ok && load.failure === "unavailable";
+    if (!retryable && document.activeElement === retryEl) titleEl.focus();
+    retryEl.hidden = !retryable;
     if (load.ok) {
       wrap.dataset.embedState = "loaded";
       statusEl.hidden = true;
-      retryEl.hidden = true;
       applyOgMeta(load.meta, titleEl, descEl, hostEl, imageWrap, url, displayHost);
       return;
     }
@@ -188,10 +194,6 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
     descEl.style.display = "none";
     setText(statusEl, t("preview.failed"));
     statusEl.hidden = false;
-    // A refusal is not retryable by policy or type; only a transient
-    // "unavailable" answer is worth re-asking (B9-9).
-    const retryable = load.failure === "unavailable";
-    retryEl.hidden = !retryable;
   };
 
   // Check cache first for instant render
@@ -205,8 +207,10 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   }
 
   retryEl.addEventListener("click", () => {
+    if (wrap.dataset.embedState === "loading") return;
+    // The retry stays mounted (and focused) while it re-asks.
     statusEl.hidden = true;
-    retryEl.hidden = true;
+    retryEl.setAttribute("aria-disabled", "true");
     wrap.dataset.embedState = "loading";
     wrap.setAttribute("aria-busy", "true");
     clearOgEntry(url);

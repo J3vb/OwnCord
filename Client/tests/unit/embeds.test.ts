@@ -323,6 +323,34 @@ describe("renderGenericLinkPreview", () => {
     expect(retry.hidden).toBe(true);
   });
 
+  it("keeps keyboard focus on the retry while it re-asks and after a repeat failure", async () => {
+    previewMock.mockResolvedValue(refused("unavailable"));
+
+    const card = renderGenericLinkPreview("https://focus.example.com/x");
+    document.body.appendChild(card);
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("failed");
+    });
+    const retry = card.querySelector<HTMLButtonElement>(".msg-embed-retry")!;
+    retry.focus();
+
+    retry.click();
+    expect(document.activeElement).toBe(retry);
+    await vi.waitFor(() => {
+      expect(previewMock).toHaveBeenCalledTimes(2);
+      expect(card.dataset.embedState).toBe("failed");
+    });
+    expect(document.activeElement).toBe(retry);
+    expect(retry.hasAttribute("aria-disabled")).toBe(false);
+
+    previewMock.mockResolvedValue(previewOk("Back"));
+    retry.click();
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("loaded");
+    });
+    expect(document.activeElement).toBe(card.querySelector(".msg-embed-link-title"));
+  });
+
   it("does not retry automatically after a refusal", async () => {
     previewMock.mockResolvedValue(refused("unavailable"));
 
