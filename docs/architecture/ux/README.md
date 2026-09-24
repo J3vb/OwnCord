@@ -159,9 +159,11 @@ and drives the ring state machine in `lib/call-ring.ts` +
 
 ## 5. Error & permission reaction matrix
 
-One canonical reaction per failure class, applied everywhere. Today error
-handling is per-call-site with no shared mapper (`doFetch()` in `lib/api.ts` centralizes only
-401); this matrix is the target contract.
+One canonical reaction per failure class, applied everywhere. Today the
+reaction is per-call-site (`doFetch()` in `lib/api.ts` centralizes only 401);
+only the displayed text is shared: `serverErrorText()`/`errorText()` in
+`lib/api.ts` map a server error code to catalog text and show the server
+message only when the code has no mapping. This matrix is the target contract.
 
 | Class                            | Source                      | Target reaction                                                                                                                                                                                                                                                  |
 | -------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

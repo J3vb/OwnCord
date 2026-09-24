@@ -26,7 +26,9 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   by editing MainPage/SidebarArea; `uiStore.activeView` has one writer there
 - `src/i18n/` holds the English catalogs (B9-3); rules are in `format.ts`'s
   header. `tests/unit/ui-strings.test.ts` fails on new UI text outside a
-  catalog, against the shrink-only `scripts/ui-strings-baseline.json`
+  catalog, against the shrink-only `scripts/ui-strings-baseline.json`.
+  Native user-visible text (tray, startup dialog, certificate/TOFU) lives
+  only in `src-tauri/src/text.rs`
 - `tests/unit`, `tests/integration`, `tests/contract` (vitest, jsdom) ·
   `tests/e2e`, `tests/e2e/admin`, `tests/e2e/native` (Playwright) ·
   `tests/browser` (vitest browser mode)
