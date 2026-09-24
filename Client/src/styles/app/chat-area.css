@@ -272,6 +272,11 @@
   padding: 10px 8px;
   border-bottom: 1px solid var(--border);
 }
+/* Takes focus when the request before it is decided. */
+.requests-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
 .requests-item-head {
   display: flex;
   flex-wrap: wrap;
@@ -299,6 +304,19 @@
 .requests-preview-empty {
   color: var(--text-muted);
   font-style: italic;
+}
+.requests-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.requests-actions button[aria-disabled="true"] {
+  cursor: progress;
+}
+.requests-item-error {
+  margin: var(--space-1) 0 0;
+  color: var(--text-danger);
 }
 
 /* ── B9-11 Moderation Center: the queue and one report's evidence, as text ── */

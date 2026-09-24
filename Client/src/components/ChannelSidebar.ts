@@ -5,7 +5,9 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { createElement, setText, clearChildren, appendChildren } from "@lib/dom";
+import { createElement, setText, appendChildren } from "@lib/dom";
+import { reconcileChildren } from "@lib/reconcile";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon, type IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { channelsStore, getChannelsByCategory } from "@stores/channels.store";
@@ -30,7 +32,7 @@ import { rePinPeerIdentity } from "@lib/livekitSession";
 import { createIdentityMismatchModal } from "./IdentityMismatchModal";
 import { createLogger } from "@lib/logger";
 import { membersStore, memberDisplayName } from "@stores/members.store";
-import { roleHasPermission, canManageChannels } from "@lib/permissions";
+import { roleHasPermission, canManageChannels, currentUserPermissions } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { importIdentityPublicKey, computeKeyFingerprint } from "@lib/e2eeCrypto";
 import { shellText } from "../i18n/shell";
@@ -261,10 +263,17 @@ function renderTextChannelItem(
     .filter(Boolean)
     .join(" ");
 
-  const item = createElement("div", { class: classes, "data-testid": `channel-${channel.id}` });
+  const item = createElement("div", {
+    class: classes,
+    "data-testid": `channel-${channel.id}`,
+    // Roving list item: reachable by Tab once, then arrow-stepped (B9-21).
+    role: "link",
+    tabindex: "-1",
+  });
   item.dataset.channelId = String(channel.id);
+  item.setAttribute("aria-current", isActive ? "page" : "false");
 
-  const prefix = createElement("span", { class: "ch-icon" });
+  const prefix = createElement("span", { class: "ch-icon", "aria-hidden": "true" });
   if (channel.type === "announcement") {
     prefix.appendChild(createIcon("megaphone", 16));
   } else {
@@ -370,14 +379,20 @@ function renderVoiceChannelItem(
     .filter(Boolean)
     .join(" ");
 
-  const item = createElement("div", { class: classes, "data-testid": `channel-${channel.id}` });
+  const item = createElement("div", {
+    class: classes,
+    "data-testid": `channel-${channel.id}`,
+    // Roving list item: reachable by Tab once, then arrow-stepped (B9-21).
+    role: "button",
+    tabindex: "-1",
+  });
   item.dataset.channelId = String(channel.id);
   if (frozen) {
     item.title = frozenReason;
     item.setAttribute("aria-disabled", "true");
   }
 
-  const prefix = createElement("span", { class: "ch-icon" });
+  const prefix = createElement("span", { class: "ch-icon", "aria-hidden": "true" });
   prefix.appendChild(createIcon("volume-2", 16));
   const name = createElement("span", { class: "ch-name" }, channel.name);
 
@@ -680,125 +695,48 @@ function renderChannelItem(
   return el;
 }
 
-function renderCategoryGroup(
-  categoryName: string | null,
-  channels: readonly Channel[],
+/**
+ * Everything a channel row renders, as one string. A changed value rebuilds
+ * just that row (B9-21); an unchanged value reuses the node, so focus, a
+ * hovered/open state and the scroll position all survive an unrelated update.
+ *
+ * The group's channel order is folded in so a reorder rebuilds the affected
+ * rows: each row's drag handler captures the ordered channel array at attach
+ * time, and a reused node would otherwise drop against a stale order.
+ *
+ * A voice row is rebuilt on every render (`voiceTick`, below): it carries live
+ * participant/stream/verification state whose changes already arrive through
+ * this sidebar's voice and connection subscriptions, and those rows are few.
+ * Text rows — the long list this milestone is about — keep their identity.
+ * ponytail: voice rows intentionally stay unkeyed; key them too if a voice
+ * roster ever grows large enough for the rebuild to matter.
+ */
+function channelRowSignature(
+  channel: Channel,
   activeChannelId: number | null,
-  signal: AbortSignal,
-  lifetimeSignal: AbortSignal,
-  onVoiceJoin: (channelId: number) => void,
-  onVoiceLeave: () => void,
-  onCreateChannel?: (category: string) => void,
-  onEditChannel?: (channel: Channel) => void,
-  onDeleteChannel?: (channel: Channel) => void,
-  onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
-  onWatchStream?: (userId: number) => void,
-  onVoiceModerate?: VoiceModerationCallbacks,
-  onPurgeChannel?: (channel: Channel, count: number) => Promise<void>,
-): HTMLDivElement {
-  const group = createElement("div", {});
+  orderIds: string,
+  voiceTick: number,
+): string {
+  return [
+    channel.id,
+    channel.name,
+    channel.type,
+    channel.nsfw ? "n" : "",
+    channel.voiceMaxUsers,
+    activeChannelId === channel.id ? "a" : "",
+    isChannelMuted(channel.id) ? "m" : "",
+    channel.unreadCount,
+    channel.mentionCount,
+    orderIds,
+    channel.type === "voice" ? voiceTick : "",
+  ].join("|");
+}
 
-  if (categoryName !== null) {
-    const collapsed = isCategoryCollapsed(categoryName);
-    const header = createElement("div", {
-      class: collapsed ? "category collapsed" : "category",
-    });
-    header.dataset.category = categoryName;
-
-    const arrow = createElement("span", { class: "category-arrow" });
-    arrow.appendChild(createIcon(collapsed ? "chevron-right" : "chevron-down", 12));
-    const label = createElement("span", { class: "category-name" }, categoryName);
-
-    appendChildren(header, arrow, label);
-
-    if (onCreateChannel !== undefined) {
-      // MANAGE_CHANNELS is enforced server-side on /admin/api/channels*, so
-      // gate on the bit; the role-name check only stands in when the `ready`
-      // role list has no entry for this role. Same derivation as the channel
-      // context menu's Edit/Delete items.
-      if (canManageChannels()) {
-        const addBtn = createElement(
-          "span",
-          {
-            class: "category-add-btn",
-            title: shellText("channel.create"),
-            "data-testid": `create-channel-${categoryName.toLowerCase().replace(/\s+/g, "-")}`,
-          },
-          "+",
-        );
-        addBtn.addEventListener(
-          "click",
-          (e) => {
-            e.stopPropagation();
-            onCreateChannel(categoryName);
-          },
-          { signal },
-        );
-        header.appendChild(addBtn);
-      }
-    }
-
-    header.addEventListener(
-      "click",
-      () => {
-        toggleCategory(categoryName);
-      },
-      { signal },
-    );
-
-    group.appendChild(header);
-
-    if (!collapsed) {
-      const channelsContainer = createElement("div", { class: "category-channels-container" });
-      for (const ch of channels) {
-        channelsContainer.appendChild(
-          renderChannelItem(
-            ch,
-            ch.id === activeChannelId,
-            signal,
-            lifetimeSignal,
-            onVoiceJoin,
-            onVoiceLeave,
-            onEditChannel,
-            onDeleteChannel,
-            channelsContainer,
-            channels,
-            onReorderChannel,
-            onWatchStream,
-            onVoiceModerate,
-            onPurgeChannel,
-          ),
-        );
-      }
-      group.appendChild(channelsContainer);
-    }
-  } else {
-    // Uncategorized channels render directly
-    const channelsContainer = createElement("div", { class: "category-channels-container" });
-    for (const ch of channels) {
-      channelsContainer.appendChild(
-        renderChannelItem(
-          ch,
-          ch.id === activeChannelId,
-          signal,
-          lifetimeSignal,
-          onVoiceJoin,
-          onVoiceLeave,
-          onEditChannel,
-          onDeleteChannel,
-          channelsContainer,
-          channels,
-          onReorderChannel,
-          onWatchStream,
-          onVoiceModerate,
-          onPurgeChannel,
-        ),
-      );
-    }
-    group.appendChild(channelsContainer);
-  }
-
-  return group;
+interface GroupRender {
+  /** Category name, or null for the uncategorized group. */
+  readonly name: string | null;
+  readonly channels: readonly Channel[];
+  readonly orderIds: string;
 }
 
 export function createChannelSidebar(options: ChannelSidebarOptions): MountableComponent {
@@ -814,17 +752,15 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     onPurgeChannel,
   } = options;
   const disposable = new Disposable();
-  // renderChannels() rebuilds every row from scratch on every channels-store
-  // notification (unread count, active channel, role change, mute toggle,
-  // ...). Per-row listeners (context menu, drag handlers) must NOT be
-  // registered on the sidebar-lifetime `disposable.signal`, which only aborts once,
-  // at destroy() -- addEventListener({ signal }) keeps a detached row alive
-  // via that signal's own retained "abort" listener list until it fires, so
-  // every re-render would otherwise leak one full set of detached rows
-  // (OC-0229). renderOwner is aborted and replaced at the top of every
-  // renderChannels() call, so only the CURRENT render's rows stay reachable;
-  // header/root listeners registered once in mount() keep using `disposable.signal`.
-  let renderOwner: Disposable | null = null;
+  // renderChannels() keys every row (B9-21): an unchanged row is reused and its
+  // listeners left alone; a replaced row's listeners must be aborted before it
+  // detaches. Per-row listeners (context menu, drag handlers) therefore hold
+  // their own `Disposable` (ownerByEl), NOT the sidebar-lifetime
+  // `disposable.signal` — addEventListener({ signal }) keeps a detached row
+  // alive via that signal's own retained "abort" listener list until it fires,
+  // so a row left on the sidebar signal would be retained for the sidebar's
+  // whole lifetime (OC-0229). Header/root listeners registered once in mount()
+  // still use `disposable.signal`.
   let root: HTMLDivElement | null = null;
   let channelList: HTMLDivElement | null = null;
   let serverNameEl: HTMLSpanElement | null = null;
@@ -835,6 +771,14 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   /** Voice-user rows from the last render, keyed by user id — lets the
    *  speaking-only subscription patch classes without per-user querySelector. */
   const voiceRowByUserId = new Map<number, HTMLElement>();
+
+  /**
+   * Bumped by every refresh that can change a voice row's rendered state
+   * (voice membership/streams/E2EE, connection status, timeout). Voice rows
+   * fold it into their signature, so those refreshes rebuild them while text
+   * rows stay keyed (B9-21).
+   */
+  let voiceTick = 0;
 
   function rebuildVoiceRowCache(): void {
     voiceRowByUserId.clear();
@@ -853,24 +797,40 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     markAllBtn.classList.toggle("visible", unreadChannelIds().length > 0);
   }
 
-  function renderChannels(): void {
+  /**
+   * Listener owners for every keyed group and row. A reused element keeps its
+   * owner; a replaced or removed one has its owner aborted before it detaches,
+   * so a stale element can never outlive the render that replaced it (OC-0229)
+   * — without aborting the listeners of every UNCHANGED row, which the old
+   * single per-render controller did.
+   */
+  const ownerByEl = new WeakMap<Element, Disposable>();
+
+  /** Abort a group's or row's owner and those of the rows inside it. */
+  function disposeOwned(el: Element): void {
+    for (const owned of [el, ...el.querySelectorAll(".category-channels-container > *")]) {
+      ownerByEl.get(owned)?.destroy();
+    }
+  }
+
+  /** `voiceChanged` is true for the refreshes that can alter a voice row's
+   *  rendered state; they bump `voiceTick` so those rows rebuild. */
+  function renderChannels(voiceChanged = false): void {
     updateMarkAllBtn();
     if (channelList === null) {
       return;
     }
-    // Abort the previous render's row-scoped listeners before the rows they
-    // belong to are detached below, so a stale row can never outlive the
-    // render that replaced it (OC-0229).
-    renderOwner?.destroy();
-    const currentRender = new Disposable();
-    renderOwner = currentRender;
-    clearChildren(channelList);
+    if (voiceChanged) voiceTick++;
     voiceRowByUserId.clear();
 
     const grouped = getChannelsByCategory();
-    const state = channelsStore.getState();
+    const activeChannelId = channelsStore.getState().activeChannelId;
 
     if (grouped.size === 0) {
+      for (const child of Array.from(channelList.children)) {
+        disposeOwned(child);
+        child.remove();
+      }
       const emptyState = createElement("div", { class: "channel-list-empty" });
       const msg = createElement(
         "p",
@@ -886,33 +846,156 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       channelList.appendChild(emptyState);
       return;
     }
+    channelList.querySelector(".channel-list-empty")?.remove();
 
+    const canManage = canManageChannels();
+    const canModerate = canModerateVoice();
+    const permissions = currentUserPermissions();
+
+    // One entry per category, in the map's order; the null key is the
+    // uncategorized group.
+    const groups: GroupRender[] = [];
     for (const [category, channels] of grouped) {
-      channelList.appendChild(
-        renderCategoryGroup(
-          category,
-          channels,
-          state.activeChannelId,
-          currentRender.signal,
-          // Sidebar-lifetime signal (aborted only in destroy()) for anything
-          // that owns DOM mounted outside this render's rows -- a menu or
-          // modal on document.body must not be torn down by an unrelated
-          // re-render (OC-0281, OC-0282).
-          disposable.signal,
-          onVoiceJoin,
-          onVoiceLeave,
-          onCreateChannel,
-          onEditChannel,
-          onDeleteChannel,
-          onReorderChannel,
-          onWatchStream,
-          onVoiceModerate,
-          onPurgeChannel,
-        ),
-      );
+      groups.push({ name: category, channels, orderIds: channels.map((c) => c.id).join(",") });
     }
 
+    /** One group's rows, keyed and reused (B9-21). */
+    function reconcileRows(container: HTMLElement, g: GroupRender): void {
+      reconcileChildren(container, g.channels, {
+        key: (ch) => String(ch.id),
+        signature: (ch) => channelRowSignature(ch, activeChannelId, g.orderIds, voiceTick),
+        create: (ch) => {
+          const owner = new Disposable();
+          const el = renderChannelItem(
+            ch,
+            ch.id === activeChannelId,
+            owner.signal,
+            // Sidebar-lifetime signal (aborted only in destroy()) for anything
+            // that owns DOM mounted outside this render's rows — a menu or
+            // modal on document.body must not be torn down by an unrelated
+            // re-render (OC-0281, OC-0282).
+            disposable.signal,
+            onVoiceJoin,
+            onVoiceLeave,
+            onEditChannel,
+            onDeleteChannel,
+            container,
+            g.channels,
+            onReorderChannel,
+            onWatchStream,
+            onVoiceModerate,
+            onPurgeChannel,
+          );
+          ownerByEl.set(el, owner);
+          return el;
+        },
+        dispose: disposeOwned,
+      });
+    }
+
+    reconcileChildren(channelList, groups, {
+      key: (g) => g.name ?? "\u0000uncategorized",
+      // A group rebuilds when its own chrome or permission-dependent
+      // affordances change; an unchanged group reuses its element and
+      // reconciles its rows in place.
+      signature: (g) =>
+        [
+          g.name ?? "",
+          g.name !== null && isCategoryCollapsed(g.name) ? "c" : "e",
+          canManage ? "C" : "",
+          canModerate ? "M" : "",
+          permissions,
+        ].join("|"),
+      create: (g) => buildCategoryGroup(g, reconcileRows),
+      update: (el, g) => {
+        const container = el.querySelector<HTMLElement>(".category-channels-container");
+        if (container !== null) reconcileRows(container, g);
+      },
+      dispose: disposeOwned,
+    });
+
+    setRovingTabindex(channelList, ".channel-item");
     rebuildVoiceRowCache();
+  }
+
+  /** Build the header (and, when expanded, the rows) for one category group. */
+  function buildCategoryGroup(
+    g: GroupRender,
+    reconcileRows: (container: HTMLElement, g: GroupRender) => void,
+  ): HTMLDivElement {
+    const group = createElement("div", {});
+    const owner = new Disposable();
+    ownerByEl.set(group, owner);
+    const { signal } = owner;
+
+    if (g.name !== null) {
+      const collapsed = isCategoryCollapsed(g.name);
+      const header = createElement("div", {
+        class: collapsed ? "category collapsed" : "category",
+      });
+      header.dataset.category = g.name;
+      const categoryNameId = `category-name-${g.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
+      // The arrow is the keyboard-operated collapse control; the header div
+      // itself keeps its mouse click handler. A real <button> here (rather
+      // than making the whole header a button) keeps the header's own "+" from
+      // being an interactive element nested inside another one. The label
+      // names the arrow (aria-labelledby), so no second copy of the category
+      // name is needed.
+      const label = createElement("span", { class: "category-name", id: categoryNameId }, g.name);
+      const arrow = createElement("button", {
+        type: "button",
+        class: "category-arrow",
+        "aria-expanded": collapsed ? "false" : "true",
+        "aria-labelledby": categoryNameId,
+      });
+      arrow.appendChild(createIcon(collapsed ? "chevron-right" : "chevron-down", 12));
+
+      appendChildren(header, arrow, label);
+
+      if (onCreateChannel !== undefined && canManageChannels()) {
+        const addBtn = createElement(
+          "button",
+          {
+            type: "button",
+            class: "category-add-btn",
+            title: shellText("channel.create"),
+            "aria-label": shellText("channel.create"),
+            "data-testid": `create-channel-${g.name.toLowerCase().replace(/\s+/g, "-")}`,
+          },
+          "+",
+        );
+        addBtn.addEventListener(
+          "click",
+          (e) => {
+            e.stopPropagation();
+            onCreateChannel(g.name!);
+          },
+          { signal },
+        );
+        header.appendChild(addBtn);
+      }
+
+      header.addEventListener(
+        "click",
+        () => {
+          toggleCategory(g.name!);
+        },
+        { signal },
+      );
+
+      group.appendChild(header);
+    }
+
+    if (g.name === null || !isCategoryCollapsed(g.name)) {
+      const container = createElement("div", { class: "category-channels-container" });
+      // Populate through the reconciler so every row gets its key metadata; a
+      // later in-place update can then recognise and reuse them.
+      reconcileRows(container, g);
+      group.appendChild(container);
+    }
+
+    return group;
   }
 
   /** Redraw when a row's mute is toggled (see CHANNEL_MUTE_CHANGED). */
@@ -956,6 +1039,11 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
     // Channel list
     channelList = createElement("div", { class: "channel-list" });
+
+    // One Tab stop for the whole list; ArrowUp/Down step, Enter/Space open the
+    // focused channel (B9-21). The listener lives on the list, which survives
+    // every keyed re-render.
+    enableRovingNavigation(channelList, ".channel-item", disposable.signal, "vertical");
 
     appendChildren(root, header, channelList);
     container.appendChild(root);
@@ -1019,13 +1107,13 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // affordance freezes/unfreezes with a visible reason (§3 connection status).
     const unsubConnStatus = uiStore.subscribeSelector(
       (s) => s.connectionStatus,
-      () => renderChannels(),
+      () => renderChannels(true),
     );
     unsubscribers.push(unsubConnStatus);
     unsubscribers.push(
       safetyStore.subscribeSelector(
         (s) => s.timeout,
-        () => renderChannels(),
+        () => renderChannels(true),
       ),
     );
 
@@ -1053,7 +1141,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         }
         return structSig;
       },
-      () => renderChannels(),
+      () => renderChannels(true),
     );
     unsubscribers.push(unsubVoiceStructure);
 
@@ -1063,7 +1151,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // (OC-0333). Re-render on roleRevision to pick up the new name/nickname.
     const unsubMemberRevision = membersStore.subscribeSelector(
       (s) => s.roleRevision ?? 0,
-      () => renderChannels(),
+      () => renderChannels(true),
     );
     unsubscribers.push(unsubMemberRevision);
 
@@ -1086,8 +1174,6 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // disposable.destroy() also releases this sidebar's hold on the shared document-level
     // drag listeners (drag-reorder.ts tracks owners by signal).
     disposable.destroy();
-    renderOwner?.destroy();
-    renderOwner = null;
     for (const unsub of unsubscribers) {
       unsub();
     }

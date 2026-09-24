@@ -1,13 +1,15 @@
 /**
  * The Message Requests store (B9-5): the pending inbox of the signed-in
- * account on the connected server. The dispatcher's handlers are its only
- * writers; sign-out and profile switch empty it.
+ * account on the connected server. The dispatcher's handlers and the inbox's
+ * own decisions (decisions.ts) are its only writers; sign-out and profile
+ * switch empty it.
  *
  * Two sources feed it. Each `ready`, and each resume (which gets no `ready`),
  * fetches GET /api/v1/dm-requests, the authoritative snapshot, and dm_request
- * frames change it live. A frame that lands while a snapshot is in flight is
- * newer than that snapshot for its id, so the snapshot keeps the frame's word
- * for it. Only the latest snapshot applies, and none crosses a sign-out.
+ * frames change it live; a decision's 200 is applied as a frame. A frame that
+ * lands while a snapshot is in flight is newer than that snapshot for its id,
+ * so the snapshot keeps the frame's word for it. Only the latest snapshot
+ * applies, and none crosses a sign-out.
  *
  * Nothing here adds to unread or mention counts (Q2): the count is its own.
  */

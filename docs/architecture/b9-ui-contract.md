@@ -146,13 +146,13 @@ beside it) everywhere else. The `@font-face` is in `base.css`; font-src is
 
 ## Keyboard
 
-| Control                      | Keys                                                                                                                   |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Every action                 | reachable with Tab/Shift+Tab; activates with Enter (and Space for buttons); nothing is hover-only                      |
-| Dialog                       | Tab cycles inside; Escape closes and restores focus                                                                    |
-| Switch (`createToggle`)      | Enter or Space toggles; `label` is required and becomes the accessible name                                            |
-| Radio group, grid of options | `setRovingTabindex` + `enableRovingNavigation` (`lib/a11y.ts`): one Tab stop, arrows/Home/End move, Enter/Space choose |
-| Combobox over a listbox      | as the quick switcher: `aria-controls`, `aria-activedescendant`                                                        |
+| Control                                       | Keys                                                                                                                                                                        |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Every action                                  | reachable with Tab/Shift+Tab; activates with Enter (and Space for buttons); nothing is hover-only                                                                           |
+| Dialog                                        | Tab cycles inside; Escape closes and restores focus                                                                                                                         |
+| Switch (`createToggle`)                       | Enter or Space toggles; `label` is required and becomes the accessible name                                                                                                 |
+| Radio group, grid of options, navigation list | `setRovingTabindex` + `enableRovingNavigation` (`lib/a11y.ts`): one Tab stop, arrows/Home/End move, Enter/Space choose; a stacked list passes `"vertical"` for ArrowUp/Down |
+| Combobox over a listbox                       | as the quick switcher: `aria-controls`, `aria-activedescendant`                                                                                                             |
 
 ## Announcements
 

@@ -264,7 +264,10 @@ frame all exist on `dev`.
   `features/moderation/{queue,evidence}.test.ts`.
 - **Budget.** The queue, the evidence renderer and the catalog load on first
   open. Measured at the base: startup 93,952 B, MainPage 63,300 B; with this
-  change 94,576 B of 95,000 B and 63,437 B of 64,000 B, no budget change. The
+  change 94,576 B of 95,000 B and 63,437 B of 64,000 B, no budget change;
+  after merging `dev` `6b3af8d4` (B9-6 #1770, B9-21 #1773), 94,788 B and
+  63,627 B. The unit suite (304 files, 6,614 passed), both Playwright specs and
+  the fullstack spec were re-run green on the merge. The
   startup growth is the view CSS, the two API methods and the `mod_queue`
   handler. Importing `formatFileSize` from `message-list/attachments` made
   Rolldown split four shared modules out of the entry (+700 B), so the size

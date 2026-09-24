@@ -217,6 +217,16 @@ export interface ModerationReportDetail {
   readonly evidence_withheld?: string;
 }
 
+/** The four recipient transitions of a pending Message Request (docs/api.md). */
+export type DmRequestDecision = "accept" | "ignore" | "delete" | "block";
+
+/** The 200 body of every POST /dm-requests/{id}/{decision}. */
+export interface DmRequestDecisionResult {
+  readonly id: number;
+  readonly state: "accepted" | "ignored" | "deleted" | "blocked";
+  readonly decided_at: string | null;
+}
+
 interface SessionsListResponse {
   readonly sessions: SessionInfo[];
 }
@@ -919,6 +929,20 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     /** The pending Message Requests inbox (B5-6). */
     listDmRequests(signal?: AbortSignal): Promise<DmRequestListResponse> {
       return request<DmRequestListResponse>("GET", "/dm-requests", undefined, signal);
+    },
+
+    /** Decide a pending Message Request (B5-6). 409: no longer pending; 404: not the caller's. */
+    decideDmRequest(
+      id: number,
+      decision: DmRequestDecision,
+      signal?: AbortSignal,
+    ): Promise<DmRequestDecisionResult> {
+      return request<DmRequestDecisionResult>(
+        "POST",
+        `/dm-requests/${id}/${decision}`,
+        undefined,
+        signal,
+      );
     },
 
     /** Block a user (prevents DMs in both directions). */

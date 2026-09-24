@@ -70,18 +70,41 @@ describe("DmSidebar", () => {
     searchInput.value = "ali";
     searchInput.dispatchEvent(new Event("input", { bubbles: true }));
 
-    const visibleNames = [...container.querySelectorAll(".dm-item")]
-      .filter((el) => (el as HTMLElement).style.display !== "none")
+    const visibleNames = [...container.querySelectorAll<HTMLElement>(".dm-item")]
+      .filter((el) => !el.hidden)
       .map((el) => el.querySelector(".dm-name")?.textContent);
     expect(visibleNames).toEqual(["Alice"]);
 
     // Clearing the query shows every conversation again.
     searchInput.value = "";
     searchInput.dispatchEvent(new Event("input", { bubbles: true }));
-    const allVisible = [...container.querySelectorAll(".dm-item")].every(
-      (el) => (el as HTMLElement).style.display !== "none",
+    const allVisible = [...container.querySelectorAll<HTMLElement>(".dm-item")].every(
+      (el) => !el.hidden,
     );
     expect(allVisible).toBe(true);
+
+    sidebar.destroy?.();
+  });
+
+  it("keeps the list's Tab stop on a row the search filter leaves visible", () => {
+    const sidebar = createDmSidebar({
+      conversations: [
+        makeConvo({ channelId: 1, username: "Alice" }),
+        makeConvo({ channelId: 2, username: "Bob" }),
+      ],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+
+    const searchInput = container.querySelector(".dm-search") as HTMLInputElement;
+    searchInput.value = "bob";
+    searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const stops = [...container.querySelectorAll<HTMLElement>(".dm-item:not([hidden])")].filter(
+      (el) => el.tabIndex === 0,
+    );
+    expect(stops.map((el) => el.dataset.channelId)).toEqual(["2"]);
 
     sidebar.destroy?.();
   });
@@ -105,8 +128,8 @@ describe("DmSidebar", () => {
 
   it("renders conversation items", () => {
     const conversations: DmConversation[] = [
-      makeConvo({ userId: 1, username: "Alice" }),
-      makeConvo({ userId: 2, username: "Bob" }),
+      makeConvo({ channelId: 1, userId: 1, username: "Alice" }),
+      makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
     ];
 
     const sidebar = createDmSidebar({
@@ -122,10 +145,63 @@ describe("DmSidebar", () => {
     sidebar.destroy?.();
   });
 
+  // ── B9-21: one Tab stop, arrow-key navigation, in-place update ──
+  it("exposes one Tab stop and arrow-navigates the conversation list", () => {
+    const sidebar = createDmSidebar({
+      conversations: [
+        makeConvo({ channelId: 1, userId: 1, username: "Alice" }),
+        makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
+      ],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+
+    const items = container.querySelectorAll(".dm-item");
+    expect(container.querySelectorAll(".dm-item[tabindex='0']").length).toBe(1);
+
+    const first = items[0] as HTMLElement;
+    first.focus();
+    first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    const focused = document.activeElement as HTMLElement;
+    expect(focused).toBe(items[1]);
+    expect(focused.getAttribute("tabindex")).toBe("0");
+    expect(first.getAttribute("tabindex")).toBe("-1");
+
+    sidebar.destroy?.();
+  });
+
+  it("updates rows in place, keeping the search input and its value", () => {
+    const sidebar = createDmSidebar({
+      conversations: [makeConvo({ channelId: 1, userId: 1, username: "Alice" })],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+
+    const searchInput = container.querySelector(".dm-search") as HTMLInputElement;
+    searchInput.value = "ali";
+    searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+    const row = container.querySelector(".dm-item") as HTMLElement;
+
+    sidebar.update([
+      makeConvo({ channelId: 1, userId: 1, username: "Alice" }),
+      makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
+    ]);
+
+    // Same node for the unchanged row; the header/search chrome is untouched.
+    expect(container.querySelector(".dm-search")).toBe(searchInput);
+    expect(searchInput.value).toBe("ali");
+    expect(container.querySelector('[data-channel-id="1"]')).toBe(row);
+    expect(container.querySelectorAll(".dm-item").length).toBe(2);
+
+    sidebar.destroy?.();
+  });
+
   it("sorts unread conversations first", () => {
     const conversations: DmConversation[] = [
-      makeConvo({ userId: 1, username: "Alice", unread: false }),
-      makeConvo({ userId: 2, username: "Bob", unread: true }),
+      makeConvo({ channelId: 1, userId: 1, username: "Alice", unread: false }),
+      makeConvo({ channelId: 2, userId: 2, username: "Bob", unread: true }),
     ];
 
     const sidebar = createDmSidebar({
@@ -410,17 +486,17 @@ describe("DmSidebar", () => {
   it("applies correct status color to DM status dot", () => {
     const sidebar = createDmSidebar({
       conversations: [
-        makeConvo({ userId: 1, username: "Alice", status: "online" }),
-        makeConvo({ userId: 2, username: "Bob", status: "dnd" }),
-        makeConvo({ userId: 3, username: "Charlie", status: "idle" }),
-        makeConvo({ userId: 4, username: "Dave", status: "offline" }),
+        makeConvo({ channelId: 1, userId: 1, username: "Alice", status: "online" }),
+        makeConvo({ channelId: 2, userId: 2, username: "Bob", status: "dnd" }),
+        makeConvo({ channelId: 3, userId: 3, username: "Charlie", status: "idle" }),
+        makeConvo({ channelId: 4, userId: 4, username: "Dave", status: "offline" }),
       ],
       onSelectConversation: vi.fn(),
       onNewDm: vi.fn(),
     });
     sidebar.mount(container);
 
-    const statusDots = container.querySelectorAll(".dm-status") as NodeListOf<HTMLSpanElement>;
+    const statusDots = container.querySelectorAll<HTMLSpanElement>(".dm-status");
     const colors = Array.from(statusDots).map((dot) => dot.style.background);
 
     expect(colors).toContain("var(--green)");
@@ -455,8 +531,8 @@ describe("DmSidebar", () => {
   it("clicking a DM item marks it active and deactivates siblings", () => {
     const sidebar = createDmSidebar({
       conversations: [
-        makeConvo({ userId: 1, username: "Alice" }),
-        makeConvo({ userId: 2, username: "Bob" }),
+        makeConvo({ channelId: 1, userId: 1, username: "Alice" }),
+        makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
       ],
       onSelectConversation: vi.fn(),
       onNewDm: vi.fn(),

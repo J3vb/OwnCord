@@ -78,7 +78,13 @@
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
+  /* Fill the sidebar's content slot and, crucially, allow shrinking below the
+     content's height so `.channel-list` (overflow-y:auto) becomes the scroller.
+     Without min-height:0 the column grows past its slot and the list is clipped
+     instead of scrolled (B9-21 reflow: a long channel list must stay reachable
+     at the 940x500 minimum window). */
+  flex: 1 1 0;
+  min-height: 0;
   overflow: hidden;
 }
 .channel-sidebar-header {
@@ -150,7 +156,16 @@
   letter-spacing: 0.5px;
   text-transform: uppercase;
 }
+.category-arrow {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
 .category-add-btn {
+  background: transparent;
+  border: none;
   margin-left: auto;
   font-size: var(--font-size-lg);
   color: var(--text-faint);
@@ -162,10 +177,14 @@
     opacity 0.15s,
     color 0.15s;
 }
-.category:hover .category-add-btn {
+/* Reveal on hover OR keyboard focus: the action must never be hover-only
+   (B9-21, WCAG 2.1.1). Focus-within covers the "+"/arrow reaching focus. */
+.category:hover .category-add-btn,
+.category:focus-within .category-add-btn {
   opacity: 1;
 }
-.category-add-btn:hover {
+.category-add-btn:hover,
+.category-add-btn:focus-visible {
   color: var(--text-normal);
 }
 .category-channels {
@@ -183,6 +202,9 @@
   gap: 6px;
   padding: 6px 8px;
   margin: 1px 8px;
+  /* Keyboard-reachable rows (B9-21) must meet the 24px pointer-target floor
+     (Q1, WCAG 2.5.8) even at the smallest text scale. */
+  min-height: 24px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-muted);
@@ -192,6 +214,16 @@
 .channel-item:hover {
   background: var(--bg-hover);
   color: var(--text-normal);
+}
+/* base.css only rings buttons/inputs/links/[tabindex]; a roving row is a
+   [tabindex] element, so it inherits the ring, but its offset is tightened so
+   the ring stays inside the sidebar's 8px gutter. */
+.channel-item:focus-visible,
+.dm-item:focus-visible,
+.category-arrow:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
 }
 .channel-item.active {
   background: var(--bg-active);

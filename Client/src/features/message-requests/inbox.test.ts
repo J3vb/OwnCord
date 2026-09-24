@@ -380,6 +380,37 @@ describe("inbox view", () => {
     expect(rows()).toHaveLength(1);
   });
 
+  it("redraws a kept row when a newer snapshot drops its preview or renames its sender", async () => {
+    handleDmRequest(frame(1, "pending"));
+    handleDmRequest(frame(2, "pending"));
+    open();
+    const [second, first] = rows();
+    const accept = first!.querySelector<HTMLElement>("[data-testid='request-accept']")!;
+    accept.focus();
+
+    const { api, calls } = deferredApi();
+    applyReadyDmRequests(api);
+    calls[0]!.resolve([
+      item(2),
+      { ...item(1, null), sender: { ...item(1).sender, username: "", display_name: "" } },
+    ]);
+    await settle();
+    messageRequestsStore.flush();
+
+    expect(rows()).toEqual([second, first]);
+    expect(document.activeElement).toBe(accept);
+    expect(first!.querySelector(".requests-preview")!.textContent).toBe(
+      "This message has no text to preview.",
+    );
+    expect(first!.textContent).not.toContain("hello 1");
+    expect(first!.querySelector("h3")!.textContent).toBe("Unknown user");
+    expect(first!.querySelector(".requests-username")).toBeNull();
+    expect(first!.querySelector(".requests-actions")!.getAttribute("aria-label")).not.toContain(
+      "Stranger 1",
+    );
+    expect(second!.querySelector(".requests-preview")!.textContent).toBe("hello 2");
+  });
+
   it("speaks a status once, not again on every update", async () => {
     setConnectionStatus("reconnecting");
     open();

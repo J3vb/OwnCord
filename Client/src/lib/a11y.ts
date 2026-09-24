@@ -93,17 +93,23 @@ export function trapFocus(container: HTMLElement, signal: AbortSignal): void {
 }
 
 /**
- * Make exactly one cell in `container` tabbable (the first) and the rest
- * focusable only programmatically. Call after every render that replaces the
- * cell set — search results swap the cells out from under the tabindex, and a
- * grid with zero (or many) Tab stops breaks the "Tab enters the grid once"
- * contract.
+ * Make exactly one cell in `container` tabbable and the rest focusable only
+ * programmatically. Call after every render that replaces the cell set —
+ * search results swap the cells out from under the tabindex, and a grid with
+ * zero (or many) Tab stops breaks the "Tab enters the grid once" contract.
+ *
+ * The Tab stop survives a re-render: it stays on the focused cell, else the
+ * cell that already held it, else the current one (`.active` or
+ * `aria-current="page"`), and only then falls back to the first cell.
  */
 export function setRovingTabindex(container: HTMLElement, cellSelector: string): void {
-  const cells = container.querySelectorAll<HTMLElement>(cellSelector);
-  cells.forEach((cell, i) => {
-    cell.setAttribute("tabindex", i === 0 ? "0" : "-1");
-  });
+  const cells = Array.from(container.querySelectorAll<HTMLElement>(cellSelector));
+  const stop =
+    cells.find((c) => c === document.activeElement) ??
+    cells.find((c) => c.getAttribute("tabindex") === "0") ??
+    cells.find((c) => c.matches(".active, [aria-current='page']")) ??
+    cells[0];
+  for (const cell of cells) cell.setAttribute("tabindex", cell === stop ? "0" : "-1");
 }
 
 /**
@@ -117,19 +123,26 @@ export function setRovingTabindex(container: HTMLElement, cellSelector: string):
  * The listener lives on the container (which survives re-renders) and the
  * cell set is queried per keystroke, so callers may rebuild cells freely as
  * long as they re-run setRovingTabindex afterwards.
+ *
+ * `orientation` picks the stepping axis: the horizontal default (the picker
+ * grids) keeps ArrowLeft/Right; `"vertical"` is for a stacked navigation list
+ * (the B9-21 shell sidebars) and uses ArrowUp/ArrowDown instead. Home/End and
+ * Enter/Space are the same either way.
  */
 export function enableRovingNavigation(
   container: HTMLElement,
   cellSelector: string,
   signal: AbortSignal,
+  orientation: "horizontal" | "vertical" = "horizontal",
 ): void {
   container.addEventListener(
     "keydown",
     (e: KeyboardEvent) => {
-      // Only keystrokes originating on a cell rove; the search input above
-      // the grid keeps its native caret behavior for arrows and Home/End.
+      // Only keystrokes originating on a cell itself rove; the search input
+      // above the grid and a control nested inside a cell keep their native
+      // key behavior.
       const origin =
-        e.target instanceof HTMLElement ? e.target.closest<HTMLElement>(cellSelector) : null;
+        e.target instanceof HTMLElement && e.target.matches(cellSelector) ? e.target : null;
       if (origin === null) return;
       const cells = Array.from(container.querySelectorAll<HTMLElement>(cellSelector));
       const from = cells.indexOf(origin);
@@ -141,9 +154,11 @@ export function enableRovingNavigation(
         return;
       }
 
+      const nextKey = orientation === "vertical" ? "ArrowDown" : "ArrowRight";
+      const prevKey = orientation === "vertical" ? "ArrowUp" : "ArrowLeft";
       let to: number;
-      if (e.key === "ArrowRight") to = Math.min(from + 1, cells.length - 1);
-      else if (e.key === "ArrowLeft") to = Math.max(from - 1, 0);
+      if (e.key === nextKey) to = Math.min(from + 1, cells.length - 1);
+      else if (e.key === prevKey) to = Math.max(from - 1, 0);
       else if (e.key === "Home") to = 0;
       else if (e.key === "End") to = cells.length - 1;
       else return;

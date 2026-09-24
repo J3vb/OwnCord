@@ -14,6 +14,8 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
+import { reconcileChildren } from "@lib/reconcile";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon } from "@lib/icons";
 import { showContextMenu } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
@@ -151,7 +153,12 @@ function renderDmItem(
   options: DmSidebarOptions,
   signal: AbortSignal,
 ): HTMLDivElement {
-  const item = createElement("div", { class: "dm-item" });
+  const item = createElement("div", {
+    class: "dm-item",
+    // Roving list item: reachable by Tab once, then arrow-stepped (B9-21).
+    role: "button",
+    tabindex: "-1",
+  });
   if (convo.active === true) {
     item.classList.add("active");
   }
@@ -282,9 +289,88 @@ function renderDmItem(
   return item;
 }
 
-export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
+/**
+ * SidebarArea refreshes the DM list on every dmStore change (a presence flip,
+ * a message, an unread clear). Rebuilding the whole subtree would lose the
+ * "Find a conversation" filter, its focus and the scroll position; the keyed
+ * list keeps every unchanged row, so those all survive an unrelated update
+ * (B9-21).
+ */
+export interface DmSidebar extends MountableComponent {
+  /** Re-render the conversation rows from a fresh list, in place. */
+  update(conversations: readonly DmConversation[]): void;
+}
+
+/** A row the search filter has not hidden: the only rows the keyboard visits. */
+const VISIBLE_ROW = ".dm-item:not([hidden])";
+
+/** The unread-first order the conversation list renders in. */
+function sortConversations(conversations: readonly DmConversation[]): DmConversation[] {
+  return [...conversations].toSorted((a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0));
+}
+
+/** Everything a row draws. A changed value rebuilds just that row. */
+function convoSignature(convo: DmConversation): string {
+  return [
+    convo.username,
+    convo.avatar ?? "",
+    convo.avatarColor ?? "",
+    convo.status ?? "",
+    convo.isGroup === true ? "g" : "",
+    (convo.participants ?? []).length,
+    convo.active === true ? "a" : "",
+    convo.muted === true ? "m" : "",
+    convo.unread === true ? "u" : "",
+    convo.unreadCount ?? 0,
+    convo.mentionCount ?? 0,
+  ].join("|");
+}
+
+export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
+  let list: HTMLDivElement | null = null;
+  let searchInput: HTMLInputElement | null = null;
+  // The sorted list the current filter runs over, kept in sync with the DOM.
+  let rendered: readonly DmConversation[] = [];
+  // Rows the search filter has hidden, so a later update can re-apply it.
+  let query = "";
+  // Each row's listeners die with the row, not with the sidebar (OC-0229).
+  const rowOwners = new Map<Element, Disposable>();
+
+  /** Apply the current search query to the current rows. */
+  function applyFilter(): void {
+    if (list === null) return;
+    const q = query.trim().toLowerCase();
+    const rows = list.children;
+    rendered.forEach((convo, i) => {
+      const el = rows[i] as HTMLElement | undefined;
+      if (el === undefined) return;
+      const match = q === "" || convo.username.toLowerCase().includes(q);
+      el.hidden = !match;
+    });
+    setRovingTabindex(list, VISIBLE_ROW);
+  }
+
+  function update(conversations: readonly DmConversation[]): void {
+    if (list === null) return;
+    rendered = sortConversations(conversations);
+    reconcileChildren(list, rendered, {
+      key: (c) => String(c.channelId),
+      signature: convoSignature,
+      create: (convo) => {
+        const owner = new Disposable();
+        const el = renderDmItem(convo, options, owner.signal);
+        rowOwners.set(el, owner);
+        return el;
+      },
+      dispose: (el) => {
+        rowOwners.get(el)?.destroy();
+        rowOwners.delete(el);
+      },
+    });
+    applyFilter();
+  }
 
   function mount(container: Element): void {
     // Reuse channel-sidebar container class per mockup
@@ -297,23 +383,37 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
         class: "dm-back-header",
         "data-testid": "dm-back-header",
       });
-      const arrow = createElement("span", { class: "dm-back-arrow" }, "←");
+      backHeader.tabIndex = 0;
+      backHeader.setAttribute("role", "button");
+      // Named by the visible title rather than a second copy of its text.
+      const backTitleId = "dm-back-title";
+      backHeader.setAttribute("aria-labelledby", backTitleId);
+      const arrow = createElement("span", { class: "dm-back-arrow", "aria-hidden": "true" }, "←");
       const backInfo = createElement("div", { class: "dm-back-info" });
       const backTitle = createElement(
         "div",
-        { class: "dm-back-title" },
+        { class: "dm-back-title", id: backTitleId },
         `Back to ${options.serverName ?? "Server"}`,
       );
       const backSub = createElement("div", { class: "dm-back-subtitle" }, "Return to channels");
       appendChildren(backInfo, backTitle, backSub);
       appendChildren(backHeader, arrow, backInfo);
       backHeader.addEventListener("click", () => backFn(), { signal: disposable.signal });
+      backHeader.addEventListener(
+        "keydown",
+        (e: KeyboardEvent) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          backFn();
+        },
+        { signal: disposable.signal },
+      );
       root.appendChild(backHeader);
     }
 
     // Search header
     const header = createElement("div", { class: "dm-sidebar-header" });
-    const searchInput = createElement("input", {
+    searchInput = createElement("input", {
       class: "dm-search",
       placeholder: "Find a conversation",
     });
@@ -331,35 +431,38 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
     sectionLabel.appendChild(addBtn);
 
     // Conversation list
-    const sorted = [...options.conversations].toSorted(
-      (a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0),
-    );
-
-    const items = sorted.map((convo) => renderDmItem(convo, options, disposable.signal));
+    list = createElement("div", { class: "dm-conversation-list" });
 
     searchInput.addEventListener(
       "input",
       () => {
-        const q = searchInput.value.trim().toLowerCase();
-        items.forEach((el, i) => {
-          const match = q === "" || sorted[i]!.username.toLowerCase().includes(q);
-          el.style.display = match ? "" : "none";
-        });
+        query = searchInput?.value ?? "";
+        applyFilter();
       },
       { signal: disposable.signal },
     );
 
-    appendChildren(root, header, sectionLabel, ...items);
+    // One Tab stop for the list; ArrowUp/Down step, Enter/Space open.
+    enableRovingNavigation(list, VISIBLE_ROW, disposable.signal, "vertical");
+
+    appendChildren(root, header, sectionLabel, list);
     container.appendChild(root);
+
+    update(options.conversations);
   }
 
   function destroy(): void {
     disposable.destroy();
+    for (const owner of rowOwners.values()) owner.destroy();
+    rowOwners.clear();
     if (root !== null) {
       root.remove();
       root = null;
     }
+    list = null;
+    searchInput = null;
+    rendered = [];
   }
 
-  return { mount, destroy };
+  return { mount, update, destroy };
 }

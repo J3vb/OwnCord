@@ -61,6 +61,7 @@ vi.mock("@components/DmSidebar", () => ({
   createDmSidebar: vi.fn().mockReturnValue({
     mount: vi.fn(),
     destroy: vi.fn(),
+    update: vi.fn(),
   }),
 }));
 
@@ -156,7 +157,7 @@ import {
 } from "../../src/features/navigation/contentView";
 import { channelsStore, setActiveChannel, setRoles } from "../../src/stores/channels.store";
 import { dmStore, addDmChannel } from "../../src/stores/dm.store";
-import { uiStore, setSidebarMode, setActiveDmUser } from "../../src/stores/ui.store";
+import { uiStore, setSidebarMode } from "../../src/stores/ui.store";
 import { authStore } from "../../src/stores/auth.store";
 import { Permission } from "../../src/lib/types";
 import { membersStore } from "../../src/stores/members.store";
@@ -187,6 +188,11 @@ function getMockMount(factory: MockedFn): MockedFn {
 function getMockDestroy(factory: MockedFn): MockedFn {
   const lastCall = factory.mock.results[factory.mock.results.length - 1];
   return lastCall?.value?.destroy;
+}
+
+function getMockUpdate(factory: MockedFn): MockedFn {
+  const lastCall = factory.mock.results[factory.mock.results.length - 1];
+  return lastCall?.value?.update;
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +262,11 @@ function resetMocks(): void {
 
   // Reset return values so each test gets fresh mock objects
   (createChannelSidebar as MockedFn).mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
-  (createDmSidebar as MockedFn).mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
+  (createDmSidebar as MockedFn).mockReturnValue({
+    mount: vi.fn(),
+    destroy: vi.fn(),
+    update: vi.fn(),
+  });
   (createMemberList as MockedFn).mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
   (createUserBar as MockedFn).mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
   (createVoiceWidget as MockedFn).mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
@@ -320,7 +330,7 @@ function defaultOpts(): SidebarAreaOptions {
     presenceSender: {
       send: vi.fn(),
       destroy: vi.fn(),
-    } as unknown as SidebarAreaOptions["presenceSender"],
+    },
     getRoot: vi.fn().mockReturnValue(document.createElement("div")),
     getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
   };
@@ -894,19 +904,22 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("re-renders DM sidebar when DM store changes in DMs mode", () => {
+    it("refreshes the DM sidebar rows in place when DM store changes in DMs mode", () => {
       uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
 
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const initialCallCount = (createDmSidebar as MockedFn).mock.calls.length;
+      const update = getMockUpdate(createDmSidebar as MockedFn);
 
       addDmChannel(makeDm({ channelId: 100 }));
       dmStore.flush();
 
-      const newCallCount = (createDmSidebar as MockedFn).mock.calls.length;
-      expect(newCallCount).toBeGreaterThan(initialCallCount);
+      // B9-21: the sidebar is refreshed, not rebuilt — one instance, updated.
+      expect(getMockUpdate(createDmSidebar as MockedFn)).toHaveBeenCalled();
+      expect((createDmSidebar as MockedFn).mock.calls.length).toBe(initialCallCount);
+      void update;
 
       cleanup(result);
     });
@@ -914,7 +927,7 @@ describe("SidebarArea", () => {
     // Keyed on the active CHANNEL, not activeDmUserId: a group DM leaves the
     // latter null, so a subscription on it would stop redrawing the list the
     // moment a group became the active conversation.
-    it("re-renders DM sidebar when the active channel changes in DMs mode", () => {
+    it("refreshes the DM sidebar rows in place when the active channel changes in DMs mode", () => {
       uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
 
       const result = createSidebarArea(defaultOpts());
@@ -925,23 +938,24 @@ describe("SidebarArea", () => {
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 4242 }));
       channelsStore.flush?.();
 
-      const newCallCount = (createDmSidebar as MockedFn).mock.calls.length;
-      expect(newCallCount).toBeGreaterThan(initialCallCount);
+      expect(getMockUpdate(createDmSidebar as MockedFn)).toHaveBeenCalled();
+      expect((createDmSidebar as MockedFn).mock.calls.length).toBe(initialCallCount);
 
       cleanup(result);
     });
   });
 
   // -------------------------------------------------------------------------
-  // DM search preservation across refresh (OC-0280)
+  // DM search preservation across refresh (OC-0280, amended by B9-21)
   //
-  // refreshDmSidebar() destroys and recreates the whole DM sidebar subtree on
-  // every dmStore.channels change (presence flips, new messages, unread
-  // clears — not just "the DM list changed"). Real DmSidebar keeps the
-  // "Find a conversation" filter text and focus only in its own destroyed
-  // DOM, so a naive rebuild wipes both mid-typing. This mock stands in for
-  // the real component closely enough to pin that: a `.dm-search` input that
-  // SidebarArea can read/restore across the destroy+recreate cycle.
+  // refreshDmSidebar() used to destroy and recreate the whole DM sidebar
+  // subtree on every dmStore.channels change (presence flips, new messages,
+  // unread clears — not just "the DM list changed"), so SidebarArea had to
+  // capture the "Find a conversation" filter text and focus and restore them
+  // onto the freshly-mounted input. B9-21 makes the sidebar update its rows in
+  // place, so the sidebar instance — and its search input node — survive the
+  // refresh. These tests pin the stronger contract: the node is reused (same
+  // identity) and neither the filter text nor focus is ever dropped.
   // -------------------------------------------------------------------------
 
   describe("DM search preservation across refresh (OC-0280)", () => {
@@ -957,6 +971,9 @@ describe("SidebarArea", () => {
             root.appendChild(input);
             mountContainer.appendChild(root);
           }),
+          // In-place refresh: the real DmSidebar reconciles its rows and leaves
+          // the header/search chrome untouched, so this is a no-op here.
+          update: vi.fn(),
           destroy: vi.fn(() => {
             root?.remove();
             root = null;
@@ -965,7 +982,7 @@ describe("SidebarArea", () => {
       });
     }
 
-    it("keeps the search filter text after a DM store change destroys/recreates the sidebar", () => {
+    it("keeps the search filter text across a DM store change without rebuilding", () => {
       uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
       mockDmSidebarWithSearchInput();
 
@@ -984,11 +1001,13 @@ describe("SidebarArea", () => {
       const newSearchInput = container.querySelector(".dm-search") as HTMLInputElement;
       expect(newSearchInput).not.toBeNull();
       expect(newSearchInput.value).toBe("ali");
+      // The input node is the same one, not a capture/restore replacement.
+      expect(newSearchInput).toBe(searchInput);
 
       cleanup(result);
     });
 
-    it("keeps keyboard focus on the search input after a DM store change", () => {
+    it("keeps keyboard focus on the search input across a DM store change", () => {
       uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
       mockDmSidebarWithSearchInput();
 
@@ -1004,7 +1023,7 @@ describe("SidebarArea", () => {
 
       const newSearchInput = container.querySelector(".dm-search") as HTMLInputElement;
       expect(newSearchInput).not.toBeNull();
-      expect(newSearchInput).not.toBe(searchInput);
+      expect(newSearchInput).toBe(searchInput);
       expect(document.activeElement).toBe(newSearchInput);
 
       cleanup(result);
@@ -1464,6 +1483,22 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
+    it("onSelectConversation opens a DM that arrived after the sidebar was built", () => {
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+      const callArgs = (createDmSidebar as MockedFn).mock.calls[0]![0];
+
+      addDmChannel(makeDm({ channelId: 100 }));
+      dmStore.flush();
+      callArgs.onSelectConversation(100);
+
+      expect(channelsStore.getState().activeChannelId).toBe(100);
+
+      cleanup(result);
+    });
+
     it("onBack restores previous channel and switches to channels mode", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
@@ -1879,16 +1914,29 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onEditChannel opens edit channel modal", () => {
+    it("onEditChannel opens edit channel modal", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       callArgs.onEditChannel({ id: 1, name: "general", type: "text" });
+      await vi.dynamicImportSettled();
 
       expect(createEditChannelModal).toHaveBeenCalled();
 
       cleanup(result);
+    });
+
+    it("onEditChannel opens nothing when the sidebar is torn down while the editor loads", async () => {
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      callArgs.onEditChannel({ id: 1, name: "general", type: "text" });
+      cleanup(result);
+      await vi.dynamicImportSettled();
+
+      expect(createEditChannelModal).not.toHaveBeenCalled();
     });
 
     it("onDeleteChannel opens delete channel modal", () => {
@@ -2098,6 +2146,7 @@ describe("SidebarArea", () => {
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
       await modalCallArgs.onSave({ name: "updated" });
@@ -2118,6 +2167,7 @@ describe("SidebarArea", () => {
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
       await expect(modalCallArgs.onSave({ name: "updated" })).rejects.toThrow("Update failed");
@@ -2139,6 +2189,7 @@ describe("SidebarArea", () => {
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
       await expect(modalCallArgs.onSave({ name: "updated" })).rejects.toBe(42);
@@ -2148,17 +2199,20 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onClose callback destroys edit modal", () => {
+    it("onClose callback destroys edit modal", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
       modalCallArgs.onClose();
 
       channelCallArgs.onEditChannel({ id: 2, name: "random", type: "text" });
+
+      await vi.dynamicImportSettled();
       expect(createEditChannelModal).toHaveBeenCalledTimes(2);
 
       cleanup(result);
