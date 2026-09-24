@@ -4,13 +4,16 @@
 **Base commit:** `e1781086` (`dev`; B4's exit was accepted 2026-09-03 at
 `0a14554` and today's CI-gate work — #1534, #1536, #1537 — is merged on top)
 — claims below verified at `e1781086`  
-**Status:** IN PROGRESS. **Audit snapshot, 2026-09-06, at `dev`
+**Status:** BUILT — **EXIT PREPARED, AWAITING THE OWNER'S ACCEPTANCE; B5 is
+not accepted.** **Audit snapshot, 2026-09-06, at `dev`
 `61ac2b959cc4592ee5291637ac36f22acab89631`: B5-0 through B5-9 and B5-11 are
 merged; B5-12's initial reconciliation is merged.** B5-10 is being finished
 and is not assessed as complete by this audit. HP-5 was accepted 2026-09-06
 at #1547, with the signature record completed by #1550; it is not awaiting a
-new signature. The existing exit gate remains open for B5-10, the acceptance
-follow-ups below, final reconciliation and the required exit evidence. The
+new signature. B5-10 merged as [#1555](https://github.com/J3vb/OwnCord/pull/1555);
+with the acceptance follow-ups, final reconciliation and the exit evidence all
+done at the exit SHA (below), the exit gate is prepared and awaits the owner's
+acceptance. The
 moderation-evidence consent follow-up (Conditions 3 and 4) was accepted by the
 owner on 2026-09-23 ([#1735](https://github.com/J3vb/OwnCord/pull/1735)).
 **All fourteen decisions were settled 2026-09-04** (the owner delegated them;
@@ -30,6 +33,11 @@ the owner on 2026-09-24**, and **exit condition 7 was closed by the owner on
 2026-09-24 without publishing an advisory** (SEC-04 fixed by B5-2
 [#1543](https://github.com/J3vb/OwnCord/pull/1543)). **B5 is not accepted:**
 only the exit-SHA measurement and B5-12's final pass remain.
+**Exit prepared 2026-09-24 at `dev` `458301fd`** ([exit-SHA
+measurement](#exit-sha-measurement-2026-09-24)): the seven conditions and
+roadmap rule 2 met, the gate re-run on the exit SHA, and the migration and
+rollback rehearsal report — **awaiting the owner's acceptance; B5 is not
+accepted.**
 
 **Roadmap section:** ["B5 — Add community, content, and moderation
 services"](repo-health-roadmap-2026-08-23.md) — objective, entry gate, eleven
@@ -2834,6 +2842,23 @@ inventory's gate descriptions are reconciled (see the [exit-gate
 reconciliation](#exit-gate-reconciliation-2026-09-23)); the final pass at the
 exit SHA is still owed.
 
+**Final pass, 2026-09-24, at `dev` `458301fd`.** The reconciliation is done on
+the measured exit SHA ([exit-SHA measurement](#exit-sha-measurement-2026-09-24)),
+which names the SHA and re-runs the gates. Corrections to B5-owned rows only:
+
+- **Register.** `SEC-04` reads `resolved/superseded` with its closure line
+  naming B5-2 (#1543) and the owner's condition-7 closure (#1790); `BG-18` and
+  `BG-19` carry decision 14's split; `BG-05` names B5-4's storage landing; all
+  were set in the initial reconciliation (#1546) and #1790 and are current at
+  the exit SHA. No B5-owned row is stale.
+- **Roadmap.** Workstreams 2, 11 and the amended exit conditions 2 and 3 are
+  current (#1546); the B5 header and the current-implementation-slice block are
+  reconciled by this PR.
+- **Plan index.** The README B5 row records the exit-SHA measurement as
+  prepared and awaiting acceptance, not accepted.
+- **Traceability.** BPR-060..063 and BPR-070..073 keep their B5 primary phase
+  with the later client proof named; no row is release-qualified.
+
 **Register corrections**, each with the evidence already in "Verify before you
 implement":
 
@@ -3103,6 +3128,151 @@ requirement map and scorecard in agreement; and rollback, compatibility and
 data-migration notes — which for B5 means **a rehearsed reversal for each of
 the seven migrations `044`–`050`** in `Server/rollback/`, the obligation B4's
 exit established.
+
+### Exit-SHA measurement, 2026-09-24
+
+The exit SHA is **`dev` `458301fd1ef6b9c449ed010e101eff810e5c4b08`** — the
+squash of [#1790](https://github.com/J3vb/OwnCord/pull/1790), the commit that
+closed exit condition 7 and accepted conditions 5 and 6, and the tip of `dev`
+when this measurement ran. Every result below was re-run on that SHA rather
+than cited from the step that first produced it; a named suite's count is the
+count that passed here. This is the exit's shape (the "B4 exit" section of
+[hp-4-scorecard-2026-09-02.md](hp-4-scorecard-2026-09-02.md)), and the
+`gate-evidence` job blocks tagging an ungated SHA.
+
+**Exit prepared and awaiting the owner's acceptance. B5 is not accepted by this
+measurement.**
+
+#### The seven conditions and roadmap rule 2
+
+| #          | Condition                                                                                                                    | Evidence at `458301fd`                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1          | Message Requests cannot bypass block, permission, retention, or deletion rules                                               | **Met.** B5-6 ([#1549](https://github.com/J3vb/OwnCord/pull/1549)). The five bypass tests re-run green: `TestMessageRequest_BlockedSenderCreatesNoRequest`, `TestMessageRequest_BannedRecipientGetsNoRequest`, `TestMessageRequest_AcceptDoesNotResurrectDeletedContent`, `TestMessageRequest_ErasingEitherPartyRemovesRequestAndTrust`, `TestMessageRequest_ResendAfterIgnoreCreatesNothing`                                             |
+| 2          | External retrieval passes address, redirect, streaming-size, timeout, concurrency, media-type, and offline adversarial tests | **Met at the server scope** (decision 1). B5-1 ([#1541](https://github.com/J3vb/OwnCord/pull/1541)); `Server/safefetch` **55 tests, 0 failures** — address classification, redirect chains, byte/decompressed ceilings, timeout, concurrency cap, media-type sniffing and offline dial/resolve. The narrowing carries the owner's HP-5 acceptance (decision 14).                                                                          |
+| 3          | NSFW content and third-party fetches remain unavailable before consent                                                       | **Met at the server scope** (decision 14). B5-7 ([#1551](https://github.com/J3vb/OwnCord/pull/1551)) and its consent follow-up ([#1735](https://github.com/J3vb/OwnCord/pull/1735)); **39 tests, 0 failures** across the four server paths (REST reads, search, socket delivery, attachments) plus the evidence-read gate. The client render gate is B9.                                                                                  |
+| 4          | Report, moderation, and appeal state machines enforce least privilege and immutable safe audit                               | **Met.** B5-8 ([#1552](https://github.com/J3vb/OwnCord/pull/1552)), B5-9 ([#1553](https://github.com/J3vb/OwnCord/pull/1553)), B5-10 ([#1555](https://github.com/J3vb/OwnCord/pull/1555)); **141 tests, 0 failures** over the report/action/appeal suites (role matrix, adversarial hierarchy, audit rows). B5-10's handler-level appeal-route tests are B5-10's ongoing evidence, not a named exit gate.                                 |
+| 5          | Storage quotas and disk headroom fail safely under concurrency and restart                                                   | **Met.** B5-2 ([#1543](https://github.com/J3vb/OwnCord/pull/1543)) and its upload-staging follow-up ([#1565](https://github.com/J3vb/OwnCord/pull/1565)); **58 tests, 0 failures** over the quota, reservation, headroom and recount suites under `-race`. The follow-up is accepted by the owner 2026-09-24.                                                                                                                             |
+| 6          | Push subscriptions are per server/device, opt-in, revocable, and contain no sensitive default payload                        | **Met.** B5-4 ([#1545](https://github.com/J3vb/OwnCord/pull/1545)) and B5-11 ([#1548](https://github.com/J3vb/OwnCord/pull/1548)); **56 tests, 0 failures** over the push/VAPID/subscription suites. The two named tests are green at this SHA: `TestNoAutomaticTelemetry_Capture` and `TestEgressAllowIsLive`. Condition 6's per-attempt proof ([#1742](https://github.com/J3vb/OwnCord/pull/1742)) is accepted by the owner 2026-09-24. |
+| 7          | No unresolved B5 security advisory remains                                                                                   | **Met — closed by the owner 2026-09-24** without publishing an advisory ([#1790](https://github.com/J3vb/OwnCord/pull/1790)); SEC-04's placeholder `GHSA-____-____-____` is retired. Advisory material still goes through GitHub Security Advisories, never a commit, issue or PR description.                                                                                                                                            |
+| **rule 2** | No `OC-*` finding tagged B5 is open, unless re-tagged with a written reason in the scorecard                                 | **Met.** All five B5-tagged `OC-*` rows are `fixed` in the ledger at this SHA — `OC-0323`, `OC-0327`, `OC-0349`, `OC-0351`, `OC-0357`; `node .superpowers/render-ledger.mjs --check` → `ledger valid: 459 finding(s)`; no `OC-*` row tagged B5 is `open`.                                                                                                                                                                                 |
+
+#### The gate, run on the exit SHA
+
+| Check                                                                  | Result                                                                                                                  |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Four build-tag variants (default, otel, wazero, both)                  | all OK                                                                                                                  |
+| `go vet ./...`                                                         | clean                                                                                                                   |
+| `golangci-lint run` (pinned v2.11.3)                                   | **0 issues**                                                                                                            |
+| `go test -race ./...` (`-p 2`)                                         | ok, all packages                                                                                                        |
+| `go test -tags otel,wazero ./...` (`-p 2`)                             | ok, all packages                                                                                                        |
+| `go test -tags deadlock -count=1 ./ws/`                                | ok, 85.4s                                                                                                               |
+| `TestMigrationRollbackRehearsalOnAlphaSnapshot`                        | PASS — 22 migrations applied 31 → 53, 22 reversed newest-first                                                          |
+| `TestMarkerFileRollback`, `TestReversalFilesAreOperatorSafe`           | PASS                                                                                                                    |
+| `TestNoAutomaticTelemetry_Capture`, `TestEgressAllowIsLive`            | PASS                                                                                                                    |
+| Coverage floors                                                        | aggregate 82.0 (81.3), auth 92.0 (91.4), db 81.3 (81.2), permissions 100.0 (100.0), service 78.9 (77.4), ws 88.8 (88.5) |
+| `make sqlc-verify`                                                     | no drift in `Server/db/dbgen`                                                                                           |
+| `make protocol-verify`                                                 | no drift in `ws/message_types.go` / `Client/src/lib/protocolTypes.ts`                                                   |
+| `make docs-verify`                                                     | no drift in the `gendocs:*` blocks                                                                                      |
+| `npm run check:docs`                                                   | passed — `check-migrations` 0 new migrations, ledger 459 findings, `check-doc-counts` 10 claims across 5 documents      |
+| `npm run check:hygiene` (tracked files)                                | prettier clean on every tracked file; shellcheck/actionlint skipped locally, CI runs them                               |
+| Server `go run ./cmd/dbinventory` + `TestServerBoundariesDocIsCurrent` | no drift                                                                                                                |
+| Client unit suite                                                      | 313 files, 6818 passed / 152 expected fail; `tsc --noEmit` clean; `npm run lint` (oxlint, cycles, eslint) clean         |
+| `cargo fmt --all -- --check`                                           | clean                                                                                                                   |
+
+#### Integration evidence for the exit commits
+
+`dev` is squash-merge-only and its pushes run no `ci.yml` matrix, so what
+transfers the PR-head result to the squash commit is
+`required_status_checks.strict` plus tree identity (G-03 as amended).
+`bash scripts/verify-integration-tree.sh` on the exit SHA and the B5 commits:
+
+```
+PASS 458301fd (PR #1790): squash tree == PR head tree 8faeee875c30067e2c215b1f542129c05e2e2da1
+PASS a356d88b (PR #1565): squash tree == PR head tree b9e49372062e48b7ce6fe42f88df9b6e9141f539
+PASS a05828e0 (PR #1555): squash tree == PR head tree a02df73ccd96c91a4ce4012c3cdbd7e715e25733
+PASS 61ac2b95 (PR #1553): squash tree == PR head tree dcf1a917f574f3d72ddbb05a943625e2704765f7
+PASS ae6b9c04 (PR #1552): squash tree == PR head tree 3a36f82fe2a4e7cb6d41db807d0d6fdd69800e5c
+PASS 18b8ea9c (PR #1551): squash tree == PR head tree 288470c86330987e540a984308dd895a84dc2ffb
+PASS 23c98ee1 (PR #1549): squash tree == PR head tree ec80df3f427117a634a10df48845139fbfa8c7e1
+PASS 897e21b4 (PR #1548): squash tree == PR head tree 95fc3a28647208affe0fe1040941379a379537c9
+PASS a504d61e (PR #1545): squash tree == PR head tree 2e51f14fd6a976e7cc3ff9410fd01e5c9109b010
+PASS 1311fee9 (PR #1544): squash tree == PR head tree 6ad81d202113dc716cb5f862d08fe5d275706f2e
+PASS 123b07d8 (PR #1543): squash tree == PR head tree 04055258a923757dca3fe3b09e2d4a0cb2a9e76c
+PASS 5c7a0f4a (PR #1542): squash tree == PR head tree 1d3f8794d15f5b4744651afc7f6f4028f8a565b3
+PASS a60c6ca9 (PR #1540): squash tree == PR head tree b5c588ece0f4da67b0c007cd5fda1233df1d4c4a
+PASS af473ff4 (PR #1541): squash tree == PR head tree 1d978805e5e43be0b6037a8f60ffdabd5d10b04c
+PASS 2b187b64 (PR #1546): squash tree == PR head tree cda147687f0840cc465a2e4b9804ee307ff2494a
+PASS 1a3a7b1d (PR #1772): squash tree == PR head tree 8acd286080d3dcc11d7085597cf424d0f10acbe3
+```
+
+Three commits report differently, and the difference is the squash-merge
+retarget, not a test gap:
+
+- `6fd8cc0c` (#1742), `714b55a0` (#1735) and `8df46055` (#1740) each landed with
+  a PR head whose tree differs from the squash tree, so
+  `verify-integration-tree.sh` reports FAIL for them. The same three PRs had
+  `dev` move under them between the head run and the merge, and the forge
+  retargeted the base; the exit SHA `458301fd` is strictly after all three, so
+  their content is in the tested tree at the exit SHA (the `-race`, tagged and
+  deadlock runs above) regardless. Their `ci.yml` runs are green, read from the
+  forge: PR #1742 run 35849984306 and PR #1735 run 35837220724 each passed both
+  `Server Build & Test` legs; #1740 is docs-only, so the selector skipped the
+  server legs (#1740 run 35848361041) and its `Repository Hygiene` and
+  `Docs & Ledger Consistency` legs passed.
+
+#### Migration and rollback rehearsal report
+
+The exit re-runs the whole reversal rehearsal on a copy of the committed alpha
+snapshot — never the tracked file. The snapshot sits at `031`, so the forward
+run is the full `032`–`053` delta and a full reversal lands back on the
+snapshot's own schema:
+
+| Stage                 | Result at `458301fd`                                                                                                                                 |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Forward               | 22 migrations applied, `schema_versions` 31 → 53, clean                                                                                              |
+| Completeness          | every migration past the snapshot's level has a reversal, and every reversal names a migration the head applied                                      |
+| Reverse, newest first | 22 reversals, 74 statements, clean — 053 down to 032, the seven B5 migrations `044`–`050` among them                                                 |
+| Round trip            | schema fingerprint, `schema_versions` (53 → 31), `settings` and the row counts of the seven data classes all identical to the snapshot's             |
+| Convergence           | migrating forward again reaches the same head schema — a rolled-back database is one a server can start on                                           |
+| Marker file           | all three tables dropped, `OpenMarkerStore` rebuilds them on the next open, the marker is gone                                                       |
+| Operator path         | no reversal carries transaction control of its own, and every one ends on its own `schema_versions` delete with nothing touching the tracker earlier |
+
+**B5's own obligation** is the seven migrations `044`–`050`, each with its
+reversal in `Server/rollback/` and its cost row in that directory's README:
+`044_user_storage` (B5-2), `045_push_subscriptions` (B5-4),
+`046_message_requests` (B5-6), `047_nsfw_acknowledgements` (B5-7),
+`048_reports` (B5-8), `049_moderation_actions` (B5-9) and `050_appeals`
+(B5-10). All seven are in the rehearsal above.
+
+#### What this exit does not claim
+
+- **The Rust unit gate was not run locally.** `cargo test --lib` needs clang
+  21 or newer and the prebuilt libwebrtc
+  (`Client/scripts/linux-webrtc-toolchain.sh`); this host has neither and no
+  passwordless package install. CI is the evidence: the exit SHA's PR #1790 is
+  docs-only, so its selector skipped the Rust leg, and the last commit to touch
+  `Client/src-tauri` before the exit SHA is #1772 (`1a3a7b1d`) —
+  tree-identical to its PR head (`PASS 1a3a7b1d` above), whose `Rust Unit
+Tests` job passed in run 35964577049. `cargo fmt --all -- --check` was re-run
+  here on the exit SHA and is clean.
+- **Conditions 2 and 3 are server-scoped.** Decision 1 (condition 2) and
+  decision 14 (conditions 3 and 2) narrow them to server-side paths, with the
+  client halves at B9 and the desktop broker at B7; the owner's acceptance of
+  that narrowing is recorded in the HP-5 scorecard. This exit measures the
+  server scope only.
+- **Three step commits are not tree-identical to their PR heads** (#1735,
+  #1740, #1742) — see the integration note above. They are ancestors of the
+  exit SHA and covered by its gate run.
+- **Condition 7 was closed without an advisory.** The owner retired the
+  placeholder ID; nothing here says an advisory was published.
+- **The gate runs on the exit SHA here, not in CI.** `dev` pushes run no
+  `ci.yml` matrix; this is a local re-run on `458301fd`, with the PR-head CI
+  runs named above.
+
+**Prepared:** 2026-09-24 by the B5 exit PR, measured at `dev` `458301fd`. The
+seven conditions and roadmap rule 2 are met on the server scope, with the
+limits above. **Awaiting the owner's acceptance — B5 is not accepted by this
+measurement.**
 
 ## Explicitly out of scope for B5
 
