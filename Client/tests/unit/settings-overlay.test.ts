@@ -528,7 +528,11 @@ describe("SettingsOverlay", () => {
       expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123");
       expect(status!.textContent).toBe(warning);
     });
-    expect(status!.style.color).toBe("var(--yellow)");
+    // B9-23: the warning is the qualified .form-warning class, not an inline
+    // --yellow (which reads 1.89:1 on light), and keeps the live role it was
+    // created with so the swap to the warning text is announced.
+    expect(status!.classList.contains("form-warning")).toBe(true);
+    expect(status!.getAttribute("role")).toBe("alert");
     // The password did change, so the fields are cleared like any success.
     expect((inputs[0] as HTMLInputElement).value).toBe("");
     expect((inputs[1] as HTMLInputElement).value).toBe("");
@@ -553,12 +557,11 @@ describe("SettingsOverlay", () => {
     changePwBtn.click();
 
     await vi.waitFor(() => {
-      // Find the error element near the password fields
-      const errorEls = container.querySelectorAll("div[style*='color:var(--red)']");
-      const pwError = Array.from(errorEls).find(
-        (el) => el.textContent === "Incorrect old password",
-      );
-      expect(pwError).not.toBeUndefined();
+      // B9-23: the error is the shared .form-error class with role=alert.
+      const pwError = container.querySelector('[data-testid="pw-change-status"]');
+      expect(pwError?.textContent).toBe("Incorrect old password");
+      expect(pwError?.classList.contains("form-error")).toBe(true);
+      expect(pwError?.getAttribute("role")).toBe("alert");
     });
 
     overlay.destroy?.();
@@ -583,9 +586,9 @@ describe("SettingsOverlay", () => {
     saveBtn.click();
 
     await vi.waitFor(() => {
-      const errorEls = container.querySelectorAll("div[style*='color:var(--red)']");
-      const nameError = Array.from(errorEls).find((el) => el.textContent === "Username taken");
-      expect(nameError).not.toBeUndefined();
+      const nameError = container.querySelector<HTMLElement>("#username-edit-error");
+      expect(nameError?.textContent).toBe("Username taken");
+      expect(nameError?.getAttribute("role")).toBe("alert");
     });
 
     overlay.destroy?.();

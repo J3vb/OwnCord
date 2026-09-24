@@ -85,3 +85,14 @@ export function setOwnedTimeout(signal: AbortSignal, fn: () => void, ms: number)
   }, ms);
   signal.addEventListener("abort", clear, { once: true });
 }
+
+/**
+ * Whether focus is still ours to move after a control was disabled, hidden or
+ * rebuilt: it fell to `<body>` (Chromium blurs a disabled or hidden focused
+ * control) or is still inside `owner`. False once the user has moved it
+ * elsewhere, so an async result never pulls focus out of the field they are in.
+ */
+export function focusIsOurs(owner: Element): boolean {
+  const active = document.activeElement;
+  return active === null || active === document.body || owner.contains(active);
+}

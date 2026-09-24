@@ -107,6 +107,7 @@ export const connectText = defineCatalog("connect", {
   "totp.inputLabel": "Authentication or recovery code",
   "totp.verify": "Verify",
   "totp.verifying": "Verifying…",
+  "totp.invalidCode": "Enter a 6-digit code or an 11-character recovery code.",
   "totp.failed": "Verification failed.",
 
   "cert.mismatch.title": "Certificate Warning",

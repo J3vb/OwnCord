@@ -8,14 +8,16 @@
  * tab switch and on closing the overlay).
  */
 
-import { createElement, appendChildren, setText } from "@lib/dom";
+import { createElement, appendChildren, setText, focusIsOurs } from "@lib/dom";
 import { errorText } from "@lib/api";
 import type { RecoveryKitStatus } from "@lib/api";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { accountText as t } from "../../i18n/account";
 
 const MUTED = "color:var(--text-muted);font-size:13px;margin-bottom:12px";
-const ERROR = "color:var(--red);font-size:13px;margin-bottom:8px";
+// --text-danger is the qualified error-text token; --red (the fill) reads
+// 3.35:1 on --bg-primary, below Q1's 4.5:1 (B9-2 UI contract).
+const ERROR = "color:var(--text-danger);font-size:13px;margin-bottom:8px";
 
 export interface ShownOnce {
   readonly element: HTMLDivElement;
@@ -40,7 +42,7 @@ export function buildShownOnce(
   const element = createElement("div", {});
   const warning = createElement(
     "div",
-    { style: "color:var(--yellow, #faa61a);font-size:13px;margin-bottom:8px;font-weight:600" },
+    { style: "color:var(--text-warning);font-size:13px;margin-bottom:8px;font-weight:600" },
     opts.warning,
   );
   const code = createElement(
@@ -59,15 +61,21 @@ export function buildShownOnce(
     { class: "ac-btn", style: "margin-bottom:12px", "data-testid": opts.copyTestId },
     opts.copyLabel,
   );
+  // The copy result is announced once, without moving focus (B9-23): the
+  // button's own label change is a repaint a screen reader may miss on a
+  // control that is still the focus. The region holds no secret.
+  const copyStatus = createElement("div", { class: "sr-only", role: "status" });
   let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
   copyBtn.addEventListener(
     "click",
     () => {
       const restore = (label: string): void => {
         setText(copyBtn, label);
+        setText(copyStatus, label);
         if (copyResetTimer !== null) clearTimeout(copyResetTimer);
         copyResetTimer = setTimeout(() => {
           setText(copyBtn, opts.copyLabel);
+          setText(copyStatus, "");
           copyResetTimer = null;
         }, 1500);
       };
@@ -82,7 +90,7 @@ export function buildShownOnce(
     },
     { signal },
   );
-  appendChildren(element, warning, code, copyBtn);
+  appendChildren(element, warning, code, copyBtn, copyStatus);
 
   const clear = (): void => {
     code.textContent = "";
@@ -123,6 +131,7 @@ function buildPasswordConfirm(
   });
   const errorEl = createElement("div", {
     style: ERROR,
+    role: "alert",
     "data-testid": `${opts.testIdPrefix}-error`,
   });
   const btnRow = createElement("div", { style: "display:flex;gap:8px" });
@@ -140,10 +149,14 @@ function buildPasswordConfirm(
   appendChildren(area, pwInput, errorEl, btnRow);
 
   const close = (): void => {
+    // The submit button that was focused is inside `area`, which is about to
+    // hide; focus the trigger that replaces it so focus never falls to <body>
+    // (B9-23). Only reclaim focus if the user has not moved it elsewhere.
     area.style.display = "none";
     trigger.style.display = "";
     pwInput.value = "";
     setText(errorEl, "");
+    if (focusIsOurs(area)) trigger.focus();
   };
   trigger.addEventListener(
     "click",
@@ -172,6 +185,8 @@ function buildPasswordConfirm(
         .then(close)
         .catch((err: unknown) => {
           setText(errorEl, errorText(err, t("recovery.requestFailed")));
+          submitBtn.disabled = false;
+          if (focusIsOurs(submitBtn)) submitBtn.focus();
         })
         .finally(() => {
           submitBtn.disabled = false;
@@ -296,19 +311,21 @@ export function buildRecoveryKitSection(
     "data-testid": "recovery-kit-status",
     style:
       "font-size:12px;padding:2px 8px;border-radius:4px;font-weight:600;" +
-      "background:var(--bg-active);color:var(--text-muted)",
+      "background:var(--bg-tertiary);color:var(--text-muted)",
   });
   appendChildren(headerRow, header, badge);
 
   const description = createElement("div", { style: MUTED }, t("recovery.kitDescription"));
-  const statusError = createElement("div", { style: ERROR });
+  const statusError = createElement("div", { style: ERROR, role: "alert" });
   const slot = buildRevealSlot(signal);
 
   function paint(status: RecoveryKitStatus | null): void {
     const { text, enrolled } = statusLabel(status);
+    // Qualified status tokens rather than white on the --green fill (3.2:1,
+    // below Q1's 4.5:1); the badge's word carries the state (B9-23).
     setText(badge, text);
-    badge.style.background = enrolled ? "var(--green, #3ba55d)" : "var(--bg-active)";
-    badge.style.color = enrolled ? "#fff" : "var(--text-muted)";
+    badge.style.background = "var(--bg-tertiary)";
+    badge.style.color = enrolled ? "var(--text-positive)" : "var(--text-muted)";
     confirm.setTriggerLabel(enrolled ? t("recovery.replaceKit") : t("recovery.createKit"));
   }
 

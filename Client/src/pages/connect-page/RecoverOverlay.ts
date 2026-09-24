@@ -3,7 +3,7 @@
 // startup bundle. The secret field takes a recovery kit secret or an
 // owner-issued recovery credential; the server tells them apart by shape.
 
-import { createElement, setText, appendChildren } from "@lib/dom";
+import { createElement, setText, appendChildren, focusIsOurs } from "@lib/dom";
 import { connectText } from "../../i18n/connect";
 import { recoverText } from "../../i18n/recover";
 
@@ -87,11 +87,18 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
     "new-password",
   );
   const error = createElement("div", {
-    class: "totp-subtitle",
+    // .form-error carries the qualified --text-danger; no inline colour.
+    class: "form-error",
     role: "alert",
-    style: "color:var(--red)",
+    id: "recover-error",
     "data-testid": "recover-error",
   });
+  // Link the error to every field it can be about, so a screen reader reads
+  // the reason with the control (B9-23). A server error names no field, so
+  // the association is harmless when the message is generic.
+  for (const { input } of [username, secret, password]) {
+    input.setAttribute("aria-describedby", "recover-error");
+  }
   const submit = createElement(
     "button",
     { class: "btn-primary", type: "button", "data-testid": "recover-submit" },
@@ -165,6 +172,9 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
     } finally {
       submit.disabled = false;
       setText(submit, recoverText("recover.submit"));
+      if (!element.classList.contains("totp-overlay--hidden") && focusIsOurs(submit)) {
+        submit.focus();
+      }
     }
   }
 

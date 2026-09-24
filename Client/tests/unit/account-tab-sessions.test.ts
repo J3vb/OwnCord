@@ -190,6 +190,23 @@ describe("Account tab — devices", () => {
     expect(options.onRevokeSession).not.toHaveBeenCalled();
   });
 
+  it("hands focus back to the trigger when the confirmation is cancelled", async () => {
+    const tab = await render(makeOptions());
+    const trigger = tab.querySelector<HTMLButtonElement>('[data-testid="sessions-revoke-all"]')!;
+    const confirmArea = tab.querySelector<HTMLElement>(
+      '[data-testid="sessions-revoke-all-confirm-area"]',
+    )!;
+    trigger.click();
+    const cancel = [...confirmArea.querySelectorAll("button")].find(
+      (b) => b.textContent === "Cancel",
+    )!;
+    // Opening moves focus off the hidden trigger to the safe choice.
+    expect(document.activeElement).toBe(cancel);
+    cancel.click();
+    expect(confirmArea.style.display).toBe("none");
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("shows an unknown device plainly", async () => {
     const tab = await render(
       makeOptions({
