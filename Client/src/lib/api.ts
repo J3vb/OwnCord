@@ -241,8 +241,9 @@ export interface ModerationReportDetail {
   }[];
   /** NSFW_ACKNOWLEDGEMENT_REQUIRED or SOURCE_CHANNEL_UNAVAILABLE when withheld. */
   readonly evidence_withheld?: string;
-  /** Internal notes: always empty for the report's own reporter, and once
-   *  the retention sweep has run on a closed report. */
+  /** Internal notes: always empty for the report's own reporter, once the
+   *  retention sweep has run on a closed report, and once the subject's
+   *  account is erased. */
   readonly notes: readonly {
     readonly id: number;
     readonly author_id: number;
