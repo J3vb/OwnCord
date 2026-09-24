@@ -148,7 +148,8 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `OWNCORD_E2E_LIVEKIT_BINARY` and gates every `client-fullstack` PR; it also
   runs over WebView2 in `client-native` and at length through
   `npm run test:e2e:soak`. Its bars hold within one page as well as across
-  logins, so a leak the re-login navigation would release still fails. A native
+  logins, so a leak the re-login navigation would release still fails (bar a
+  within-page node move of at most 2, a known blind spot). A native
   voice backend keeps these rules plus three IPC ones (owned `listen()` with a
   late-unlisten, native handles released in the web room's teardown, native
   counts reported through `getSessionDebugInfo`):
