@@ -251,16 +251,24 @@ describe("the server decides", () => {
     expect(status(root)).toBe("");
   });
 
-  it("shows a refused removal as a channel refusal", async () => {
+  it.each([
+    [
+      "forbidden: cannot delete this message",
+      "The server refused to remove this message: you can't manage messages in its channel.",
+    ],
+    [
+      "forbidden: channel is archived",
+      "The server refused to remove this message: its channel is archived.",
+    ],
+    ["forbidden: blocked", "The server didn't accept this: forbidden: blocked"],
+  ])("shows a removal refused with %j as that refusal", async (message, shown) => {
     roleBits(ALL);
     const root = await opened(held("r1"));
     press(root, REMOVE);
     answer("Remove message");
-    writes[0]!.reject(new ApiClientError(403, "FORBIDDEN", "cannot delete this message"));
+    writes[0]!.reject(new ApiClientError(403, "FORBIDDEN", message));
     await flush();
-    expect(alerts(root)).toBe(
-      "The server refused to remove this message: you can't manage messages in its channel.",
-    );
+    expect(alerts(root)).toBe(shown);
     expect(status(root)).toBe("");
   });
 
@@ -297,6 +305,25 @@ describe("a demoted moderator", () => {
     expect(writes).toHaveLength(0);
     expect(buttons(root)).toEqual(["Issue warning", "Time out"]);
   });
+
+  it.each([
+    ["kept", ALL, BAN],
+    ["taken", Permission.MANAGE_MESSAGES, null],
+  ] as const)(
+    "puts focus back on the rebuilt report when the bit is %s with the confirm open",
+    async (_, bits, back) => {
+      roleBits(ALL);
+      const root = await opened(held("r1"));
+      press(root, BAN);
+      roleBits(bits);
+      await flush();
+      answer("Cancel");
+      const active = document.activeElement as HTMLElement;
+      expect(root.contains(active)).toBe(true);
+      if (back === null) expect(active.tagName).toBe("H3");
+      else expect(active.textContent).toBe(back);
+    },
+  );
 
   it("follows a change of the reader's own role", async () => {
     setRoles([

@@ -142,6 +142,7 @@ export const moderationText = defineCatalog("moderation", {
     "The server refused this action: your role doesn't allow it, or their role isn't below yours.",
   "act.refusedRemoval":
     "The server refused to remove this message: you can't manage messages in its channel.",
+  "act.refusedArchived": "The server refused to remove this message: its channel is archived.",
   "done.removal": "Message removed for everyone.",
   "done.kick": "Logged out of every session. They can sign in again.",
   "done.ban": "Member banned. They were disconnected and can't sign in again.",

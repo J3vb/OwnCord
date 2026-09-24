@@ -100,6 +100,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   let items: readonly QueueItem[] = [];
   let selected: string | null = null;
   let shown: ReportDetail | null = null;
+  let reportHeading: HTMLElement | null = null;
   let gate: MountableComponent | null = null;
   let listReq: Disposable | null = null;
   let detailReq: Disposable | null = null;
@@ -388,6 +389,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     dropDetail();
     shown = detail;
     const view = buildReportDetail(item, detail, mountGate);
+    reportHeading = view.heading;
     const me = authStore.getState().user?.id ?? -1;
     view.element.append(...buildHistory(detail, me));
     const mine = draft.id === detail.id ? draft : NO_DRAFT;
@@ -417,6 +419,8 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       draft: actDraft,
       onWrite: (w) => write(detail.id, w),
       signal,
+      refocus: (key) =>
+        detailSlot.querySelector<HTMLElement>(`[data-focus="${key}"]`) ?? reportHeading,
     });
     if (acts.element !== null) view.element.appendChild(acts.element);
     if (!acts.takesInput) {
@@ -489,7 +493,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     if (isStatus(err, 403)) {
       // Kick and ban each have their own bit, which a role change can take
       // while MODERATE_MEMBERS stays, so a refusal is not only about rank.
-      if (w.kind === "removal") return t("act.refusedRemoval");
+      if (w.kind === "removal") return removalRefusal((err as ApiClientError).message);
       return t(w.kind === "kick" || w.kind === "ban" ? "act.refusedEnforce" : "act.refused");
     }
     if (isStatus(err, 404) && w.kind === "lift") return t("act.liftNone");
@@ -498,6 +502,12 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     }
     // No answer, or an internal failure: the action may still have been recorded.
     return err instanceof ApiClientError ? errorText(err, t("act.unknown")) : t("act.unknown");
+  }
+  /** A removal's refusal: the channel's rules, the reader's bit, or the server's own words. */
+  function removalRefusal(message: string): string {
+    if (message === "forbidden: channel is archived") return t("act.refusedArchived");
+    if (message === "forbidden: cannot delete this message") return t("act.refusedRemoval");
+    return message === "" ? t("act.unknown") : t("act.invalid", { message });
   }
   const WRITE_CONFLICT = {
     assign: "conflict.assign",

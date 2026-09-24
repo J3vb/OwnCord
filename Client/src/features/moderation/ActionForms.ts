@@ -115,6 +115,8 @@ export interface ActionOptions {
   /** Whether the write was accepted; one runs at a time. */
   readonly onWrite: (write: ActionWrite) => boolean;
   readonly signal: AbortSignal;
+  /** The live report's control with this focus key, or its heading. */
+  readonly refocus: (key: string) => HTMLElement | null;
   /** For tests: the time a running timeout is measured against. */
   readonly now?: number;
 }
@@ -310,9 +312,14 @@ export function buildActionForms(o: ActionOptions): ActionView {
         "click",
         () => {
           if (b.getAttribute("aria-disabled") === "true") return;
-          confirmEnforce(kind, signal, () => {
-            if (mayEnforce(kind)) send({ kind, reason: cleanReason(draft.enforce) });
-          });
+          confirmEnforce(
+            kind,
+            signal,
+            () => o.refocus(kind),
+            () => {
+              if (mayEnforce(kind)) send({ kind, reason: cleanReason(draft.enforce) });
+            },
+          );
         },
         { signal },
       );
@@ -327,9 +334,14 @@ export function buildActionForms(o: ActionOptions): ActionView {
 /**
  * The destructive-action confirm (message-requests/decisions.ts's shape):
  * Cancel first and focused, Escape and the backdrop cancel, focus returns to
- * the opener.
+ * the opener, or to `fallbackFocus` when a role change rebuilt the report.
  */
-function confirmEnforce(kind: EnforceKind, signal: AbortSignal, onConfirm: () => void): void {
+function confirmEnforce(
+  kind: EnforceKind,
+  signal: AbortSignal,
+  fallbackFocus: () => HTMLElement | null,
+  onConfirm: () => void,
+): void {
   const titleId = `mod-confirm-${++actSeq}`;
   const content = createElement("div");
   const header = createElement("div", { class: "modal-header" });
@@ -354,6 +366,7 @@ function confirmEnforce(kind: EnforceKind, signal: AbortSignal, onConfirm: () =>
     ariaLabelledBy: titleId,
     overlayAttrs: { "data-testid": "mod-confirm-dialog" },
     signal,
+    fallbackFocus,
   });
   cancel.addEventListener("click", () => modal.close());
   confirm.addEventListener("click", () => {
