@@ -61,8 +61,10 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
  * refuses notifications and the "Desktop Notifications" toggle cannot change
  * that, so it offers the one action that can re-ask; `unavailable` means this
  * build has no native notifier at all (a non-Tauri host), which is a different
- * limitation and gets different wording. The row removes itself if the check
- * cannot answer, so the panel never claims a state it did not observe.
+ * limitation and gets different wording. A notifier that cannot observe the OS
+ * setting (`readsOsPermission` false — the Tauri desktop plugin always answers
+ * "granted") gets wording that says so instead of a granted claim, and no
+ * Allow action, since asking it changes nothing.
  */
 function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
   const row = createElement("div", {
@@ -127,7 +129,10 @@ function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
 
   void desktop.notifier.permissionGranted().then(
     (granted) => {
-      if (granted) showGranted();
+      if (!desktop.notifier.readsOsPermission) {
+        setState(t("notifications.permission.unknown"));
+        allow.hidden = true;
+      } else if (granted) showGranted();
       else showDenied();
     },
     () => {

@@ -214,6 +214,7 @@ function resetStores(): void {
     activeModal: null,
     theme: "dark" as const,
     connectionStatus: "disconnected" as const,
+    connectionDialFailed: false,
     transientError: null,
     sessionReplaced: false,
     persistentError: null,

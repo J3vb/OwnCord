@@ -444,25 +444,21 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       else
         applyConnectionStatus(banner, state.connectionStatus, {
           offline: deviceNetworkOffline(),
+          dialFailed: state.connectionDialFailed,
           onRetry: retryConnection,
         });
     };
     unsubscribers.push(uiStore.subscribeSelector((s) => s.sessionReplaced, syncBanner));
+    unsubscribers.push(uiStore.subscribeSelector((s) => s.connectionDialFailed, syncBanner));
 
-    // Regaining a network is a recovery point: dial at once instead of waiting
-    // out a backoff that could be at its cap. Going offline only re-renders,
-    // so the banner says the true thing immediately. Owned by a Disposable so
-    // the lifecycle guard sees both listeners torn down with the page.
+    // Losing or regaining the device's network only re-renders, so the banner
+    // says the true thing immediately; the reconnect loop and Retry own
+    // recovery. Owned by a Disposable so the lifecycle guard sees both
+    // listeners torn down with the page.
     const networkOwner = new Disposable();
     unsubscribers.push(() => networkOwner.destroy());
-    networkOwner.onEvent(window, "online", () => {
-      // Never redial a session the server displaced: that would restart the
-      // two-device fight B7-14 stopped. "Use here" owns that recovery.
-      const state = uiStore.getState();
-      if (state.connectionStatus !== "connected" && !state.sessionReplaced) retryConnection();
-      syncBanner();
-    });
-    networkOwner.onEvent(window, "offline", syncBanner);
+    window.addEventListener("online", syncBanner, { signal: networkOwner.signal });
+    window.addEventListener("offline", syncBanner, { signal: networkOwner.signal });
 
     // A sign-in not yet reviewed: listed on connect and on window focus.
     const sessionNotice = new Disposable();

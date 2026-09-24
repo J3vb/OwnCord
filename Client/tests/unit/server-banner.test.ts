@@ -86,6 +86,25 @@ describe("ServerBanner", () => {
     banner.destroy();
   });
 
+  it("showReconnecting keeps Reconnecting... until a dial has actually failed", () => {
+    const banner = createServerBanner();
+    const onRetry = vi.fn();
+    banner.showReconnecting({ offline: false, onRetry });
+
+    expect(banner.element.textContent).toBe("Reconnecting...");
+    expect(banner.element.querySelector("button")).toBeNull();
+    expect(banner.liveElement.textContent).toBe("Reconnecting...");
+
+    banner.showReconnecting({ offline: false, dialFailed: true, onRetry });
+    expect(banner.element.textContent).toBe(
+      "Can't reach this server right now. It may be down or blocked on this network. Retry",
+    );
+    banner.element.querySelector("button")!.click();
+    expect(onRetry).toHaveBeenCalledTimes(1);
+
+    banner.destroy();
+  });
+
   it("showReconnecting says the device is offline instead of promising progress", () => {
     const banner = createServerBanner();
     banner.showReconnecting({ offline: true });

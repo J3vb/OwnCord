@@ -72,6 +72,7 @@ function resetStores(): void {
     // Default to a live socket: the voice join/leave affordance is only usable
     // when connected. Frozen-state behavior is exercised explicitly below.
     connectionStatus: "connected" as const,
+    connectionDialFailed: false,
     transientError: null,
     sessionReplaced: false,
     persistentError: null,

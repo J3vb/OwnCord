@@ -5088,4 +5088,34 @@ describe("wireConnectionStatus", () => {
     mockWs.simulateStateChange("connected");
     expect(uiStore.getState().connectionStatus).toBe("disconnected");
   });
+
+  it("marks a dial failure only when a dial attempt ends without connecting", () => {
+    const mockWs = createMockWsClient();
+    const unsub = wireConnectionStatus(mockWs);
+    const dialFailed = (): boolean => uiStore.getState().connectionDialFailed;
+
+    mockWs.simulateStateChange("connected");
+    // A drop from a live connection has not failed a dial yet.
+    mockWs.simulateStateChange("reconnecting");
+    expect(dialFailed()).toBe(false);
+
+    mockWs.simulateStateChange("connecting");
+    expect(dialFailed()).toBe(false);
+    mockWs.simulateStateChange("reconnecting");
+    expect(dialFailed()).toBe(true);
+
+    // The next dial is in progress again.
+    mockWs.simulateStateChange("connecting");
+    expect(dialFailed()).toBe(false);
+    mockWs.simulateStateChange("authenticating");
+    mockWs.simulateStateChange("disconnected");
+    expect(dialFailed()).toBe(true);
+
+    mockWs.simulateStateChange("connecting");
+    mockWs.simulateStateChange("authenticating");
+    mockWs.simulateStateChange("connected");
+    expect(dialFailed()).toBe(false);
+
+    unsub();
+  });
 });

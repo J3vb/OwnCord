@@ -10,6 +10,12 @@ export interface NotifierShowOptions {
 }
 
 export interface Notifier {
+  /**
+   * Whether `permissionGranted()` observes the OS setting. The Tauri desktop
+   * plugin answers "granted" without asking the OS, so its reading proves
+   * nothing and a settings surface must not present it as the system's state.
+   */
+  readonly readsOsPermission: boolean;
   permissionGranted(): Promise<boolean>;
   requestPermission(): Promise<boolean>;
   show(title: string, body: string, options?: NotifierShowOptions): Promise<void>;

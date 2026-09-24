@@ -59,6 +59,8 @@ export const settingsText = defineCatalog("settings", {
   "notifications.permission.denied":
     "Your system has blocked notifications from OwnCord, so the toggles below cannot deliver them. Allow notifications to change this.",
   "notifications.permission.allow": "Allow notifications",
+  "notifications.permission.unknown":
+    "OwnCord can't read your system notification setting. If notifications don't appear, check your system notification settings.",
   "notifications.permission.unavailable":
     "This build has no system notifier, so it cannot show desktop notifications or ask for permission.",
   "notifications.flash.label": "Flash Taskbar",

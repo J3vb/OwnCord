@@ -1,23 +1,28 @@
 /**
  * B9-25: the Notifications settings tab reports the real OS notification
  * permission and offers the one action that can change it. These cases pin the
- * three states the native notifier can answer (granted, denied, unavailable),
- * so the panel never claims a permission it did not observe (BPR-092).
+ * states a notifier can answer (granted, denied, unavailable) and the one where
+ * it cannot observe the OS setting at all, so the panel never claims a
+ * permission it did not observe (BPR-092).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockPermissionGranted, mockRequestPermission } = vi.hoisted(() => ({
-  mockPermissionGranted: vi.fn(),
-  mockRequestPermission: vi.fn(),
-}));
-
-vi.mock("../../src/platform/desktop", () => ({
-  desktop: {
-    notifier: {
+const { mockNotifier, mockPermissionGranted, mockRequestPermission } = vi.hoisted(() => {
+  const mockPermissionGranted = vi.fn();
+  const mockRequestPermission = vi.fn();
+  return {
+    mockPermissionGranted,
+    mockRequestPermission,
+    mockNotifier: {
+      readsOsPermission: true,
       permissionGranted: mockPermissionGranted,
       requestPermission: mockRequestPermission,
     },
-  },
+  };
+});
+
+vi.mock("../../src/platform/desktop", () => ({
+  desktop: { notifier: mockNotifier },
 }));
 
 import { buildNotificationsTab } from "@components/settings/NotificationsTab";
@@ -27,6 +32,7 @@ let ac: AbortController;
 
 beforeEach(() => {
   localStorage.clear();
+  mockNotifier.readsOsPermission = true;
   mockPermissionGranted.mockReset();
   mockRequestPermission.mockReset();
   container = document.createElement("div");
@@ -104,6 +110,24 @@ describe("NotificationsTab — system notification permission", () => {
     const allow = el.querySelector("[data-testid='notification-permission-allow']") as HTMLElement;
     expect(allow.hidden).toBe(true);
   });
+
+  it.each([true, false])(
+    "says it cannot read the system setting when the notifier cannot observe it (reading %s)",
+    async (reading) => {
+      mockNotifier.readsOsPermission = false;
+      mockPermissionGranted.mockResolvedValue(reading);
+      const el = row();
+      await vi.waitFor(() => {
+        expect(descText(el)).toBe(
+          "OwnCord can't read your system notification setting. If notifications don't appear, check your system notification settings.",
+        );
+      });
+      const allow = el.querySelector(
+        "[data-testid='notification-permission-allow']",
+      ) as HTMLElement;
+      expect(allow.hidden).toBe(true);
+    },
+  );
 
   it("removes the Allow action if the request itself finds no notifier", async () => {
     mockPermissionGranted.mockResolvedValue(false);

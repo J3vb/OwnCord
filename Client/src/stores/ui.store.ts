@@ -9,6 +9,11 @@ import type { ContentViewId } from "../features/navigation/destinations";
 export interface UiState {
   readonly settingsOpen: boolean;
   readonly connectionStatus: "connected" | "reconnecting" | "disconnected";
+  /**
+   * The last dial attempt failed and no new one is in progress. A drop from a
+   * live connection, or a dial still under way, leaves this false.
+   */
+  readonly connectionDialFailed: boolean;
   readonly transientError: string | null;
   /**
    * The server displaced this device's socket because the same account
@@ -55,6 +60,7 @@ export interface UpdateRequired {
 const INITIAL_STATE: UiState = {
   settingsOpen: false,
   connectionStatus: "disconnected",
+  connectionDialFailed: false,
   transientError: null,
   sessionReplaced: false,
   updateRequiredHost: null,
@@ -86,10 +92,14 @@ export function closeSettings(): void {
 }
 
 /** Set the WebSocket connection status. */
-export function setConnectionStatus(status: "connected" | "reconnecting" | "disconnected"): void {
+export function setConnectionStatus(
+  status: "connected" | "reconnecting" | "disconnected",
+  dialFailed = false,
+): void {
   uiStore.setState((prev) => ({
     ...prev,
     connectionStatus: status,
+    connectionDialFailed: dialFailed,
     // A live connection means this device is the one in use again.
     sessionReplaced: status === "connected" ? false : prev.sessionReplaced,
   }));

@@ -91,12 +91,18 @@ export type DispatcherCleanup = () => void;
 
 /**
  * The single writer for ui.store.connectionStatus (UX spec §3): collapses the
- * ws client's internal state machine onto the 3-state status. Wired once at
+ * ws client's internal state machine onto the 3-state status, and records
+ * whether the state was reached by a dial attempt failing. Wired once at
  * startup and kept for the app's lifetime — deliberately separate from
  * wireDispatcher, whose listeners are torn down per connection.
  */
 export function wireConnectionStatus(ws: Pick<WsClient, "onStateChange">): () => void {
-  return ws.onStateChange((s) => setConnectionStatus(toConnectionStatus(s)));
+  let dialing = false;
+  return ws.onStateChange((s) => {
+    const dialFailed = dialing && (s === "reconnecting" || s === "disconnected");
+    dialing = s === "connecting" || s === "authenticating";
+    setConnectionStatus(toConnectionStatus(s), dialFailed);
+  });
 }
 
 /**

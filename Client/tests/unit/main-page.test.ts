@@ -1206,7 +1206,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
   });
 
-  it("does not redial a session the server displaced when the network returns (B9-25)", async () => {
+  it("keeps Reconnecting... until a dial fails, then offers Retry (B9-25)", async () => {
     const ws = fakeWs();
     authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
     page = createMainPage({ ws, api: fakeApi("chat.example.com") });
@@ -1214,18 +1214,54 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     uiStore.setState((prev) => ({
       ...prev,
-      sessionReplaced: true,
+      sessionReplaced: false,
+      connectionStatus: "reconnecting",
+      connectionDialFailed: false,
+    }));
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toBe("Reconnecting...");
+    });
+    expect(banner.querySelector("button")).toBeNull();
+
+    // Same 3-state status: only the dial outcome changed.
+    uiStore.setState((prev) => ({ ...prev, connectionDialFailed: true }));
+    await vi.waitFor(() => {
+      expect(banner.textContent).toContain("Can't reach this server");
+    });
+    banner.querySelector("button")!.click();
+    expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
+    uiStore.setState((prev) => ({ ...prev, connectionDialFailed: false }));
+  });
+
+  it("re-renders the notice on network loss and return without redialing (B9-25)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    uiStore.setState((prev) => ({
+      ...prev,
+      sessionReplaced: false,
       connectionStatus: "disconnected",
     }));
-    window.dispatchEvent(new Event("online"));
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toContain("Can't reach this server");
+    });
 
-    // "Use here" owns displaced-session recovery; a network-return retry must
-    // not restart the two-device fight B7-14 stopped.
+    const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    try {
+      window.dispatchEvent(new Event("offline"));
+      expect(banner.textContent).toContain("This device has no network");
+
+      onLine.mockReturnValue(true);
+      window.dispatchEvent(new Event("online"));
+      expect(banner.textContent).toContain("Can't reach this server");
+    } finally {
+      onLine.mockRestore();
+    }
     expect(ws.connect).not.toHaveBeenCalled();
-
-    // resetStores does not clear sessionReplaced; leave the shared store as a
-    // later test expects it.
-    uiStore.setState((prev) => ({ ...prev, sessionReplaced: false }));
   });
 
   it("clears local auth when sign-out-everywhere revoked this device's session (B7-14)", async () => {

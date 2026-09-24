@@ -11,13 +11,16 @@ import { shellText } from "../i18n/shell";
  * own network state (`navigator.onLine`), which is not the same fact as the
  * server's reachability: a device on a LAN with no internet still answers
  * `onLine === true`, so only a false reading means no server — LAN or
- * otherwise — is reachable. `onRetry` offers a manual re-dial while the
+ * otherwise — is reachable. `dialFailed` says a dial attempt actually failed;
+ * until one has, a reconnect is still "Reconnecting...", not a claim that the
+ * server is unreachable. `onRetry` offers a manual re-dial while the
  * socket is down. A browser that does not expose `navigator.onLine` leaves
  * `offline` undefined and the notice stays the server-unreachable wording,
  * never a claim about the internet.
  */
 export interface ConnectionBannerOptions {
   readonly offline?: boolean;
+  readonly dialFailed?: boolean;
   readonly onRetry?: () => void;
 }
 
@@ -69,7 +72,7 @@ export function createServerBanner(): ServerBannerControl {
    *  countdown rewrites it every second, which a live region would read out
    *  on each tick. */
   function announce(text: string): void {
-    setText(liveElement, text);
+    if (liveElement.textContent !== text) setText(liveElement, text);
   }
 
   /** Render `text` plus an optional Retry action, replacing prior content. */
@@ -117,17 +120,16 @@ export function createServerBanner(): ServerBannerControl {
   }
 
   /**
-   * A connection problem the socket is working to recover from. The reconnect
-   * loop keeps the store in "reconnecting" for the whole outage, so this is
-   * the notice a user actually sees — it must be actionable, not a bare
-   * "Reconnecting…" (BPR-092). Retry is safe here: `connect()` cancels the
-   * pending backoff before dialing, so it cannot race the loop. Internal
-   * callers with no retry action (the restart countdown) keep the plain text.
+   * A connection problem the socket is working to recover from. While a dial
+   * is in progress, or none has failed yet (a drop, an announced restart,
+   * "Use here"), it is the plain "Reconnecting...". Once a dial has failed the
+   * notice becomes actionable (BPR-092). Retry is safe here: `connect()`
+   * cancels the pending backoff before dialing, so it cannot race the loop.
    */
   function showReconnecting(opts: ConnectionBannerOptions = {}): void {
     clearCountdown();
     root.classList.add("visible");
-    if (opts.onRetry === undefined && opts.offline !== true) {
+    if (opts.dialFailed !== true && opts.offline !== true) {
       root.replaceChildren(shellText("banner.reconnecting"));
       announce(shellText("banner.reconnecting"));
       return;
@@ -189,8 +191,8 @@ export function createServerBanner(): ServerBannerControl {
 
 /**
  * Apply a store connection status to the banner (UX spec §3 table):
- * reconnecting → "Reconnecting...", disconnected → an actionable notice,
- * connected → hidden. `opts` carries the device's own network fact and the
+ * reconnecting → "Reconnecting..." until a dial fails, then an actionable
+ * notice; disconnected → an actionable notice; connected → hidden. `opts` carries the device's own network fact and the
  * manual retry action, so the notice answers the state honestly (BPR-092).
  */
 export function applyConnectionStatus(

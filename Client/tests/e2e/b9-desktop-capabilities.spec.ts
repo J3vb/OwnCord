@@ -2,9 +2,10 @@
  * B9-25: honest, actionable desktop network, notification and update
  * limitations (BPR-092, BPR-091).
  *
- * The journey: lose the server, distinguish "no network at all" from "server
- * unreachable", retry, see the OS notification permission reported truthfully
- * with a working Allow action, and hear/see each update phase once. These are
+ * The journey: lose the server, keep "Reconnecting..." until a dial actually
+ * fails, distinguish "no network at all" from "server unreachable", retry, see
+ * the desktop build admit it cannot read the OS notification setting, and
+ * hear/see each update phase once. These are
  * the recovery states the plan's Task 3 names, exercised through the mocked
  * desktop seam; native network/capture behaviour stays with the desktop suite.
  *
@@ -36,22 +37,34 @@ async function withDeviceOffline(page: Page, offline: boolean): Promise<void> {
   }, offline);
 }
 
-/**
- * Make the OS notification permission answer as the test wants. The base
- *  mock returns null for the permission invokes; the plugin answers via
- *  window.Notification when its `permission` is not "default". */
-async function withNotificationPermission(
-  page: Page,
-  permission: NotificationPermission,
-): Promise<void> {
-  await page.addInitScript((value) => {
-    Object.defineProperty(window.Notification, "permission", {
-      configurable: true,
-      get: () => value,
-    });
-    // requestPermission is the plugin's own call for a "default" permission.
-    window.Notification.requestPermission = () => Promise.resolve(value);
-  }, permission);
+/** Layer a server that can go down over the base session: while
+ *  `window.__serverDown` is true every dial fails, as a lost LAN server does. */
+async function withLosableServer(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as {
+      __serverDown: boolean;
+      __invokeLog: { cmd: string; args?: unknown }[];
+      __tauriEmitEvent: (event: string, payload: string) => void;
+      __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> };
+    };
+    w.__serverDown = false;
+    const t = w.__TAURI_INTERNALS__;
+    const orig = t.invoke.bind(t);
+    t.invoke = async (cmd: string, args?: unknown) => {
+      if (cmd === "ws_connect" && w.__serverDown) {
+        w.__invokeLog.push({ cmd, args });
+        setTimeout(() => w.__tauriEmitEvent("ws-state", "closed"), 50);
+        return;
+      }
+      return orig(cmd, args);
+    };
+  });
+}
+
+function setServerDown(page: Page, down: boolean): Promise<void> {
+  return page.evaluate((d) => {
+    (window as unknown as { __serverDown: boolean }).__serverDown = d;
+  }, down);
 }
 
 function wsConnectCount(page: Page): Promise<number> {
@@ -66,22 +79,34 @@ function wsConnectCount(page: Page): Promise<number> {
 test.describe("B9-25 network limitations are actionable", () => {
   test.beforeEach(async ({ page }) => {
     await mockTauriFullSession(page);
+    await withLosableServer(page);
     await page.goto("/");
     await navigateToMainPageReady(page);
   });
 
-  test("a server outage names the unreachable server and offers a working Retry", async ({
+  test("a drop says Reconnecting... until a dial fails, then offers a working Retry", async ({
     page,
   }) => {
+    await setServerDown(page, true);
     await emitWsEvent(page, "ws-state", "closed");
+
+    // No dial has failed yet: the drop alone does not prove the server is gone.
+    await expect(banner(page)).toHaveText("Reconnecting...");
 
     await expect(banner(page)).toContainText("Can't reach this server", { timeout: 10_000 });
     const retry = banner(page).getByRole("button", { name: "Retry" });
     await expect(retry).toBeVisible();
 
+    // Retry dials at once instead of waiting out the backoff, and a failed
+    // retry lands back on the same actionable notice.
     const before = await wsConnectCount(page);
     await retry.click();
     await expect.poll(() => wsConnectCount(page)).toBeGreaterThan(before);
+    await expect(banner(page)).toContainText("Can't reach this server");
+
+    // The server comes back and the next dial clears the notice.
+    await setServerDown(page, false);
+    await expect(banner(page)).toBeHidden({ timeout: 15_000 });
   });
 
   test("a disconnect while the device has no network names that, not the server", async ({
@@ -99,20 +124,20 @@ test.describe("B9-25 network limitations are actionable", () => {
     await expect(banner(page).getByRole("button", { name: "Retry" })).toHaveCount(0);
   });
 
-  test("regaining the network redials instead of waiting out the backoff", async ({ page }) => {
+  test("regaining the network re-renders the notice for the server", async ({ page }) => {
     await withDeviceOffline(page, true);
     await page.reload();
     await navigateToMainPageReady(page);
+    await setServerDown(page, true);
     await emitWsEvent(page, "ws-state", "closed");
-    await expect(banner(page)).toBeVisible({ timeout: 5_000 });
+    await expect(banner(page)).toContainText("This device has no network", { timeout: 5_000 });
 
-    const before = await wsConnectCount(page);
     await page.evaluate(() => {
       Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => true });
       window.dispatchEvent(new Event("online"));
     });
 
-    await expect.poll(() => wsConnectCount(page), { timeout: 5_000 }).toBeGreaterThan(before);
+    await expect(banner(page)).not.toContainText("This device has no network");
   });
 
   test("the notice is announced once through a live region", async ({ page }) => {
@@ -151,8 +176,9 @@ test.describe("B9-25 network limitations are actionable", () => {
 });
 
 test.describe("B9-25 notification limitations are actionable", () => {
-  test("a granted OS permission is reported and needs no action", async ({ page }) => {
-    await withNotificationPermission(page, "granted");
+  test("the desktop build says it cannot read the system setting, with no false grant", async ({
+    page,
+  }) => {
     await mockTauriFullSession(page);
     await page.goto("/");
     await navigateToMainPageReady(page);
@@ -160,12 +186,13 @@ test.describe("B9-25 notification limitations are actionable", () => {
     await switchSettingsTab(page, "Notifications");
 
     const row = page.locator("[data-testid='notification-permission-row']");
-    await expect(row).toContainText("Your system allows OwnCord");
+    await expect(row).toContainText("OwnCord can't read your system notification setting");
+    await expect(row).not.toContainText("Your system allows OwnCord");
     await expect(page.locator("[data-testid='notification-permission-allow']")).toBeHidden();
   });
 
-  test("a denied OS permission is stated and the Allow action updates it", async ({ page }) => {
-    await withNotificationPermission(page, "denied");
+  test("the permission row reflows at the 940x500 minimum window", async ({ page }) => {
+    await page.setViewportSize({ width: 940, height: 500 });
     await mockTauriFullSession(page);
     await page.goto("/");
     await navigateToMainPageReady(page);
@@ -173,27 +200,8 @@ test.describe("B9-25 notification limitations are actionable", () => {
     await switchSettingsTab(page, "Notifications");
 
     const row = page.locator("[data-testid='notification-permission-row']");
-    await expect(row).toContainText("blocked notifications from OwnCord");
-
-    const allow = page.locator("[data-testid='notification-permission-allow']");
-    await expect(allow).toBeVisible();
-    await expect(allow).toHaveAccessibleName("Allow notifications");
-  });
-
-  test("the permission row is keyboard reachable at the 940x500 minimum window", async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 940, height: 500 });
-    await withNotificationPermission(page, "denied");
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
-    await openSettings(page);
-    await switchSettingsTab(page, "Notifications");
-
-    const allow = page.locator("[data-testid='notification-permission-allow']");
-    await allow.scrollIntoViewIfNeeded();
-    await expect(allow).toBeVisible();
+    await row.scrollIntoViewIfNeeded();
+    await expect(row).toContainText("check your system notification settings");
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
   });
 });
