@@ -47,12 +47,71 @@ describe("ServerBanner", () => {
     banner.destroy();
   });
 
-  it('showDisconnected adds visible class with "Disconnected" text', () => {
+  it("showDisconnected adds visible class with the server-unreachable notice", () => {
     const banner = createServerBanner();
     banner.showDisconnected();
 
     expect(banner.element.classList.contains("visible")).toBe(true);
-    expect(banner.element.textContent).toBe("Disconnected");
+    expect(banner.element.textContent).toBe(
+      "Can't reach this server right now. It may be down or blocked on this network.",
+    );
+
+    banner.destroy();
+  });
+
+  it("showDisconnected names the device's own network when it is offline", () => {
+    const banner = createServerBanner();
+    banner.showDisconnected({ offline: true });
+
+    expect(banner.element.textContent).toBe(
+      "This device has no network. Check your connection — your server may still be reachable on this network.",
+    );
+    // No retry over a network the device itself does not have.
+    expect(banner.element.querySelector("button")).toBeNull();
+
+    banner.destroy();
+  });
+
+  it("offers a Retry on a disconnect when the device has a network", () => {
+    const banner = createServerBanner();
+    const onRetry = vi.fn();
+    banner.showDisconnected({ offline: false, onRetry });
+
+    const retry = banner.element.querySelector("button");
+    expect(retry?.textContent).toBe("Retry");
+    retry!.click();
+    retry!.click();
+    expect(onRetry).toHaveBeenCalledTimes(1);
+
+    banner.destroy();
+  });
+
+  it("showReconnecting says the device is offline instead of promising progress", () => {
+    const banner = createServerBanner();
+    banner.showReconnecting({ offline: true });
+
+    expect(banner.element.classList.contains("visible")).toBe(true);
+    expect(banner.element.textContent).toBe(
+      "This device has no network. Check your connection — your server may still be reachable on this network.",
+    );
+    // Never a Retry mid-backoff: the reconnect loop owns that.
+    expect(banner.element.querySelector("button")).toBeNull();
+
+    banner.destroy();
+  });
+
+  it("announces the notice once through its live region and clears it on hide", () => {
+    const banner = createServerBanner();
+    expect(banner.liveElement.getAttribute("role")).toBe("status");
+    expect(banner.liveElement.textContent).toBe("");
+
+    banner.showDisconnected();
+    expect(banner.liveElement.textContent).toBe(
+      "Can't reach this server right now. It may be down or blocked on this network.",
+    );
+
+    banner.hide();
+    expect(banner.liveElement.textContent).toBe("");
 
     banner.destroy();
   });
@@ -66,7 +125,9 @@ describe("ServerBanner", () => {
 
     applyConnectionStatus(banner, "disconnected");
     expect(banner.element.classList.contains("visible")).toBe(true);
-    expect(banner.element.textContent).toBe("Disconnected");
+    expect(banner.element.textContent).toBe(
+      "Can't reach this server right now. It may be down or blocked on this network.",
+    );
 
     applyConnectionStatus(banner, "connected");
     expect(banner.element.classList.contains("visible")).toBe(false);

@@ -169,3 +169,117 @@ render path as a fallback; fail closed and record a blocker instead.
 ## Open questions
 
 No new owner decision is introduced by this milestone. The PRD's unresolved entry decisions still apply; stop if implementation would require a new product, UX or scope choice.
+
+## Drift at the implementation base (2026-09-24)
+
+Re-read at `dev` `5e477f00` (B9-24 merged as
+[#1789](https://github.com/J3vb/OwnCord/pull/1789)):
+
+- Inventory row 1 holds: the connection banner still derives from the one
+  `uiStore.connectionStatus` subscription with a synchronous initial sync
+  (`MainPage.ts` `syncBanner`). `applyConnectionStatus` lives in
+  `ServerBanner.ts`.
+- Inventory row 2 holds: `UpdateNotifier` still distinguishes `manual_upgrade`
+  and renders download/restart/failure states. B9-24 did not touch it.
+- Inventory row 3 holds: `NotificationsTab` still describes the desktop
+  notification/flash/sound preferences; it had no OS-permission state.
+- Not in the table, added by this lane: `Notifier.permissionGranted()` /
+  `requestPermission()` are `Promise<boolean>` with no denied/unavailable
+  distinction, and the voice widget's listen-only state carried only a bare
+  "Grant Microphone" button. Both gaps are the ones Tasks 2-4 name.
+- Bundle base at `5e477f00`: startup closure 96,374 B / 97,000 B, MainPage
+  62,039 B / 64,000 B (B9-24's recorded numbers).
+
+## Desktop capability table (Task 1)
+
+Observed from source at `5e477f00`; desktop behavior is what the client can
+actually observe, not a browser-API assumption.
+
+| Capability           | Windows / Linux supported behavior                                                                                                   | Limitation the UI now makes actionable                                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Network / server     | WS over the native proxy; reconnect loop keeps the store in `reconnecting` for the whole outage and a failed dial is `disconnected`. | Device-offline (`navigator.onLine === false`) is told apart from server-unreachable; a Retry re-dials; regaining the network auto-redials. |
+| Internet provider    | None required for LAN messaging; link previews/GIFs go through the native broker and fail closed without internet.                   | Not gated on server reachability — the banner never claims the internet is required for a LAN server.                                      |
+| Notifications        | Tauri notification plugin; OS permission is a real gate on the popup, not the taskbar flash (a passive hint).                        | Granted / denied / no-notifier states are read from the contract; denied offers an "Allow notifications" action.                           |
+| Device capture (mic) | LiveKit join falls back to listen-only on `NotAllowedError`, `NotFoundError` or any other capture failure.                           | A persistent notice gives the next step; after a failed retry it stops implying a permission grant is all that is missing.                 |
+| Updater / packages   | A `.deb`/`.rpm` install reports `manual_upgrade` and cannot self-update; other installs download then relaunch.                      | The manual-install limitation and each install phase are announced once; no false "up to date" claim.                                      |
+| Certificate trust    | TOFU mismatch latches the socket to `disconnected` until the user accepts the rotated fingerprint.                                   | Retry re-dials through `connect()`, which re-validates and re-latches on a mismatch — it cannot bypass the TOFU gate.                      |
+
+## Implementation record — 2026-09-24
+
+Branch `fm/b9-25-impl`; base `dev` `5e477f00`. Q13 applied: no token file was
+edited and no Aurora treatment adopted; the shared PRD status table and per-lane
+status paragraphs were not touched. The updater contract (#1766/#1767) and the
+network/notification transport contracts are unchanged; the B9-3 catalog seam
+keeps every existing English string byte-identical (only new keys were added).
+
+### What changed
+
+- **The connection notice answers the real state (BPR-092).** `ServerBanner`
+  gains `ConnectionBannerOptions` (`offline`, `onRetry`). A `reconnecting` or
+  `disconnected` status now renders "Can't reach this server right now…" with a
+  Retry button when the device has a network, and "This device has no
+  network…" with no Retry when `navigator.onLine` is false. A LAN server with
+  no internet still answers `onLine`, so the offline wording never claims the
+  internet is required. The restart countdown (which calls `showReconnecting()`
+  with no options) keeps the plain "Reconnecting..." text.
+- **Retry is safe against TOFU and the backoff.** `MainPage`'s `retryConnection`
+  calls `ws.connect()`, which re-validates the certificate (a mismatch
+  re-latches) and cancels any pending backoff attempt via `cancelReconnect()`,
+  so a manual retry cannot race the loop. `online`/`offline` window listeners
+  (owned by a `Disposable`) redial on network return and re-render honestly on
+  loss; a session the server displaced is never redialed (B7-14 preserved).
+- **Notices are announced once (BPR-091).** `ServerBanner` owns a `.sr-only`
+  `role="status"` live region appended beside the visible banner; the visible
+  countdown rewrites only the banner, so the screen reader hears the initial
+  notice once, not every second.
+- **The OS notification permission is reported, not assumed (BPR-092).**
+  `NotificationsTab` reads `desktop.notifier.permissionGranted()` and renders
+  granted / denied / unavailable wording. Denied shows an "Allow notifications"
+  button calling `requestPermission()`; unavailable (no native notifier, a
+  non-Tauri host) is named as a different limitation with no dead action.
+- **Update phases are announced once.** `UpdateNotifier` owns a `.sr-only`
+  `role="status"` region carrying the coarse phase (available / downloading /
+  installed / failed); the per-percent progress tick updates only the visible
+  text, and identical text is never re-set.
+- **Listen-only is explained.** `VoiceWidget` adds a persistent mic notice: a
+  hint under the Grant Microphone button, replaced after a failed retry by
+  wording that points at the system setting and the device, without claiming a
+  permission denial the app cannot actually observe.
+
+### Evidence
+
+- **Unit (vitest, jsdom):** new `tests/unit/notification-permission.test.ts` (5)
+  pins granted / denied+Allow / denied-again / unavailable / no-notifier-on-ask;
+  `server-banner.test.ts` adds the offline vs server wording, the Retry-once
+  action, the no-Retry-when-offline case, the live-region announcement, and the
+  countdown-not-re-announced property; `update-notifier.test.ts` adds the
+  once-per-phase announcement and the available-update announcement;
+  `voice-widget.test.ts` adds the mic notice show/hide and the failed-retry
+  wording; `main-page.test.ts` adds the Retry redial and the
+  displaced-session-not-redialed case. Full suite green after the change.
+- **E2E (mocked Chromium, `--workers=1`, non-1420 port):**
+  `tests/e2e/b9-desktop-capabilities.spec.ts` — 10 tests: outage names the
+  unreachable server with a working Retry; device-offline names that instead;
+  network return redials; the notice is announced once through the live region;
+  the restart countdown does not re-announce; granted/denied notification
+  permission; keyboard reach at 940×500; the update banner is announced once;
+  a manual install states its limitation with no false update claim.
+- **Budgets:** `npm run check:budgets` — startup closure 96,511 B (97,000),
+  MainPage 62,394 B (64,000), livekit 133,372 B, livekitSession 23,003 B. No
+  budget raised.
+- **Static:** `tsc --noEmit`, `typecheck:e2e`, `oxlint --deny-warnings`,
+  `lint:cycles`, `eslint`, prettier and `scripts/check-ui-strings.mjs` clean;
+  every new string lives in a catalog.
+- **Native / AT:** NVDA (Windows) and Orca (Linux) recordings are
+  owner-declined (2026-09-24), not pending; automated evidence only, as the
+  owner directed. Native network/capture behaviour stays with the desktop
+  suites; no live-Tauri behavior is claimed from the mocked run.
+
+### Requirement map
+
+BPR-092 (honest desktop network/offline, notification and update behavior),
+BPR-091 (announcements, keyboard reach, reflow) and BPR-090 (coherent desktop
+state/feedback, budgets preserved) get their automated evidence here. Transport
+contracts, the updater internals and the notification policy are unchanged; only
+the interaction and status layer moved. The B9-3 catalog seam (English
+byte-identical) and B7-14 displaced-session behaviour are preserved.

@@ -1184,6 +1184,50 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(uiStore.getState().sessionReplaced).toBe(false);
   });
 
+  it("shows an actionable connection notice on disconnect and Retry redials (B9-25)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    uiStore.setState((prev) => ({
+      ...prev,
+      sessionReplaced: false,
+      connectionStatus: "disconnected",
+    }));
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toContain("Can't reach this server");
+    });
+
+    const retry = banner.querySelector("button")!;
+    expect(retry.textContent).toBe("Retry");
+    retry.click();
+    expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
+  });
+
+  it("does not redial a session the server displaced when the network returns (B9-25)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    uiStore.setState((prev) => ({
+      ...prev,
+      sessionReplaced: true,
+      connectionStatus: "disconnected",
+    }));
+    window.dispatchEvent(new Event("online"));
+
+    // "Use here" owns displaced-session recovery; a network-return retry must
+    // not restart the two-device fight B7-14 stopped.
+    expect(ws.connect).not.toHaveBeenCalled();
+
+    // resetStores does not clear sessionReplaced; leave the shared store as a
+    // later test expects it.
+    uiStore.setState((prev) => ({ ...prev, sessionReplaced: false }));
+  });
+
   it("clears local auth when sign-out-everywhere revoked this device's session (B7-14)", async () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),

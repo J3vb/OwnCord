@@ -116,6 +116,14 @@
   opacity: 0.6;
   cursor: wait;
 }
+/* The listen-only explanation sits below the Grant Microphone button: the
+   state needs a reason and a next step, not just an action (BPR-092). */
+.vw-mic-notice {
+  margin: 4px 4px 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  line-height: 1.3;
+}
 .vw-signal {
   margin-left: auto;
   display: flex;

@@ -46,6 +46,10 @@ export const voiceText = defineCatalog("voice", {
   "widget.grantMic": "Grant Microphone",
   "widget.grantMicLabel": "Grant microphone permission",
   "widget.requesting": "Requesting...",
+  "widget.listenOnlyHint":
+    "You joined without a microphone. Grant microphone access, or check that a microphone is connected and not in use by another app.",
+  "widget.listenOnlyBlocked":
+    "The microphone is still unavailable. This app cannot change it — allow microphone access for OwnCord in your system settings, and check that the device is connected and free.",
 
   "volume.user": "User Volume: {percent}%",
   "volume.reset": "Reset Volume",

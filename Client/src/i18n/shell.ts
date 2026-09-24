@@ -117,7 +117,11 @@ export const shellText = defineCatalog("shell", {
 
   "banner.restarting": "Server restarting in {seconds} seconds...",
   "banner.reconnecting": "Reconnecting...",
-  "banner.disconnected": "Disconnected",
+  "banner.deviceOffline":
+    "This device has no network. Check your connection — your server may still be reachable on this network.",
+  "banner.serverUnreachable":
+    "Can't reach this server right now. It may be down or blocked on this network.",
+  "banner.retry": "Retry",
   "banner.signedInElsewhere": "Signed in elsewhere",
   "banner.useHere": "Use here",
 
