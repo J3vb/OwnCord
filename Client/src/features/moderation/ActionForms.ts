@@ -23,7 +23,7 @@
 
 import { createModal } from "@lib/modalFactory";
 import { appendChildren, createElement, setText } from "@lib/dom";
-import { currentUserPermissions, hasPermission } from "@lib/permissions";
+import { currentUserHasPermission } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { moderationText as t } from "../../i18n/moderation";
 import { activeTimeoutEnd, type ReportDetail } from "./api";
@@ -81,7 +81,7 @@ export const ENFORCE = {
 
 /** Whether the signed-in user's role holds `kind`'s bit. The server still decides rank. */
 export function mayEnforce(kind: EnforceKind): boolean {
-  return hasPermission(currentUserPermissions(), ENFORCE[kind].bit);
+  return currentUserHasPermission(ENFORCE[kind].bit);
 }
 
 /** What the reader typed, kept by Queue.ts across re-reads of the same report. */
@@ -303,10 +303,17 @@ export function buildActionForms(o: ActionOptions): ActionView {
   );
   if (kinds.length > 0) {
     const enforceForm = createElement("div", { class: "mod-work-form" });
-    enforceForm.append(
-      ...reasonField(`mod-enforce-${seq}`, "enforce", t("enforce.label"), t("enforce.hint")),
-    );
-    for (const kind of kinds) {
+    const removed =
+      kinds[0] === "removal" &&
+      detail.history.some((e) => e.kind === "action" && e.action === "removal");
+    if (removed) enforceForm.appendChild(muted(t("enforce.removed")));
+    const offered = removed ? kinds.slice(1) : kinds;
+    if (offered.length > 0) {
+      enforceForm.append(
+        ...reasonField(`mod-enforce-${seq}`, "enforce", t("enforce.label"), t("enforce.hint")),
+      );
+    }
+    for (const kind of offered) {
       const b = button(t(ENFORCE[kind].labelKey), kind, "button");
       b.addEventListener(
         "click",

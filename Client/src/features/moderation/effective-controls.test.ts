@@ -16,6 +16,7 @@ import { resetChannelsStore, setRoles } from "@stores/channels.store";
 import { setMembers } from "@stores/members.store";
 import type { FeatureViewContext } from "../navigation/destinations";
 import { renderModerationCenter } from "./Queue";
+import { noteQueueChange } from "./store";
 
 const ME = 7;
 const SUBJECT = 4;
@@ -167,6 +168,20 @@ describe("what the report offers", () => {
     roleBits(ALL);
     const root = await opened(held("r1", { target_type: "user" }));
     expect(buttons(root)).toEqual(["Issue warning", "Time out", KICK, BAN]);
+  });
+
+  it("says the message was already removed instead of offering removal again", async () => {
+    roleBits(ALL);
+    const root = await opened(
+      held("r1", {
+        actions: [
+          { id: 1, kind: "removal", actor_id: ME, reason: "", created_at: "2026-09-05 10:05:00" },
+        ],
+      }),
+    );
+    expect(buttons(root)).toEqual(["Issue warning", "Time out", KICK, BAN]);
+    expect(acts(root)!.textContent).toContain("The reported message was already removed.");
+    expect(reason(root)).toBeDefined();
   });
 
   it.each([
@@ -324,6 +339,21 @@ describe("a demoted moderator", () => {
       else expect(active.textContent).toBe(back);
     },
   );
+
+  it("keeps a re-read in flight when a role changes, and shows what it answers", async () => {
+    roleBits(ALL);
+    const root = await opened(held("r1"));
+    noteQueueChange();
+    await flush();
+    lists.at(-1)!.resolve([row("r1", { assignee_id: 9 })]);
+    await flush();
+    roleBits(ALL | Permission.MANAGE_ROLES);
+    await flush();
+    details.at(-1)!.resolve(held("r1", { assignee_id: 9 }));
+    await flush();
+    expect(buttons(root).filter((b) => [REMOVE, KICK, BAN].includes(b))).toEqual([]);
+    expect(root.querySelector("[aria-busy=true]")).toBeNull();
+  });
 
   it("follows a change of the reader's own role", async () => {
     setRoles([

@@ -126,6 +126,7 @@ export const moderationText = defineCatalog("moderation", {
   "enforce.removal": "Remove reported message",
   "enforce.kick": "Log out of every session",
   "enforce.ban": "Ban member",
+  "enforce.removed": "The reported message was already removed.",
   "confirm.removal.title": "Remove the reported message?",
   "confirm.removal.body":
     "It's deleted on the server for everyone, not just hidden from you. You can't restore it.",

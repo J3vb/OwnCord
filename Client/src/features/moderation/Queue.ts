@@ -799,8 +799,8 @@ function renderReports(
   /** The open report again, for a role change that moves what may be offered. */
   function reoffer(): void {
     const d = shown;
-    // A write's own re-read rebuilds it anyway.
-    if (d === null || writing !== null) return;
+    // A write's re-read, or any read in flight, rebuilds it anyway.
+    if (d === null || writing !== null || detailReq !== null) return;
     const item = itemFor(d.id);
     if (item !== undefined) showDetail(item, d, false);
   }
