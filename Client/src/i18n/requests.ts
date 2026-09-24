@@ -7,7 +7,7 @@ import { defineCatalog } from "./format";
  * labels stay in `shell.ts`, which already owns them.
  */
 export const requestsText = defineCatalog("requests", {
-  "members.count": { one: "{count} member", other: "{count} members" },
+  "members.count": "{count} members",
   "mention.count": { one: "{n} mention", other: "{n} mentions" },
   "unread.count": { one: "{n} unread message", other: "{n} unread messages" },
 

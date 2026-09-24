@@ -184,7 +184,7 @@ function renderDmItem(
       { class: "dm-member-count", "data-testid": `dm-members-${convo.channelId}` },
       String(count),
     );
-    countEl.title = requestsText("members.count", { count });
+    countEl.title = requestsText("members.count", { count: String(count) });
     item.appendChild(countEl);
   }
 

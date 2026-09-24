@@ -50,7 +50,9 @@ describe("B9-19 catalogs", () => {
     expect(requestsText("mention.count", { count: 4, n: "4" })).toBe("4 mentions");
     expect(requestsText("unread.count", { count: 1, n: "1" })).toBe("1 unread message");
     expect(requestsText("unread.count", { count: 12, n: "12" })).toBe("12 unread messages");
-    expect(requestsText("members.count", { count: 3 })).toBe("3 members");
+    expect(requestsText("members.count", { count: "3" })).toBe("3 members");
+    // A group whose other members all left still reads "1 members", as it shipped.
+    expect(requestsText("members.count", { count: "1" })).toBe("1 members");
     expect(requestsText("dm.groupSubtitle", { count: 3, names: "Ana, Bo" })).toBe(
       "3 members: You, Ana, Bo",
     );
