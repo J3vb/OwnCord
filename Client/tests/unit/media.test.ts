@@ -354,6 +354,42 @@ describe("media.ts", () => {
       expect(createObjectURLMock).not.toHaveBeenCalled();
     });
 
+    it("shows a typed failed state and retries on demand", async () => {
+      imageMock.mockResolvedValueOnce({ ok: false, failure: "unavailable" });
+      const url = "https://example.com/flaky.png";
+      const wrap = renderInlineImage(url);
+      document.body.appendChild(wrap);
+
+      await vi.waitFor(() => {
+        expect(wrap.dataset.mediaState).toBe("failed");
+      });
+      expect(wrap.querySelector(".msg-media-fallback-text")?.textContent).toBe("Image unavailable");
+      const retry = wrap.querySelector<HTMLButtonElement>(".msg-media-retry")!;
+      expect(retry.hidden).toBe(false);
+      expect(retry.getAttribute("aria-label")).toBe("Retry image");
+
+      imageMock.mockResolvedValueOnce(imageResponse("image/png"));
+      retry.click();
+      await vi.waitFor(() => {
+        expect(wrap.querySelector("img")?.getAttribute("src")).toMatch(/^blob:/);
+      });
+      // The loaded state lands with the load event, as the renderer waits on it.
+      fireImgLoad(wrap);
+      expect(wrap.dataset.mediaState).toBe("loaded");
+      expect(wrap.querySelector<HTMLElement>(".msg-media-fallback")!.hidden).toBe(true);
+    });
+
+    it("never reads as a loaded image once refused", async () => {
+      imageMock.mockResolvedValue({ ok: false, failure: "wrong-type" });
+      const wrap = renderInlineImage("https://example.com/notimage.png");
+      document.body.appendChild(wrap);
+      await vi.waitFor(() => {
+        expect(wrap.dataset.mediaState).toBe("failed");
+      });
+      expect(wrap.dataset.mediaState).not.toBe("loaded");
+      expect(wrap.querySelector("img")!.hidden).toBe(true);
+    });
+
     it("does not cache height of 0", async () => {
       const url = "https://example.com/zero-height.png";
       const wrap = renderInlineImage(url);
