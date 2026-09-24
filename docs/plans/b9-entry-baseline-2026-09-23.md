@@ -104,17 +104,17 @@ remainder B9-2 owns; B9-1 moves them without changing them.
 The rule set every B9 PR applies is the PRD's accessibility block at the Q1
 thresholds, reusing the existing primitives rather than new global state:
 
-| Rule                | Threshold or pattern                                                                                          | Existing primitive                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Dialogs             | Labelled, focus contained, Escape closes, focus restored to the opener or a safe fallback                     | `Client/src/lib/modalFactory.ts:71-99`                               |
-| Focus               | Visible and unobscured (WCAG 2.4.7, 2.4.11); indicator at 3:1                                                 | `Client/src/styles/base.css:34-50`                                   |
-| Lists and toolbars  | Roving tabindex with arrow keys                                                                               | `Client/src/lib/a11y.ts:95-160`                                      |
-| Contrast            | Text 4.5:1; large text, UI components and focus 3:1; Q8 accent fallback below 3:1                             | tokens above                                                         |
-| Targets and spacing | Pointer targets ≥ 24×24 CSS px (2.5.8); text spacing (1.4.12)                                                 | —                                                                    |
-| Scale and reflow    | App text 12–20 px with Large Font, OS zoom 200 %, 940×500 window, no lost content or function                 | `Client/src/lib/appearance.ts:14-56`                                 |
-| Motion              | Honour both the OS setting and the in-app toggle; no motion-only feedback                                     | `.reduced-motion`, `prefers-reduced-motion`                          |
-| Announcements       | Status announced once through the existing polite live regions                                                | toast and typing regions (`Client/tests/e2e/a11y-smoke.spec.ts:101`) |
-| Native evidence     | One NVDA (Windows 11) and one Orca (Linux) recording per milestone journey; automated reports supplement only | —                                                                    |
+| Rule                | Threshold or pattern                                                                                                        | Existing primitive                                                   |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Dialogs             | Labelled, focus contained, Escape closes, focus restored to the opener or a safe fallback                                   | `Client/src/lib/modalFactory.ts:71-99`                               |
+| Focus               | Visible and unobscured (WCAG 2.4.7, 2.4.11); indicator at 3:1                                                               | `Client/src/styles/base.css:34-50`                                   |
+| Lists and toolbars  | Roving tabindex with arrow keys                                                                                             | `Client/src/lib/a11y.ts:95-160`                                      |
+| Contrast            | Text 4.5:1; large text, UI components and focus 3:1; Q8 accent fallback below 3:1                                           | tokens above                                                         |
+| Targets and spacing | Pointer targets ≥ 24×24 CSS px (2.5.8); text spacing (1.4.12)                                                               | —                                                                    |
+| Scale and reflow    | App text 12–20 px with Large Font, OS zoom 200 %, 940×500 window, no lost content or function                               | `Client/src/lib/appearance.ts:14-56`                                 |
+| Motion              | Honour both the OS setting and the in-app toggle; no motion-only feedback                                                   | `.reduced-motion`, `prefers-reduced-motion`                          |
+| Announcements       | Status announced once through the existing polite live regions                                                              | toast and typing regions (`Client/tests/e2e/a11y-smoke.spec.ts:101`) |
+| Native evidence     | One NVDA (Windows 11) and one Orca (Linux) recording per milestone journey; declined by the owner 2026-09-24 (Q1 amendment) | —                                                                    |
 
 ### File ownership (single-writer lane)
 
