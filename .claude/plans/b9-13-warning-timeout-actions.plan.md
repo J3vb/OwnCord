@@ -278,6 +278,14 @@ the line ranges moved:
 - **Budget.** Startup 94,454 B of 95,500 B, MainPage 63,992 B of 64,000 B,
   no budget change. The forms and copy load with the lazy Moderation Center
   chunk; the startup growth is the two API methods.
+  After merging `dev` `879740bf` (B9-19 #1781, B9-23 #1779) the startup
+  closure measures 96,130 B against the 95,500 B budget, and `dev` itself at
+  `879740bf` already measures 96,099 B: the overrun comes from `dev`, and
+  this change adds 31 B. MainPage 61,325 B. The budget is not raised here;
+  that is a decision for the shared B9 budget. On the merge the whole unit
+  suite (309 files, 6,745 passed, 152 expected-fail), `b9-moderation-actions`
+  and `b9-moderation-workflow` (25 passed) and fullstack
+  `b9-moderation-actions` (1 passed) were re-run green.
 
 ### Evidence
 
