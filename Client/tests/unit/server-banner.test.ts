@@ -91,6 +91,36 @@ describe("ServerBanner", () => {
     banner.destroy();
   });
 
+  it("keeps keyboard focus on Retry when a network flap re-renders the notice", () => {
+    const banner = createServerBanner();
+    document.body.append(banner.element);
+    const onRetry = vi.fn();
+    applyConnectionStatus(banner, "reconnecting", { offline: false, dialFailed: true, onRetry });
+
+    const retry = banner.element.querySelector("button")!;
+    retry.focus();
+    expect(document.activeElement).toBe(retry);
+
+    applyConnectionStatus(banner, "reconnecting", { offline: true, dialFailed: true, onRetry });
+    expect(banner.element.textContent).toBe(
+      "Your device reports no network connection. If your server is on a local network, try again. Retry",
+    );
+    applyConnectionStatus(banner, "reconnecting", { offline: false, dialFailed: true, onRetry });
+    expect(banner.element.textContent).toBe(
+      "Can't reach this server right now. It may be down or blocked on this network. Retry",
+    );
+
+    expect(banner.element.querySelector("button")).toBe(retry);
+    expect(document.activeElement).toBe(retry);
+    retry.click();
+    expect(onRetry).toHaveBeenCalledTimes(1);
+
+    applyConnectionStatus(banner, "reconnecting", { offline: false, dialFailed: false, onRetry });
+    expect(banner.element.querySelector("button")).toBeNull();
+
+    banner.destroy();
+  });
+
   it("showReconnecting keeps Reconnecting... until a dial has actually failed", () => {
     const banner = createServerBanner();
     const onRetry = vi.fn();

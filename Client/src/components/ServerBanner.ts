@@ -76,22 +76,32 @@ export function createServerBanner(): ServerBannerControl {
     if (liveElement.textContent !== text) setText(liveElement, text);
   }
 
-  /** Render `text` plus an optional Retry action, replacing prior content. */
+  let onRetry: (() => void) | undefined;
+  const retry = createElement(
+    "button",
+    { class: "reconnecting-banner-action", type: "button" },
+    shellText("banner.retry"),
+  );
+  // Not `once`: the banner is stable for the whole outage, so a retry that
+  // fails must be retryable again. A second connect() safely supersedes the
+  // first through the ws generation counter (BPR-092 "working recovery").
+  retry.addEventListener("click", () => onRetry?.());
+
+  /**
+   * Render `text` plus an optional Retry action. While Retry is already shown,
+   * only the text in front of it changes, so a re-render during an outage
+   * (a Wi-Fi flap) keeps keyboard focus on the button.
+   */
   function renderNotice(text: string, opts: ConnectionBannerOptions): void {
-    if (opts.onRetry === undefined) {
+    onRetry = opts.onRetry;
+    const label = root.firstChild;
+    if (onRetry === undefined) {
       root.replaceChildren(text);
-      return;
+    } else if (retry.parentNode === root && label !== null && label !== retry) {
+      label.textContent = `${text} `;
+    } else {
+      root.replaceChildren(`${text} `, retry);
     }
-    const retry = createElement(
-      "button",
-      { class: "reconnecting-banner-action", type: "button" },
-      shellText("banner.retry"),
-    );
-    // Not `once`: the banner is stable for the whole outage, so a retry that
-    // fails must be retryable again. A second connect() safely supersedes the
-    // first through the ws generation counter (BPR-092 "working recovery").
-    retry.addEventListener("click", opts.onRetry);
-    root.replaceChildren(`${text} `, retry);
   }
 
   function clearCountdown(): void {
