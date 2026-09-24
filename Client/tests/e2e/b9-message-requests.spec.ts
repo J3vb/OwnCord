@@ -422,6 +422,8 @@ test.describe("B9-6 Message Request decisions", () => {
   test("decision controls, the confirm and a failure meet Q1 contrast in every theme and custom accent", async ({
     page,
   }) => {
+    // Ten sign-in and theme cycles: ~22s on an idle machine, past 30s on a loaded CI worker.
+    test.setTimeout(90_000);
     const failing: Route = {
       pattern: "/api/v1/dm-requests/2/block",
       method: "POST",
