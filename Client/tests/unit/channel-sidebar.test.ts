@@ -223,6 +223,46 @@ describe("ChannelSidebar", () => {
     expect(names).toContain("announcements");
   });
 
+  // ── B9-21: the channel list is a single Tab stop with arrow-key navigation ──
+  describe("keyboard navigation (B9-21)", () => {
+    it("exposes exactly one Tab stop and marks the active channel", () => {
+      setChannels(testChannels);
+      setActiveChannel(1);
+      sidebar.mount(container);
+
+      const tabbable = container.querySelectorAll(".channel-item[tabindex='0']");
+      expect(tabbable.length).toBe(1);
+      expect((tabbable[0] as HTMLElement).dataset.channelId).toBe("1");
+      expect(tabbable[0]!.getAttribute("aria-current")).toBe("page");
+    });
+
+    it("ArrowDown moves focus and the Tab stop to the next row", () => {
+      setChannels(testChannels);
+      sidebar.mount(container);
+
+      const first = container.querySelector(".channel-item") as HTMLElement;
+      first.focus();
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+
+      const focused = document.activeElement as HTMLElement;
+      expect(focused).not.toBe(first);
+      expect(focused.dataset.channelId).toBe("2");
+      expect(focused.getAttribute("tabindex")).toBe("0");
+      expect(first.getAttribute("tabindex")).toBe("-1");
+    });
+
+    it("Enter on a focused row opens that channel", () => {
+      setChannels(testChannels);
+      sidebar.mount(container);
+
+      const row = container.querySelector('[data-channel-id="2"]') as HTMLElement;
+      row.focus();
+      row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      expect(channelsStore.getState().activeChannelId).toBe(2);
+    });
+  });
+
   it("groups channels by category", () => {
     setChannels(testChannels);
     sidebar.mount(container);
@@ -1160,6 +1200,33 @@ describe("ChannelSidebar", () => {
     expect(document.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
   });
 
+  it("offers Purge Messages once a live role update grants MANAGE_MESSAGES", () => {
+    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
+      async () => {},
+    );
+    sidebar.destroy?.();
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: 0 }]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onPurgeChannel });
+    setChannels(testChannels);
+    sidebar.mount(container);
+    openChannelCtxMenu();
+    expect(document.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
+    document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
+
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_MESSAGES }]);
+    channelsStore.flush();
+
+    expect(openChannelCtxMenu()).not.toBeNull();
+    expect(document.querySelector('[data-testid="ctx-purge-messages"]')).not.toBeNull();
+  });
+
   it("purge prompt clamps the count and calls onPurgeChannel with the channel", async () => {
     const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
       async () => {},
@@ -2069,9 +2136,7 @@ describe("ChannelSidebar voice identity badge", () => {
     voiceStore.setState((prev) => ({ ...prev, localSessionFingerprint: "0123 4567 89AB CDEF" }));
     sidebar.mount(container);
 
-    const own = container.querySelector(
-      `.voice-user-item[data-voice-uid="7"] .vu-session-fp`,
-    ) as HTMLElement | null;
+    const own = container.querySelector(`.voice-user-item[data-voice-uid="7"] .vu-session-fp`);
     expect(own).not.toBeNull();
     expect(own!.getAttribute("title")).toContain("0123 4567 89AB CDEF");
   });
@@ -2587,22 +2652,18 @@ describe("ChannelSidebar channel context menu permissions", () => {
 
 // ── Per-row listeners must not outlive the render that created them (OC-0229) ──
 //
-// renderChannels() does clearChildren(channelList) and rebuilds every row from
-// scratch on every channels-store notification (a new unread count, a new
-// active channel, a role change, ...). Each row's listeners (context menu,
-// drag handlers, ...) used to be registered on the sidebar's single
-// factory-lifetime AbortSignal, which only aborts once, in destroy(). That
-// signal's "abort" algorithm list is what actually keeps a DOM node alive in
-// a browser once addEventListener({ signal }) has been called on it, so a
-// detached row whose listener is still registered on that signal is retained
-// for the sidebar's entire lifetime instead of being collectable after the
-// re-render that replaced it.
+// A row's listeners (context menu, drag handlers, ...) must never be registered
+// on the sidebar's single factory-lifetime AbortSignal, which only aborts once,
+// in destroy(): that signal's "abort" algorithm list is what actually keeps a
+// DOM node alive in a browser once addEventListener({ signal }) has been called
+// on it, so a detached row whose listener is still on that signal is retained
+// for the sidebar's entire lifetime.
 //
-// This cannot observe GC directly in jsdom, but the retained listener is
-// itself observable: a detached row whose "contextmenu" listener is still
-// live will still open a context menu when the event fires on it, even
-// though the row has not been part of the document since the render that
-// superseded it.
+// B9-21 keys the list, so an unchanged row is now REUSED across a re-render
+// instead of being detached and rebuilt. A replaced row (its signature changed)
+// must still be disposed before it detaches, or the old leak returns for that
+// row. This pins both halves of the keyed contract: identity is kept for an
+// unchanged row, and the listeners of a replaced one die with it.
 describe("ChannelSidebar row listeners across re-renders (OC-0229)", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
@@ -2620,12 +2681,12 @@ describe("ChannelSidebar row listeners across re-renders (OC-0229)", () => {
     document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
   });
 
-  it("does not leave a stale row's context-menu listener live after a re-render replaces it", () => {
+  it("reuses an unchanged row's node across a re-render (no detach, no relisten)", () => {
     setChannels(testChannels);
     sidebar.mount(container);
 
-    const staleRow = container.querySelector('[data-channel-id="1"]') as HTMLElement;
-    expect(staleRow).not.toBeNull();
+    const row = container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    expect(row).not.toBeNull();
 
     // Provoke renderChannels() the same way incrementUnread does for every
     // message delivered to a non-active channel: a fresh channels Map with
@@ -2634,22 +2695,43 @@ describe("ChannelSidebar row listeners across re-renders (OC-0229)", () => {
     setChannels(testChannels);
     channelsStore.flush();
 
-    // clearChildren(channelList) detached the old row and a new one replaced it.
+    // The row is unchanged, so the keyed list reuses the node; its context
+    // menu still works and was never re-registered.
+    const after = container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    expect(after).toBe(row);
+    expect(after.isConnected).toBe(true);
+    after.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
+    );
+    expect(document.querySelector(".channel-ctx-menu")).not.toBeNull();
+  });
+
+  it("disposes a replaced row so its context-menu listener cannot fire again", () => {
+    setChannels(testChannels);
+    sidebar.mount(container);
+
+    const staleRow = container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    expect(staleRow).not.toBeNull();
+
+    // Rename channel 1: its signature changes, so the keyed list replaces the
+    // node instead of reusing it.
+    setChannels(testChannels.map((c) => (c.id === 1 ? { ...c, name: "renamed" } : c)));
+    channelsStore.flush();
+
     const freshRow = container.querySelector('[data-channel-id="1"]') as HTMLElement;
     expect(freshRow).not.toBeNull();
     expect(freshRow).not.toBe(staleRow);
     expect(staleRow.isConnected).toBe(false);
 
-    // The stale, detached row must not still be able to open a menu -- if it
-    // does, its listener is still registered (on a signal that only aborts at
-    // sidebar destroy()), which is the retention this finding is about.
+    // The replaced, detached row must not still be able to open a menu -- if
+    // it does, its listener is still registered (on a signal that only aborts
+    // at sidebar destroy()), which is the retention this finding is about.
     staleRow.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
     );
     expect(document.querySelector(".channel-ctx-menu")).toBeNull();
 
-    // The replacement row must still work normally -- the fix must scope the
-    // listener to the render, not break the context menu outright.
+    // The replacement row works normally.
     freshRow.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
     );

@@ -16,8 +16,8 @@ import type { ToastContainer } from "@components/Toast";
 import { createLogger } from "@lib/logger";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
+import type { DmSidebar } from "@components/DmSidebar";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
-import { createEditChannelModal } from "@components/EditChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createUserBar } from "@components/UserBar";
 import { createVoiceWidget } from "@components/VoiceWidget";
@@ -354,40 +354,54 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       },
       onEditChannel: (channel) => {
         if (activeModal !== null) return;
-        // Pre-fill from the store rather than from the sidebar's row: the store
-        // is what channel_update writes into, so the modal opens on the current
-        // values even if the row was rendered before the last edit landed.
-        const stored = channelsStore.getState().channels.get(channel.id);
-        const modal = createEditChannelModal({
-          channelId: channel.id,
-          channelName: channel.name,
-          channelType: channel.type,
-          channelTopic: stored?.topic ?? "",
-          channelCategory: stored?.category ?? "",
-          channelSlowMode: stored?.slowMode ?? 0,
-          channelNsfw: stored?.nsfw ?? false,
-          channelVoiceMaxUsers: stored?.voiceMaxUsers ?? 0,
-          channelVoiceMaxVideo: stored?.voiceMaxVideo ?? 0,
-          onSave: async (data) => {
-            try {
-              await api.adminUpdateChannel(channel.id, data);
-              modal.destroy?.();
-              activeModal = null;
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : shellText("channel.updateFailed");
-              getToast()?.show(msg, "error");
-              // Propagate so the modal re-enables its save button and shows
-              // the inline error.
-              throw err;
-            }
+        // The editor is admin-only and never on first paint, so it loads on
+        // demand. The placeholder holds the modal slot while it loads: a second
+        // click is refused, and a teardown in between drops the late modal.
+        const pending: MountableComponent = { mount: () => {} };
+        activeModal = pending;
+        void import("@components/EditChannelModal").then(
+          ({ createEditChannelModal }) => {
+            if (activeModal !== pending) return;
+            // Pre-fill from the store rather than from the sidebar's row: the store
+            // is what channel_update writes into, so the modal opens on the current
+            // values even if the row was rendered before the last edit landed.
+            const stored = channelsStore.getState().channels.get(channel.id);
+            const modal = createEditChannelModal({
+              channelId: channel.id,
+              channelName: channel.name,
+              channelType: channel.type,
+              channelTopic: stored?.topic ?? "",
+              channelCategory: stored?.category ?? "",
+              channelSlowMode: stored?.slowMode ?? 0,
+              channelNsfw: stored?.nsfw ?? false,
+              channelVoiceMaxUsers: stored?.voiceMaxUsers ?? 0,
+              channelVoiceMaxVideo: stored?.voiceMaxVideo ?? 0,
+              onSave: async (data) => {
+                try {
+                  await api.adminUpdateChannel(channel.id, data);
+                  modal.destroy?.();
+                  activeModal = null;
+                } catch (err) {
+                  const msg =
+                    err instanceof Error ? err.message : shellText("channel.updateFailed");
+                  getToast()?.show(msg, "error");
+                  // Propagate so the modal re-enables its save button and shows
+                  // the inline error.
+                  throw err;
+                }
+              },
+              onClose: () => {
+                modal.destroy?.();
+                activeModal = null;
+              },
+            });
+            activeModal = modal;
+            modal.mount(document.body);
           },
-          onClose: () => {
-            modal.destroy?.();
-            activeModal = null;
+          () => {
+            if (activeModal === pending) activeModal = null;
           },
-        });
-        activeModal = modal;
-        modal.mount(document.body);
+        );
       },
       onDeleteChannel: (channel) => {
         if (activeModal !== null) return;
@@ -600,16 +614,15 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     if (current !== undefined && current.type !== "dm") channelBeforeDm = current.id;
   }
 
-  function buildDmSidebar(): MountableComponent {
+  function buildDmSidebar(): DmSidebar {
     const serverName = authStore.getState().serverName ?? shellText("common.serverFallback");
     const activeChannelId = channelsStore.getState().activeChannelId;
-    const dmChannels = dmStore.getState().channels;
     const conversations = buildDmConversations(activeChannelId);
 
     return createDmSidebar({
       conversations,
       onSelectConversation: (channelId) => {
-        const dmChannel = dmChannels.find((c) => c.channelId === channelId);
+        const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
         if (dmChannel !== undefined) {
           selectDmConversation(dmChannel, dmDeps);
         }
@@ -744,46 +757,17 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       /**
        * Re-render the DM sidebar from fresh store data.
        *
-       * TODO(H16): This is an O(n) DOM thrash — it destroys and recreates the
-       * entire DM sidebar on every store change. For a small number of DMs this
-       * is acceptable, but should be optimized to diff/patch individual DM items
-       * once the DM list grows or store updates become more frequent.
-       *
-       * dmStore.channels changes far more often than "the DM list changed" —
-       * a DM partner's presence flip or a new message rebuilds it too — so the
-       * "Find a conversation" filter text and input focus (state that lives
-       * only in the destroyed subtree) are captured here and restored onto
-       * the freshly-mounted input rather than silently dropped (OC-0280).
+       * dmStore.channels changes far more often than "the DM list changed" — a
+       * DM partner's presence flip or a new message reaches it too. The sidebar
+       * updates its rows in place (keyed on the DM channel), so the "Find a
+       * conversation" filter text/focus and the list scroll position all
+       * survive an unrelated update (B9-21, replacing OC-0280's capture/restore
+       * of a full destroy+recreate).
        */
       function refreshDmSidebar(): void {
-        const oldSearchInput = contentSlot.querySelector<HTMLInputElement>(".dm-search");
-        const savedQuery = oldSearchInput?.value ?? "";
-        const hadFocus = oldSearchInput !== null && document.activeElement === oldSearchInput;
-        const savedCaret = oldSearchInput?.selectionStart ?? null;
-
-        if (activeSidebarContent !== null) {
-          activeSidebarContent.destroy?.();
-        }
-        // Only the DM list is rebuilt; the requests entry above it keeps its
-        // element, and with it any focus.
-        clearChildren(innerSlot);
-        const freshDm = buildDmSidebar();
-        freshDm.mount(innerSlot);
-        activeSidebarContent = freshDm;
-
-        const newSearchInput = innerSlot.querySelector<HTMLInputElement>(".dm-search");
-        if (newSearchInput !== null) {
-          if (savedQuery !== "") {
-            newSearchInput.value = savedQuery;
-            newSearchInput.dispatchEvent(new Event("input"));
-          }
-          if (hadFocus) {
-            newSearchInput.focus();
-            if (savedCaret !== null) {
-              newSearchInput.setSelectionRange(savedCaret, savedCaret);
-            }
-          }
-        }
+        if (activeSidebarContent === null) return;
+        const conversations = buildDmConversations(channelsStore.getState().activeChannelId);
+        (activeSidebarContent as DmSidebar).update(conversations);
       }
 
       refreshDmSidebarRef = refreshDmSidebar;

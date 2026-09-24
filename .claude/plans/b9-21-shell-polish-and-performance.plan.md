@@ -1,6 +1,6 @@
 # Plan: B9-21 — Polish desktop shell navigation without rebuilding it on every update
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-21-impl` from `dev` `55589d43`, merging `dev` `838bab09` (B9-7); the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-21 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-21-shell-polish-and-performance`; branch from current `dev`, PR to `dev` only.
@@ -38,6 +38,24 @@ at the actual implementation base; record drift before coding.
 | 2   | Quick-switch height and scrolling are already bounded; OC-0372 is not an open implementation task.        | `Client/src/styles/app.css:4875-4905`                  |
 | 3   | The embedded DM section clears and rebuilds its visible rows.                                             | `Client/src/pages/main-page/SidebarDmSection.ts:70-75` |
 
+### Drift at the implementation base (2026-09-23)
+
+Re-read at `55589d43` (`dev`, B9-18 merged). Rows 1 and 3 still hold after the
+B9-1 CSS split and B9-18 text extraction; only line numbers moved (B9-1's
+split sent the shell/sidebar rules to `Client/src/styles/app/shell.css` and
+`Client/src/styles/app/sidebar.css`, cited in row 2 as the pre-split
+`app.css`). Two facts the inventory did not name, found while measuring:
+
+- The DM sidebar's own full rebuild is `Client/src/pages/main-page/SidebarArea.ts`'s
+  `refreshDmSidebar()` (the old `TODO(H16)`), not just the embedded section: it
+  destroys and recreates `DmSidebar` on every `dmStore.channels` change.
+- Neither sidebar path preserves scroll position, and `.channel-list` was
+  clipped rather than scrollable whenever the list exceeded its column (the
+  flex chain let `.channel-sidebar` grow past its slot). Both are fixed here.
+
+`dev` moved to `838bab09` (B9-7) during implementation; it was merged in (not
+rebased), and the measured numbers below are from that merged head.
+
 ## Patterns to mirror
 
 - Follow `Client/CLAUDE.md:44-56`: dispatcher registers server-event store writes;
@@ -66,6 +84,18 @@ only by their existing public identifiers, never reproduced here.
 | `Owned shell/sidebar CSS from B9-1`                                                                                                  | Scoped desktop polish                                |
 | `Client/tests/e2e/b9-shell-polish.spec.ts (new)`                                                                                     | Focus, scroll and performance evidence               |
 | `docs/plans/b9-unified-experience-accessibility-polish.prd.md` and this milestone plan                                               | Dated implementation status and exact-SHA evidence   |
+
+Bounded-group amendments made during implementation (same purpose, named
+explicitly as the table's groups were proposals):
+
+| Added file                                                                     | Why it is in this lane                                                                                                                                                                  |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Client/src/components/DmSidebar.ts`                                           | The DM list is the second surface the journey names ("a DM while names, presence and unread counts change"); the old `TODO(H16)` rebuild lives across `SidebarArea` and this component. |
+| `Client/src/lib/reconcile.ts (new)`                                            | One keyed-list reconciler shared by both sidebars; a private copy in each would be two things to keep correct.                                                                          |
+| `Client/src/lib/a11y.ts`                                                       | Added an `orientation` argument to `enableRovingNavigation` so a vertical navigation list steps with ArrowUp/Down; the horizontal default is unchanged.                                 |
+| `Client/src/i18n/shell.ts`                                                     | No new keys: the category-name label now names its arrow via `aria-labelledby` rather than a second copy of the text.                                                                   |
+| `Client/src/styles/app/sidebar.css; Client/src/styles/app/friends-dm.css`      | The owned shell/sidebar fragments; the reflow fix and focus/hover parity live here.                                                                                                     |
+| `Client/tests/unit/reconcile.test.ts (new)` and the updated sidebar unit tests | Focused proof for the reconciler and the amended OC-0229/OC-0280 contracts.                                                                                                             |
 
 Shared edits to navigation, `api.ts`, `types.ts`, `dispatcher.ts`, global stores,
 tokens and style import composition take the PRD's single-writer lane. Parallel
@@ -169,3 +199,96 @@ render path as a fallback; fail closed and record a blocker instead.
 ## Open questions
 
 No new owner decision is introduced by this milestone. The PRD's unresolved entry decisions still apply; stop if implementation would require a new product, UX or scope choice.
+
+The one budget question escalated to firstmate during implementation is
+closed: the MainPage chunk exceeded the shared 64,000 B budget after this lane,
+the raise was withdrawn in favour of the owner's "do not weaken any threshold",
+and the channel editor now loads on demand so MainPage fits 64,000 B (see the
+record below). No open question remains.
+
+## Implementation record — 2026-09-23
+
+Branch `fm/b9-21-impl`; base `dev` `55589d43`, `dev` `838bab09` (B9-7) merged
+in. The owner's decisions applied are in
+[b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md#q13--visual-direction)
+(Q13: Refined Neon tokens, Aurora components adoptable per lane). No token files
+were edited.
+
+### What changed
+
+- **Measured before/after (source inspection + a jsdom probe).** At the base,
+  a single `dmStore.channels` change replaced **every** DM row (0 surviving
+  nodes in the probe) via `refreshDmSidebar()`, and an unread bump rebuilt the
+  whole channel list (670 nodes under `.channel-list`, 0 survivors). After the
+  change, a row whose key and rendered signature are unchanged keeps its DOM
+  node; only the changed row is rebuilt.
+- **`lib/reconcile.ts`** — a small keyed reconciler (`reconcileChildren`):
+  reuse by `key` + `signature`, rebuild a changed row, remove the gone ones,
+  keep focus on a focused row that is moved or rebuilt, `dispose` a row before
+  it detaches.
+  It is not a virtual DOM; `signature` is the caller's honest statement of what
+  the row draws.
+- **`ChannelSidebar`** — two-level keyed reconciliation (category groups, then
+  their rows); each row owns its own `Disposable` for its per-row listeners
+  (context menu, drag), replacing the single per-render controller. A voice row
+  is rebuilt on every render that a voice event can reach (`voiceTick`), since
+  it carries live participant/stream/E2EE state; text rows stay keyed. Rows are
+  keyboard-reachable: one Tab stop per list, ArrowUp/Down roving, Enter/Space
+  activates, `role`/`aria-current` set, a visible `:focus-visible` ring.
+- **`DmSidebar`** — rows keyed by DM channel; a new `update(conversations)`
+  refreshes them in place instead of the caller destroying and recreating the
+  component, so the search input, its value, focus and the list scroll all
+  survive. Row keyboard semantics as above; the back header is a real
+  focusable control.
+- **`SidebarDmSection`** — the embedded preview's top-3 rows are keyed; the
+  list is one Tab stop with vertical roving; the section's collapse arrow is a
+  real `<button aria-expanded>`, as on the channel categories.
+- **`SidebarArea`** — `refreshDmSidebar()` now calls `DmSidebar.update()`
+  (removing the OC-0280 capture/restore of a destroy+recreate).
+- **CSS (`app/sidebar.css`, `app/friends-dm.css`)** — focus-visible rings for
+  the roving rows and the category arrow; hover parity for the "+" and DM
+  close buttons (`:focus-within`), so no action is hover-only; 24×24 pointer
+  targets (Q1, WCAG 2.5.8); and the reflow fix — `.channel-sidebar` takes
+  `flex: 1 1 0; min-height: 0` so `.channel-list` scrolls instead of being
+  clipped when a long list exceeds its column.
+
+### Evidence
+
+- **Unit:** full client suite 251 files / 6,025 passed (+152 expected failures),
+  including the new `reconcile.test.ts` and the amended OC-0229 (row-listener
+  lifetime across re-renders) and OC-0280 (DM search/focus preservation) tests.
+  `tsc --noEmit`, `eslint`, `oxlint`, `lint:cycles` and `knip` clean.
+- **E2E (mocked, Chromium, one spec, `--workers=1`):**
+  `Client/tests/e2e/b9-shell-polish.spec.ts` — 7 tests: one Tab stop + arrow
+  roving + Enter + ring; row identity across an unrelated unread update; DM
+  search/focus across a presence change; scroll position preserved on a long
+  list; reflow at 940×500; the embedded DM preview's Tab stop + arrows; the
+  embedded DM section collapsed and expanded from the keyboard. All
+  pass against the dev server. The neighbour specs that touch these surfaces
+  also pass unchanged: `channel-sidebar`, `sidebar-header`, `sidebar-menus`,
+  `b9-navigation`, `a11y-smoke`, `b9-text-expansion`, `server-profiles`,
+  `overlays` (75 tests).
+- **Native AT (NVDA/Orca) recordings and OS-zoom checks are owner-run and remain
+  pending**, consistent with the other B9 lanes.
+- **Bundle budgets** (`npm run check:budgets` at `841ad52f`): startup closure
+  94,732 B of the shared 95,000 B; MainPage 63,611 B of the unchanged 64,000 B. This lane adds ~1.1 KB of
+  MainPage (the reconciler and the keyed render paths, all startup code); the
+  admin-only channel editor (`EditChannelModal`) moved to an on-demand chunk to
+  pay for it. No budget was raised.
+
+### Requirements and register
+
+BPR-090 (coherent desktop navigation, preserved performance) and BPR-091
+(keyboard, focus, reflow) get their automated evidence here; the visual
+acceptance and native AT half remain owner-run. Register C-13's "measured
+incremental sidebar updates" clause is addressed: the `TODO(H16)` is gone and
+the O(n) rebuild is replaced by a keyed, measured update.
+
+### Drift from the plan
+
+The plan's `Task 1` asked to "capture update latency, DOM replacements, focus
+and scroll behavior". DOM replacements/identity and focus/scroll are asserted
+directly (unit + e2e); a wall-clock latency threshold is intentionally **not**
+asserted, because a CI timing threshold on a shared runner is flaky and the
+owner's acceptance is DOM-identity/focus, not a stopwatch. This is recorded as
+a deliberate scope choice, not an omitted check.
