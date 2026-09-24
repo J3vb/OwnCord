@@ -1,5 +1,7 @@
 /**
- * B9-5: the Message Requests inbox in the real shell (Q2).
+ * B9-5: the Message Requests inbox in the real shell (Q2), and the B9-6
+ * decisions on it (keyboard, focus, contrast and reflow; the real-server
+ * transitions are fullstack/b9-message-requests.spec.ts).
  *
  * Journey: open a first-contact request, read the sender and the plain text,
  * leave, and reconnect, without accepting it or fetching anything on the
@@ -67,9 +69,19 @@ const DM_CHANNELS = [
   },
 ];
 
-function mockScript(): string {
+type Route = { pattern: string; status: number; body: unknown; method?: string };
+
+const decided = (id: number, verb: string, state: string): Route => ({
+  pattern: `/api/v1/dm-requests/${id}/${verb}`,
+  method: "POST",
+  status: 200,
+  body: { id, state, decided_at: "2026-09-06T08:00:00Z" },
+});
+
+function mockScript(decisions: readonly Route[] = []): string {
   return buildTauriMockScript({
     httpRoutes: [
+      ...decisions,
       { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
       { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
       { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
@@ -299,6 +311,15 @@ test.describe("B9-5 inbox at the minimum window with 20px Large Font", () => {
       expect(await row.evaluate((n) => n.scrollWidth <= n.clientWidth + 1)).toBe(true);
     }
     expect(await list.evaluate((n) => n.scrollWidth <= n.clientWidth + 1)).toBe(true);
+    // B9-6: every decision stays reachable and at least 24x24 (Q1, 2.5.8).
+    for (const i of [0, 1]) {
+      for (const button of await items(page).nth(i).getByRole("button").all()) {
+        await button.scrollIntoViewIfNeeded();
+        await expect(button).toBeInViewport({ ratio: 1 });
+        const box = (await button.boundingBox())!;
+        expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(24);
+      }
+    }
     await expect(page.locator("[data-testid='feature-view-close']")).toBeInViewport();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
     // Nothing in the inbox animates.
@@ -307,5 +328,165 @@ test.describe("B9-5 inbox at the minimum window with 20px Large Font", () => {
       body: await page.screenshot(),
       contentType: "image/png",
     });
+
+    // The Block confirm fits too, with its buttons whole, and does not animate.
+    await items(page).nth(0).getByRole("button", { name: "Block…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Block A Stranger?" });
+    for (const button of await dialog.getByRole("button").all()) {
+      await expect(button).toBeInViewport({ ratio: 1 });
+    }
+    expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
+    await testInfo.attach("message-requests-block-dialog-940x500-20px.png", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+  });
+});
+
+test.describe("B9-6 Message Request decisions", () => {
+  const outcome = (page: Page) => page.locator("[data-testid='requests-outcome']");
+
+  test("decide by keyboard: named, ringed controls; the confirm holds focus and Escape cancels only it", async ({
+    page,
+  }) => {
+    await page.addInitScript(
+      mockScript([decided(1, "delete", "deleted"), decided(2, "ignore", "ignored")]),
+    );
+    await page.goto("/");
+    await signIn(page);
+    await toDmMode(page);
+    await entry(page).click();
+    await expect(items(page)).toHaveCount(2);
+    expect(await findUnnamedControls(view(page))).toEqual([]);
+    const before = (await ipcLog(page)).length;
+
+    // From the list, Tab walks the first request's four decisions in order.
+    await page.locator("[data-testid='requests-list']").focus();
+    const first = items(page).nth(0);
+    await expect(first.getByRole("group", { name: "Request from A Stranger" })).toBeVisible();
+    for (const name of ["Accept", "Ignore", "Delete…", "Block…"]) {
+      await page.keyboard.press("Tab");
+      await expect(first.getByRole("button", { name })).toBeFocused();
+      expect((await focusIndicator(page)).problems).toEqual([]);
+    }
+
+    // Delete the erased sender's request: Cancel first, focus stays inside,
+    // Escape closes the dialog (not the inbox) and returns to its opener.
+    const del = items(page).nth(1).getByRole("button", { name: "Delete…" });
+    await del.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Delete this request?" });
+    await expect(dialog).toContainText("Unknown user is not told.");
+    await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+    expect((await focusIndicator(page)).problems).toEqual([]);
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("button", { name: "Delete request" })).toBeFocused();
+    expect((await focusIndicator(page)).problems).toEqual([]);
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(view(page)).toBeVisible();
+    await expect(del).toBeFocused();
+
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await expect(items(page)).toHaveCount(1);
+    await expect(outcome(page)).toHaveText("Deleted Unknown user's request.");
+    // Removal moves focus to the next request's row: here, the one before it.
+    await expect(first).toBeFocused();
+    expect((await focusIndicator(page)).problems).toEqual([]);
+
+    // Ignore the last one with Space: focus falls back to the heading.
+    await first.getByRole("button", { name: "Ignore" }).focus();
+    await page.keyboard.press(" ");
+    await expect(items(page)).toHaveCount(0);
+    await expect(page.getByRole("heading", { level: 2, name: "Message Requests" })).toBeFocused();
+    await expect(page.locator("[data-testid='requests-status']")).toHaveText(
+      "No pending message requests.",
+    );
+    await expect(outcome(page)).toHaveText("Ignored A Stranger's request.");
+
+    // Exactly the two decisions went out, and nothing on the strangers' behalf.
+    const urls = httpUrls((await ipcLog(page)).slice(before));
+    expect(urls.filter((u) => u.includes("/dm-requests/"))).toEqual([
+      expect.stringMatching(/\/dm-requests\/1\/delete$/),
+      expect.stringMatching(/\/dm-requests\/2\/ignore$/),
+    ]);
+    expect(urls.filter((u) => /\/channels\/20\d|evil\.example|tracker\.example/.test(u))).toEqual(
+      [],
+    );
+  });
+
+  test("decision controls, the confirm and a failure meet Q1 contrast in every theme and custom accent", async ({
+    page,
+  }) => {
+    const failing: Route = {
+      pattern: "/api/v1/dm-requests/2/block",
+      method: "POST",
+      status: 500,
+      body: { error: "INTERNAL", message: "boom" },
+    };
+    await page.addInitScript(mockScript([failing]));
+    await page.goto("/");
+    await signIn(page);
+    for (const theme of ["neon-glow", "dark", "midnight", "light"] as const) {
+      for (const highContrast of [false, true]) {
+        const label = `${theme}${highContrast ? "+HC" : ""}`;
+        await setAppearance(page, { theme, highContrast });
+        await signIn(page);
+        await toDmMode(page);
+        await entry(page).click();
+        await expect(items(page)).toHaveCount(2);
+        const first = items(page).nth(0);
+        await first.getByRole("button", { name: "Block…" }).click();
+        const dialog = page.getByRole("dialog", { name: "Block A Stranger?" });
+        for (const target of [
+          dialog.locator("h3"),
+          dialog.locator(".modal-danger-text"),
+          dialog.getByRole("button", { name: "Cancel" }),
+          dialog.getByRole("button", { name: "Block" }),
+        ]) {
+          const { ratio, fg, bg } = await textContrast(target);
+          expect(ratio, `${label} dialog: ${fg} on ${bg}`).toBeGreaterThanOrEqual(Q1.text);
+        }
+        await dialog.getByRole("button", { name: "Block" }).click();
+        const error = first.locator("[data-testid='request-error']");
+        await expect(error).toBeVisible();
+        await expect(outcome(page)).toHaveText(await error.innerText());
+        // A failed decision leaves the request in place, retryable.
+        await expect(first.getByRole("button", { name: "Block…" })).toHaveAttribute(
+          "aria-disabled",
+          "false",
+        );
+        for (const target of [
+          error,
+          outcome(page),
+          page.locator(".requests-intro").nth(1),
+          ...["Accept", "Ignore", "Delete…", "Block…"].map((name) =>
+            first.getByRole("button", { name }),
+          ),
+        ]) {
+          const { ratio, fg, bg } = await textContrast(target);
+          expect(ratio, `${label}: ${fg} on ${bg}`).toBeGreaterThanOrEqual(Q1.text);
+        }
+      }
+    }
+
+    // Q8: a low-contrast custom accent keeps Accept's text and focus ring readable.
+    for (const accent of ["#ffe600", "#1a1a40"]) {
+      await setAppearance(page, { theme: "dark", highContrast: false, accent });
+      await signIn(page);
+      await toDmMode(page);
+      await entry(page).click();
+      const accept = items(page).nth(0).getByRole("button", { name: "Accept" });
+      const { ratio, fg, bg } = await textContrast(accept);
+      expect(ratio, `accent ${accent}: ${fg} on ${bg}`).toBeGreaterThanOrEqual(Q1.text);
+      await page.locator("[data-testid='requests-list']").focus();
+      await page.keyboard.press("Tab");
+      await expect(accept).toBeFocused();
+      expect((await focusIndicator(page)).problems, `accent ${accent}`).toEqual([]);
+    }
   });
 });
