@@ -125,7 +125,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   const title = sanitizeNotif(
     mentioned
       ? connectText("notifications.mentioned", { author: authorName, channel: channelLabel })
-      : `${authorName} in ${channelLabel}`,
+      : connectText("notifications.inChannel", { author: authorName, channel: channelLabel }),
     80,
   );
   const body = sanitizeNotif(payload.content, 100);

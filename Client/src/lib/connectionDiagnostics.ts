@@ -277,7 +277,13 @@ export async function runConnectionDiagnostics(
       }
     }
     if (audio || video) {
-      const kinds = [audio ? "audio" : "", video ? "video" : ""].filter(Boolean).join(" and ");
+      const kinds = t(
+        audio && video
+          ? "diagnostics.detail.kinds.audioAndVideo"
+          : audio
+            ? "diagnostics.detail.kinds.audio"
+            : "diagnostics.detail.kinds.video",
+      );
       emit("media", "passed", t("diagnostics.detail.mediaPassed", { kinds }));
     } else {
       emit("media", "not-tested", t("diagnostics.detail.mediaMissing"));

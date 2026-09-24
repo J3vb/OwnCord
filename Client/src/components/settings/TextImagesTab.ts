@@ -4,7 +4,7 @@
 
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { resetExternalConsent } from "../../features/content-consent/external";
-import { externalConsentText as t } from "../../i18n/externalConsent";
+import { externalConsentText } from "../../i18n/externalConsent";
 import { appendToggleRows } from "./helpers";
 import { settingsText as t } from "../../i18n/settings";
 
@@ -52,20 +52,20 @@ function buildConsentResetRow(signal: AbortSignal): HTMLDivElement {
   const status = createElement("div", { class: "setting-desc", role: "status" });
   appendChildren(
     info,
-    createElement("div", { class: "setting-label" }, t("reset.label")),
-    createElement("div", { class: "setting-desc" }, t("reset.desc")),
+    createElement("div", { class: "setting-label" }, externalConsentText("reset.label")),
+    createElement("div", { class: "setting-desc" }, externalConsentText("reset.desc")),
     status,
   );
   const btn = createElement(
     "button",
-    { class: "ac-btn", type: "button", "aria-label": t("reset.label") },
-    t("reset.button"),
+    { class: "ac-btn", type: "button", "aria-label": externalConsentText("reset.label") },
+    externalConsentText("reset.button"),
   );
   btn.addEventListener(
     "click",
     () => {
       resetExternalConsent();
-      setText(status, t("reset.done"));
+      setText(status, externalConsentText("reset.done"));
     },
     { signal },
   );

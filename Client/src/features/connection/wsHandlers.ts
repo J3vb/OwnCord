@@ -80,7 +80,9 @@ export function handleServerRestart(payload: Payload<"server_restart">): void {
     return;
   }
   setTransientError(
-    connectText("session.serverRestarting", { reason: payload.reason ?? "maintenance" }),
+    connectText("session.serverRestarting", {
+      reason: payload.reason ?? connectText("session.restartReasonDefault"),
+    }),
   );
 }
 

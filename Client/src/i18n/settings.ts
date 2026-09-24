@@ -224,6 +224,9 @@ export const settingsText = defineCatalog("settings", {
     "The call changed during the check. Run it again in your current call.",
   "diagnostics.detail.mediaPassed":
     "Incoming {kinds} decoded during this check. This does not test your speakers, outgoing media, or the other person's identity.",
+  "diagnostics.detail.kinds.audio": "audio",
+  "diagnostics.detail.kinds.video": "video",
+  "diagnostics.detail.kinds.audioAndVideo": "audio and video",
   "diagnostics.detail.mediaMissing":
     "No advancing decoded media was observed. Ask someone to speak or share video and retry. If they are already sending, check voice permissions, encryption warnings and the media network path.",
   "diagnostics.detail.mediaFailed":

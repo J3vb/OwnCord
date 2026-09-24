@@ -133,6 +133,7 @@ export const connectText = defineCatalog("connect", {
   "session.expired": "Your session expired — sign in again.",
   "session.serverShutdown": "The server was shut down — you have been signed out.",
   "session.serverRestarting": "Server is restarting: {reason}",
+  "session.restartReasonDefault": "maintenance",
   "session.banned": "You have been banned.",
   "error.serverFallback": "Server error",
   "error.rateLimited": "Too many requests. Try again later.",
@@ -157,6 +158,7 @@ export const connectText = defineCatalog("connect", {
   "channel.voiceCategory": "Voice",
   "notifications.channelFallback": "Channel {id}",
   "notifications.mentioned": "{author} mentioned you in {channel}",
+  "notifications.inChannel": "{author} in {channel}",
   "retention.kept": "keeps messages until they are deleted",
   "retention.deleted": {
     one: "deletes messages after {days} day",
