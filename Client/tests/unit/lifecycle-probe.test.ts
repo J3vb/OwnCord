@@ -186,6 +186,25 @@ describe("lifecycle soak pass bars", () => {
     expect(nodes.bar).toContain("page 0: 2858→2861");
   });
 
+  it("keeps the phase series exact for nodes: 1-2 nodes per login generation still fails", () => {
+    for (const growth of [1, 2]) {
+      const perLogin = [
+        sample(5, { nodes: 2858 }),
+        sample(6, { nodes: 2858 }),
+        sample(9, { nodes: 2858 }),
+        sample(10, { nodes: 2858 }),
+        sample(15, { nodes: 2858 + growth }),
+        sample(16, { nodes: 2858 + growth }),
+        sample(19, { nodes: 2858 + growth }),
+        sample(20, { nodes: 2858 + growth }),
+      ];
+      const nodes = bar(evaluateBars(perLogin), "nodes");
+      expect(nodes.pass).toBe(false);
+      expect(nodes.bar).toContain(`phase 5: 2858→${2858 + growth}`);
+      expect(nodes.bar).not.toMatch(/page \d:/);
+    }
+  });
+
   it("keeps the tolerance to nodes: a 1-unit wobble in another metric still fails", () => {
     const listeners = [
       sample(5),
