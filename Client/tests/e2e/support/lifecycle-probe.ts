@@ -36,6 +36,20 @@ export interface LifecycleSample {
 }
 
 const COUNT_BAR_SLOPE = 0.05;
+/**
+ * A DOM node can be in flux at one sample even after the settle loop — a
+ * detached node retained a moment longer (see `sampleLifecycle`, run
+ * 35886832029 read 2739/2738/2739 with an identical attached DOM). In a
+ * two-sample within-page series a single such node is a slope of 1/3, far past
+ * the bar, with no leak. So a within-page `nodes` series also passes on a net
+ * move of at most this many nodes. The cost is a blind spot: each page is
+ * always exactly two samples (cycles 6 and 9), however long the soak runs, so
+ * page-scoped node growth of up to 2 between them that the re-login navigation
+ * releases is accepted, and no longer run catches it. The phase series keep no
+ * tolerance, so growth that survives the navigation still fails. Every other
+ * counter settles exactly under the settle loop and gets none.
+ */
+const NODE_BAR_TOLERANCE = 2;
 const HEAP_BAR_RATIO = 1.1;
 const HEAP_BAR_SLOPE = 25 * 1024;
 
@@ -354,6 +368,9 @@ export function evaluateBars(
     let lastWarm: number | null = null;
     let lastFinal = 0;
     for (const { label, group, withinPage } of series) {
+      // Run 35986328302: page-0 nodes read 2858→2859 across cycles 6 and 9,
+      // slope 1/3 with an identical attached DOM (see NODE_BAR_TOLERANCE).
+      const tolerance = metric === "nodes" && withinPage ? NODE_BAR_TOLERANCE : 0;
       const values = group.map((s) => s[metric]);
       const measuredSlope = slope(group.map((s) => ({ x: s.cycle, y: s[metric] })));
       if (Math.abs(measuredSlope) >= Math.abs(worstSlope)) {
@@ -362,7 +379,11 @@ export function evaluateBars(
         lastFinal = values[values.length - 1]!;
       }
       const flat = values.every((v) => v === values[0]);
-      const ok = exact ? flat : measuredSlope <= (withinPage ? COUNT_BAR_SLOPE : phaseCeiling);
+      const net = values[values.length - 1]! - values[0]!;
+      const withinTolerance = tolerance > 0 && net <= tolerance;
+      const ok = exact
+        ? flat
+        : withinTolerance || measuredSlope <= (withinPage ? COUNT_BAR_SLOPE : phaseCeiling);
       if (!ok) failures.push(`${label}: ${values.join("→")}`);
     }
     const result: BarResult = {
@@ -372,7 +393,9 @@ export function evaluateBars(
       slope: worstSlope,
       bar: exact
         ? "every phase and page series exactly flat"
-        : `every phase series slope <= ${phaseCeiling}/cycle, every page series <= ${COUNT_BAR_SLOPE}/cycle`,
+        : `every phase series slope <= ${phaseCeiling}/cycle, every page series <= ${COUNT_BAR_SLOPE}/cycle${
+            metric === "nodes" ? ` or a net move <= ${NODE_BAR_TOLERANCE}` : ""
+          }`,
       pass: failures.length === 0,
     };
     if (failures.length > 0) result.bar += ` — FAIL ${failures.join("; ")}`;

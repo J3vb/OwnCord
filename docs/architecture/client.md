@@ -148,9 +148,15 @@ nodes, documents, live `AbortController`s, live intervals and timeouts, open
 sockets and peer connections, live tracks and `AudioContext`s, and heap. The bar
 is no growth after warm-up: every count's slope is at most 0.05 per cycle
 (documents and intervals exactly flat), both across pages at the same page age
-and within one page (cycles 6 and 9, after that page's reconnect). Heap stays
-within 1.10× and 25 KB per cycle at equal page age. It runs 20 cycles on every
-`client-fullstack` PR (`tests/e2e/fullstack/long-session.spec.ts`), 10 cycles
+and within one page (cycles 6 and 9, after that page's reconnect). A within-page
+nodes series also passes on a net move of at most 2, because a detached node can
+be in flux at one sample even after the settle loop (a 1-node move in a
+two-sample page series is a slope of 1/3). That is a blind spot: every page is
+two samples however long the soak runs, so page-scoped node growth of up to 2
+that the re-login navigation releases passes. The across-page series get no
+tolerance, so node growth that survives the navigation still fails. Heap
+stays within 1.10× and 25 KB per cycle at equal page age. It runs 20 cycles on
+every `client-fullstack` PR (`tests/e2e/fullstack/long-session.spec.ts`), 10 cycles
 over WebView2 in `client-native` (`tests/e2e/native/long-session.spec.ts`), and
 200 cycles plus 30 idle-connected minutes, in which every count must hold
 exactly and heap grow at most 100 KB per minute, through `npm run test:e2e:soak` (the `long-session-soak` job in
