@@ -76,6 +76,9 @@ const SCROLL_BOTTOM_THRESHOLD = 100;
 /** Number of items to render beyond visible viewport in each direction. */
 const OVERSCAN = 20;
 
+/** Controls a keyboard user can land on inside a rendered row. */
+const ROW_FOCUSABLE_SELECTOR = "button, [tabindex='0'], a[href]";
+
 /** Regex for direct image URLs in message content. */
 const IMAGE_URL_RE = /\.(?:png|jpe?g|gif|webp)(?:\?[^\s]*)?(?:\s|$)/i;
 
@@ -512,6 +515,52 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
   }
 
+  /**
+   * Stable identity of the focused control inside the rendered window, so a
+   * virtualized rebuild can put focus back on its replacement (Q1 focus:
+   * stable location through async update/removal). The row's own key survives
+   * the rebuild because rows are keyed by message id; a control with its own
+   * `data-testid` (the action buttons) is restored exactly, and a focusable
+   * without one (a reaction chip, a reply bar, a link) is restored by its
+   * position among the row's focusable controls. Null when focus is outside
+   * the rendered window, so an unrelated rebuild never pulls focus back into
+   * the list. Restoring never scrolls, so a reader scrolling away from the
+   * focused row or a history-prepend anchor is not pulled back to it.
+   */
+  function captureRowFocus(): { own: string | null; row: string | null; index: number } | null {
+    const active = document.activeElement;
+    if (
+      !(active instanceof HTMLElement) ||
+      contentContainer === null ||
+      !contentContainer.contains(active)
+    ) {
+      return null;
+    }
+    const row = active.closest<HTMLElement>("[data-testid]");
+    const index =
+      row === null ? -1 : [...row.querySelectorAll(ROW_FOCUSABLE_SELECTOR)].indexOf(active);
+    return { own: active.dataset.testid ?? null, row: row?.dataset.testid ?? null, index };
+  }
+
+  function restoreRowFocus(
+    captured: { own: string | null; row: string | null; index: number } | null,
+  ): void {
+    if (captured === null || contentContainer === null) return;
+    if (captured.own !== null) {
+      contentContainer
+        .querySelector<HTMLElement>(`[data-testid="${captured.own}"]`)
+        ?.focus({ preventScroll: true });
+      return;
+    }
+    if (captured.row !== null && captured.index >= 0) {
+      contentContainer
+        .querySelector<HTMLElement>(`[data-testid="${captured.row}"]`)
+        ?.querySelectorAll<HTMLElement>(ROW_FOCUSABLE_SELECTOR)
+        .item(captured.index)
+        ?.focus({ preventScroll: true });
+    }
+  }
+
   /** Abort the previous window's row-scoped listeners and start a fresh
    *  signal for the rows about to replace them. Must run before every
    *  `clearChildren(contentContainer)` that discards rendered rows, so a
@@ -597,7 +646,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       renderedStart = start;
       renderedEnd = end;
 
-      // Rebuild content
+      // Rebuild content. The focused row's control is about to be detached by
+      // clearChildren; capture its identity so it can be restored on its
+      // replacement row (Q1: focus stays put through a virtualized rebuild).
+      const focusedRow = captureRowFocus();
       releaseTrackedMedia();
       beginRowRender();
       clearChildren(contentContainer);
@@ -610,6 +662,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // Measure newly rendered elements and update spacers
       measureRendered();
       updateSpacers();
+      restoreRowFocus(focusedRow);
     } else {
       // Target range already fully rendered: no-op. The ResizeObserver
       // handles measurement and spacer updates when element sizes change.
@@ -923,7 +976,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     bottomSpacer = createElement("div", { class: "virtual-spacer-bottom" });
     const scrollAnchor = createElement("div", { class: "scroll-anchor" });
 
-    scrollToBottomBtn = createElement("button", { class: "scroll-to-bottom-btn" });
+    scrollToBottomBtn = createElement("button", {
+      class: "scroll-to-bottom-btn",
+      "aria-label": messagingText("scrollToBottom"),
+    });
     scrollToBottomBtn.textContent = "↓";
     scrollToBottomBtn.addEventListener(
       "click",

@@ -197,12 +197,12 @@ sign in again.") and throws `ApiClientError(401)`.
 **Inline players (✓ implemented 2026-08):** a received attachment renders by MIME
 family, not as a download chip for everything but images:
 
-| MIME                                                                     | Rendering                                                                                                       |
-| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `image/*` except `image/svg+xml`                                         | Inline `<img>` (existing)                                                                                       |
-| `video/mp4`, `video/webm`, `video/ogg`                                   | Inline `<video controls preload="metadata">` in the same max box as an image, with the download button on hover |
-| `audio/mpeg`/`mp3`, `audio/ogg`, `audio/opus`, `audio/wav`, `audio/webm` | Inline `<audio controls preload="metadata">` row with filename, size and download                               |
-| anything else, including `image/svg+xml`                                 | Download chip                                                                                                   |
+| MIME                                                                     | Rendering                                                                                                                         |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `image/*` except `image/svg+xml`                                         | Inline `<img>` (existing)                                                                                                         |
+| `video/mp4`, `video/webm`, `video/ogg`                                   | Inline `<video controls preload="metadata">` in the same max box as an image, with the download button on hover or keyboard focus |
+| `audio/mpeg`/`mp3`, `audio/ogg`, `audio/opus`, `audio/wav`, `audio/webm` | Inline `<audio controls preload="metadata">` row with filename, size and download                                                 |
+| anything else, including `image/svg+xml`                                 | Download chip                                                                                                                     |
 
 Both player families are allowlists, not `video/`/`audio/` prefix tests: an
 unknown container gets a chip rather than a player that fails to decode. SVG is
