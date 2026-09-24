@@ -220,20 +220,26 @@ the lane's own.
   inline — measured at 3.35:1 / 1.89:1 / 3.18:1 on their surfaces, all below
   the Q1 4.5:1 bar. A small shared helper in `settings/helpers.ts`
   (`outcomeEl`/`showOutcome`) now builds every message from the B9-2 classes
-  `.form-error` (role=alert), `.form-status` and the new `.form-warning`
-  (role=status), which resolve to `--text-danger`/`--text-positive`/
-  `--text-warning`. The TOTP and recovery-kit status badges moved off white-on-
+  `.form-error`, `.form-status` and the new `.form-warning`, which resolve to
+  `--text-danger`/`--text-positive`/`--text-warning`. The TOTP and recovery-kit status badges moved off white-on-
   `--green` onto `--text-positive`/`--text-muted` on `--bg-tertiary`; the badge's
   word carries the state, so colour is never the only signal.
 - **Every form message is announced once.** Account/recovery errors and the
-  recovery-kit status error gained `role="alert"`; successes and the one-time
-  copy result are polite `role="status"`. The one-time-secret reveal now has a
-  screen-reader-only status region for copy success/failure, holding no secret.
+  recovery-kit status error gained `role="alert"`. `outcomeEl` fixes the live
+  role at creation and `showOutcome` changes only the class and text, because
+  swapping the role with the text rebuilds the region and drops the
+  announcement; every account message is created as an error, so a later
+  success or warning in the same element is also read as an alert. The
+  one-time-secret reveal has a screen-reader-only `role="status"` region for
+  copy success/failure, holding no secret.
 - **A validation error is tied to its field.** `LoginForm`'s `validateForm`
   returns the offending field; the error is linked with `aria-invalid` +
-  `aria-describedby` and focus moves to the control to fix. The 2FA box's
-  malformed code now shows and announces real text (`connect.totp.invalidCode`)
-  linked to its input instead of a 500 ms colour-only flash.
+  `aria-describedby` and focus moves to the control to fix. The banner is then
+  not a live region, so the message is read once, as the field's description;
+  it keeps `role="alert"` only when focus does not move — a server error that
+  names no field, or Enter in a field that already has focus. The 2FA box's
+  malformed code now shows real text (`connect.totp.invalidCode`) linked to its
+  input the same way, instead of a 500 ms colour-only flash.
 - **Real labels on the secret/password inputs.** The password-change fields, the
   delete-confirmation field and the recovery-overlay fields gained `<label>`s
   (and `aria-describedby` to their errors); the delete-confirm field's
@@ -242,7 +248,12 @@ the lane's own.
   enroll/disable step, and hiding the password-confirm area after submit, now
   hand focus to the replacement control instead of dropping it to `<body>`.
   After "Sign out everywhere" the confirm button that was focused is hidden, so
-  focus returns to the now-visible trigger.
+  focus returns to the now-visible trigger; opening that confirm focuses
+  Cancel. Chromium blurs a disabled focused button, so every async submit
+  (profile, password, 2FA enrol/confirm/disable, sessions, deletion, recovery
+  kit) returns focus to its control when the request fails. Each restore goes
+  through `focusIsOurs` (`settings/helpers.ts`) and is skipped once the user
+  has moved focus elsewhere.
 - **Scoped reflow (BPR-091).** `.settings-content` gets `min-width: 0` (a flex
   child otherwise refuses to shrink below its min-content width, pushing the
   panel into horizontal overflow at the 940×500 minimum window with 20px text),
@@ -268,14 +279,17 @@ the lane's own.
   B9-2 class and live role instead — the assertions were strengthened, not
   weakened. `tsc --noEmit`, `oxlint`, `eslint` and `lint:cycles` are clean.
 - **E2E (mocked, Chromium, `--workers=1`):**
-  `Client/tests/e2e/b9-account-settings.spec.ts` — 6 tests: the host and
-  short-password errors mark and focus their field; a failed password change is
+  `Client/tests/e2e/b9-account-settings.spec.ts` — 8 tests: the host and
+  short-password errors mark and focus their field; Enter in an already-focused
+  invalid field, or with a malformed 2FA code, announces the error once as an
+  alert; a failed password change is
   announced on `.form-error` with its text measured ≥ 4.5:1; the deletion
   disclosure is verbatim, its password field is labelled and its error
   announced; the recovery overlay's error is tied to all three fields; and the
   account pane at 940×500 with 20px text keeps every control named, unclipped
   and on screen with a Q1 focus ring. The neighbour specs that touch these
-  surfaces pass unchanged: `account-security`, `sessions`, `recovery-flow`,
+  surfaces pass: `account-security` (its keyboard submits now also assert
+  where focus lands), `sessions`, `recovery-flow`,
   `totp-flow`, `connect-page`, `register-flow`, `a11y-smoke` (56 tests).
 - **Before/after screenshots** of the account pane, the password-change error
   and the deletion disclosure were captured on the same 1280×800 hardware at
