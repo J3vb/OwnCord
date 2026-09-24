@@ -10,13 +10,18 @@
 2026-09-01 to 2026-09-03**, all twelve steps merged to `dev`; its **exit was
 accepted 2026-09-03** — the "B4 exit" section of
 [hp-4-scorecard-2026-09-02.md](hp-4-scorecard-2026-09-02.md), measured at
-`dev` `1133a26` and accepted at `0a14554`. **Audit update, 2026-09-06, at
-`dev` `61ac2b959cc4592ee5291637ac36f22acab89631`: B5 is in progress.** B5-0
-through B5-9, B5-11, and B5-12's initial reconciliation are merged; HP-5 was
-accepted 2026-09-06. B5-10 is being finished and is not assessed as complete
-in this audit. B5's exit remains open, including the acceptance follow-ups
-and final reconciliation recorded in its existing exit gate. Its execution plan
-is
+`dev` `1133a26` and accepted at `0a14554`. **B5 is built and its exit is
+prepared at `dev` `458301fd` (2026-09-24), awaiting the owner's acceptance**
+— the plan's [exit-SHA
+measurement](b5-community-content-moderation-2026-09-04.md#exit-sha-measurement-2026-09-24)
+records the seven conditions and roadmap rule 2 met with the gate re-run there.
+**Audit update, 2026-09-06, at
+`dev` `61ac2b959cc4592ee5291637ac36f22acab89631`: B5 was then in progress.**
+B5-0 through B5-9, B5-11, and B5-12's initial reconciliation were merged; HP-5
+was accepted 2026-09-06; B5-10 was still being finished. _Reconciled
+2026-09-24 (see the exit status above):_ B5-0 through B5-12 are merged
+(B5-10 as [#1555](https://github.com/J3vb/OwnCord/pull/1555)) and B5's exit
+is prepared, awaiting the owner's acceptance. Its execution plan is
 [b5-community-content-moderation-2026-09-04.md](b5-community-content-moderation-2026-09-04.md),
 drafted 2026-09-04 at `e1781086`, which schedules **HP-5 as B5's mid-phase
 hold point** between B5-5 and B5-6 — in front of every step whose topics HP-5
@@ -1548,7 +1553,11 @@ B5-10 is in progress. Complete the existing B5 exit follow-ups and final
 reconciliation before B6 entry. _Reconciled 2026-09-23 at `6fd8cc0c`:_ B5-10
 merged as #1555; B5 is not accepted — the plan's [exit-gate
 reconciliation](b5-community-content-moderation-2026-09-04.md#exit-gate-reconciliation-2026-09-23)
-names what remains. The 2026-08-29 sequence below is retained
+names what remains. _Exit prepared 2026-09-24 at `458301fd`:_ the [exit-SHA
+measurement](b5-community-content-moderation-2026-09-04.md#exit-sha-measurement-2026-09-24)
+records the seven conditions and roadmap rule 2 met with the gate re-run there,
+and B5-12's final pass is done; the exit awaits the owner's acceptance and B5
+is not accepted. The 2026-08-29 sequence below is retained
 as historical execution evidence, not today's instruction to start B3.
 
 _Updated 2026-08-29._ B0 and B1 are complete (HP-0 accepted 2026-08-25, HP-1
