@@ -4,6 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { messagingText } from "../../i18n/messaging";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,7 +40,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   const nameEl = createElement(
     "span",
     { class: "ch-name", "data-testid": "chat-header-name" },
-    "general",
+    messagingText("header.channelFallback"),
   );
 
   // Wrap hash+name in a clickable region for DM profile toggle
@@ -66,8 +67,8 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   const callBtn = createElement("button", {
     type: "button",
     class: "call-btn",
-    title: "Start a call",
-    "aria-label": "Start a call",
+    title: messagingText("header.startCall"),
+    "aria-label": messagingText("header.startCall"),
     "data-testid": "call-btn",
   });
   callBtn.appendChild(createIcon("phone", 18));
@@ -79,8 +80,8 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   const pinBtn = createElement("button", {
     type: "button",
     class: "pin-btn",
-    title: "Pins",
-    "aria-label": "Pins",
+    title: messagingText("header.pins"),
+    "aria-label": messagingText("header.pins"),
     "data-testid": "pin-btn",
   });
   pinBtn.appendChild(createIcon("pin", 18));
@@ -90,7 +91,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   const searchInput = createElement("input", {
     class: "search-input",
     type: "text",
-    placeholder: "Search...",
+    placeholder: messagingText("header.search"),
     "data-testid": "search-input",
   });
   if (opts.onSearchFocus !== undefined) {

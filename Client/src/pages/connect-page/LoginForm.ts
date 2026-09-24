@@ -1,7 +1,7 @@
 // LoginForm — login/register form sub-component for ConnectPage.
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
-import { createElement, setText, appendChildren, qs, setOwnedTimeout } from "@lib/dom";
+import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
@@ -16,6 +16,9 @@ export type FormState = "idle" | "loading" | "totp" | "connecting" | "error" | "
 
 /** Form mode: login or register. */
 export type FormMode = "login" | "register";
+
+/** A connect-form field a validation error can be tied to (B9-23). */
+type FieldId = "host" | "username" | "password" | "invite";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -138,6 +141,10 @@ export interface LoginFormApi {
 // Factory
 // ---------------------------------------------------------------------------
 
+function isBusy(state: FormState): boolean {
+  return state === "loading" || state === "connecting" || state === "auto-connecting";
+}
+
 export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   const {
     signal,
@@ -174,11 +181,19 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let formState: FormState = "idle";
   let formMode: FormMode = "login";
   let errorMessage = "";
+  /**
+   * The field the current banner error belongs to (B9-23), so the error is
+   * linked to its input with aria-describedby/aria-invalid and focus moves
+   * there. Null for a server error that names no field.
+   */
+  let errorField: FieldId | null = null;
   // True while a TOTP challenge is outstanding (from showTotp() until it is
   // cancelled or resolved). A rejected verify moves formState to "error" for
   // the banner/shake, but the overlay must stay up so the code can be
   // re-entered — see updateTotpOverlay().
   let totpPending = false;
+  // What had focus when a request disabled the form, restored when it settles.
+  let focusBeforeBusy: Element | null = null;
 
   // --- cached DOM references ---
   let formTitle: HTMLHeadingElement;
@@ -193,6 +208,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let toggleModeBtn: HTMLAnchorElement;
   let errorBanner: HTMLDivElement;
   let totpInput: HTMLInputElement;
+  let totpError: HTMLDivElement;
   let totpSubmitBtn: HTMLButtonElement;
   let rememberPasswordCheckbox: HTMLInputElement;
   let autoConnectCheckbox: HTMLInputElement;
@@ -290,6 +306,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     errorBanner = createElement("div", {
       class: "error-banner",
       role: "alert",
+      id: "connect-error-banner",
     });
 
     // Form
@@ -515,6 +532,17 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       pattern: "[0-9]{6}|[A-Za-z0-9]{5}-?[A-Za-z0-9]{5}",
       autocomplete: "one-time-code",
       "aria-label": connectText("totp.inputLabel"),
+      "aria-describedby": "totp-error",
+    });
+    // A malformed code used to be a 500 ms red border with no text and no
+    // announcement, so a screen reader got nothing. The message is the
+    // input's description and focus returns to the input, so it is read once
+    // with the field; it is a live alert only when the input already has
+    // focus and so is not re-read (B9-23).
+    totpError = createElement("div", {
+      class: "form-error",
+      id: "totp-error",
+      "data-testid": "totp-invalid",
     });
 
     totpSubmitBtn = createElement(
@@ -550,7 +578,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       { signal },
     );
 
-    appendChildren(card, title, description, totpInput, totpSubmitBtn, cancelBtn);
+    appendChildren(card, title, description, totpInput, totpError, totpSubmitBtn, cancelBtn);
     overlay.appendChild(card);
     return overlay;
   }
@@ -616,9 +644,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // State transitions
   // ---------------------------------------------------------------------------
 
-  function transitionTo(state: FormState, error?: string): void {
+  function transitionTo(state: FormState, error?: string, field: FieldId | null = null): void {
+    const wasBusy = isBusy(formState);
+    const focused = document.activeElement;
     formState = state;
     errorMessage = error ?? "";
+    // A validation error names its field; a server error names none. Kept on
+    // the instance so the input keeps aria-invalid/aria-describedby while the
+    // banner is up, through unrelated store updates.
+    errorField = state === "error" ? field : null;
 
     // Update UI based on state
     updateSubmitButton();
@@ -627,11 +661,30 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     updateTotpOverlay();
     updateAutoConnectOverlay();
     updateFormInputsDisabled();
+
+    // Disabling the inputs drops a focused one to <body>; once the request
+    // settles, put focus back where the user submitted from.
+    if (!wasBusy && isBusy(state)) {
+      focusBeforeBusy = focused;
+    } else if (wasBusy && !isBusy(state)) {
+      const restore = focusBeforeBusy;
+      focusBeforeBusy = null;
+      if (restore instanceof HTMLElement && restore !== document.body && focusIsOurs(restore)) {
+        restore.focus();
+      }
+    }
+  }
+
+  /** The input a banner error for `field` belongs to. */
+  function fieldInput(field: FieldId): HTMLInputElement {
+    if (field === "host") return hostInput;
+    if (field === "username") return usernameInput;
+    if (field === "password") return passwordInput;
+    return inviteInput;
   }
 
   function updateSubmitButton(): void {
-    const isLoading =
-      formState === "loading" || formState === "connecting" || formState === "auto-connecting";
+    const isLoading = isBusy(formState);
     // A closed server refuses registration outright — disable the control and
     // let the notice state why, rather than collecting a doomed attempt.
     const refused = isRegisterRefused();
@@ -655,10 +708,38 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
   }
 
+  /** All inputs a banner error can be linked to. */
+  function allFieldInputs(): HTMLInputElement[] {
+    return [hostInput, usernameInput, passwordInput, inviteInput];
+  }
+
   function updateErrorBanner(): void {
+    // A field error is linked to its input and focus moves there, so a
+    // keyboard/screen-reader user lands on the control to fix rather than on
+    // an unassociated sentence (B9-23). The banner is only a live alert when
+    // focus does not move — a server error naming no field, or a field that
+    // already has focus — so each error is announced once.
+    const field = formState === "error" ? errorField : null;
+    const target = field === null ? null : fieldInput(field);
+    if (target === null || target === document.activeElement) {
+      errorBanner.setAttribute("role", "alert");
+    } else {
+      errorBanner.removeAttribute("role");
+    }
+    for (const input of allFieldInputs()) {
+      input.removeAttribute("aria-invalid");
+      if (input.getAttribute("aria-describedby") === errorBanner.id) {
+        input.removeAttribute("aria-describedby");
+      }
+    }
     if (formState === "error" && errorMessage) {
       setText(errorBanner, errorMessage);
       errorBanner.classList.add("visible");
+      if (target !== null) {
+        target.setAttribute("aria-invalid", "true");
+        target.setAttribute("aria-describedby", errorBanner.id);
+        target.focus();
+      }
       // The shakeX animation plays automatically via CSS on .error-banner
       // Re-trigger animation by removing and re-adding the element
       errorBanner.style.animation = "none";
@@ -689,6 +770,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     if (formState === "totp") {
       totpOverlay.classList.remove("totp-overlay--hidden");
       totpInput.value = "";
+      totpInput.classList.remove("error");
+      totpInput.removeAttribute("aria-invalid");
+      setText(totpError, "");
       totpInput.focus();
     } else if (formState === "error" && totpPending) {
       // A rejected verify lands here — keep the overlay up (and the
@@ -709,8 +793,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   }
 
   function updateFormInputsDisabled(): void {
-    const disable =
-      formState === "loading" || formState === "connecting" || formState === "auto-connecting";
+    const disable = isBusy(formState);
     hostInput.disabled = disable;
     usernameInput.disabled = disable;
     passwordInput.disabled = disable;
@@ -799,26 +882,29 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
   }
 
-  function validateForm(): string | null {
+  function validateForm(): { message: string; field: FieldId | null } | null {
     const host = hostInput.value.trim();
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
 
     if (!host) {
-      return connectText("validation.hostRequired");
+      return { message: connectText("validation.hostRequired"), field: "host" };
     }
     if (!username) {
-      return connectText("validation.usernameRequired");
+      return { message: connectText("validation.usernameRequired"), field: "username" };
     }
     // A saved password is already known-good; it is never re-validated here
     // because its plaintext is not available to this process. The bypass is
     // login-only: registration always needs a real, freshly typed password.
     if (!usingSavedPassword || formMode !== "login") {
       if (!password) {
-        return connectText("validation.passwordRequired");
+        return { message: connectText("validation.passwordRequired"), field: "password" };
       }
       if (password.length < MIN_PASSWORD_LENGTH) {
-        return connectText("validation.passwordTooShort", { min: MIN_PASSWORD_LENGTH });
+        return {
+          message: connectText("validation.passwordTooShort", { min: MIN_PASSWORD_LENGTH }),
+          field: "password",
+        };
       }
     }
     if (formMode === "register") {
@@ -831,18 +917,20 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // history (whether the field had shown the placeholder before) was
       // wrong in both directions.
       if (password === SAVED_PASSWORD_PLACEHOLDER) {
-        return connectText("validation.placeholderPassword");
+        return { message: connectText("validation.placeholderPassword"), field: "password" };
       }
       const mode = currentRegistrationMode();
       if (mode === "closed") {
-        return connectText("registration.closedNotice");
+        // No field is at fault (and the invite field is hidden in this mode),
+        // so the banner stands alone.
+        return { message: connectText("registration.closedNotice"), field: null };
       }
       // `invite` and an unknown mode (older server / failed read) both require
       // a code. Never widen registration because the mode could not be read.
       if (mode === "invite" || mode === null) {
         const inviteCode = inviteInput.value.trim();
         if (!inviteCode) {
-          return connectText("validation.inviteRequired");
+          return { message: connectText("validation.inviteRequired"), field: "invite" };
         }
       }
     }
@@ -858,7 +946,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     const validationError = validateForm();
     if (validationError !== null) {
-      transitionTo("error", validationError);
+      transitionTo("error", validationError.message, validationError.field);
       return;
     }
 
@@ -913,11 +1001,18 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     const code = totpInput.value.trim();
     if (!TOTP_OR_RECOVERY_CODE.test(code)) {
-      // Simple inline feedback — add error class to the input
       totpInput.classList.add("error");
+      totpInput.setAttribute("aria-invalid", "true");
+      if (document.activeElement === totpInput) totpError.setAttribute("role", "alert");
+      else totpError.removeAttribute("role");
+      setText(totpError, connectText("totp.invalidCode"));
       setOwnedTimeout(signal, () => totpInput.classList.remove("error"), 500);
+      totpInput.focus();
       return;
     }
+    totpInput.classList.remove("error");
+    totpInput.removeAttribute("aria-invalid");
+    setText(totpError, "");
 
     totpSubmitBtn.disabled = true;
     setText(totpSubmitBtn, connectText("totp.verifying"));
@@ -936,6 +1031,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     } finally {
       totpSubmitBtn.disabled = false;
       setText(totpSubmitBtn, connectText("totp.verify"));
+      if (totpPending && focusIsOurs(totpSubmitBtn)) totpSubmitBtn.focus();
     }
   }
 

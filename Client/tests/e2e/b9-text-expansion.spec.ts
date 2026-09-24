@@ -351,6 +351,96 @@ test.describe("B9-18 connect and shell text", () => {
 });
 
 // ---------------------------------------------------------------------------
+// B9-19: messaging, rich-content and media text. The main page and its pickers
+// are built after the seam switch, so the message actions, the pinned panel and
+// the search overlay resolve through the expanded catalog.
+// ---------------------------------------------------------------------------
+
+test.describe("B9-19 messaging text", () => {
+  test.use({ viewport: { width: 940, height: 500 } });
+
+  test("reads the messaging catalogs' English copy", async ({ page }) => {
+    await startAtLargestText(page);
+    await navigateToMainPageReady(page);
+
+    const own = page.locator("[data-testid='message-101']");
+    await own.hover();
+    await expect(page.locator("[data-testid='msg-reply-101']")).toHaveAccessibleName("Reply");
+    await expect(page.locator("[data-testid='msg-edit-101']")).toHaveAccessibleName("Edit");
+    await expect(page.locator("[data-testid='msg-react-101']")).toHaveAccessibleName("React");
+
+    await page.locator("[data-testid='pin-btn']").click();
+    const panel = page.locator(".pinned-panel");
+    await expect(panel).toHaveAccessibleName("Pinned messages");
+    await expect(panel.locator(".pinned-panel__close")).toHaveAccessibleName(
+      "Close pinned messages",
+    );
+    await page.locator(".pinned-panel__close").click();
+
+    await expect(page.locator("[data-testid='search-input']")).toHaveAttribute(
+      "placeholder",
+      "Search...",
+    );
+    await page.locator("[data-testid='search-input']").focus();
+    await expect(page.locator("[data-testid='search-overlay-input']")).toHaveAttribute(
+      "placeholder",
+      "Search messages...",
+    );
+  });
+
+  test("keeps expanded message-action names operable at 940×500 with 20px text", async ({
+    page,
+  }, testInfo) => {
+    await startAtLargestText(page);
+    test.skip(!(await expandCatalogText(page)), "needs the dev server's modules");
+    // Sign in after the switch: the message rows, pinned panel and search
+    // overlay are all built through the expanded seam.
+    await navigateToMainPageReady(page);
+
+    const own = page.locator("[data-testid='message-101']");
+    await own.scrollIntoViewIfNeeded();
+    await own.hover();
+    for (const [testId, english] of [
+      ["msg-react-101", "React"],
+      ["msg-reply-101", "Reply"],
+      ["msg-edit-101", "Edit"],
+      ["msg-delete-101", "Delete"],
+    ] as const) {
+      const btn = page.locator(`[data-testid='${testId}']`);
+      await expect(btn).toHaveAccessibleName(expanded(english));
+      await expect(btn).toBeVisible();
+    }
+
+    // The pinned panel's complementary landmark and close control are named
+    // from the seam, and its empty state stays whole.
+    await page.locator("[data-testid='pin-btn']").click();
+    const panel = page.locator(".pinned-panel");
+    await expect(panel).toHaveAccessibleName(expanded("Pinned messages"));
+    await expect(panel.locator(".pinned-panel__close")).toHaveAccessibleName(
+      expanded("Close pinned messages"),
+    );
+    await expectWhole(panel.locator(".pinned-panel__close"));
+    await panel.locator(".pinned-panel__close").click();
+
+    // The search overlay resolves its placeholder and label through the seam.
+    await page.locator("[data-testid='search-input']").focus();
+    const searchInput = page.locator("[data-testid='search-overlay-input']");
+    await expect(searchInput).toHaveAttribute(
+      "placeholder",
+      new RegExp("^⟦Search messages\\.\\.\\. .+⟧$"),
+    );
+    await expect(searchInput).toHaveAccessibleName(expanded("Search messages"));
+    expect(await findUnnamedControls(page.locator("[data-testid='search-overlay']"))).toEqual([]);
+
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+    await testInfo.attach("messaging-expanded-940x500-20px.png", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // B9-20: settings, account and voice/media text. The settings overlay and the
 // voice widget are built after the seam switch, so their labels are expanded.
 // ---------------------------------------------------------------------------

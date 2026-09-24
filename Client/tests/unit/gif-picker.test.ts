@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createGifPicker, GIF_UNAVAILABLE_MESSAGE } from "@components/GifPicker";
+import { createGifPicker } from "@components/GifPicker";
+import { messagingText } from "../../src/i18n/messaging";
 import { ApiClientError } from "@lib/api";
 import type { GifPickerOptions } from "@components/GifPicker";
 import type { GifApi, GifResult } from "@lib/gifProvider";
@@ -648,7 +649,7 @@ describe("GifPicker", () => {
 
       const el = picker.element.querySelector(".gp-empty");
       expect(el).not.toBeNull();
-      expect(el!.textContent).toBe(GIF_UNAVAILABLE_MESSAGE);
+      expect(el!.textContent).toBe(messagingText("gif.disabled"));
       picker.destroy();
     });
 
@@ -679,7 +680,7 @@ describe("GifPicker", () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(onUnavailable).toHaveBeenCalledWith(GIF_UNAVAILABLE_MESSAGE);
+      expect(onUnavailable).toHaveBeenCalledWith(messagingText("gif.disabled"));
       picker.destroy();
     });
 

@@ -12,6 +12,7 @@ import {
   createInlineAutocomplete,
   type InlineAutocompleteComponent,
 } from "@components/inline-autocomplete";
+import { messagingText } from "../i18n/messaging";
 
 /** Maximum rows shown at once — the popup is a shortcut, not the member list. */
 export const MAX_MENTION_SUGGESTIONS = 10;
@@ -89,14 +90,14 @@ export function filterMentionSuggestions(query: string): MentionSuggestion[] {
       {
         token: EVERYONE_TOKEN,
         label: EVERYONE_TOKEN,
-        detail: "Notify everyone in this channel",
+        detail: messagingText("mention.everyone"),
         kind: "broadcast",
         userId: null,
       },
       {
         token: HERE_TOKEN,
         label: HERE_TOKEN,
-        detail: "Notify everyone who is online",
+        detail: messagingText("mention.here"),
         kind: "broadcast",
         userId: null,
       },

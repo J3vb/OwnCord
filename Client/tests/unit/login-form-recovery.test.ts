@@ -27,6 +27,14 @@ function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPa
 const profiles: SimpleProfile[] = [{ name: "Test Server", host: "localhost:8443" }];
 const KIT = "K7QF-3M2X-9PLA-ZB5A-QW2E-TT7Y-AAAA-BBBB";
 
+/** What Chromium does to a focused control once it is disabled; jsdom does not. */
+function dropFocusToBody(): void {
+  const sink = document.createElement("button");
+  document.body.appendChild(sink);
+  sink.focus();
+  sink.remove();
+}
+
 describe("LoginForm 2FA box accepts an emergency recovery code", () => {
   let container: HTMLDivElement;
   beforeEach(() => {
@@ -93,6 +101,19 @@ describe("LoginForm 2FA box accepts an emergency recovery code", () => {
     await vi.waitFor(() => expect(verify.disabled).toBe(false));
     const overlay = container.querySelector(".totp-overlay")!;
     expect(overlay.classList.contains("totp-overlay--hidden")).toBe(false);
+    page.destroy?.();
+  });
+
+  it("returns focus to Verify after a rejected code submitted from the button", async () => {
+    const onTotpSubmit = vi.fn().mockRejectedValue(new Error("invalid two-factor code"));
+    const { page, input, verify } = open(onTotpSubmit);
+    input.value = "123456";
+    verify.focus();
+    verify.click();
+    expect(verify.disabled).toBe(true);
+    dropFocusToBody();
+    await vi.waitFor(() => expect(verify.disabled).toBe(false));
+    expect(document.activeElement).toBe(verify);
     page.destroy?.();
   });
 });
@@ -162,6 +183,19 @@ describe("Account recovery from the connect page", () => {
     expect(f.overlay.classList.contains("totp-overlay--hidden")).toBe(false);
     expect(f.submit.disabled).toBe(false);
     expect(f.secret.value).toBe(KIT);
+    f.page.destroy?.();
+  });
+
+  it("returns focus to the submit button after a refused attempt", async () => {
+    const f = await mountPage(vi.fn().mockRejectedValue(new Error("invalid credentials")));
+    f.secret.value = KIT;
+    f.password.value = "N3w-Str0ng!";
+    f.submit.focus();
+    f.submit.click();
+    expect(f.submit.disabled).toBe(true);
+    dropFocusToBody();
+    await vi.waitFor(() => expect(f.error.textContent).toBe("invalid credentials"));
+    expect(document.activeElement).toBe(f.submit);
     f.page.destroy?.();
   });
 

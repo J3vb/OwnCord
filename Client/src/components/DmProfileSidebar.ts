@@ -21,6 +21,8 @@ import {
   resolveServerUrl,
 } from "./message-list/attachments";
 import { migrateLegacyValue } from "@lib/legacyKeyMigration";
+import { shellText } from "../i18n/shell";
+import { requestsText } from "../i18n/requests";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,13 +89,20 @@ const STATUS_COLORS: Readonly<Record<UserStatus, string>> = {
   offline: "#747f8d",
 };
 
-const STATUS_LABELS: Readonly<Record<UserStatus, string>> = {
-  online: "Online",
-  idle: "Idle",
-  dnd: "Do Not Disturb",
-  invisible: "Invisible",
-  offline: "Offline",
+const STATUS_LABELS: Readonly<
+  Record<
+    UserStatus,
+    "status.online" | "status.idle" | "status.dnd" | "status.invisible" | "status.offline"
+  >
+> = {
+  online: "status.online",
+  idle: "status.idle",
+  dnd: "status.dnd",
+  invisible: "status.invisible",
+  offline: "status.offline",
 };
+
+const statusLabel = (status: UserStatus): string => shellText(STATUS_LABELS[status]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -201,7 +210,7 @@ export function createDmProfileSidebar(
     // Status dot overlay
     const statusDot = createElement("div", { class: "dps-status-dot" });
     statusDot.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
-    statusDot.title = STATUS_LABELS[user.status] ?? "Offline";
+    statusDot.title = statusLabel(user.status);
     statusDotNode = statusDot;
     wrapper.appendChild(statusDot);
 
@@ -214,7 +223,7 @@ export function createDmProfileSidebar(
     panel = createElement("div", {
       class: "dm-profile-sidebar",
       role: "complementary",
-      "aria-label": "User profile",
+      "aria-label": requestsText("profile.label"),
       tabindex: "-1",
       "data-testid": "dm-profile-sidebar",
     });
@@ -228,7 +237,7 @@ export function createDmProfileSidebar(
     // --- Close button ---
     const closeBtn = createElement("button", {
       class: "dps-close",
-      "aria-label": "Close profile sidebar",
+      "aria-label": requestsText("profile.close"),
       "data-testid": "dps-close",
     });
     closeBtn.textContent = "\u2715";
@@ -265,7 +274,7 @@ export function createDmProfileSidebar(
     statusDotInline.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
     statusDotInlineNode = statusDotInline;
 
-    const statusText = createElement("span", {}, STATUS_LABELS[user.status] ?? "Offline");
+    const statusText = createElement("span", {}, statusLabel(user.status));
     statusTextNode = statusText;
     appendChildren(statusLine, statusDotInline, statusText);
 
@@ -274,7 +283,11 @@ export function createDmProfileSidebar(
     // About section
     if (user.about !== undefined && user.about !== null && user.about.length > 0) {
       content.appendChild(makeDivider());
-      const aboutTitle = createElement("div", { class: "dps-section-title" }, "ABOUT ME");
+      const aboutTitle = createElement(
+        "div",
+        { class: "dps-section-title" },
+        requestsText("profile.about"),
+      );
 
       const aboutText = createElement("div", {
         class: "dps-about-text",
@@ -288,7 +301,11 @@ export function createDmProfileSidebar(
     // Member Since
     if (user.joinDate !== undefined && user.joinDate !== null) {
       content.appendChild(makeDivider());
-      const joinTitle = createElement("div", { class: "dps-section-title" }, "MEMBER SINCE");
+      const joinTitle = createElement(
+        "div",
+        { class: "dps-section-title" },
+        requestsText("profile.memberSince"),
+      );
 
       const joinText = createElement("div", {
         class: "dps-join-text",
@@ -301,11 +318,15 @@ export function createDmProfileSidebar(
 
     // Note section (local-only, persisted to localStorage)
     content.appendChild(makeDivider());
-    const noteTitle = createElement("div", { class: "dps-section-title" }, "NOTE");
+    const noteTitle = createElement(
+      "div",
+      { class: "dps-section-title" },
+      requestsText("profile.note"),
+    );
 
     const noteInput = createElement("textarea", {
       class: "dps-note",
-      placeholder: "Click to add a note",
+      placeholder: requestsText("profile.notePlaceholder"),
       "data-testid": "dps-note",
       rows: "3",
     });
@@ -369,7 +390,7 @@ export function createDmProfileSidebar(
     if (nameNode !== null) setText(nameNode, resolveDisplayName(user));
 
     const color = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
-    const label = STATUS_LABELS[user.status] ?? "Offline";
+    const label = statusLabel(user.status);
 
     if (statusDotNode !== null) {
       statusDotNode.style.background = color;
