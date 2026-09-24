@@ -999,6 +999,48 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  // ── Accessible names for icon-only composer controls (B9-22) ──
+
+  it("names the reply and edit close buttons (B9-22)", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    comp.setReplyTo(1, "x");
+    comp.startEdit(2, "draft");
+
+    const bars = container.querySelectorAll(".reply-bar");
+    const replyClose = (bars[0] as HTMLElement).querySelector(".reply-close")!;
+    const editClose = (bars[1] as HTMLElement).querySelector(".reply-close")!;
+    expect(replyClose.getAttribute("aria-label")).toBe("Cancel reply");
+    expect(editClose.getAttribute("aria-label")).toBe("Cancel editing");
+
+    comp.destroy?.();
+  });
+
+  it("names the attachment remove button with its filename (B9-22)", async () => {
+    const onUploadFile = vi.fn(async () => ({
+      id: "srv-1",
+      url: "http://x/f.png",
+      filename: "f.png",
+    }));
+    const comp = createMessageInput(makeOptions({ onUploadFile }));
+    comp.mount(container);
+
+    const file = new File(["x"], "photo.png", { type: "image/png" });
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    await vi.waitFor(() => {
+      const btn = container.querySelector('[data-testid="attachment-remove"]');
+      expect(btn).not.toBeNull();
+      expect(btn!.getAttribute("aria-label")).toBe("Remove attachment photo.png");
+    });
+
+    comp.destroy?.();
+  });
+
   // ── Textarea auto-resize ──
 
   it("textarea height adjusts on input (auto-resize)", () => {
