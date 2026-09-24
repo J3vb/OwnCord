@@ -81,8 +81,9 @@ func findMessageDelivery(ctx context.Context, q *dbgen.Queries, p MessageDeliver
 	}, Duplicate: true}, nil
 }
 
-// CreateMessageDelivery commits message, receipt, mentions and attachment
-// ownership changes together. Nothing observes a receipt for a half-written
+// CreateMessageDelivery commits message, receipt, mentions, attachment
+// ownership changes and the author's read state (advanceAuthorReadState)
+// together. Nothing observes a receipt for a half-written
 // message. One writer connection serializes competing callers, and the unique
 // key is the storage backstop. A lost response after commit is safe to retry.
 func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams) (*MessageDelivery, error) {
@@ -124,6 +125,7 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	}); err != nil {
 		return nil, fmt.Errorf("message delivery receipt insert: %w", err)
 	}
+	advanceAuthorReadState(ctx, q, p.UserID, p.ChannelID, r.ID)
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("message delivery commit: %w", err)
 	}

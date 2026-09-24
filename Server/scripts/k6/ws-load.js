@@ -86,6 +86,11 @@
 //   K6_SEND_INTERVAL_MS - Per-connection send interval (default: 2000).
 //                         ceiling-search requires >= 100: the server admits at
 //                         most 10 sends/second per user (service/message_crud.go)
+//   K6_SEND_PHASE       - spread (default): each VU sends on the phase its
+//                         first connection happened to take. aligned: every
+//                         VU sends on the same epoch-aligned instant each
+//                         period — a synchronized burst of PEAK_VUS sends
+//                         (OC-0454). Changes timing only, never thresholds.
 //   K6_VOICE_CHANNEL_ID - Voice channel id; unset disables the voice leg
 //   K6_CEILING_CHANNELS - Comma-separated text channel ids the ceiling search
 //                         spreads its cohort over. Must contain enough distinct
@@ -270,6 +275,10 @@ const RAMP = __ENV.K6_RAMP || "60s";
 const SUSTAIN = __ENV.K6_SUSTAIN || "180s";
 const RAMP_DOWN = "20s";
 const SEND_INTERVAL_MS = parseInt(__ENV.K6_SEND_INTERVAL_MS || "2000");
+const SEND_PHASE = __ENV.K6_SEND_PHASE || "spread";
+if (!["spread", "aligned"].includes(SEND_PHASE)) {
+  throw new Error(`K6_SEND_PHASE must be spread or aligned, got ${SEND_PHASE}`);
+}
 const VOICE_CHANNEL_ID = parseInt(__ENV.K6_VOICE_CHANNEL_ID || "0");
 const VOICE_VUS = VOICE_CHANNEL_ID ? parseInt(__ENV.K6_VOICE_VUS || "25") : 0;
 // B6-10 knobs. Each name was checked against k6's own option names (K6_VUS
@@ -964,12 +973,19 @@ const vuTimerPhase = {};
 // and stayed there, at unchanged throughput and an unchanged 0.4 ms per
 // write). A reconnect changes when a user is connected, not when they type,
 // so the timer re-anchors on its original phase instead.
+//
+// K6_SEND_PHASE=aligned pins every VU's send phase to 0 on the epoch grid
+// instead, so all connected users send in the same instant each period: the
+// deliberate burst OC-0454 measures, not a population shape.
 function phasedInterval(socket, name, periodMs, fn) {
   const now = Date.now();
   if (!(name in vuTimerPhase)) {
-    vuTimerPhase[name] = now % periodMs;
-    socket.setInterval(fn, periodMs);
-    return;
+    if (name !== "send" || SEND_PHASE !== "aligned") {
+      vuTimerPhase[name] = now % periodMs;
+      socket.setInterval(fn, periodMs);
+      return;
+    }
+    vuTimerPhase[name] = 0;
   }
   const delay = (((vuTimerPhase[name] - now) % periodMs) + periodMs) % periodMs;
   socket.setTimeout(function () {

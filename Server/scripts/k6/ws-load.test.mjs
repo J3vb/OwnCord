@@ -207,6 +207,34 @@ test("a resumed connection keeps the VU's send, typing and presence phase (OC-04
   assert.equal(sent(), before + 1);
 });
 
+test("K6_SEND_PHASE=aligned puts every VU's sends on the epoch grid; typing keeps its own phase (OC-0454)", () => {
+  assert.throws(() => harness({ K6_SEND_PHASE: "burst" }), /K6_SEND_PHASE/);
+
+  for (const [vu, at] of [
+    [1, 10.5],
+    [2, 11.25],
+  ]) {
+    const h = harness({ K6_SEND_PHASE: "aligned" }, vu);
+    h.at(at);
+    h.start();
+    const sendDelay = 2000 - ((at * 1000) % 2000);
+    const first = h.timeouts.filter((t) => t.ms === sendDelay);
+    assert.equal(first.length, 1, `VU ${vu} send waits for the next 2 s boundary`);
+    assert.equal(h.intervals.has(2000), false, "no send interval before the boundary");
+    assert.ok(h.intervals.has(4000), "typing starts on the connection's own phase");
+
+    h.at(at + sendDelay / 1000);
+    first[0].callback();
+    assert.equal(h.frames.filter((f) => f.type === "chat_send").length, 1);
+    assert.ok(h.intervals.has(2000), "the period continues from the boundary");
+  }
+
+  const spread = harness({});
+  spread.at(10.5);
+  spread.start();
+  assert.ok(spread.intervals.has(2000), "the default still sends on the connection's own phase");
+});
+
 test("operational acknowledgement and delivery samples carry the observer's phase", () => {
   const h = harness({ K6_PROFILE: "operational" });
   h.start();

@@ -747,7 +747,7 @@ func (d *DB) GetReadState(ctx context.Context, userID, channelID int64) (lastMes
 // Use it for "mark this channel read" (channel_focus, mark_read).
 // UpdateReadState stays for the caller that already holds the exact id it
 // means — the send path advancing the sender's own read state past their own
-// message — where there is no snapshot to go stale.
+// message (advanceAuthorReadState) — where there is no snapshot to go stale.
 //
 // OC-0323: a mark-read computed from a stale snapshot cleared mention_count
 // while last_message_id still pointed behind a message that had just raised a
@@ -770,8 +770,9 @@ func (d *DB) MarkChannelReadAtLatest(ctx context.Context, userID, channelID int6
 // its mentions.
 //
 // It is for a caller that already holds the exact id it means, which since
-// OC-0323 means the send path advancing the sender past their own message.
-// A "mark this channel read" caller must use MarkChannelReadAtLatest instead:
+// OC-0323 means the send path advancing the sender past their own message;
+// that path runs the statement inside its own transaction through
+// advanceAuthorReadState. A "mark this channel read" caller must use MarkChannelReadAtLatest instead:
 // the id it would pass here is a snapshot, and clearing mentions against a
 // stale one destroys any raised in the meantime.
 func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error {
