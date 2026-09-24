@@ -13,7 +13,11 @@ import {
   recoverEvictedImage,
 } from "./attachments";
 import { admitDerived } from "../../features/content-consent/external";
-import type { ExternalImageHandle } from "../../platform/contracts/externalContent";
+import { contentText as t } from "../../i18n/content";
+import type {
+  ExternalContentFailure,
+  ExternalImageHandle,
+} from "../../platform/contracts/externalContent";
 
 const log = createLogger("embeds");
 
@@ -30,15 +34,22 @@ export interface OgMeta {
 
 // -- Caches -------------------------------------------------------------------
 
+/** A typed preview view state: the meta when the broker answered, or the
+ *  refusal class that replaced it. Nothing collapses a refusal into an empty
+ *  success (B9-9). */
+type OgLoad =
+  | { readonly ok: true; readonly meta: OgMeta }
+  | { readonly ok: false; readonly failure: ExternalContentFailure };
+
 /** Cache for OG metadata to avoid re-fetching on re-render. Cleared on page
  *  teardown (MainPage) as well as by the manual "clear cache" action, so one
  *  server's previews are never shown on the next. */
-const ogCache = new Map<string, OgMeta>();
+const ogCache = new Map<string, OgLoad>();
 /** In-flight fetch promises keyed by URL — concurrent callers share the same promise. */
-const ogInFlight = new Map<string, Promise<OgMeta>>();
+const ogInFlight = new Map<string, Promise<OgLoad>>();
 /** Previews re-asked for after the broker forgot their image handle — at most
  *  once per URL until the next cache clear, shared by every embed of it. */
-const ogReasked = new Map<string, Promise<OgMeta>>();
+const ogReasked = new Map<string, Promise<OgLoad>>();
 let embedCacheGeneration = 0;
 
 export function clearEmbedCaches(): void {
@@ -50,14 +61,13 @@ export function clearEmbedCaches(): void {
 
 // -- OG fetch -----------------------------------------------------------------
 
-const EMPTY_OG: OgMeta = { title: null, description: null, image: null, siteName: null };
-
 /** Fetch OG metadata for a URL through the external-content broker, which
  *  owns the whole destination policy (resolved-address classification,
  *  redirects, time/byte/type ceilings) and parses the page natively — the
  *  renderer never sees the body. Concurrent requests for the same URL share
- *  the same in-flight promise. */
-function fetchOgMeta(url: string): Promise<OgMeta> {
+ *  the same in-flight promise. A refusal is kept as its failure class, never
+ *  flattened into an empty success (B9-9). */
+function fetchOgMeta(url: string): Promise<OgLoad> {
   const generation = embedCacheGeneration;
   const cached = ogCache.get(url);
   if (cached !== undefined) return Promise.resolve(cached);
@@ -67,25 +77,31 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
   if (existing !== undefined) return existing;
 
   log.debug("fetchOgMeta START", url.slice(0, 100));
-  const promise = (async (): Promise<OgMeta> => {
+  const promise = (async (): Promise<OgLoad> => {
     const result = await previewExternal(url);
-    if (!result.ok) log.debug("fetchOgMeta refused", { failure: result.failure });
-    // The preview image belongs to the same consented item as its page.
-    if (result.ok && result.value.image !== null) {
-      admitDerived(`url:${url}`, `handle:${result.value.image}`);
-    }
-    const meta: OgMeta = result.ok
-      ? {
+    let load: OgLoad;
+    if (result.ok) {
+      // The preview image belongs to the same consented item as its page.
+      if (result.value.image !== null) {
+        admitDerived(`url:${url}`, `handle:${result.value.image}`);
+      }
+      load = {
+        ok: true,
+        meta: {
           title: result.value.title,
           description: result.value.description,
           image: result.value.image,
           siteName: result.value.siteName,
-        }
-      : EMPTY_OG;
+        },
+      };
+    } else {
+      log.debug("fetchOgMeta refused", { failure: result.failure });
+      load = { ok: false, failure: result.failure };
+    }
     // A cache clear while this was in flight means the answer belongs to a
     // session that is gone: hand it to this caller, but never cache it.
-    if (generation === embedCacheGeneration) ogCache.set(url, meta);
-    return meta;
+    if (generation === embedCacheGeneration) ogCache.set(url, load);
+    return load;
   })();
 
   ogInFlight.set(url, promise);
@@ -98,6 +114,13 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
 }
 
 // -- Link preview rendering ---------------------------------------------------
+
+/** Drop a URL's cached preview (and in-flight answer) so an explicit retry
+ *  re-asks the broker rather than replaying the refusal. */
+function clearOgEntry(url: string): void {
+  ogCache.delete(url);
+  ogInFlight.delete(url);
+}
 
 /** Render a link preview card with OG metadata (title, description, image). */
 export function renderGenericLinkPreview(url: string): HTMLDivElement {
@@ -133,17 +156,66 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   imageWrap.style.display = "none";
   wrap.appendChild(imageWrap);
 
+  // The failure line + bounded retry live outside the description element so a
+  // refusal never reads as a loaded description (B9-9).
+  const statusEl = createElement("div", { class: "msg-embed-status", role: "status" });
+  statusEl.hidden = true;
+  const retryEl = createElement("button", {
+    type: "button",
+    class: "messages-retry-btn msg-embed-retry",
+  });
+  setText(retryEl, t("preview.retry"));
+  retryEl.setAttribute("aria-label", t("preview.retry"));
+  retryEl.hidden = true;
+  content.appendChild(statusEl);
+  content.appendChild(retryEl);
+  wrap.dataset.embedState = "loading";
+  wrap.setAttribute("aria-busy", "true");
+
+  const apply = (load: OgLoad): void => {
+    wrap.removeAttribute("aria-busy");
+    delete wrap.dataset.embedFailure;
+    retryEl.removeAttribute("aria-disabled");
+    // A refusal is not retryable by policy or type; only a transient
+    // "unavailable" answer is worth re-asking (B9-9). A retry that goes away
+    // while focused hands focus to the card's link, never to <body>.
+    const retryable = !load.ok && load.failure === "unavailable";
+    if (!retryable && document.activeElement === retryEl) titleEl.focus();
+    retryEl.hidden = !retryable;
+    if (load.ok) {
+      wrap.dataset.embedState = "loaded";
+      statusEl.hidden = true;
+      applyOgMeta(load.meta, titleEl, descEl, hostEl, imageWrap, url, displayHost);
+      return;
+    }
+    wrap.dataset.embedState = "failed";
+    wrap.dataset.embedFailure = load.failure;
+    setText(titleEl, displayHost);
+    descEl.style.display = "none";
+    setText(statusEl, t("preview.failed"));
+    statusEl.hidden = false;
+  };
+
   // Check cache first for instant render
   const cached = ogCache.get(url);
   if (cached !== undefined) {
-    applyOgMeta(cached, titleEl, descEl, hostEl, imageWrap, url, displayHost);
+    apply(cached);
   } else {
     // Show URL as fallback title while loading
     setText(titleEl, displayHost);
-    void fetchOgMeta(url).then((meta) => {
-      applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, url, displayHost);
-    });
+    void fetchOgMeta(url).then(apply);
   }
+
+  retryEl.addEventListener("click", () => {
+    if (wrap.dataset.embedState === "loading") return;
+    // The retry stays mounted (and focused) while it re-asks.
+    statusEl.hidden = true;
+    retryEl.setAttribute("aria-disabled", "true");
+    wrap.dataset.embedState = "loading";
+    wrap.setAttribute("aria-busy", "true");
+    clearOgEntry(url);
+    void fetchOgMeta(url).then(apply);
+  });
 
   return wrap;
 }
@@ -188,12 +260,14 @@ function showOgImage(
     if (!reask) return;
     let fresh = ogReasked.get(url);
     if (fresh === undefined) {
-      if (ogCache.get(url) === meta) ogCache.delete(url);
+      clearOgEntry(url);
       fresh = fetchOgMeta(url);
       ogReasked.set(url, fresh);
     }
     void fresh.then((next) => {
-      if (next.image !== null) showOgImage(next, next.image, imageWrap, url, false);
+      if (next.ok && next.meta.image !== null) {
+        showOgImage(next.meta, next.meta.image, imageWrap, url, false);
+      }
     });
   };
   // The image arrives as broker-fetched bytes (a same-origin blob: URL),

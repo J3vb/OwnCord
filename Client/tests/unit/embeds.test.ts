@@ -283,6 +283,88 @@ describe("renderGenericLinkPreview", () => {
     expect(previewMock).toHaveBeenCalledTimes(1);
   });
 
+  it("marks a refusal as a typed failed state with no retry for a policy refusal", async () => {
+    previewMock.mockResolvedValue(refused("blocked-destination"));
+
+    const card = renderGenericLinkPreview("https://blocked.example.com/x");
+    document.body.appendChild(card);
+
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("failed");
+    });
+    expect(card.dataset.embedFailure).toBe("blocked-destination");
+    expect(card.querySelector(".msg-embed-status")?.textContent).toBe("Preview unavailable");
+    // A policy refusal is not retryable; the retry stays hidden.
+    expect((card.querySelector(".msg-embed-retry") as HTMLElement).hidden).toBe(true);
+    // The refusal is distinguishable from a loaded card.
+    expect(card.dataset.embedState).not.toBe("loaded");
+  });
+
+  it("offers a bounded retry for a transient 'unavailable' answer and re-asks on click", async () => {
+    previewMock.mockResolvedValueOnce(refused("unavailable"));
+
+    const card = renderGenericLinkPreview("https://flaky.example.com/x");
+    document.body.appendChild(card);
+
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("failed");
+    });
+    const retry = card.querySelector(".msg-embed-retry") as HTMLButtonElement;
+    expect(retry.hidden).toBe(false);
+    expect(retry.getAttribute("aria-label")).toBe("Retry preview");
+
+    previewMock.mockResolvedValueOnce(previewOk("Recovered"));
+    retry.click();
+
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("loaded");
+    });
+    expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe("Recovered");
+    expect(retry.hidden).toBe(true);
+  });
+
+  it("keeps keyboard focus on the retry while it re-asks and after a repeat failure", async () => {
+    previewMock.mockResolvedValue(refused("unavailable"));
+
+    const card = renderGenericLinkPreview("https://focus.example.com/x");
+    document.body.appendChild(card);
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("failed");
+    });
+    const retry = card.querySelector<HTMLButtonElement>(".msg-embed-retry")!;
+    retry.focus();
+
+    retry.click();
+    expect(document.activeElement).toBe(retry);
+    await vi.waitFor(() => {
+      expect(previewMock).toHaveBeenCalledTimes(2);
+      expect(card.dataset.embedState).toBe("failed");
+    });
+    expect(document.activeElement).toBe(retry);
+    expect(retry.hasAttribute("aria-disabled")).toBe(false);
+
+    previewMock.mockResolvedValue(previewOk("Back"));
+    retry.click();
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("loaded");
+    });
+    expect(document.activeElement).toBe(card.querySelector(".msg-embed-link-title"));
+  });
+
+  it("does not retry automatically after a refusal", async () => {
+    previewMock.mockResolvedValue(refused("unavailable"));
+
+    const card = renderGenericLinkPreview("https://still-down.example.com/x");
+    document.body.appendChild(card);
+
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("failed");
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Only the single render-time ask, no retry loop.
+    expect(previewMock).toHaveBeenCalledTimes(1);
+  });
+
   it("renders from cache on second call (no second preview)", async () => {
     previewMock.mockResolvedValueOnce(previewOk("Cached Title"));
 
