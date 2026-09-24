@@ -21,6 +21,7 @@ import {
 } from "../features/content-consent/external";
 import { externalConsentText } from "../i18n/externalConsent";
 import { contentText } from "../i18n/content";
+import { messagingText } from "../i18n/messaging";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,9 +39,6 @@ export interface GifPickerOptions {
    */
   readonly onUnavailable?: (reason: string) => void;
 }
-
-/** Shown in-picker and passed to onUnavailable when the server has no key. */
-export const GIF_UNAVAILABLE_MESSAGE = "GIFs are not enabled on this server";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -71,13 +69,13 @@ export function createGifPicker(options: GifPickerOptions): {
   const searchInput = createElement("input", {
     class: "gp-search",
     type: "text",
-    placeholder: "Search Klipy",
+    placeholder: messagingText("gif.searchPlaceholder"),
   });
   header.appendChild(searchInput);
 
   // Attribution
   const attribution = createElement("div", { class: "gp-attribution" });
-  setText(attribution, "Powered by Klipy");
+  setText(attribution, messagingText("gif.attribution"));
   header.appendChild(attribution);
 
   root.appendChild(header);
@@ -87,7 +85,7 @@ export function createGifPicker(options: GifPickerOptions): {
   const gridArea = createElement("div", {
     class: "gp-grid-area",
     role: "listbox",
-    "aria-label": "GIFs",
+    "aria-label": messagingText("gif.listLabel"),
   });
   root.appendChild(gridArea);
   enableRovingNavigation(gridArea, ".gp-item", signal);
@@ -115,11 +113,11 @@ export function createGifPicker(options: GifPickerOptions): {
 
   // Loading indicator
   const loadingEl = createElement("div", { class: "gp-loading", role: "status" });
-  setText(loadingEl, "Loading...");
+  setText(loadingEl, messagingText("gif.loading"));
 
   // Empty state
   const emptyEl = createElement("div", { class: "gp-empty" });
-  setText(emptyEl, "No GIFs found");
+  setText(emptyEl, messagingText("gif.empty"));
 
   /** Transient failure: the same calm line as before plus a bounded retry,
    *  which re-runs the last query under the picker's current consent. */
@@ -146,7 +144,7 @@ export function createGifPicker(options: GifPickerOptions): {
         role: "option",
         // Same fallback as the img alt below — an untitled GIF still needs a
         // pronounceable accessible name.
-        "aria-label": gif.title || "GIF",
+        "aria-label": gif.title || messagingText("gif.itemLabel"),
         // Read by the delegated click handler on gridArea (see mount-time
         // listener above) instead of a per-cell listener.
         "data-full-url": gif.fullUrl,
@@ -155,7 +153,7 @@ export function createGifPicker(options: GifPickerOptions): {
       // the external-content broker, not as a URL the webview loads itself.
       const img = createElement("img", {
         class: "gp-img",
-        alt: gif.title || "GIF",
+        alt: gif.title || messagingText("gif.itemLabel"),
         loading: "lazy",
       });
       admitDerived(GIF_PICKER_ITEM, `url:${gif.url}`);
@@ -229,13 +227,13 @@ export function createGifPicker(options: GifPickerOptions): {
       if (disabled) {
         root.classList.add("gp-unavailable");
         searchInput.disabled = true;
-        options.onUnavailable?.(GIF_UNAVAILABLE_MESSAGE);
+        options.onUnavailable?.(messagingText("gif.disabled"));
       }
       if (requestId === currentRequestId) {
         if (disabled) {
           clearChildren(gridArea);
           const errEl = createElement("div", { class: "gp-empty", role: "status" });
-          setText(errEl, GIF_UNAVAILABLE_MESSAGE);
+          setText(errEl, messagingText("gif.disabled"));
           gridArea.appendChild(errEl);
         } else {
           // A transient provider/network failure keeps the query and offers a

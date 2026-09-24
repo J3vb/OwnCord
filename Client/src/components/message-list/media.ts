@@ -196,6 +196,7 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
 
   // Header: channel name + video title
   const header = createElement("div", { class: "msg-embed-yt-header" });
+  // i18n-exempt: provider name, attribution not translated (B9-9 rule)
   const channelLabel = createElement("div", { class: "msg-embed-host" }, "YouTube");
   const titleLink = createElement("a", {
     class: "msg-embed-yt-title",
@@ -208,7 +209,7 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
   if (cached !== undefined) {
     setText(titleLink, cached);
   } else {
-    setText(titleLink, "Loading...");
+    setText(titleLink, contentText("youtube.title.loading"));
     const generation = mediaCacheGeneration;
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&format=json`;
     admitDerived(`url:${originalUrl}`, `url:${oembedUrl}`);
@@ -216,10 +217,11 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     // its title — the renderer never reads the JSON.
     void previewExternal(oembedUrl).then((result) => {
       if (generation !== mediaCacheGeneration) {
-        setText(titleLink, "YouTube Video");
+        setText(titleLink, contentText("youtube.title.fallback"));
         return;
       }
-      const title = (result.ok ? result.value.title : null) ?? "YouTube Video";
+      const title =
+        (result.ok ? result.value.title : null) ?? contentText("youtube.title.fallback");
       if (ytTitleCache.size >= YT_TITLE_CACHE_MAX) {
         const firstKey = ytTitleCache.keys().next().value;
         if (firstKey !== undefined) ytTitleCache.delete(firstKey);
@@ -237,7 +239,7 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
   const thumbUrl = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
   const thumb = createElement("img", {
     class: "msg-embed-thumb",
-    alt: "YouTube video",
+    alt: contentText("youtube.thumbAlt"),
     loading: "lazy",
   });
   admitDerived(`url:${originalUrl}`, `url:${thumbUrl}`);

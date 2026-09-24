@@ -24,6 +24,7 @@ const log = createLogger("attachments");
 import type { Attachment } from "@lib/types";
 import { externalAllowed, setExternalConsentScope } from "../../features/content-consent/external";
 import { mediaControlsText } from "../../i18n/mediaControls";
+import { messageStatusText } from "../../i18n/messageStatus";
 
 /** Cached value of the animateGifs preference. Invalidated on pref change
  *  (same pattern as roleColors in formatting.ts). */
@@ -253,12 +254,14 @@ export function isTrustedServerUrl(url: string): boolean {
  * else is refused here rather than handed to a general-purpose client.
  */
 async function fetchServerFile(url: string): Promise<Response> {
+  // i18n-exempt: internal guard, logged by the caller, never rendered
   if (!isServerUrl(url)) throw new Error("external URLs are fetched only through the broker");
   const parsed = new URL(url);
   const origin = await ensureHttpProxy(parsed.host);
   const headers: Record<string, string> = {};
   const token = getToken();
   if (token !== null) {
+    // i18n-exempt: HTTP wire header value, never rendered
     headers["Authorization"] = `Bearer ${token}`;
   }
   return desktop.http.fetch(`${origin}${parsed.pathname}${parsed.search}`, { headers });
@@ -419,7 +422,7 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
       const contentType = sanitizeContentType(rawCt);
       const buffer = await res.arrayBuffer();
       const base64 = uint8ToBase64(new Uint8Array(buffer));
-      const dataUrl = `data:${contentType};base64,${base64}`;
+      const dataUrl = `data:${contentType};base64,${base64}`; // i18n-exempt: data-URI scheme, not copy
 
       if (generation !== attachmentCacheGeneration) {
         return null;
@@ -725,8 +728,8 @@ function buildFileMeta(att: Attachment, resolvedUrl: string): HTMLDivElement {
 function buildDownloadButton(att: Attachment, resolvedUrl: string): HTMLButtonElement {
   const btn = createElement("button", {
     class: "msg-file-download",
-    title: "Download",
-    "aria-label": `Download ${att.filename}`,
+    title: messageStatusText("file.download"),
+    "aria-label": messageStatusText("file.downloadNamed", { filename: att.filename }),
   });
   btn.appendChild(createIcon("download", 16));
   btn.addEventListener("click", () => {
@@ -911,7 +914,7 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     const res = await fetchServerFile(url);
     if (!res.ok) {
       log.error("Download failed", { filename, status: res.status });
-      alert(`Download failed: server returned ${res.status}`);
+      alert(messageStatusText("file.downloadHttpFailed", { status: res.status }));
       return;
     }
 
@@ -919,7 +922,7 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     await desktop.fileSaver.writeFile(filePath, new Uint8Array(buffer));
   } catch (err) {
     log.error("Download failed", { filename, error: String(err) });
-    alert(`Download failed for ${filename} — check logs for details`);
+    alert(messageStatusText("file.downloadFailed", { filename }));
   }
 }
 

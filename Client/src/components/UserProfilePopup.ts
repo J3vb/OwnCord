@@ -19,6 +19,8 @@ import type { UserStatus } from "@lib/types";
 import { createAvatarElement, resolveDisplayName } from "@lib/avatar";
 import { roleColorVar } from "./message-list/formatting";
 import { reportEntryText } from "../i18n/reportEntry";
+import { shellText } from "../i18n/shell";
+import { requestsText } from "../i18n/requests";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,13 +84,18 @@ const STATUS_COLORS: Record<UserStatus, string> = {
   offline: "#747f8d",
 };
 
-const STATUS_LABELS: Record<UserStatus, string> = {
-  online: "Online",
-  idle: "Idle",
-  dnd: "Do Not Disturb",
-  invisible: "Invisible",
-  offline: "Offline",
+const STATUS_LABELS: Record<
+  UserStatus,
+  "status.online" | "status.idle" | "status.dnd" | "status.invisible" | "status.offline"
+> = {
+  online: "status.online",
+  idle: "status.idle",
+  dnd: "status.dnd",
+  invisible: "status.invisible",
+  offline: "status.offline",
 };
+
+const statusLabel = (status: UserStatus): string => shellText(STATUS_LABELS[status]);
 
 // ---------------------------------------------------------------------------
 // Component factory
@@ -178,7 +185,7 @@ export function createUserProfilePopup(
     // Status dot overlay
     const statusDot = createElement("div", { class: "upp-status-dot" });
     statusDot.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
-    statusDot.title = STATUS_LABELS[user.status] ?? "Offline";
+    statusDot.title = statusLabel(user.status);
     wrapper.appendChild(statusDot);
 
     return wrapper;
@@ -199,7 +206,7 @@ export function createUserProfilePopup(
     popup = createElement("div", {
       class: "upp-popup",
       role: "dialog",
-      "aria-label": "User profile",
+      "aria-label": requestsText("profile.label"),
       "aria-modal": "true",
       tabindex: "-1",
       "data-testid": "user-profile-popup",
@@ -247,13 +254,17 @@ export function createUserProfilePopup(
     const statusLine = createElement("div", { class: "upp-status-line" });
     const statusDotInline = createElement("span", { class: "upp-status-dot-inline" });
     statusDotInline.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
-    const statusText = createElement("span", {}, STATUS_LABELS[user.status] ?? "Offline");
+    const statusText = createElement("span", {}, statusLabel(user.status));
     appendChildren(statusLine, statusDotInline, statusText);
 
     // About section (2 lines max)
     const aboutSection = createElement("div", { class: "upp-about" });
     if (user.about !== undefined && user.about !== null && user.about.length > 0) {
-      const aboutTitle = createElement("div", { class: "upp-section-title" }, "ABOUT ME");
+      const aboutTitle = createElement(
+        "div",
+        { class: "upp-section-title" },
+        requestsText("profile.about"),
+      );
       const aboutText = createElement("div", { class: "upp-about-text" }, user.about);
       appendChildren(aboutSection, aboutTitle, aboutText);
     }
@@ -261,7 +272,11 @@ export function createUserProfilePopup(
     // Join date
     const joinSection = createElement("div", { class: "upp-join-date" });
     if (user.joinDate !== undefined && user.joinDate !== null) {
-      const joinTitle = createElement("div", { class: "upp-section-title" }, "MEMBER SINCE");
+      const joinTitle = createElement(
+        "div",
+        { class: "upp-section-title" },
+        requestsText("profile.memberSince"),
+      );
       const joinText = createElement("div", { class: "upp-join-text" }, user.joinDate);
       appendChildren(joinSection, joinTitle, joinText);
     }
@@ -281,7 +296,7 @@ export function createUserProfilePopup(
         "data-testid": "upp-message-btn",
       });
       messageBtn.appendChild(createIcon("send", 16));
-      messageBtn.appendChild(document.createTextNode(" Message"));
+      messageBtn.appendChild(document.createTextNode(requestsText("profile.message")));
       messageBtn.addEventListener(
         "click",
         () => {
@@ -300,7 +315,7 @@ export function createUserProfilePopup(
         "data-testid": "upp-call-btn",
       });
       callBtn.appendChild(createIcon("phone", 16));
-      callBtn.appendChild(document.createTextNode(" Call"));
+      callBtn.appendChild(document.createTextNode(requestsText("profile.call")));
       callBtn.addEventListener(
         "click",
         () => {
