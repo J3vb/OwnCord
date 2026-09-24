@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
-/** The Moderation Center queue, report evidence (B9-11), review workflow (B9-12), BPR-071, and
- *  warning and timeout actions (B9-13), BPR-072. */
+/** The Moderation Center queue, report evidence (B9-11), review workflow (B9-12), BPR-071,
+ *  warning and timeout actions (B9-13), BPR-072, and appeal review (B9-17), BPR-073. */
 export const moderationText = defineCatalog("moderation", {
   intro:
     "Reports sent to this server's moderators. Reports about you are never shown here, and reports you sent show no internal notes.",
@@ -148,4 +148,107 @@ export const moderationText = defineCatalog("moderation", {
   "kind.removal": "Message removed",
   "kind.ban": "Ban",
   "kind.other": "Moderator action",
+  "tabs.label": "Moderation queues",
+  "tabs.reports": "Reports",
+  "tabs.appeals": "Appeals",
+  "appeal.intro":
+    "Appeals members filed against moderator actions. Your own appeals are never shown here.",
+  "appeal.filter.active": "Open and in review",
+  "appeal.filter.open": "Waiting for review",
+  "appeal.filter.assigned": "In review",
+  "appeal.filter.decided": "Decided",
+  "appeal.count.active": {
+    one: "{count} appeal open or in review",
+    other: "{count} appeals open or in review",
+  },
+  "appeal.count.open": {
+    one: "{count} appeal waiting for review",
+    other: "{count} appeals waiting for review",
+  },
+  "appeal.count.assigned": { one: "{count} appeal in review", other: "{count} appeals in review" },
+  "appeal.count.decided": { one: "{count} decided appeal", other: "{count} decided appeals" },
+  "appeal.list.label": "Appeals",
+  "appeal.list.loading": "Loading appeals…",
+  "appeal.list.error": "Couldn't load appeals.",
+  "appeal.row.title": "Appeal from {name}",
+  "appeal.row.filed": "Filed {date}",
+  "appeal.state.open": "Waiting for review",
+  "appeal.state.assigned": "In review",
+  "appeal.state.upheld": "Upheld",
+  "appeal.state.overturned": "Overturned",
+  "appeal.state.withdrawn": "Withdrawn by the appellant",
+  "appeal.state.unknown": "Status unavailable",
+  "appeal.detail.loading": "Loading appeal…",
+  "appeal.detail.error": "Couldn't load this appeal.",
+  "appeal.detail.notFound": "This appeal is no longer available.",
+  "appeal.detail.own": "You filed this appeal, so another moderator has to decide it.",
+  "appeal.title": "Appeal: {kind}",
+  "appeal.fact.appellant": "Filed by",
+  "appeal.fact.decided": "Decided",
+  "appeal.fact.decidedBy": "Decided by",
+  "appeal.action.title": "Appealed action",
+  "appeal.action.by": "Issued by",
+  "appeal.action.at": "Issued",
+  "appeal.action.reason": "Reason shown to the member",
+  "appeal.action.noReason": "No reason given",
+  "appeal.action.until": "Until",
+  "appeal.action.lifted": "Lifted",
+  "appeal.action.acknowledged": "Acknowledged",
+  "appeal.statement.title": "Appellant's statement",
+  "appeal.statement.none": "The appellant didn't add a statement.",
+  "appeal.report.title": "Linked report",
+  "appeal.report.hint":
+    "This action was taken with a report. Its evidence and internal notes stay in Reports.",
+  "appeal.report.open": "Open the report",
+  "appeal.work.title": "Decision",
+  "appeal.work.unassigned": "No one is reviewing this appeal yet. Take it to decide it.",
+  "appeal.work.assign": "Take this appeal",
+  "appeal.work.other": "Another moderator is reviewing this appeal. Only they can decide it here.",
+  "appeal.work.mine": "You're reviewing this appeal.",
+  "appeal.work.ownAction":
+    "You issued this action. The server lets you take or decide its appeal only when no other moderator can, and records it when you do.",
+  "appeal.work.outcomeLabel": "Decision",
+  "appeal.outcome.upheld": "Uphold (the action stands)",
+  "appeal.outcome.overturned": "Overturn (reverse the action)",
+  "appeal.effect.timeout": "Overturning lifts the timeout if it is still running.",
+  "appeal.effect.ban": "Overturning lifts the ban, unless a later ban replaced it.",
+  "appeal.effect.warning":
+    "Overturning clears the warning from the member's notices. It stays in the record.",
+  "appeal.effect.removal":
+    "Overturning a removal is recorded only: the removed message isn't restored.",
+  "appeal.work.noteLabel": "Note to the appellant",
+  "appeal.work.noteHint":
+    "The appellant sees this note with the decision. It isn't an internal note: keep report details and other members out of it. Optional, up to 2,000 characters. Line breaks are sent as spaces.",
+  "appeal.work.decide": "Record decision",
+  "appeal.work.decideHint":
+    "A decision is final: it can't be changed and the appeal can't be reopened.",
+  "appeal.work.outcomeEmpty": "Choose uphold or overturn first.",
+  "appeal.result.upheld": "Upheld: the action stands.",
+  "appeal.result.overturned": "Overturned.",
+  "appeal.result.timeout":
+    "Overturning lifted the timeout if it was still running; the appealed action above shows when it ended.",
+  "appeal.result.ban": "Overturning lifted the ban, unless a later ban replaced it.",
+  "appeal.result.warning": "Overturning cleared the warning from the member's notices.",
+  "appeal.result.removal":
+    "Overturning a removal is recorded only: the removed message wasn't restored.",
+  "appeal.result.withdrawn": "The appellant withdrew this appeal. It can't be decided.",
+  "appeal.result.note": "Note sent to the appellant",
+  "appeal.result.noNote": "No note was sent to the appellant.",
+  "appeal.result.appellant":
+    "The appellant sees the decision and this note in their Safety settings, never who decided it.",
+  "appeal.done.assign": "You're now reviewing this appeal.",
+  "appeal.done.decide": "Decision recorded. The status below is what the server saved.",
+  "appeal.conflict.assign":
+    "Another moderator took this appeal first, or it was decided or withdrawn.",
+  "appeal.conflict.decide":
+    "Nothing was recorded: this appeal changed first. Another moderator took or decided it, or the appellant withdrew it.",
+  "appeal.reversalFailed":
+    "Nothing was recorded: the server couldn't reverse the action, so the decision was not saved. Try again later.",
+  "appeal.selfReview":
+    "The server refused: you issued this action and another moderator can review its appeal, so they have to.",
+  "appeal.invalid": "The server didn't accept this: {message}",
+  "appeal.unknown":
+    "Couldn't confirm your change. The appeal was read again: check its status before trying again.",
+  "appeal.draftLost":
+    "This appeal can no longer take your decision, so the unsaved note was discarded.",
 });

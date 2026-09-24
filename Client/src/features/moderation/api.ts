@@ -13,7 +13,12 @@
  * withdrawn while the read was in flight).
  */
 
-import type { ModerationQueueRow, ModerationReportDetail } from "@lib/api";
+import type {
+  ModerationAppealDetail,
+  ModerationAppealRow,
+  ModerationQueueRow,
+  ModerationReportDetail,
+} from "@lib/api";
 import { parseTimestamp } from "@components/message-list/formatting";
 import { NSFW_ACKNOWLEDGEMENT_REQUIRED, nsfwContentBlocked } from "../content-consent/nsfw";
 
@@ -216,5 +221,98 @@ export function mapDetail(w: ModerationReportDetail): ReportDetail {
       createdAt: n.created_at,
     })),
     history: mapHistory(w),
+  };
+}
+
+/**
+ * A report opened by id from an appeal (B9-17), which may be outside the
+ * current filter: its title and names come from the report itself.
+ */
+export function itemFromDetail(w: ModerationReportDetail, name: (id: number) => string): QueueItem {
+  return {
+    id: w.id,
+    reporterName: w.reporter_id === 0 ? "" : name(w.reporter_id),
+    subjectName: w.subject_id === 0 ? "" : name(w.subject_id),
+    targetType: w.target_type,
+    reason: w.reason,
+    state: w.state,
+    outcome: w.outcome,
+    assigneeId: w.assignee_id,
+    createdAt: w.created_at,
+    closedAt: w.closed_at ?? null,
+  };
+}
+
+/**
+ * An appeal queue row (B9-17). The appellant's statement and any decision
+ * note are dropped here: the list shows who, what state and when, and the
+ * text is read only with the appeal it belongs to.
+ */
+export interface AppealItem {
+  readonly id: string;
+  /** 0 once the appellant's account is erased. */
+  readonly appellantId: number;
+  readonly state: string;
+  readonly assigneeId: number;
+  readonly createdAt: string;
+}
+
+export function mapAppealRow(w: ModerationAppealRow): AppealItem {
+  return {
+    id: w.id,
+    appellantId: w.appellant_id,
+    state: w.state,
+    assigneeId: w.assignee_id,
+    createdAt: w.created_at,
+  };
+}
+
+/** One appeal and the action it is about. Kept apart from ReportDetail: no evidence, no notes. */
+export interface AppealDetail {
+  readonly id: string;
+  readonly appellantId: number;
+  readonly state: string;
+  readonly assigneeId: number;
+  readonly decidedBy: number;
+  /** The appellant's statement. */
+  readonly body: string;
+  /** Sent to the appellant with the decision; never an internal note. */
+  readonly decisionNote: string;
+  readonly createdAt: string;
+  readonly decidedAt: string | null;
+  readonly action: {
+    readonly kind: string;
+    readonly actorId: number;
+    readonly reason: string;
+    readonly createdAt: string;
+    readonly expiresAt: string | null;
+    readonly acknowledgedAt: string | null;
+    readonly liftedAt: string | null;
+  };
+  /** Set only when the server returned the linked report for this reader. */
+  readonly reportId: string | null;
+}
+
+export function mapAppealDetail(w: ModerationAppealDetail): AppealDetail {
+  return {
+    id: w.id,
+    appellantId: w.appellant_id,
+    state: w.state,
+    assigneeId: w.assignee_id,
+    decidedBy: w.decided_by,
+    body: w.body,
+    decisionNote: w.decision_note,
+    createdAt: w.created_at,
+    decidedAt: w.decided_at,
+    action: {
+      kind: w.action.kind,
+      actorId: w.action.actor_id,
+      reason: w.action.reason,
+      createdAt: w.action.created_at,
+      expiresAt: w.action.expires_at ?? null,
+      acknowledgedAt: w.action.acknowledged_at ?? null,
+      liftedAt: w.action.lifted_at ?? null,
+    },
+    reportId: typeof w.report_id === "string" && w.report_id !== "" ? w.report_id : null,
   };
 }
