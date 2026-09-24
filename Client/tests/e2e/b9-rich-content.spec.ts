@@ -198,6 +198,16 @@ test.describe("B9-9 rich-content states", () => {
 
     await imageWrap(page).locator(".msg-media-retry").click();
     await expect.poll(() => brokerImageCalls(page)).toBeGreaterThan(before);
+    await expect(imageWrap(page)).toHaveAttribute("data-media-state", "loaded");
+    const img = imageWrap(page).locator("img");
+    await expect(img).toBeFocused();
+
+    await page.keyboard.press("Space");
+    const lightbox = page.locator(".image-lightbox");
+    await expect(lightbox).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(lightbox).toHaveCount(0);
+    await expect(img).toBeFocused();
   });
 
   test("a consent reset re-conceals the failed image and no stale retry can fetch", async ({
@@ -253,9 +263,11 @@ test.describe("B9-9 rich-content states", () => {
     await expect(retry).toHaveAttribute("aria-label", "Retry image");
     await retry.focus();
     await expect(retry).toBeFocused();
+    const before = await brokerImageCalls(page);
     await page.keyboard.press("Enter");
-    // Activating it re-asks, so the failed state is re-entered at least once.
+    await expect.poll(() => brokerImageCalls(page)).toBeGreaterThan(before);
     await expect(imageWrap(page)).toHaveAttribute("data-media-state", "failed");
+    await expect(retry).toBeFocused();
   });
 
   test("the rich-content controls are named and pass contrast at Q1 thresholds", async ({
