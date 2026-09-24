@@ -180,7 +180,11 @@ function buildVoiceAudioTabInner(
     //         sensitivity 0 (max gating) → handle at RIGHT (100%).
     // This matches Discord: drag LEFT = easier to pass, RIGHT = harder.
     meterThreshold.style.left = `${100 - sensitivity}%`;
-    meterThreshold.setAttribute("aria-valuenow", String(sensitivity));
+    meterThreshold.setAttribute("aria-valuenow", String(100 - sensitivity));
+    meterThreshold.setAttribute(
+      "aria-valuetext",
+      t("voiceAudio.sensitivityValue", { value: sensitivity }),
+    );
   }
   updateThresholdIndicator(currentSensitivity);
 
@@ -234,21 +238,22 @@ function buildVoiceAudioTabInner(
     { signal },
   );
 
-  // Keyboard: standard slider semantics — ArrowLeft/Down decrement the
-  // aria-valuenow (sensitivity), ArrowRight/Up increment it, Home/End jump to
-  // the edges. The handle's visual position is inverted by design (left = more
-  // sensitive), but the announced value is the plain sensitivity number.
+  // Keyboard: standard slider semantics over the gate threshold the handle
+  // shows (aria-valuenow = 100 - sensitivity), so ArrowRight/End move the
+  // handle right exactly as a drag does; aria-valuetext announces the
+  // sensitivity itself.
   meterThreshold.addEventListener(
     "keydown",
     (e: KeyboardEvent) => {
+      const threshold = 100 - currentSensitivity;
       let next: number;
       if (e.key === "Home") next = 0;
       else if (e.key === "End") next = 100;
-      else if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = currentSensitivity - 5;
-      else if (e.key === "ArrowRight" || e.key === "ArrowUp") next = currentSensitivity + 5;
+      else if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = threshold - 5;
+      else if (e.key === "ArrowRight" || e.key === "ArrowUp") next = threshold + 5;
       else return;
       e.preventDefault();
-      applySensitivity(Math.max(0, Math.min(100, next)));
+      applySensitivity(100 - Math.max(0, Math.min(100, next)));
     },
     { signal },
   );

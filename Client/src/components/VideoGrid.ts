@@ -207,23 +207,13 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   /** Put focus back on a captured tile control, or — when that tile is gone
-   *  (its peer left) — on the first remaining tile's same control, else the
-   *  grid itself so focus never drops to `<body>`. */
+   *  (its peer left) — on the grid itself, so focus never drops to `<body>`
+   *  and never lands on another peer's identically named control. */
   function restoreFocusedControl(saved: { userId: number; control: string } | null): void {
     if (saved === null || root === null) return;
-    const find = (userId: number): HTMLElement | null =>
-      root?.querySelector<HTMLElement>(
-        `.video-cell[data-user-id='${userId}'] [data-tile-control='${saved.control}']`,
-      ) ?? null;
-    const target =
-      find(saved.userId) ??
-      (() => {
-        for (const id of cells.keys()) {
-          const hit = find(id);
-          if (hit !== null) return hit;
-        }
-        return null;
-      })();
+    const target = root.querySelector<HTMLElement>(
+      `.video-cell[data-user-id='${saved.userId}'] [data-tile-control='${saved.control}']`,
+    );
     (target ?? root).focus();
   }
 

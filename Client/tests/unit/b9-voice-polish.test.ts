@@ -106,21 +106,6 @@ describe("B9-24 voice widget", () => {
     widget.destroy?.();
   });
 
-  it("toggles the stats pane from the keyboard (Enter and Space)", () => {
-    const container = document.createElement("div");
-    const widget = mountWidget(container);
-    const signal = container.querySelector<HTMLButtonElement>("[data-testid='vw-signal']")!;
-    const pane = container.querySelector(".vw-stats")!;
-
-    signal.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    expect(pane.classList.contains("visible")).toBe(true);
-
-    signal.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
-    expect(pane.classList.contains("visible")).toBe(false);
-
-    widget.destroy?.();
-  });
-
   it("announces a moderator-imposed mute once, and clears it when lifted", () => {
     const container = document.createElement("div");
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 1 }));
@@ -196,7 +181,7 @@ describe("B9-24 video grid focus stability", () => {
     grid.destroy?.();
   });
 
-  it("moves focus to a remaining tile's control when the focused peer leaves", () => {
+  it("moves focus to the grid, not another peer's control, when the focused peer leaves", () => {
     const { container, grid } = mountGrid();
     grid.addStream(1, "alice", fakeStream(), tileConfig);
     grid.addStream(2, "bob", fakeStream(), tileConfig);
@@ -209,12 +194,7 @@ describe("B9-24 video grid focus stability", () => {
 
     grid.removeStream(1);
 
-    // Not dropped to <body>: the successor tile's mute control has focus.
-    expect(document.activeElement).not.toBe(document.body);
-    expect((document.activeElement as HTMLElement).dataset["tileControl"]).toBe("mute");
-    expect(
-      (document.activeElement as Element).closest(".video-cell")!.getAttribute("data-user-id"),
-    ).toBe("2");
+    expect(document.activeElement).toBe(container.querySelector("[data-testid='video-grid']"));
     grid.destroy?.();
   });
 

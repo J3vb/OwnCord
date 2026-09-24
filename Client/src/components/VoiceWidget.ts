@@ -388,17 +388,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       signalWrap.setAttribute("aria-expanded", String(open));
     }
     signalWrap.addEventListener("click", toggleStatsPane, { signal: disposable.signal });
-    signalWrap.addEventListener(
-      "keydown",
-      (e: KeyboardEvent) => {
-        // Enter and Space already fire click on a real button; this only
-        // guards against the app's global keybinds swallowing them.
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.preventDefault();
-        toggleStatsPane();
-      },
-      { signal: disposable.signal },
-    );
 
     appendChildren(header, statusLabel, securedBadge, timerEl, channelNameEl, signalWrap);
 

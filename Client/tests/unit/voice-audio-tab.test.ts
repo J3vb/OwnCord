@@ -736,6 +736,39 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("keyboard moves the threshold handle the way the key points", () => {
+    localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+    stubNavigator();
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+
+    const threshold = el.querySelector(".mic-meter-threshold") as HTMLElement;
+    const press = (key: string): void => {
+      threshold.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    };
+    expect(threshold.getAttribute("aria-valuenow")).toBe("50");
+
+    press("ArrowRight");
+    expect(threshold.style.left).toBe("55%");
+    expect(threshold.getAttribute("aria-valuenow")).toBe("55");
+    expect(threshold.getAttribute("aria-valuetext")).toBe("Sensitivity 45%");
+    expect(mockSetVoiceSensitivity).toHaveBeenLastCalledWith(45);
+
+    press("Home");
+    expect(threshold.style.left).toBe("0%");
+    expect(threshold.getAttribute("aria-valuenow")).toBe("0");
+    expect(mockSetVoiceSensitivity).toHaveBeenLastCalledWith(100);
+
+    press("End");
+    expect(threshold.style.left).toBe("100%");
+    expect(threshold.getAttribute("aria-valuenow")).toBe("100");
+    expect(threshold.getAttribute("aria-valuetext")).toBe("Sensitivity 0%");
+    expect(mockSetVoiceSensitivity).toHaveBeenLastCalledWith(0);
+    ac.abort();
+  });
+
   it("clicking the meter bar calls setVoiceSensitivity", () => {
     stubNavigator();
     const ac = new AbortController();
