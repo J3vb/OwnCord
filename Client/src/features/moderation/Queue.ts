@@ -94,6 +94,13 @@ function isStatus(err: unknown, status: number, code?: string): boolean {
   );
 }
 
+/** A removal's refusal: the channel's rules, the reader's bit, or the server's own words. */
+function removalRefusal(message: string): string {
+  if (message === "forbidden: channel is archived") return t("act.refusedArchived");
+  if (message === "forbidden: cannot delete this message") return t("act.refusedRemoval");
+  return message === "" ? t("act.unknown") : t("act.invalid", { message });
+}
+
 export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContext): void {
   const { signal, api } = ctx;
   let filter: (typeof FILTERS)[number] = FILTERS[0];
@@ -502,12 +509,6 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     }
     // No answer, or an internal failure: the action may still have been recorded.
     return err instanceof ApiClientError ? errorText(err, t("act.unknown")) : t("act.unknown");
-  }
-  /** A removal's refusal: the channel's rules, the reader's bit, or the server's own words. */
-  function removalRefusal(message: string): string {
-    if (message === "forbidden: channel is archived") return t("act.refusedArchived");
-    if (message === "forbidden: cannot delete this message") return t("act.refusedRemoval");
-    return message === "" ? t("act.unknown") : t("act.invalid", { message });
   }
   const WRITE_CONFLICT = {
     assign: "conflict.assign",
