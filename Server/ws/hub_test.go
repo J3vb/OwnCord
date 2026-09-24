@@ -550,13 +550,17 @@ func TestHub_ChatSend_RateLimit(t *testing.T) {
 		"payload": payload,
 	})
 
-	// Send 12 messages rapidly — the 11th and 12th should be rate-limited.
-	for range 12 {
-		hub.HandleMessageForTest(c, raw)
+	// One real send, then exhaust the user's chat window (10 per second) so
+	// the next two are refused however slowly the runner goes.
+	hub.HandleMessageForTest(c, raw)
+	for range 10 {
+		limiter.Allow(auth.Key("chat", user.ID), 10, time.Second)
 	}
+	hub.HandleMessageForTest(c, raw)
+	hub.HandleMessageForTest(c, raw)
 
-	// Drain the replies — handleMessage sends them synchronously, so they are
-	// already buffered on the send channel. The limit is 10 sends per second.
+	// handleMessage sends its replies synchronously, so they are already
+	// buffered on the send channel.
 	sendOK, rateLimited, otherErr := 0, 0, 0
 drainLoop:
 	for {
@@ -581,10 +585,8 @@ drainLoop:
 			break drainLoop
 		}
 	}
-	// The window slides, so a runner slow enough to spread the sends past one
-	// second may see fewer refusals; every send must still be one or the other.
-	if otherErr != 0 || sendOK+rateLimited != 12 || sendOK > 10 || rateLimited == 0 {
-		t.Errorf("12 sends: got %d chat_send_ok, %d RATE_LIMITED, %d other errors; want at most 10 sent, the rest rate-limited",
+	if sendOK != 1 || rateLimited != 2 || otherErr != 0 {
+		t.Errorf("3 sends around an exhausted window: got %d chat_send_ok, %d RATE_LIMITED, %d other errors; want 1, 2, 0",
 			sendOK, rateLimited, otherErr)
 	}
 }
