@@ -274,7 +274,9 @@ Re-read at `dev` `6671f2283f448afebe896eac993219df0529b692` (B9-8 merged as
      cases.
      This pass added three e2e cases (scenarios 3, 6, 7) and taught the native mock
      to refuse an image by failure class (it previously answered only bytes or a
-     blanket `unavailable`); no other scenario was genuinely missing.
+     blanket `unavailable`), and extended the existing scenario 4 and 5 cases to
+     assert the re-ask, the retained or moved focus, and the Space/Escape
+     lightbox round trip; no other scenario was genuinely missing.
 - **Consent preserved:** `b9-content-consent.spec.ts`, `message-media.spec.ts`
   — 26 passed; B9-8's zero-fetch-before-consent and its reset journey are
   unmodified.
