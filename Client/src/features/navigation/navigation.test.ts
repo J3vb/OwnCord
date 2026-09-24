@@ -8,6 +8,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
+import type { ApiClient } from "@lib/api";
 import { Permission } from "@lib/types";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { channelsStore, setActiveChannel, setRoles, type Channel } from "@stores/channels.store";
@@ -107,6 +108,7 @@ let moderation: InertView;
 function makeNavigator(destinations: NavigationDestinations): ContentNavigator {
   const created = createContentNavigator({
     destinations,
+    api: {} as ApiClient,
     chatArea,
     rememberChannel: () => {
       const id = channelsStore.getState().activeChannelId;

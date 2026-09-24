@@ -1,12 +1,12 @@
 /**
  * B9-4: the shared navigation seams in the real shell.
  *
- * Message Requests (B9-5) and the Safety tab (B9-15 and B9-10) ship in this
- * build; their journeys are b9-message-requests.spec.ts,
- * b9-moderation-notices.spec.ts and b9-reports.spec.ts. The Moderation Center
- * (B9-11) still has no entry, so what the running app must show for it is the
- * owner's Q2 rule: no empty or nonfunctional destination, and the familiar
- * channel, DM and settings routes unchanged with the content-view column in place. The
+ * Message Requests (B9-5), the Safety tab (B9-15 and B9-10) and the
+ * Moderation Center (B9-11) ship in this build; their journeys are
+ * b9-message-requests.spec.ts, b9-moderation-notices.spec.ts, b9-reports.spec.ts
+ * and fullstack/b9-moderation-queue.spec.ts. What this spec pins is the owner's
+ * Q2 placement, and the familiar channel, DM and settings routes unchanged
+ * with the content-view column in place. The
  * transitions through a destination (open, Close/Escape back to the channel,
  * replacement, permission loss, sign-out) run against inert views in
  * src/features/navigation/navigation.test.ts, because this spec also runs
@@ -68,10 +68,20 @@ test.describe("B9-4 shared navigation", () => {
     await signIn(page);
   });
 
-  test("shows no Moderation entry before its feature ships (Q2)", async ({ page }) => {
-    // Moderation would sit beside Audit Log; Audit Log is there, Moderation is not.
-    await expect(page.locator("[data-testid='audit-log-btn']")).toBeVisible();
-    await expect(page.locator("[data-testid='moderation-btn']")).toHaveCount(0);
+  test("shows the Moderation entry beside Audit Log for a MODERATE_MEMBERS holder (Q2)", async ({
+    page,
+  }) => {
+    const audit = page.locator("[data-testid='audit-log-btn']");
+    await expect(audit).toBeVisible();
+    const moderation = page.locator("[data-testid='moderation-btn']");
+    await expect(moderation).toBeVisible();
+    await expect(moderation).toHaveText("Moderation");
+    expect(
+      await moderation.evaluate(
+        (btn, a) => btn.previousElementSibling === a,
+        await audit.elementHandle(),
+      ),
+    ).toBe(true);
     // No pending requests (the mock server has no inbox): no badge on the DM header.
     await expect(page.locator("[data-testid='dm-requests-badge']")).toBeHidden();
     await expectNoView(page);
@@ -94,19 +104,9 @@ test.describe("B9-4 shared navigation", () => {
   });
 
   test("the header fits a Moderation entry beside Audit Log (Q2)", async ({ page }) => {
-    // The entry B9-11 turns on is the same button SidebarArea renders beside
-    // Audit Log. No destination can be registered in the production bundle, so
-    // add it to the real header and measure the real stylesheet.
+    // The real entry (B9-11), measured against the real stylesheet.
     const sidebar = page.locator("[data-testid='unified-sidebar']");
     const header = sidebar.locator(".unified-sidebar-header");
-    await page.locator("[data-testid='audit-log-btn']").evaluate((audit) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "sidebar-audit-btn";
-      btn.dataset.testid = "moderation-btn";
-      btn.textContent = "Moderation";
-      audit.after(btn);
-    });
     const moderation = page.locator("[data-testid='moderation-btn']");
     await expect(moderation).toBeVisible();
 

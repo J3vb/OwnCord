@@ -25,6 +25,7 @@
 import type { ApiClient } from "@lib/api";
 import { pendingRequestCount } from "../message-requests/store";
 import { buildInbox } from "../message-requests/view";
+import { buildModerationCenter } from "../moderation/view";
 import { buildSafetyPane } from "../reports/safetyPane";
 
 /** A destination that opens in the content area, in place of the chat column. */
@@ -39,6 +40,8 @@ export interface FeatureViewContext {
   readonly signal: AbortSignal;
   /** Leave the view the way its Close button does. */
   readonly close: () => void;
+  /** The page's API client; the server authorizes every read behind a view. */
+  readonly api: ApiClient;
 }
 
 /** Builds a view's body. Called on every open; a view is never kept while closed. */
@@ -68,5 +71,6 @@ export interface NavigationDestinations {
 /** The destinations this build ships. */
 export const NAVIGATION_DESTINATIONS: NavigationDestinations = {
   requests: { build: buildInbox, pending: pendingRequestCount },
+  moderation: { build: buildModerationCenter },
   safety: { build: buildSafetyPane },
 };

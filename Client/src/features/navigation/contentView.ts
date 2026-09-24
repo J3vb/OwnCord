@@ -15,6 +15,7 @@
  * The view state lives in `uiStore.activeView`; this is its only writer.
  */
 
+import type { ApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { createElement, clearChildren, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -30,6 +31,8 @@ const log = createLogger("content-view");
 
 export interface ContentNavigatorOptions {
   readonly destinations: NavigationDestinations;
+  /** Handed to each view's builder. */
+  readonly api: ApiClient;
   /** The chat column. Hidden while a view is open. */
   readonly chatArea: HTMLElement;
   /** Remember the channel on screen as the one to go back to (channelBeforeDm). */
@@ -170,7 +173,7 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
     );
 
     try {
-      body.appendChild(build({ signal: owner.signal, close }));
+      body.appendChild(build({ signal: owner.signal, close, api: opts.api }));
     } catch (err) {
       log.error("Feature view failed to build", { id, error: String(err) });
       close();
