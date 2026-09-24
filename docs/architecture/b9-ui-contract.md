@@ -141,7 +141,9 @@ beside it) everywhere else. The `@font-face` is in `base.css`; font-src is
     the row that opened it). Otherwise focus drops to `<body>`.
 - Pending states keep focus where it is. Mark a busy button with
   `aria-busy="true"` and `aria-disabled="true"`, not `disabled`: disabling
-  the focused button moves focus to `<body>`.
+  the focused button moves focus to `<body>`. Exception: the Settings
+  account and recovery forms still set `disabled` and, once the request
+  settles, put focus back with `focusIsOurs` (`settings/helpers.ts`).
 - After an error, focus stays on or returns to the field at fault.
 
 ## Keyboard
@@ -156,12 +158,12 @@ beside it) everywhere else. The `@font-face` is in `base.css`; font-src is
 
 ## Announcements
 
-| Situation                                                                                  | Pattern                                                                                                            | Politeness |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ---------- |
-| A field error after submit                                                                 | `.form-error` with `role="alert"`, id listed in the input's `aria-describedby`, `aria-invalid="true"` on the input | assertive  |
-| Pending ("Saving…"), success, a count or a background result                               | `.form-status` or another element with `role="status"` (or `aria-live="polite"`)                                   | polite     |
-| A blocking failure that stops the journey (the login error banner, an incompatible server) | `role="alert"`                                                                                                     | assertive  |
-| Toasts, typing indicator                                                                   | the existing `aria-live="polite"` regions                                                                          | polite     |
+| Situation                                                                                  | Pattern                                                                                                                                                                                                                                                                                       | Politeness          |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| A field error after submit                                                                 | `.form-error` whose id is in the input's `aria-describedby`, `aria-invalid="true"` on the input, and focus moved to the input with no live role. Add `role="alert"` only when focus does not move (the field already has focus, or focus stays on the submit), so the error is announced once | assertive when live |
+| Pending ("Saving…"), success, a count or a background result                               | `.form-status` or another element with `role="status"` (or `aria-live="polite"`)                                                                                                                                                                                                              | polite              |
+| A blocking failure that stops the journey (the login error banner, an incompatible server) | `role="alert"`                                                                                                                                                                                                                                                                                | assertive           |
+| Toasts, typing indicator                                                                   | the existing `aria-live="polite"` regions                                                                                                                                                                                                                                                     | polite              |
 
 Live regions exist in the DOM before their text changes. Screen readers skip
 a region that is inserted already filled. An announcement never carries
