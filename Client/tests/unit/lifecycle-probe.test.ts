@@ -151,6 +151,55 @@ describe("lifecycle soak pass bars", () => {
     expect(bar(evaluateBars(perPage, { listeners: 2 }), "listeners").pass).toBe(false);
   });
 
+  it("tolerates a 1-2 node detached-node wobble in a within-page pair", () => {
+    // The CI flake: run 35986328302 read page-0 nodes 2858→2859 (slope 1/3,
+    // far past 0.05/cycle) between cycles 6 and 9 with an identical attached
+    // DOM — one retained, detached node in flux. It is not a leak.
+    const wobble = [
+      sample(5, { nodes: 2858 }),
+      sample(6, { nodes: 2858 }),
+      sample(9, { nodes: 2859 }),
+      sample(10, { nodes: 2858 }),
+      sample(15, { nodes: 2858 }),
+      sample(16, { nodes: 2858 }),
+      sample(19, { nodes: 2859 }),
+      sample(20, { nodes: 2858 }),
+    ];
+    expect(bar(evaluateBars(wobble), "nodes").pass).toBe(true);
+    // The worst slope is still recorded, even though the tolerance passes it.
+    expect(bar(evaluateBars(wobble), "nodes").slope).toBeCloseTo(1 / 3, 5);
+  });
+
+  it("still fails a real nodes leak past the 2-node tolerance", () => {
+    const leaking = [
+      sample(5, { nodes: 2858 }),
+      sample(6, { nodes: 2858 }),
+      sample(9, { nodes: 2861 }),
+      sample(10, { nodes: 2858 }),
+      sample(15, { nodes: 2858 }),
+      sample(16, { nodes: 2858 }),
+      sample(19, { nodes: 2861 }),
+      sample(20, { nodes: 2858 }),
+    ];
+    const nodes = bar(evaluateBars(leaking), "nodes");
+    expect(nodes.pass).toBe(false);
+    expect(nodes.bar).toContain("page 0: 2858→2861");
+  });
+
+  it("keeps the tolerance to nodes: a 1-unit wobble in another metric still fails", () => {
+    const listeners = [
+      sample(5),
+      sample(6, { listeners: 100 }),
+      sample(9, { listeners: 101 }),
+      sample(10),
+      sample(15),
+      sample(16, { listeners: 100 }),
+      sample(19, { listeners: 101 }),
+      sample(20),
+    ];
+    expect(bar(evaluateBars(listeners), "listeners").pass).toBe(false);
+  });
+
   it("leaves the samples at the 5-cycle marks (reconnect, logout) out of the page pair", () => {
     const bars = evaluateBars([
       sample(5, { nodes: 101 }),
