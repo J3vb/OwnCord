@@ -666,6 +666,40 @@ describe("closing", () => {
     expect(alerts(root)).toBe("");
   });
 
+  it("closes the report when mod_queue's re-read beats a take that loses with 409", async () => {
+    const root = mount();
+    lists[0]!.resolve([row("r1")]);
+    await flush();
+    const filter = q<HTMLSelectElement>(root, "[data-testid=mod-filter]")!;
+    filter.value = "open";
+    filter.dispatchEvent(new Event("change"));
+    lists.at(-1)!.resolve([row("r1")]);
+    await flush();
+    q<HTMLButtonElement>(root, ".mod-queue-row")!.click();
+    details.at(-1)!.resolve(detail("r1"));
+    await flush();
+    const moved = "Your change moved this report out of the current filter. It stays open here.";
+
+    q<HTMLButtonElement>(work(root)!, "button")!.click();
+    // Another moderator's take lands first; its mod_queue arrives before our answer.
+    noteQueueChange();
+    await flush();
+    lists.at(-1)!.resolve([]);
+    await flush();
+    details.at(-1)!.resolve(detail("r1", { state: "assigned", assignee_id: OTHER }));
+    await flush();
+
+    writes[0]!.reject(new ApiClientError(409, "CONFLICT", "already assigned"));
+    await flush();
+    expect(alerts(root)).toBe("Another moderator took this report first.");
+    expect(root.textContent).not.toContain(moved);
+    lists.at(-1)!.resolve([]);
+    await flush();
+    expect(root.querySelector("[data-testid=mod-report]")).toBeNull();
+    expect(root.textContent).toContain("The report you had open is no longer in this list.");
+    expect(root.textContent).not.toContain(moved);
+  });
+
   it("still closes a report that leaves the filter through someone else's change", async () => {
     const root = mount();
     lists[0]!.resolve([row("r1")]);

@@ -410,6 +410,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     if (writing !== null || denied) return false;
     writing = "sending";
     ownWrite = id;
+    const keptBefore = offList;
     setText(writeStatus, "");
     setText(writeAlert, "");
     const req =
@@ -433,6 +434,10 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       (err: unknown) => {
         if (signal.aborted || denied) return;
         ownWrite = null;
+        if (offList !== keptBefore) {
+          offList = null;
+          setText(detailStatus, "");
+        }
         if (isStatus(err, 403) && (err as ApiClientError).code !== "SELF_REVIEW") {
           deny();
           return;
