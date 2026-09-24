@@ -44,10 +44,14 @@
 /* ── DM Section (sidebar — positioned above channels) ── */
 .sidebar-dm-section {
   border-bottom: 1px solid var(--border-glow, var(--border));
-  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 .sidebar-dm-list {
-  overflow: hidden;
+  overflow-y: auto;
+  min-height: 0;
   transition: max-height 0.2s;
 }
 .sidebar-dm-section .category.collapsed + .sidebar-dm-list {

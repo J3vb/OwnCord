@@ -107,7 +107,8 @@ export function createSidebarMemberSection(
     (e: MouseEvent) => {
       isDragging = true;
       startY = e.clientY;
-      startHeight = memberListContainer.offsetHeight;
+      startHeight =
+        parseFloat(memberListContainer.style.height) || memberListContainer.offsetHeight;
       e.preventDefault();
     },
     { signal: resizeOwner.signal },
@@ -121,6 +122,7 @@ export function createSidebarMemberSection(
       const maxH = window.innerHeight * 0.65;
       const newHeight = Math.max(80, Math.min(startHeight + delta, maxH));
       memberListContainer.style.height = `${newHeight}px`;
+      localStorage.setItem(LS_KEY_HEIGHT, String(newHeight));
     },
     { signal: resizeOwner.signal },
   );
@@ -128,9 +130,7 @@ export function createSidebarMemberSection(
   document.addEventListener(
     "mouseup",
     () => {
-      if (!isDragging) return;
       isDragging = false;
-      localStorage.setItem(LS_KEY_HEIGHT, String(memberListContainer.offsetHeight));
     },
     { signal: resizeOwner.signal },
   );
