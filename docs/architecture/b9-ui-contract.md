@@ -142,8 +142,9 @@ beside it) everywhere else. The `@font-face` is in `base.css`; font-src is
 - Pending states keep focus where it is. Mark a busy button with
   `aria-busy="true"` and `aria-disabled="true"`, not `disabled`: disabling
   the focused button moves focus to `<body>`. Exception: the Settings
-  account and recovery forms still set `disabled` and, once the request
-  settles, put focus back with `focusIsOurs` (`settings/helpers.ts`).
+  account and recovery forms and the connect page's login, 2FA and recovery
+  forms still set `disabled` and, once the request settles, put focus back
+  with `focusIsOurs` (`lib/dom.ts`).
 - After an error, focus stays on or returns to the field at fault.
 
 ## Keyboard

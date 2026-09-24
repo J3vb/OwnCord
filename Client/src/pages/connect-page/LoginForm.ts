@@ -141,6 +141,10 @@ export interface LoginFormApi {
 // Factory
 // ---------------------------------------------------------------------------
 
+function isBusy(state: FormState): boolean {
+  return state === "loading" || state === "connecting" || state === "auto-connecting";
+}
+
 export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   const {
     signal,
@@ -669,10 +673,6 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         restore.focus();
       }
     }
-  }
-
-  function isBusy(state: FormState): boolean {
-    return state === "loading" || state === "connecting" || state === "auto-connecting";
   }
 
   /** The input a banner error for `field` belongs to. */

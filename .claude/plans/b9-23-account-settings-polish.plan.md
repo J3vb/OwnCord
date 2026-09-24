@@ -251,9 +251,10 @@ the lane's own.
   focus returns to the now-visible trigger; opening that confirm focuses
   Cancel. Chromium blurs a disabled focused button, so every async submit
   (profile, password, 2FA enrol/confirm/disable, sessions, deletion, recovery
-  kit) returns focus to its control when the request fails. Each restore goes
-  through `focusIsOurs` (`settings/helpers.ts`) and is skipped once the user
-  has moved focus elsewhere.
+  kit) returns focus to its control when the request fails, and so do the
+  connect page's login/register, 2FA Verify and account-recovery submits. Each
+  restore goes through `focusIsOurs` (`lib/dom.ts`) and is skipped once the
+  user has moved focus elsewhere.
 - **Scoped reflow (BPR-091).** `.settings-content` gets `min-width: 0` (a flex
   child otherwise refuses to shrink below its min-content width, pushing the
   panel into horizontal overflow at the 940×500 minimum window with 20px text),
