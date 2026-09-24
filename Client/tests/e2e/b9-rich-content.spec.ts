@@ -313,8 +313,10 @@ test.describe("B9-9 rich-content states", () => {
     // keyboard focus moves to the search field rather than falling to <body>
     // when the retry is replaced. The loading line may flash past, so assert
     // the durable outcome (the re-asked failure) and the focus, not the flash.
+    const before = await gifTrendingCalls(page);
     await retry.focus();
     await retry.click();
+    await expect.poll(() => gifTrendingCalls(page)).toBeGreaterThan(before);
     await expect(picker.locator(".gp-search")).toBeFocused();
     await expect(picker.locator(".msg-media-fallback-text")).toHaveText("Couldn't load GIFs");
     await expect(picker.locator(".msg-media-retry")).toBeVisible();
@@ -373,6 +375,22 @@ async function brokerImageCalls(page: Page): Promise<number> {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ((window as any).__invokeLog as Array<{ cmd: string }>).filter(
         (e) => e.cmd === "external_image",
+      ).length,
+  );
+}
+
+/** Count the GIF proxy's trending requests through the native HTTP mock. */
+async function gifTrendingCalls(page: Page): Promise<number> {
+  return page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __invokeLog: Array<{ cmd: string; args?: { clientConfig?: { url?: string } } }>;
+        }
+      ).__invokeLog.filter(
+        (e) =>
+          e.cmd === "plugin:http|fetch" &&
+          (e.args?.clientConfig?.url ?? "").includes("/api/v1/gif/trending"),
       ).length,
   );
 }

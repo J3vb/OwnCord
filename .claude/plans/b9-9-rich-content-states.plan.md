@@ -235,7 +235,7 @@ Re-read at `dev` `6671f2283f448afebe896eac993219df0529b692` (B9-8 merged as
 
 - **Unit:** `npx vitest run tests/unit src` — 295 files, 6,599 passed, 152
   expected-fail (on the follow-up branch off `dev` `782e010e`; 292 files,
-  6,570 passed on the original PR's base). New named cases: the typed preview
+  6,553 passed on the original PR's base). New named cases: the typed preview
   failed state and its
   bounded retry (`embeds.test.ts`), the inline-image failed state/retry,
   "never reads as loaded", "offers no retry for a policy refusal", "keeps the
