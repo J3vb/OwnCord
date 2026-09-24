@@ -173,7 +173,11 @@ export function formatReactorNames(
   const others = total - shown.length;
 
   if (others > 0) {
-    return `${shown.join(", ")} ${messageStatusText("reaction.others", { count: others })}`;
+    return messageStatusText("reaction.others", {
+      count: others,
+      n: String(others),
+      names: shown.join(", "),
+    });
   }
   return listFormatter.format(shown);
 }

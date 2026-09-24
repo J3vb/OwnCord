@@ -20,7 +20,7 @@ export const messageStatusText = defineCatalog("messageStatus", {
 
   "reaction.reactedWith": "reacted with {emoji}",
   "reaction.others": {
-    one: "and {count} other",
-    other: "and {count} others",
+    one: "{names} and {n} other",
+    other: "{names} and {n} others",
   },
 });

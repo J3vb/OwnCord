@@ -218,7 +218,7 @@ function renderDmItem(
       { class: "dm-mention-badge", "data-testid": `dm-mentions-${convo.channelId}` },
       String(mentionCount),
     );
-    badge.title = requestsText("mention.count", { count: mentionCount });
+    badge.title = requestsText("mention.count", { count: mentionCount, n: String(mentionCount) });
     item.appendChild(badge);
   } else if (unreadCount > 0) {
     const badge = createElement(
@@ -229,7 +229,7 @@ function renderDmItem(
       },
       String(unreadCount),
     );
-    badge.title = requestsText("unread.count", { count: unreadCount });
+    badge.title = requestsText("unread.count", { count: unreadCount, n: String(unreadCount) });
     item.appendChild(badge);
   } else if (convo.unread) {
     const unreadDot = createElement("span", { class: "dm-unread" });

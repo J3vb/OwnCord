@@ -675,6 +675,18 @@ describe("DmSidebar — unread and mention badges", () => {
     );
   });
 
+  it("keeps large badge counts ungrouped in the tooltip, matching the badge text", () => {
+    mountWith(makeConvo({ channelId: 7, userId: 7, unread: true, unreadCount: 1234 }));
+    const unread = container.querySelector('[data-testid="dm-unread-7"]') as HTMLElement;
+    expect(unread.textContent).toBe("1234");
+    expect(unread.title).toBe("1234 unread messages");
+
+    mountWith(makeConvo({ channelId: 8, userId: 8, unread: true, mentionCount: 1234 }));
+    const mentions = container.querySelector('[data-testid="dm-mentions-8"]') as HTMLElement;
+    expect(mentions.textContent).toBe("1234");
+    expect(mentions.title).toBe("1234 mentions");
+  });
+
   it("falls back to the dot when the payload carries no counts", () => {
     mountWith(makeConvo({ channelId: 7, userId: 7, unread: true }));
 

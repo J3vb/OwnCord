@@ -25,8 +25,12 @@ describe("B9-19 catalogs", () => {
   });
 
   it("uses a plural branch for the reactor overflow and never concatenates fragments", () => {
-    expect(messageStatusText("reaction.others", { count: 1 })).toBe("and 1 other");
-    expect(messageStatusText("reaction.others", { count: 2 })).toBe("and 2 others");
+    expect(messageStatusText("reaction.others", { count: 1, n: "1", names: "Ana" })).toBe(
+      "Ana and 1 other",
+    );
+    expect(messageStatusText("reaction.others", { count: 2, n: "2", names: "Ana, Bo" })).toBe(
+      "Ana, Bo and 2 others",
+    );
     expect(messageStatusText("reaction.reactedWith", { emoji: "🔥" })).toBe("reacted with 🔥");
   });
 
@@ -42,10 +46,10 @@ describe("B9-19 catalogs", () => {
   });
 
   it("keeps the DM sidebar's plural badge titles", () => {
-    expect(requestsText("mention.count", { count: 1 })).toBe("1 mention");
-    expect(requestsText("mention.count", { count: 4 })).toBe("4 mentions");
-    expect(requestsText("unread.count", { count: 1 })).toBe("1 unread message");
-    expect(requestsText("unread.count", { count: 12 })).toBe("12 unread messages");
+    expect(requestsText("mention.count", { count: 1, n: "1" })).toBe("1 mention");
+    expect(requestsText("mention.count", { count: 4, n: "4" })).toBe("4 mentions");
+    expect(requestsText("unread.count", { count: 1, n: "1" })).toBe("1 unread message");
+    expect(requestsText("unread.count", { count: 12, n: "12" })).toBe("12 unread messages");
     expect(requestsText("members.count", { count: 3 })).toBe("3 members");
     expect(requestsText("dm.groupSubtitle", { count: 3, names: "Ana, Bo" })).toBe(
       "3 members: You, Ana, Bo",

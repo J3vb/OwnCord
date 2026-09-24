@@ -8,8 +8,8 @@ import { defineCatalog } from "./format";
  */
 export const requestsText = defineCatalog("requests", {
   "members.count": { one: "{count} member", other: "{count} members" },
-  "mention.count": { one: "{count} mention", other: "{count} mentions" },
-  "unread.count": { one: "{count} unread message", other: "{count} unread messages" },
+  "mention.count": { one: "{n} mention", other: "{n} mentions" },
+  "unread.count": { one: "{n} unread message", other: "{n} unread messages" },
 
   "dm.closeShort": "Close DM",
   "dm.leaveShort": "Leave group",

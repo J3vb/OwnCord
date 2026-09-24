@@ -40,9 +40,6 @@ export interface GifPickerOptions {
   readonly onUnavailable?: (reason: string) => void;
 }
 
-/** Shown in-picker and passed to onUnavailable when the server has no key. */
-export const GIF_UNAVAILABLE_MESSAGE = messagingText("gif.disabled");
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
