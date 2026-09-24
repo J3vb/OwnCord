@@ -15,6 +15,7 @@ import type { DeviceManager } from "../../lib/deviceManager";
 import type { E2EEManager } from "../../lib/livekitE2EE";
 import type { SessionState } from "./sessionState";
 import { detachRoom, releaseRoom } from "./releaseRoom";
+import { voiceText } from "../../i18n/voice";
 
 // Same logger tag as before the extraction, so the join log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -447,7 +448,7 @@ export class JoinOrchestration {
         } catch (disconnectErr) {
           log.debug("Room disconnect during error cleanup failed (safe to ignore)", disconnectErr);
         }
-        this._onError?.("Failed to join voice — connection error");
+        this._onError?.(voiceText("join.connectionError"));
       }
       // Only touch the shared session state if this attempt is still current.
       // A superseded attempt must not clear a newer join's server-side voice

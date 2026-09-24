@@ -8,6 +8,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import { bracketBareIPv6Host } from "@lib/ws";
 import type { UserStatus } from "@lib/types";
+import { errorText } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { createRateLimiterSet } from "@lib/rate-limiter";
@@ -18,6 +19,8 @@ import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
 import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@lib/toast";
+import { accountText as account } from "../i18n/account";
+import { shellText } from "../i18n/shell";
 import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
@@ -365,12 +368,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // (VoiceCallbacks.ts's socketLive() guard) — without this check the ring
     // and "Calling…" toast fire anyway, promising a call nobody can hear.
     if (uiStore.getState().connectionStatus !== "connected") {
-      showToast("Not connected", "error");
+      showToast(shellText("channel.notConnected"), "error");
       return;
     }
     createSidebarVoiceCallbacks(ws).onVoiceJoin(active.id);
     ws.send({ type: "call_ring", payload: { channel_id: active.id } });
-    showToast("Calling…", "info");
+    showToast(account("toast.calling"), "info");
   }
 
   /** Close the DM profile sidebar if open. */
@@ -578,12 +581,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onChangePassword: async (oldPassword, newPassword) => {
         try {
           const outcome = await api.changePassword(oldPassword, newPassword);
-          showChangeOutcomeToast(outcome, "Password changed successfully");
+          showChangeOutcomeToast(outcome, account("toast.passwordChanged"));
           // The form shows the same outcome inline, so a partial success is
           // never a green "changed successfully" beside the warning toast.
           return outcome;
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "Failed to change password";
+          const msg = errorText(err, account("toast.passwordChangeFailed"));
           showToast(msg, "error");
           throw err;
         }
@@ -600,9 +603,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             display_name: updated.display_name ?? null,
             about: updated.about ?? null,
           });
-          showToast("Profile updated", "success");
+          showToast(account("toast.profileUpdated"), "success");
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "Failed to update profile";
+          const msg = errorText(err, account("toast.profileUpdateFailed"));
           showToast(msg, "error");
           throw err;
         }
@@ -614,10 +617,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           // broadcast a user_update; this keeps the local copy from lagging a
           // round-trip behind.
           updateUser({ avatar: uploaded.url });
-          showToast("Avatar updated", "success");
+          showToast(account("toast.avatarUpdated"), "success");
           return uploaded.url;
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "Failed to upload avatar";
+          const msg = errorText(err, account("toast.avatarUploadFailed"));
           showToast(msg, "error");
           throw err;
         }
@@ -631,13 +634,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         // The account is gone, so its cached server images go too (B7-15c).
         // clearAuth has already disarmed the scope, so no late write follows.
         if (cacheScope !== null) void pruneAttachmentCacheScope(cacheScope);
-        showToast("Account deleted successfully", "success");
+        showToast(account("toast.accountDeleted"), "success");
       },
       onEnableTotp: async (password) => {
         try {
           return await api.enableTotp(password);
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "Failed to enable 2FA";
+          const msg = errorText(err, account("toast.enableTotpFailed"));
           showToast(msg, "error");
           throw err;
         }
@@ -647,9 +650,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           const outcome = await api.confirmTotp(password, code);
           totpEpoch++;
           updateUser({ totp_enabled: true });
-          showChangeOutcomeToast(outcome, "Two-factor authentication enabled");
+          showChangeOutcomeToast(outcome, account("toast.totpEnabled"));
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "Failed to confirm 2FA";
+          const msg = errorText(err, account("toast.confirmTotpFailed"));
           showToast(msg, "error");
           throw err;
         }
@@ -659,9 +662,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           const outcome = await api.disableTotp(password);
           totpEpoch++;
           updateUser({ totp_enabled: false });
-          showChangeOutcomeToast(outcome, "Two-factor authentication disabled");
+          showChangeOutcomeToast(outcome, account("toast.totpDisabled"));
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "Failed to disable 2FA";
+          const msg = errorText(err, account("toast.disableTotpFailed"));
           showToast(msg, "error");
           throw err;
         }
@@ -752,7 +755,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         // Guarded here, the banner's only caller of accept(), so the ring
         // survives for the user to accept again once reconnected.
         if (uiStore.getState().connectionStatus !== "connected") {
-          showToast("Can't answer while reconnecting", "error");
+          showToast(account("voice.canAnswerWhileReconnecting"), "error");
           return;
         }
         ringCtrl?.accept();
@@ -884,11 +887,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       const name = (member !== undefined ? memberDisplayName(member) : "") || voiceUser?.username;
       const isSelf = userId === getCurrentUserId();
       if (name === undefined || name === "") {
-        if (isSelf) return isScreenshare ? "Your Screen" : "You";
-        return isScreenshare ? `User ${userId} (Screen)` : `User ${userId}`;
+        if (isSelf) return isScreenshare ? shellText("tile.yourScreen") : shellText("tile.you");
+        return isScreenshare
+          ? shellText("tile.userScreen", { id: String(userId) })
+          : shellText("tile.user", { id: String(userId) });
       }
-      if (isScreenshare) return `${name} (Screen)`;
-      return isSelf ? `${name} (You)` : name;
+      if (isScreenshare) return shellText("tile.nameScreen", { name });
+      return isSelf ? shellText("tile.nameYou", { name }) : name;
     }
 
     // Wire remote video callbacks to video grid

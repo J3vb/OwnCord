@@ -41,6 +41,7 @@ export class SessionScope {
   }
 
   assertCurrent(): void {
+    // i18n-exempt: AbortError cancellation signal, never rendered
     if (!this.isCurrent()) throw new DOMException("Session work was cancelled", "AbortError");
   }
 
@@ -62,6 +63,7 @@ export class SessionScope {
   /** Reject promptly even when native work ignores cancellation or never returns. */
   run<T>(work: Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
+      // i18n-exempt: AbortError cancellation signal, never rendered
       const onAbort = () => reject(new DOMException("Session work was cancelled", "AbortError"));
       this.signal.addEventListener("abort", onAbort, { once: true });
       // Always attach both handlers, including when already aborted, so a late

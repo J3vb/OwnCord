@@ -7,9 +7,10 @@ import {
   clearBlockedByThem,
   resetBlocksStore,
   dmComposerBlockReason,
-  BLOCKED_BY_ME_REASON,
-  BLOCKED_BY_THEM_REASON,
 } from "../../src/stores/blocks.store";
+
+const BLOCKED_BY_ME_REASON = "You've blocked this user. Unblock to send messages.";
+const BLOCKED_BY_THEM_REASON = "You can't message this user right now.";
 
 describe("blocksStore", () => {
   beforeEach(() => {
@@ -24,13 +25,11 @@ describe("blocksStore", () => {
     it("gates with the explicit reason when the local user blocked them", () => {
       setBlockedByMe([5]);
       expect(dmComposerBlockReason(blocksStore.getState(), 5)).toBe(BLOCKED_BY_ME_REASON);
-      expect(BLOCKED_BY_ME_REASON).toBe("You've blocked this user. Unblock to send messages.");
     });
 
     it("gates with the neutral reason when being blocked", () => {
       setUserBlockedByThem(7, true);
       expect(dmComposerBlockReason(blocksStore.getState(), 7)).toBe(BLOCKED_BY_THEM_REASON);
-      expect(BLOCKED_BY_THEM_REASON).toBe("You can't message this user right now.");
     });
 
     it("prefers the explicit reason over the neutral one when both apply", () => {

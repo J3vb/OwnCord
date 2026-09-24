@@ -17,6 +17,7 @@ import { createLogger } from "../../lib/logger";
 import type { AudioPipeline } from "../../lib/audioPipeline";
 import type { AudioElements } from "../../lib/audioElements";
 import { type DeviceManager, isMicPolicyGated } from "../../lib/deviceManager";
+import { voiceText } from "../../i18n/voice";
 import {
   type VideoTrackDeps,
   type CameraTrackState,
@@ -141,7 +142,7 @@ export class MediaControl {
     } catch (err) {
       if (this._room !== room) return;
       log.warn("Microphone retry failed — still in listen-only mode", err);
-      this.onErrorCallback?.("Microphone still unavailable — check your browser permissions");
+      this.onErrorCallback?.(voiceText("mic.stillUnavailable"));
     }
   }
 
@@ -261,7 +262,7 @@ export class MediaControl {
         setListenOnly(true);
         setLocalMuted(true);
         log.warn("Mic re-publish failed — falling back to listen-only/muted", err);
-        this.onErrorCallback?.("Microphone unavailable — you are muted");
+        this.onErrorCallback?.(voiceText("mic.unavailableMuted"));
       }
     }
   }

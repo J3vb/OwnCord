@@ -11,6 +11,7 @@ import { channelsStore } from "../../stores/channels.store";
 import { voiceStore, leaveVoiceChannel } from "../../stores/voice.store";
 import { PROTOCOL_EPOCH } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";
+import { connectText } from "../../i18n/connect";
 import { livekitSession, log } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock } from "./dispatchContext";
 
@@ -74,11 +75,15 @@ export function handleServerRestart(payload: Payload<"server_restart">): void {
     // resetting their toggles to off. "server_shutdown" keeps the saved
     // credential (the token is still valid), so auto-login can resume
     // when the server comes back.
-    setTransientError("The server was shut down — you have been signed out.");
+    setTransientError(connectText("session.serverShutdown"));
     clearAuth("server_shutdown");
     return;
   }
-  setTransientError(`Server is restarting: ${payload.reason ?? "maintenance"}`);
+  setTransientError(
+    connectText("session.serverRestarting", {
+      reason: payload.reason ?? connectText("session.restartReasonDefault"),
+    }),
+  );
 }
 
 /**
@@ -97,9 +102,7 @@ export function handleConnectionError(ws: DispatchWs, payload: Payload<"error">)
     // token via scheduleReconnect() forever (OC-0107). Disconnect here
     // directly: it's idempotent with that subscriber's own
     // ws.disconnect() and covers every router state, not just "main".
-    setTransientError(
-      `${(payload.message || "You have been banned").replace(/([^.!?])$/, "$1.")} ${safetyText("appeals.unavailable")}`,
-    );
+    setTransientError(`${connectText("session.banned")} ${safetyText("appeals.unavailable")}`);
     ws.disconnect();
     clearAuth();
     return true;

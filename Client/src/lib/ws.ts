@@ -625,6 +625,7 @@ export function createWsClient({
           return;
         }
         if (state !== "connected" || !proxyOpen) {
+          // i18n-exempt: internal ping liveness guard, never rendered
           reject(new Error("The application connection is not ready."));
           return;
         }
@@ -641,10 +642,12 @@ export function createWsClient({
         };
         const onAbort = (): void => fail(signal.reason);
         const onState = (next: ConnectionState): void => {
+          // i18n-exempt: internal ping liveness guard, never rendered
           if (next !== "connected") fail(new Error("The application connection changed."));
         };
         const onPong = (): void => {
           if (generation !== wsGeneration) {
+            // i18n-exempt: internal ping liveness guard, never rendered
             fail(new Error("The application connection changed."));
             return;
           }
@@ -652,6 +655,7 @@ export function createWsClient({
           resolve();
         };
         const timer = setTimeout(
+          // i18n-exempt: internal ping liveness guard, never rendered
           () => fail(new Error("No heartbeat response arrived.")),
           timeoutMs,
         );

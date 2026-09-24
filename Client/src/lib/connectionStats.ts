@@ -262,7 +262,10 @@ export function formatRate(bytesPerSec: number): string {
 /** Format bytes/sec as human-readable Mbps (for bandwidth display). */
 export function formatBitrate(bytesPerSec: number): string {
   const mbps = (bytesPerSec * 8) / 1_000_000;
+  // i18n-exempt: unit-formatted numeric bandwidth value, no English words
   if (mbps < 0.01) return "0 Mbps";
+  // i18n-exempt: unit-formatted numeric bandwidth value, no English words
   if (mbps < 1) return `${(mbps * 1000).toFixed(0)} Kbps`;
+  // i18n-exempt: unit-formatted numeric bandwidth value, no English words
   return `${mbps.toFixed(1)} Mbps`;
 }

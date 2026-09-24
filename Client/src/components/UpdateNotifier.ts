@@ -6,6 +6,7 @@ import { createLogger } from "@lib/logger";
 import { checkForUpdate, downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/updater";
 import type { DownloadProgress, UpdateInstallState } from "@lib/updater";
 import type { MountableComponent } from "@lib/safe-render";
+import { connectText } from "../i18n/connect";
 
 const log = createLogger("update-notifier");
 
@@ -20,10 +21,10 @@ export interface UpdateNotifierOptions {
 export function formatDownloadProgress(p: DownloadProgress): string {
   if (p.total !== null && p.total > 0) {
     const pct = Math.min(100, Math.max(0, Math.round((p.received / p.total) * 100)));
-    return `Downloading update… ${pct}%`;
+    return connectText("update.downloadingPercent", { percent: pct });
   }
   const mb = (p.received / (1024 * 1024)).toFixed(1);
-  return `Downloading update… ${mb} MB`;
+  return connectText("update.downloadingMb", { mb });
 }
 
 export function createUpdateNotifier(options: UpdateNotifierOptions): MountableComponent {
@@ -65,13 +66,13 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     const text = createElement(
       "span",
       { class: "update-banner-text" },
-      "This install cannot update itself. Ask your server administrator for the new version.",
+      connectText("update.unavailable"),
     );
 
     const dismissBtn = createElement(
       "button",
       { class: "update-banner-btn update-banner-later" },
-      "Dismiss",
+      connectText("update.dismiss"),
     );
     dismissBtn.addEventListener("click", () => {
       dismissed = true;
@@ -90,13 +91,13 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     const text = createElement(
       "span",
       { class: "update-banner-text" },
-      `Update v${version} available`,
+      connectText("update.available", { version }),
     );
 
     const updateBtn = createElement(
       "button",
       { class: "update-banner-btn update-banner-install" },
-      "Update Now",
+      connectText("update.now"),
     );
     updateBtn.addEventListener("click", () => {
       void installUpdate();
@@ -105,7 +106,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     const laterBtn = createElement(
       "button",
       { class: "update-banner-btn update-banner-later" },
-      "Later",
+      connectText("update.later"),
     );
     laterBtn.addEventListener("click", () => {
       dismissed = true;
@@ -132,13 +133,13 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     const text =
       state.status === "downloading"
         ? state.progress === null
-          ? "Downloading update…"
+          ? connectText("update.downloading")
           : formatDownloadProgress(state.progress)
         : state.status === "restarting"
-          ? "Update installed. Restarting…"
+          ? connectText("update.installedRestarting")
           : state.restartRequired
-            ? "Update installed. Please restart OwnCord to finish."
-            : "Update failed. Please try again later.";
+            ? connectText("update.installedRestart")
+            : connectText("update.failed");
     banner.replaceChildren(createElement("span", { class: "update-banner-text" }, text));
 
     if (state.status === "failed") {
@@ -146,7 +147,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
         const retryBtn = createElement(
           "button",
           { class: "update-banner-btn update-banner-install" },
-          "Retry",
+          connectText("update.retry"),
         );
         retryBtn.addEventListener("click", installUpdate);
         banner.appendChild(retryBtn);
@@ -154,7 +155,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       const dismissBtn = createElement(
         "button",
         { class: "update-banner-btn update-banner-later" },
-        "Dismiss",
+        connectText("update.dismiss"),
       );
       dismissBtn.addEventListener("click", () => {
         dismissed = true;

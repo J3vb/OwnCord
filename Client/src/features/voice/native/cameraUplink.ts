@@ -119,6 +119,7 @@ export class CameraUplink {
   private drawRgba(width: number, height: number): Uint8ClampedArray {
     if (this.canvas === null) {
       this.canvas = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+      // i18n-exempt: internal canvas guard, never rendered
       if (this.canvas === null) throw new Error("no 2D canvas for the camera pump");
     }
     const c = this.canvas.canvas;

@@ -137,8 +137,10 @@ export class PendingMessageQueue {
 
   async put(draft: PendingTextMessage): Promise<void> {
     await this.loaded;
+    // i18n-exempt: internal persistence guard; the caller shows its own catalog toast
     if (!this.active) throw new Error("Session ended before saving the pending message");
     if (pendingMessageExpired(draft.clientMessageId, Date.now(), this.retryFloor))
+      // i18n-exempt: internal persistence guard, never rendered
       throw new Error("Message retry window expired");
     const next = new Map(this.drafts);
     for (const [id] of next)
@@ -149,12 +151,14 @@ export class PendingMessageQueue {
       new TextEncoder().encode(JSON.stringify([...next.values()])).length >
         PENDING_MESSAGE_MAX_BYTES
     ) {
+      // i18n-exempt: internal persistence guard, never rendered
       throw new Error("Pending message recovery storage is full");
     }
     this.drafts = next;
     await this.serialize(async () => {
       if (this.active) await this.write();
     });
+    // i18n-exempt: internal persistence guard, never rendered
     if (!this.active) throw new Error("Session ended before saving the pending message");
   }
 
@@ -247,6 +251,7 @@ export async function savePendingText(
   draft: PendingTextMessage,
 ): Promise<void> {
   const queue = activeQueue;
+  // i18n-exempt: internal session guard, never rendered
   if (!queue?.owns(owner)) throw new Error("The message belongs to another session");
   await queue.put(draft);
 }

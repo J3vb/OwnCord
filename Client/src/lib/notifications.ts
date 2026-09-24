@@ -16,6 +16,7 @@ import { createLogger } from "./logger";
 import { resolveAuthor } from "@components/message-list/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { desktop } from "../platform/desktop";
+import { connectText } from "../i18n/connect";
 
 const log = createLogger("notifications");
 
@@ -38,7 +39,10 @@ function resolveNotificationChannel(channelId: number): { name: string; isDm: bo
   const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
   if (dm !== undefined) return { name: dmDisplayName(dm), isDm: true };
   const channel = channelsStore.getState().channels.get(channelId);
-  return { name: channel?.name ?? `Channel ${channelId}`, isDm: false };
+  return {
+    name: channel?.name ?? connectText("notifications.channelFallback", { id: String(channelId) }),
+    isDm: false,
+  };
 }
 
 /**
@@ -120,8 +124,8 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
 
   const title = sanitizeNotif(
     mentioned
-      ? `${authorName} mentioned you in ${channelLabel}`
-      : `${authorName} in ${channelLabel}`,
+      ? connectText("notifications.mentioned", { author: authorName, channel: channelLabel })
+      : connectText("notifications.inChannel", { author: authorName, channel: channelLabel }),
     80,
   );
   const body = sanitizeNotif(payload.content, 100);

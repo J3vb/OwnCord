@@ -11,6 +11,7 @@ import {
   nsfwContentBlocked,
 } from "../features/content-consent/nsfw";
 import { setNsfwAcknowledged } from "../stores/channels.store";
+import { connectText } from "../i18n/connect";
 import type {
   AuthResponse,
   AdminUser,
@@ -56,6 +57,29 @@ export class ApiClientError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+/**
+ * The text for a server error: catalog text when its code has a mapping, the
+ * server's message only when it has none, and `fallback` for an empty message.
+ * An internal failure maps to the caller's own `fallback`.
+ */
+export function serverErrorText(code: string, message: string, fallback: string): string {
+  switch (code) {
+    case "RATE_LIMITED":
+      return connectText("error.rateLimited");
+    case "INTERNAL":
+    case "INTERNAL_ERROR":
+      return fallback;
+    default:
+      return message || fallback;
+  }
+}
+
+/** A failed request's text: `serverErrorText` for an `ApiClientError`, else the error's own message. */
+export function errorText(err: unknown, fallback: string): string {
+  if (err instanceof ApiClientError) return serverErrorText(err.code, err.message, fallback);
+  return err instanceof Error ? err.message : fallback;
 }
 
 export type OnUnauthorized = () => void;
@@ -227,6 +251,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       const headers: Record<string, string> = {};
       if (!opts?.multipart) headers["Content-Type"] = "application/json";
       const token = opts?.token ?? snapshot.token;
+      // i18n-exempt: wire header value, never rendered
       if (token) headers["Authorization"] = `Bearer ${token}`;
       const init: RequestInit = { method, headers, signal: transport.signal };
       if (body !== undefined)
@@ -318,6 +343,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     body?: unknown,
     signal?: AbortSignal,
   ): Promise<T> {
+    // i18n-exempt: log label for admin requests, never rendered
     return doFetch<T>("Admin API", "/admin/api", method, path, body, signal);
   }
 
@@ -342,6 +368,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     setConfig(newConfig: Partial<ApiClientConfig>): void {
       if (newConfig.host !== undefined && !isValidHost(newConfig.host)) {
         log.error("setConfig rejected invalid host", { host: newConfig.host });
+        // i18n-exempt: internal guard; callers validate the host before this runs
         throw new Error("Invalid host format");
       }
       // Switching to a different host without an accompanying new token must
@@ -921,6 +948,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         );
         owner.assertCurrent();
         if (!res.ok) {
+          // i18n-exempt: internal ApiClientError diagnostic; the connect page shows a fixed status, not this message
           throw new ApiClientError(res.status, "HEALTH_CHECK_FAILED", "Health check failed");
         }
         const data = await owner
@@ -959,6 +987,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         );
         owner.assertCurrent();
         if (!res.ok) {
+          // i18n-exempt: internal ApiClientError diagnostic; the connect page shows a fixed status, not this message
           throw new ApiClientError(res.status, "SERVER_INFO_FAILED", "Server info check failed");
         }
         const data = await owner

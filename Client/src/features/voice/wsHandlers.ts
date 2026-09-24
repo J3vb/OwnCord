@@ -17,6 +17,7 @@ import { showToast } from "../../lib/toast";
 import { livekitSession } from "../connection/dispatchContext";
 import type { DispatchApi, DispatchWs, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
+import { connectText } from "../../i18n/connect";
 
 /**
  * Honor a moderator's mute/deafen locally. Mute is also enforced at the SFU,
@@ -250,7 +251,7 @@ export function handleVoiceDisconnected(payload: Payload<"voice_disconnected">):
   log.info("Disconnected from voice by a moderator", { channelId: payload.channel_id });
   void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
   leaveVoiceChannel();
-  showToast(payload.reason || "You were disconnected from voice", "error");
+  showToast(payload.reason || connectText("voice.disconnected"), "error");
 }
 
 export function handleVoiceLeave(payload: Payload<"voice_leave">): void {
@@ -389,11 +390,11 @@ export function handleVoiceError(payload: Payload<"error">, id: string | undefin
   // is to say what happened — without this the click was a silent no-op
   // with an explanation buried in the log.
   if (payload.code === "CHANNEL_FULL") {
-    showToast(payload.message || "That voice channel is full", "error");
+    showToast(connectText("voice.channelFull"), "error");
     return true;
   }
   if (payload.code === "VIDEO_LIMIT") {
-    showToast(payload.message || "That voice channel has reached its video limit", "error");
+    showToast(connectText("voice.videoLimit"), "error");
     // max_video has no SFU-level enforcement — the server only refuses the
     // DB write. Without this rollback the already-published track keeps
     // streaming to everyone while voice_state says camera/screenshare is

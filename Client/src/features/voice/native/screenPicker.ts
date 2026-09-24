@@ -9,6 +9,7 @@ import { createElement } from "../../../lib/dom";
 import { createModal } from "../../../lib/modalFactory";
 import { desktop } from "../../../platform/desktop";
 import type { NativeVoiceScreenSource } from "../../../platform/contracts/nativeVoice";
+import { voiceText as t } from "../../../i18n/voice";
 
 /** Resolve the source to share: a host source id, "portal", or null when
  *  the user closed the picker. */
@@ -22,7 +23,7 @@ export async function pickScreenSource(): Promise<string | null> {
       style: "padding:20px;",
     });
     content.appendChild(
-      createElement("h3", { id: "native-screen-picker-title" }, "Share your screen"),
+      createElement("h3", { id: "native-screen-picker-title" }, t("picker.title")),
     );
     const cards = createElement("div", {
       style:
@@ -48,13 +49,9 @@ export async function pickScreenSource(): Promise<string | null> {
     }
     if (listed.sources.length === 0)
       cards.appendChild(
-        createElement(
-          "p",
-          { style: "color:var(--text-secondary);" },
-          "No screens or windows can be shared in this desktop session.",
-        ),
+        createElement("p", { style: "color:var(--text-secondary);" }, t("picker.none")),
       );
-    const cancel = createElement("button", { class: "btn", type: "button" }, "Cancel");
+    const cancel = createElement("button", { class: "btn", type: "button" }, t("picker.cancel"));
     cancel.addEventListener("click", () => modal.close());
     content.appendChild(cancel);
   });
@@ -68,8 +65,9 @@ function sourceCard(source: NativeVoiceScreenSource): HTMLButtonElement {
     style:
       "display:flex;flex-direction:column;gap:6px;align-items:stretch;padding:8px;min-width:0;text-align:left;",
   });
-  const label = `${source.kind === "screen" ? "Screen" : "Window"}: ${source.title}`;
-  card.setAttribute("aria-label", `Share ${label}`);
+  const kind = source.kind === "screen" ? t("picker.screen") : t("picker.window");
+  const label = `${kind}: ${source.title}`;
+  card.setAttribute("aria-label", t("picker.shareLabel", { name: label }));
   const frame = createElement("div", {
     style:
       "aspect-ratio:16/9;background:var(--bg-tertiary,#000);display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:4px;",
@@ -82,7 +80,7 @@ function sourceCard(source: NativeVoiceScreenSource): HTMLButtonElement {
         style: "max-width:100%;max-height:100%;",
       }),
     );
-  else frame.appendChild(createElement("span", {}, "No preview"));
+  else frame.appendChild(createElement("span", {}, t("picker.noPreview")));
   card.appendChild(frame);
   card.appendChild(
     createElement(

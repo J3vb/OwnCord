@@ -9,7 +9,7 @@ import "@styles/theme-neon-glow.css";
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createApiClient, ApiClientError } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
-import { configureConnectionDiagnostics } from "@lib/connectionDiagnostics";
+
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { cleanupNotificationAudio } from "@lib/notifications";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
@@ -155,7 +155,12 @@ function handleUnauthorized(): void {
 }
 const api = createApiClient({ host: "" }, handleUnauthorized);
 const ws = createWsClient();
-configureConnectionDiagnostics(api, ws);
+// Diagnostics back the lazily loaded Settings > Logs panel, so their engine and
+// text stay out of the startup chunk (B9-20). The import resolves long before
+// the panel can be opened, and the panel's own module imports the same chunk.
+void import("@lib/connectionDiagnostics").then(({ configureConnectionDiagnostics }) => {
+  configureConnectionDiagnostics(api, ws);
+});
 // Registered here rather than imported by auth.store: notifications imports
 // auth.store, so that import was a cycle.
 onAuthCleared(cleanupNotificationAudio);

@@ -5,6 +5,7 @@
 
 import { createStore } from "@lib/store";
 import { channelsStore, removeChannel } from "@stores/channels.store";
+import { connectText } from "../i18n/connect";
 
 export interface DmUser {
   readonly id: number;
@@ -224,12 +225,12 @@ export function dmDisplayName(dm: DmChannel): string {
     return dm.recipient.username !== ""
       ? dm.recipient.username
       : dm.isGroup
-        ? "Empty group"
-        : "Unknown user";
+        ? connectText("dm.emptyGroup")
+        : connectText("dm.unknownUser");
   }
   if (!dm.isGroup) return names[0]!;
   if (names.length <= 3) return names.join(", ");
-  return `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
+  return `${names.slice(0, 3).join(", ")} ${connectText("dm.more", { count: names.length - 3 })}`;
 }
 
 /**

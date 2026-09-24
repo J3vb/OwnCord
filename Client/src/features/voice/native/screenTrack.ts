@@ -20,6 +20,7 @@ import { NativeVideoRenderer } from "./videoRenderer";
 
 /** The host's rejection of a start whose portal dialog was cancelled or
  *  refused (`screen::CANCELLED`). */
+// i18n-exempt: host rejection marker compared with includes(), never displayed
 const CANCELLED = "screen capture was cancelled or refused";
 
 /** The capture-option slice of livekit-client's `ScreenShareCaptureOptions`

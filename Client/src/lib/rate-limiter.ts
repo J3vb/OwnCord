@@ -23,9 +23,11 @@ export class RateLimiter {
     private readonly windowMs: number,
   ) {
     if (maxTokens < 1) {
+      // i18n-exempt: internal configuration guard, never rendered
       throw new Error("maxTokens must be >= 1");
     }
     if (windowMs < 1) {
+      // i18n-exempt: internal configuration guard, never rendered
       throw new Error("windowMs must be >= 1");
     }
   }

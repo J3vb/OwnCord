@@ -115,12 +115,27 @@ const TAB_ICONS: Record<TabName, IconName> = {
   Logs: "scroll-text",
 };
 
-// i18n-exempt: tab key; its label is settingsText("tabs.safety")
+// i18n-exempt: TabName key; its label is settingsText("tabs.safety")
 const SAFETY = "Safety" satisfies TabName;
+// i18n-exempt: TabName key; its label is settingsText("tabs.account")
+const ACCOUNT = "Account" satisfies TabName;
 
-/** What a tab is called on screen. The older tabs are still named by their key (B9-20). */
+/** What each tab is called on screen (B9-20 moved every label onto the seam). */
+const TAB_LABEL_KEYS = {
+  Account: "tabs.account",
+  Safety: "tabs.safety",
+  Appearance: "tabs.appearance",
+  Notifications: "tabs.notifications",
+  "Text & Images": "tabs.textImages",
+  Accessibility: "tabs.accessibility",
+  "Voice & Audio": "tabs.voice",
+  Keybinds: "tabs.keybinds",
+  Advanced: "tabs.advanced",
+  Logs: "tabs.logs",
+} as const satisfies Record<TabName, string>;
+
 function tabLabel(name: TabName): string {
-  return name === SAFETY ? settingsText("tabs.safety") : name;
+  return settingsText(TAB_LABEL_KEYS[name]);
 }
 
 /** Stable DOM id for a tab button (aria-labelledby target), e.g. "settings-tab-text-images". */
@@ -141,7 +156,8 @@ export function createSettingsOverlay(
   let panel: HTMLDivElement | null = null;
   let contentArea: HTMLDivElement | null = null;
   let pageTitle: HTMLHeadingElement | null = null;
-  let activeTab: TabName = authenticated ? "Account" : "Appearance";
+  // i18n-exempt: TabName key; its label is settingsText("tabs.appearance")
+  let activeTab: TabName = authenticated ? ACCOUNT : "Appearance";
   /** False once the active tab's content has been torn down by `hide()`. */
   let contentLive = false;
   /** Puts focus back on whatever opened the panel; null while closed. */
@@ -268,7 +284,7 @@ export function createSettingsOverlay(
       class: "settings-sidebar",
       role: "tablist",
       "aria-orientation": "vertical",
-      "aria-label": "Settings sections",
+      "aria-label": settingsText("shell.sections"),
     });
 
     // Arrow-key navigation between tabs, activate-on-focus (the simpler
@@ -308,15 +324,15 @@ export function createSettingsOverlay(
     const profileName = createElement(
       "div",
       { class: "settings-sidebar-name" },
-      user?.username ?? "Unknown",
+      user?.username ?? settingsText("common.unknown"),
     );
     const editProfileLink = createElement(
       "div",
       { class: "settings-sidebar-edit" },
-      "Edit Profile",
+      settingsText("shell.editProfile"),
     );
     if (authenticated) {
-      editProfileLink.addEventListener("click", () => setActiveTab("Account"), {
+      editProfileLink.addEventListener("click", () => setActiveTab(ACCOUNT), {
         signal: disposable.signal,
       });
     } else {
@@ -331,29 +347,33 @@ export function createSettingsOverlay(
     unsubAuth = authStore.subscribeSelector(
       (s) => s.user?.username,
       (name) => {
-        profileName.textContent = name ?? "Unknown";
+        profileName.textContent = name ?? settingsText("common.unknown");
         avatarEl.textContent = (name ?? "U").charAt(0).toUpperCase();
       },
     );
 
     // "User Settings" category — only Account belongs here (hidden when not authenticated)
     if (authenticated) {
-      const userSettingsCat = createElement("div", { class: "settings-cat" }, "User Settings");
+      const userSettingsCat = createElement(
+        "div",
+        { class: "settings-cat" },
+        settingsText("shell.userSettings"),
+      );
       sidebar.appendChild(userSettingsCat);
 
       const accountBtn = createElement("button", {
-        class: `settings-nav-item${activeTab === "Account" ? " active" : ""}`,
-        id: tabId("Account"),
+        class: `settings-nav-item${activeTab === ACCOUNT ? " active" : ""}`,
+        id: tabId(ACCOUNT),
         role: "tab",
-        "aria-selected": activeTab === "Account" ? "true" : "false",
-        tabindex: activeTab === "Account" ? "0" : "-1",
+        "aria-selected": activeTab === ACCOUNT ? "true" : "false",
+        tabindex: activeTab === ACCOUNT ? "0" : "-1",
       });
-      accountBtn.prepend(createIcon(TAB_ICONS["Account"], 18));
-      accountBtn.appendChild(document.createTextNode("Account"));
-      accountBtn.addEventListener("click", () => setActiveTab("Account"), {
+      accountBtn.prepend(createIcon(TAB_ICONS[ACCOUNT], 18));
+      accountBtn.appendChild(document.createTextNode(settingsText("tabs.account")));
+      accountBtn.addEventListener("click", () => setActiveTab(ACCOUNT), {
         signal: disposable.signal,
       });
-      tabButtons.set("Account", accountBtn);
+      tabButtons.set(ACCOUNT, accountBtn);
       sidebar.appendChild(accountBtn);
 
       if (options.safetyTab !== undefined) {
@@ -375,19 +395,16 @@ export function createSettingsOverlay(
     }
 
     // "App Settings" category — remaining tabs
-    const appSettingsCat = createElement("div", { class: "settings-cat" }, "App Settings");
+    const appSettingsCat = createElement(
+      "div",
+      { class: "settings-cat" },
+      settingsText("shell.appSettings"),
+    );
     sidebar.appendChild(appSettingsCat);
 
-    const appTabs: readonly TabName[] = [
-      "Appearance",
-      "Notifications",
-      "Text & Images",
-      "Accessibility",
-      "Voice & Audio",
-      "Keybinds",
-      "Advanced",
-      "Logs",
-    ];
+    const appTabs = (Object.keys(TAB_LABEL_KEYS) as TabName[]).filter(
+      (name) => name !== ACCOUNT && name !== SAFETY,
+    );
     for (const name of appTabs) {
       const btn = createElement("button", {
         class: `settings-nav-item${name === activeTab ? " active" : ""}`,
@@ -397,7 +414,7 @@ export function createSettingsOverlay(
         tabindex: name === activeTab ? "0" : "-1",
       });
       btn.prepend(createIcon(TAB_ICONS[name], 18));
-      btn.appendChild(document.createTextNode(name));
+      btn.appendChild(document.createTextNode(tabLabel(name)));
       btn.addEventListener("click", () => setActiveTab(name), { signal: disposable.signal });
       tabButtons.set(name, btn);
       sidebar.appendChild(btn);
@@ -407,14 +424,18 @@ export function createSettingsOverlay(
       // Separator + Log Out at sidebar bottom
       const logoutWrap = createElement("div", { class: "settings-sidebar-logout" });
       const logoutSep = createElement("div", { class: "settings-sep" });
-      const logoutBtn = createElement("button", { class: "settings-nav-item danger" }, "Log Out");
+      const logoutBtn = createElement(
+        "button",
+        { class: "settings-nav-item danger" },
+        settingsText("shell.logOut"),
+      );
       logoutBtn.addEventListener("click", () => options.onLogout(), { signal: disposable.signal });
       appendChildren(logoutWrap, logoutSep, logoutBtn);
       sidebar.appendChild(logoutWrap);
     }
 
     // Page title (h1) at top of content area — created here, inserted in renderActiveTab
-    pageTitle = createElement("h1", {}, activeTab);
+    pageTitle = createElement("h1", {}, tabLabel(activeTab));
 
     // Content — the single tabpanel, renamed per switch via aria-labelledby
     contentArea = createElement("div", {
@@ -434,7 +455,11 @@ export function createSettingsOverlay(
       },
       { signal: disposable.signal },
     );
-    const escLabel = createElement("div", { class: "settings-esc-label" }, "ESC");
+    const escLabel = createElement(
+      "div",
+      { class: "settings-esc-label" },
+      settingsText("shell.esc"),
+    );
     appendChildren(closeWrap, closeBtn, escLabel);
 
     // Escape key
@@ -450,7 +475,7 @@ export function createSettingsOverlay(
 
     // Inner panel (Discord-style centered card)
     panel = createElement("div", { class: "settings-panel" });
-    applyDialogSemantics(panel, { label: "Settings" });
+    applyDialogSemantics(panel, { label: settingsText("shell.title") });
     // Arming the trap while hidden is safe: Tab can't land inside a
     // display:none panel, so the handler only fires while the overlay is open.
     trapFocus(panel, disposable.signal);

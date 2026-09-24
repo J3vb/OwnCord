@@ -7,6 +7,7 @@ import { appendToggleRows } from "./helpers";
 import { listMutedChannels, unmuteChannel } from "@lib/channel-mutes";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { settingsText as t } from "../../i18n/settings";
 
 export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
@@ -14,26 +15,26 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const toggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
     {
       key: "desktopNotifications",
-      label: "Desktop Notifications",
-      desc: "Show desktop notifications for messages",
+      label: t("notifications.desktop.label"),
+      desc: t("notifications.desktop.desc"),
       fallback: true,
     },
     {
       key: "flashTaskbar",
-      label: "Flash Taskbar",
-      desc: "Flash taskbar on new messages",
+      label: t("notifications.flash.label"),
+      desc: t("notifications.flash.desc"),
       fallback: true,
     },
     {
       key: "suppressEveryone",
-      label: "Suppress @everyone",
-      desc: "Mute @everyone and @here — messages that name you still notify",
+      label: t("notifications.suppress.label"),
+      desc: t("notifications.suppress.desc"),
       fallback: false,
     },
     {
       key: "notificationSounds",
-      label: "Notification Sounds",
-      desc: "Play sounds for notifications",
+      label: t("notifications.sounds.label"),
+      desc: t("notifications.sounds.desc"),
       fallback: true,
     },
   ];
@@ -52,7 +53,8 @@ function mutedChannelName(channelId: number): string {
   if (dm !== undefined) return `@${dmDisplayName(dm)}`;
   // A mute can outlive the channel it names (deleted channel, left group). It
   // is shown rather than hidden so the user can clear it.
-  return `Channel ${channelId}`;
+  // i18n-exempt: a numeric channel id, formatted as a plain string so it is not thousands-grouped
+  return t("notifications.channelFallback", { id: String(channelId) });
 }
 
 /**
@@ -65,12 +67,8 @@ function mutedChannelName(channelId: number): string {
  */
 function buildMutedChannelsSection(signal: AbortSignal): HTMLDivElement {
   const wrapper = createElement("div", { class: "setting-row", style: "display:block;" });
-  const label = createElement("div", { class: "setting-label" }, "Muted Channels");
-  const desc = createElement(
-    "div",
-    { class: "setting-desc" },
-    "Muted channels never notify you, but messages that mention you still do.",
-  );
+  const label = createElement("div", { class: "setting-label" }, t("notifications.muted.title"));
+  const desc = createElement("div", { class: "setting-desc" }, t("notifications.muted.desc"));
   const list = createElement("div", {
     class: "settings-muted-list",
     "data-testid": "muted-channel-list",
@@ -85,7 +83,7 @@ function buildMutedChannelsSection(signal: AbortSignal): HTMLDivElement {
         createElement(
           "div",
           { class: "setting-desc", "data-testid": "muted-empty" },
-          "Nothing is muted.",
+          t("notifications.muted.empty"),
         ),
       );
       return;
@@ -101,7 +99,7 @@ function buildMutedChannelsSection(signal: AbortSignal): HTMLDivElement {
           type: "button",
           "data-testid": `unmute-${channelId}`,
         },
-        "Unmute",
+        t("notifications.muted.unmute"),
       );
       btn.addEventListener(
         "click",

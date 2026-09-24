@@ -14,6 +14,7 @@ import {
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches } from "@components/message-list/media";
 import { appendToggleRows, createToggle } from "./helpers";
+import { settingsText as t } from "../../i18n/settings";
 
 const log = createLogger("AdvancedTab");
 const IMAGE_CACHE_DELETE_BLOCK_TIMEOUT_MS = 1000;
@@ -31,8 +32,8 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   const toggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
     {
       key: "developerMode",
-      label: "Developer Mode",
-      desc: "Show message IDs, user IDs, and channel IDs on context menus",
+      label: t("advanced.developerMode.label"),
+      desc: t("advanced.developerMode.desc"),
       fallback: false,
     },
   ];
@@ -49,22 +50,26 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
 
   // ---- Debug section ---------------------------------------------------------
 
-  const debugTitle = createElement("div", { class: "settings-section-title" }, "Debug");
+  const debugTitle = createElement("div", { class: "settings-section-title" }, t("advanced.debug"));
   section.appendChild(debugTitle);
 
   if (import.meta.env.DEV) {
     // DevTools button row
     const devtoolsRow = createElement("div", { class: "setting-row" });
     const devtoolsInfo = createElement("div", {});
-    const devtoolsLabel = createElement("div", { class: "setting-label" }, "Open DevTools");
+    const devtoolsLabel = createElement(
+      "div",
+      { class: "setting-label" },
+      t("advanced.devtools.label"),
+    );
     const devtoolsDesc = createElement(
       "div",
       { class: "setting-desc" },
-      "Open the browser developer tools for debugging",
+      t("advanced.devtools.desc"),
     );
     appendChildren(devtoolsInfo, devtoolsLabel, devtoolsDesc);
 
-    const devtoolsBtn = createElement("button", { class: "ac-btn" }, "Open DevTools");
+    const devtoolsBtn = createElement("button", { class: "ac-btn" }, t("advanced.devtools.button"));
     devtoolsBtn.addEventListener(
       "click",
       () => {
@@ -86,37 +91,41 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   const cacheSep = createElement("div", { class: "settings-separator" });
   section.appendChild(cacheSep);
 
-  const cacheTitle = createElement("div", { class: "settings-section-title" }, "Storage & Cache");
+  const cacheTitle = createElement(
+    "div",
+    { class: "settings-section-title" },
+    t("advanced.storageCache"),
+  );
   section.appendChild(cacheTitle);
 
   // Clear Image Cache
   section.appendChild(
     buildCacheRow(
-      "Clear Image Cache",
-      "Remove cached images and link previews. They will be re-downloaded as needed.",
-      "Clear",
+      t("advanced.clearImages.label"),
+      t("advanced.clearImages.desc"),
+      t("advanced.button.clear"),
       signal,
       async (btn) => {
-        btn.textContent = "Clearing...";
+        btn.textContent = t("advanced.button.clearing");
         btn.setAttribute("disabled", "");
         try {
           await clearImageCache();
-          btn.textContent = "Cleared!";
+          btn.textContent = t("advanced.button.cleared");
           setOwnedTimeout(
             signal,
             () => {
-              btn.textContent = "Clear";
+              btn.textContent = t("advanced.button.clear");
               btn.removeAttribute("disabled");
             },
             2000,
           );
         } catch (err) {
           log.error("Failed to clear image cache", err);
-          btn.textContent = "Failed";
+          btn.textContent = t("advanced.button.failed");
           setOwnedTimeout(
             signal,
             () => {
-              btn.textContent = "Clear";
+              btn.textContent = t("advanced.button.clear");
               btn.removeAttribute("disabled");
             },
             2000,
@@ -129,12 +138,12 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   // Clear Log Files
   section.appendChild(
     buildCacheRow(
-      "Clear Log Files",
-      "Remove persisted client log files from disk.",
-      "Clear",
+      t("advanced.clearLogs.label"),
+      t("advanced.clearLogs.desc"),
+      t("advanced.button.clear"),
       signal,
       async (btn) => {
-        btn.textContent = "Clearing...";
+        btn.textContent = t("advanced.button.clearing");
         btn.setAttribute("disabled", "");
         try {
           // The button's own test (tests/unit/advanced-tab.test.ts) asserts the
@@ -142,22 +151,22 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
           // clearAll() drains it again, which is a no-op.
           await clearPendingPersistedLogs();
           await desktop.logFiles.clearAll();
-          btn.textContent = "Cleared!";
+          btn.textContent = t("advanced.button.cleared");
           setOwnedTimeout(
             signal,
             () => {
-              btn.textContent = "Clear";
+              btn.textContent = t("advanced.button.clear");
               btn.removeAttribute("disabled");
             },
             2000,
           );
         } catch (err) {
           log.error("Failed to clear log files", err);
-          btn.textContent = "Failed";
+          btn.textContent = t("advanced.button.failed");
           setOwnedTimeout(
             signal,
             () => {
-              btn.textContent = "Clear";
+              btn.textContent = t("advanced.button.clear");
               btn.removeAttribute("disabled");
             },
             2000,
@@ -170,20 +179,19 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   // Clear All Cache (nuclear option)
   section.appendChild(
     buildCacheRow(
-      "Clear All Cache & Restart",
-      "Remove all cached data (images, logs, WebView storage) and restart the app. " +
-        "Server profiles and credentials are preserved.",
-      "Clear & Restart",
+      t("advanced.clearAll.label"),
+      t("advanced.clearAll.desc"),
+      t("advanced.button.clearRestart"),
       signal,
       async (btn) => {
         // Two-step confirmation: first click shows warning, second click confirms
         if (btn.dataset.confirmPending !== "true") {
           btn.dataset.confirmPending = "true";
-          btn.textContent = "Are you sure? Click again";
+          btn.textContent = t("advanced.button.confirmAgain");
           btn.classList.add("ac-btn-danger");
           const resetTimer = setTimeout(() => {
             btn.dataset.confirmPending = "";
-            btn.textContent = "Clear & Restart";
+            btn.textContent = t("advanced.button.clearRestart");
             btn.classList.remove("ac-btn-danger");
           }, 3000);
           // Store timer ID so it can be cleared if the button is clicked again
@@ -194,7 +202,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
         const pendingTimer = btn.dataset.resetTimer;
         if (pendingTimer) clearTimeout(Number(pendingTimer));
         btn.dataset.confirmPending = "";
-        btn.textContent = "Clearing...";
+        btn.textContent = t("advanced.button.clearing");
         btn.setAttribute("disabled", "");
         try {
           await clearImageCache();
@@ -209,11 +217,11 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
           await desktop.appProcess.relaunch();
         } catch (err) {
           log.error("Failed to clear all cache", err);
-          btn.textContent = "Failed";
+          btn.textContent = t("advanced.button.failed");
           setOwnedTimeout(
             signal,
             () => {
-              btn.textContent = "Clear & Restart";
+              btn.textContent = t("advanced.button.clearRestart");
               btn.removeAttribute("disabled");
             },
             2000,
@@ -239,12 +247,8 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
 function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
   const row = createElement("div", { class: "setting-row" });
   const info = createElement("div", {});
-  const label = createElement("div", { class: "setting-label" }, "Launch on Login");
-  const desc = createElement(
-    "div",
-    { class: "setting-desc" },
-    "Start OwnCord automatically when you sign in to your computer",
-  );
+  const label = createElement("div", { class: "setting-label" }, t("advanced.launchOnLogin.label"));
+  const desc = createElement("div", { class: "setting-desc" }, t("advanced.launchOnLogin.desc"));
   appendChildren(info, label, desc);
 
   // Starts off; corrected to the real OS state once the plugin answers.
@@ -256,7 +260,7 @@ function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
   let touched = false;
   const toggle = createToggle(false, {
     signal,
-    label: "Launch on Login",
+    label: t("advanced.launchOnLogin.label"),
     onChange: (nowOn) => {
       touched = true;
       void (async () => {
@@ -343,9 +347,9 @@ async function clearImageCache(): Promise<void> {
     req.onblocked = () => {
       if (blockedTimer !== null) return;
       blockedTimer = setTimeout(() => {
-        finish(() =>
-          reject(new Error("Image cache is still in use. Close active media and try again.")),
-        );
+        // The caller shows only the generic "Failed" button state, never this text.
+        const blocked = new Error("Image cache is still in use. Close active media and try again."); // i18n-exempt: internal error, only the button state is shown
+        finish(() => reject(blocked));
       }, IMAGE_CACHE_DELETE_BLOCK_TIMEOUT_MS);
     };
   });

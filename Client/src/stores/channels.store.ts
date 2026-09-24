@@ -4,6 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { connectText } from "../i18n/connect";
 import type {
   ReadyChannel,
   ReadyRole,
@@ -314,7 +315,15 @@ export function getActiveChannel(): Channel | null {
  * category at all needs somewhere to go, and mixing it into the unnamed group
  * next to uncategorized text channels reads as a bug, so it gets this group.
  */
+// i18n-exempt: stable group key, not rendered directly; categoryLabel() maps it to the channel.voiceCategory catalog entry
 export const UNCATEGORIZED_VOICE_CATEGORY = "Voice";
+
+/** The header text for a category; the synthetic voice group reads through the catalog. */
+export function categoryLabel(category: string): string {
+  return category === UNCATEGORIZED_VOICE_CATEGORY
+    ? connectText("channel.voiceCategory")
+    : category;
+}
 
 /** The category header a channel is displayed under. */
 export function displayCategoryOf(channel: Channel): string | null {

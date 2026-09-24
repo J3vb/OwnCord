@@ -15,6 +15,7 @@ import {
   setUserVolume,
 } from "@lib/livekitSession";
 import type { MountableComponent } from "@lib/safe-render";
+import { voiceText } from "../i18n/voice";
 
 const log = createLogger("VideoGrid");
 
@@ -346,7 +347,7 @@ export function createVideoGrid(): VideoGridComponent {
         max: config.isScreenshare ? "100" : "200",
         value: String(currentVolume),
         class: "tile-volume-slider",
-        "aria-label": "Volume",
+        "aria-label": voiceText("widget.volume"),
       });
 
       volumeSlider.addEventListener("input", () => {
@@ -362,7 +363,10 @@ export function createVideoGrid(): VideoGridComponent {
           setUserVolume(config.audioUserId, currentVolume);
         }
         setButtonIcon(muteBtn, muted ? volumeXIcon() : volumeIcon());
-        muteBtn.setAttribute("aria-label", muted ? "Unmute" : "Mute");
+        muteBtn.setAttribute(
+          "aria-label",
+          muted ? voiceText("widget.control.unmute") : voiceText("widget.control.mute"),
+        );
         if (muted !== wasMuted) {
           overlay.classList.toggle("muted", muted);
         }
@@ -371,7 +375,7 @@ export function createVideoGrid(): VideoGridComponent {
       // Mute button
       const muteBtn = createElement("button", {
         class: "tile-mute-btn",
-        "aria-label": muted ? "Unmute" : "Mute",
+        "aria-label": muted ? voiceText("widget.control.unmute") : voiceText("widget.control.mute"),
       });
       muteBtn.appendChild(muted ? volumeXIcon() : volumeIcon());
       if (muted) overlay.classList.add("muted");
@@ -396,7 +400,10 @@ export function createVideoGrid(): VideoGridComponent {
           volumeSlider.value = String(currentVolume);
         }
         setButtonIcon(muteBtn, muted ? volumeXIcon() : volumeIcon());
-        muteBtn.setAttribute("aria-label", muted ? "Unmute" : "Mute");
+        muteBtn.setAttribute(
+          "aria-label",
+          muted ? voiceText("widget.control.unmute") : voiceText("widget.control.mute"),
+        );
         overlay.classList.toggle("muted", muted);
       });
 

@@ -21,6 +21,7 @@
 import type { SessionInfo } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { formatMessageTimestamp } from "@components/message-list/formatting";
+import { accountText } from "../i18n/account";
 
 const log = createLogger("session-notice");
 
@@ -33,26 +34,26 @@ const log = createLogger("session-notice");
 const DESKTOP_USER_AGENT = /^(OwnCord-Client|tauri-plugin-http)\//;
 
 export function sessionDeviceLabel(device: string): string {
-  if (device === "") return "Unknown device";
-  if (DESKTOP_USER_AGENT.test(device)) return "OwnCord desktop";
+  if (device === "") return accountText("notice.unknownDevice");
+  if (DESKTOP_USER_AGENT.test(device)) return accountText("notice.desktop");
   return device;
 }
 
 /** "OwnCord desktop from 203.0.113.5, Today at 2:34 PM" */
 export function describeSession(s: SessionInfo): string {
-  const where = s.ip === "" ? "" : ` from ${s.ip}`;
-  return `${sessionDeviceLabel(s.device)}${where}, ${formatMessageTimestamp(s.created_at)}`;
+  const device = sessionDeviceLabel(s.device);
+  const time = formatMessageTimestamp(s.created_at);
+  return s.ip === ""
+    ? accountText("notice.noIp", { device, time })
+    : accountText("notice.from", { device, ip: s.ip, time });
 }
 
 /** The toast text for one listing's unreviewed sign-ins (newest first). */
 export function sessionNoticeMessage(unseen: readonly SessionInfo[]): string {
   const [newest] = unseen;
   if (newest === undefined) return "";
-  const more = unseen.length > 1 ? ` and ${unseen.length - 1} more` : "";
-  return (
-    `A sign-in to your account you have not reviewed: ${describeSession(newest)}${more}. ` +
-    "Review your devices in Settings > Account."
-  );
+  const more = unseen.length > 1 ? accountText("notice.more", { count: unseen.length - 1 }) : "";
+  return accountText("notice.message", { session: describeSession(newest), more });
 }
 
 export interface SessionNoticeOptions {

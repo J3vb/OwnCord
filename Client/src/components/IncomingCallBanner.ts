@@ -14,6 +14,7 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { RingState } from "@lib/call-ring";
+import { voiceText } from "../i18n/voice";
 
 export interface IncomingCallBannerOptions {
   readonly onAccept: () => void;
@@ -45,7 +46,11 @@ export function createIncomingCallBanner(
     class: "incoming-call-title",
     "data-testid": "incoming-call-title",
   });
-  const subtitle = createElement("div", { class: "incoming-call-subtitle" }, "Incoming call");
+  const subtitle = createElement(
+    "div",
+    { class: "incoming-call-subtitle" },
+    voiceText("call.incoming"),
+  );
   appendChildren(info, title, subtitle);
 
   const acceptBtn = createElement(
@@ -55,7 +60,7 @@ export function createIncomingCallBanner(
       type: "button",
       "data-testid": "incoming-call-accept",
     },
-    "Accept",
+    voiceText("call.accept"),
   );
   acceptBtn.addEventListener("click", () => options.onAccept(), { signal: disposable.signal });
 
@@ -66,7 +71,7 @@ export function createIncomingCallBanner(
       type: "button",
       "data-testid": "incoming-call-decline",
     },
-    "Decline",
+    voiceText("call.decline"),
   );
   declineBtn.addEventListener("click", () => options.onDecline(), { signal: disposable.signal });
 
@@ -81,7 +86,7 @@ export function createIncomingCallBanner(
       return;
     }
     // setText, never innerHTML: the username is user-controlled.
-    setText(title, `${state.fromUsername} is calling`);
+    setText(title, voiceText("call.isCalling", { name: state.fromUsername }));
     root.style.display = "";
   }
 

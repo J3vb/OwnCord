@@ -19,7 +19,7 @@ vi.mock("../../src/lib/httpProxy", () => ({
   stopHttpProxy: () => Promise.resolve(),
 }));
 
-import { createApiClient, ApiClientError, type OnUnauthorized } from "../../src/lib/api";
+import { createApiClient, ApiClientError, errorText, type OnUnauthorized } from "../../src/lib/api";
 import { expectConsole } from "../helpers/console";
 
 function jsonResponse(data: unknown, status = 200): Response {
@@ -1346,5 +1346,34 @@ describe("API Client", () => {
         password: "p",
       });
     });
+  });
+});
+
+describe("errorText (B9-20, Q7)", () => {
+  it("shows catalog text for a mapped server code, not the server's message", () => {
+    const err = new ApiClientError(
+      429,
+      "RATE_LIMITED",
+      "too many failed attempts, try again later",
+    );
+    expect(errorText(err, "Failed to change password.")).toBe(
+      "Too many requests. Try again later.",
+    );
+  });
+
+  it("shows the caller's catalog text for an internal server failure", () => {
+    const err = new ApiClientError(500, "INTERNAL_ERROR", "failed to delete account");
+    expect(errorText(err, "Failed to delete account.")).toBe("Failed to delete account.");
+  });
+
+  it("shows the server's message only when its code has no mapping", () => {
+    const err = new ApiClientError(400, "INVALID_INPUT", "incorrect password");
+    expect(errorText(err, "Failed to delete account.")).toBe("incorrect password");
+    expect(errorText(new ApiClientError(400, "INVALID_INPUT", ""), "Fallback")).toBe("Fallback");
+  });
+
+  it("keeps a non-server error's own message and falls back for a non-error", () => {
+    expect(errorText(new Error("offline"), "Fallback")).toBe("offline");
+    expect(errorText("nope", "Fallback")).toBe("Fallback");
   });
 });

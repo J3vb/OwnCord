@@ -8,6 +8,7 @@ import { createEmojiPicker } from "@components/EmojiPicker";
 import { addOptimisticReaction, getChannelMessages } from "@stores/messages.store";
 import { listCustomEmoji } from "@stores/emoji.store";
 import type { WsClient } from "@lib/ws";
+import { shellText } from "../../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,7 +37,7 @@ export function createReactionController(opts: ReactionControllerOptions): React
 
   function sendReaction(msgId: number, emoji: string): void {
     if (!reactionsLimiter.tryConsume()) {
-      showError("Slow down! Please wait before reacting again.");
+      showError(shellText("messages.reactionSlowDown"));
       return;
     }
     const channelId = getChannelId();

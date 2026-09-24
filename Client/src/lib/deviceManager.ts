@@ -10,6 +10,7 @@ import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import type { AudioPipeline } from "@lib/audioPipeline";
 import { nativeAudioDevices } from "../features/voice/native/devices";
+import { voiceText } from "../i18n/voice";
 
 const log = createLogger("deviceManager");
 
@@ -145,13 +146,13 @@ export class DeviceManager {
             this.audioPipeline?.setupAudioPipeline();
           } catch (pipelineErr) {
             log.warn("Audio pipeline setup failed after device fallback", pipelineErr);
-            this.onToast?.("Audio pipeline error after device switch");
+            this.onToast?.(voiceText("device.pipelineError"));
           }
-          this.onToast?.("Audio device disconnected — switched to default");
+          this.onToast?.(voiceText("device.inputDisconnected"));
         } catch (err) {
           if (this.room !== room) return;
           log.error("Failed to fallback to default input device", err);
-          this.onErrorCallback?.("No audio input device available");
+          this.onErrorCallback?.(voiceText("device.noInput"));
         }
       }
 
@@ -169,12 +170,12 @@ export class DeviceManager {
           if (this.room !== room || loadPref<string>("audioOutputDevice", "") !== savedOutput)
             return;
           savePref("audioOutputDevice", "");
-          this.onToast?.("Audio output device disconnected — switched to default");
+          this.onToast?.(voiceText("device.outputDisconnected"));
         } catch (err) {
           if (this.room !== room || loadPref<string>("audioOutputDevice", "") !== savedOutput)
             return;
           log.error("Failed to fallback to default output device", err);
-          this.onErrorCallback?.("Failed to switch to default speaker");
+          this.onErrorCallback?.(voiceText("device.defaultSpeakerFailed"));
         }
       }
 
@@ -223,7 +224,7 @@ export class DeviceManager {
         this.audioPipeline?.setupAudioPipeline();
       } catch (pipelineErr) {
         log.warn("Audio pipeline setup failed after input device switch", pipelineErr);
-        this.onToast?.("Audio pipeline error after device switch");
+        this.onToast?.(voiceText("device.pipelineError"));
       }
       // Re-apply or remove RNNoise processor based on current setting
       const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
@@ -236,7 +237,7 @@ export class DeviceManager {
     } catch (err) {
       if (this.room !== room) return;
       log.error("Failed to switch input device", err);
-      this.onErrorCallback?.("Failed to switch microphone");
+      this.onErrorCallback?.(voiceText("device.micFailed"));
     }
   }
 
@@ -257,7 +258,7 @@ export class DeviceManager {
     } catch (err) {
       if (this.room !== room) return;
       log.error("Failed to switch output device", err);
-      this.onErrorCallback?.("Failed to switch speaker");
+      this.onErrorCallback?.(voiceText("device.speakerFailed"));
     }
   }
 }

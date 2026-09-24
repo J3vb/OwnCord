@@ -185,3 +185,109 @@ render path as a fallback; fail closed and record a blocker instead.
 **Options and consequences:** Cover all app-authored desktop text, including native menus/notifications/errors, while treating OS/user/server data as classified inputs; or limit extraction to TypeScript. TypeScript-only is smaller but leaves desktop-owned text outside BPR-064; including the server admin panel would further expand this client phase.
 
 **Drafting recommendation (historical):** Cover renderer and app-authored native desktop text, inventory visible server errors with a client mapping where appropriate, explicitly exclude OS/user data and the separately served admin panel. Confirm catalog ownership and those exclusions.
+
+## Implementation record (2026-09-23)
+
+**Base:** `dev` `55589d43` (B9-18 merged). **Head:** `c233af68`.
+
+### What moved
+
+- **Catalogs.** `Client/src/i18n/account.ts` (`accountText`, new) owns the
+  Account tab (profile, avatar, password, two-factor, status, devices,
+  retention, deletion), the recovery-kit and recovery-code sections, the
+  unseen-sign-in notice and the main page's account toasts.
+  `Client/src/i18n/voice.ts` (`voiceText`, new) owns the voice widget and grid,
+  the per-user volume menu, the incoming-call banner, the
+  Linux screen picker, the push-to-talk key names and the voice/media error
+  toasts. `settings.ts` grows the settings tabs, the connection-diagnostics
+  panel, Voice & Audio and the support-bundle README. `connect.ts` (the startup
+  chunk) takes the copy startup-reachable modules raise: the session
+  shut-down/restarting/ban messages, the update banner, the DM fallbacks, the
+  server-default retention notice, the block reasons, the voice-capacity
+  refusals and the dispatcher's generic "Server error" fallback.
+- **Chunk placement.** Every startup-resident file reads `connect.ts`, already
+  in the startup closure; every lazy file reads its feature catalog. The
+  connection-diagnostics engine moved behind a lazy `import()` in `main.ts` so
+  its 30 strings could read the lazily loaded `settings.ts` instead of adding a
+  startup catalog.
+- **Exempt with a reason.** Internal `Error`s that never render: the E2EE
+  protocol guards, the pending-message persistence guards, the rate-limiter and
+  session-scope guards, the ws ping liveness errors, the WebGL/GLSL shader
+  source, the native-room state guards, `localStorage` keys and the desktop-seam
+  "Tauri APIs not available" guards. Each carries an `i18n-exempt:` comment.
+- **Rust (Q7).** `Client/src-tauri/src/text.rs` is one constant table for the
+  tray menu and tooltip, the startup failure dialog and the certificate/TOFU
+  messages; `tray.rs`, `lib.rs`, `tofu.rs`, `ws_proxy.rs` and `http_proxy.rs`
+  reference it. `tray.rs` builds its menu and tooltip from one spec that
+  `menu_and_tooltip_come_from_the_text_table` checks; `text.rs`'s tests check
+  the startup dialog body and the certificate messages (the mismatch through
+  `tofu::mismatch_message`, which both proxies call), and a supplementary
+  `call_sites_do_not_repeat_the_table` fails if a call site hard-codes the
+  table's text again. The certificate refusals reach the renderer as a
+  `cert-tofu` event classified by `status`, which it maps to connect-catalog
+  text; other Rust command errors are not classified as codes yet.
+- **Server errors (Q7).** `serverErrorText` and `errorText` in `lib/api.ts`
+  are the one mapping from a server error code to catalog text, used by the
+  ws `error` fallback toast, the Account tab, the recovery sections and the
+  main page's account toasts: `RATE_LIMITED` shows catalog text, an internal
+  failure shows the caller's own catalog fallback, and the server's message
+  appears only for an unmapped code. The code-gated `BANNED`, `CHANNEL_FULL`
+  and `VIDEO_LIMIT` branches show their catalog text and no longer prefer the
+  server's message, and the Account tab recognises "2FA required by this
+  server" by the `FORBIDDEN` code rather than by searching the message.
+- **Numbers.** Byte sizes, pixel sizes and retention days are passed as
+  strings, so the English stays ungrouped ("1024 KB", "1095 days").
+
+### Accessibility fixes found by the expansion run
+
+- **Voice & Audio** (`VoiceAudioTab.ts`): the input/output/video device selects,
+  the stream-quality and FPS selects, and the input/output volume sliders had no
+  accessible name; each now has one from the catalog.
+- **Logs** (`LogsTab.ts`): the filter and minimum-level selects had no
+  accessible name; each now has one.
+- **Appearance** (`AppearanceTab.ts`): the font-size slider had no accessible
+  name; it now reads "Font Size".
+- All three faults predate B9-20.
+
+### Bundle budget
+
+| Chunk           | Base `55589d43` | This branch |   Budget |
+| --------------- | --------------: | ----------: | -------: |
+| startup closure |        93,944 B |    90,889 B | 94,000 B |
+| MainPage        |        63,162 B |    63,140 B | 64,000 B |
+
+Moving the diagnostics engine behind a lazy import and reading the lazy
+settings catalog there took the startup closure 3,049 B below the base, so no
+budget change was needed. `Client/bundle-budgets.json` is untouched.
+
+### Evidence
+
+Base `55589d43`; branch head `c233af68`; Node 26.9.0, Rust 1.98.1, clang 23,
+Linux.
+
+| Check                                                                                         | Result                                                                                                              |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `node scripts/check-ui-strings.mjs --update`, then the gate                                   | B9-20 literals 624 → 0; the baseline lists no B9-20 file (only B9-19's 416 remain); no new UI text                  |
+| `npx vitest run --maxWorkers=4` (whole client, includes `ui-strings.test.ts`)                 | 297 files; 6,477 passed, 152 expected-fail; the one failure (`livekit-e2ee-enable-ack`) is pre-existing at the base |
+| `npm run typecheck`, `typecheck:build`, `typecheck:e2e`, `npm run lint`, `knip`               | clean                                                                                                               |
+| `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --lib` | clean; 235 passed, 2 ignored                                                                                        |
+| Playwright `b9-text-expansion` (B9-3, B9-18 and the new B9-20 cases), 8 tests                 | 8 passed                                                                                                            |
+| Playwright `settings-tabs-extra`, `settings-overlay`, `voice-channel`                         | 46 passed                                                                                                           |
+| Playwright `account-security`, `recovery-flow`, `sessions`, `updater`                         | 18 passed                                                                                                           |
+| `npm run build:budget && npm run check:budgets`                                               | all ok; startup 90,895 B of 94,000 B, MainPage 63,143 B of 64,000 B                                                 |
+| `npm run check:docs`, `npm run check:hygiene` (prettier)                                      | passed                                                                                                              |
+
+The expanded cases need the dev server's modules and skip under the
+production-bundle config. They run on a private port because the default 1420
+was held by another lane.
+
+### Accessibility blocks (BPR-091) for this journey
+
+| Block          | Status                                                                                                                                                                                                                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Keyboard       | Automated at 940×500 with expanded text: every settings tab, Account included, is reached with ArrowDown/Home and scanned for unnamed controls; the account deletion form is opened, submitted and cancelled with Enter, Tab and Space; the voice widget's Mute toggles with Space and Enter |
+| Screen reader  | Automated: accessible names come from the catalog in English and expanded. NVDA (Windows) and Orca (Linux) recordings **pending owner**                                                                                                                                                      |
+| Focus          | No change: the tabs and dialogs keep B9-2's focus handling                                                                                                                                                                                                                                   |
+| Contrast       | No change: no colour or token changed; B9-2's Q1/Q8 matrix applies                                                                                                                                                                                                                           |
+| Reduced motion | No change: no animation changed                                                                                                                                                                                                                                                              |
+| Zoom/reflow    | Automated at 940×500 with 20 px Large Font, English and expanded, for the settings tabs and the voice widget; OS zoom 200 % **pending owner**                                                                                                                                                |

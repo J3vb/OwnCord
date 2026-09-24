@@ -15,6 +15,7 @@ import {
 } from "@lib/livekitSession";
 import { nativeAudioDevices } from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
+import { settingsText as t } from "../../i18n/settings";
 
 const log = createLogger("VoiceAudioTab");
 
@@ -111,18 +112,19 @@ function buildVoiceAudioTabInner(
   const nativeAudio = isLinuxDesktop();
 
   // Input device selector
-  const inputHeader = createElement("h3", {}, "Input Device");
+  const inputHeader = createElement("h3", {}, t("voiceAudio.inputDevice"));
   const inputSelect = createElement("select", {
     class: "form-input",
     style: "width:100%;margin-bottom:12px",
+    "aria-label": t("voiceAudio.inputDevice"),
   });
-  const defaultInputOpt = createElement("option", { value: "" }, "Default");
+  const defaultInputOpt = createElement("option", { value: "" }, t("voiceAudio.default"));
   inputSelect.appendChild(defaultInputOpt);
   section.appendChild(inputHeader);
   section.appendChild(inputSelect);
 
   // Input Volume slider
-  const inputVolumeHeader = createElement("h3", {}, "Input Volume");
+  const inputVolumeHeader = createElement("h3", {}, t("voiceAudio.inputVolume"));
   section.appendChild(inputVolumeHeader);
   const inputVolumeRow = createElement("div", { class: "slider-row" });
   const savedInputVolume = loadPref<number>("inputVolume", 100);
@@ -133,6 +135,7 @@ function buildVoiceAudioTabInner(
     max: "200",
     step: "1",
     value: String(savedInputVolume),
+    "aria-label": t("voiceAudio.inputVolume"),
   });
   const inputVolumeLabel = createElement("span", { class: "slider-val" }, `${savedInputVolume}%`);
   inputVolumeSlider.addEventListener(
@@ -148,7 +151,7 @@ function buildVoiceAudioTabInner(
   section.appendChild(inputVolumeRow);
 
   // ── Mic level meter with draggable sensitivity threshold ────────
-  const sensitivityHeader = createElement("h3", {}, "Input Sensitivity");
+  const sensitivityHeader = createElement("h3", {}, t("voiceAudio.inputSensitivity"));
   section.appendChild(sensitivityHeader);
 
   // Real-time mic level bar with embedded draggable threshold handle
@@ -222,18 +225,19 @@ function buildVoiceAudioTabInner(
   );
 
   // Output device selector
-  const outputHeader = createElement("h3", {}, "Output Device");
+  const outputHeader = createElement("h3", {}, t("voiceAudio.outputDevice"));
   const outputSelect = createElement("select", {
     class: "form-input",
     style: "width:100%;margin-bottom:12px",
+    "aria-label": t("voiceAudio.outputDevice"),
   });
-  const defaultOutputOpt = createElement("option", { value: "" }, "Default");
+  const defaultOutputOpt = createElement("option", { value: "" }, t("voiceAudio.default"));
   outputSelect.appendChild(defaultOutputOpt);
   section.appendChild(outputHeader);
   section.appendChild(outputSelect);
 
   // Output Volume slider
-  const outputVolumeHeader = createElement("h3", {}, "Output Volume");
+  const outputVolumeHeader = createElement("h3", {}, t("voiceAudio.outputVolume"));
   section.appendChild(outputVolumeHeader);
   const outputVolumeRow = createElement("div", { class: "slider-row" });
   const savedOutputVolume = loadPref<number>("outputVolume", 100);
@@ -244,6 +248,7 @@ function buildVoiceAudioTabInner(
     max: "200",
     step: "1",
     value: String(savedOutputVolume),
+    "aria-label": t("voiceAudio.outputVolume"),
   });
   const outputVolumeLabel = createElement("span", { class: "slider-val" }, `${savedOutputVolume}%`);
   outputVolumeSlider.addEventListener(
@@ -259,23 +264,24 @@ function buildVoiceAudioTabInner(
   section.appendChild(outputVolumeRow);
 
   // Stream quality selector
-  const qualityHeader = createElement("h3", {}, "Stream Quality");
+  const qualityHeader = createElement("h3", {}, t("voiceAudio.streamQuality"));
   const qualityDesc = createElement(
     "p",
     {
       style: "color:var(--text-muted);font-size:12px;margin:0 0 8px",
     },
-    "Applies to camera and screenshare. Higher quality uses more bandwidth. Changes take effect on next voice join.",
+    t("voiceAudio.streamQualityDesc"),
   );
   const qualitySelect = createElement("select", {
     class: "form-input",
     style: "width:100%;margin-bottom:16px",
+    "aria-label": t("voiceAudio.streamQuality"),
   });
   const qualityOptions: Array<[string, string]> = [
-    ["low", "Low (360p cam / 720p screen)"],
-    ["medium", "Medium (720p)"],
-    ["high", "High (1080p)"],
-    ["source", "Source (1080p max bitrate)"],
+    ["low", t("voiceAudio.quality.low")],
+    ["medium", t("voiceAudio.quality.medium")],
+    ["high", t("voiceAudio.quality.high")],
+    ["source", t("voiceAudio.quality.source")],
   ];
   const savedQuality = loadPref<string>("streamQuality", "high");
   for (const [value, label] of qualityOptions) {
@@ -296,22 +302,23 @@ function buildVoiceAudioTabInner(
   section.appendChild(qualitySelect);
 
   // Screen share FPS selector
-  const fpsHeader = createElement("h3", {}, "Screen Share FPS");
+  const fpsHeader = createElement("h3", {}, t("voiceAudio.screenFps"));
   const fpsDesc = createElement(
     "p",
     {
       style: "color:var(--text-muted);font-size:12px;margin:0 0 8px",
     },
-    "Higher frame rates use more bandwidth and depend on what the capture source and display can deliver. Takes effect the next time you start sharing.",
+    t("voiceAudio.screenFpsDesc"),
   );
   const fpsSelect = createElement("select", {
     class: "form-input",
     style: "width:100%;margin-bottom:16px",
+    "aria-label": t("voiceAudio.screenFps"),
   });
   const fpsOptions: Array<[number, string]> = [
-    [30, "30 FPS (default)"],
-    [60, "60 FPS"],
-    [120, "120 FPS"],
+    [30, t("voiceAudio.fps.30")],
+    [60, t("voiceAudio.fps.60")],
+    [120, t("voiceAudio.fps.120")],
   ];
   const savedFpsRaw = loadPref<number>("screenShareFps", 30);
   const savedFps = savedFpsRaw === 60 || savedFpsRaw === 120 ? savedFpsRaw : 30;
@@ -333,12 +340,13 @@ function buildVoiceAudioTabInner(
   section.appendChild(fpsSelect);
 
   // Video device selector
-  const videoHeader = createElement("h3", {}, "Video Device");
+  const videoHeader = createElement("h3", {}, t("voiceAudio.videoDevice"));
   const videoSelect = createElement("select", {
     class: "form-input",
     style: "width:100%;margin-bottom:12px",
+    "aria-label": t("voiceAudio.videoDevice"),
   });
-  const defaultVideoOpt = createElement("option", { value: "" }, "Default");
+  const defaultVideoOpt = createElement("option", { value: "" }, t("voiceAudio.default"));
   videoSelect.appendChild(defaultVideoOpt);
   section.appendChild(videoHeader);
   section.appendChild(videoSelect);
@@ -368,9 +376,9 @@ function buildVoiceAudioTabInner(
    */
   async function populateDevices(): Promise<void> {
     const selects: Array<[HTMLSelectElement, MediaDeviceKind, string, string]> = [
-      [inputSelect, "audioinput", "audioInputDevice", "Microphone"],
-      [outputSelect, "audiooutput", "audioOutputDevice", "Speaker"],
-      [videoSelect, "videoinput", "videoInputDevice", "Camera"],
+      [inputSelect, "audioinput", "audioInputDevice", t("voiceAudio.kind.microphone")],
+      [outputSelect, "audiooutput", "audioOutputDevice", t("voiceAudio.kind.speaker")],
+      [videoSelect, "videoinput", "videoInputDevice", t("voiceAudio.kind.camera")],
     ];
     try {
       // On Linux the audio lists come from the native backend (the ids the
@@ -408,7 +416,7 @@ function buildVoiceAudioTabInner(
       const errOpt = createElement(
         "option",
         { value: "", disabled: "" },
-        "Could not enumerate devices",
+        t("voiceAudio.enumerateFailed"),
       );
       inputSelect.appendChild(errOpt);
     }
@@ -494,7 +502,7 @@ function buildVoiceAudioTabInner(
         previewVideo.srcObject = stream;
       } catch (err) {
         if (signal.aborted || thisRequest !== cameraRequestId) return;
-        const msg = err instanceof Error ? err.message : "Camera unavailable";
+        const msg = err instanceof Error ? err.message : t("voiceAudio.cameraUnavailable");
         previewErrorEl = createElement("div", { class: "setting-desc" }, msg);
         previewWrap.appendChild(previewErrorEl);
       }
@@ -593,26 +601,26 @@ function buildVoiceAudioTabInner(
   }> = [
     {
       key: "echoCancellation",
-      label: "Echo Cancellation",
-      desc: "Reduce echo from speakers feeding back into microphone",
+      label: t("voiceAudio.echo.label"),
+      desc: t("voiceAudio.echo.desc"),
       fallback: true,
     },
     {
       key: "noiseSuppression",
-      label: "Noise Suppression",
-      desc: "Filter out background noise from your microphone",
+      label: t("voiceAudio.noise.label"),
+      desc: t("voiceAudio.noise.desc"),
       fallback: true,
     },
     {
       key: "autoGainControl",
-      label: "Automatic Gain Control",
-      desc: "Automatically adjust microphone volume",
+      label: t("voiceAudio.agc.label"),
+      desc: t("voiceAudio.agc.desc"),
       fallback: true,
     },
     {
       key: "enhancedNoiseSuppression",
-      label: "Enhanced Noise Suppression",
-      desc: "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds",
+      label: t("voiceAudio.enhanced.label"),
+      desc: t("voiceAudio.enhanced.desc"),
       fallback: false,
     },
   ];
@@ -622,9 +630,7 @@ function buildVoiceAudioTabInner(
     const info = createElement("div", {});
     const label = createElement("div", { class: "setting-label" }, item.label);
     // The native engine reads these at connect, not live.
-    const descText = nativeAudio
-      ? `${item.desc}. Applies when you next join a voice channel.`
-      : item.desc;
+    const descText = nativeAudio ? t("voiceAudio.applyNextJoin", { desc: item.desc }) : item.desc;
     const desc = createElement("div", { class: "setting-desc" }, descText);
     appendChildren(info, label, desc);
 
@@ -649,10 +655,7 @@ function buildVoiceAudioTabInner(
     const note = createElement(
       "p",
       { class: "setting-desc", "data-testid": "native-audio-note" },
-      "On Linux, audio runs in the app's native engine. Your microphone level and voice " +
-        "sensitivity are handled by the engine's automatic gain control and silence " +
-        "detection, so the input volume and input sensitivity controls are not available " +
-        "here. Use your system mixer to adjust your microphone level.",
+      t("voiceAudio.nativeNote"),
     );
     inputSelect.after(note);
   }

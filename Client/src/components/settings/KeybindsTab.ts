@@ -7,31 +7,34 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref } from "./helpers";
 import { vkName } from "@lib/ptt";
 import { desktop } from "../../platform/desktop";
+import { settingsText as t } from "../../i18n/settings";
 
 export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
 
   // ── Push to Talk ──────────────────────────────────────────
   const pttRow = createElement("div", { class: "keybind-row" });
-  const pttLabel = createElement("span", { class: "setting-label" }, "Push to Talk");
+  const pttLabel = createElement("span", { class: "setting-label" }, t("keybinds.pushToTalk"));
   let currentVk = loadPref<number>("pttVk", 0);
   const pttValue = createElement(
     "button",
     {
       class: "kbd",
       style: "cursor: pointer; min-width: 80px; text-align: center;",
-      title: "Click to set keybind",
-      "aria-label": "Push to Talk keybind — click to capture",
+      title: t("keybinds.clickToSet"),
+      "aria-label": t("keybinds.pttAria"),
     },
-    currentVk !== 0 ? vkName(currentVk) : "Not set",
+    currentVk !== 0 ? vkName(currentVk) : t("keybinds.notSet"),
   );
+  // i18n-exempt: inline CSS value, not user-visible text
+  const hiddenStyle = "display: none;";
   const pttClear = createElement(
     "button",
     {
       class: "ac-btn",
-      style: `margin-left: 8px; font-size: 12px; padding: 4px 10px; ${currentVk !== 0 ? "" : "display: none;"}`,
+      style: `margin-left: 8px; font-size: 12px; padding: 4px 10px; ${currentVk !== 0 ? "" : hiddenStyle}`,
     },
-    "Clear",
+    t("keybinds.clear"),
   );
 
   let capturing = false;
@@ -43,7 +46,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       if (capturing) return;
       capturing = true;
       const attempt = ++captureGeneration;
-      pttValue.textContent = "Press a supported key...";
+      pttValue.textContent = t("keybinds.pressKey");
       pttValue.style.borderColor = "var(--accent)";
       pttValue.style.color = "var(--accent)";
 
@@ -58,7 +61,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
           pttValue.style.color = "";
           if (vk === 0) {
             // Timed out — restore previous value
-            setText(pttValue, currentVk !== 0 ? vkName(currentVk) : "Not set");
+            setText(pttValue, currentVk !== 0 ? vkName(currentVk) : t("keybinds.notSet"));
             return;
           }
           currentVk = vk;
@@ -72,7 +75,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
           capturing = false;
           pttValue.style.borderColor = "";
           pttValue.style.color = "";
-          setText(pttValue, currentVk !== 0 ? vkName(currentVk) : "Not set");
+          setText(pttValue, currentVk !== 0 ? vkName(currentVk) : t("keybinds.notSet"));
         });
     },
     { signal },
@@ -87,7 +90,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       currentVk = 0;
       pttValue.style.borderColor = "";
       pttValue.style.color = "";
-      setText(pttValue, "Not set");
+      setText(pttValue, t("keybinds.notSet"));
       pttClear.style.display = "none";
       void desktop.pushToTalk.updateKey(0);
     },
@@ -103,7 +106,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     {
       style: "font-size: 11px; color: var(--text-micro); margin: 4px 0 16px 0; line-height: 1.4;",
     },
-    "PTT works globally and does not hijack the key. Capture supports function keys, navigation keys, and Mouse 4/5.",
+    t("keybinds.pttHint"),
   );
   section.appendChild(pttHint);
 
@@ -115,14 +118,14 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     {
       class: "keybind-section-header",
     },
-    "Navigation",
+    t("keybinds.navigation"),
   );
   section.appendChild(navHeader);
 
   const navBinds: [string, string][] = [
-    ["Quick Switcher", "Ctrl + K"],
-    ["Search Messages", "Ctrl + F"],
-    ["Close Overlay / Cancel", "Escape"],
+    [t("keybinds.action.quickSwitcher"), t("keybinds.key.ctrlK")],
+    [t("keybinds.action.searchMessages"), t("keybinds.key.ctrlF")],
+    [t("keybinds.action.closeOverlay"), t("keybinds.key.escape")],
   ];
   for (const [label, shortcut] of navBinds) {
     const row = createElement("div", { class: "keybind-row" });
@@ -142,14 +145,14 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     {
       class: "keybind-section-header",
     },
-    "Communication",
+    t("keybinds.communication"),
   );
   section.appendChild(commHeader);
 
   const commBinds: [string, string][] = [
-    ["Toggle Mute", "Ctrl + M"],
-    ["Toggle Deafen", "Ctrl + D"],
-    ["Toggle Camera", "Ctrl + Shift + V"],
+    [t("keybinds.action.toggleMute"), t("keybinds.key.ctrlM")],
+    [t("keybinds.action.toggleDeafen"), t("keybinds.key.ctrlD")],
+    [t("keybinds.action.toggleCamera"), t("keybinds.key.ctrlShiftV")],
   ];
   for (const [label, shortcut] of commBinds) {
     const row = createElement("div", { class: "keybind-row" });
@@ -167,7 +170,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       {
         style: "font-size: 11px; color: var(--text-micro); margin: 4px 0 0 0; line-height: 1.4;",
       },
-      "Voice shortcuts apply while you are connected to a voice channel.",
+      t("keybinds.voiceHint"),
     ),
   );
 
@@ -179,16 +182,16 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     {
       class: "keybind-section-header",
     },
-    "Messages",
+    t("keybinds.messages"),
   );
   section.appendChild(msgHeader);
 
   const msgBinds: [string, string][] = [
-    ["Upload File", "Ctrl + U"],
-    ["Edit Last Message", "Arrow Up"],
-    ["Bold", "Ctrl + B"],
-    ["Italic", "Ctrl + I"],
-    ["Underline", "Ctrl + U"],
+    [t("keybinds.action.uploadFile"), t("keybinds.key.ctrlU")],
+    [t("keybinds.action.editLastMessage"), t("keybinds.key.arrowUp")],
+    [t("keybinds.action.bold"), t("keybinds.key.ctrlB")],
+    [t("keybinds.action.italic"), t("keybinds.key.ctrlI")],
+    [t("keybinds.action.underline"), t("keybinds.key.ctrlU")],
   ];
   for (const [label, shortcut] of msgBinds) {
     const row = createElement("div", { class: "keybind-row" });
@@ -206,7 +209,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       {
         style: "font-size: 11px; color: var(--text-micro); margin: 4px 0 0 0; line-height: 1.4;",
       },
-      "Formatting shortcuts wrap the selected text while the message box has focus; Ctrl + U uploads a file everywhere else.",
+      t("keybinds.formatHint"),
     ),
   );
 

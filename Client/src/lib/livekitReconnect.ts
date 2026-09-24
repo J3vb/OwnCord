@@ -7,6 +7,7 @@ import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { logIceConnectionInfo } from "@lib/livekitDiagnostics";
 import { releaseRoom } from "../features/voice/releaseRoom";
+import { voiceText } from "../i18n/voice";
 
 const log = createLogger("livekitReconnect");
 
@@ -294,5 +295,5 @@ export async function attemptAutoReconnect(
   log.error("Auto-reconnect exhausted all attempts, giving up");
   deps.leaveVoice();
   leaveVoiceChannel();
-  deps.onError("Voice connection lost — failed to reconnect");
+  deps.onError(voiceText("reconnect.voiceLost"));
 }

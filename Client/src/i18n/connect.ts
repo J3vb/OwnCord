@@ -14,6 +14,27 @@ export const connectText = defineCatalog("connect", {
   "common.close": "Close",
   "common.unknown": "Unknown",
   "common.settings": "Settings",
+  "modal.save": "Save",
+
+  "media.playPauseGif": "Play/pause GIF",
+
+  "update.downloadingPercent": "Downloading update… {percent}%",
+  "update.downloadingMb": "Downloading update… {mb} MB",
+  "update.downloading": "Downloading update…",
+  "update.unavailable":
+    "This install cannot update itself. Ask your server administrator for the new version.",
+  "update.dismiss": "Dismiss",
+  "update.available": "Update v{version} available",
+  "update.now": "Update Now",
+  "update.later": "Later",
+  "update.installedRestarting": "Update installed. Restarting…",
+  "update.installedRestart": "Update installed. Please restart OwnCord to finish.",
+  "update.failed": "Update failed. Please try again later.",
+  "update.retry": "Retry",
+
+  "voice.disconnected": "You were disconnected from voice",
+  "voice.channelFull": "That voice channel is full",
+  "voice.videoLimit": "That voice channel has reached its video limit",
 
   "brand.tagline": "Self-hosted chat — Your server, your rules",
   "profiles.defaultName": "Local Server",
@@ -110,6 +131,12 @@ export const connectText = defineCatalog("connect", {
   "connected.ready": "Ready!",
 
   "session.expired": "Your session expired — sign in again.",
+  "session.serverShutdown": "The server was shut down — you have been signed out.",
+  "session.serverRestarting": "Server is restarting: {reason}",
+  "session.restartReasonDefault": "maintenance",
+  "session.banned": "You have been banned.",
+  "error.serverFallback": "Server error",
+  "error.rateLimited": "Too many requests. Try again later.",
   "session.passwordRemoveFailed": "Could not remove the saved password — it is still stored",
   "session.credentialsSaveFailed": "Could not save credentials — auto-login won't work",
   "session.savedLoginUnavailable":
@@ -124,4 +151,22 @@ export const connectText = defineCatalog("connect", {
   "app.dmNoMessages": "No messages yet",
   "app.dmCreateFailed": "Failed to create DM",
   "app.dmCreateGroupFailed": "Failed to create group DM",
+
+  "dm.emptyGroup": "Empty group",
+  "dm.unknownUser": "Unknown user",
+  "dm.more": "and {count} more",
+  "channel.voiceCategory": "Voice",
+  "notifications.channelFallback": "Channel {id}",
+  "notifications.mentioned": "{author} mentioned you in {channel}",
+  "notifications.inChannel": "{author} in {channel}",
+  "retention.kept": "keeps messages until they are deleted",
+  "retention.deleted": {
+    one: "deletes messages after {days} day",
+    other: "deletes messages after {days} days",
+  },
+  "retention.notice":
+    "By default this server {window}; attachments are removed with their messages.",
+
+  "blocks.blockedByMe": "You've blocked this user. Unblock to send messages.",
+  "blocks.blockedByThem": "You can't message this user right now.",
 });

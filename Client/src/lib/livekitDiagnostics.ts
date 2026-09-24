@@ -54,7 +54,9 @@ function getIceTransports(
   const pcManager = room.engine?.pcManager;
   const transports: Array<{ label: "subscriber" | "publisher"; transport: IceTransport }> = [];
   if (pcManager?.subscriber)
+    // i18n-exempt: transport identifier from the SDK, not display text
     transports.push({ label: "subscriber", transport: pcManager.subscriber });
+  // i18n-exempt: transport identifier from the SDK, not display text
   if (pcManager?.publisher) transports.push({ label: "publisher", transport: pcManager.publisher });
   return transports;
 }
