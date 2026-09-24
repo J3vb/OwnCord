@@ -15,9 +15,10 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import { EMOJI_NAMES } from "@components/EmojiPicker";
+import { EMOJI_NAMES } from "@components/emoji-keywords";
 import { buildCustomEmojiImage } from "@components/message-list/custom-emoji";
 import { listCustomEmoji, type CustomEmoji } from "@stores/emoji.store";
+import { messagingText } from "../i18n/messaging";
 import {
   createInlineAutocomplete,
   type InlineAutocompleteComponent,
@@ -92,7 +93,7 @@ export function filterEmojiSuggestions(query: string): EmojiSuggestion[] {
     const entry: EmojiSuggestion = {
       label: name,
       insert: `:${name}:`,
-      detail: "Server emoji",
+      detail: messagingText("emoji.customDetail"),
       kind: "custom",
       char: null,
       emoji,

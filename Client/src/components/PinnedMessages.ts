@@ -8,6 +8,7 @@ import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { parseTimestamp } from "@components/message-list/formatting";
+import { messagingText } from "../i18n/messaging";
 
 export interface PinnedMessage {
   readonly id: number;
@@ -66,14 +67,14 @@ function renderPinnedItem(
   // Icon-only buttons: title= only tooltips for mouse users, so mirror it as
   // an aria-label for screen readers.
   const jumpBtn = createElement("button", {
-    title: "Jump to message",
-    "aria-label": "Jump to message",
+    title: messagingText("pins.jump"),
+    "aria-label": messagingText("pins.jump"),
   });
   jumpBtn.appendChild(createIcon("external-link", 14));
   const unpinBtn = createElement("button", {
     class: "pinned-msg__unpin",
-    title: "Unpin message",
-    "aria-label": "Unpin message",
+    title: messagingText("pins.unpin"),
+    "aria-label": messagingText("pins.unpin"),
   });
   unpinBtn.appendChild(createIcon("x", 14));
 
@@ -92,7 +93,7 @@ function renderEmptyState(): HTMLDivElement {
   icon.textContent = "";
   icon.appendChild(createIcon("pin", 20));
   const text = createElement("div", { class: "pinned-panel__empty-text" });
-  text.textContent = "This channel doesn't have any pinned messages\u2026 yet!";
+  text.textContent = messagingText("pins.empty");
   appendChildren(empty, icon, text);
   return empty;
 }
@@ -107,7 +108,7 @@ export function createPinnedMessages(options: PinnedMessagesOptions): MountableC
     root = createElement("div", {
       class: "pinned-panel",
       role: "complementary",
-      "aria-label": "Pinned messages",
+      "aria-label": messagingText("pins.label"),
     });
 
     // Header
@@ -115,14 +116,14 @@ export function createPinnedMessages(options: PinnedMessagesOptions): MountableC
     const title = createElement("h3", {});
     title.textContent = "";
     title.appendChild(createIcon("pin", 16));
-    title.appendChild(document.createTextNode(" Pinned Messages"));
+    title.appendChild(document.createTextNode(messagingText("pins.title")));
 
     const count = createElement("span", { class: "pinned-panel__count" });
     count.textContent = String(options.pinnedMessages.length);
 
     const closeBtn = createElement("button", {
       class: "pinned-panel__close",
-      "aria-label": "Close pinned messages",
+      "aria-label": messagingText("pins.close"),
     });
     closeBtn.appendChild(createIcon("x", 16));
     closeBtn.addEventListener("click", () => options.onClose(), { signal: disposable.signal });

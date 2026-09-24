@@ -19,6 +19,7 @@ import { findChannelById, navigateToChannel } from "@lib/channel-navigation";
 import { setAroundMessages, hasMessageLoaded } from "@stores/messages.store";
 import { NSFW_ACKNOWLEDGEMENT_REQUIRED } from "../../features/content-consent/nsfw";
 import type { ChannelController } from "./ChannelController";
+import { messagingText } from "../../i18n/messaging";
 
 const log = createLogger("message-jump");
 
@@ -74,7 +75,7 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
     // A permalink to a channel this user cannot see must degrade quietly
     // rather than blank the chat area on an unknown id.
     if (findChannelById(channelId) === null) {
-      showToast("That channel isn't available", "info");
+      showToast(messagingText("jump.channelUnavailable"), "info");
       return false;
     }
 
@@ -105,18 +106,18 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
       // The channel's NSFW gate is showing and says why (B9-7).
       if (err instanceof ApiClientError && err.code === NSFW_ACKNOWLEDGEMENT_REQUIRED) return false;
       if (err instanceof ApiClientError && err.status === 404) {
-        showToast("That message no longer exists", "info");
+        showToast(messagingText("jump.gone"), "info");
         return false;
       }
       log.error("Failed to fetch the message window", { channelId, messageId, error: String(err) });
-      showToast("Couldn't jump to that message", "error");
+      showToast(messagingText("jump.failed"), "error");
       return false;
     }
 
     if (!hasMessageLoaded(channelId, messageId)) {
       // The server answered but the centre is not in the window — nothing to
       // scroll to, and silently landing elsewhere would be worse.
-      showToast("Couldn't jump to that message", "error");
+      showToast(messagingText("jump.failed"), "error");
       return false;
     }
 

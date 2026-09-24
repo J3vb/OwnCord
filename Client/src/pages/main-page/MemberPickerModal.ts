@@ -17,6 +17,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import { membersStore } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { MAX_GROUP_DM_PARTICIPANTS } from "@lib/constants";
+import { requestsText } from "../../i18n/requests";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,13 +53,13 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
     const currentUserId = authStore.getState().user?.id ?? 0;
 
     const content = createElement("div", { style: "padding:20px;" });
-    const title = createElement("h3", {}, "New Direct Message");
+    const title = createElement("h3", {}, requestsText("picker.title"));
     const subtitle = createElement(
       "p",
       { style: "color:var(--text-secondary);font-size:0.85rem;margin:0 0 8px;" },
       multi
-        ? `Select one member for a DM, or up to ${MAX_GROUP_DM_PARTICIPANTS - 1} for a group`
-        : "Select a member to start a conversation",
+        ? requestsText("picker.groupHint", { max: String(MAX_GROUP_DM_PARTICIPANTS - 1) })
+        : requestsText("picker.singleHint"),
     );
     const listContainer = createElement("div", {
       class: "dm-member-picker-list",
@@ -72,7 +73,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       class: "dm-group-name-input",
       type: "text",
       maxlength: "100",
-      placeholder: "Group name (optional)",
+      placeholder: requestsText("picker.groupNamePlaceholder"),
       "data-testid": "dm-group-name",
       style: "width:100%;margin-top:10px;",
     });
@@ -85,7 +86,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
         style: "margin-top:10px;width:100%;",
         "data-testid": "dm-picker-create",
       },
-      "Create DM",
+      requestsText("picker.create"),
     );
     confirmBtn.style.display = "none";
 
@@ -100,7 +101,12 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       // there would be offering something that cannot take effect.
       nameInput.style.display = isGroup ? "" : "none";
       confirmBtn.style.display = selected.size >= 1 ? "" : "none";
-      setText(confirmBtn, isGroup ? `Create Group DM (${selected.size + 1})` : "Create DM");
+      setText(
+        confirmBtn,
+        isGroup
+          ? requestsText("picker.createGroup", { count: String(selected.size + 1) })
+          : requestsText("picker.create"),
+      );
     };
 
     for (const member of members.values()) {
@@ -172,7 +178,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
         class: "btn btn-secondary",
         style: "margin-top:8px;width:100%;",
       },
-      "Cancel",
+      requestsText("picker.cancel"),
     );
     cancelBtn.addEventListener("click", () => close());
 

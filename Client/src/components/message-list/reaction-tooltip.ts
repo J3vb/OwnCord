@@ -16,6 +16,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import type { ReactionUser } from "@lib/types";
+import { messageStatusText } from "../../i18n/messageStatus";
 
 const log = createLogger("reaction-tooltip");
 
@@ -25,8 +26,11 @@ export const REACTION_TOOLTIP_DEBOUNCE_MS = 300;
 /** How many names are spelled out before collapsing into "and N others". */
 const MAX_NAMES = 3;
 
-/** "A, B and C" — no Oxford comma, matching the existing phrasing. */
-const listFormatter = new Intl.ListFormat("en-GB", { type: "conjunction" });
+/** "A, B and C" — no Oxford comma, matching the existing phrasing. The list
+ *  separator is locale-owned formatting, not app copy, so it stays a locale
+ *  constant rather than a catalog entry; the English output is unchanged. */
+const LIST_LOCALE = "en-GB";
+const listFormatter = new Intl.ListFormat(LIST_LOCALE, { type: "conjunction" });
 
 // ---------------------------------------------------------------------------
 // Fetcher injection
@@ -169,7 +173,7 @@ export function formatReactorNames(
   const others = total - shown.length;
 
   if (others > 0) {
-    return `${shown.join(", ")} and ${others} ${others === 1 ? "other" : "others"}`;
+    return `${shown.join(", ")} ${messageStatusText("reaction.others", { count: others })}`;
   }
   return listFormatter.format(shown);
 }
@@ -206,7 +210,7 @@ export function buildReactionTooltip(
     ),
   );
   const reacted = createElement("span", { class: "reaction-tooltip-emoji" });
-  setText(reacted, `reacted with ${emoji}`);
+  setText(reacted, messageStatusText("reaction.reactedWith", { emoji }));
   appendChildren(tip, names, reacted);
   return tip;
 }

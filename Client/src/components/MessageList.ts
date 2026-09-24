@@ -30,6 +30,7 @@ import {
 import { getUnreadOnOpen } from "@stores/channels.store";
 import { isAudioMime, isVideoMime } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
+import { messagingText } from "../i18n/messaging";
 
 // -- Options ------------------------------------------------------------------
 
@@ -196,12 +197,14 @@ function renderEmptyState(channelName: string, channelType?: string): HTMLDivEle
   icon.textContent = isDm ? "@" : "#";
 
   const title = createElement("h2", { class: "channel-welcome-title" });
-  title.textContent = isDm ? channelName : `Welcome to #${channelName}!`;
+  title.textContent = isDm
+    ? channelName
+    : messagingText("welcome.channel", { channel: channelName });
 
   const text = createElement("p", { class: "channel-welcome-text" });
   text.textContent = isDm
-    ? `This is the beginning of your direct message history with ${channelName}.`
-    : `This is the start of the #${channelName} channel.`;
+    ? messagingText("welcome.dmIntro", { name: channelName })
+    : messagingText("welcome.channelIntro", { channel: channelName });
 
   const wrapper = createElement("div", { class: "channel-welcome" });
   wrapper.appendChild(icon);
@@ -216,7 +219,7 @@ function renderLoadingState(): HTMLDivElement {
   const wrapper = createElement("div", { class: "messages-loading" });
   wrapper.appendChild(createElement("div", { class: "spinner" }));
   const text = createElement("p", { class: "messages-loading-text" });
-  text.textContent = "Loading messages…";
+  text.textContent = messagingText("loading");
   wrapper.appendChild(text);
   return wrapper;
 }
@@ -225,13 +228,13 @@ function renderLoadingState(): HTMLDivElement {
 function renderLoadErrorState(onRetryLoad?: () => void): HTMLDivElement {
   const wrapper = createElement("div", { class: "messages-load-error" });
   const text = createElement("p", { class: "messages-load-error-text" });
-  text.textContent = "Couldn't load messages";
+  text.textContent = messagingText("loadFailed");
   wrapper.appendChild(text);
   const retry = createElement("button", {
     class: "messages-retry-btn",
     "data-testid": "messages-retry",
   });
-  retry.textContent = "Retry";
+  retry.textContent = messagingText("retry");
   retry.addEventListener("click", () => onRetryLoad?.());
   wrapper.appendChild(retry);
   return wrapper;
@@ -935,7 +938,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       class: "jump-to-present-pill",
       "data-testid": "jump-to-present",
     });
-    jumpToPresentPill.textContent = "Jump to Present ↓";
+    jumpToPresentPill.textContent = messagingText("jumpToPresent");
     jumpToPresentPill.addEventListener("click", () => options.onJumpToPresent?.(), {
       signal: disposable.signal,
     });

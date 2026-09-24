@@ -52,6 +52,10 @@ const EXCLUDED = [
     /^src\/components\/message-list\/syntax-highlight\.ts$/,
     "programming-language keyword tables for code highlighting, never copy",
   ],
+  [
+    /^src\/components\/emoji-keywords\.ts$/,
+    "emoji search keyword index: lookup data matched against typed queries, not rendered copy",
+  ],
 ];
 
 /**

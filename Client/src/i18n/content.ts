@@ -13,4 +13,7 @@ export const contentText = defineCatalog("content", {
   "image.open": "Open image from {host}",
   "gif.failed": "Couldn't load GIFs",
   "gif.retry": "Retry",
+  "youtube.title.loading": "Loading...",
+  "youtube.title.fallback": "YouTube Video",
+  "youtube.thumbAlt": "YouTube video",
 });

@@ -1,6 +1,6 @@
 # Plan: B9-19 — Extract messaging, rich-content and media text
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch `fm/b9-19-impl` from `dev` `782e010e`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24). This file carries the status and evidence for this lane; the shared PRD status table is updated by the single docs lane.
 
 > **Milestone:** B9-19 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `refactor/b9-19-english-messaging-content`; branch from current `dev`, PR to `dev` only.
@@ -179,3 +179,110 @@ render path as a fallback; fail closed and record a blocker instead.
 **Options and consequences:** Cover all app-authored desktop text, including native menus/notifications/errors, while treating OS/user/server data as classified inputs; or limit extraction to TypeScript. TypeScript-only is smaller but leaves desktop-owned text outside BPR-064; including the server admin panel would further expand this client phase.
 
 **Drafting recommendation (historical):** Cover renderer and app-authored native desktop text, inventory visible server errors with a client mapping where appropriate, explicitly exclude OS/user data and the separately served admin panel. Confirm catalog ownership and those exclusions.
+
+## Implementation record (2026-09-24)
+
+**Base:** `dev` `782e010e` (B9-9, B9-6, B9-18 merged — the milestone's stated
+dependencies). **Head:** recorded at PR time.
+
+### Current-state inventory drift at the base
+
+The plan's six inventory rows were re-read at `782e010e`. Line numbers had
+drifted from the planning commit `0beee8e4`, as the plan warned; the
+authoritative inventory is `Client/scripts/ui-strings-baseline.json`, which at
+the base listed **408 literals across 21 B9-19-owned files** (the plan's prose
+said 416 at planning time; B9-9 and B9-18 had moved some since). Every cited
+file still held its copy; no row was refuted.
+
+**Pre-existing bundle drift.** At the base, `origin/dev` itself measures
+MainPage **64,022 B against its 64,000 B budget** on the reviewed toolchain
+(Node 26.9.0, vite 8.3.0 from the lockfile); B9-9's merge added the copy/JS that
+pushed it over, and CI at `c74f4786`/`782e010e` did not run the client leg
+(`ci.yml`'s Change selection skips it for a server-only change; PR #1775's own
+run measured 63,888 B before its final rebase onto `6671f228`). B9-19 moves the
+messaging copy behind the seam and, as a side effect, takes MainPage back under
+budget (below); no budget was raised.
+
+### What moved
+
+- **Catalogs.** Three new feature catalogs, split by where they load:
+  - `Client/src/i18n/messaging.ts` (`messagingText`, new) — the message list
+    welcome/loading/error states, the composer's labels and errors, the message
+    renderers and their send-status reasons, the action bar and copy toasts,
+    the search overlay, the pinned panel, the emoji and GIF pickers, the
+    mention autocomplete and the message-jump toasts. Loads with the main page.
+  - `Client/src/i18n/requests.ts` (`requestsText`, new) — the DM sidebar, the
+    DM profile panel, the user profile popup and the member picker, plus the
+    DM header's group subtitle.
+  - `Client/src/i18n/messageStatus.ts` (`messageStatusText`, new) — the
+    **startup-safe slice**: the date stamps (`formatting.ts`), the attachment
+    download labels (`attachments.ts`) and the who-reacted tooltip
+    (`reaction-tooltip.ts`), all statically reachable from the entry.
+  - `i18n/content.ts` grew the YouTube embed's provider-title/loading/thumb-alt
+    copy, which shares the lazy chunk with the preview and image states (B9-9).
+- **Search-index data, not copy.** `EMOJI_NAMES` moved out of `EmojiPicker.ts`
+  into a new `Client/src/components/emoji-keywords.ts` and is excluded from the
+  UI-string scan with a reason, exactly like `message-list/syntax-highlight.ts`:
+  it is a lookup table matched against typed queries, never rendered. The
+  category labels it sits beside are copy and moved to the catalog.
+- **Reused catalogs.** The DM/profile presence labels come from `shell.ts`'s
+  existing `status.*` keys (no second copy); the composer's reconnect/not-
+  connected/slow-mode strings reuse `shell.ts`'s `channel.reconnecting`,
+  `channel.notConnected` and `shellText`'s status fallback.
+- **Exempt with a reason.** The internal "external URLs are fetched only
+  through the broker" guard, the `Bearer`/`data:`-URI wire fragments, the
+  `Failed to read file` FileReader failure and the `KeyboardEvent.key` values
+  (`Home`/`End`) each carry an `i18n-exempt:` comment.
+- **Numbers stay ungrouped where the literal was.** Character and attachment
+  caps pass `String(...)` (`error.tooLong`, `error.tooManyAttachments`,
+  `composer.slowMode`, `search.minChars`, `picker.groupHint`) so "4000",
+  "5s" and "9" keep their exact English. Counted plural titles
+  (`members.count`, `mention.count`, `unread.count`, `reaction.others`) become
+  plural entries with unchanged English. `requests.dm.groupSubtitle` keeps the
+  literal's always-plural "{count} members" wording.
+
+### Bundle budget
+
+| Chunk           | Base `782e010e` | This branch |   Budget |
+| --------------- | --------------: | ----------: | -------: |
+| startup closure |        94,179 B |    95,249 B | 95,500 B |
+| MainPage        |        64,022 B |    61,347 B | 64,000 B |
+
+Moving the messaging copy out of the renderers' inline literals into
+`messaging.ts` shrinks the MainPage chunk by 2,675 B even after the catalog is
+added. The startup closure grows 1,070 B (three new catalog modules and their
+lookup calls, no new copy) — headroom is 251 B. `Client/bundle-budgets.json` is
+untouched; no budget raise was requested.
+
+### Evidence
+
+Base `782e010e`; Node 26.9.0, vite 8.3.0, Playwright 1.63.0 (bundled Chromium),
+Linux, dev server on a private port (1420/1431 were free locally).
+
+| Check                                                                                          | Result                                                                                                                                                          |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node scripts/check-ui-strings.mjs --update`, then the gate                                    | B9-19 literals 408 → 0; the baseline is now `{}`; scan exit 0                                                                                                   |
+| Failing control: `formatting.ts` date stamp reverted to its literal                            | **Fail**: `src/components/message-list/formatting.ts:87: new UI text "Today at {…}"`, exit 1                                                                    |
+| `npx vitest run --maxWorkers=4` (whole client)                                                 | 306 files; 6,658 passed, 152 expected-fail                                                                                                                      |
+| `npx tsc --noEmit`, `npx tsc -p tsconfig.e2e.json --noEmit`                                    | clean                                                                                                                                                           |
+| `npx oxlint --deny-warnings src/`, `npm run lint:cycles`, `npx eslint src/`                    | clean                                                                                                                                                           |
+| `npx knip`                                                                                     | clean                                                                                                                                                           |
+| `npm run build:budget && node scripts/bundle-budget.mjs`                                       | all budgets ok (see table)                                                                                                                                      |
+| Playwright `b9-text-expansion.spec.ts` (B9-3, B9-18, **new B9-19**, B9-20)                     | 9 passed; the 1 failure (`B9-20 ... expanded voice controls`) reproduces on unmodified `782e010e` at 940×500 with 20px text (sidebar overlap another lane owns) |
+| Playwright `message-actions`, `search-overlay`, `dm-system`, `emoji-insertion`, `user-profile` | 44 passed, 1 skipped                                                                                                                                            |
+| Playwright `message-media`                                                                     | 11 passed                                                                                                                                                       |
+| New unit: `src/i18n/messaging.test.ts`                                                         | 7 passed (exact English, parameterised values, plural branches)                                                                                                 |
+
+The expanded cases need the dev server's modules and skip under the
+production-bundle config.
+
+### Accessibility blocks (BPR-091) for this journey
+
+| Block          | Status                                                                                                                                                                                                                                        |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Keyboard       | Automated (existing suites): the message action bar, search overlay, pinned panel, DM sidebar and member picker are reached and operated with Enter/Space/Escape and arrows; the new B9-19 case asserts the expanded action names are visible |
+| Screen reader  | Automated: action, panel, picker and search accessible names resolve from the catalog in English and expanded. NVDA (Windows) and Orca (Linux) recordings **pending owner** — this host has no display or screen reader                       |
+| Focus          | No change: no focus handling was touched; the B9-9 lightbox/popup focus behaviour is untouched                                                                                                                                                |
+| Contrast       | No change: no colour or token changed; B9-2's Q1/Q8 matrix applies                                                                                                                                                                            |
+| Reduced motion | No change: no animation changed                                                                                                                                                                                                               |
+| Zoom/reflow    | Automated at 940×500 with 20 px Large Font, English and expanded, for the message rows, pinned panel and search overlay; OS zoom 200 % on a native window **pending owner**. The B9-20 voice-widget overlap in that run predates B9-19        |

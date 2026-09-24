@@ -25,6 +25,7 @@ import {
   recoverEvictedImage,
   resolveServerUrl,
 } from "./message-list/attachments";
+import { requestsText } from "../i18n/requests";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {
@@ -183,14 +184,14 @@ function renderDmItem(
       { class: "dm-member-count", "data-testid": `dm-members-${convo.channelId}` },
       String(count),
     );
-    countEl.title = `${count} members`;
+    countEl.title = requestsText("members.count", { count });
     item.appendChild(countEl);
   }
 
   // Close / leave button (hidden by default, shown on hover via CSS)
   const closeBtn = createElement("button", {
     class: "dm-close",
-    title: convo.isGroup === true ? "Leave group" : "Close DM",
+    title: convo.isGroup === true ? requestsText("dm.leaveShort") : requestsText("dm.closeShort"),
   });
   closeBtn.appendChild(createIcon("x", 14));
   closeBtn.addEventListener(
@@ -217,7 +218,7 @@ function renderDmItem(
       { class: "dm-mention-badge", "data-testid": `dm-mentions-${convo.channelId}` },
       String(mentionCount),
     );
-    badge.title = `${mentionCount} mention${mentionCount === 1 ? "" : "s"}`;
+    badge.title = requestsText("mention.count", { count: mentionCount });
     item.appendChild(badge);
   } else if (unreadCount > 0) {
     const badge = createElement(
@@ -228,7 +229,7 @@ function renderDmItem(
       },
       String(unreadCount),
     );
-    badge.title = `${unreadCount} unread message${unreadCount === 1 ? "" : "s"}`;
+    badge.title = requestsText("unread.count", { count: unreadCount });
     item.appendChild(badge);
   } else if (convo.unread) {
     const unreadDot = createElement("span", { class: "dm-unread" });
@@ -258,7 +259,7 @@ function renderDmItem(
       if (options.onToggleMute !== undefined) {
         const toggle = options.onToggleMute;
         items.push({
-          label: convo.muted === true ? "Unmute Conversation" : "Mute Conversation",
+          label: convo.muted === true ? requestsText("dm.unmute") : requestsText("dm.mute"),
           testId: `dm-mute-${convo.channelId}`,
           onClick: () => toggle(convo.channelId),
         });
@@ -266,7 +267,7 @@ function renderDmItem(
       if (convo.isGroup === true && options.onRenameGroup !== undefined) {
         const rename = options.onRenameGroup;
         items.push({
-          label: "Rename Group",
+          label: requestsText("dm.renameGroup"),
           testId: `dm-rename-${convo.channelId}`,
           onClick: () => rename(convo.channelId),
         });
@@ -274,7 +275,7 @@ function renderDmItem(
       if (options.onCloseDm !== undefined) {
         const close = options.onCloseDm;
         items.push({
-          label: convo.isGroup === true ? "Leave Group" : "Close DM",
+          label: convo.isGroup === true ? requestsText("dm.leaveGroup") : requestsText("dm.close"),
           danger: true,
           testId: `dm-close-${convo.channelId}`,
           onClick: () => close(convo.channelId),
@@ -393,9 +394,15 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
       const backTitle = createElement(
         "div",
         { class: "dm-back-title", id: backTitleId },
-        `Back to ${options.serverName ?? "Server"}`,
+        requestsText("dm.backTo", {
+          server: options.serverName ?? requestsText("dm.serverFallback"),
+        }),
       );
-      const backSub = createElement("div", { class: "dm-back-subtitle" }, "Return to channels");
+      const backSub = createElement(
+        "div",
+        { class: "dm-back-subtitle" },
+        requestsText("dm.returnToChannels"),
+      );
       appendChildren(backInfo, backTitle, backSub);
       appendChildren(backHeader, arrow, backInfo);
       backHeader.addEventListener("click", () => backFn(), { signal: disposable.signal });
@@ -415,16 +422,16 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
     const header = createElement("div", { class: "dm-sidebar-header" });
     searchInput = createElement("input", {
       class: "dm-search",
-      placeholder: "Find a conversation",
+      placeholder: requestsText("dm.find"),
     });
     header.appendChild(searchInput);
 
     // Section label with + button
     const sectionLabel = createElement("div", { class: "dm-section-label" });
-    setText(sectionLabel, "Direct Messages");
+    setText(sectionLabel, requestsText("dm.heading"));
     const addBtn = createElement("button", {
       class: "dm-add",
-      title: "New DM",
+      title: requestsText("dm.new"),
     });
     setText(addBtn, "+");
     addBtn.addEventListener("click", () => options.onNewDm(), { signal: disposable.signal });
