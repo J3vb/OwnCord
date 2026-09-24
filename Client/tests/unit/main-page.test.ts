@@ -234,6 +234,8 @@ import { createMainPage } from "../../src/pages/MainPage";
 import { channelsStore, setChannels, setActiveChannel } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
+import { wireConnectionStatus } from "../../src/lib/dispatcher";
+import { createMockWsClient } from "../helpers/mock-ws";
 import { voiceStore, updateVoiceUserProfile } from "../../src/stores/voice.store";
 import { dmStore, updateDmParticipant } from "../../src/stores/dm.store";
 import { membersStore, updateMemberProfile } from "../../src/stores/members.store";
@@ -1232,6 +1234,62 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     banner.querySelector("button")!.click();
     expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
     uiStore.setState((prev) => ({ ...prev, connectionDialFailed: false }));
+  });
+
+  it("holds one unreachable notice and Retry across repeated failed dials (B9-25)", async () => {
+    const socket = createMockWsClient();
+    const unwire = wireConnectionStatus(socket);
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    socket.simulateStateChange("connecting");
+    socket.simulateStateChange("authenticating");
+    socket.simulateStateChange("connected");
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    const live = container.querySelector<HTMLElement>("[data-testid='banner-announce']")!;
+    const unreachable =
+      "Can't reach this server right now. It may be down or blocked on this network.";
+    const announced: string[] = [];
+    const observer = new MutationObserver(() => announced.push(live.textContent ?? ""));
+    observer.observe(live, { childList: true, characterData: true, subtree: true });
+    const settle = async (): Promise<void> => {
+      uiStore.flush();
+      await Promise.resolve();
+    };
+
+    try {
+      socket.simulateStateChange("reconnecting");
+      await settle();
+      expect(banner.textContent).toBe("Reconnecting...");
+
+      socket.simulateStateChange("connecting");
+      socket.simulateStateChange("reconnecting");
+      await settle();
+      expect(banner.textContent).toBe(`${unreachable} Retry`);
+
+      for (let cycle = 0; cycle < 2; cycle++) {
+        socket.simulateStateChange("connecting");
+        await settle();
+        expect(banner.textContent).toBe(`${unreachable} Retry`);
+        expect(banner.querySelector("button")).not.toBeNull();
+        socket.simulateStateChange("reconnecting");
+        await settle();
+        expect(banner.textContent).toBe(`${unreachable} Retry`);
+        expect(banner.querySelector("button")).not.toBeNull();
+      }
+
+      expect(announced.filter((text) => text === unreachable)).toHaveLength(1);
+    } finally {
+      observer.disconnect();
+      unwire();
+      uiStore.setState((prev) => ({
+        ...prev,
+        connectionStatus: "disconnected",
+        connectionDialFailed: false,
+      }));
+    }
   });
 
   it("re-renders the notice on network loss and return without redialing (B9-25)", async () => {

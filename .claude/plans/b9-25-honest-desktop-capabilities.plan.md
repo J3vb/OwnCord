@@ -226,11 +226,13 @@ new keys.
 
 - **The connection notice answers the real state (BPR-092).** `ServerBanner`
   gains `ConnectionBannerOptions` (`offline`, `dialFailed`, `onRetry`).
-  `wireConnectionStatus` records `uiStore.connectionDialFailed`: true only when
-  a dial (`connecting`/`authenticating`) ends without connecting. A
-  `reconnecting` status keeps "Reconnecting..." while no dial has failed (a
-  drop, an announced restart, "Use here", a dial in progress); after a failed
-  dial, or on `disconnected`, it renders "Can't reach this server right now…"
+  `wireConnectionStatus` records `uiStore.connectionDialFailed`: set when a
+  dial (`connecting`/`authenticating`) ends without connecting, held for the
+  rest of the outage across the backoff's later dials, and cleared only on a
+  connection or a fresh connect from a stopped socket (sign-in, server switch,
+  "Use here"). A `reconnecting` status keeps "Reconnecting..." until a dial has
+  failed (a drop, an announced restart, "Use here"); after that, or on
+  `disconnected`, it renders "Can't reach this server right now…"
   with a Retry button when the device has a network, and "This device has no
   network…" with no Retry when `navigator.onLine` is false. A LAN server with
   no internet still answers `onLine`, so the offline wording never claims the

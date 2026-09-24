@@ -120,10 +120,10 @@ export function createServerBanner(): ServerBannerControl {
   }
 
   /**
-   * A connection problem the socket is working to recover from. While a dial
-   * is in progress, or none has failed yet (a drop, an announced restart,
-   * "Use here"), it is the plain "Reconnecting...". Once a dial has failed the
-   * notice becomes actionable (BPR-092). Retry is safe here: `connect()`
+   * A connection problem the socket is working to recover from. Until a dial
+   * has failed (a drop, an announced restart, "Use here"), it is the plain
+   * "Reconnecting...". Once one has, the notice is actionable for the rest of
+   * the outage, across the backoff's later dials (BPR-092). Retry is safe here: `connect()`
    * cancels the pending backoff before dialing, so it cannot race the loop.
    */
   function showReconnecting(opts: ConnectionBannerOptions = {}): void {

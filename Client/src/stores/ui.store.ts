@@ -10,8 +10,9 @@ export interface UiState {
   readonly settingsOpen: boolean;
   readonly connectionStatus: "connected" | "reconnecting" | "disconnected";
   /**
-   * The last dial attempt failed and no new one is in progress. A drop from a
-   * live connection, or a dial still under way, leaves this false.
+   * A dial has failed in the current outage. It stays set through the
+   * backoff's later dials; a drop from a live connection, before any dial has
+   * failed, leaves it false.
    */
   readonly connectionDialFailed: boolean;
   readonly transientError: string | null;
