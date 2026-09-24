@@ -256,6 +256,24 @@ describe("what the review offers", () => {
     expect(buttons(work(root))).toEqual(["Add note", "Close report"]);
   });
 
+  it("leaves another report's controls available when its click waits on a write", async () => {
+    const root = mount();
+    lists[0]!.resolve([row("r1"), row("r2")]);
+    await flush();
+    const rows = [...root.querySelectorAll<HTMLButtonElement>(".mod-queue-row")];
+    rows[0]!.click();
+    details.at(-1)!.resolve(detail("r1"));
+    await flush();
+    q<HTMLButtonElement>(work(root)!, "button")!.click();
+    rows[1]!.click();
+    details.at(-1)!.resolve(detail("r2"));
+    await flush();
+    const take = q<HTMLButtonElement>(work(root)!, "button")!;
+    take.click();
+    expect(writes.map((w) => w.arg)).toEqual(["r1"]);
+    expect(take.getAttribute("aria-disabled")).toBeNull();
+  });
+
   it("offers nothing on a report someone else is reviewing", async () => {
     const root = await opened(detail("r1", { state: "assigned", assignee_id: OTHER }));
     expect(buttons(work(root))).toEqual([]);
@@ -330,6 +348,19 @@ describe("notes", () => {
     expect(note(root)!.value).toBe("half a thought");
     expect(document.activeElement).toBe(note(root));
     expect(note(root)!.selectionStart).toBe(4);
+  });
+
+  it("keeps the chosen outcome through a background re-read", async () => {
+    const root = await opened(mine("r1"));
+    const chosen = q<HTMLInputElement>(root, "input[value=no_action]")!;
+    chosen.checked = true;
+    chosen.dispatchEvent(new Event("change"));
+    noteQueueChange();
+    await flush();
+    await reread(mine("r1"), row("r1", { state: "assigned", assignee_id: ME }));
+    expect(q<HTMLInputElement>(root, "input[value=no_action]")!.checked).toBe(true);
+    submit(q(root, "input[value=no_action]"));
+    expect(writes.map((w) => [w.op, w.body])).toEqual([["close", "no_action"]]);
   });
 
   it("discards the draft, and says so, when the report stops taking notes", async () => {
@@ -596,6 +627,43 @@ describe("closing", () => {
     ]);
     expect(buttons(work(root))).toEqual([]);
     expect(root.textContent).not.toContain("no longer in this list");
+  });
+
+  it("keeps the report open when mod_queue's re-read beats the take's 204", async () => {
+    const root = mount();
+    lists[0]!.resolve([row("r1")]);
+    await flush();
+    const filter = q<HTMLSelectElement>(root, "[data-testid=mod-filter]")!;
+    filter.value = "open";
+    filter.dispatchEvent(new Event("change"));
+    lists.at(-1)!.resolve([row("r1")]);
+    await flush();
+    q<HTMLButtonElement>(root, ".mod-queue-row")!.click();
+    details.at(-1)!.resolve(detail("r1"));
+    await flush();
+    const report = () => root.querySelector("[data-testid=mod-report]");
+
+    q<HTMLButtonElement>(work(root)!, "button")!.click();
+    // The server broadcasts mod_queue before it answers the POST.
+    noteQueueChange();
+    await flush();
+    lists.at(-1)!.resolve([]);
+    await flush();
+    expect(report()).not.toBeNull();
+    expect(root.textContent).not.toContain("no longer in this list");
+    details.at(-1)!.resolve(mine("r1"));
+    await flush();
+
+    writes[0]!.resolve();
+    await flush();
+    expect(writeStatus(root)).toBe("You're now reviewing this report.");
+    lists.at(-1)!.resolve([]);
+    await flush();
+    details.at(-1)!.resolve(mine("r1"));
+    await flush();
+    expect(report()).not.toBeNull();
+    expect(buttons(work(root))).toEqual(["Add note", "Close report"]);
+    expect(alerts(root)).toBe("");
   });
 
   it("still closes a report that leaves the filter through someone else's change", async () => {

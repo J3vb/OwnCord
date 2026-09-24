@@ -22,10 +22,11 @@
  * controls built before the write can't send it twice. A report the reader's
  * own write moves out of the current filter stays open and is read by id; one
  * that leaves the list for any other reason closes and says so. An unsaved
- * note lives only while the report can still take it and the view is live.
+ * note and chosen outcome live only while the report can still take them and
+ * the view is live.
  */
 
-import { ApiClientError, type ModerationQueueFilter } from "@lib/api";
+import { ApiClientError, type ModerationOutcome, type ModerationQueueFilter } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
@@ -69,11 +70,12 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   let detailReq: Disposable | null = null;
   let detailFocus = false;
   let denied = false;
-  /** The unsaved note, for the report it was typed on. */
-  let draft = { id: "", text: "" };
+  /** The unsaved note and chosen outcome, for the report they were entered on. */
+  const NO_DRAFT = { id: "", text: "", outcome: null as ModerationOutcome | null };
+  let draft = NO_DRAFT;
   /** A write being sent, or its answer waiting on the re-read of the report. */
   let writing: "sending" | "reading" | null = null;
-  /** A report this reader just wrote to: leaving the filter is expected, not news. */
+  /** A report this reader is writing to: leaving the filter is expected, not news. */
   let ownWrite: string | null = null;
   /** The open report, kept after the reader's own write took it out of the filter. */
   let offList: QueueItem | null = null;
@@ -185,7 +187,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     selected = null;
     ownWrite = null;
     offList = null;
-    draft = { id: "", text: "" };
+    draft = NO_DRAFT;
     syncCurrent();
     setDetailError("");
     setText(detailStatus, message);
@@ -204,7 +206,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     selected = null;
     ownWrite = null;
     offList = null;
-    draft = { id: "", text: "" };
+    draft = NO_DRAFT;
     clearChildren(list);
     for (const el of [toolbar, list, retry, detailRetry]) el.hidden = true;
     for (const el of [status, detailStatus, detailFailure, writeStatus, writeAlert])
@@ -288,7 +290,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
             clearDetail(t("detail.gone"));
           }
         }
-        ownWrite = null;
+        if (writing !== "sending") ownWrite = null;
       },
       (err: unknown) => {
         if (req !== listReq || signal.aborted) return;
@@ -346,12 +348,17 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     const view = buildReportDetail(item, detail, mountGate);
     const me = authStore.getState().user?.id ?? -1;
     view.element.append(...buildHistory(detail, me));
+    const mine = draft.id === detail.id ? draft : NO_DRAFT;
     const work = buildWorkflow({
       detail,
       me,
-      draft: draft.id === detail.id ? draft.text : "",
+      draft: mine.text,
       onDraft: (text) => {
-        draft = { id: detail.id, text };
+        draft = { ...draft, id: detail.id, text };
+      },
+      outcome: mine.outcome,
+      onOutcome: (outcome) => {
+        draft = { ...draft, id: detail.id, outcome };
       },
       onWrite: (w) => write(detail.id, w),
       signal,
@@ -359,7 +366,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     view.element.appendChild(work.element);
     if (draft.id === detail.id && !work.takesNotes) {
       if (draft.text.trim() !== "") setText(writeAlert, t("draft.lost"));
-      draft = { id: "", text: "" };
+      draft = NO_DRAFT;
     }
     view.element.addEventListener(
       "keydown",
@@ -399,9 +406,10 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   }
 
   /** Send one review write, then read the report again whatever the answer. */
-  function write(id: string, w: WorkflowWrite): void {
-    if (writing !== null || denied) return;
+  function write(id: string, w: WorkflowWrite): boolean {
+    if (writing !== null || denied) return false;
     writing = "sending";
+    ownWrite = id;
     setText(writeStatus, "");
     setText(writeAlert, "");
     const req =
@@ -413,7 +421,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     req.then(
       () => {
         if (signal.aborted || denied) return;
-        if (w.kind === "note" && draft.id === id) draft = { id: "", text: "" };
+        if (w.kind === "note" && draft.id === id) draft = { ...draft, text: "" };
         if (selected !== id) {
           writing = null;
           return;
@@ -424,6 +432,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       },
       (err: unknown) => {
         if (signal.aborted || denied) return;
+        ownWrite = null;
         if (isStatus(err, 403) && (err as ApiClientError).code !== "SELF_REVIEW") {
           deny();
           return;
@@ -451,6 +460,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
         reread(id);
       },
     );
+    return true;
   }
 
   function closeToRow(): void {
@@ -524,7 +534,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       detailSlot.querySelector<HTMLElement>("h3")?.focus();
       return;
     }
-    if (draft.id !== id) draft = { id: "", text: "" };
+    if (draft.id !== id) draft = NO_DRAFT;
     setText(writeStatus, "");
     setText(writeAlert, "");
     selected = id;
@@ -585,7 +595,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       items = [];
       selected = null;
       offList = null;
-      draft = { id: "", text: "" };
+      draft = NO_DRAFT;
       clearChildren(root);
     },
     { once: true },

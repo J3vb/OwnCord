@@ -214,7 +214,9 @@ B9-11 left no server gap: no server, protocol, schema or migration change.
   holds until that report read settles (rendered, failed or dropped), so the
   controls still on screen from before the write can't send it twice: no
   second take, no duplicate note, no false "already closed" after an own
-  close.
+  close. A click the guard refuses (another report's write still running)
+  leaves its controls as they were, not marked unavailable; only an accepted
+  write marks them `aria-disabled`.
   409 says which race was lost ("Another moderator took this report first",
   "Your note wasn't saved: this report was closed", "already closed by
   another moderator"); 403 `SELF_REVIEW` says so without leaving; any other
@@ -225,7 +227,9 @@ B9-11 left no server gap: no server, protocol, schema or migration change.
   under the active filter), the report stays open and is read by id, and a
   `role="status"` line says "Your change moved this report out of the
   current filter. It stays open here." instead of the "no longer in this
-  list" alert; later background reads keep reading it by id until the reader
+  list" alert. The report counts as the reader's own write from the moment
+  the POST is sent, so a `mod_queue` re-read that lands before the server's
+  204 (the server broadcasts first) keeps it open too; later background reads keep reading it by id until the reader
   leaves it or changes the filter. A report that leaves the list for any
   other reason (another moderator's write seen in a background read, a lost
   409 race, a filter change) still closes with "no longer in this list".
@@ -234,7 +238,8 @@ B9-11 left no server gap: no server, protocol, schema or migration change.
   view is live: switching report, refusal, 404, the view closing, role loss
   and sign-out drop it; a re-read that takes the note field away (someone
   else took or closed the report) drops it and says so. A background re-read
-  keeps the draft, focus and caret.
+  keeps the draft, the chosen outcome, focus and caret; the outcome is kept
+  and dropped with the draft, and survives a saved note.
 - **History** (`History.ts`, adapter in `api.ts`). Internal notes in their own
   section (author, UTC-parsed local date, text), never mixed into the history.
   The history merges report events and the moderator actions taken with the

@@ -30,7 +30,11 @@ export interface WorkflowOptions {
   /** The unsaved note for this report, kept while the view is live. */
   readonly draft: string;
   readonly onDraft: (text: string) => void;
-  readonly onWrite: (write: WorkflowWrite) => void;
+  /** The outcome chosen for this report, kept with the draft. */
+  readonly outcome: ModerationOutcome | null;
+  readonly onOutcome: (outcome: ModerationOutcome) => void;
+  /** Whether the write was accepted; one runs at a time. */
+  readonly onWrite: (write: WorkflowWrite) => boolean;
   readonly signal: AbortSignal;
 }
 
@@ -70,8 +74,8 @@ export function buildWorkflow(o: WorkflowOptions): WorkflowView {
   const buttons: HTMLButtonElement[] = [];
   /** Queue.ts lets one write run at a time; the next render comes from the fresh read. */
   const send = (write: WorkflowWrite): void => {
+    if (!o.onWrite(write)) return;
     for (const b of buttons) b.setAttribute("aria-disabled", "true");
-    o.onWrite(write);
   };
   const button = (label: string, key: string, type: "button" | "submit"): HTMLButtonElement => {
     const b = createElement("button", { type, class: "btn-modal-save", "data-focus": key }, label);
@@ -162,6 +166,7 @@ export function buildWorkflow(o: WorkflowOptions): WorkflowView {
       value: outcome,
       "data-focus": `outcome-${outcome}`,
     });
+    radio.checked = outcome === o.outcome;
     radios.push(radio);
     const label = createElement("label", { for: id, class: "mod-work-outcome" });
     appendChildren(label, radio, createElement("span", {}, outcomeText(outcome)));
@@ -181,7 +186,14 @@ export function buildWorkflow(o: WorkflowOptions): WorkflowView {
   const close = button(t("work.close"), "close", "submit");
   close.setAttribute("aria-describedby", closeHint.id);
   for (const r of radios) {
-    r.addEventListener("change", () => setText(closeError, ""), { signal });
+    r.addEventListener(
+      "change",
+      () => {
+        setText(closeError, "");
+        o.onOutcome(r.value as ModerationOutcome);
+      },
+      { signal },
+    );
   }
   closeForm.addEventListener(
     "submit",
