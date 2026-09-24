@@ -1,6 +1,6 @@
 # Plan: B9-22 — Polish desktop message reading, composing and related overlays
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch `fm/b9-22-impl` from `dev` `cd599319`, merging `dev` `cd599319` (startup budget 97,000 B); the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-24 on branch `fm/b9-22-impl` from `dev` `cd599319`, merging `dev` `cd599319` (startup budget 97,000 B); the outcome and evidence are in [Implementation record](#implementation-record--2026-09-24).
 
 > **Milestone:** B9-22 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-22-messaging-interaction-polish`; branch from current `dev`, PR to `dev` only.
@@ -274,8 +274,9 @@ the B9-3 seam), `Client/src/styles/app/{messages,composer,pinned-messages,overla
   940×500/20px reflow were captured on the same 1280×800 (and 940×500) fixture
   at the base and the branch heads; the after-state shots are attached to the
   Playwright report (CI artifact) and the full before/after pair is in the PR.
-- **Native AT (NVDA/Orca) recordings and OS-zoom checks are owner-run and remain
-  pending**, consistent with the other B9 lanes.
+- **Native AT (NVDA/Orca) recordings were declined by the owner 2026-09-24; the
+  OS-zoom checks are owner-run and remain pending**, consistent with the other
+  B9 lanes.
 - **Bundle budgets** (`npm run check:budgets` at the merged head): startup
   closure 96,149 B of the shared 97,000 B (raised by #1783 for B9-23); MainPage
   61,531 B of the unchanged 64,000 B. This lane adds ~800 B of startup (the
@@ -286,7 +287,8 @@ the B9-3 seam), `Client/src/styles/app/{messages,composer,pinned-messages,overla
 
 BPR-090 (coherent desktop reading/composing, preserved performance) and BPR-091
 (keyboard, focus, contrast, reflow, announcements) get their automated evidence
-here; the visual acceptance and native AT half remain owner-run. No new text was
+here; the visual acceptance and OS-zoom half remain owner-run; the native
+recordings were declined 2026-09-24. No new text was
 added that is not behind the B9-3 seam, and English remains byte-identical
 (`scripts/check-ui-strings.mjs` green against the shrink-only baseline).
 

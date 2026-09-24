@@ -1,6 +1,6 @@
 # Plan: B9-11 — Show the permission-gated moderation queue and authorized evidence
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-11-impl` from `dev` `64a41b3a1e6a0972059ec156a3f76f692fcccb99`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-11-impl` from `dev` `64a41b3a1e6a0972059ec156a3f76f692fcccb99`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-11 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-11-moderation-queue-evidence`; branch from current `dev`, PR to `dev` only.
@@ -337,8 +337,8 @@ before it took the shared `form-input` class.
   their text changes; the report is a section named by its heading, facts a
   description list. Every focusable control has a name
   (`findUnnamedControls`). A refusal, closed view or withdrawn consent
-  removes the private text from the tree. **NVDA and Orca recordings are
-  owner-run and pending.**
+  removes the private text from the tree. **NVDA and Orca recordings were
+  declined by the owner 2026-09-24.**
 - **Focus:** the view heading on open; the report heading once a report
   loads (only if the reader is still on its row); its row on Escape or Go
   back; the first row or the filter when an open report disappears; the view
@@ -356,4 +356,5 @@ before it took the shared `form-input` class.
 - **Zoom/reflow:** at 940×500 with 20 px Large Font every control and
   evidence line scrolls into view and neither the view nor the queue scrolls
   sideways (screenshot attached); long unbroken text wraps. The OS 200 %
-  zoom check is owner-run and pending with the native recordings.
+  zoom check is still owner-run and pending; the native recordings were
+  declined 2026-09-24.

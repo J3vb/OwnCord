@@ -1,6 +1,6 @@
 # Plan: B9-8 — Apply external-content consent before broker or provider work
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-8-impl` from `dev` `838bab09`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-8-impl` from `dev` `838bab09`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-8 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-8-external-content-consent`; branch from current `dev`, PR to `dev` only.
@@ -288,5 +288,5 @@ render path as a fallback; fail closed and record a blocker instead.
 - **Reflow:** 940×500 with 20 px Large Font at 100 % and 200 % scale — every
   dialog button in view, no clipping, no horizontal page scroll (screenshots
   attached).
-- **Screen reader:** NVDA (Windows) and Orca (Linux) recordings are owner-run
-  and pending.
+- **Screen reader:** NVDA (Windows) and Orca (Linux) recordings were declined
+  by the owner 2026-09-24.

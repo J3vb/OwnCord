@@ -1,6 +1,6 @@
 # Plan: B9-9 — Polish approved rich-content loading, failure and media controls
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch `fm/b9-9-impl` from `dev` `6671f228`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24). This file carries the status and evidence for this lane; the shared PRD status table is updated by the single docs lane (firstmate scope change, 2026-09-24).
+**Status:** IMPLEMENTED — native AT recordings declined by owner 2026-09-24 — 2026-09-24 on branch `fm/b9-9-impl` from `dev` `6671f228`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24). This file carries the status and evidence for this lane; the shared PRD status table is updated by the single docs lane (firstmate scope change, 2026-09-24).
 
 > **Milestone:** B9-9 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-9-rich-content-states`; branch from current `dev`, PR to `dev` only.
@@ -287,6 +287,6 @@ Re-read at `dev` `6671f2283f448afebe896eac993219df0529b692` (B9-8 merged as
   `1a3a7b1d` → this change: startup closure 93,150 → 93,384 B (+234 B),
   MainPage 63,841 → 63,890 B (+49 B, 110 B headroom).
 - **Lint:** `npm run lint` (oxlint, cycles, eslint) and both typechecks clean.
-- **Native:** NVDA (Windows) and Orca (Linux) recordings are owner-run and
-  pending; the native broker traffic proof remains B9-8's
+- **Native:** NVDA (Windows) and Orca (Linux) recordings were declined by the
+  owner 2026-09-24; the native broker traffic proof remains B9-8's
   `tests/e2e/native/b9-content-consent.spec.ts` (CI `native-core`).

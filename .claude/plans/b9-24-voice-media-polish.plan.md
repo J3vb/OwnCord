@@ -1,6 +1,6 @@
 # Plan: B9-24 — Polish voice and video controls and their accessibility
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch `fm/b9-24-impl` from `dev` `35f0b246`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
+**Status:** IMPLEMENTED — native AT recordings declined by owner 2026-09-24 — 2026-09-24 on branch `fm/b9-24-impl` from `dev` `35f0b246`; the outcome and evidence are in [Implementation record](#implementation-record--2026-09-24).
 
 > **Milestone:** B9-24 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-24-voice-media-polish`; branch from current `dev`, PR to `dev` only.
@@ -285,8 +285,8 @@ this record is the lane's own.
 - **Native (owner-run / CI):** `Client/tests/e2e/native/voice-controls.spec.ts`
   gains the stats-toggle keyboard check and the moderator-status role probe to
   the existing live journey (mute/deafen/disconnect over the real backend).
-  NVDA (Windows) and Orca (Linux) recordings remain owner-run, tracked with
-  B9-26; no automated proxy is claimed for them.
+  NVDA (Windows) and Orca (Linux) recordings were declined by the owner
+  2026-09-24; no automated proxy is claimed for them.
 
 ### Requirement map
 

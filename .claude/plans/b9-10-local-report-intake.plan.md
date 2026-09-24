@@ -1,6 +1,6 @@
 # Plan: B9-10 — Report local messages, users and attachments and show own report status
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-10-impl` from `dev` `166d71e44ce5dfde6455e3f108ce88a8def9c88f`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-10-impl` from `dev` `166d71e44ce5dfde6455e3f108ce88a8def9c88f`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-10 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-10-local-report-intake`; branch from current `dev`, PR to `dev` only.
@@ -325,7 +325,7 @@ the accessible-name check misread both failed before their fixes.
   `role="status"`; My reports is a region named "My reports". Every focusable
   control has a name (`findUnnamedControls`). No detail text, evidence or
   other person's data is in the summary's tree. **NVDA and Orca recordings
-  are owner-run and pending.**
+  were declined by the owner 2026-09-24.**
 - **Focus:** focus moves to the first radio on open, to the field at fault on
   error, stays on Send while pending and after a refusal, and returns to the
   opener on cancel and success (the composer if the row was re-rendered; the
@@ -347,8 +347,8 @@ the accessible-name check misread both failed before their fixes.
   nothing depends on it.
 - **Zoom/reflow:** at 940×500 with 20 px Large Font, every dialog control
   scrolls into view and neither the dialog nor My reports scrolls sideways
-  (screenshots attached to the run). OS zoom 200 % is owner-run with the
-  native recordings.
+  (screenshots attached to the run). OS zoom 200 % is still owner-run; the
+  native recordings were declined 2026-09-24.
 
 BPR-070's evidence row and status are not changed here: its B9 half closes at
 B9-26's joined journey with the owner's native recordings.

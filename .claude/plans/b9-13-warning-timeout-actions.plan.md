@@ -1,6 +1,6 @@
 # Plan: B9-13 — Issue warnings and timeouts with accurate outcomes
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch `fm/b9-13-impl` from `dev` `ea22a3bf699f9c1841502ceb69a8dbe3c3dabb2c`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-24 on branch `fm/b9-13-impl` from `dev` `ea22a3bf699f9c1841502ceb69a8dbe3c3dabb2c`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
 
 > **Milestone:** B9-13 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-13-warning-timeout-actions`; branch from current `dev`, PR to `dev` only.
@@ -337,5 +337,5 @@ with and without High Contrast (per-theme ratios attached as
 `b9-13-contrast-*.json`); at 940×500 with 20 px Large Font nothing scrolls
 sideways and every control and line scrolls into view (screenshot attached).
 Custom-accent fallback is inherited unchanged from B9-2 (no new colour).
-**Owner-run pending:** NVDA (Windows) and Orca (Linux) recordings, and the
-200 % OS-zoom check.
+**Owner-run pending:** the 200 % OS-zoom check. NVDA (Windows) and Orca
+(Linux) recordings were declined by the owner 2026-09-24.

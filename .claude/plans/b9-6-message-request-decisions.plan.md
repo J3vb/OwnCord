@@ -1,6 +1,6 @@
 # Plan: B9-6 — Accept, ignore, delete or block a Message Request
 
-**Status:** IMPLEMENTED — 2026-09-23 on `fm/b9-6-impl`; NVDA/Orca recordings and the OS 200 % zoom check are owner-run and pending. See [Implementation record](#implementation-record-2026-09-23).
+**Status:** IMPLEMENTED — 2026-09-23 on `fm/b9-6-impl`; the OS 200 % zoom check is owner-run and pending, and the NVDA/Orca recordings were declined by the owner 2026-09-24. See [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-6 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-6-message-request-decisions`; branch from current `dev`, PR to `dev` only.
@@ -295,7 +295,7 @@ the `GET /dms` fallback existed.
   `role="status"`; the busy row carries `aria-busy`. The confirm is a modal
   `dialog` named by its heading, with Cancel focused first. No stranger
   content beyond the B9-5 text reaches the tree. **NVDA and Orca recordings
-  are owner-run and pending.**
+  were declined by the owner 2026-09-24.**
 - **Focus:** every decision and confirm button's ring, and the request
   row's ring after a removal, meets Q1 (2px, 3:1; e2e `focusIndicator`); Tab stays inside the confirm; removal moves focus to
   the next request's row or the heading (unit and e2e); Accept lands on the
@@ -310,4 +310,4 @@ the `GET /dms` fallback existed.
   path. No media.
 - **Zoom/reflow:** at 940×500 with 20 px Large Font every decision is whole
   in view and at least 24×24 px, and the Block confirm's buttons fit (e2e,
-  screenshots). The OS 200 % zoom check is owner-run and pending.
+  screenshots). The OS 200 % zoom check is still owner-run and pending.

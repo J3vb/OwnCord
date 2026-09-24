@@ -1,6 +1,6 @@
 # Plan: B9-2 — Apply the agreed shared accessibility and token rules
 
-**Status:** IMPLEMENTED — native AT recordings and owner visual acceptance pending — 2026-09-23 on branch `fm/b9-2-impl` from `dev` `3c55f811`; evidence in `docs/plans/b9-shared-a11y-evidence-2026-09-23.md`, contract in `docs/architecture/b9-ui-contract.md`.
+**Status:** IMPLEMENTED — owner visual acceptance pending; native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-2-impl` from `dev` `3c55f811`; evidence in `docs/plans/b9-shared-a11y-evidence-2026-09-23.md`, contract in `docs/architecture/b9-ui-contract.md`.
 
 > **Milestone:** B9-2 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-2-shared-accessibility-and-tokens`; branch from current `dev`, PR to `dev` only.

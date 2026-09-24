@@ -1,6 +1,6 @@
 # Plan: B9-3 — Introduce the English text and formatting boundary
 
-**Status:** IMPLEMENTED — native AT recordings and OS-zoom check pending owner — 2026-09-23 on branch `fm/b9-3-impl` from `dev` `4830b23c`; inventory and evidence in `docs/plans/b9-text-inventory-2026-09-23.md`.
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-23 on branch `fm/b9-3-impl` from `dev` `4830b23c`; inventory and evidence in `docs/plans/b9-text-inventory-2026-09-23.md`.
 
 Validated at `d33224d7e8fa110bf68c93be2a030cf2f50da8d3`.
 

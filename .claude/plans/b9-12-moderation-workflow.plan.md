@@ -1,6 +1,6 @@
 # Plan: B9-12 — Assign, annotate and close reports with immutable history
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch `fm/b9-12-impl` from `dev` `9c5f5d67f29bc2313adb227a6e2c1d60abc962c6`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-24 on branch `fm/b9-12-impl` from `dev` `9c5f5d67f29bc2313adb227a6e2c1d60abc962c6`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
 
 > **Milestone:** B9-12 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-12-moderation-workflow`; branch from current `dev`, PR to `dev` only.
@@ -374,8 +374,8 @@ report.
   region and conflicts and refusals through a `role="alert"` region, both
   outside the rebuilt report so they exist before their text changes. Every
   control has a name (`findUnnamedControls`). Refusal and role loss remove the
-  notes, history and draft from the tree. **NVDA and Orca recordings are
-  owner-run and pending.**
+  notes, history and draft from the tree. **NVDA and Orca recordings were
+  declined by the owner 2026-09-24.**
 - **Focus:** after a write or a background re-read, focus returns to the
   same control (caret kept in the note field); when that control is gone (a
   take or close), it goes to the report heading, or to the list after the
@@ -392,5 +392,5 @@ report.
   animation or transition.
 - **Zoom/reflow:** at 940×500 with 20 px Large Font every control, note and
   history entry scrolls into view and the view does not scroll sideways
-  (screenshot attached); long text wraps. The OS 200 % zoom check is
-  owner-run and pending with the native recordings.
+  (screenshot attached); long text wraps. The OS 200 % zoom check is still
+  owner-run and pending; the native recordings were declined 2026-09-24.

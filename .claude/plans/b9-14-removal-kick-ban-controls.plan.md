@@ -1,6 +1,6 @@
 # Plan: B9-14 — Finish narrow removal, kick, ban and effective voice controls
 
-**Status:** IMPLEMENTED — native AT recordings and OS-zoom check pending owner — 2026-09-24 on branch `fm/b9-14-impl` from `dev` `c215cadeb4e16bff71f9ecac5261b50b27f0a453`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-24 on branch `fm/b9-14-impl` from `dev` `c215cadeb4e16bff71f9ecac5261b50b27f0a453`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
 
 > **Milestone:** B9-14 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-14-removal-kick-ban-controls`; branch from current `dev`, PR to `dev` only.
@@ -376,5 +376,5 @@ in dark, neon-glow, midnight and light, each with and without High Contrast
 scroll (screenshot attached). The voice menu's disabled reason is text with
 `aria-disabled`; the menu's own keyboard access is B9-24's scope and is
 unchanged here. Custom-accent fallback is inherited unchanged from B9-2 (no
-new colour). **Owner-run pending:** NVDA (Windows) and Orca (Linux)
-recordings, and the 200 % OS-zoom check.
+new colour). **Owner-run pending:** the 200 % OS-zoom check. NVDA (Windows)
+and Orca (Linux) recordings were declined by the owner 2026-09-24.

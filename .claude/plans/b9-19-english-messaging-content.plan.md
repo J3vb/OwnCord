@@ -1,6 +1,6 @@
 # Plan: B9-19 — Extract messaging, rich-content and media text
 
-**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch `fm/b9-19-impl` from `dev` `782e010e`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24). This file carries the status and evidence for this lane; the shared PRD status table is updated by the single docs lane.
+**Status:** IMPLEMENTED — OS-zoom check pending owner; native AT recordings declined by owner 2026-09-24 — 2026-09-24 on branch `fm/b9-19-impl` from `dev` `782e010e`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24). This file carries the status and evidence for this lane; the shared PRD status table is updated by the single docs lane.
 
 > **Milestone:** B9-19 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `refactor/b9-19-english-messaging-content`; branch from current `dev`, PR to `dev` only.
@@ -284,7 +284,7 @@ production-bundle config.
 | Block          | Status                                                                                                                                                                                                                                        |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Keyboard       | Automated (existing suites): the message action bar, search overlay, pinned panel, DM sidebar and member picker are reached and operated with Enter/Space/Escape and arrows; the new B9-19 case asserts the expanded action names are visible |
-| Screen reader  | Automated: action, panel, picker and search accessible names resolve from the catalog in English and expanded. NVDA (Windows) and Orca (Linux) recordings **pending owner** — this host has no display or screen reader                       |
+| Screen reader  | Automated: action, panel, picker and search accessible names resolve from the catalog in English and expanded. NVDA (Windows) and Orca (Linux) recordings **declined by the owner 2026-09-24**                                                |
 | Focus          | No change: no focus handling was touched; the B9-9 lightbox/popup focus behaviour is untouched                                                                                                                                                |
 | Contrast       | No change: no colour or token changed; B9-2's Q1/Q8 matrix applies                                                                                                                                                                            |
 | Reduced motion | No change: no animation changed                                                                                                                                                                                                               |
