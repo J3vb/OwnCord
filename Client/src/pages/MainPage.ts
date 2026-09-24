@@ -48,6 +48,7 @@ import {
 } from "@components/message-list/attachments";
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches, closeActiveLightbox } from "@components/message-list/media";
+import { forgetAdmittedItems } from "../features/content-consent/external";
 import {
   setReactionUsersFetcher,
   clearReactionUsersCache,
@@ -1067,6 +1068,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       clearEmbedCaches();
       clearMediaCaches();
       clearExternalImageCache();
+      forgetAdmittedItems();
       // The lightbox is a module-level overlay appended straight to
       // document.body — renderPage only clears #app, so a forced logout with
       // it open would otherwise leave it floating over the login screen with

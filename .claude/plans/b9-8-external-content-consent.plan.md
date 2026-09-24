@@ -1,6 +1,6 @@
 # Plan: B9-8 — Apply external-content consent before broker or provider work
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-23 on branch `fm/b9-8-impl` from `dev` `838bab09`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-23).
 
 > **Milestone:** B9-8 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-8-external-content-consent`; branch from current `dev`, PR to `dev` only.
@@ -38,6 +38,25 @@ at the actual implementation base; record drift before coding.
 | 2   | Generic preview rendering starts a broker preview and can recover an expired image handle.                                                  | `Client/src/components/message-list/embeds.ts:60-84`; `Client/src/components/message-list/embeds.ts:132-141`; `Client/src/components/message-list/embeds.ts:183-199` |
 | 3   | YouTube title and thumbnail load through the broker; playback creates a fixed-host sandboxed iframe on click. The frame is a distinct path. | `Client/src/components/message-list/media.ts:178-239`                                                                                                                |
 | 4   | External caches are cleared during MainPage teardown.                                                                                       | `Client/src/pages/MainPage.ts:1020-1026`                                                                                                                             |
+
+### Drift at the implementation base (2026-09-23)
+
+Re-read at `dev` `838bab09649dc715000a3a59e2dbc9eddb685d82` (B9-7 merged):
+
+- Rows 1–3 hold unchanged: the contract is still `externalContent.ts:18-64`;
+  the preview fetch, card render and handle recovery are `embeds.ts:60-97`,
+  `99-150` and `176-199`; YouTube is `media.ts:153-242`.
+- Row 4 moved: the teardown cache clears are now `MainPage.ts:1062-1068`.
+- Not in the table: every broker call went through `desktop.externalContent`
+  directly from `embeds.ts`, `media.ts` and `attachments.ts`
+  (`loadExternalImage`, which also serves external avatars through
+  `fetchImageAsDataUrl`), and the GIF picker queried the server's GIF proxy
+  on open. The YouTube play control was a `div`, reachable by pointer only,
+  and its frame had no title.
+- B9-7 consent is enforced before a gated channel mounts any row, so its
+  messages never reach the embed pipeline; the Message Requests inbox renders
+  preview text only and imports no renderer (`features/message-requests/Inbox.ts`).
+- Bundle base: startup closure 94,362 B / 95,000 B, MainPage 63,343 B / 64,000 B.
 
 ## Patterns to mirror
 
@@ -176,3 +195,98 @@ render path as a fallback; fail closed and record a blocker instead.
 **Options and consequences:** Require per-item activation without persistence; remember consent for this server/account session; or persist provider/server permission across restarts. Per-item is clearest but repetitive, session memory reduces prompts, persistent grants need a discoverable revocation/reset model and stronger lifecycle evidence. All options keep zero fetch before the applicable acknowledgement; NSFW and request trust remain separate.
 
 **Drafting recommendation (historical):** Start with explicit per-item activation and no durable grants; offer broader grants only after the owner chooses their exact scope. Playback remains a separate deliberate action.
+
+## Implementation record (2026-09-23)
+
+### Implementation decisions and file-table amendments
+
+- **The Q3 model.** `features/content-consent/external.ts` keeps one choice per
+  server host (`"auto"` or `"ask"`) in the `externalContentConsent` client
+  preference, plus a session set of items admitted one by one. The scope is the
+  host `attachments.ts` already normalises for the broker partition, so a
+  server switch changes it and forgets per-item admissions; a page teardown
+  forgets them too, but the manual cache clear (Advanced) keeps them, so an
+  item already loaded under "Ask each time" can refetch. A dialog still open
+  across a server switch, teardown or reset admits and records nothing when
+  answered (a generation counter). It is loaded with the startup
+  closure (attachments.ts is), so the concealed control lives apart in
+  `concealed.ts` and the dialog is lazy (`externalDialog.ts`).
+- **Dialog on first activation, not on render.** The owner's dialog appears the
+  first time the viewer activates a concealed item on a server, not when a
+  message renders: opening a modal from a render would move focus without a
+  user action. It states the viewer-IP disclosure in one sentence and offers
+  "Load automatically on this server" and "Ask each time"; Cancel, Escape and
+  the backdrop choose nothing and fetch nothing. Either choice loads the item
+  activated; "auto" then loads every concealed item on the server.
+- **One admission check in front of the broker.** `attachments.ts`
+  `loadExternalImage` and the new `previewExternal` refuse (`"unavailable"`)
+  any key not admitted, before any IPC. Fetches an admitted item needs (a
+  preview's image handle, YouTube's oEmbed and thumbnail, a picker's
+  thumbnails) are admitted only from an admitted parent (`admitDerived`).
+  External avatars have no item to activate, so they load only on "auto".
+- **Render gate.** `media.ts` renders each URL embed through one function that
+  returns the real embed only when admitted, otherwise the concealed control
+  naming the host. A consent change re-renders exactly the items whose state
+  changed and keeps focus in the item it was in.
+- **GIF picker.** The picker is one item: until admitted it shows "Load GIFs
+  from Klipy" and sends no query to the server's proxy.
+- **Revocation.** The Text & Images tab gains "Reset external content
+  consent"; turning off Link Preview, Show Embeds or Inline Attachment Preview
+  does the same. Both forget every server's choice (the tab is global), and a
+  revocation clears the embed, media and broker image caches (revoking blob
+  URLs and moving to a fresh partition, so late answers are dropped) and
+  re-conceals rendered items, removing any YouTube frame.
+- **Playback.** The play control is now a `<button>` named "Play on YouTube",
+  described by a visible note that playing connects to YouTube directly; the
+  frame is titled and takes focus when opened from the keyboard. Host,
+  sandbox and CSP are unchanged.
+- **Files beyond the table:** `components/settings/TextImagesTab.ts` (the
+  reset action Q3 names), `i18n/externalConsent.ts` (catalog, required by the
+  B9-3 rule), `tests/e2e/b9-content-consent.spec.ts` (mocked-shell journey and
+  Q1 checks, as B9-7 did), `playwright.config.native.ts` (adds the native spec
+  to `native-core`, or it would never run), `docs/trust-model.md` and
+  `docs/architecture/rich-content-inventory.md` (record the gate). Ten existing
+  unit suites that render consented content now mock `externalAllowed` to
+  true as their precondition; no assertion changed. No navigation
+  composition, token, style, store or dispatcher change.
+
+### Evidence
+
+- **Failing control.** `Client/src/features/content-consent/external.test.ts`
+  (14 tests). With `externalAllowed` forced to `true` — the pre-B9-8 behaviour
+  — 9 fail, including "conceals every item and fetches nothing", "refuses at
+  the broker seam too" and "sends no GIF query ... until the picker is
+  admitted"; with the gate, all pass.
+- **Unit:** `npx vitest run tests/unit src` — 288 files, 6,460 passed, 152
+  expected-fail.
+- **Mocked shell:** `npx playwright test tests/e2e/b9-content-consent.spec.ts
+--workers=1` — 15 passed (zero broker invocations before consent, Escape
+  and Cancel, "Ask each time" admitting one item, "auto" surviving a reload,
+  the reset, YouTube playback, Q1).
+- **Native:** `tests/e2e/native/b9-content-consent.spec.ts` observes the real
+  IPC transport in the Windows build (CI `native-core`) and asserts no
+  `external_preview`/`external_image` invocation before consent, one item
+  only under "Ask each time", and none after the reset. `.invalid` hosts keep
+  admitted calls on the machine. Not runnable locally (CI-only build).
+- **Bundle:** startup closure 94,790 B / 95,000 B (+428 B, the model and its
+  admission check); MainPage 63,508 B / 64,000 B (+165 B). No budget change.
+- **Lint:** `npm run lint` (oxlint, cycles, eslint) and both typechecks clean.
+
+### Accessibility (Q1)
+
+- **Keyboard / focus:** the concealed control and the play control are
+  buttons; the dialog opens on Cancel, contains focus, and restores it; a
+  loaded item takes focus from the control that loaded it. Automated in the
+  mocked spec.
+- **Names / contrast:** no unnamed control in the item or dialog; text
+  contrast ≥ 4.5:1 and the focus indicator measured in dark, neon-glow,
+  midnight and light, each with and without High Contrast (per-theme JSON
+  attached to the run). The Q8 custom-accent fallback is not separately
+  measured: the new controls use the shared modal and ghost button styles.
+- **Motion:** no running animation under OS or in-app reduced motion; without
+  it, only the shared modal fade, which the choice does not wait for.
+- **Reflow:** 940×500 with 20 px Large Font at 100 % and 200 % scale — every
+  dialog button in view, no clipping, no horizontal page scroll (screenshots
+  attached).
+- **Screen reader:** NVDA (Windows) and Orca (Linux) recordings are owner-run
+  and pending.

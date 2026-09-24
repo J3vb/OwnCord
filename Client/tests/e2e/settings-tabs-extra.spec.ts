@@ -25,6 +25,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import {
   buildTauriMockScript,
+  grantExternalConsent,
   MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
@@ -175,6 +176,7 @@ async function closeSettings(page: Page): Promise<void> {
 test.describe("Settings — Text & Images Tab", () => {
   test.beforeEach(async ({ page }) => {
     await mockSession(page);
+    await grantExternalConsent(page);
     await page.goto("/");
     await navigateToMainPageReady(page);
   });
@@ -199,13 +201,18 @@ test.describe("Settings — Text & Images Tab", () => {
     await expect(page.locator("[data-testid='message-9101'] .msg-text")).toContainText("youtube");
     await expect(page.locator("[data-testid='message-9101'] .msg-embed-youtube")).toHaveCount(0);
 
-    // Flip it back on and prove the embed renders again.
+    // Flip it back on and prove the embed renders again — concealed, because
+    // turning the toggle off revoked the external-content consent (B9-8, Q3).
     await openSettings(page);
     await switchSettingsTab(page, "Text & Images");
     await toggleFor(page, "Show Embeds").click();
     await closeSettings(page);
     await emitChat(page, 9102, "https://www.youtube.com/watch?v=aaaaaaaaaaa");
-    await expect(page.locator("[data-testid='message-9102'] .msg-embed-youtube")).toBeVisible();
+    await expect(
+      page
+        .locator("[data-testid='message-9102']")
+        .getByRole("button", { name: "Load external content from www.youtube.com" }),
+    ).toBeVisible();
   });
 
   test("Inline Attachment Preview off suppresses a direct image URL", async ({ page }) => {
@@ -227,7 +234,12 @@ test.describe("Settings — Text & Images Tab", () => {
     await toggleFor(page, "Inline Attachment Preview").click();
     await closeSettings(page);
     await emitChat(page, 9202, "https://example.com/other.png");
-    await expect(page.locator("[data-testid='message-9202'] .msg-image")).toBeVisible();
+    // Back on, concealed: turning it off revoked the consent (B9-8, Q3).
+    await expect(
+      page
+        .locator("[data-testid='message-9202']")
+        .getByRole("button", { name: "Load external content from example.com" }),
+    ).toBeVisible();
   });
 
   test("Link Preview off suppresses a generic link card", async ({ page }) => {
@@ -251,9 +263,12 @@ test.describe("Settings — Text & Images Tab", () => {
     await toggleFor(page, "Link Preview").click();
     await closeSettings(page);
     await emitChat(page, 9302, "https://example.com/another-article");
-    const card = page.locator("[data-testid='message-9302'] .msg-embed-link");
-    await expect(card).toBeVisible();
-    await expect(card.locator(".msg-embed-host")).toHaveText("example.com");
+    // Back on, concealed: turning it off revoked the consent (B9-8, Q3).
+    await expect(
+      page
+        .locator("[data-testid='message-9302']")
+        .getByRole("button", { name: "Load external content from example.com" }),
+    ).toBeVisible();
   });
 
   test("Animate GIFs off renders a new GIF frozen, on renders it playing", async ({ page }) => {

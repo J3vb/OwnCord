@@ -9,6 +9,13 @@ import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
 import type { GifApi, GifResult } from "@lib/gifProvider";
 import { fetchExternalImage, recoverEvictedImage } from "@components/message-list/attachments";
+import {
+  admitDerived,
+  externalAllowed,
+  GIF_PICKER_ITEM,
+  requestExternalItem,
+} from "../features/content-consent/external";
+import { externalConsentText } from "../i18n/externalConsent";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -139,6 +146,7 @@ export function createGifPicker(options: GifPickerOptions): {
         alt: gif.title || "GIF",
         loading: "lazy",
       });
+      admitDerived(GIF_PICKER_ITEM, `url:${gif.url}`);
       recoverEvictedImage(img, { url: gif.url });
       void fetchExternalImage({ url: gif.url }).then((src) => {
         if (src !== null) img.src = src;
@@ -159,7 +167,36 @@ export function createGifPicker(options: GifPickerOptions): {
     gridArea.appendChild(loadingEl);
   }
 
+  // B9-8: the picker is one external item. Until the viewer consents, not
+  // even the query reaches the server's GIF proxy.
+  let consentBtn: HTMLButtonElement | null = null;
+  function showConsent(): void {
+    if (consentBtn !== null) return;
+    gridArea.hidden = true;
+    consentBtn = createElement("button", { type: "button", class: "btn-ghost gp-consent" });
+    setText(consentBtn, externalConsentText("gif.load"));
+    consentBtn.addEventListener(
+      "click",
+      () => {
+        void requestExternalItem(GIF_PICKER_ITEM).then((ok) => {
+          if (!ok || signal.aborted) return;
+          consentBtn?.remove();
+          consentBtn = null;
+          gridArea.hidden = false;
+          searchInput.focus();
+          void loadGifs(searchInput.value.trim());
+        });
+      },
+      { signal },
+    );
+    root.insertBefore(consentBtn, gridArea);
+  }
+
   async function loadGifs(query: string): Promise<void> {
+    if (!externalAllowed(GIF_PICKER_ITEM)) {
+      showConsent();
+      return;
+    }
     const requestId = ++currentRequestId;
     showLoading();
 

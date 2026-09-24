@@ -56,6 +56,7 @@ export default defineConfig({
         "pending-messages.spec.ts",
         "http-cancellation.spec.ts",
         "long-session.spec.ts",
+        "b9-content-consent.spec.ts",
       ],
     },
     {

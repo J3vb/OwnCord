@@ -11,6 +11,13 @@ const { previewMock, imageMock, observeMediaMock, loadPrefMock } = vi.hoisted(()
   loadPrefMock: vi.fn(),
 }));
 
+// B9-8: this suite exercises content the viewer has already consented to;
+// the consent gate itself is proven in src/features/content-consent/external.test.ts.
+vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
+  externalAllowed: () => true,
+}));
+
 vi.mock("../../src/platform/desktop/externalContent", () => ({
   externalContent: { preview: previewMock, image: imageMock },
 }));
@@ -62,6 +69,7 @@ vi.mock("../../src/components/message-list/embeds", () => ({
     el.textContent = url;
     return el;
   },
+  clearEmbedCaches: () => {},
 }));
 
 // ---------------------------------------------------------------------------

@@ -292,6 +292,19 @@ source either, only loopback. One residual is deliberate: the YouTube player
 is a frame load, which cannot be brokered into bytes, and keeps its fixed host
 (`frame-src`) and sandbox.
 
+**Viewer consent, B9-8.** The broker bounds _how_ content is fetched; the
+viewer decides _whether_. No broker call and no GIF-proxy query is made until
+the viewer has chosen, once per server profile, "Load automatically on this
+server" or "Ask each time" (a per-item click), after being told the linked
+sites can see their IP address
+(`Client/src/features/content-consent/external.ts`). The check sits in front
+of every broker call in `Client/src/components/message-list/attachments.ts`,
+so a render path that forgets to ask still fetches nothing. Turning off a
+Text & Images toggle, or its "Reset external content consent" action, revokes
+every server's choice, drops fetched bytes and late answers, and re-conceals
+rendered items. YouTube playback stays a separate click. The grant is
+separate from NSFW consent and Message Request trust and satisfies neither.
+
 **Clause 1 and the server's own files.** Attachments, avatars and custom
 emoji hosted by the connected OwnCord server are automatic fetches too, and
 they deliberately do not go through the broker: they keep the cert-pinned

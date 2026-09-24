@@ -10,13 +10,23 @@ import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
 import {
-  externalPartition,
+  clearExternalImageCache,
   fetchExternalImage,
   isSafeUrl,
   openImageLightbox,
+  previewExternal,
   recoverEvictedImage,
 } from "./attachments";
-import { desktop } from "../../platform/desktop";
+import {
+  admitDerived,
+  EXTERNAL_CONSENT_PREF,
+  externalAllowed,
+  externalConsentChoice,
+  requestExternalItem,
+  resetExternalConsent,
+} from "../../features/content-consent/external";
+import { renderConcealedItem } from "../../features/content-consent/concealed";
+import { externalConsentText } from "../../i18n/externalConsent";
 import {
   CODE_BLOCK_REGEX,
   INLINE_CODE_REGEX,
@@ -24,7 +34,7 @@ import {
   stripUrlTrailingPunctuation,
   URL_REGEX,
 } from "./content-parser";
-import { renderGenericLinkPreview } from "./embeds";
+import { clearEmbedCaches, renderGenericLinkPreview } from "./embeds";
 
 // The lightbox lives in attachments.ts, which renders attachment images and
 // must not import this module (that import was a cycle); re-exported here for
@@ -44,15 +54,28 @@ window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>
   switch (e.detail.key) {
     case "showEmbeds":
       showEmbedsPref = loadPref<boolean>("showEmbeds", true);
+      if (!showEmbedsPref) resetExternalConsent();
       break;
     case "inlineMedia":
       inlineMediaPref = loadPref<boolean>("inlineMedia", true);
+      if (!inlineMediaPref) resetExternalConsent();
       break;
     case "showLinkPreviews":
       showLinkPreviewsPref = loadPref<boolean>("showLinkPreviews", true);
+      if (!showLinkPreviewsPref) resetExternalConsent();
       break;
     case "animateGifs":
       animateGifsPref = loadPref<boolean>("animateGifs", true);
+      break;
+    case EXTERNAL_CONSENT_PREF:
+      // Revoked (Q3: a Text & Images toggle turned off, or the reset): drop
+      // every fetched byte and late answer before re-concealing.
+      if (externalConsentChoice() === null) {
+        clearEmbedCaches();
+        clearMediaCaches();
+        clearExternalImageCache();
+      }
+      refreshExternalItems();
       break;
   }
 }) as EventListener);
@@ -136,6 +159,8 @@ export function extractYouTubeId(url: string): string | null {
   return null;
 }
 
+let ytNoteSeq = 0;
+
 /** Cache for YouTube video titles to avoid re-fetching on every re-render (LRU at 200). */
 const ytTitleCache = new Map<string, string>();
 const YT_TITLE_CACHE_MAX = 200;
@@ -182,9 +207,10 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     setText(titleLink, "Loading...");
     const generation = mediaCacheGeneration;
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&format=json`;
+    admitDerived(`url:${originalUrl}`, `url:${oembedUrl}`);
     // The broker fetches and parses the oEmbed document and hands back only
     // its title — the renderer never reads the JSON.
-    void desktop.externalContent.preview(externalPartition(), oembedUrl).then((result) => {
+    void previewExternal(oembedUrl).then((result) => {
       if (generation !== mediaCacheGeneration) {
         setText(titleLink, "YouTube Video");
         return;
@@ -210,18 +236,32 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     alt: "YouTube video",
     loading: "lazy",
   });
+  admitDerived(`url:${originalUrl}`, `url:${thumbUrl}`);
   recoverEvictedImage(thumb, { url: thumbUrl });
   void fetchExternalImage({ url: thumbUrl }).then((src) => {
     if (src !== null) thumb.src = src;
   });
 
-  const playBtn = createElement("div", { class: "msg-embed-play" });
+  // Playback is a separate deliberate act (B9-8): the frame talks to YouTube
+  // itself, outside the broker's byte-fetch boundary, and the note says so.
+  const note = createElement(
+    "div",
+    { class: "msg-embed-link-desc", id: `yt-note-${videoId}-${++ytNoteSeq}` },
+    externalConsentText("youtube.note"),
+  );
+  header.appendChild(note);
+  const playBtn = createElement("button", {
+    type: "button",
+    class: "msg-embed-play",
+    "aria-label": externalConsentText("youtube.play"),
+    "aria-describedby": note.id,
+  });
   playBtn.appendChild(createIcon("play", 24));
 
   appendChildren(thumbWrap, thumb, playBtn);
   wrap.appendChild(thumbWrap);
 
-  // On click thumbnail, replace with iframe player
+  // On click (or Enter/Space on the play button), replace with the player
   thumbWrap.addEventListener(
     "click",
     () => {
@@ -234,7 +274,10 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
         "allow-scripts allow-same-origin allow-presentation allow-popups",
       );
       iframe.className = "msg-embed-iframe";
+      iframe.title = externalConsentText("youtube.frame");
+      const hadFocus = thumbWrap.contains(document.activeElement);
       thumbWrap.replaceChildren(iframe);
+      if (hadFocus) iframe.focus();
     },
     { once: true },
   );
@@ -362,39 +405,64 @@ export function extractUrls(content: string): string[] {
   return (matches ?? []).map(stripUrlTrailingPunctuation);
 }
 
+/** One URL's embed (YouTube player, inline image, link card), or null when
+ *  it gets none. Concealed until the viewer consented to it (B9-8). */
+function renderUrlEmbed(url: string): HTMLElement | null {
+  const ytId = extractYouTubeId(url);
+  const isSafe = isSafeUrl(url);
+  let render: () => HTMLElement;
+  if (ytId !== null) {
+    if (!showEmbedsPref) return null;
+    render = () => renderYouTubeEmbed(ytId, url);
+  } else if (isDirectImageUrl(url) && isSafe) {
+    if (!inlineMediaPref) return null;
+    render = () => renderInlineImage(url);
+  } else if (isSafe) {
+    if (!showLinkPreviewsPref) return null;
+    render = () => renderGenericLinkPreview(url);
+  } else {
+    return null;
+  }
+  const loaded = externalAllowed(`url:${url}`);
+  const el = loaded
+    ? render()
+    : renderConcealedItem(url, () => {
+        void requestExternalItem(`url:${url}`).then((ok) => {
+          if (ok) refreshExternalItems();
+        });
+      });
+  el.dataset.externalUrl = url;
+  el.dataset.externalLoaded = String(loaded);
+  return el;
+}
+
+/** Re-render every embed whose consent changed: load the newly admitted ones
+ *  and conceal the revoked ones, keeping focus on the item it was in. */
+function refreshExternalItems(): void {
+  for (const el of document.querySelectorAll<HTMLElement>("[data-external-url]")) {
+    const url = el.dataset.externalUrl ?? "";
+    if (String(externalAllowed(`url:${url}`)) === el.dataset.externalLoaded) continue;
+    const hadFocus = el.contains(document.activeElement);
+    const next = renderUrlEmbed(url);
+    if (next === null) {
+      el.remove();
+      continue;
+    }
+    el.replaceWith(next);
+    if (hadFocus) {
+      const target = next.querySelector<HTMLElement>("a, button") ?? next;
+      if (target === next) next.tabIndex = -1;
+      target.focus();
+    }
+  }
+}
+
 /** Render URL embeds (YouTube players, generic link previews). */
 export function renderUrlEmbeds(content: string): DocumentFragment {
   const fragment = document.createDocumentFragment();
-  const urls = extractUrls(content);
-  const seen = new Set<string>();
-
-  for (const url of urls) {
-    if (seen.has(url)) continue;
-    seen.add(url);
-
-    // YouTube embed
-    const ytId = extractYouTubeId(url);
-    if (ytId !== null) {
-      if (!showEmbedsPref) continue;
-      fragment.appendChild(renderYouTubeEmbed(ytId, url));
-      continue;
-    }
-
-    // Direct image/GIF URL — render inline
-    const isDirect = isDirectImageUrl(url);
-    const isSafe = isSafeUrl(url);
-    if (isDirect && isSafe) {
-      if (!inlineMediaPref) continue;
-      fragment.appendChild(renderInlineImage(url));
-      continue;
-    }
-
-    // Generic URL preview (compact link card)
-    if (isSafe) {
-      if (!showLinkPreviewsPref) continue;
-      fragment.appendChild(renderGenericLinkPreview(url));
-    }
+  for (const url of new Set(extractUrls(content))) {
+    const el = renderUrlEmbed(url);
+    if (el !== null) fragment.appendChild(el);
   }
-
   return fragment;
 }

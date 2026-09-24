@@ -14,6 +14,13 @@ const { fetchMock, saveMock, writeFileMock, brokerImageMock } = vi.hoisted(() =>
   brokerImageMock: vi.fn(),
 }));
 
+// B9-8: this suite exercises content the viewer has already consented to;
+// the consent gate itself is proven in src/features/content-consent/external.test.ts.
+vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
+  externalAllowed: () => true,
+}));
+
 vi.mock("../../src/platform/desktop/externalContent", () => ({
   externalContent: { preview: vi.fn(), image: brokerImageMock },
 }));
