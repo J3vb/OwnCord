@@ -1311,7 +1311,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     try {
       window.dispatchEvent(new Event("offline"));
-      expect(banner.textContent).toContain("This device has no network");
+      expect(banner.textContent).toContain("Your device reports no network connection");
 
       onLine.mockReturnValue(true);
       window.dispatchEvent(new Event("online"));

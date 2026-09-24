@@ -61,13 +61,16 @@ describe("ServerBanner", () => {
 
   it("showDisconnected names the device's own network when it is offline", () => {
     const banner = createServerBanner();
-    banner.showDisconnected({ offline: true });
+    const onRetry = vi.fn();
+    banner.showDisconnected({ offline: true, onRetry });
 
     expect(banner.element.textContent).toBe(
-      "This device has no network. Check your connection — your server may still be reachable on this network.",
+      "Your device reports no network connection. If your server is on a local network, try again. Retry",
     );
-    // No retry over a network the device itself does not have.
-    expect(banner.element.querySelector("button")).toBeNull();
+    // A LAN with no default route can read offline while its server is
+    // reachable, so Retry stays offered.
+    banner.element.querySelector("button")!.click();
+    expect(onRetry).toHaveBeenCalledTimes(1);
 
     banner.destroy();
   });
@@ -113,10 +116,8 @@ describe("ServerBanner", () => {
 
     expect(banner.element.classList.contains("visible")).toBe(true);
     expect(banner.element.textContent).toBe(
-      "This device has no network. Check your connection — your server may still be reachable on this network.",
+      "Your device reports no network connection. If your server is on a local network, try again.",
     );
-    // Never a Retry mid-backoff: the reconnect loop owns that.
-    expect(banner.element.querySelector("button")).toBeNull();
 
     banner.destroy();
   });

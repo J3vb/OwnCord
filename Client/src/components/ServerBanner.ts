@@ -10,9 +10,10 @@ import { shellText } from "../i18n/shell";
  * Facts that make a connection notice actionable. `offline` is the device's
  * own network state (`navigator.onLine`), which is not the same fact as the
  * server's reachability: a device on a LAN with no internet still answers
- * `onLine === true`, so only a false reading means no server — LAN or
- * otherwise — is reachable. `dialFailed` says a dial attempt actually failed;
- * until one has, a reconnect is still "Reconnecting...", not a claim that the
+ * `onLine === true`. A false reading is only the device's report — a LAN
+ * with no default route can read offline while its server is reachable — so
+ * the notice keeps Retry either way. `dialFailed` says a dial attempt
+ * actually failed; until one has, a reconnect is still "Reconnecting...", not a claim that the
  * server is unreachable. `onRetry` offers a manual re-dial while the
  * socket is down. A browser that does not expose `navigator.onLine` leaves
  * `offline` undefined and the notice stays the server-unreachable wording,
@@ -138,20 +139,17 @@ export function createServerBanner(): ServerBannerControl {
       return;
     }
     const text = connectionNoticeText(opts);
-    renderNotice(text, opts.offline === true ? {} : opts);
+    renderNotice(text, opts);
     announce(text);
   }
 
   function showDisconnected(opts: ConnectionBannerOptions = {}): void {
     clearCountdown();
     root.classList.add("visible");
-    // Two distinct facts, two distinct answers (BPR-092). A LAN server with no
-    // internet still answers `onLine === true`, so the offline wording only
-    // fires when the device has no network at all, and neither wording tells
-    // the user the internet is required to reach a local server.
+    // Two distinct facts, two distinct answers (BPR-092). Neither wording
+    // tells the user the internet is required to reach a local server.
     const text = connectionNoticeText(opts);
-    // Retry only helps when the device has a network to retry over.
-    renderNotice(text, opts.offline === true ? {} : opts);
+    renderNotice(text, opts);
     announce(text);
   }
 

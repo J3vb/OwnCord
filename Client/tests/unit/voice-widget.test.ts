@@ -522,14 +522,16 @@ describe("VoiceWidget", () => {
     widget.mount(container);
 
     const notice = container.querySelector("[data-testid='vw-mic-notice']") as HTMLDivElement;
-    expect(notice.style.display).toBe("block");
     expect(notice.getAttribute("role")).toBe("status");
     expect(notice.textContent).toContain("Grant microphone access");
 
-    // The state clears: the notice goes with it.
+    // The state clears: the text goes, but the live region stays rendered so
+    // a later listen-only join fills a region already in the a11y tree.
     voiceStore.setState((prev) => ({ ...prev, listenOnly: false }));
     voiceStore.flush();
-    expect(notice.style.display).toBe("none");
+    expect(notice.textContent).toBe("");
+    expect(notice.style.display).not.toBe("none");
+    expect(notice.isConnected).toBe(true);
 
     widget.destroy?.();
   });

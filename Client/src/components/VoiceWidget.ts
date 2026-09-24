@@ -348,15 +348,15 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     // (no device, in use by another app) is something a permission grant
     // cannot fix.
     if (micNoticeEl) {
-      const show = voice.listenOnly;
-      micNoticeEl.style.display = show ? "block" : "none";
-      if (show) {
-        const text = micRetryFailed ? t("widget.listenOnlyBlocked") : t("widget.listenOnlyHint");
-        // Set only on change: render() runs on unrelated store updates, and a
-        // screen reader can re-read a replaced text node even when identical,
-        // which would break the "announced once" goal.
-        if (micNoticeEl.textContent !== text) setText(micNoticeEl, text);
-      }
+      const text = !voice.listenOnly
+        ? ""
+        : micRetryFailed
+          ? t("widget.listenOnlyBlocked")
+          : t("widget.listenOnlyHint");
+      // Set only on change: render() runs on unrelated store updates, and a
+      // screen reader can re-read a replaced text node even when identical,
+      // which would break the "announced once" goal.
+      if (micNoticeEl.textContent !== text) setText(micNoticeEl, text);
     }
   }
 
@@ -565,7 +565,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       role: "status",
       "aria-live": "polite",
     });
-    micNoticeEl.style.display = "none";
 
     // A live region present from mount (screen readers skip one inserted
     // already filled) that only fills when a moderator-imposed state lands.

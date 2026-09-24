@@ -233,10 +233,11 @@ new keys.
   "Use here"). A `reconnecting` status keeps "Reconnecting..." until a dial has
   failed (a drop, an announced restart, "Use here"); after that, or on
   `disconnected`, it renders "Can't reach this server right now…"
-  with a Retry button when the device has a network, and "This device has no
-  network…" with no Retry when `navigator.onLine` is false. A LAN server with
-  no internet still answers `onLine`, so the offline wording never claims the
-  internet is required.
+  with a Retry button, and "Your device reports no network connection…", also
+  with Retry, when `navigator.onLine` is false. `onLine` is only the device's
+  report (WebKitGTK reads false on a LAN with no default route while its
+  server is reachable), so the offline wording does not assert there is no
+  network, never claims the internet is required, and keeps the Retry.
 - **Retry is safe against TOFU and the backoff.** `MainPage`'s `retryConnection`
   calls `ws.connect()`, which re-validates the certificate (a mismatch
   re-latches) and cancels any pending backoff attempt via `cancelReconnect()`,
@@ -274,17 +275,18 @@ new keys.
   counts as failed; `server-banner.test.ts` adds the offline vs server wording,
   "Reconnecting..." until a dial fails, a Retry that stays usable across
   repeated clicks, the
-  no-Retry-when-offline case, the live-region announcement, and the
+  Retry-still-offered-when-offline case, the live-region announcement, and the
   countdown-not-re-announced property; `update-notifier.test.ts` adds the
   once-per-phase announcement and the available-update announcement;
-  `voice-widget.test.ts` adds the mic notice show/hide and the failed-retry
+  `voice-widget.test.ts` adds the mic notice fill/empty (the live region stays
+  rendered so a listen-only join is announced) and the failed-retry
   wording; `main-page.test.ts` adds the Retry redial, "Reconnecting..." until a
   dial fails, one unreachable notice (announced once) with Retry held across
   repeated failed dials, and the network events re-rendering without a redial.
 - **E2E (mocked Chromium, `--workers=1`, non-1420 port):**
   `tests/e2e/b9-desktop-capabilities.spec.ts`: a drop says "Reconnecting..."
   until a dial fails, then names the unreachable server with a working Retry;
-  device-offline names that instead; network return re-renders the notice; the
+  device-offline names that instead, still with Retry; network return re-renders the notice; the
   notice is announced once through the live region; the restart countdown does
   not re-announce; the desktop build says it cannot read the OS notification
   setting; reflow at 940×500; the update banner is announced once; a manual

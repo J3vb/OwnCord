@@ -119,9 +119,9 @@ test.describe("B9-25 network limitations are actionable", () => {
     await emitWsEvent(page, "ws-state", "closed");
 
     await expect(banner(page)).toBeVisible({ timeout: 5_000 });
-    await expect(banner(page)).toContainText("This device has no network");
-    // No Retry over a network the device itself does not have.
-    await expect(banner(page).getByRole("button", { name: "Retry" })).toHaveCount(0);
+    await expect(banner(page)).toContainText("Your device reports no network connection");
+    // Offline is only the device's report: Retry stays offered.
+    await expect(banner(page).getByRole("button", { name: "Retry" })).toBeVisible();
   });
 
   test("regaining the network re-renders the notice for the server", async ({ page }) => {
@@ -130,14 +130,16 @@ test.describe("B9-25 network limitations are actionable", () => {
     await navigateToMainPageReady(page);
     await setServerDown(page, true);
     await emitWsEvent(page, "ws-state", "closed");
-    await expect(banner(page)).toContainText("This device has no network", { timeout: 5_000 });
+    await expect(banner(page)).toContainText("Your device reports no network connection", {
+      timeout: 5_000,
+    });
 
     await page.evaluate(() => {
       Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => true });
       window.dispatchEvent(new Event("online"));
     });
 
-    await expect(banner(page)).not.toContainText("This device has no network");
+    await expect(banner(page)).not.toContainText("Your device reports no network connection");
   });
 
   test("the notice is announced once through a live region", async ({ page }) => {
@@ -152,7 +154,7 @@ test.describe("B9-25 network limitations are actionable", () => {
     await expect(live).toHaveText("");
 
     await emitWsEvent(page, "ws-state", "closed");
-    await expect(live).toContainText("This device has no network");
+    await expect(live).toContainText("Your device reports no network connection");
   });
 
   test("the restart countdown does not re-announce every second", async ({ page }) => {
