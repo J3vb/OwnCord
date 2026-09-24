@@ -19,6 +19,7 @@ import {
   type EmojiAutocompleteComponent,
 } from "@components/EmojiAutocomplete";
 import { listCustomEmoji } from "@stores/emoji.store";
+import { messagingText } from "../i18n/messaging";
 import type { GifApi } from "@lib/gifProvider";
 
 export interface MessageInputOptions {
@@ -184,8 +185,8 @@ const ALLOWED_TYPES = [
 const CARET_MOVE_KEYS: ReadonlySet<string> = new Set([
   "ArrowLeft",
   "ArrowRight",
-  "Home",
-  "End",
+  "Home", // i18n-exempt: KeyboardEvent.key value, a wire identifier, never displayed
+  "End", // i18n-exempt: KeyboardEvent.key value, a wire identifier, never displayed
   "PageUp",
   "PageDown",
 ]);
@@ -194,7 +195,7 @@ const CARET_MOVE_KEYS: ReadonlySet<string> = new Set([
 function markGifUnavailable(gifBtn: HTMLButtonElement, reason: string): void {
   gifBtn.setAttribute("disabled", "true");
   gifBtn.title = reason;
-  gifBtn.setAttribute("aria-label", `GIF — ${reason}`);
+  gifBtn.setAttribute("aria-label", messagingText("gif.ariaWithReason", { reason }));
 }
 
 export function createMessageInput(options: MessageInputOptions): MessageInputComponent {
@@ -408,7 +409,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
   function showReplyBar(username: string): void {
     if (replyBar === null || replyText === null) return;
-    setText(replyText, `Replying to @${username}`);
+    setText(replyText, messagingText("reply.replyingTo", { username }));
     replyBar.classList.add("visible");
   }
 
@@ -479,7 +480,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (textarea === null) return;
     const disabled = disabledReason !== null;
     textarea.disabled = disabled;
-    textarea.placeholder = disabled ? disabledReason! : `Message #${options.channelName}`;
+    textarea.placeholder = disabled
+      ? disabledReason!
+      : messagingText("composer.placeholder", { channel: options.channelName });
     for (const btn of controlButtons) {
       if (disabled) {
         btn.setAttribute("disabled", "true");
@@ -516,13 +519,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // emoji the server accepts. Checked before the debounce stamp below so a
     // refused send does not suppress the next one.
     if ([...content].length > MAX_MESSAGE_LEN) {
-      showUploadError(`Messages are limited to ${MAX_MESSAGE_LEN} characters`);
+      showUploadError(messagingText("error.tooLong", { max: String(MAX_MESSAGE_LEN) }));
       return;
     }
 
     // Block send while uploads are still in flight
     if (pendingUploadCount > 0) {
-      showUploadError("Please wait for uploads to finish");
+      showUploadError(messagingText("error.uploadsPending"));
       return;
     }
 
@@ -574,6 +577,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.addEventListener("load", () => resolve(reader.result as string));
+      // i18n-exempt: internal read failure, surfaced only as the caller's own upload toast
       reader.addEventListener("error", () => reject(new Error("Failed to read file")));
       reader.readAsDataURL(file);
     });
@@ -586,19 +590,19 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // never reads pendingAttachments) nor cleared -- they'd silently ride
     // along with the next ordinary message. Refuse at the single entry point.
     if (state.editing !== null) {
-      showUploadError("Can't attach files while editing a message");
+      showUploadError(messagingText("error.attachWhileEditing"));
       return;
     }
 
     // Validate file size
     if (file.size > MAX_FILE_SIZE) {
-      showUploadError(`File too large: ${file.name} exceeds 100 MB limit`);
+      showUploadError(messagingText("error.fileTooLarge", { filename: file.name }));
       return;
     }
 
     // Validate file type — reject files with unknown/empty MIME type
     if (file.type === "" || !ALLOWED_TYPES.some((t) => file.type.startsWith(t))) {
-      showUploadError(`${file.name} is not a supported file type`);
+      showUploadError(messagingText("error.unsupportedType", { filename: file.name }));
       return;
     }
 
@@ -606,7 +610,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // upload starts -- keeps the composer's state and the eventual send in
     // sync with what the server will actually accept.
     if (pendingAttachments.length >= MAX_ATTACHMENTS) {
-      showUploadError(`You can attach at most ${MAX_ATTACHMENTS} files to a message`);
+      showUploadError(messagingText("error.tooManyAttachments", { max: String(MAX_ATTACHMENTS) }));
       return;
     }
 
@@ -683,8 +687,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     } catch (err) {
       // Upload failed — remove preview and show error
       removePreviewItem(item);
-      const errMsg = err instanceof Error ? err.message : "Upload failed";
-      showUploadError(`Upload failed: ${errMsg}`);
+      const errMsg = err instanceof Error ? err.message : messagingText("error.uploadFailed");
+      showUploadError(messagingText("error.uploadFailedDetail", { detail: errMsg }));
     } finally {
       pendingUploadCount--;
     }
@@ -739,7 +743,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     editBar = createElement("div", { class: "reply-bar" });
     const editInner = createElement("div", { class: "reply-bar-inner" });
-    const editText = createElement("strong", {}, "Editing message");
+    const editText = createElement("strong", {}, messagingText("edit.editing"));
     editInner.appendChild(editText);
     const editClose = createElement("button", { class: "reply-close" });
     editClose.appendChild(createIcon("x", 14));
@@ -752,7 +756,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const inputBox = createElement("div", { class: "message-input-box" });
     const attachBtn = createElement(
       "button",
-      { class: "input-btn attach-btn", "aria-label": "Attach file" },
+      { class: "input-btn attach-btn", "aria-label": messagingText("attach.label") },
       "+",
     );
 
@@ -782,30 +786,30 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       root?.appendChild(fileInput);
     } else {
       attachBtn.setAttribute("disabled", "true");
-      attachBtn.title = "File uploads not available";
+      attachBtn.title = messagingText("attach.unavailable");
     }
     textarea = createElement("textarea", {
       class: "msg-textarea",
-      placeholder: `Message #${options.channelName}`,
+      placeholder: messagingText("composer.placeholder", { channel: options.channelName }),
       rows: "1",
       "data-testid": "msg-textarea",
     });
     const emojiBtn = createElement("button", {
       class: "input-btn emoji-btn",
-      "aria-label": "Emoji",
+      "aria-label": messagingText("emoji.label"),
     });
     emojiBtn.appendChild(createIcon("smile", 20));
     const gifBtn = createElement(
       "button",
-      { class: "input-btn gif-btn", "aria-label": "GIF" },
-      "GIF",
+      { class: "input-btn gif-btn", "aria-label": messagingText("gif.button") },
+      messagingText("gif.button"),
     );
     if (gifUnavailable) {
-      markGifUnavailable(gifBtn, "GIFs are not enabled on this server");
+      markGifUnavailable(gifBtn, messagingText("gif.disabled"));
     }
     const sendBtn = createElement("button", {
       class: "input-btn send-btn",
-      "aria-label": "Send message",
+      "aria-label": messagingText("send.label"),
       "data-testid": "send-btn",
     });
     sendBtn.appendChild(createIcon("send", 20));

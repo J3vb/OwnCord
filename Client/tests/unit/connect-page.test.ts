@@ -41,6 +41,14 @@ function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPa
 
 const testProfiles: SimpleProfile[] = [{ name: "Test Server", host: "localhost:8443" }];
 
+/** What Chromium does to a focused control once it is disabled; jsdom does not. */
+function dropFocusToBody(): void {
+  const sink = document.createElement("button");
+  document.body.appendChild(sink);
+  sink.focus();
+  sink.remove();
+}
+
 describe("ConnectPage", () => {
   let container: HTMLDivElement;
 
@@ -156,6 +164,62 @@ describe("ConnectPage", () => {
       expect(errorBanner!.classList.contains("visible")).toBe(true);
       expect(errorBanner!.textContent).toContain("at least 8 characters");
     });
+    // A field error is announced once: through the focused field's
+    // description, not also through a live alert.
+    const errorBanner = container.querySelector(".error-banner")!;
+    expect(errorBanner.hasAttribute("role")).toBe(false);
+    expect(passwordInput.getAttribute("aria-describedby")).toBe(errorBanner.id);
+    expect(document.activeElement).toBe(passwordInput);
+
+    page.destroy?.();
+  });
+
+  it("announces a field error as an alert when that field already has focus", async () => {
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    (container.querySelector("#host") as HTMLInputElement).value = "localhost:8443";
+    (container.querySelector("#username") as HTMLInputElement).value = "testuser";
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.value = "short";
+    passwordInput.focus();
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    const errorBanner = container.querySelector(".error-banner")!;
+    await vi.waitFor(() => {
+      expect(errorBanner.textContent).toContain("at least 8 characters");
+    });
+    expect(errorBanner.getAttribute("role")).toBe("alert");
+    expect(passwordInput.getAttribute("aria-describedby")).toBe(errorBanner.id);
+    expect(document.activeElement).toBe(passwordInput);
+
+    page.destroy?.();
+  });
+
+  it("returns focus to the password field after the server rejects a login", async () => {
+    const onLogin = vi.fn().mockRejectedValue(new Error("Invalid credentials"));
+    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
+    page.mount(container);
+
+    (container.querySelector("#host") as HTMLInputElement).value = "localhost:8443";
+    (container.querySelector("#username") as HTMLInputElement).value = "testuser";
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.value = "long-enough-password";
+    passwordInput.focus();
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(passwordInput.disabled).toBe(true);
+    dropFocusToBody();
+
+    const errorBanner = container.querySelector(".error-banner")!;
+    await vi.waitFor(() => {
+      expect(errorBanner.textContent).toContain("Invalid credentials");
+    });
+    expect(errorBanner.getAttribute("role")).toBe("alert");
+    expect(document.activeElement).toBe(passwordInput);
 
     page.destroy?.();
   });
@@ -821,6 +885,10 @@ describe("ConnectPage", () => {
     const errorBanner = container.querySelector(".error-banner");
     expect(errorBanner!.classList.contains("visible")).toBe(true);
     expect(errorBanner!.textContent).toBe("Connection refused");
+    expect(errorBanner!.getAttribute("role")).toBe("alert");
+    for (const input of container.querySelectorAll(".connect-form input")) {
+      expect(input.getAttribute("aria-describedby")).not.toBe(errorBanner!.id);
+    }
 
     page.destroy?.();
   });
@@ -1355,10 +1423,38 @@ describe("ConnectPage", () => {
     totpInput.value = "abc";
 
     const verifyBtn = container.querySelector(".totp-overlay .btn-primary") as HTMLButtonElement;
+    verifyBtn.focus();
     verifyBtn.click();
 
     expect(onTotpSubmit).not.toHaveBeenCalled();
     expect(totpInput.classList.contains("error")).toBe(true);
+    const totpError = container.querySelector("[data-testid='totp-invalid']")!;
+    expect(totpError.textContent).not.toBe("");
+    expect(totpError.hasAttribute("role")).toBe(false);
+    expect(totpInput.getAttribute("aria-describedby")).toBe(totpError.id);
+    expect(document.activeElement).toBe(totpInput);
+
+    page.destroy?.();
+  });
+
+  it("announces a malformed code submitted with Enter from the focused input", () => {
+    const onTotpSubmit = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
+    page.mount(container);
+
+    page.showTotp();
+    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    expect(document.activeElement).toBe(totpInput);
+    totpInput.value = "abc";
+    totpInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    // Focus cannot move to the field it is already on, so the error is the
+    // one live alert instead.
+    expect(onTotpSubmit).not.toHaveBeenCalled();
+    const totpError = container.querySelector("[data-testid='totp-invalid']")!;
+    expect(totpError.textContent).not.toBe("");
+    expect(totpError.getAttribute("role")).toBe("alert");
+    expect(document.activeElement).toBe(totpInput);
 
     page.destroy?.();
   });

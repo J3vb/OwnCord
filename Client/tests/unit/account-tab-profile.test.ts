@@ -161,6 +161,48 @@ describe("Account tab profile fields", () => {
     expect(name.value).toBe("Ada");
   });
 
+  it("leaves focus where the user moved it while the save was in flight", async () => {
+    setUser({});
+    let settle!: () => void;
+    const options = makeOptions({
+      onUpdateProfile: vi.fn(() => new Promise<void>((resolve) => (settle = resolve))),
+    });
+    container.appendChild(buildAccountTab(options, ac.signal));
+
+    const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
+    const about = container.querySelector<HTMLTextAreaElement>('[data-testid="about-input"]')!;
+    save.focus();
+    save.click();
+    about.focus();
+    settle();
+
+    await vi.waitFor(() => {
+      expect(save.disabled).toBe(false);
+    });
+    expect(document.activeElement).toBe(about);
+  });
+
+  it("puts focus back on Save when it fell to the page during the save", async () => {
+    setUser({});
+    let settle!: () => void;
+    const options = makeOptions({
+      onUpdateProfile: vi.fn(() => new Promise<void>((resolve) => (settle = resolve))),
+    });
+    container.appendChild(buildAccountTab(options, ac.signal));
+
+    const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
+    save.focus();
+    save.click();
+    // What Chromium does to a focused control once it is disabled.
+    save.blur();
+    settle();
+
+    await vi.waitFor(() => {
+      expect(save.disabled).toBe(false);
+    });
+    expect(document.activeElement).toBe(save);
+  });
+
   it("bounds the inputs at the server's caps", () => {
     setUser({});
     container.appendChild(buildAccountTab(makeOptions(), ac.signal));

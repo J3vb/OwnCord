@@ -43,6 +43,9 @@ import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/ch
 import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../features/safety/store";
 import { reportEntryText } from "../../i18n/reportEntry";
+import { messagingText } from "../../i18n/messaging";
+import { requestsText } from "../../i18n/requests";
+import { shellText } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { markChannelRead } from "@lib/read-state";
 import {
@@ -373,8 +376,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }).then(
           () => true,
           () => {
-            if (ownsSession())
-              showToast("Could not save this pending message for recovery after restart", "error");
+            if (ownsSession()) showToast(messagingText("toast.pendingSaveFailed"), "error");
             return false;
           },
         );
@@ -480,17 +482,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         draft.clientMessageId &&
         pendingMessageExpired(draft.clientMessageId, Date.now(), pendingMessageRetryFloor(owner))
       ) {
-        showToast(
-          "This message's retry window expired. Copy the text to send a new message.",
-          "error",
-        );
+        showToast(messagingText("toast.retryExpired"), "error");
         return;
       }
       if (draft.clientMessageId && !supportsMessageDeduplication(owner)) {
-        showToast(
-          "This server cannot safely retry a saved message. Copy its text to send it again.",
-          "error",
-        );
+        showToast(messagingText("toast.retryUnsupported"), "error");
         return;
       }
       draftByCorrelation.delete(correlationId);
@@ -527,13 +523,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // A group has no single presence to show, so the subtitle lists who is
         // in it instead — that is the fact a group header is asked for, and a
         // first member's status presented as the group's would be a lie.
-        let subtitle = "Offline";
+        let subtitle = shellText("status.offline");
         if (dmChannel !== undefined && dmChannel.isGroup) {
           const names = dmChannel.participants.map((p) => (p.displayName ?? "") || p.username);
-          subtitle = `${names.length + 1} members: You, ${names.join(", ")}`;
+          subtitle = requestsText("dm.groupSubtitle", {
+            count: String(names.length + 1),
+            names: names.join(", "),
+          });
         } else if (dmChannel !== undefined) {
           const member = membersStore.getState().members.get(dmChannel.recipient.id);
-          const status = member?.status ?? dmChannel.recipient.status ?? "Offline";
+          const status =
+            member?.status ?? dmChannel.recipient.status ?? shellText("status.offline");
           subtitle = status.charAt(0).toUpperCase() + status.slice(1);
         }
         const headerName = dmChannel !== undefined ? dmDisplayName(dmChannel) : channelName;
@@ -710,9 +710,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
             type: "chat_delete",
             payload: { message_id: msgId },
           });
-          showToast("Message deleted", "success");
+          showToast(messagingText("toast.deleted"), "success");
         } else {
-          showToast("Click delete again to confirm", "info");
+          showToast(messagingText("toast.deleteConfirm"), "info");
         }
       },
       onReactionClick: (msgId: number, emoji: string) => {
@@ -725,11 +725,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         action
           .then(() => {
             setMessagePinned(chId, msgId, !currentlyPinned);
-            showToast(currentlyPinned ? "Message unpinned" : "Message pinned", "success");
+            showToast(
+              currentlyPinned ? messagingText("toast.unpinned") : messagingText("toast.pinned"),
+              "success",
+            );
           })
           .catch((err) => {
             log.error("Pin/unpin failed", { error: String(err) });
-            showToast("Failed to pin/unpin message", "error");
+            showToast(messagingText("toast.pinFailed"), "error");
           });
       },
       onReportClick: (msgId: number) => {
@@ -772,7 +775,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           return { id: result.id, url: result.url, filename: result.filename };
         } catch (err) {
           log.error("File upload failed", { error: String(err) });
-          showToast("File upload failed", "error");
+          showToast(messagingText("toast.uploadFailed"), "error");
           throw err;
         }
       },
@@ -787,7 +790,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       onEditMessage: (messageId: number, content: string) => {
         const trimmed = content.trim();
         if (trimmed === "") {
-          showToast("Message cannot be empty", "error");
+          showToast(messagingText("toast.emptyMessage"), "error");
           return;
         }
         const msgs = getChannelMessages(channelId);
@@ -799,7 +802,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           type: "chat_edit",
           payload: { message_id: messageId, content: trimmed },
         });
-        showToast("Message edited", "success");
+        showToast(messagingText("toast.edited"), "success");
       },
     });
     messageInput.mount(slots.inputSlot);
@@ -827,8 +830,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     const computeComposerReason = (): string | null => {
       const status = uiStore.getState().connectionStatus;
-      if (status === "reconnecting") return "Reconnecting…";
-      if (status === "disconnected") return "Not connected";
+      if (status === "reconnecting") return shellText("channel.reconnecting");
+      if (status === "disconnected") return shellText("channel.notConnected");
       const timeout = safetyStore.getState().timeout;
       if (timeout !== null)
         return safetyText("timeout.composer", { time: formatUntil(timeout.expiresAt) });
@@ -840,11 +843,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       if (ch === undefined) return null;
       if (!ch.canSend) {
         return ch.type === "announcement"
-          ? "Only moderators can post in announcement channels"
-          : "You don't have permission to send messages here";
+          ? messagingText("composer.announcementOnly")
+          : messagingText("composer.noPermission");
       }
       const remaining = slowModeRemaining();
-      if (remaining > 0) return `Slow mode — ${remaining}s`;
+      if (remaining > 0) return messagingText("composer.slowMode", { seconds: String(remaining) });
       return null;
     };
     const refreshComposerState = (): void => {

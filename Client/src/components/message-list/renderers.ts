@@ -14,6 +14,7 @@ import { formatMessageLink } from "@lib/deep-link";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { reportEntryText } from "../../i18n/reportEntry";
+import { messagingText } from "../../i18n/messaging";
 
 /** Cached value of the developerMode preference. Invalidated on pref change. */
 let developerModeEnabled = loadPref<boolean>("developerMode", false);
@@ -84,7 +85,7 @@ export function renderNewDivider(): HTMLDivElement {
   appendChildren(
     divider,
     createElement("span", { class: "line" }),
-    createElement("span", { class: "label" }, "NEW"),
+    createElement("span", { class: "label" }, messagingText("divider.new")),
     createElement("span", { class: "line" }),
   );
   return divider;
@@ -108,7 +109,7 @@ function renderReplyRef(
     role: "button",
     tabindex: "0",
     "data-reply-to": String(replyToId),
-    title: "Jump to the replied-to message",
+    title: messagingText("reply.jumpTitle"),
   });
   const jump = (): void => opts.onJumpToMessage?.(replyToId);
   bar.addEventListener("click", jump, { signal });
@@ -123,7 +124,7 @@ function renderReplyRef(
     { signal },
   );
   if (ref) {
-    const preview = ref.deleted ? "[message deleted]" : ref.content.slice(0, 100);
+    const preview = ref.deleted ? messagingText("message.deleted") : ref.content.slice(0, 100);
     const role = getUserRole(ref.user.id);
     const author = resolveAuthor(ref.user);
     const miniAvatar = createAvatarElement(author, {
@@ -137,7 +138,7 @@ function renderReplyRef(
       createElement("span", { class: "rr-text" }, preview),
     );
   } else {
-    setText(bar, "Reply to unknown message");
+    setText(bar, messagingText("reply.unknown"));
   }
   return bar;
 }
@@ -157,25 +158,25 @@ function renderSystemMessage(msg: Message): HTMLDivElement {
 function sendErrorReason(code: string | null): string {
   switch (code) {
     case "SLOW_MODE":
-      return "Slow mode — wait before sending again";
+      return messagingText("send.slowMode");
     case "RATE_LIMITED":
-      return "You're sending too fast — try again in a moment";
+      return messagingText("send.rateLimited");
     case "FORBIDDEN":
-      return "You don't have permission to post here";
+      return messagingText("send.forbidden");
     case "OFFLINE":
-      return "Disconnected — delivery not confirmed";
+      return messagingText("send.disconnected");
     case "OFFLINE_NO_RECOVERY":
-      return "Could not save this message — retry now or it is lost on restart";
+      return messagingText("send.offlineNoRecovery");
     case "NETWORK":
-      return "Connection problem — delivery not confirmed";
+      return messagingText("send.network");
     case "UNCONFIRMED":
-      return "Delivery not confirmed — check the conversation before retrying";
+      return messagingText("send.unconfirmed");
     case "RECOVERED":
-      return "Recovered pending message — retry when you're ready";
+      return messagingText("send.recovered");
     case "BAD_REQUEST":
-      return "Message rejected";
+      return messagingText("send.rejected");
     default:
-      return "Failed to send";
+      return messagingText("send.failed");
   }
 }
 
@@ -259,12 +260,14 @@ export function renderMessage(
     const text = createElement("div", { class: "msg-text" });
     text.style.fontStyle = "italic";
     text.style.color = "var(--text-muted)";
-    setText(text, "[message deleted]");
+    setText(text, messagingText("message.deleted"));
     el.appendChild(text);
   } else {
     el.appendChild(renderMessageContent(msg.content, mentionInfo));
     if (msg.editedAt !== null) {
-      el.appendChild(createElement("span", { class: "msg-edited" }, "(edited)"));
+      el.appendChild(
+        createElement("span", { class: "msg-edited" }, messagingText("message.edited")),
+      );
     }
 
     for (const att of msg.attachments) {
@@ -292,13 +295,13 @@ export function renderMessage(
     const retryBtn = createElement(
       "button",
       { class: "msg-send-retry", "data-testid": `msg-retry-${cid}` },
-      "Retry",
+      messagingText("action.retry"),
     );
     retryBtn.addEventListener("click", () => opts.onRetry?.(cid), { signal });
     const discardBtn = createElement(
       "button",
       { class: "msg-send-discard", "data-testid": `msg-discard-${cid}` },
-      "Delete",
+      messagingText("action.delete"),
     );
     discardBtn.addEventListener("click", () => opts.onDeleteDraft?.(cid), { signal });
     appendChildren(bar, retryBtn, discardBtn);
@@ -312,10 +315,10 @@ export function renderMessage(
 
     const reactBtn = createElement("button", {
       "data-testid": `msg-react-${msg.id}`,
-      "aria-label": "React",
+      "aria-label": messagingText("action.react"),
     });
     reactBtn.appendChild(createIcon("smile", 16));
-    reactBtn.title = "React";
+    reactBtn.title = messagingText("action.react");
     wireReactionControl(
       reactBtn,
       () => opts.onReactionClick(msg.id, ""),
@@ -326,19 +329,19 @@ export function renderMessage(
 
     const replyBtn = createElement("button", {
       "data-testid": `msg-reply-${msg.id}`,
-      "aria-label": "Reply",
+      "aria-label": messagingText("action.reply"),
     });
     replyBtn.appendChild(createIcon("reply", 16));
-    replyBtn.title = "Reply";
+    replyBtn.title = messagingText("action.reply");
     replyBtn.addEventListener("click", () => opts.onReplyClick(msg.id), { signal });
     actionsBar.appendChild(replyBtn);
 
     const pinBtn = createElement("button", {
       "data-testid": `msg-pin-${msg.id}`,
-      "aria-label": msg.pinned ? "Unpin" : "Pin",
+      "aria-label": msg.pinned ? messagingText("action.unpin") : messagingText("action.pin"),
     });
     pinBtn.appendChild(createIcon(msg.pinned ? "pin-off" : "pin", 16));
-    pinBtn.title = msg.pinned ? "Unpin" : "Pin";
+    pinBtn.title = msg.pinned ? messagingText("action.unpin") : messagingText("action.pin");
     pinBtn.addEventListener("click", () => opts.onPinClick(msg.id, msg.channelId, msg.pinned), {
       signal,
     });
@@ -347,10 +350,10 @@ export function renderMessage(
     if (msg.user.id === opts.currentUserId) {
       const editBtn = createElement("button", {
         "data-testid": `msg-edit-${msg.id}`,
-        "aria-label": "Edit",
+        "aria-label": messagingText("action.edit"),
       });
       editBtn.appendChild(createIcon("pencil", 16));
-      editBtn.title = "Edit";
+      editBtn.title = messagingText("action.edit");
       editBtn.addEventListener("click", () => opts.onEditClick(msg.id), { signal });
       actionsBar.appendChild(editBtn);
     }
@@ -359,28 +362,28 @@ export function renderMessage(
     if (msg.user.id === opts.currentUserId || canManageMessages()) {
       const deleteBtn = createElement("button", {
         "data-testid": `msg-delete-${msg.id}`,
-        "aria-label": "Delete",
+        "aria-label": messagingText("action.delete"),
       });
       deleteBtn.appendChild(createIcon("trash-2", 16));
-      deleteBtn.title = "Delete";
+      deleteBtn.title = messagingText("action.delete");
       deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
       actionsBar.appendChild(deleteBtn);
     }
 
     const copyLinkBtn = createElement("button", {
       "data-testid": `msg-copy-link-${msg.id}`,
-      "aria-label": "Copy Message Link",
+      "aria-label": messagingText("action.copyLink"),
     });
     copyLinkBtn.appendChild(createIcon("link", 16));
-    copyLinkBtn.title = "Copy Message Link";
+    copyLinkBtn.title = messagingText("action.copyLink");
     copyLinkBtn.addEventListener(
       "click",
       () => {
         // No silent success: a copy with no feedback is indistinguishable
         // from a clipboard that refused.
         void navigator.clipboard.writeText(formatMessageLink(msg.channelId, msg.id)).then(
-          () => showToast("Message link copied", "success"),
-          () => showToast("Couldn't copy the message link", "error"),
+          () => showToast(messagingText("toast.linkCopied"), "success"),
+          () => showToast(messagingText("toast.linkCopyFailed"), "error"),
         );
       },
       { signal },
@@ -404,18 +407,18 @@ export function renderMessage(
     if (developerModeEnabled) {
       const copyIdBtn = createElement("button", {
         "data-testid": `msg-copy-id-${msg.id}`,
-        "aria-label": "Copy ID",
+        "aria-label": messagingText("action.copyId"),
       });
       copyIdBtn.appendChild(createIcon("hash", 16));
-      copyIdBtn.title = "Copy ID";
+      copyIdBtn.title = messagingText("action.copyId");
       copyIdBtn.addEventListener(
         "click",
         () => {
           // No silent success: a copy with no feedback is indistinguishable
           // from a clipboard that refused.
           void navigator.clipboard.writeText(String(msg.id)).then(
-            () => showToast("Message ID copied", "success"),
-            () => showToast("Couldn't copy the message ID", "error"),
+            () => showToast(messagingText("toast.idCopied"), "success"),
+            () => showToast(messagingText("toast.idCopyFailed"), "error"),
           );
         },
         { signal },
