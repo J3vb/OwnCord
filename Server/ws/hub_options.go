@@ -166,6 +166,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		broadcast:           make(chan broadcastMsg, 1024),
 		clientEvents:        make(chan clientEvent, 64),
 		stop:                make(chan struct{}),
+		runDone:             make(chan struct{}),
 		pubsub:              NewPubSub(),
 		replayBuf:           NewEventRingBuffer(ringSize),
 		registry:            reg,
