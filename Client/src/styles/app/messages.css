@@ -511,6 +511,24 @@
 .msg-embed-link-image {
   margin-top: 10px;
 }
+/* B9-9: a preview's typed failure line and its bounded retry. */
+.msg-embed-status,
+.msg-media-fallback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.msg-embed-status[hidden],
+.msg-media-fallback[hidden],
+.msg-image img[hidden] {
+  display: none;
+}
+.msg-media-fallback-text {
+  min-width: 0;
+}
 .msg-embed-link-img {
   max-width: 100%;
   max-height: 300px;

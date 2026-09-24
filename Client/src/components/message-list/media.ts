@@ -13,9 +13,11 @@ import {
   clearExternalImageCache,
   fetchExternalImage,
   isSafeUrl,
+  loadExternalImage,
   openImageLightbox,
   previewExternal,
   recoverEvictedImage,
+  renderFailureStatus,
 } from "./attachments";
 import {
   admitDerived,
@@ -27,6 +29,7 @@ import {
 } from "../../features/content-consent/external";
 import { renderConcealedItem } from "../../features/content-consent/concealed";
 import { externalConsentText } from "../../i18n/externalConsent";
+import { contentText } from "../../i18n/content";
 import {
   CODE_BLOCK_REGEX,
   INLINE_CODE_REGEX,
@@ -35,6 +38,7 @@ import {
   URL_REGEX,
 } from "./content-parser";
 import { clearEmbedCaches, renderGenericLinkPreview } from "./embeds";
+import type { ExternalContentFailure } from "../../platform/contracts/externalContent";
 
 // The lightbox lives in attachments.ts, which renders attachment images and
 // must not import this module (that import was a cycle); re-exported here for
@@ -297,12 +301,22 @@ export function isDirectImageUrl(url: string): boolean {
   }
 }
 
+/** Host shown in an external image's accessible name and alt text. */
+function displayHost(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
 /** Render a direct image/GIF URL as an inline image with lightbox. */
 export function renderInlineImage(url: string): HTMLDivElement {
   // Use cached height from a previous render if available, otherwise 200px.
   // This prevents height oscillation when virtual scroll rebuilds DOM.
   const cachedH = imageHeightCache.get(url);
   const minH = cachedH ?? 200;
+  const host = displayHost(url);
 
   const wrap = createElement("div", {
     class: "msg-image",
@@ -312,67 +326,12 @@ export function renderInlineImage(url: string): HTMLDivElement {
   // No src yet: the bytes come from the external-content broker as a
   // same-origin blob: URL, never from the webview loading `url` itself.
   const img = createElement("img", {
-    alt: "Image",
-    style:
-      "max-width: 100%; max-height: 350px; display: block; border-radius: 4px; cursor: pointer;",
+    alt: contentText("image.alt", { host }),
+    style: "max-width: 100%; max-height: 350px; border-radius: 4px; cursor: pointer;",
   });
-
-  // On error: clear min-height so the wrapper collapses instead of
-  // holding a 200px empty reservation that can oscillate with virtual scroll.
-  const collapse = (): void => {
-    log.error("Image failed to load", { url });
-    wrap.style.minHeight = "";
-  };
-  recoverEvictedImage(img, { url });
-  img.addEventListener("error", collapse, { once: true });
-
-  void fetchExternalImage({ url }).then((src) => {
-    if (src === null) {
-      collapse();
-      return;
-    }
-
-    // On load: clear min-height reservation and cache the natural rendered
-    // height so future virtual-scroll rebuilds start at the correct size.
-    // Measure synchronously — deferring to rAF loses the race with
-    // ResizeObserver which can rebuild the DOM before the rAF fires.
-    img.addEventListener(
-      "load",
-      () => {
-        log.debug("Image loaded", {
-          url: url.slice(0, 80),
-          naturalW: img.naturalWidth,
-          naturalH: img.naturalHeight,
-        });
-        wrap.style.minHeight = "";
-        const h = wrap.offsetHeight;
-        if (h > 0) cacheImageHeight(url, h);
-        log.debug("Image height cached", { url: url.slice(0, 80), h });
-      },
-      { once: true },
-    );
-
-    // Observe GIFs for visibility-based freeze/unfreeze + play/pause button.
-    // When the animateGifs pref is disabled, start frozen so the first frame is
-    // shown by default; the user can still click the play button to animate.
-    // The blob: source is same-origin, so the freeze canvas is never tainted.
-    if (isGifUrl(url)) {
-      img.addEventListener(
-        "load",
-        () => {
-          observeMedia(img, src, wrap, !animateGifsPref);
-        },
-        { once: true },
-      );
-    }
-
-    img.addEventListener("click", () => {
-      openImageLightbox(src, "Image", { url });
-    });
-
-    img.src = src;
-  });
-
+  // Hidden until its bytes load: a loading or refused image is neither shown
+  // nor reachable as a control, so it can never open an empty lightbox.
+  img.hidden = true;
   wrap.appendChild(img);
 
   if (isKlipyUrl(url)) {
@@ -384,6 +343,102 @@ export function renderInlineImage(url: string): HTMLDivElement {
     });
     wrap.appendChild(watermark);
   }
+
+  // The failure line and its bounded retry sit beside the image; the image is
+  // hidden, not discarded, so retry can reuse it and tests keep one element.
+  const failure = renderFailureStatus(
+    contentText("image.failed"),
+    contentText("image.retry"),
+    () => {
+      if (wrap.dataset.mediaState !== "loading") load();
+    },
+  );
+  failure.hidden = true;
+  wrap.appendChild(failure);
+  const retry = failure.querySelector("button")!;
+
+  // On failure: clear min-height so the wrapper collapses instead of
+  // holding a 200px empty reservation that can oscillate with virtual scroll.
+  const showFailure = (kind: ExternalContentFailure): void => {
+    log.error("Image failed to load", { url, failure: kind });
+    wrap.style.minHeight = "";
+    // A refusal (blocked destination, wrong type, oversized, expired) is kept
+    // distinct from a loaded image; the failure line never reads as success.
+    wrap.dataset.mediaState = "failed";
+    img.hidden = true;
+    // Only a transient "unavailable" answer is worth re-asking.
+    retry.hidden = kind !== "unavailable";
+    retry.removeAttribute("aria-disabled");
+    failure.hidden = false;
+  };
+  recoverEvictedImage(img, { url });
+  // Bytes that fail to decode, or an evicted image the broker can no longer
+  // re-fetch, land in the same typed failed state.
+  img.addEventListener("error", () => showFailure("unavailable"));
+
+  // On load: clear min-height reservation and cache the natural rendered
+  // height so future virtual-scroll rebuilds start at the correct size.
+  // Measure synchronously — deferring to rAF loses the race with
+  // ResizeObserver which can rebuild the DOM before the rAF fires.
+  img.addEventListener("load", () => {
+    log.debug("Image loaded", { url: url.slice(0, 80), naturalH: img.naturalHeight });
+    // A retry that succeeds hands keyboard focus from the retry to the image.
+    const refocus = failure.contains(document.activeElement);
+    wrap.style.minHeight = "";
+    wrap.dataset.mediaState = "loaded";
+    img.hidden = false;
+    failure.hidden = true;
+    const h = wrap.offsetHeight;
+    if (h > 0) cacheImageHeight(url, h);
+    if (refocus) img.focus();
+  });
+
+  // Observe GIFs for visibility-based freeze/unfreeze + play/pause button.
+  // When the animateGifs pref is disabled, start frozen so the first frame is
+  // shown by default; the user can still click the play button to animate.
+  // The blob: source is same-origin, so the freeze canvas stays untainted.
+  if (isGifUrl(url)) {
+    img.addEventListener(
+      "load",
+      () => {
+        observeMedia(img, img.src, wrap, !animateGifsPref);
+      },
+      { once: true },
+    );
+  }
+
+  // The image is a keyboard-operable control, not pointer-only (B9-9): focus
+  // it and Enter/Space open the same lightbox a click does.
+  img.tabIndex = 0;
+  img.setAttribute("role", "button");
+  img.setAttribute("aria-label", contentText("image.open", { host }));
+  img.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    img.click();
+  });
+  img.addEventListener("click", () => {
+    openImageLightbox(img.src, contentText("image.alt", { host }), { url });
+  });
+
+  function load(): void {
+    // A retry rechecks consent and the current partition: a revoked grant
+    // makes loadExternalImage refuse again with nothing fetched.
+    // A visible retry stays mounted (and focused) while it re-asks.
+    wrap.dataset.mediaState = "loading";
+    wrap.style.minHeight = `${cachedH ?? 200}px`;
+    retry.setAttribute("aria-disabled", "true");
+    if (img.hasAttribute("src")) img.removeAttribute("src");
+    void loadExternalImage({ url }).then((result) => {
+      if (!result.ok) {
+        showFailure(result.failure);
+        return;
+      }
+      img.src = result.value;
+    });
+  }
+
+  load();
 
   return wrap;
 }

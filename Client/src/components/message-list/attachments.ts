@@ -4,7 +4,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { createElement, appendChildren } from "@lib/dom";
+import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
@@ -23,6 +23,7 @@ import type {
 const log = createLogger("attachments");
 import type { Attachment } from "@lib/types";
 import { externalAllowed, setExternalConsentScope } from "../../features/content-consent/external";
+import { mediaControlsText } from "../../i18n/mediaControls";
 
 /** Cached value of the animateGifs preference. Invalidated on pref change
  *  (same pattern as roleColors in formatting.ts). */
@@ -680,6 +681,31 @@ export function loadExternalImage(
   return promise;
 }
 
+// -- Failure + retry ----------------------------------------------------------
+
+/** The typed failure line shared by the embed, image and picker renderers
+ *  (B9-9): a status message plus a bounded, explicitly labelled retry. The
+ *  caller owns what retry does, so a retry always rechecks the current consent
+ *  and partition rather than replaying a stale answer. */
+export function renderFailureStatus(
+  message: string,
+  retryLabel: string,
+  onRetry: () => void,
+): HTMLDivElement {
+  const wrap = createElement("div", { class: "msg-media-fallback" });
+  const status = createElement("span", { class: "msg-media-fallback-text", role: "status" });
+  setText(status, message);
+  const retry = createElement("button", {
+    class: "messages-retry-btn msg-media-retry",
+    type: "button",
+    "aria-label": retryLabel,
+  });
+  setText(retry, retryLabel);
+  retry.addEventListener("click", onRetry);
+  appendChildren(wrap, status, retry);
+  return wrap;
+}
+
 // -- Attachment rendering -----------------------------------------------------
 
 /** The filename + size + download row shared by the audio player and the
@@ -728,6 +754,7 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
     if (objectUrl !== null) {
       video.src = objectUrl;
     } else {
+      // The download chip stays; the player is dimmed, never shown as loading.
       wrap.classList.add("msg-media-failed");
     }
   });
@@ -917,7 +944,16 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
     activeLightboxClose = null;
   }
 
+  // Focus moves into the lightbox on open and back to the opener on close
+  // (B9-9); captured before the overlay takes focus.
+  const opener = document.activeElement;
   const overlay = createElement("div", { class: "image-lightbox" });
+  // A modal surface: named so a screen reader announces it, and tabbable
+  // itself so the Tab cycle never escapes to the page behind it.
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", alt);
+  overlay.tabIndex = -1;
 
   const imgWrap = createElement("div", { class: "image-lightbox-wrap" });
   const img = createElement("img", { src, alt });
@@ -925,7 +961,10 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   imgWrap.appendChild(img);
   overlay.appendChild(imgWrap);
 
-  const closeBtn = createElement("button", { class: "image-lightbox-close" });
+  const closeBtn = createElement("button", {
+    class: "image-lightbox-close",
+    "aria-label": mediaControlsText("lightbox.close"),
+  });
   closeBtn.appendChild(createIcon("x", 20));
   overlay.appendChild(closeBtn);
 
@@ -967,6 +1006,7 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   function close(): void {
     overlay.remove();
     disposable.destroy();
+    if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     if (activeLightboxClose === close) activeLightboxClose = null;
   }
 
@@ -1043,6 +1083,11 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
 
   function onKey(e: KeyboardEvent): void {
     if (e.key === "Escape") close();
+    if (e.key === "Tab") {
+      // Contain focus in the dialog: its close button is the only Tab stop.
+      e.preventDefault();
+      closeBtn.focus();
+    }
     if (e.key === "+" || e.key === "=") {
       scale = Math.min(10, scale * 1.3);
       applyTransform();
@@ -1057,4 +1102,7 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
 
   activeLightboxClose = close;
   document.body.appendChild(overlay);
+  // The close button is the one Tab stop, so the lightbox holds a single
+  // focusable control whose Escape/Tab behaviour never leaks behind it.
+  closeBtn.focus();
 }
