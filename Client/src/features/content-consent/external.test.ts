@@ -192,6 +192,25 @@ describe("the per-server choice", () => {
     expect(externalAllowed(`url:${IMAGE}`)).toBe(false);
   });
 
+  it.each(["Ask each time", "Load automatically on this server"])(
+    "a '%s' answered after the session tore down admits and records nothing",
+    async (label) => {
+      concealed(show(IMAGE))[0]?.click();
+      const dialog = await vi.waitFor(() => {
+        const el = document.querySelector('[data-testid="external-consent-dialog"]');
+        if (el === null) throw new Error("no dialog yet");
+        return el;
+      });
+      forgetAdmittedItems();
+      await answerDialog(label);
+      await vi.waitFor(() => expect(dialog.isConnected).toBe(false));
+      await Promise.resolve();
+      expect(externalConsentChoice()).toBeNull();
+      expect(externalAllowed(`url:${IMAGE}`)).toBe(false);
+      expect(brokerCalls()).toBe(0);
+    },
+  );
+
   it("a manual cache clear keeps an admitted item loadable", async () => {
     setExternalConsentChoice("ask");
     const row = show(IMAGE);

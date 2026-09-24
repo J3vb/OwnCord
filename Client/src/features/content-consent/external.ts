@@ -28,6 +28,14 @@ let scope = "";
 /** Items admitted one by one this session ("ask"), keyed like the broker
  *  cache: `url:<url>`, `handle:<handle>` or a named item. */
 const admitted = new Set<string>();
+/** Bumped whenever the admitted items are forgotten, so a dialog answered
+ *  after a teardown, server switch or reset admits and records nothing. */
+let generation = 0;
+
+function forget(): void {
+  admitted.clear();
+  generation++;
+}
 
 function choices(): Record<string, unknown> {
   return loadPref<Record<string, unknown>>(EXTERNAL_CONSENT_PREF, {});
@@ -37,7 +45,7 @@ function choices(): Record<string, unknown> {
 export function setExternalConsentScope(host: string): void {
   if (host === scope) return;
   scope = host;
-  admitted.clear();
+  forget();
 }
 
 /** This server's choice, or null when the viewer has not made one. */
@@ -53,13 +61,13 @@ export function setExternalConsentChoice(choice: ExternalConsentChoice): void {
 
 /** Forget every server's choice and every admitted item. */
 export function resetExternalConsent(): void {
-  admitted.clear();
+  forget();
   savePref(EXTERNAL_CONSENT_PREF, {});
 }
 
 /** Forget items admitted one by one (a page teardown). */
 export function forgetAdmittedItems(): void {
-  admitted.clear();
+  forget();
 }
 
 /** Whether `key` may be fetched: the server is on "auto", or the viewer
@@ -78,9 +86,10 @@ export function admitDerived(parent: string, child: string): void {
  *  is none. Resolves whether the item is now admitted. */
 export async function requestExternalItem(key: string): Promise<boolean> {
   if (externalConsentChoice() === null) {
+    const asked = generation;
     const { askExternalConsent } = await import("./externalDialog");
     const choice = await askExternalConsent();
-    if (choice === null) return false;
+    if (choice === null || asked !== generation) return false;
     admitted.add(key);
     setExternalConsentChoice(choice);
     return true;
