@@ -63,6 +63,11 @@
   display: flex;
   flex-direction: column;
 }
+/* When the floors below cannot all fit, the sidebar scrolls rather than
+   clipping a header or the channel list. */
+.sidebar-content {
+  overflow-y: auto;
+}
 /* The min-height, about three channel rows at the user's text size, keeps
    the channel list reachable when the header wraps and the member list below
    is long or dragged tall (B9 Q1 reflow: 940x500 with 20px text left it no
