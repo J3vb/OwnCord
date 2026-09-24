@@ -6,8 +6,8 @@
  * Notes are moderator-only text and stay in their own section; the history
  * names who did what and when, and a moderator action's reason is labelled as
  * the text the member was shown. An erased actor, a report closed because its
- * subject was erased and notes removed by the retention sweep are shown as
- * facts, not as a failed read.
+ * subject was erased (its notes deleted with the account) and notes removed by
+ * the retention sweep are shown as facts, not as a failed read.
  */
 
 import { appendChildren, createElement } from "@lib/dom";
@@ -108,7 +108,8 @@ function notesSection(detail: ReportDetail, me: number): HTMLElement[] {
   if (detail.reporterId === me) return [heading, muted(t("notes.hidden"))];
   if (detail.notes.length === 0) {
     const noted = detail.history.some((e) => e.kind === "event" && e.action === "noted");
-    return [heading, muted(t(noted && detail.closedAt !== null ? "notes.pruned" : "notes.none"))];
+    if (!noted || detail.closedAt === null) return [heading, muted(t("notes.none"))];
+    return [heading, muted(t(detail.state === "subject_erased" ? "notes.erased" : "notes.pruned"))];
   }
   const list = createElement("ol", { class: "mod-notes" });
   for (const n of detail.notes) {

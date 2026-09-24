@@ -16,10 +16,11 @@
  * profile removes it all, from the DOM and from memory.
  *
  * Review (B9-12): taking, noting and closing a report are single writes. One
- * write runs at a time; whatever the answer, the report is read again, so a
- * conflict with another moderator (409) shows the server's current state
- * rather than this view's guess. An unsaved note lives only while the report
- * can still take it and the view is live.
+ * write runs at a time; whatever the answer, the queue and the report are read
+ * again, so a conflict with another moderator (409) shows the server's current
+ * state rather than this view's guess. The next write waits for that read, so
+ * controls built before the write can't send it twice. An unsaved note lives
+ * only while the report can still take it and the view is live.
  */
 
 import { ApiClientError, type ModerationQueueFilter } from "@lib/api";
@@ -68,7 +69,8 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   let denied = false;
   /** The unsaved note, for the report it was typed on. */
   let draft = { id: "", text: "" };
-  let writing = false;
+  /** A write being sent, or its answer waiting on the re-read of the report. */
+  let writing: "sending" | "reading" | null = null;
   /** A report this reader just closed: leaving the list is expected, not news. */
   let closedHere: string | null = null;
 
@@ -161,11 +163,17 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     detailRetry.hidden = message === "";
   }
 
+  /** The report read that follows a write has settled or been dropped. */
+  function readSettled(): void {
+    if (writing === "reading") writing = null;
+  }
+
   /** Close the open report, saying why, and keep focus in the view. */
   function clearDetail(message: string): void {
     const hadFocus =
       detailSlot.contains(document.activeElement) || detailRetry === document.activeElement;
     const was = selected;
+    readSettled();
     dropDetail();
     selected = null;
     draft = { id: "", text: "" };
@@ -179,6 +187,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   function deny(): void {
     const hadFocus = root.contains(document.activeElement);
     denied = true;
+    writing = null;
     listReq?.destroy();
     listReq = null;
     dropDetail();
@@ -362,10 +371,17 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     close: "conflict.close",
   } as const;
 
+  /** Read the queue and the report again after a write; the next write waits for the report. */
+  function reread(id: string): void {
+    writing = "reading";
+    loadList(false, false);
+    loadDetail(id, false);
+  }
+
   /** Send one review write, then read the report again whatever the answer. */
   function write(id: string, w: WorkflowWrite): void {
-    if (writing || denied) return;
-    writing = true;
+    if (writing !== null || denied) return;
+    writing = "sending";
     setText(writeStatus, "");
     setText(writeAlert, "");
     const req =
@@ -376,24 +392,28 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
           : api.closeModerationReport(id, w.outcome, signal);
     req.then(
       () => {
-        writing = false;
-        if (signal.aborted) return;
+        if (signal.aborted || denied) return;
         if (w.kind === "note" && draft.id === id) draft = { id: "", text: "" };
         if (w.kind === "close") closedHere = id;
-        if (selected !== id) return;
+        if (selected !== id) {
+          writing = null;
+          return;
+        }
         setText(writeStatus, t(WRITE_DONE[w.kind]));
-        // The list shows state and assignee too; it re-reads the report after.
-        loadList(false, true);
+        reread(id);
       },
       (err: unknown) => {
-        writing = false;
-        if (signal.aborted) return;
+        if (signal.aborted || denied) return;
         if (isStatus(err, 403) && (err as ApiClientError).code !== "SELF_REVIEW") {
           deny();
           return;
         }
-        if (selected !== id) return;
+        if (selected !== id) {
+          writing = null;
+          return;
+        }
         if (isStatus(err, 404)) {
+          writing = null;
           clearDetail(t("detail.notFound"));
           loadList(false, false);
           return;
@@ -408,7 +428,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
                 ? t("write.invalid")
                 : t("write.error"),
         );
-        loadList(false, true);
+        reread(id);
       },
     );
   }
@@ -438,6 +458,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       (wire) => {
         if (req !== detailReq || signal.aborted || selected !== id) return;
         detailReq = null;
+        readSettled();
         detailSlot.removeAttribute("aria-busy");
         const item = items.find((i) => i.id === id);
         if (item === undefined) {
@@ -457,6 +478,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       (err: unknown) => {
         if (req !== detailReq || signal.aborted || selected !== id) return;
         detailReq = null;
+        readSettled();
         detailSlot.removeAttribute("aria-busy");
         if (isStatus(err, 403)) {
           deny();

@@ -209,7 +209,12 @@ B9-11 left no server gap: no server, protocol, schema or migration change.
   with a sentence saying why.
 - **Writes and conflicts** (`Queue.ts`). One write at a time, even across a
   re-read that rebuilds the controls; whatever the answer, the queue and the
-  report are read again, so the server's state replaces the view's guess.
+  report are read again, each directly, so a failed queue read still re-reads
+  the report and the server's state replaces the view's guess. The guard
+  holds until that report read settles (rendered, failed or dropped), so the
+  controls still on screen from before the write can't send it twice: no
+  second take, no duplicate note, no false "already closed" after an own
+  close.
   409 says which race was lost ("Another moderator took this report first",
   "Your note wasn't saved: this report was closed", "already closed by
   another moderator"); 403 `SELF_REVIEW` says so without leaving; any other
@@ -230,7 +235,10 @@ B9-11 left no server gap: no server, protocol, schema or migration change.
   labelled "Reason shown to the member". Read-only by construction: no
   control inside either. Erased actors read "A deleted account", an unknown
   event "… updated the report", notes removed by retention "Note text is no
-  longer kept …", and the reporter's own view says why notes are hidden.
+  longer kept …", notes of a report closed because its subject was erased
+  (`subject_erased`) "Note text was deleted along with the reported
+  account." rather than the retention copy, and the reporter's own view says
+  why notes are hidden.
 
 ### Implementation decisions and file-table amendments
 
@@ -303,6 +311,15 @@ suite re-run; each failed and was restored: the reporter's no-controls branch,
 the other-moderator no-controls branch (3 tests), 403-on-write denies, the
 draft-lost notice, the own-close "not gone" case, focus restored by key, the
 per-report draft reset, and one-write-at-a-time (3 tests).
+
+**Review fixes.** The write guard now holds until the post-write report read
+settles, the report is re-read directly after every write, and an erased
+subject's notes get their own line; the unused `history.system` string is
+gone. Five new `workflow.test.ts` cases (second take, duplicate note, guard
+released after a retried failed read, re-read despite a failed queue read,
+erasure copy) and the 409 case (report re-read at once, not after the queue)
+each failed on the previous head and pass now; the moderation unit suite is
+53 passed.
 
 ### Accessibility (Q1)
 

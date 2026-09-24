@@ -90,6 +90,7 @@ export const moderationText = defineCatalog("moderation", {
   "notes.none": "No notes yet.",
   "notes.pruned":
     "Note text is no longer kept: this server removes it some time after a report closes.",
+  "notes.erased": "Note text was deleted along with the reported account.",
   "notes.by": "{name}, {date}",
   "history.title": "History",
   "history.hint": "Recorded by the server. History can't be edited or deleted.",
@@ -102,7 +103,6 @@ export const moderationText = defineCatalog("moderation", {
   "history.action": "{name} issued: {kind}",
   "history.reason": "Reason shown to the member: {reason}",
   "history.lifted": "Lifted {date}",
-  "history.system": "The server",
   "name.you": "You",
   "name.erased": "A deleted account",
   "kind.warning": "Warning",

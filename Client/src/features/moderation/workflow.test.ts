@@ -199,6 +199,63 @@ describe("what the review offers", () => {
     expect(writes).toHaveLength(1);
   });
 
+  it("sends no second take while the report is read again after the first", async () => {
+    const root = await opened(detail("r1"));
+    const take = q<HTMLButtonElement>(work(root)!, "button")!;
+    take.click();
+    writes[0]!.resolve();
+    await flush();
+    take.click();
+    expect(writes).toHaveLength(1);
+    await reread(mine("r1"), row("r1", { state: "assigned", assignee_id: ME }));
+    type(root, "after the take");
+    submit(note(root));
+    expect(writes.map((w) => w.op)).toEqual(["assign", "note"]);
+  });
+
+  it("sends a saved note once, even before the re-read replaces the field", async () => {
+    const root = await opened(mine("r1"));
+    type(root, "only once");
+    submit(note(root));
+    writes[0]!.resolve();
+    await flush();
+    submit(note(root));
+    expect(writes).toHaveLength(1);
+  });
+
+  it("lets the next write through once a failed re-read is retried", async () => {
+    const root = await opened(mine("r1"));
+    type(root, "one");
+    submit(note(root));
+    writes[0]!.resolve();
+    await flush();
+    lists.at(-1)!.resolve([row("r1", { state: "assigned", assignee_id: ME })]);
+    details.at(-1)!.reject(new Error("offline"));
+    await flush();
+    expect(alerts(root)).toBe("Couldn't load this report.");
+    [...root.querySelectorAll<HTMLButtonElement>("button")]
+      .find((b) => b.textContent === "Try again" && !b.hidden)!
+      .click();
+    details.at(-1)!.resolve(mine("r1"));
+    await flush();
+    type(root, "two");
+    submit(note(root));
+    expect(writes.map((w) => w.body)).toEqual(["one", "two"]);
+  });
+
+  it("reads the report again after a write even when the queue read fails", async () => {
+    const root = await opened(detail("r1"));
+    q<HTMLButtonElement>(work(root)!, "button")!.click();
+    writes[0]!.resolve();
+    await flush();
+    lists.at(-1)!.reject(new Error("offline"));
+    await flush();
+    expect(details).toHaveLength(2);
+    details.at(-1)!.resolve(mine("r1"));
+    await flush();
+    expect(buttons(work(root))).toEqual(["Add note", "Close report"]);
+  });
+
   it("offers nothing on a report someone else is reviewing", async () => {
     const root = await opened(detail("r1", { state: "assigned", assignee_id: OTHER }));
     expect(buttons(work(root))).toEqual([]);
@@ -315,7 +372,7 @@ describe("conflicts and refusals", () => {
     writes[0]!.reject(new ApiClientError(409, "CONFLICT", "already assigned"));
     await flush();
     expect(alerts(root)).toBe("Another moderator took this report first.");
-    expect(details).toHaveLength(1);
+    expect(details).toHaveLength(2);
     await reread(detail("r1", { state: "assigned", assignee_id: OTHER }));
     expect(details).toHaveLength(2);
     expect(buttons(work(root))).toEqual([]);
@@ -507,5 +564,18 @@ describe("history", () => {
     );
     expect(root.textContent).toContain("Note text is no longer kept");
     expect(root.textContent).not.toContain("No notes yet.");
+  });
+
+  it("says the note text went with the erased account, not retention", async () => {
+    const root = await opened(
+      detail("r1", {
+        state: "subject_erased",
+        outcome: "subject_erased",
+        closed_at: "2026-06-01 09:00:00",
+        events: [{ actor_id: ME, action: "noted", detail: "", created_at: "2026-05-30 09:00:00" }],
+      }),
+    );
+    expect(root.textContent).toContain("Note text was deleted along with the reported account.");
+    expect(root.textContent).not.toContain("Note text is no longer kept");
   });
 });
