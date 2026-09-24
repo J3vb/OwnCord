@@ -278,7 +278,8 @@ new keys.
   once-per-phase announcement and the available-update announcement;
   `voice-widget.test.ts` adds the mic notice show/hide and the failed-retry
   wording; `main-page.test.ts` adds the Retry redial, "Reconnecting..." until a
-  dial fails, and the network events re-rendering without a redial.
+  dial fails, one unreachable notice (announced once) with Retry held across
+  repeated failed dials, and the network events re-rendering without a redial.
 - **E2E (mocked Chromium, `--workers=1`, non-1420 port):**
   `tests/e2e/b9-desktop-capabilities.spec.ts`: a drop says "Reconnecting..."
   until a dial fails, then names the unreachable server with a working Retry;
