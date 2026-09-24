@@ -148,11 +148,10 @@ function buildPasswordConfirm(
   appendChildren(btnRow, submitBtn, cancelBtn);
   appendChildren(area, pwInput, errorEl, btnRow);
 
-  const close = (): void => {
+  const close = (hadFocus = area.contains(document.activeElement)): void => {
     // The submit button that was focused is inside `area`, which is about to
     // hide; focus the trigger that replaces it so focus never falls to <body>
     // (B9-23). Only reclaim focus if it was inside this area.
-    const hadFocus = area.contains(document.activeElement);
     area.style.display = "none";
     trigger.style.display = "";
     pwInput.value = "";
@@ -168,7 +167,7 @@ function buildPasswordConfirm(
     },
     { signal },
   );
-  cancelBtn.addEventListener("click", close, { signal });
+  cancelBtn.addEventListener("click", () => close(), { signal });
   submitBtn.addEventListener(
     "click",
     () => {
@@ -179,11 +178,12 @@ function buildPasswordConfirm(
       }
       pwInput.value = "";
       setText(errorEl, "");
+      const hadFocus = area.contains(document.activeElement);
       submitBtn.disabled = true;
       setText(submitBtn, opts.busyLabel);
       void opts
         .onSubmit(pw)
-        .then(close)
+        .then(() => close(hadFocus))
         .catch((err: unknown) => {
           setText(errorEl, errorText(err, t("recovery.requestFailed")));
         })

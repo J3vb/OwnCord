@@ -435,10 +435,13 @@ test.describe("Settings > Account — disable 2FA", () => {
     ).toBe(false);
 
     await password.fill("password123");
-    await section.locator("button", { hasText: "Confirm Disable" }).click();
+    await section.locator("button", { hasText: "Confirm Disable" }).focus();
+    await page.keyboard.press("Enter");
 
     await expect(section.locator("[data-testid='totp-status-badge']")).toHaveText("Disabled");
-    await expect(section.locator("[data-testid='totp-enable-btn']")).toBeVisible();
+    // The focused confirm button is disabled and then replaced; focus moves
+    // to the rebuilt section rather than falling to <body>.
+    await expect(section.locator("[data-testid='totp-enable-btn']")).toBeFocused();
     await expect(
       page.locator("[data-testid='toast']", { hasText: "Two-factor authentication disabled" }),
     ).toBeVisible();

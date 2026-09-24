@@ -478,7 +478,7 @@ function buildPasswordSection(
 function buildTotpEnrollForm(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
-  onEnrolled: () => void,
+  onEnrolled: (restoreFocus: boolean) => void,
 ): HTMLDivElement {
   const wrapper = createElement("div", {});
 
@@ -567,7 +567,7 @@ function buildTotpConfirmArea(
   password: string,
   result: { qr_uri: string; backup_codes: string[] },
   signal: AbortSignal,
-  onEnrolled: () => void,
+  onEnrolled: (restoreFocus: boolean) => void,
 ): void {
   // Clear previous content immutably (remove children)
   while (container.firstChild) {
@@ -642,13 +642,14 @@ function buildTotpConfirmArea(
         return;
       }
       setText(confirmError, "");
+      const hadFocus = document.activeElement === confirmBtn;
       confirmBtn.disabled = true;
       setText(confirmBtn, t("totp.verifying"));
 
       void options
         .onConfirmTotp(password, code)
         .then(() => {
-          onEnrolled();
+          onEnrolled(hadFocus);
         })
         .catch((err: unknown) => {
           setText(confirmError, errorText(err, t("totp.enableFailed")));
@@ -666,7 +667,7 @@ function buildTotpConfirmArea(
 function buildTotpDisableView(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
-  onDisabled: () => void,
+  onDisabled: (restoreFocus: boolean) => void,
 ): HTMLDivElement {
   const wrapper = createElement("div", {});
 
@@ -748,13 +749,14 @@ function buildTotpDisableView(
         return;
       }
       setText(errorEl, "");
+      const hadFocus = confirmArea.contains(document.activeElement);
       confirmBtn.disabled = true;
       setText(confirmBtn, t("totp.disabling"));
 
       void options
         .onDisableTotp(pw)
         .then(() => {
-          onDisabled();
+          onDisabled(hadFocus);
         })
         .catch((err: unknown) => {
           const requiredByServer = err instanceof ApiClientError && err.code === "FORBIDDEN";
@@ -798,12 +800,11 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
 
   const contentArea = createElement("div", {});
 
-  function render(keepFocus = false): void {
+  function render(restoreFocus = false): void {
     const enabled = authStore.getState().user?.totp_enabled === true;
-    // Capture before clearing: the control the user just activated is being
-    // replaced, and removing it drops focus to <body> (B9-23). Move focus to
-    // the first control of the rebuilt area instead.
-    const hadFocusInside = keepFocus && contentArea.contains(document.activeElement);
+    // The control the user just activated is being replaced, and removing it
+    // drops focus to <body> (B9-23). The caller records whether it had focus
+    // before disabling it; move focus to the first rebuilt control instead.
 
     // Status text uses the qualified --text-* tokens, not white on the
     // --green fill (3.2:1, below Q1's 4.5:1 for this 12px bold text); the
@@ -817,12 +818,12 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
     }
 
     if (enabled) {
-      contentArea.appendChild(buildTotpDisableView(options, signal, () => render(true)));
+      contentArea.appendChild(buildTotpDisableView(options, signal, render));
       contentArea.appendChild(buildRegenerateCodes(options, signal));
     } else {
-      contentArea.appendChild(buildTotpEnrollForm(options, signal, () => render(true)));
+      contentArea.appendChild(buildTotpEnrollForm(options, signal, render));
     }
-    if (hadFocusInside) {
+    if (restoreFocus) {
       contentArea.querySelector<HTMLElement>("button, [tabindex]")?.focus();
     }
   }
@@ -1083,8 +1084,7 @@ function buildSessionsSection(
   appendChildren(btnRow, confirmBtn, cancelBtn);
   appendChildren(confirmArea, warning, errorEl, btnRow);
 
-  const closeConfirm = (): void => {
-    const hadFocus = confirmArea.contains(document.activeElement);
+  const closeConfirm = (hadFocus = confirmArea.contains(document.activeElement)): void => {
     confirmArea.style.display = "none";
     revokeAllBtn.style.display = "";
     setText(errorEl, "");
@@ -1098,10 +1098,11 @@ function buildSessionsSection(
     },
     { signal },
   );
-  cancelBtn.addEventListener("click", closeConfirm, { signal });
+  cancelBtn.addEventListener("click", () => closeConfirm(), { signal });
   confirmBtn.addEventListener(
     "click",
     () => {
+      const hadFocus = confirmArea.contains(document.activeElement);
       confirmBtn.disabled = true;
       setText(errorEl, "");
       void options
@@ -1110,7 +1111,7 @@ function buildSessionsSection(
           // A revoked current session is handled by the page: auth is
           // cleared and the app leaves. Otherwise refresh what is left.
           if (result.current_session_revoked || signal.aborted) return;
-          closeConfirm();
+          closeConfirm(hadFocus);
           load();
         })
         .catch((err: unknown) => {

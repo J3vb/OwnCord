@@ -528,10 +528,11 @@ describe("SettingsOverlay", () => {
       expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123");
       expect(status!.textContent).toBe(warning);
     });
-    // B9-23: the warning is the qualified .form-warning class with a polite
-    // status role, not an inline --yellow (which reads 1.89:1 on light).
+    // B9-23: the warning is the qualified .form-warning class, not an inline
+    // --yellow (which reads 1.89:1 on light), and keeps the live role it was
+    // created with so the swap to the warning text is announced.
     expect(status!.classList.contains("form-warning")).toBe(true);
-    expect(status!.getAttribute("role")).toBe("status");
+    expect(status!.getAttribute("role")).toBe("alert");
     // The password did change, so the fields are cleared like any success.
     expect((inputs[0] as HTMLInputElement).value).toBe("");
     expect((inputs[1] as HTMLInputElement).value).toBe("");

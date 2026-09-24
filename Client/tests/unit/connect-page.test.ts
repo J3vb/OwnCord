@@ -166,6 +166,30 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("announces a field error as an alert when that field already has focus", async () => {
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    (container.querySelector("#host") as HTMLInputElement).value = "localhost:8443";
+    (container.querySelector("#username") as HTMLInputElement).value = "testuser";
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.value = "short";
+    passwordInput.focus();
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    const errorBanner = container.querySelector(".error-banner")!;
+    await vi.waitFor(() => {
+      expect(errorBanner.textContent).toContain("at least 8 characters");
+    });
+    expect(errorBanner.getAttribute("role")).toBe("alert");
+    expect(passwordInput.getAttribute("aria-describedby")).toBe(errorBanner.id);
+    expect(document.activeElement).toBe(passwordInput);
+
+    page.destroy?.();
+  });
+
   // ── Saved-password login (OCV-001) ───────────────────────────────────────
   //
   // The plaintext password no longer crosses IPC, so a remembered password is
@@ -1365,6 +1389,7 @@ describe("ConnectPage", () => {
     totpInput.value = "abc";
 
     const verifyBtn = container.querySelector(".totp-overlay .btn-primary") as HTMLButtonElement;
+    verifyBtn.focus();
     verifyBtn.click();
 
     expect(onTotpSubmit).not.toHaveBeenCalled();
@@ -1373,6 +1398,28 @@ describe("ConnectPage", () => {
     expect(totpError.textContent).not.toBe("");
     expect(totpError.hasAttribute("role")).toBe(false);
     expect(totpInput.getAttribute("aria-describedby")).toBe(totpError.id);
+    expect(document.activeElement).toBe(totpInput);
+
+    page.destroy?.();
+  });
+
+  it("announces a malformed code submitted with Enter from the focused input", () => {
+    const onTotpSubmit = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
+    page.mount(container);
+
+    page.showTotp();
+    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    expect(document.activeElement).toBe(totpInput);
+    totpInput.value = "abc";
+    totpInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    // Focus cannot move to the field it is already on, so the error is the
+    // one live alert instead.
+    expect(onTotpSubmit).not.toHaveBeenCalled();
+    const totpError = container.querySelector("[data-testid='totp-invalid']")!;
+    expect(totpError.textContent).not.toBe("");
+    expect(totpError.getAttribute("role")).toBe("alert");
     expect(document.activeElement).toBe(totpInput);
 
     page.destroy?.();

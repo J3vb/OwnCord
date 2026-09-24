@@ -23,6 +23,7 @@ import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
   MOCK_AUTH_OK,
+  MOCK_LOGIN_2FA_RESPONSE,
   MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
@@ -130,6 +131,58 @@ test.describe("B9-23 connect form validation is field-linked", () => {
     await expect(page.locator(".error-banner.visible")).toHaveText(/at least 8 characters/);
     await expect(password).toHaveAttribute("aria-invalid", "true");
     await expect(password).toBeFocused();
+    await expect(page.locator(".error-banner")).not.toHaveAttribute("role", "alert");
+  });
+
+  test("Enter in an invalid, already-focused field announces the error once as an alert", async ({
+    page,
+  }) => {
+    await page.addInitScript(
+      buildTauriMockScript({ httpRoutes: [ROUTE_HEALTH], simulateWsFlow: false }),
+    );
+    await page.goto("/");
+
+    await page.locator("#host").fill("localhost:8443");
+    await page.locator("#username").fill("user");
+    const password = page.locator("#password");
+    await password.fill("short");
+    await password.press("Enter");
+
+    // Focus is already on the field, so it cannot carry the message; the
+    // banner does, through its live role.
+    const banner = page.locator(".error-banner.visible");
+    await expect(banner).toHaveText(/at least 8 characters/);
+    await expect(banner).toHaveAttribute("role", "alert");
+    await expect(password).toBeFocused();
+    await expect(password).toHaveAccessibleDescription(/at least 8 characters/);
+  });
+
+  test("Enter with a malformed 2FA code announces the error once as an alert", async ({ page }) => {
+    await page.addInitScript(
+      buildTauriMockScript({
+        httpRoutes: [
+          ROUTE_HEALTH,
+          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_2FA_RESPONSE },
+        ],
+        simulateWsFlow: false,
+      }),
+    );
+    await page.goto("/");
+
+    await page.locator("#host").fill("localhost:8443");
+    await page.locator("#username").fill("user");
+    await page.locator("#password").fill("password123");
+    await page.locator("button.btn-primary[type='submit']").click();
+
+    const code = page.locator(".totp-overlay input[autocomplete='one-time-code']");
+    await expect(code).toBeFocused();
+    await code.fill("abc");
+    await code.press("Enter");
+
+    const error = page.locator("[data-testid='totp-invalid']");
+    await expect(error).not.toHaveText("");
+    await expect(error).toHaveAttribute("role", "alert");
+    await expect(code).toBeFocused();
   });
 });
 

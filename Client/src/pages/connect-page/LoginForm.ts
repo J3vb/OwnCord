@@ -531,7 +531,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // A malformed code used to be a 500 ms red border with no text and no
     // announcement, so a screen reader got nothing. The message is the
     // input's description and focus returns to the input, so it is read once
-    // with the field rather than also through a live region (B9-23).
+    // with the field; it is a live alert only when the input already has
+    // focus and so is not re-read (B9-23).
     totpError = createElement("div", {
       class: "form-error",
       id: "totp-error",
@@ -700,11 +701,16 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   function updateErrorBanner(): void {
     // A field error is linked to its input and focus moves there, so a
     // keyboard/screen-reader user lands on the control to fix rather than on
-    // an unassociated sentence (B9-23). The banner is only a live alert for a
-    // server error, which names no field, so each error is announced once.
+    // an unassociated sentence (B9-23). The banner is only a live alert when
+    // focus does not move — a server error naming no field, or a field that
+    // already has focus — so each error is announced once.
     const field = formState === "error" ? errorField : null;
-    if (field === null) errorBanner.setAttribute("role", "alert");
-    else errorBanner.removeAttribute("role");
+    const target = field === null ? null : fieldInput(field);
+    if (target === null || target === document.activeElement) {
+      errorBanner.setAttribute("role", "alert");
+    } else {
+      errorBanner.removeAttribute("role");
+    }
     for (const input of allFieldInputs()) {
       input.removeAttribute("aria-invalid");
       if (input.getAttribute("aria-describedby") === errorBanner.id) {
@@ -714,11 +720,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     if (formState === "error" && errorMessage) {
       setText(errorBanner, errorMessage);
       errorBanner.classList.add("visible");
-      if (field !== null) {
-        const input = fieldInput(field);
-        input.setAttribute("aria-invalid", "true");
-        input.setAttribute("aria-describedby", errorBanner.id);
-        input.focus();
+      if (target !== null) {
+        target.setAttribute("aria-invalid", "true");
+        target.setAttribute("aria-describedby", errorBanner.id);
+        target.focus();
       }
       // The shakeX animation plays automatically via CSS on .error-banner
       // Re-trigger animation by removing and re-adding the element
@@ -984,6 +989,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     if (!TOTP_OR_RECOVERY_CODE.test(code)) {
       totpInput.classList.add("error");
       totpInput.setAttribute("aria-invalid", "true");
+      if (document.activeElement === totpInput) totpError.setAttribute("role", "alert");
+      else totpError.removeAttribute("role");
       setText(totpError, connectText("totp.invalidCode"));
       setOwnedTimeout(signal, () => totpInput.classList.remove("error"), 500);
       totpInput.focus();

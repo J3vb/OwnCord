@@ -208,10 +208,13 @@ export function outcomeEl(outcome: Outcome, testId?: string): HTMLDivElement {
   });
 }
 
-/** Show `text` in `el` as `outcome` ('' clears it). */
+/**
+ * Show `text` in `el` as `outcome` ('' clears it). The live role set by
+ * `outcomeEl` stays put: swapping it with the text rebuilds the live region
+ * and the new text is not announced.
+ */
 export function showOutcome(el: HTMLElement, outcome: Outcome, text: string): void {
   el.className = OUTCOME_CLASS[outcome];
-  el.setAttribute("role", outcome === "error" ? "alert" : "status");
   setText(el, text);
 }
 
