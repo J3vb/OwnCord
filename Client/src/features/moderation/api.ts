@@ -13,14 +13,24 @@
  * withdrawn while the read was in flight).
  */
 
-import type {
-  ModerationAppealDetail,
-  ModerationAppealRow,
-  ModerationQueueRow,
-  ModerationReportDetail,
+import {
+  ApiClientError,
+  type ModerationAppealDetail,
+  type ModerationAppealRow,
+  type ModerationQueueRow,
+  type ModerationReportDetail,
 } from "@lib/api";
 import { parseTimestamp } from "@components/message-list/formatting";
 import { NSFW_ACKNOWLEDGEMENT_REQUIRED, nsfwContentBlocked } from "../content-consent/nsfw";
+
+/** Whether a request failed with this HTTP status (and error code, when given). */
+export function isStatus(err: unknown, status: number, code?: string): boolean {
+  return (
+    err instanceof ApiClientError &&
+    err.status === status &&
+    (code === undefined || err.code === code)
+  );
+}
 
 export interface QueueItem {
   readonly id: string;

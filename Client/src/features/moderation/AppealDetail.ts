@@ -25,8 +25,8 @@ import type { AppealDecision } from "@lib/api";
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { moderationText as t } from "../../i18n/moderation";
 import type { AppealDetail } from "./api";
-import { dateText, memberName } from "./Evidence";
-import { muted } from "./History";
+import { dateText } from "./Evidence";
+import { actorName, keyFor, KINDS, muted } from "./History";
 
 export type AppealWrite =
   | { readonly kind: "assign" }
@@ -58,13 +58,6 @@ export interface AppealDetailView {
   readonly takesInput: boolean;
 }
 
-const KINDS = {
-  warning: "kind.warning",
-  timeout: "kind.timeout",
-  removal: "kind.removal",
-  ban: "kind.ban",
-} as const;
-
 const STATES = {
   open: "appeal.state.open",
   assigned: "appeal.state.assigned",
@@ -89,24 +82,16 @@ const OUTCOMES = {
 /** The server's own bound (Server/service/appeal.go appealNoteMaxRunes); UTF-16 units never exceed runes. */
 const NOTE_MAX = 2000;
 
-export function kindText(kind: string): string {
-  return t(Object.hasOwn(KINDS, kind) ? KINDS[kind as keyof typeof KINDS] : "kind.other");
+function kindText(kind: string): string {
+  return t(keyFor(KINDS, kind, "kind.other"));
 }
 
 export function appealStateText(state: string): string {
-  return t(
-    Object.hasOwn(STATES, state) ? STATES[state as keyof typeof STATES] : "appeal.state.unknown",
-  );
+  return t(keyFor(STATES, state, "appeal.state.unknown"));
 }
 
 function effect(kind: string, when: 0 | 1): string | null {
   return Object.hasOwn(EFFECTS, kind) ? t(EFFECTS[kind as keyof typeof EFFECTS][when]) : null;
-}
-
-/** A member by id: "You", a deleted account (0) or their current name. */
-export function personText(id: number, me: number): string {
-  if (id === 0) return t("name.erased");
-  return id === me ? t("name.you") : memberName(id);
 }
 
 /** Label and value pairs, as a definition list. */
@@ -139,16 +124,16 @@ export function buildAppealDetail(o: AppealDetailOptions): AppealDetailView {
     element,
     heading,
     facts([
-      [t("appeal.fact.appellant"), personText(detail.appellantId, me)],
+      [t("appeal.fact.appellant"), actorName(detail.appellantId, me)],
       [t("fact.state"), appealStateText(detail.state)],
       [
         t("fact.assignee"),
-        detail.assigneeId === 0 ? t("fact.unassigned") : personText(detail.assigneeId, me),
+        detail.assigneeId === 0 ? t("fact.unassigned") : actorName(detail.assigneeId, me),
       ],
       [t("fact.filed"), dateText(detail.createdAt)],
       ...(decided
         ? ([
-            [t("appeal.fact.decidedBy"), personText(detail.decidedBy, me)],
+            [t("appeal.fact.decidedBy"), actorName(detail.decidedBy, me)],
             [t("appeal.fact.decided"), dateText(detail.decidedAt)],
           ] as const)
         : []),
@@ -159,7 +144,7 @@ export function buildAppealDetail(o: AppealDetailOptions): AppealDetailView {
   element.appendChild(createElement("h4", {}, t("appeal.action.title")));
   element.appendChild(
     facts([
-      [t("appeal.action.by"), personText(a.actorId, me)],
+      [t("appeal.action.by"), actorName(a.actorId, me)],
       [t("appeal.action.at"), dateText(a.createdAt)],
       [t("appeal.action.reason"), a.reason === "" ? t("appeal.action.noReason") : a.reason],
       ...(a.expiresAt !== null && a.liftedAt === null

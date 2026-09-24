@@ -64,7 +64,14 @@ import {
   type ActionWrite,
 } from "./ActionForms";
 import { renderAppeals, type AppealsView } from "./AppealQueue";
-import { itemFromDetail, mapDetail, mapQueueRow, type QueueItem, type ReportDetail } from "./api";
+import {
+  isStatus,
+  itemFromDetail,
+  mapDetail,
+  mapQueueRow,
+  type QueueItem,
+  type ReportDetail,
+} from "./api";
 import {
   buildReportDetail,
   dateText,
@@ -93,14 +100,6 @@ let viewSeq = 0;
 type Write = WorkflowWrite | ActionWrite;
 const isAction = (w: Write): w is ActionWrite =>
   w.kind === "warning" || w.kind === "timeout" || w.kind === "lift";
-
-function isStatus(err: unknown, status: number, code?: string): boolean {
-  return (
-    err instanceof ApiClientError &&
-    err.status === status &&
-    (code === undefined || err.code === code)
-  );
-}
 
 interface ReportsView {
   readonly deny: () => void;
@@ -221,7 +220,7 @@ function renderReports(
   let ownWrite: string | null = null;
   /** The open report, kept after the reader's own write took it out of the filter. */
   let offList: QueueItem | null = null;
-  /** A report opened by id from an appeal, before its first read. */
+  /** A report opened by id from an appeal, kept open whatever the filter. */
   let linked: string | null = null;
 
   const filterId = `mod-filter-${++viewSeq}`;
@@ -431,7 +430,10 @@ function renderReports(
           if (items.some((i) => i.id === selected)) {
             offList = null;
             if (refreshDetail) loadDetail(selected, false);
-          } else if (was !== undefined && (selected === ownWrite || offList === was)) {
+          } else if (
+            was !== undefined &&
+            (selected === ownWrite || selected === linked || offList === was)
+          ) {
             if (offList === null) setText(detailStatus, t("detail.leftFilter"));
             offList = was;
             if (refreshDetail) loadDetail(selected, false);
@@ -754,7 +756,7 @@ function renderReports(
     () => {
       filter = FILTERS.find((f) => f.value === select.value) ?? FILTERS[0];
       ownWrite = null;
-      offList = null;
+      if (selected !== linked) offList = null;
       loadList(true, false);
     },
     { signal },

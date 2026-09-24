@@ -32,12 +32,12 @@ import type { FeatureViewContext } from "../navigation/destinations";
 import {
   appealStateText,
   buildAppealDetail,
-  personText,
   type AppealDraft,
   type AppealWrite,
 } from "./AppealDetail";
-import { mapAppealDetail, mapAppealRow, type AppealDetail, type AppealItem } from "./api";
+import { isStatus, mapAppealDetail, mapAppealRow, type AppealDetail, type AppealItem } from "./api";
 import { dateText } from "./Evidence";
+import { actorName } from "./History";
 import { modAppealStore } from "./store";
 
 const FILTERS = [
@@ -67,14 +67,6 @@ let viewSeq = 0;
 
 const me = (): number => authStore.getState().user?.id ?? -1;
 const NO_DRAFT = (): AppealDraft & { id: string } => ({ id: "", note: "", outcome: null });
-
-function isStatus(err: unknown, status: number, code?: string): boolean {
-  return (
-    err instanceof ApiClientError &&
-    err.status === status &&
-    (code === undefined || err.code === code)
-  );
-}
 
 export function renderAppeals(
   root: HTMLElement,
@@ -222,7 +214,7 @@ export function renderAppeals(
 
   function renderRow(item: AppealItem): HTMLLIElement {
     const li = createElement("li");
-    const what = t("appeal.row.title", { name: personText(item.appellantId, me()) });
+    const what = t("appeal.row.title", { name: actorName(item.appellantId, me()) });
     const state = appealStateText(item.state);
     const when = t("appeal.row.filed", { date: dateText(item.createdAt) });
     const button = createElement("button", {

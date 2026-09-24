@@ -95,6 +95,25 @@ function detail(id: string, over: Partial<ModerationAppealDetail> = {}): Moderat
   };
 }
 
+function linkedReport(state: string): ModerationReportDetail {
+  return {
+    id: "r-pub",
+    reporter_id: 3,
+    subject_id: APPELLANT,
+    target_type: "message",
+    reason: "spam",
+    detail: "",
+    state,
+    assignee_id: 0,
+    outcome: state === "closed" ? "actioned" : "",
+    created_at: "2026-09-19 09:00:00",
+    evidence: [],
+    notes: [],
+    events: [],
+    actions: [],
+  };
+}
+
 const held = (id: string, over: Partial<ModerationAppealDetail> = {}) =>
   detail(id, { state: "assigned", assignee_id: ME, ...over });
 
@@ -243,28 +262,38 @@ describe("Appeals tab", () => {
     link.click();
     expect(tab(root, "reports").getAttribute("aria-selected")).toBe("true");
     expect(reportDetails.at(-1)!.arg).toBe("r-pub");
-    reportDetails.at(-1)!.resolve({
-      id: "r-pub",
-      reporter_id: 3,
-      subject_id: APPELLANT,
-      target_type: "message",
-      reason: "spam",
-      detail: "",
-      state: "closed",
-      assignee_id: 0,
-      outcome: "actioned",
-      created_at: "2026-09-19 09:00:00",
-      evidence: [],
-      notes: [],
-      events: [],
-      actions: [],
-    });
+    reportDetails.at(-1)!.resolve(linkedReport("closed"));
     await flush();
     expect(q(root, "[data-testid=mod-report]")).not.toBeNull();
     // A list re-read without it keeps it open: it was opened by id.
     noteQueueChange();
     await flush();
     reportLists.at(-1)!.resolve([]);
+    await flush();
+    expect(q(root, "[data-testid=mod-report]")).not.toBeNull();
+  });
+
+  it("keeps re-reading a linked report after the Reports filter changes", async () => {
+    const root = await opened(detail("a1", { report_id: "r-pub" }));
+    reportLists.at(-1)!.resolve([]);
+    await flush();
+    [...root.querySelectorAll("button")].find((b) => b.textContent === "Open the report")!.click();
+    reportDetails.at(-1)!.resolve(linkedReport("open"));
+    await flush();
+    const filter = q<HTMLSelectElement>(root, "[data-testid=mod-filter]")!;
+    filter.value = "closed";
+    filter.dispatchEvent(new Event("change"));
+    reportLists.at(-1)!.resolve([]);
+    await flush();
+    expect(q(root, "[data-testid=mod-report]")).not.toBeNull();
+    const reads = reportDetails.length;
+    noteQueueChange();
+    await flush();
+    reportLists.at(-1)!.resolve([]);
+    await flush();
+    expect(reportDetails.length).toBe(reads + 1);
+    expect(reportDetails.at(-1)!.arg).toBe("r-pub");
+    reportDetails.at(-1)!.resolve(linkedReport("closed"));
     await flush();
     expect(q(root, "[data-testid=mod-report]")).not.toBeNull();
   });
