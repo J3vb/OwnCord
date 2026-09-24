@@ -29,6 +29,7 @@ function wire(over: Partial<ModerationReportDetail> = {}): ModerationReportDetai
   return {
     id: "a1b2",
     reporter_id: 3,
+    subject_id: 4,
     notes: [],
     events: [],
     actions: [],

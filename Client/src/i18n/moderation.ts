@@ -1,6 +1,7 @@
 import { defineCatalog } from "./format";
 
-/** The Moderation Center queue, report evidence (B9-11) and review workflow (B9-12), BPR-071. */
+/** The Moderation Center queue, report evidence (B9-11), review workflow (B9-12), BPR-071, and
+ *  warning and timeout actions (B9-13), BPR-072. */
 export const moderationText = defineCatalog("moderation", {
   intro:
     "Reports sent to this server's moderators. Reports about you are never shown here, and reports you sent show no internal notes.",
@@ -87,6 +88,40 @@ export const moderationText = defineCatalog("moderation", {
   "write.selfReview": "You sent this report, so you can't review it.",
   "write.invalid": "The server didn't accept this. Check the note for unusual characters.",
   "write.error": "Couldn't save this change. Try again.",
+  "act.title": "Actions",
+  "act.hint":
+    "Linked to this report. The member sees a warning or timeout with the reason you give. The server accepts actions only on members whose role is below yours.",
+  "act.warnLabel": "Warning reason, shown to the member",
+  "act.reasonHint": "Optional, up to 500 characters.",
+  "act.warn": "Issue warning",
+  "act.timeoutLabel": "Timeout reason, shown to the member",
+  "act.lengthLabel": "Timeout length",
+  "act.unitLabel": "Unit",
+  "unit.minutes": "Minutes",
+  "unit.hours": "Hours",
+  "unit.days": "Days",
+  "act.timeoutHint":
+    "From 1 minute to 28 days. Until it ends they can't send messages or react. If they're in a voice channel where you can moderate voice, they're also server-muted there.",
+  "act.timeout": "Time out",
+  "act.lengthInvalid": "Enter a whole number, for a length from 1 minute to 28 days.",
+  "act.running": "This report's timeout runs until {date}.",
+  "act.lift": "Lift timeout",
+  "act.refused":
+    "The server refused this action. You can act only on members whose role is below yours.",
+  "act.invalid": "The server didn't accept this: {message}",
+  "act.liftNone": "There's no timeout to lift: it has ended or was already lifted.",
+  "act.unknown": "Couldn't confirm this action. Check the history before trying again.",
+  "act.draftLost":
+    "You can no longer act on this report here, so the unsaved reason was discarded.",
+  "done.warning": "Warning issued. The member sees it now, or the next time they sign in.",
+  "done.timeoutApplied":
+    "Timed out for {length}: they can't send messages or react. They were also server-muted in their voice channel.",
+  "done.timeoutSkipped":
+    "Timed out for {length}: they can't send messages or react. Their voice wasn't changed: they weren't in a voice channel where you can moderate voice, or the mute didn't take effect.",
+  "done.lift": "Timeout lifted: they can send messages and react again.",
+  "length.minutes": { one: "{count} minute", other: "{count} minutes" },
+  "length.hours": { one: "{count} hour", other: "{count} hours" },
+  "length.days": { one: "{count} day", other: "{count} days" },
   "notes.title": "Internal notes",
   "notes.hidden": "Internal notes are hidden from you because you sent this report.",
   "notes.none": "No notes yet.",
@@ -105,6 +140,7 @@ export const moderationText = defineCatalog("moderation", {
   "history.action": "{name} issued: {kind}",
   "history.reason": "Reason shown to the member: {reason}",
   "history.lifted": "Lifted {date}",
+  "history.until": "Until {date}",
   "name.you": "You",
   "name.erased": "A deleted account",
   "kind.warning": "Warning",

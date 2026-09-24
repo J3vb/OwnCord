@@ -221,6 +221,8 @@ export interface ModerationQueueRow {
 export interface ModerationReportDetail {
   readonly id: string;
   readonly reporter_id: number;
+  /** The reported account; 0 once it is erased. */
+  readonly subject_id: number;
   readonly target_type: string;
   readonly channel_id?: number;
   readonly reason: string;
@@ -265,9 +267,17 @@ export interface ModerationReportDetail {
     readonly actor_id: number;
     readonly reason: string;
     readonly created_at: string;
+    /** A timeout's end. */
+    readonly expires_at?: string;
     readonly lifted_at?: string;
   }[];
 }
+
+/** POST /moderation/queue/{id}/act: the report-linked actions B9-13 sends. A
+ *  timeout's duration is 60 to 2,419,200 seconds (Server/service/moderation.go). */
+export type ModerationActRequest =
+  | { readonly kind: "warning"; readonly reason: string }
+  | { readonly kind: "timeout"; readonly reason: string; readonly duration_seconds: number };
 
 /** POST /moderation/queue/{id}/close outcomes (Server/service/report.go). */
 export type ModerationOutcome = "actioned" | "no_action" | "duplicate";
@@ -716,6 +726,27 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         { outcome },
         signal,
       );
+    },
+
+    /** Warn or time out a report's subject, linked to the report (B9-13). A
+     *  timeout answers with its voice half, "applied" or "skipped"; a warning
+     *  answers nothing. 403 below MODERATE_MEMBERS or the subject's rank. */
+    actOnModerationReport(
+      id: string,
+      body: ModerationActRequest,
+      signal?: AbortSignal,
+    ): Promise<{ readonly voice?: string } | undefined> {
+      return request<{ readonly voice?: string } | undefined>(
+        "POST",
+        `/moderation/queue/${encodeURIComponent(id)}/act`,
+        body,
+        signal,
+      );
+    },
+
+    /** End a member's active timeout early: 404 when they have none. */
+    liftTimeout(userId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("POST", `/moderation/users/${userId}/untimeout`, undefined, signal);
     },
 
     /** Records that the caller read their own warning. 404 when it is already

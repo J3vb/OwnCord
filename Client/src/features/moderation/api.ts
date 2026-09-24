@@ -74,12 +74,16 @@ export type HistoryEntry =
       readonly reason: string;
       readonly actorId: number;
       readonly at: string;
+      /** A timeout's end. */
+      readonly expiresAt: string | null;
       readonly liftedAt: string | null;
     };
 
 export interface ReportDetail {
   readonly id: string;
   readonly reporterId: number;
+  /** The reported account; 0 once it is erased. */
+  readonly subjectId: number;
   readonly channelId: number | null;
   readonly detail: string;
   readonly state: string;
@@ -152,6 +156,18 @@ function mapEvidence(w: ModerationReportDetail): Evidence {
   };
 }
 
+/** The end of a timeout taken with this report that is still running at `now` (B9-13). */
+export function activeTimeoutEnd(detail: ReportDetail, now: number): string | null {
+  for (const e of detail.history) {
+    if (e.kind !== "action" || e.action !== "timeout" || e.liftedAt !== null) continue;
+    if (e.expiresAt === null) continue;
+    const end = timeOf(e.expiresAt);
+    // An unreadable end is not a running timeout: the server is asked, not guessed.
+    if (end > now && end !== Number.MAX_SAFE_INTEGER) return e.expiresAt;
+  }
+  return null;
+}
+
 /** Sort key: an unreadable time goes last rather than breaking the order. */
 function timeOf(raw: string): number {
   const ms = raw === "" ? Number.NaN : parseTimestamp(raw).getTime();
@@ -173,6 +189,7 @@ function mapHistory(w: ModerationReportDetail): HistoryEntry[] {
       reason: a.reason,
       actorId: a.actor_id,
       at: a.created_at,
+      expiresAt: a.expires_at ?? null,
       liftedAt: a.lifted_at ?? null,
     })),
   ];
@@ -184,6 +201,7 @@ export function mapDetail(w: ModerationReportDetail): ReportDetail {
   return {
     id: w.id,
     reporterId: w.reporter_id,
+    subjectId: w.subject_id,
     channelId: w.channel_id ?? null,
     detail: w.detail,
     state: w.state,

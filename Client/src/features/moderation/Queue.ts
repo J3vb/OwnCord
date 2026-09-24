@@ -24,9 +24,24 @@
  * that leaves the list for any other reason closes and says so. An unsaved
  * note and chosen outcome live only while the report can still take them and
  * the view is live.
+ *
+ * Actions (B9-13): a warning or timeout is sent through the report, and lifting
+ * a timeout through the member's own route; each is one write under the same
+ * guard. Success is said only once the server answers, and a timeout says
+ * whether its voice half was applied or skipped, as the server reported it. A
+ * 403 on an action is shown as the server's refusal (a member ranked at or
+ * above the reader) and the report is read again: if the reader lost the
+ * permission, that read's own 403 clears the view. An action that gets no
+ * answer may still have been recorded, so the history is read, not guessed.
  */
 
-import { ApiClientError, type ModerationOutcome, type ModerationQueueFilter } from "@lib/api";
+import {
+  ApiClientError,
+  errorText,
+  type ModerationActRequest,
+  type ModerationOutcome,
+  type ModerationQueueFilter,
+} from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
@@ -36,6 +51,13 @@ import { uiStore } from "@stores/ui.store";
 import { moderationText as t } from "../../i18n/moderation";
 import { nsfwContentBlocked } from "../content-consent/nsfw";
 import type { FeatureViewContext } from "../navigation/destinations";
+import {
+  buildActionForms,
+  emptyActionDraft,
+  UNITS,
+  type ActionDraft,
+  type ActionWrite,
+} from "./ActionForms";
 import { mapDetail, mapQueueRow, type QueueItem, type ReportDetail } from "./api";
 import { buildReportDetail, dateText, nameText, reportTitle, stateText } from "./Evidence";
 import { buildHistory } from "./History";
@@ -55,8 +77,16 @@ const FILTERS = [
 
 let viewSeq = 0;
 
-function isStatus(err: unknown, status: number): boolean {
-  return err instanceof ApiClientError && err.status === status;
+type Write = WorkflowWrite | ActionWrite;
+const isAction = (w: Write): w is ActionWrite =>
+  w.kind === "warning" || w.kind === "timeout" || w.kind === "lift";
+
+function isStatus(err: unknown, status: number, code?: string): boolean {
+  return (
+    err instanceof ApiClientError &&
+    err.status === status &&
+    (code === undefined || err.code === code)
+  );
 }
 
 export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContext): void {
@@ -73,6 +103,11 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   /** The unsaved note and chosen outcome, for the report they were entered on. */
   const NO_DRAFT = { id: "", text: "", outcome: null as ModerationOutcome | null };
   let draft = NO_DRAFT;
+  /** The unsaved action reasons and length, for the report they were entered on. */
+  let actDraft: ActionDraft & { id: string } = { id: "", ...emptyActionDraft() };
+  const dropActDraft = (): void => {
+    actDraft = { id: "", ...emptyActionDraft() };
+  };
   /** A write being sent, or its answer waiting on the re-read of the report. */
   let writing: "sending" | "reading" | null = null;
   /** A report this reader is writing to: leaving the filter is expected, not news. */
@@ -188,6 +223,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     ownWrite = null;
     offList = null;
     draft = NO_DRAFT;
+    dropActDraft();
     syncCurrent();
     setDetailError("");
     setText(detailStatus, message);
@@ -207,6 +243,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     ownWrite = null;
     offList = null;
     draft = NO_DRAFT;
+    dropActDraft();
     clearChildren(list);
     for (const el of [toolbar, list, retry, detailRetry]) el.hidden = true;
     for (const el of [status, detailStatus, detailFailure, writeStatus, writeAlert])
@@ -339,10 +376,10 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     const retryHadFocus = active === detailRetry;
     // A re-read rebuilds the report: put focus back on the same control.
     const focusKey = hadFocus && active instanceof HTMLElement ? active.dataset.focus : undefined;
-    const caret =
-      active instanceof HTMLTextAreaElement
-        ? ([active.selectionStart, active.selectionEnd] as const)
-        : null;
+    const typed =
+      active instanceof HTMLTextAreaElement ||
+      (active instanceof HTMLInputElement && active.type === "text");
+    const caret = typed ? ([active.selectionStart, active.selectionEnd] as const) : null;
     dropDetail();
     shown = detail;
     const view = buildReportDetail(item, detail, mountGate);
@@ -368,6 +405,20 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       if (draft.text.trim() !== "") setText(writeAlert, t("draft.lost"));
       draft = NO_DRAFT;
     }
+    if (actDraft.id !== detail.id) actDraft = { id: detail.id, ...emptyActionDraft() };
+    const acts = buildActionForms({
+      detail,
+      me,
+      draft: actDraft,
+      onWrite: (w) => write(detail.id, w),
+      signal,
+    });
+    if (acts.element !== null) view.element.appendChild(acts.element);
+    if (!acts.takesInput) {
+      if (`${actDraft.warn}${actDraft.reason}`.trim() !== "")
+        setText(writeAlert, t("act.draftLost"));
+      actDraft = { id: detail.id, ...emptyActionDraft() };
+    }
     view.element.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
@@ -385,13 +436,57 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
         : view.element.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`);
     if (again !== null) {
       again.focus();
-      if (caret !== null && again instanceof HTMLTextAreaElement) {
+      if (
+        caret !== null &&
+        (again instanceof HTMLTextAreaElement || again instanceof HTMLInputElement)
+      ) {
         again.setSelectionRange(caret[0], caret[1]);
       }
     } else if (takeFocus || hadFocus || retryHadFocus) view.heading.focus();
   }
 
   const WRITE_DONE = { assign: "done.assign", note: "done.note", close: "done.close" } as const;
+
+  function send(id: string, w: Write): Promise<unknown> {
+    if (w.kind === "assign") return api.assignModerationReport(id, signal);
+    if (w.kind === "note") return api.addModerationNote(id, w.body, signal);
+    if (w.kind === "close") return api.closeModerationReport(id, w.outcome, signal);
+    if (w.kind === "lift") return api.liftTimeout(w.userId, signal);
+    const body: ModerationActRequest =
+      w.kind === "warning"
+        ? { kind: "warning", reason: w.reason }
+        : { kind: "timeout", reason: w.reason, duration_seconds: w.amount * UNITS[w.unit].seconds };
+    return api.actOnModerationReport(id, body, signal);
+  }
+
+  /** What the server's answer means; a timeout's voice half is "applied" only when it says so. */
+  function doneText(w: Write, answer: unknown): string {
+    if (w.kind === "warning") return t("done.warning");
+    if (w.kind === "lift") return t("done.lift");
+    if (w.kind === "timeout") {
+      const length = t(UNITS[w.unit].lengthKey, { count: w.amount });
+      const voice = (answer as { voice?: unknown } | undefined)?.voice;
+      return t(voice === "applied" ? "done.timeoutApplied" : "done.timeoutSkipped", { length });
+    }
+    return t(WRITE_DONE[w.kind]);
+  }
+
+  function reviewErrorText(w: WorkflowWrite, err: unknown): string {
+    if (isStatus(err, 409)) return t(WRITE_CONFLICT[w.kind]);
+    if (isStatus(err, 403)) return t("write.selfReview");
+    return t(isStatus(err, 400) ? "write.invalid" : "write.error");
+  }
+
+  function actionErrorText(w: ActionWrite, err: unknown): string {
+    if (isStatus(err, 403, "SELF_REVIEW")) return t("write.selfReview");
+    if (isStatus(err, 403)) return t("act.refused");
+    if (isStatus(err, 404) && w.kind === "lift") return t("act.liftNone");
+    if (isStatus(err, 400) && (err as ApiClientError).message !== "") {
+      return t("act.invalid", { message: (err as ApiClientError).message });
+    }
+    // No answer, or an internal failure: the action may still have been recorded.
+    return err instanceof ApiClientError ? errorText(err, t("act.unknown")) : t("act.unknown");
+  }
   const WRITE_CONFLICT = {
     assign: "conflict.assign",
     note: "conflict.note",
@@ -406,29 +501,28 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   }
 
   /** Send one review write, then read the report again whatever the answer. */
-  function write(id: string, w: WorkflowWrite): boolean {
+  function write(id: string, w: Write): boolean {
     if (writing !== null || denied) return false;
     writing = "sending";
     ownWrite = id;
     const keptBefore = offList;
     setText(writeStatus, "");
     setText(writeAlert, "");
-    const req =
-      w.kind === "assign"
-        ? api.assignModerationReport(id, signal)
-        : w.kind === "note"
-          ? api.addModerationNote(id, w.body, signal)
-          : api.closeModerationReport(id, w.outcome, signal);
-    req.then(
-      () => {
+    send(id, w).then(
+      (answer) => {
         if (signal.aborted || denied) return;
         if (w.kind === "note" && draft.id === id) draft = { ...draft, text: "" };
+        if (actDraft.id === id && w.kind === "warning") actDraft.warn = "";
+        if (actDraft.id === id && w.kind === "timeout") {
+          actDraft.reason = "";
+          actDraft.amount = "";
+        }
         if (selected !== id) {
           writing = null;
           return;
         }
         ownWrite = id;
-        setText(writeStatus, t(WRITE_DONE[w.kind]));
+        setText(writeStatus, doneText(w, answer));
         reread(id);
       },
       (err: unknown) => {
@@ -438,7 +532,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
           offList = null;
           setText(detailStatus, "");
         }
-        if (isStatus(err, 403) && (err as ApiClientError).code !== "SELF_REVIEW") {
+        if (isStatus(err, 403) && !isStatus(err, 403, "SELF_REVIEW") && !isAction(w)) {
           deny();
           return;
         }
@@ -446,22 +540,13 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
           writing = null;
           return;
         }
-        if (isStatus(err, 404)) {
+        if (isStatus(err, 404) && w.kind !== "lift") {
           writing = null;
           clearDetail(t("detail.notFound"));
           loadList(false, false);
           return;
         }
-        setText(
-          writeAlert,
-          isStatus(err, 409)
-            ? t(WRITE_CONFLICT[w.kind])
-            : isStatus(err, 403)
-              ? t("write.selfReview")
-              : isStatus(err, 400)
-                ? t("write.invalid")
-                : t("write.error"),
-        );
+        setText(writeAlert, isAction(w) ? actionErrorText(w, err) : reviewErrorText(w, err));
         reread(id);
       },
     );
@@ -540,6 +625,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       return;
     }
     if (draft.id !== id) draft = NO_DRAFT;
+    if (actDraft.id !== id) dropActDraft();
     setText(writeStatus, "");
     setText(writeAlert, "");
     selected = id;
@@ -601,6 +687,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       selected = null;
       offList = null;
       draft = NO_DRAFT;
+      dropActDraft();
       clearChildren(root);
     },
     { once: true },

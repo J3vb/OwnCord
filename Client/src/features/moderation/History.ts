@@ -91,6 +91,15 @@ function renderEntry(e: HistoryEntry, me: number): HTMLLIElement {
         ),
       );
     }
+    if (e.liftedAt === null && e.expiresAt !== null) {
+      li.appendChild(
+        createElement(
+          "span",
+          { class: "mod-history-when" },
+          t("history.until", { date: dateText(e.expiresAt) }),
+        ),
+      );
+    }
     if (e.liftedAt !== null) {
       li.appendChild(
         createElement(
