@@ -846,7 +846,7 @@ where each goes:
 | C-09       | **B2** (contract) / B7 (client) | beside the report                                                                        | contract in B2-7 docs (PR #1443, `88c7a824`) — done; code in B7 |
 | SEC-03     | **B5** (decided 2026-08-29)     | beside the report                                                                        | B5 item 11 — see evidence below                                 |
 | SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                               | B4                                                              |
-| SEC-04     | **B3/B5**                       | no advisory — fixed by B5-2 (#1543); placeholder retired by the owner 2026-09-24          | B5 (B5-2) — done                                                |
+| SEC-04     | **B3/B5**                       | no advisory — fixed by B5-2 (#1543); placeholder retired by the owner 2026-09-24         | B5 (B5-2) — done                                                |
 | OC-0324    | **B4**                          | beside the report; no advisory — the tracked ledger already carries this finding in full | B4                                                              |
 
 An acceptance test demonstrates the defect, so it is exploit detail: it stays
