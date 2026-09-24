@@ -72,16 +72,18 @@ describe("ServerBanner", () => {
     banner.destroy();
   });
 
-  it("offers a Retry on a disconnect when the device has a network", () => {
+  it("offers a Retry on a disconnect that stays usable across repeated clicks", () => {
     const banner = createServerBanner();
     const onRetry = vi.fn();
     banner.showDisconnected({ offline: false, onRetry });
 
     const retry = banner.element.querySelector("button");
     expect(retry?.textContent).toBe("Retry");
+    // The notice is stable for the whole outage, so a failed retry must be
+    // retryable again — the listener is not one-shot (BPR-092).
     retry!.click();
     retry!.click();
-    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onRetry).toHaveBeenCalledTimes(2);
 
     banner.destroy();
   });

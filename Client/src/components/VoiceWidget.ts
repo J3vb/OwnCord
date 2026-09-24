@@ -351,10 +351,11 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       const show = voice.listenOnly;
       micNoticeEl.style.display = show ? "block" : "none";
       if (show) {
-        setText(
-          micNoticeEl,
-          micRetryFailed ? t("widget.listenOnlyBlocked") : t("widget.listenOnlyHint"),
-        );
+        const text = micRetryFailed ? t("widget.listenOnlyBlocked") : t("widget.listenOnlyHint");
+        // Set only on change: render() runs on unrelated store updates, and a
+        // screen reader can re-read a replaced text node even when identical,
+        // which would break the "announced once" goal.
+        if (micNoticeEl.textContent !== text) setText(micNoticeEl, text);
       }
     }
   }

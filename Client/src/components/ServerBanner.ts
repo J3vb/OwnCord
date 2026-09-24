@@ -86,7 +86,10 @@ export function createServerBanner(): ServerBannerControl {
       { class: "reconnecting-banner-action", type: "button" },
       shellText("banner.retry"),
     );
-    retry.addEventListener("click", opts.onRetry, { once: true });
+    // Not `once`: the banner is stable for the whole outage, so a retry that
+    // fails must be retryable again. A second connect() safely supersedes the
+    // first through the ws generation counter (BPR-092 "working recovery").
+    retry.addEventListener("click", opts.onRetry);
     root.replaceChildren(`${text} `, retry);
   }
 
