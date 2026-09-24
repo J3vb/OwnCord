@@ -260,8 +260,13 @@ test.describe("B9-22 accessibility reflow at 940x500 with 20px text", () => {
     // Message text contrast at Q1's 4.5:1 with the large-text theme.
     const author = page.locator(`[data-testid='message-${RENDERED}'] .msg-author`);
     await author.scrollIntoViewIfNeeded();
-    const text = await textContrast(author);
-    expect(text.ratio).toBeGreaterThanOrEqual(Q1.text);
+    // The scroll moves the virtual window, so a rebuild can detach the row the
+    // locator just resolved (getComputedStyle then reads ""); retry until the
+    // measurement lands on the settled row.
+    await expect(async () => {
+      const text = await textContrast(author);
+      expect(text.ratio).toBeGreaterThanOrEqual(Q1.text);
+    }).toPass();
 
     await testInfo.attach("messaging-940x500-20px.png", {
       body: await page.screenshot(),
