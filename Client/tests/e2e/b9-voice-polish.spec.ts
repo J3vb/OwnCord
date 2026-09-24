@@ -143,11 +143,17 @@ test.describe("B9-24 video tile overlay keyboard parity", () => {
   // The real grid component is mounted into a visible host via the dev server's
   // module graph: the mocked suite cannot create a live MediaStream track, but
   // the overlay markup and CSS are what this lane changed, so driving the
-  // component's own addStream (with a stub stream) is the honest check.
+  // component's own addStream (with a stub stream) is the honest check. The
+  // production preview serves only the bundle, so there the tests skip.
   async function mountGrid(page: Page): Promise<void> {
     await bootJoined(page);
-    await page.evaluate(async (moduleUrl) => {
-      const mod = await import(/* @vite-ignore */ moduleUrl);
+    const mounted = await page.evaluate(async (moduleUrl) => {
+      let mod;
+      try {
+        mod = await import(/* @vite-ignore */ moduleUrl);
+      } catch {
+        return false;
+      }
       const host = document.createElement("div");
       host.id = "b9-grid-host";
       host.style.cssText = "position:fixed;inset:0 auto auto 0;width:640px;height:360px;z-index:1";
@@ -164,7 +170,9 @@ test.describe("B9-24 video tile overlay keyboard parity", () => {
         audioUserId: 42,
         isScreenshare: false,
       });
+      return true;
     }, "/src/components/VideoGrid.ts");
+    test.skip(!mounted, "needs the dev server's modules");
     await expect(page.locator("#b9-grid-host .video-cell")).toBeVisible();
   }
 
