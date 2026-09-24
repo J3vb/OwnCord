@@ -129,8 +129,12 @@ evidence. No milestone defers its accessibility acceptance to B9-26.
 
 - [ ] **Keyboard:** Tab/Shift+Tab, Enter/Space, Escape and applicable arrow keys
       reach and operate every action; pointer parity; no hover-only action.
-- [ ] **Screen reader:** NVDA (Windows) and Orca (Linux) read names, roles, values, errors
-      and relevant status once; no concealed/private/secret content in its tree.
+- [ ] **Screen reader:** automated ARIA name/role/value/error/status evidence
+      (accessible names on every control, live regions announcing a status once,
+      no concealed/private/secret content in the accessibility tree). The manual
+      NVDA (Windows) / Orca (Linux) check is dropped from beta acceptance by the
+      owner on 2026-09-24 (BPR-091 amended in a parallel docs PR); automated
+      evidence suffices.
 - [ ] **Focus:** visible indicator, logical order, dialog containment/restore,
       stable location through async update/removal, and a safe fallback opener.
 - [ ] **Contrast:** measure text, controls, status and focus at the Q1 thresholds in
@@ -143,9 +147,10 @@ evidence. No milestone defers its accessibility acceptance to B9-26.
       long English/expanded strings and the 940×500 minimum desktop window;
       no clipped or unreachable controls, lost content or focus off screen.
 
-Frontend automation plus manual native evidence is required: mocked Playwright
-alone cannot qualify OS accessibility or native network behavior. Browser/mobile
-device qualification is deferred with B8; desktop zoom/reflow is not deferred.
+Frontend automation supplies the accessibility evidence: mocked Playwright
+alone cannot qualify native network behavior. The manual NVDA/Orca check is
+dropped by the owner (2026-09-24); browser/mobile device qualification is
+deferred with B8, and desktop zoom/reflow is not deferred.
 
 ## Validation
 
@@ -270,10 +275,11 @@ keeps every existing English string byte-identical (only new keys were added).
 - **Static:** `tsc --noEmit`, `typecheck:e2e`, `oxlint --deny-warnings`,
   `lint:cycles`, `eslint`, prettier and `scripts/check-ui-strings.mjs` clean;
   every new string lives in a catalog.
-- **Native / AT:** NVDA (Windows) and Orca (Linux) recordings are
-  owner-declined (2026-09-24), not pending; automated evidence only, as the
-  owner directed. Native network/capture behaviour stays with the desktop
-  suites; no live-Tauri behavior is claimed from the mocked run.
+- **Native / AT:** the manual NVDA (Windows) and Orca (Linux) screen-reader
+  check is dropped from beta acceptance by the owner (2026-09-24), not pending;
+  automated evidence only, as the owner directed. Native network/capture
+  behaviour stays with the desktop suites; no live-Tauri behavior is claimed
+  from the mocked run.
 
 ### Requirement map
 
