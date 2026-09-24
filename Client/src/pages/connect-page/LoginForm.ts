@@ -638,11 +638,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // State transitions
   // ---------------------------------------------------------------------------
 
-  function transitionTo(
-    state: FormState,
-    error?: string,
-    field: "host" | "username" | "password" | "invite" | null = null,
-  ): void {
+  function transitionTo(state: FormState, error?: string, field: FieldId | null = null): void {
     formState = state;
     errorMessage = error ?? "";
     // A validation error names its field; a server error names none. Kept on
@@ -659,8 +655,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     updateFormInputsDisabled();
   }
 
-  /** The input a banner error belongs to, or null when it names no field. */
-  function fieldInput(field: NonNullable<typeof errorField>): HTMLInputElement {
+  /** The input a banner error for `field` belongs to. */
+  function fieldInput(field: FieldId): HTMLInputElement {
     if (field === "host") return hostInput;
     if (field === "username") return usernameInput;
     if (field === "password") return passwordInput;
