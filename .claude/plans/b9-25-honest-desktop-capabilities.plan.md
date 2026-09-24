@@ -242,9 +242,10 @@ new keys.
   calls `ws.connect()`, which re-validates the certificate (a mismatch
   re-latches) and cancels any pending backoff attempt via `cancelReconnect()`,
   so a manual retry cannot race the loop. `online`/`offline` window listeners
-  (owned by a `Disposable`) only re-render the notice; the reconnect loop and
-  Retry own recovery, and a displaced session is never redialed (B7-14
-  preserved).
+  (owned by a `Disposable`) only re-render the notice, and only while the
+  socket is down, so a network flap on a live connection cannot clear a pending
+  restart countdown; the reconnect loop and Retry own recovery, and a displaced
+  session is never redialed (B7-14 preserved).
 - **Notices are announced once (BPR-091).** `ServerBanner` owns a `.sr-only`
   `role="status"` live region appended beside the visible banner; the visible
   countdown rewrites only the banner, so the screen reader hears the initial
@@ -282,7 +283,8 @@ new keys.
   rendered so a listen-only join is announced) and the failed-retry
   wording; `main-page.test.ts` adds the Retry redial, "Reconnecting..." until a
   dial fails, one unreachable notice (announced once) with Retry held across
-  repeated failed dials, and the network events re-rendering without a redial.
+  repeated failed dials, the network events re-rendering without a redial, and
+  a network flap leaving a pending restart countdown in place.
 - **E2E (mocked Chromium, `--workers=1`, non-1420 port):**
   `tests/e2e/b9-desktop-capabilities.spec.ts`: a drop says "Reconnecting..."
   until a dial fails, then names the unreachable server with a working Retry;
