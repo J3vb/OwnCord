@@ -195,6 +195,9 @@ function actionErrorText(w: ActionWrite, err: unknown): string {
   if (isStatus(err, 403, "SELF_REVIEW")) return t("write.selfReview");
   if (isStatus(err, 403)) return t("act.refused");
   if (isStatus(err, 404) && w.kind === "lift") return t("act.liftNone");
+  // 409 ALREADY_DELETED (B9-14's removal of an already-removed message): a
+  // known end state, not the uncertain "may still have been recorded" answer.
+  if (isStatus(err, 409, "ALREADY_DELETED")) return t("act.alreadyDeleted");
   if (isStatus(err, 400) && (err as ApiClientError).message !== "") {
     return t("act.invalid", { message: (err as ApiClientError).message });
   }

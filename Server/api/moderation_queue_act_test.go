@@ -356,6 +356,64 @@ func TestModerationQueueAct_RemovalBroadcastsChatBulkDeleted(t *testing.T) {
 	}
 }
 
+// TestModerationQueueAct_RemovalOfDeletedMessageIsConflict covers the reviewer
+// finding on B9-14: a moderator removing a reported message the author already
+// deleted used to answer 500 INTERNAL_ERROR (writeServiceError had no case for
+// service.ErrDeletedMessage) with a server error log. It must instead return a
+// clean, typed refusal — 409 ALREADY_DELETED, never 404 (the client clears the
+// report on 404) — and broadcast nothing.
+func TestModerationQueueAct_RemovalOfDeletedMessageIsConflict(t *testing.T) {
+	h, database, broadcaster := buildModQueueActRouter(t)
+	modID := mintModerator(t, database, "act-alreadydeleted-mod", 90, permissions.ModerateMembers|permissions.ManageMessages)
+	modToken, _ := mintSession(t, database, modID)
+	reporterID := mintUser(t, database, "act-alreadydeleted-reporter")
+	reporterToken, _ := mintSession(t, database, reporterID)
+	authorID := mintUser(t, database, "act-alreadydeleted-author")
+
+	chID, err := database.CreateChannel(context.Background(), "act-alreadydeleted-channel", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	msgID, err := database.CreateMessage(context.Background(), chID, authorID, "reported content", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	body := `{"target_type":"message","target_id":"` + itoa(msgID) + `","reason":"spam"}`
+	status, respBody := actJSON(t, h, http.MethodPost, "/api/v1/reports", reporterToken, body)
+	if status != http.StatusCreated {
+		t.Fatalf("file report: status = %d, body = %s", status, respBody)
+	}
+	var fileResp struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(respBody, &fileResp); err != nil {
+		t.Fatalf("unmarshal file-report response: %v", err)
+	}
+
+	if err := database.DeleteMessage(context.Background(), msgID, authorID, false); err != nil {
+		t.Fatalf("author delete: %v", err)
+	}
+
+	status, actBody := actJSON(t, h, http.MethodPost, "/api/v1/moderation/queue/"+fileResp.ID+"/act", modToken,
+		`{"kind":"removal","reason":"rule violation"}`)
+	if status != http.StatusConflict {
+		t.Fatalf("act(removal) of an already-deleted message: status = %d, body = %s, want 409", status, actBody)
+	}
+	var actResp struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(actBody, &actResp); err != nil {
+		t.Fatalf("unmarshal act response: %v", err)
+	}
+	if actResp.Error != "ALREADY_DELETED" {
+		t.Fatalf("act(removal) of an already-deleted message: error = %q, want ALREADY_DELETED", actResp.Error)
+	}
+	if len(broadcaster.bulkDeletes) != 0 {
+		t.Fatalf("BroadcastChatBulkDeleted calls = %+v, want none — the removal was refused", broadcaster.bulkDeletes)
+	}
+}
+
 // TestModerationQueueAct_TimeoutExposesVoiceOutcome is P2-7's timeout half:
 // the act route's response must expose the voice outcome exactly like the
 // direct timeout route does, rather than a bare 204 that drops it.

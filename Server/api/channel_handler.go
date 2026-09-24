@@ -365,6 +365,13 @@ func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusForbidden, errorResponse{Error: "TIMED_OUT", Message: err.Error()})
 	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):
 		writeJSON(w, http.StatusForbidden, errorResponse{Error: "FORBIDDEN", Message: err.Error()})
+	case errors.Is(err, service.ErrDeletedMessage):
+		// The target is already gone — a state, not a failure. 404 would be
+		// wrong here: the moderation client clears the report on 404, which
+		// would hide the removal's own outcome. 409 ALREADY_DELETED is the
+		// "already in the requested end state" twin of DUPLICATE_REPORT, so
+		// the caller gets a clean typed refusal instead of a 500.
+		writeJSON(w, http.StatusConflict, errorResponse{Error: "ALREADY_DELETED", Message: err.Error()})
 	case errors.Is(err, service.ErrConflict):
 		writeJSON(w, http.StatusConflict, errorResponse{Error: "CONFLICT", Message: err.Error()})
 	case errors.Is(err, service.ErrInternal):
