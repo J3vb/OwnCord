@@ -187,9 +187,10 @@ export function appendToggleRows(
  * `.form-error`/`.form-status`/`.form-warning` classes, so the text colour is
  * the qualified `--text-danger`/`--text-positive`/`--text-warning` token
  * rather than the fill tokens (`--red`, `--green`, `--yellow`), which read
- * below 4.5:1 on several surfaces, and the message is announced: `role=alert`
- * for an error, `role=status` (polite) otherwise. Colour is never the only
- * signal — the copy says which it is.
+ * below 4.5:1 on several surfaces, and the message is announced through the
+ * live role `outcomeEl` fixes at creation from the outcome it is given
+ * (`role=alert` for an error, `role=status` otherwise); `showOutcome` keeps
+ * it. Colour is never the only signal — the copy says which it is.
  */
 export type Outcome = "error" | "success" | "warning";
 

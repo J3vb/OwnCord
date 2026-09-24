@@ -466,10 +466,15 @@ test.describe("Settings > Account — disable 2FA", () => {
 
     await section.locator("[data-testid='totp-disable-btn']").click();
     await section.locator("[data-testid='totp-password-input']").fill("nope");
-    await section.locator("button", { hasText: "Confirm Disable" }).click();
+    const confirm = section.locator("button", { hasText: "Confirm Disable" });
+    await confirm.focus();
+    await page.keyboard.press("Enter");
 
     await expect(section.locator("[data-testid='totp-error']")).toHaveText("Incorrect password");
     await expect(section.locator("[data-testid='totp-status-badge']")).toHaveText("Enabled");
+    // The button was disabled while the request ran; focus comes back to it
+    // rather than staying on <body>.
+    await expect(confirm).toBeFocused();
   });
 });
 
@@ -527,7 +532,8 @@ test.describe("Settings > Account — delete account", () => {
 
     await page.locator("[data-testid='delete-account-trigger']").click();
     await page.locator("[data-testid='delete-account-password']").fill("nope");
-    await page.locator("[data-testid='delete-account-confirm']").click();
+    await page.locator("[data-testid='delete-account-confirm']").focus();
+    await page.keyboard.press("Enter");
 
     await expect(page.locator("[data-testid='delete-account-error']")).toHaveText(
       "Incorrect password",
@@ -535,6 +541,7 @@ test.describe("Settings > Account — delete account", () => {
     await expect(page.locator("[data-testid='delete-account-confirm']")).toHaveText(
       "Confirm Delete",
     );
+    await expect(page.locator("[data-testid='delete-account-confirm']")).toBeFocused();
     await expect(page.locator("[data-testid='app-layout']")).toBeVisible();
   });
 });

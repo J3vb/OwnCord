@@ -200,7 +200,8 @@ describe("Account tab — devices", () => {
     const cancel = [...confirmArea.querySelectorAll("button")].find(
       (b) => b.textContent === "Cancel",
     )!;
-    cancel.focus();
+    // Opening moves focus off the hidden trigger to the safe choice.
+    expect(document.activeElement).toBe(cancel);
     cancel.click();
     expect(confirmArea.style.display).toBe("none");
     expect(document.activeElement).toBe(trigger);

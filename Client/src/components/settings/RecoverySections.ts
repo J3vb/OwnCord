@@ -186,6 +186,8 @@ function buildPasswordConfirm(
         .then(() => close(hadFocus))
         .catch((err: unknown) => {
           setText(errorEl, errorText(err, t("recovery.requestFailed")));
+          submitBtn.disabled = false;
+          if (hadFocus) submitBtn.focus();
         })
         .finally(() => {
           submitBtn.disabled = false;

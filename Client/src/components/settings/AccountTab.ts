@@ -655,6 +655,7 @@ function buildTotpConfirmArea(
           setText(confirmError, errorText(err, t("totp.enableFailed")));
           confirmBtn.disabled = false;
           setText(confirmBtn, t("totp.verify"));
+          if (hadFocus) confirmBtn.focus();
         });
     },
     { signal },
@@ -766,6 +767,7 @@ function buildTotpDisableView(
           );
           confirmBtn.disabled = false;
           setText(confirmBtn, t("totp.confirmDisable"));
+          if (hadFocus) confirmBtn.focus();
         });
     },
     { signal },
@@ -1095,6 +1097,7 @@ function buildSessionsSection(
     () => {
       revokeAllBtn.style.display = "none";
       confirmArea.style.display = "block";
+      cancelBtn.focus();
     },
     { signal },
   );
@@ -1116,6 +1119,8 @@ function buildSessionsSection(
         })
         .catch((err: unknown) => {
           setText(errorEl, errorText(err, t("devices.signOutEverywhereFailed")));
+          confirmBtn.disabled = false;
+          if (hadFocus) confirmBtn.focus();
         })
         .finally(() => {
           confirmBtn.disabled = false;
@@ -1279,6 +1284,7 @@ function buildDeleteAccountSection(
         return;
       }
       setText(errorEl, "");
+      const hadFocus = confirmArea.contains(document.activeElement);
       confirmBtn.disabled = true;
       setText(confirmBtn, t("delete.deleting"));
 
@@ -1291,6 +1297,7 @@ function buildDeleteAccountSection(
           setText(errorEl, errorText(err, t("delete.failed")));
           confirmBtn.disabled = false;
           setText(confirmBtn, t("delete.confirm"));
+          if (hadFocus) confirmBtn.focus();
         });
     },
     { signal },
