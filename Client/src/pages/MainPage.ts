@@ -453,12 +453,22 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // Losing or regaining the device's network only re-renders, so the banner
     // says the true thing immediately; the reconnect loop and Retry own
-    // recovery. Owned by a Disposable so the lifecycle guard sees both
-    // listeners torn down with the page.
+    // recovery. Only re-render while the socket is actually down — a network
+    // flap during a live connection (a VPN toggle, a Wi-Fi flap) must not
+    // route to `applyConnectionStatus("connected")` and clear an announced
+    // server-restart countdown. Owned by a Disposable so the lifecycle guard
+    // sees both listeners torn down with the page.
     const networkOwner = new Disposable();
     unsubscribers.push(() => networkOwner.destroy());
-    window.addEventListener("online", syncBanner, { signal: networkOwner.signal });
-    window.addEventListener("offline", syncBanner, { signal: networkOwner.signal });
+    const syncBannerIfNotConnected = (): void => {
+      if (uiStore.getState().connectionStatus !== "connected") syncBanner();
+    };
+    window.addEventListener("online", syncBannerIfNotConnected, {
+      signal: networkOwner.signal,
+    });
+    window.addEventListener("offline", syncBannerIfNotConnected, {
+      signal: networkOwner.signal,
+    });
 
     // A sign-in not yet reviewed: listed on connect and on window focus.
     const sessionNotice = new Disposable();

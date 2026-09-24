@@ -1322,6 +1322,25 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(ws.connect).not.toHaveBeenCalled();
   });
 
+  it("does not clear a pending restart countdown on a network flap (B9-25)", () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    // The server announces a restart while the socket is live.
+    ws.emit("server_restart", { reason: "update", delay_seconds: 30 });
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    expect(banner.textContent).toBe("Server restarting in 30 seconds...");
+
+    // A network interface flaps (VPN toggle / Wi-Fi blip) during the
+    // countdown. The socket never dropped, so the countdown must survive.
+    window.dispatchEvent(new Event("offline"));
+    window.dispatchEvent(new Event("online"));
+    expect(banner.textContent).toBe("Server restarting in 30 seconds...");
+    expect(banner.classList.contains("visible")).toBe(true);
+  });
+
   it("clears local auth when sign-out-everywhere revoked this device's session (B7-14)", async () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
