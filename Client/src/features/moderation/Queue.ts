@@ -191,6 +191,17 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   choose(0, false);
 }
 
+function actionErrorText(w: ActionWrite, err: unknown): string {
+  if (isStatus(err, 403, "SELF_REVIEW")) return t("write.selfReview");
+  if (isStatus(err, 403)) return t("act.refused");
+  if (isStatus(err, 404) && w.kind === "lift") return t("act.liftNone");
+  if (isStatus(err, 400) && (err as ApiClientError).message !== "") {
+    return t("act.invalid", { message: (err as ApiClientError).message });
+  }
+  // No answer, or an internal failure: the action may still have been recorded.
+  return err instanceof ApiClientError ? errorText(err, t("act.unknown")) : t("act.unknown");
+}
+
 function renderReports(
   root: HTMLElement,
   ctx: FeatureViewContext,
@@ -591,16 +602,6 @@ function renderReports(
     return t(isStatus(err, 400) ? "write.invalid" : "write.error");
   }
 
-  function actionErrorText(w: ActionWrite, err: unknown): string {
-    if (isStatus(err, 403, "SELF_REVIEW")) return t("write.selfReview");
-    if (isStatus(err, 403)) return t("act.refused");
-    if (isStatus(err, 404) && w.kind === "lift") return t("act.liftNone");
-    if (isStatus(err, 400) && (err as ApiClientError).message !== "") {
-      return t("act.invalid", { message: (err as ApiClientError).message });
-    }
-    // No answer, or an internal failure: the action may still have been recorded.
-    return err instanceof ApiClientError ? errorText(err, t("act.unknown")) : t("act.unknown");
-  }
   const WRITE_CONFLICT = {
     assign: "conflict.assign",
     note: "conflict.note",

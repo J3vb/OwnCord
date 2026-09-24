@@ -68,6 +68,18 @@ let viewSeq = 0;
 const me = (): number => authStore.getState().user?.id ?? -1;
 const NO_DRAFT = (): AppealDraft & { id: string } => ({ id: "", note: "", outcome: null });
 
+function errorText(w: AppealWrite, err: unknown): string {
+  if (isStatus(err, 403, "SELF_REVIEW")) return t("appeal.selfReview");
+  if (isStatus(err, 409, "REVERSAL_FAILED")) return t("appeal.reversalFailed");
+  if (isStatus(err, 409))
+    return t(w.kind === "assign" ? "appeal.conflict.assign" : "appeal.conflict.decide");
+  if (isStatus(err, 400) && (err as ApiClientError).message !== "") {
+    return t("appeal.invalid", { message: (err as ApiClientError).message });
+  }
+  // No answer, or an internal failure: the change may still have been recorded.
+  return t("appeal.unknown");
+}
+
 export function renderAppeals(
   root: HTMLElement,
   ctx: FeatureViewContext,
@@ -336,18 +348,6 @@ export function renderAppeals(
   function send(id: string, w: AppealWrite): Promise<void> {
     if (w.kind === "assign") return api.assignModerationAppeal(id, signal);
     return api.decideModerationAppeal(id, w.outcome, w.note, signal);
-  }
-
-  function errorText(w: AppealWrite, err: unknown): string {
-    if (isStatus(err, 403, "SELF_REVIEW")) return t("appeal.selfReview");
-    if (isStatus(err, 409, "REVERSAL_FAILED")) return t("appeal.reversalFailed");
-    if (isStatus(err, 409))
-      return t(w.kind === "assign" ? "appeal.conflict.assign" : "appeal.conflict.decide");
-    if (isStatus(err, 400) && (err as ApiClientError).message !== "") {
-      return t("appeal.invalid", { message: (err as ApiClientError).message });
-    }
-    // No answer, or an internal failure: the change may still have been recorded.
-    return t("appeal.unknown");
   }
 
   /** Read the queue and the appeal again after a write; the next write waits for the appeal. */
