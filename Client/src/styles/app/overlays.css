@@ -265,18 +265,18 @@
 }
 /* ── Appeals (B9-16): one panel for the form and the withdraw confirmation ── */
 .safety-history-row .ac-btn {
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
 }
 .safety-appeal-panel {
-  margin: 8px 0;
-  padding: 12px;
+  margin: var(--space-2) 0;
+  padding: var(--space-3);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--bg-secondary);
   color: var(--text-normal);
 }
 .safety-appeal-panel p {
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-2);
   overflow-wrap: anywhere;
 }
 .safety-appeal-title {
@@ -286,19 +286,19 @@
 .safety-appeal-body {
   box-sizing: border-box;
   width: 100%;
-  margin: 4px 0;
+  margin: var(--space-1) 0;
   resize: vertical;
 }
 .safety-appeal-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .safety-appeal-actions .ac-btn {
   margin-left: 0;
 }
 .safety-appeal-actions .safety-appeal-cancel {
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-control);
   background: transparent;
   color: var(--text-normal);
 }

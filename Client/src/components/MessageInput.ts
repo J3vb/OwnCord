@@ -654,6 +654,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const removeBtn = createElement("button", {
       class: "attachment-preview-remove",
       "data-testid": "attachment-remove",
+      "aria-label": messagingText("attach.remove", { filename: file.name }),
     });
     removeBtn.appendChild(createIcon("x", 14));
     removeBtn.addEventListener(
@@ -735,7 +736,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const replyInner = createElement("div", { class: "reply-bar-inner" });
     replyText = createElement("strong", {});
     replyInner.appendChild(replyText);
-    const replyClose = createElement("button", { class: "reply-close" });
+    const replyClose = createElement("button", {
+      class: "reply-close",
+      "aria-label": messagingText("reply.cancel"),
+    });
     replyClose.appendChild(createIcon("x", 14));
     replyClose.addEventListener("click", clearReply, { signal });
     replyInner.appendChild(replyClose);
@@ -745,7 +749,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const editInner = createElement("div", { class: "reply-bar-inner" });
     const editText = createElement("strong", {}, messagingText("edit.editing"));
     editInner.appendChild(editText);
-    const editClose = createElement("button", { class: "reply-close" });
+    const editClose = createElement("button", {
+      class: "reply-close",
+      "aria-label": messagingText("edit.cancel"),
+    });
     editClose.appendChild(createIcon("x", 14));
     editClose.addEventListener("click", () => cancelEdit(), { signal });
     editInner.appendChild(editClose);

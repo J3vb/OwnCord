@@ -171,12 +171,20 @@
   position: absolute;
   top: 8px;
   right: 8px;
-  display: none;
+  display: flex;
   flex-direction: row;
   gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
 }
-.pinned-msg:hover .pinned-msg__actions {
-  display: flex;
+/* Reveal on hover or when focus is inside the row: `display: none` would take
+   the buttons out of the tab order entirely, so the action could never be
+   reached by keyboard (Q1: no hover-only action). */
+.pinned-msg:hover .pinned-msg__actions,
+.pinned-msg:focus-within .pinned-msg__actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .pinned-msg__actions button {

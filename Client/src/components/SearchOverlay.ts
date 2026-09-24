@@ -78,6 +78,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
 
       const item = createElement("div", {
         class: isActive ? "search-result-item search-result-item--active" : "search-result-item",
+        id: `search-result-option-${i}`,
         role: "option",
         "aria-selected": isActive ? "true" : "false",
         "data-testid": `search-result-${i}`,
@@ -99,6 +100,16 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       appendChildren(item, header, content);
 
       resultsDiv.appendChild(item);
+    }
+
+    // Re-point aria-activedescendant on every render — arrow keys, filtering
+    // and a fresh result set all funnel through here, so a screen reader tracks
+    // the highlighted option while the input keeps DOM focus, and it can never
+    // go stale. An empty set clears it (pointing at a missing id is worse).
+    if (results.length > 0) {
+      input.setAttribute("aria-activedescendant", `search-result-option-${activeIndex}`);
+    } else {
+      input.removeAttribute("aria-activedescendant");
     }
   }
 
@@ -231,16 +242,25 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       type: "text",
       placeholder: messagingText("search.placeholder"),
       "aria-label": messagingText("search.label"),
+      // Combobox over the results listbox: the input keeps DOM focus while
+      // aria-activedescendant (set in renderResults) names the highlighted row,
+      // matching the quick switcher's pattern.
+      role: "combobox",
+      "aria-expanded": "true",
+      "aria-autocomplete": "list",
+      "aria-controls": "search-overlay-results",
       "data-testid": "search-overlay-input",
     });
 
     statusEl = createElement("div", {
       class: "search-overlay-status",
+      role: "status",
       style: "display:none",
     });
 
     resultsDiv = createElement("div", {
       class: "search-overlay-results",
+      id: "search-overlay-results",
       role: "listbox",
       "data-testid": "search-overlay-results",
     });

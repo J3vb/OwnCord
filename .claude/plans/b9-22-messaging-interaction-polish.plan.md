@@ -1,6 +1,6 @@
 # Plan: B9-22 — Polish desktop message reading, composing and related overlays
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch `fm/b9-22-impl` from `dev` `cd599319`, merging `dev` `cd599319` (startup budget 97,000 B); the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
 
 > **Milestone:** B9-22 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-22-messaging-interaction-polish`; branch from current `dev`, PR to `dev` only.
@@ -37,6 +37,35 @@ at the actual implementation base; record drift before coding.
 | 1   | MessageList virtualizes rows and uses ResizeObserver plus an anchor to preserve position.      | `Client/src/components/MessageList.ts:911-918`; `Client/src/components/MessageList.ts:953-967` |
 | 2   | MessageInput supports selection-based formatting shortcuts; keep native text editing behavior. | `Client/src/components/MessageInput.ts:64-68`; `Client/src/components/MessageInput.ts:77-98`   |
 | 3   | Existing focus helpers support roving navigation, including Enter/Space and Home/End.          | `Client/src/lib/a11y.ts:95-160`                                                                |
+
+### Drift at the implementation base (2026-09-24)
+
+Re-read at `cd599319` (`dev`, B9-19/B9-23 merged). All three rows still hold;
+line numbers moved (B9-19 routed the message-list copy through the `messaging`
+catalog, and MessageList grew the focus-restore helpers below). Facts the
+inventory did not name, found while implementing:
+
+- **A virtualized rebuild dropped keyboard focus to `<body>`.** `renderWindow`'s
+  rebuild path aborts the row-scoped listeners and `clearChildren` detaches every
+  row, so the focused action button vanished and focus fell to the document. The
+  fix captures the focused control's `data-testid` (or, lacking one, its
+  position among its row's focusable controls) before the rebuild and restores
+  it on the replacement row without scrolling.
+- **The pinned panel's row actions were `display: none` until hover**, so the
+  Jump/Unpin buttons could never be focused or reached by Tab — a hover-only
+  action, not merely an invisible one. They now reveal on `:focus-within` with
+  `opacity`/`pointer-events`, matching the message action bar.
+- **The search overlay's input was not a combobox**: `role="listbox"` rows had no
+  `aria-activedescendant` wiring and no live status, so a screen reader had no
+  announced result set. It now matches the quick switcher's combobox pattern and
+  its status carries `role="status"`.
+- **Several icon-only controls had no accessible name**: the scroll-to-bottom
+  button (a bare `↓`), the reply/edit cancel buttons, and the attachment-remove
+  button (`title` alone is not an accessible name); the GifPicker's GIF play
+  button and message-codeblock copy control were already named from B9-19.
+- **The B9-16 appeals CSS used px literals** (`8px`/`12px`/`6px`/`border-strong`)
+  from #1763; this lane moves it onto `--space-*`, `--radius-md` and
+  `--border-control` per the firstmate spec.
 
 ## Patterns to mirror
 
@@ -169,3 +198,105 @@ render path as a fallback; fail closed and record a blocker instead.
 ## Open questions
 
 No new owner decision is introduced by this milestone. The PRD's unresolved entry decisions still apply; stop if implementation would require a new product, UX or scope choice.
+
+## Implementation record — 2026-09-24
+
+Branch `fm/b9-22-impl`; base `dev` `cd599319`. The owner's decisions applied are
+in
+[b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md#q13--visual-direction)
+(Q13: Refined Neon tokens, Aurora components adoptable per lane; Q1/Q8
+thresholds). No token files were edited and no Aurora treatment was adopted.
+
+### What changed
+
+- **Focus survives a virtualized rebuild (`MessageList.ts`).** `renderWindow`
+  captures the focused control's `data-testid` (falling back to its position
+  among the row's focusable controls, for reaction chips, links and the reply
+  bar) before `clearChildren`, and restores it on the replacement row with
+  `preventScroll`, so a reader scrolling away is not pulled back. A rebuild triggered by anything but the
+  reader's own interaction keeps the keyboard user where they were instead of
+  dumping focus on `<body>` (Q1: stable location through async update).
+- **The scroll-to-bottom button is named** (`aria-label` from the new
+  `scrollToBottom` catalog key) — it was a bare `↓` glyph.
+- **Hover-only actions removed.** The pinned panel's `.pinned-msg__actions`
+  switched from `display: none` (unfocusable) to `opacity`/`pointer-events`
+  revealed on `:hover` **or** `:focus-within`; the message action bar's
+  `:focus-within` reveal (present since earlier work) is now regression-pinned.
+  The codeblock-copy, GIF play and video download-overlay controls gained the
+  same `:focus-within` reveal.
+- **Search overlay is a real combobox** (`SearchOverlay.ts`): `role="combobox"`,
+  `aria-controls`, `aria-activedescendant` re-pointed on every render (skipping
+  an empty set), and a `role="status"` live region for searching/empty/failed.
+- **Named composer controls** (`MessageInput.ts`): reply-cancel and edit-cancel
+  get `aria-label`; the attachment-remove button names its file.
+- **Q1 text contrast**: message timestamps, the edited marker, the grouped hover
+  time and system-message time moved off the unqualified `--text-micro`
+  (~2.5:1) onto `--text-muted` (5.1:1+); the add-reaction chip's dashed border
+  moved from `--border` to `--border-control` and its colour onto `--text-muted`
+  so the affordance is not a sub-3:1 decoration.
+- **Target size**: the attachment-remove button 20→24px and the reaction chip a
+  24px `min-height` floor (Q1, WCAG 2.5.8).
+- **B9-16 appeal CSS onto tokens** (`overlays.css`): the #1763 px literals go to
+  `--space-*` and `--radius-md`; the cancel button's edge uses `--border-control`
+  (decorative `--border-strong` kept on the panel itself).
+
+### Files changed
+
+`Client/src/components/{MessageList,MessageInput,SearchOverlay}.ts`,
+`Client/src/i18n/messaging.ts` (4 new keys; English byte-identical, kept behind
+the B9-3 seam), `Client/src/styles/app/{messages,composer,pinned-messages,overlays}.css`,
+`Client/tests/unit/message-list-focus-retention.test.ts (new)`,
+`Client/tests/unit/b9-messaging-polish-css.test.ts (new)`, the extended
+`message-input`/`search-overlay` unit tests, and
+`Client/tests/e2e/b9-messaging-polish.spec.ts (new)`. No shared navigation,
+`api.ts`, `types.ts`, dispatcher, global-store or token file was touched.
+
+### Evidence
+
+- **Unit:** full client suite 253 files / 6,096 passed (+152 expected failures),
+  including the new focus-retention test (fails without the fix: the rebuilt row
+  is a different node and focus is not restored), the new CSS parity test, and
+  the extended composer/search suites. `tsc --noEmit`, `tsc -p tsconfig.e2e.json`,
+  `eslint`, `oxlint`, `lint:cycles` and `knip` clean.
+- **E2E (mocked, Chromium, `--workers=1`):**
+  `Client/tests/e2e/b9-messaging-polish.spec.ts` — 9 tests: focus retained across
+  a virtualized rebuild, the named scroll-to-bottom control, the action bar
+  revealed on keyboard focus with a 3:1 ring, the composer's selection-preserving
+  formatting and named controls, the named reply-cancel, the search combobox
+  (aria-activedescendant + role="status"), the pinned panel's focus-revealed
+  named actions, and 940×500 at 20px text with no overflow and 4.5:1 author text.
+  The neighbour specs that touch these surfaces pass unchanged (110 tests across
+  `message-list`, `message-actions`, `message-input`, `composer-advanced`,
+  `search-overlay`, `overlays`, `message-edit-delete`, `reply-flow`,
+  `chat-header`, `b9-navigation`, `b9-text-expansion`, `b9-shell-polish`).
+- **Before/after screenshots** of the reading view, the focus-revealed action
+  bar, the search overlay and the pinned panel (dark and light) plus the
+  940×500/20px reflow were captured on the same 1280×800 (and 940×500) fixture
+  at the base and the branch heads; the after-state shots are attached to the
+  Playwright report (CI artifact) and the full before/after pair is in the PR.
+- **Native AT (NVDA/Orca) recordings and OS-zoom checks are owner-run and remain
+  pending**, consistent with the other B9 lanes.
+- **Bundle budgets** (`npm run check:budgets` at the merged head): startup
+  closure 96,149 B of the shared 97,000 B (raised by #1783 for B9-23); MainPage
+  61,531 B of the unchanged 64,000 B. This lane adds ~800 B of startup (the
+  focus-restore helpers, the search combobox wiring, four catalog keys and the
+  CSS, which is not code-split) and ~220 B of MainPage; no budget was raised.
+
+### Requirements and register
+
+BPR-090 (coherent desktop reading/composing, preserved performance) and BPR-091
+(keyboard, focus, contrast, reflow, announcements) get their automated evidence
+here; the visual acceptance and native AT half remain owner-run. No new text was
+added that is not behind the B9-3 seam, and English remains byte-identical
+(`scripts/check-ui-strings.mjs` green against the shrink-only baseline).
+
+### Drift from the plan
+
+The plan's Task 1 asked to "enumerate the reading workflow ... add failing checks
+only for measured gaps". The measured gaps are the four in
+[Drift](#drift-at-the-implementation-base-2026-09-24) (focus loss on rebuild,
+hover-only pin actions, non-combobox search, unnamed icon controls), each
+covered by a failing-then-passing control. A wall-clock latency threshold is
+intentionally not asserted, following B9-21's reasoning: a CI timing threshold
+on a shared runner is flaky, and this lane's acceptance is focus/semantics, not
+a stopwatch.

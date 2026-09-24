@@ -268,6 +268,53 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("wires the input as a combobox over the results listbox (B9-22)", async () => {
+    const results = [makeResult({ message_id: 1 }), makeResult({ message_id: 2 })];
+    const onSearch = vi.fn().mockResolvedValue(results);
+    const overlay = createSearchOverlay(makeOptions({ onSearch }));
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    const listbox = container.querySelector(".search-overlay-results") as HTMLElement;
+    expect(input.getAttribute("role")).toBe("combobox");
+    expect(input.getAttribute("aria-controls")).toBe(listbox.id);
+    expect(listbox.getAttribute("role")).toBe("listbox");
+
+    input.value = "test";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    // The active option is named while the input keeps DOM focus, so a screen
+    // reader tracks the roving highlight the arrow keys move.
+    expect(input.getAttribute("aria-activedescendant")).toBe("search-result-option-0");
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(input.getAttribute("aria-activedescendant")).toBe("search-result-option-1");
+
+    const active = container.querySelector("[data-testid='search-result-1']") as HTMLElement;
+    expect(active.id).toBe("search-result-option-1");
+    expect(active.getAttribute("aria-selected")).toBe("true");
+
+    overlay.destroy?.();
+  });
+
+  it("announces its status through a polite live region (B9-22)", async () => {
+    const onSearch = vi.fn().mockResolvedValue([]);
+    const overlay = createSearchOverlay(makeOptions({ onSearch }));
+    overlay.mount(container);
+
+    const status = container.querySelector(".search-overlay-status") as HTMLElement;
+    expect(status.getAttribute("role")).toBe("status");
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "no match";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(status.textContent).toBe("No results found");
+
+    overlay.destroy?.();
+  });
+
   it("calls onClose on backdrop click", () => {
     const opts = makeOptions();
     const overlay = createSearchOverlay(opts);
