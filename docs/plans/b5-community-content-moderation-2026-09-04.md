@@ -4,16 +4,16 @@
 **Base commit:** `e1781086` (`dev`; B4's exit was accepted 2026-09-03 at
 `0a14554` and today's CI-gate work — #1534, #1536, #1537 — is merged on top)
 — claims below verified at `e1781086`  
-**Status:** BUILT — **EXIT PREPARED, AWAITING THE OWNER'S ACCEPTANCE; B5 is
-not accepted.** **Audit snapshot, 2026-09-06, at `dev`
+**Status:** COMPLETE — **B5 exit accepted by the owner 2026-09-24** at exit SHA
+`458301fd` (prepared in [#1792](https://github.com/J3vb/OwnCord/pull/1792)).
+**Audit snapshot, 2026-09-06, at `dev`
 `61ac2b959cc4592ee5291637ac36f22acab89631`: B5-0 through B5-9 and B5-11 are
 merged; B5-12's initial reconciliation is merged.** B5-10 is being finished
 and is not assessed as complete by this audit. HP-5 was accepted 2026-09-06
 at #1547, with the signature record completed by #1550; it is not awaiting a
 new signature. B5-10 merged as [#1555](https://github.com/J3vb/OwnCord/pull/1555);
 with the acceptance follow-ups, final reconciliation and the exit evidence all
-done at the exit SHA (below), the exit gate is prepared and awaits the owner's
-acceptance. The
+done at the exit SHA (below), the exit gate was accepted by the owner. The
 moderation-evidence consent follow-up (Conditions 3 and 4) was accepted by the
 owner on 2026-09-23 ([#1735](https://github.com/J3vb/OwnCord/pull/1735)).
 **All fourteen decisions were settled 2026-09-04** (the owner delegated them;
@@ -31,12 +31,12 @@ upload follow-up is evidenced
 ([#1565](https://github.com/J3vb/OwnCord/pull/1565)); **both are accepted by
 the owner on 2026-09-24**, and **exit condition 7 was closed by the owner on
 2026-09-24 without publishing an advisory** (SEC-04 fixed by B5-2
-[#1543](https://github.com/J3vb/OwnCord/pull/1543)). **B5 is not accepted:**
-only the exit-SHA measurement and B5-12's final pass remain.
+[#1543](https://github.com/J3vb/OwnCord/pull/1543)). **B5 was not accepted at
+that point:** only the exit-SHA measurement and B5-12's final pass remained.
 **Exit prepared 2026-09-24 at `dev` `458301fd`** ([exit-SHA
 measurement](#exit-sha-measurement-2026-09-24)): the seven conditions and
 roadmap rule 2 met, the gate re-run on the exit SHA, and the migration and
-rollback rehearsal report — **awaiting the owner's acceptance; B5 is not
+rollback rehearsal report — **accepted by the owner 2026-09-24; B5 is
 accepted.**
 
 **Roadmap section:** ["B5 — Add community, content, and moderation
@@ -2854,8 +2854,8 @@ which names the SHA and re-runs the gates. Corrections to B5-owned rows only:
 - **Roadmap.** Workstreams 2, 11 and the amended exit conditions 2 and 3 are
   current (#1546); the B5 header and the current-implementation-slice block are
   reconciled by this PR.
-- **Plan index.** The README B5 row records the exit-SHA measurement as
-  prepared and awaiting acceptance, not accepted.
+- **Plan index.** The README B5 row recorded the exit-SHA measurement as
+  prepared and awaiting acceptance in #1792; the owner accepted it 2026-09-24.
 - **Traceability.** BPR-060..063 and BPR-070..073 keep their B5 primary phase
   with the later client proof named; no row is release-qualified.
 
@@ -3076,7 +3076,8 @@ Measured against `dev` `6fd8cc0c` by reading merges, this plan's evidence
 blocks and the ledger; no gate was re-run, so this is **not** the exit
 measurement. "Exit-SHA measurement" below means the shared remainder every
 condition carries: the gates re-run on the exit SHA, `gate-evidence` green
-and the owner's exit acceptance. **B5 is not accepted.**
+and the owner's exit acceptance. **B5 was not accepted at that point** (the
+owner accepted it 2026-09-24; see the exit-SHA measurement).
 
 | #          | State at `6fd8cc0c`                                                                                   | Evidence                                                                                                                                                                                                                                                                                                                              | What remains (owner · size)                                                                                                                                                                                                                                           |
 | ---------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -3099,8 +3100,9 @@ rehearsal is re-run as part of the exit-SHA measurement.
 ([#1742](https://github.com/J3vb/OwnCord/pull/1742)), and closed exit
 condition 7 without publishing an advisory: SEC-04's underlying issue was
 fixed by B5-2 ([#1543](https://github.com/J3vb/OwnCord/pull/1543)), so its
-placeholder advisory ID is retired. The only B5 items still outstanding are
-the exit-SHA measurement and B5-12's final pass; **B5 itself is not accepted.**
+placeholder advisory ID is retired. The only B5 items still outstanding were
+the exit-SHA measurement and B5-12's final pass; both were completed at the
+exit SHA and **B5's exit was accepted by the owner 2026-09-24.**
 
 Keep security validation and advisory disposition in the private review
 trail. Close these items and B5-12's final reconciliation on the measured
@@ -3140,8 +3142,7 @@ count that passed here. This is the exit's shape (the "B4 exit" section of
 [hp-4-scorecard-2026-09-02.md](hp-4-scorecard-2026-09-02.md)), and the
 `gate-evidence` job blocks tagging an ungated SHA.
 
-**Exit prepared and awaiting the owner's acceptance. B5 is not accepted by this
-measurement.**
+**Exit accepted by the owner 2026-09-24. B5 is accepted.**
 
 #### The seven conditions and roadmap rule 2
 
@@ -3271,8 +3272,7 @@ Tests` job passed in run 35964577049. `cargo fmt --all -- --check` was re-run
 
 **Prepared:** 2026-09-24 by the B5 exit PR, measured at `dev` `458301fd`. The
 seven conditions and roadmap rule 2 are met on the server scope, with the
-limits above. **Awaiting the owner's acceptance — B5 is not accepted by this
-measurement.**
+limits above. **Accepted by the owner 2026-09-24 — B5 is accepted.**
 
 ## Explicitly out of scope for B5
 
