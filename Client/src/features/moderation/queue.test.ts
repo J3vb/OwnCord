@@ -69,6 +69,7 @@ function detail(id: string, over: Partial<ModerationReportDetail> = {}): Moderat
   return {
     id,
     reporter_id: 3,
+    subject_id: 4,
     notes: [],
     events: [],
     actions: [],

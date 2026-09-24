@@ -1,6 +1,6 @@
 # Plan: B9-13 — Issue warnings and timeouts with accurate outcomes
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** IMPLEMENTED — native AT recordings pending owner — 2026-09-24 on branch `fm/b9-13-impl` from `dev` `ea22a3bf699f9c1841502ceb69a8dbe3c3dabb2c`; the outcome and evidence are in [Implementation record](#implementation-record-2026-09-24).
 
 > **Milestone:** B9-13 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `feat/b9-13-warning-timeout-actions`; branch from current `dev`, PR to `dev` only.
@@ -175,3 +175,159 @@ render path as a fallback; fail closed and record a blocker instead.
 **Options and consequences:** Use a validated duration input within the existing one-minute to 28-day bounds; or add owner-chosen presets plus custom input. The former avoids inventing moderation policy; presets are faster but imply preferred sanction lengths.
 
 **Drafting recommendation (historical):** Use a validated duration input initially; add presets only if the owner chooses their labels and values.
+
+## Implementation record (2026-09-24)
+
+### Drift at the implementation base
+
+Re-read at `ea22a3bf` (B9-12 #1777 merged). Every inventory row still holds;
+the line ranges moved:
+
+- Row 1: the direct routes are `Server/api/moderation_handler.go:87-96`
+  (`MountModerationRoutes`: warn, timeout, untimeout, actions), bodies
+  `:15-36`, handlers `:108-182`. Warn answers 201 `{id}`, timeout 201
+  `{id, voice}`, untimeout 204.
+- Row 2: the bounds are `Server/service/moderation.go:254-259`; `Warn`
+  `:282-324`, `Timeout` `:342-391`, `LiftTimeout` `:473-508`. Contract facts
+  the client relies on: MODERATE_MEMBERS, then target exists, then rank
+  (`requireOutranksRole`: the actor's role position must be strictly higher),
+  all 403 `FORBIDDEN` with no code telling "no permission" from "outranked";
+  acting on yourself and a bad duration or reason (over 500 runes, any
+  control character) are 400 `BAD_REQUEST`; lifting with no active timeout
+  is 404. The voice half is "applied" only when the actor holds base
+  MUTE_MEMBERS, can moderate voice in the target's current channel and the
+  mute succeeded (`applyTimeoutVoiceHalf`, `:401-411`); a target not in voice
+  is "skipped". A new timeout supersedes (lifts) the previous one.
+- Row 3: `actOnReportRequest`/`actOnReportResponse` are
+  `Server/api/moderation_queue_handler.go:99-114`, the handler `:337-411`.
+  The act route checks MODERATE_MEMBERS first, then reads the report (404 for
+  its subject), refuses its reporter (403 `SELF_REVIEW`), and answers a
+  timeout 200 `{voice}` and a warning 204. It does not check the report's
+  state. The report detail already carries `subject_id` and each action's
+  `expires_at`; the client type lacked both.
+- No server contract is missing: no server, protocol, schema or migration
+  change. `dev` moved to `879740bf` (B9-19 #1781, B9-23 #1779) during the
+  work and was merged in; neither touches the moderation files.
+
+### What shipped
+
+- **Actions section** (`features/moderation/ActionForms.ts`), labelled
+  "Actions", after the review. The moderator holding an open report gets a
+  warning form and a timeout form, each with a single-line reason labelled
+  "shown to the member" (optional, as on the server; at most 500 characters;
+  control characters sent as spaces). The timeout length is Q10 exactly: one
+  number field and a Minutes/Hours/Days select, no presets; a length that is
+  not a whole number from 1 minute to 28 days is refused before sending with
+  an announced error and focus on the field. "Lift timeout" is offered while
+  a timeout taken with this report is still running (the history's
+  `expires_at` in the future, not lifted), described by its end time, to the
+  holder of the open report or on a closed report; never when another
+  moderator holds it. Nothing is offered on the reader's own filing or after
+  the subject's account is erased, and nothing before the reader takes the
+  report.
+- **Linked and direct routes.** Warning and timeout go through
+  `POST /moderation/queue/{public id}/act`, so the ledger row carries the
+  report's public id; lifting uses the member's own
+  `POST /moderation/users/{id}/untimeout` (there is no report-linked lift).
+  The report id stays the opaque string and the member id the number; the
+  warning's ledger id is never shown or used.
+- **Committed outcome** (`Queue.ts`). Each action is one write under B9-12's
+  one-at-a-time guard, and the queue and report are read again after every
+  answer. Nothing is acknowledged before the server answers. A timeout's
+  status line names the length and restricts its claim to messages and
+  reactions; it adds "They were also server-muted in their voice channel"
+  only when the server answered `voice: "applied"`, and otherwise says their
+  voice wasn't changed (not in a voice channel the moderator can moderate, or
+  the mute didn't take effect). Lifting says messages and reactions are back
+  and makes no voice claim.
+- **Refusals.** B9-12 treats a 403 on a review write as lost permission and
+  clears the view. For an action a 403 can also mean the subject is ranked at
+  or above the reader, which the client can't see (roles reach it without
+  positions), so it says "The server refused this action. You can act only on
+  members whose role is below yours." and reads again: if the reader was
+  demoted, that read's own 403 clears the view, its reports and any unsaved
+  reason. A 400 shows the server's own message; a 404 on lift says there is
+  no timeout left and keeps the report; a 404 on the act route closes the
+  report as B9-12 does; no answer at all (network, 500) says the action could
+  not be confirmed and to check the history, which the re-read refreshes.
+- **Drafts.** The typed reasons, length and unit live for their report while
+  the view is live and survive a background re-read (focus and caret kept);
+  a saved warning or timeout clears its own form; a re-read that takes the
+  forms away (someone else took the report) drops the draft and says so.
+- **History** (`History.ts`, adapter in `api.ts`): a timeout that is not
+  lifted shows "Until {date}".
+
+### Implementation decisions and file-table amendments
+
+- **Actions require holding the report**, like B9-12's note and close: the
+  server would let any moderator act on any report, so this only narrows.
+- **No `permissions.ts` helper.** The Moderation Center is already gated on
+  MODERATE_MEMBERS (`canModerateMembers`), the one bit warning and timeout
+  need; the voice half's authority is per channel and decided by the server,
+  so the client states the outcome instead of predicting it.
+- **Files beyond the table**, each narrow wiring: `lib/api.ts` (the act and
+  untimeout methods, `ModerationActRequest`, and the detail's `subject_id`
+  and actions' `expires_at` — the shared single-writer file, as B9-11 and
+  B9-12 did), `features/moderation/Queue.ts` (compose the section and send
+  its writes), the B9-11/B9-12 unit fixtures (the new `subject_id` field),
+  and `tests/e2e/b9-moderation-actions.spec.ts` (the Q1 checks, mocked).
+  No CSS: the section reuses B9-12's `mod-work`/`mod-work-form` rules.
+- **Not touched:** navigation, MainPage, dispatcher, global stores (read-only
+  `authStore`), tokens, styles, the catalog API, the PRD (its shared status
+  table and per-lane paragraphs are left alone; this record is the status).
+- **Budget.** Startup 94,454 B of 95,500 B, MainPage 63,992 B of 64,000 B,
+  no budget change. The forms and copy load with the lazy Moderation Center
+  chunk; the startup growth is the two API methods.
+
+### Evidence
+
+Base `ea22a3bf`; Node 26.9.0, vitest 4.1.11, Playwright Chromium, Go 1.26.7,
+Linux. Local Playwright ran on ports 1497 (dev server) and 4197/4173
+(preview), never 1420.
+
+| Check                                                                                                                       | Result                                     |
+| --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `npx vitest run --maxWorkers=4` (whole client)                                                                              | 308 files, 6,728 passed, 152 expected-fail |
+| `src/features/moderation/warning-timeout.test.ts`                                                                           | 38 passed                                  |
+| Failing control: 403 on an action handled as lost permission, or the timeout always reported as voice "applied"             | 4 of those tests fail, as intended         |
+| `npm run typecheck`, `typecheck:build`, `typecheck:e2e`, `npm run lint` (oxlint, cycles, eslint)                            | clean                                      |
+| `npm run build:budget && npm run check:budgets`                                                                             | all ok                                     |
+| Playwright (dev server): `b9-moderation-actions` (12), `b9-moderation-workflow`, `b9-moderation-queue`, `b9-text-expansion` | 12 and 33 passed                           |
+| Playwright fullstack (real Go server): `b9-moderation-actions`, `b9-moderation-workflow`, `b9-moderation-queue`             | 4 passed                                   |
+
+**Permission ladder** (fullstack, synthetic accounts: alice owner; bob a
+"Warden" role, MODERATE_MEMBERS without MUTE_MEMBERS, position 50, in the
+client; carol reporter; dave subject; a "Muter" role, MUTE_MEMBERS only):
+
+| Case                                    | Offered in the client                        | Server answer                                     |
+| --------------------------------------- | -------------------------------------------- | ------------------------------------------------- |
+| Warning-only moderator, report held     | Issue warning, Time out; Lift while running  | act 204 / 200 `voice: skipped`; untimeout 204     |
+| Report not held                         | nothing                                      | —                                                 |
+| Ordinary member                         | no Moderation Center                         | warn 403                                          |
+| Mute-only role                          | no Moderation Center                         | warn 403, act 403                                 |
+| Self                                    | never listed (reports about you are hidden)  | warn 400                                          |
+| Peer (same role)                        | offered                                      | warn 403                                          |
+| Superior (Moderator above Warden)       | offered; shows the refusal, report stays     | act 403, ledger unchanged                         |
+| Owner target                            | offered                                      | warn 403, act 403, ledger empty                   |
+| Demoted during submission (frames held) | offered by the stale view; then view cleared | act 403; re-read 403; act and untimeout 403 after |
+| Combined (with MUTE_MEMBERS), in voice  | mocked only: "also server-muted"             | needs a live LiveKit session; not run locally     |
+
+The warning and timeout rows in dave's ledger carry `report_id` equal to the
+report's public id and the typed reason; the timeout's `expires_at` is five
+minutes out, and lifting sets `lifted_at`. The history reads "You issued:
+Warning" and the timeout's "Until …".
+
+**Accessibility** (mocked Playwright, `b9-moderation-actions.spec.ts`):
+keyboard order warning reason → Issue warning → timeout reason → length →
+unit → Time out → Lift timeout, each operable with Enter/Space and every
+outcome announced in the `role="status"` line only after the answer; the
+length error is `role="alert"`, referenced by `aria-describedby`, with
+`aria-invalid` and focus on the field; no unnamed control; every target at
+least 24×24 px; no animation or transition; text, control, error and focus
+contrast at the Q1 thresholds in dark, neon-glow, midnight and light, each
+with and without High Contrast (per-theme ratios attached as
+`b9-13-contrast-*.json`); at 940×500 with 20 px Large Font nothing scrolls
+sideways and every control and line scrolls into view (screenshot attached).
+Custom-accent fallback is inherited unchanged from B9-2 (no new colour).
+**Owner-run pending:** NVDA (Windows) and Orca (Linux) recordings, and the
+200 % OS-zoom check.
