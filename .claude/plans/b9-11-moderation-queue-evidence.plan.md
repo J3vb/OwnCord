@@ -272,6 +272,18 @@ frame all exist on `dev`.
   handler. Importing `formatFileSize` from `message-list/attachments` made
   Rolldown split four shared modules out of the entry (+700 B), so the size
   uses `lib/connectionStats`'s `formatByteSize` with the same arguments.
+  After merging `dev` `6671f228` (B9-8 #1771, 2026-09-24) the startup closure
+  measured 95,204 B, over the 95,000 B budget; MainPage 63,805 B. The view
+  CSS costs 486 B gzip and cannot load with the lazy chunk (`vite.config.ts`
+  sets `cssCodeSplit: false`), and a compacted rewrite saved only 74 B, so
+  Firstmate raised the shared startup budget to 95,500 B (decision
+  2026-09-24, re-baseline at B9-26); MainPage stays 64,000 B.
+- **Review fixes.** The validation review found three focus and race gaps in
+  `Queue.ts`, fixed with a test each in `queue.test.ts`: a failed background
+  re-read of the open report no longer drops focus to `<body>`; a queue
+  refresh that replaces a pending read keeps the open's focus intent; and
+  accepting the NSFW gate reloads only if the accepted report is still the
+  selected one.
 
 ### Evidence
 
