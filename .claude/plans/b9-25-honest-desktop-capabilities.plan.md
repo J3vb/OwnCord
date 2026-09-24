@@ -272,7 +272,8 @@ new keys.
   pins granted / denied+Allow / denied-again / unavailable / no-notifier-on-ask
   and the cannot-read-the-OS wording; `dispatcher.test.ts` pins when a dial
   counts as failed; `server-banner.test.ts` adds the offline vs server wording,
-  "Reconnecting..." until a dial fails, the Retry-once action, the
+  "Reconnecting..." until a dial fails, a Retry that stays usable across
+  repeated clicks, the
   no-Retry-when-offline case, the live-region announcement, and the
   countdown-not-re-announced property; `update-notifier.test.ts` adds the
   once-per-phase announcement and the available-update announcement;
