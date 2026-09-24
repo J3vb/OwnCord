@@ -7,7 +7,9 @@
  * names who did what and when, and a moderator action's reason is labelled as
  * the text the member was shown. An erased actor, a report closed because its
  * subject was erased (its notes deleted with the account) and notes removed by
- * the retention sweep are shown as facts, not as a failed read.
+ * the retention sweep are shown as facts, not as a failed read. Erasing the
+ * subject of an already-closed report also deletes its notes, which the view
+ * can't tell apart from retention, so the closed-report line names both.
  */
 
 import { appendChildren, createElement } from "@lib/dom";

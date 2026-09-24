@@ -19,8 +19,10 @@
  * write runs at a time; whatever the answer, the queue and the report are read
  * again, so a conflict with another moderator (409) shows the server's current
  * state rather than this view's guess. The next write waits for that read, so
- * controls built before the write can't send it twice. An unsaved note lives
- * only while the report can still take it and the view is live.
+ * controls built before the write can't send it twice. A report the reader's
+ * own write moves out of the current filter stays open and is read by id; one
+ * that leaves the list for any other reason closes and says so. An unsaved
+ * note lives only while the report can still take it and the view is live.
  */
 
 import { ApiClientError, type ModerationQueueFilter } from "@lib/api";
@@ -71,8 +73,10 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
   let draft = { id: "", text: "" };
   /** A write being sent, or its answer waiting on the re-read of the report. */
   let writing: "sending" | "reading" | null = null;
-  /** A report this reader just closed: leaving the list is expected, not news. */
-  let closedHere: string | null = null;
+  /** A report this reader just wrote to: leaving the filter is expected, not news. */
+  let ownWrite: string | null = null;
+  /** The open report, kept after the reader's own write took it out of the filter. */
+  let offList: QueueItem | null = null;
 
   const filterId = `mod-filter-${++viewSeq}`;
   const toolbar = createElement("div", { class: "mod-center-toolbar" });
@@ -129,6 +133,9 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     detailSlot,
   );
 
+  const itemFor = (id: string): QueueItem | undefined =>
+    items.find((i) => i.id === id) ?? (offList?.id === id ? offList : undefined);
+
   const rowFor = (id: string | null): HTMLButtonElement | null =>
     id === null
       ? null
@@ -176,6 +183,8 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     readSettled();
     dropDetail();
     selected = null;
+    ownWrite = null;
+    offList = null;
     draft = { id: "", text: "" };
     syncCurrent();
     setDetailError("");
@@ -193,6 +202,8 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     dropDetail();
     items = [];
     selected = null;
+    ownWrite = null;
+    offList = null;
     draft = { id: "", text: "" };
     clearChildren(list);
     for (const el of [toolbar, list, retry, detailRetry]) el.hidden = true;
@@ -258,6 +269,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
         listReq = null;
         list.removeAttribute("aria-busy");
         const retryHadFocus = document.activeElement === retry;
+        const was = selected === null ? undefined : itemFor(selected);
         items = rows.map(mapQueueRow);
         renderList();
         setText(failure, "");
@@ -265,10 +277,18 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
         setText(status, t(forFilter.countKey, { count: items.length }));
         if (retryHadFocus) focusList(null);
         if (selected !== null) {
-          if (!items.some((i) => i.id === selected))
-            clearDetail(selected === closedHere ? "" : t("detail.gone"));
-          else if (refreshDetail) loadDetail(selected, false);
+          if (items.some((i) => i.id === selected)) {
+            offList = null;
+            if (refreshDetail) loadDetail(selected, false);
+          } else if (was !== undefined && (selected === ownWrite || offList === was)) {
+            if (offList === null) setText(detailStatus, t("detail.leftFilter"));
+            offList = was;
+            if (refreshDetail) loadDetail(selected, false);
+          } else {
+            clearDetail(t("detail.gone"));
+          }
         }
+        ownWrite = null;
       },
       (err: unknown) => {
         if (req !== listReq || signal.aborted) return;
@@ -394,11 +414,11 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       () => {
         if (signal.aborted || denied) return;
         if (w.kind === "note" && draft.id === id) draft = { id: "", text: "" };
-        if (w.kind === "close") closedHere = id;
         if (selected !== id) {
           writing = null;
           return;
         }
+        ownWrite = id;
         setText(writeStatus, t(WRITE_DONE[w.kind]));
         reread(id);
       },
@@ -460,7 +480,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
         detailReq = null;
         readSettled();
         detailSlot.removeAttribute("aria-busy");
-        const item = items.find((i) => i.id === id);
+        const item = itemFor(id);
         if (item === undefined) {
           clearDetail(t("detail.gone"));
           return;
@@ -472,7 +492,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
           active === document.body ||
           active === rowFor(id) ||
           detailSlot.contains(active);
-        setText(detailStatus, "");
+        if (takeFocus) setText(detailStatus, "");
         showDetail(item, mapDetail(wire), takeFocus && stayed);
       },
       (err: unknown) => {
@@ -516,6 +536,8 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
     "change",
     () => {
       filter = FILTERS.find((f) => f.value === select.value) ?? FILTERS[0];
+      ownWrite = null;
+      offList = null;
       loadList(true, false);
     },
     { signal },
@@ -544,7 +566,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       const d = shown;
       if (d?.evidence.kind !== "shown" || d.channelId === null) return;
       if (!nsfwContentBlocked(d.channelId)) return;
-      const item = items.find((i) => i.id === d.id);
+      const item = itemFor(d.id);
       if (item === undefined) {
         clearDetail("");
         return;
@@ -562,6 +584,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
       dropDetail();
       items = [];
       selected = null;
+      offList = null;
       draft = { id: "", text: "" };
       clearChildren(root);
     },

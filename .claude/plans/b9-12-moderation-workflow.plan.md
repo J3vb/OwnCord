@@ -220,9 +220,16 @@ B9-11 left no server gap: no server, protocol, schema or migration change.
   another moderator"); 403 `SELF_REVIEW` says so without leaving; any other
   403 is B9-11's refusal (every report and the draft go); 404 closes the
   report and re-reads the queue; a failed save keeps the note for another
-  try. A report the reader just closed leaves the active list without the
-  "no longer in this list" notice, and the status says it is under
-  Show: Closed.
+  try. When the reader's own successful take, note or close moves the open
+  report out of the current filter (a take under Waiting for review, a close
+  under the active filter), the report stays open and is read by id, and a
+  `role="status"` line says "Your change moved this report out of the
+  current filter. It stays open here." instead of the "no longer in this
+  list" alert; later background reads keep reading it by id until the reader
+  leaves it or changes the filter. A report that leaves the list for any
+  other reason (another moderator's write seen in a background read, a lost
+  409 race, a filter change) still closes with "no longer in this list".
+  After an own close the status also says it is under Show: Closed.
 - **Draft lifetime.** The unsaved note lives only for its report while the
   view is live: switching report, refusal, 404, the view closing, role loss
   and sign-out drop it; a re-read that takes the note field away (someone
@@ -234,11 +241,14 @@ B9-11 left no server gap: no server, protocol, schema or migration change.
   report in time order (stable; unreadable times last); an action's reason is
   labelled "Reason shown to the member". Read-only by construction: no
   control inside either. Erased actors read "A deleted account", an unknown
-  event "… updated the report", notes removed by retention "Note text is no
-  longer kept …", notes of a report closed because its subject was erased
-  (`subject_erased`) "Note text was deleted along with the reported
-  account." rather than the retention copy, and the reporter's own view says
-  why notes are hidden.
+  event "… updated the report", notes of a report closed because its subject
+  was erased (`subject_erased`) "Note text was deleted along with the
+  reported account.", and missing notes on any other closed report "Note text
+  is no longer kept: this server removes it some time after a report closes,
+  or when the reported account is deleted." — erasing the subject of an
+  already-closed report deletes its notes but keeps its state, so the view
+  can't tell that apart from retention and names both causes. The
+  reporter's own view says why notes are hidden.
 
 ### Implementation decisions and file-table amendments
 
@@ -320,6 +330,19 @@ released after a retried failed read, re-read despite a failed queue read,
 erasure copy) and the 409 case (report re-read at once, not after the queue)
 each failed on the previous head and pass now; the moderation unit suite is
 53 passed.
+
+**Second review round.** An own write that moves the open report out of the
+current filter keeps it open (above); new `workflow.test.ts` cases take, note
+and close a report under Waiting for review without the report closing (the
+history and state still come from the server's reads), and check that a
+report leaving the list after someone else's change still closes with "no
+longer in this list"; the own-close case now also reads the closed report
+back. The closed-report notes line names both retention and erasure, with a
+case for a resolved report whose notes are gone. The Waiting-for-review and
+notes-copy cases failed on the previous head; the moderation unit suite is
+56 passed. The fullstack walkthrough needed no change: its take, note and
+close run under the active filter, and its lost races still close the
+report.
 
 ### Accessibility (Q1)
 

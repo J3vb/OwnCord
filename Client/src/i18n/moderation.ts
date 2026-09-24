@@ -32,6 +32,8 @@ export const moderationText = defineCatalog("moderation", {
   "detail.error": "Couldn't load this report.",
   "detail.notFound": "This report is no longer available.",
   "detail.gone": "The report you had open is no longer in this list.",
+  "detail.leftFilter":
+    "Your change moved this report out of the current filter. It stays open here.",
   "fact.subject": "About",
   "fact.reporter": "Reported by",
   "fact.state": "Status",
@@ -89,7 +91,7 @@ export const moderationText = defineCatalog("moderation", {
   "notes.hidden": "Internal notes are hidden from you because you sent this report.",
   "notes.none": "No notes yet.",
   "notes.pruned":
-    "Note text is no longer kept: this server removes it some time after a report closes.",
+    "Note text is no longer kept: this server removes it some time after a report closes, or when the reported account is deleted.",
   "notes.erased": "Note text was deleted along with the reported account.",
   "notes.by": "{name}, {date}",
   "history.title": "History",

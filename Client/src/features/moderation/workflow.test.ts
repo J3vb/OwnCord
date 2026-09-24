@@ -493,6 +493,130 @@ describe("closing", () => {
     );
     expect(root.textContent).not.toContain("no longer in this list");
     expect(root.contains(document.activeElement)).toBe(true);
+    // The closed report stays open, as the server now reads it.
+    details
+      .at(-1)!
+      .resolve(
+        mine("r1", { state: "resolved", outcome: "duplicate", closed_at: "2026-09-06 09:00:00" }),
+      );
+    await flush();
+    expect(root.querySelector(".mod-report-facts")?.textContent).toContain(
+      "Closed: already reported",
+    );
+    expect(buttons(work(root))).toEqual([]);
+    expect(root.contains(document.activeElement)).toBe(true);
+  });
+
+  it("keeps the report through take, note and close under Waiting for review", async () => {
+    const root = mount();
+    lists[0]!.resolve([row("r1")]);
+    await flush();
+    const filter = q<HTMLSelectElement>(root, "[data-testid=mod-filter]")!;
+    filter.value = "open";
+    filter.dispatchEvent(new Event("change"));
+    expect(lists.at(-1)!.arg).toBe("open");
+    lists.at(-1)!.resolve([row("r1")]);
+    await flush();
+    q<HTMLButtonElement>(root, ".mod-queue-row")!.click();
+    details.at(-1)!.resolve(detail("r1"));
+    await flush();
+    const report = () => root.querySelector("[data-testid=mod-report]");
+    const moved = "Your change moved this report out of the current filter. It stays open here.";
+
+    // Take: the report is now assigned, so the open filter no longer lists it.
+    q<HTMLButtonElement>(work(root)!, "button")!.click();
+    writes[0]!.resolve();
+    await flush();
+    lists.at(-1)!.resolve([]);
+    await flush();
+    details.at(-1)!.resolve(mine("r1"));
+    await flush();
+    expect(report()).not.toBeNull();
+    expect(root.querySelectorAll(".mod-queue-row")).toHaveLength(0);
+    expect(buttons(work(root))).toEqual(["Add note", "Close report"]);
+    const said = [...root.querySelectorAll("[role=status]")].find((s) => s.textContent === moved);
+    expect(said).toBeDefined();
+    expect(alerts(root)).toBe("");
+
+    // The server's mod_queue after the take reads the report again by id.
+    noteQueueChange();
+    await flush();
+    lists.at(-1)!.resolve([]);
+    await flush();
+    details.at(-1)!.resolve(mine("r1"));
+    await flush();
+    expect(report()).not.toBeNull();
+
+    type(root, "checked");
+    submit(note(root));
+    writes[1]!.resolve();
+    await flush();
+    lists.at(-1)!.resolve([]);
+    await flush();
+    details.at(-1)!.resolve(
+      mine("r1", {
+        notes: [{ id: 1, author_id: ME, body: "checked", created_at: "2026-09-05 11:00:00" }],
+      }),
+    );
+    await flush();
+    expect(root.querySelector(".mod-note-body")?.textContent).toBe("checked");
+
+    q<HTMLInputElement>(root, "input[value=actioned]")!.checked = true;
+    submit(q(root, "input[value=actioned]"));
+    expect(writes.map((w) => w.op)).toEqual(["assign", "note", "close"]);
+    writes[2]!.resolve();
+    await flush();
+    lists.at(-1)!.resolve([]);
+    await flush();
+    details.at(-1)!.resolve(
+      mine("r1", {
+        state: "resolved",
+        outcome: "actioned",
+        closed_at: "2026-09-05 12:00:00",
+        events: [
+          { actor_id: 0, action: "created", detail: "spam", created_at: "2026-09-05 10:00:00" },
+          { actor_id: ME, action: "assigned", detail: "", created_at: "2026-09-05 10:30:00" },
+          { actor_id: ME, action: "noted", detail: "", created_at: "2026-09-05 11:00:00" },
+          {
+            actor_id: ME,
+            action: "closed",
+            detail: "actioned",
+            created_at: "2026-09-05 12:00:00",
+          },
+        ],
+      }),
+    );
+    await flush();
+    expect(report()).not.toBeNull();
+    expect(history(root)).toEqual([
+      "Report sent for Spam",
+      "You took the report",
+      "You added an internal note",
+      "You closed the report: Action taken",
+    ]);
+    expect(buttons(work(root))).toEqual([]);
+    expect(root.textContent).not.toContain("no longer in this list");
+  });
+
+  it("still closes a report that leaves the filter through someone else's change", async () => {
+    const root = mount();
+    lists[0]!.resolve([row("r1")]);
+    await flush();
+    q<HTMLButtonElement>(root, ".mod-queue-row")!.click();
+    details.at(-1)!.resolve(mine("r1"));
+    await flush();
+    type(root, "a note");
+    submit(note(root));
+    writes[0]!.resolve();
+    await flush();
+    await reread(mine("r1"), row("r1", { state: "assigned", assignee_id: ME }));
+    // Another moderator closes it; the background read no longer lists it.
+    noteQueueChange();
+    await flush();
+    lists.at(-1)!.resolve([]);
+    await flush();
+    expect(root.querySelector("[data-testid=mod-report]")).toBeNull();
+    expect(root.textContent).toContain("The report you had open is no longer in this list.");
   });
 });
 
@@ -564,6 +688,21 @@ describe("history", () => {
     );
     expect(root.textContent).toContain("Note text is no longer kept");
     expect(root.textContent).not.toContain("No notes yet.");
+  });
+
+  it("does not blame retention alone when an erasure could have removed the notes", async () => {
+    // Erasing the subject of a closed report deletes its notes and keeps its state.
+    const root = await opened(
+      detail("r1", {
+        state: "resolved",
+        outcome: "actioned",
+        closed_at: "2026-06-01 09:00:00",
+        events: [{ actor_id: ME, action: "noted", detail: "", created_at: "2026-05-30 09:00:00" }],
+      }),
+    );
+    expect(root.textContent).toContain(
+      "this server removes it some time after a report closes, or when the reported account is deleted.",
+    );
   });
 
   it("says the note text went with the erased account, not retention", async () => {
