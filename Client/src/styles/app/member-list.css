@@ -17,7 +17,9 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
+  /* Yields to the channel list's floor (.sidebar-content-inner) and scrolls
+     its members instead, however long the list or the dragged height. */
+  flex-shrink: 1;
 }
 .sidebar-members-header {
   padding: 8px 8px 4px 16px;
