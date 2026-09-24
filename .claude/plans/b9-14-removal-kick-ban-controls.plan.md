@@ -297,7 +297,14 @@ merged in.
   budget change. The actions, dialog and copy load with the lazy Moderation
   Center chunk; the growth is the store field and the sidebar gate. After
   merging `646f2a43` (B9-22) the head measures startup 96,210 B and MainPage
-  61,681 B, still within budget.
+  61,681 B, still within budget. After merging `dev` with B9-17 (#1786; the Moderation
+  Center's Appeals tab, which hoisted `actionErrorText` to module level, where
+  B9-14's refusal wording now lives) it measures startup 96,368 B and MainPage
+  61,656 B. On that merge the whole unit suite (6,815 passed, 152
+  expected-fail), the mocked `b9-moderation-actions`, `b9-appeal-review` and
+  `emoji-voicemod.parity` (44 passed) and fullstack `b9-moderation-actions`
+  and `b9-appeal-review` (3 passed) were re-run green. The PRD status table is
+  left as `dev` has it; this record is B9-14's status.
 
 ### Evidence
 

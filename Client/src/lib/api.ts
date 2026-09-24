@@ -284,6 +284,49 @@ export type ModerationActRequest =
 /** POST /moderation/queue/{id}/close outcomes (Server/service/report.go). */
 export type ModerationOutcome = "actioned" | "no_action" | "duplicate";
 
+/** GET /moderation/appeals' `state` filter: "" is open and assigned together;
+ *  "decided" is upheld and overturned. */
+export type ModerationAppealFilter = "" | "open" | "assigned" | "decided";
+
+/** One row of GET /moderation/appeals (B5-10), for MODERATE_MEMBERS holders
+ *  only; never the caller's own appeal. Mirrors Server/api/appeal_handler.go's
+ *  appealQueueRowResponse. */
+export interface ModerationAppealRow {
+  readonly id: string;
+  readonly action_id: number;
+  /** 0 once the appellant's account is erased. */
+  readonly appellant_id: number;
+  readonly state: AppealState;
+  /** 0 while no one holds it. */
+  readonly assignee_id: number;
+  readonly created_at: string;
+  readonly decided_at: string | null;
+}
+
+/** GET /moderation/appeals/{id}: the appeal and the action it is about. 403
+ *  SELF_REVIEW on the caller's own appeal. Mirrors appealDetailResponse. */
+export interface ModerationAppealDetail extends ModerationAppealRow {
+  /** The appellant's statement. */
+  readonly body: string;
+  readonly decided_by: number;
+  /** Sent to the appellant with the decision. */
+  readonly decision_note: string;
+  readonly action: {
+    readonly id: number;
+    readonly kind: string;
+    readonly actor_id: number;
+    readonly reason: string;
+    readonly created_at: string;
+    readonly expires_at?: string;
+    readonly acknowledged_at?: string;
+    readonly lifted_at?: string;
+  };
+  /** The report the action was taken with, only when this reader may open it. */
+  readonly report_id?: string;
+}
+
+export type AppealDecision = "upheld" | "overturned";
+
 /** The four recipient transitions of a pending Message Request (docs/api.md). */
 export type DmRequestDecision = "accept" | "ignore" | "delete" | "block";
 
@@ -749,6 +792,54 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     /** End a member's active timeout early: 404 when they have none. */
     liftTimeout(userId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("POST", `/moderation/users/${userId}/untimeout`, undefined, signal);
+    },
+
+    /** The moderator appeal queue (B9-17). 403 without MODERATE_MEMBERS. */
+    getModerationAppeals(
+      state: ModerationAppealFilter,
+      signal?: AbortSignal,
+    ): Promise<ModerationAppealRow[]> {
+      const query = state === "" ? "" : `?state=${state}`;
+      return request<ModerationAppealRow[]>(
+        "GET",
+        `/moderation/appeals${query}`,
+        undefined,
+        signal,
+      );
+    },
+
+    getModerationAppeal(id: string, signal?: AbortSignal): Promise<ModerationAppealDetail> {
+      return request<ModerationAppealDetail>(
+        "GET",
+        `/moderation/appeals/${encodeURIComponent(id)}`,
+        undefined,
+        signal,
+      );
+    },
+
+    /** Take an appeal: 409 when someone else holds it or it closed; never forced. */
+    assignModerationAppeal(id: string, signal?: AbortSignal): Promise<void> {
+      return request<void>(
+        "POST",
+        `/moderation/appeals/${encodeURIComponent(id)}/assign`,
+        undefined,
+        signal,
+      );
+    },
+
+    /** Decide an appeal: 409 when it changed since read, or REVERSAL_FAILED. */
+    decideModerationAppeal(
+      id: string,
+      outcome: AppealDecision,
+      note: string,
+      signal?: AbortSignal,
+    ): Promise<void> {
+      return request<void>(
+        "POST",
+        `/moderation/appeals/${encodeURIComponent(id)}/decide`,
+        { outcome, note },
+        signal,
+      );
     },
 
     /** Records that the caller read their own warning. 404 when it is already

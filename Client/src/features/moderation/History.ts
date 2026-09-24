@@ -25,7 +25,7 @@ const OUTCOMES = {
   subject_erased: "outcome.subject_erased",
 } as const;
 
-const KINDS = {
+export const KINDS = {
   warning: "kind.warning",
   timeout: "kind.timeout",
   removal: "kind.removal",
@@ -34,7 +34,7 @@ const KINDS = {
 } as const;
 
 /** The catalog key for a server code, or `fallback` for a code this client doesn't know. */
-function keyFor<M extends Record<string, string>, F extends string>(
+export function keyFor<M extends Record<string, string>, F extends string>(
   map: M,
   code: string,
   fallback: F,
@@ -51,7 +51,8 @@ export function muted(text: string): HTMLParagraphElement {
   return createElement("p", { class: "mod-evidence-status" }, text);
 }
 
-function actorName(id: number, me: number): string {
+/** A member by id: "You", a deleted account (0) or their current name. */
+export function actorName(id: number, me: number): string {
   if (id === 0) return t("name.erased");
   return id === me ? t("name.you") : memberName(id);
 }
