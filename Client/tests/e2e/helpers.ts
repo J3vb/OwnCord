@@ -486,6 +486,7 @@ export function buildTauriMockScript(opts: {
    *  default. */
   externalContent?: {
     preview?: Record<string, Record<string, unknown> | string>;
+    /** Each entry is the image's bytes, or a broker refusal-class string. */
     image?: Record<string, number[] | string>;
   };
 }): string {
@@ -821,7 +822,13 @@ export function buildTauriMockScript(opts: {
         if (cmd === "external_image") {
           var source = args?.handle !== undefined ? "handle:" + args.handle : "url:" + args.url;
           var bytes = window.__mockExternalImage[source];
-          if (bytes !== undefined) return new Uint8Array(bytes).buffer;
+          if (bytes !== undefined) {
+            // A string names a broker refusal class (blocked-destination,
+            // oversized, wrong-type, ...), exactly like the preview mock; an
+            // array is the image's bytes.
+            if (typeof bytes === "string") throw bytes;
+            return new Uint8Array(bytes).buffer;
+          }
           throw "unavailable";
         }
         const error = new Error("Unexpected IPC command: " + cmd);

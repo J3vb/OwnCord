@@ -233,18 +233,51 @@ Re-read at `dev` `6671f2283f448afebe896eac993219df0529b692` (B9-8 merged as
 
 ### Evidence
 
-- **Unit:** `npx vitest run tests/unit src` — 292 files, 6,553 passed, 152
-  expected-fail. New named cases: the typed preview failed state and its
-  bounded retry (`embeds.test.ts`), the inline-image failed state/retry and
-  "never reads as loaded" (`media.test.ts`), the picker's typed failure and
-  retry (`gif-picker.test.ts`).
+- **Unit:** `npx vitest run tests/unit src` — 295 files, 6,599 passed, 152
+  expected-fail (on the follow-up branch off `dev` `782e010e`; 292 files,
+  6,570 passed on the original PR's base). New named cases: the typed preview
+  failed state and its
+  bounded retry (`embeds.test.ts`), the inline-image failed state/retry,
+  "never reads as loaded", "offers no retry for a policy refusal", "keeps the
+  image hidden and unopenable until its bytes load", "an image that fails after
+  the broker served it lands in the failed state", focus retention on retry and
+  the dialog naming (`media.test.ts`), the picker's typed failure and retry
+  (`gif-picker.test.ts`).
 - **Mocked shell:** `npx playwright test tests/e2e/b9-rich-content.spec.ts
---workers=1` — 14 passed (loaded vs failed, all six `ExternalContentFailure`
-  variants, retry on demand through the broker, keyboard lightbox open/contain/
-  restore, Q1 names/contrast, reduced motion, 940×500 reflow at 20 px and 200 %).
+--workers=1` — 17 passed. The test-gate's eight live scenarios map to these
+  covering specs (all mocked-shell; the native broker leg remains B9-8's):
+  1. Loaded preview + loaded image — `b9-rich-content.spec.ts` "a successful
+     preview loads…"; `message-media.spec.ts` "renders the OG title…" and
+     "renders the player card…".
+  2. All six `ExternalContentFailure` preview refusals — `b9-rich-content.spec.ts`
+     the six `a ${failure} preview refusal never reads as a loaded card` cases.
+  3. Policy refusal of the inline image offers no retry and is not a Tab stop —
+     `b9-rich-content.spec.ts` "a policy refusal of the inline image offers no
+     retry and is not a Tab stop" (newly added this pass).
+  4. Keyboard Enter on Retry keeps focus while re-asking — `b9-rich-content.spec.ts`
+     "the retry control is keyboard operable with an accessible name";
+     `media.test.ts` "keeps keyboard focus on the retry…".
+  5. Transient image failure recovers on Retry, focus to the image, Space opens
+     the lightbox, Escape restores focus — `b9-rich-content.spec.ts` "a transient
+     image failure is retried…" and "an inline image is keyboard operable and the
+     lightbox contains then restores focus".
+  6. After the consent reset a stale Retry sends nothing to the broker —
+     `b9-rich-content.spec.ts` "a consent reset re-conceals the failed image and
+     no stale retry can fetch" (newly added); `b9-content-consent.spec.ts` reset
+     journey; `features/content-consent/external.test.ts` "refuses at the broker
+     seam too".
+  7. GIF transient failure shows "Couldn't load GIFs" + Retry and re-queries —
+     `b9-rich-content.spec.ts` "a transient GIF failure is a typed retry, not
+     the empty state" (newly added); `gif-picker.test.ts` typed-failure/retry.
+  8. Q1 names/contrast/focus, no motion under reduced motion, 940×500 reflow at
+     20 px 1×/2× — `b9-rich-content.spec.ts` the Q1, reduced-motion and reflow
+     cases.
+     This pass added three e2e cases (scenarios 3, 6, 7) and taught the native mock
+     to refuse an image by failure class (it previously answered only bytes or a
+     blanket `unavailable`); no other scenario was genuinely missing.
 - **Consent preserved:** `b9-content-consent.spec.ts`, `message-media.spec.ts`
-  — 40 passed unchanged; B9-8's zero-fetch-before-consent and its reset journey
-  are unmodified.
+  — 42 passed; B9-8's zero-fetch-before-consent and its reset journey are
+  unmodified.
 - **Bundle:** startup closure 94,872 B / 95,000 B (+271 B, the startup
   `mediaControls` catalog and the lightbox focus code); MainPage 63,709 B /
   64,000 B (+37 B). No budget change; no note appended. Re-measured on Linux
