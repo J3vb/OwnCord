@@ -236,10 +236,13 @@ budget (below); no budget was raised.
 - **Numbers stay ungrouped where the literal was.** Character and attachment
   caps pass `String(...)` (`error.tooLong`, `error.tooManyAttachments`,
   `composer.slowMode`, `search.minChars`, `picker.groupHint`) so "4000",
-  "5s" and "9" keep their exact English. Counted plural titles
-  (`members.count`, `mention.count`, `unread.count`, `reaction.others`) become
-  plural entries with unchanged English. `requests.dm.groupSubtitle` keeps the
-  literal's always-plural "{count} members" wording.
+  "5s" and "9" keep their exact English. The counted titles `mention.count`,
+  `unread.count` and `reaction.others` become plural entries: `count` picks the
+  branch and the displayed number is a separate `{n}` passed as `String(count)`,
+  so a count of 1234 still renders "1234", not "1,234" (and `reaction.others`
+  carries the reactor names, so the whole sentence is one entry).
+  `members.count` and `requests.dm.groupSubtitle` keep the literals'
+  always-plural "{count} members" wording, so "1 members" is unchanged.
 
 ### Bundle budget
 
