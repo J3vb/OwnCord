@@ -13,9 +13,18 @@
  * bounds before sending; that check is about input, not authority. This module
  * only renders and reports intent: Queue.ts sends the write, shows the server's
  * answer (a timeout's voice half included) and reads the report again.
+ *
+ * Removal, kick and ban (B9-14) each need their own permission bit (HP-5):
+ * MANAGE_MESSAGES, KICK_MEMBERS, BAN_MEMBERS. Each is offered to the holder
+ * only while their role has that bit (an unknown role has none), removal only
+ * on a reported message, and each is confirmed first. The bit is read again at
+ * confirmation, so an offer made before a demotion is not sent.
  */
 
+import { createModal } from "@lib/modalFactory";
 import { appendChildren, createElement, setText } from "@lib/dom";
+import { currentUserHasPermission } from "@lib/permissions";
+import { Permission } from "@lib/types";
 import { moderationText as t } from "../../i18n/moderation";
 import { activeTimeoutEnd, type ReportDetail } from "./api";
 import { dateText } from "./Evidence";
@@ -38,7 +47,42 @@ export type ActionWrite =
       readonly amount: number;
       readonly unit: LengthUnit;
     }
-  | { readonly kind: "lift"; readonly userId: number };
+  | { readonly kind: "lift"; readonly userId: number }
+  | { readonly kind: EnforceKind; readonly reason: string };
+
+/** The irreversible report actions, each gated on its own bit, with their copy. */
+export type EnforceKind = "removal" | "kick" | "ban";
+export const ENFORCE = {
+  removal: {
+    bit: Permission.MANAGE_MESSAGES,
+    labelKey: "enforce.removal",
+    headingKey: "confirm.removal.title",
+    bodyKey: "confirm.removal.body",
+    confirmKey: "confirm.removal.confirm",
+    doneKey: "done.removal",
+  },
+  kick: {
+    bit: Permission.KICK_MEMBERS,
+    labelKey: "enforce.kick",
+    headingKey: "confirm.kick.title",
+    bodyKey: "confirm.kick.body",
+    confirmKey: "confirm.kick.confirm",
+    doneKey: "done.kick",
+  },
+  ban: {
+    bit: Permission.BAN_MEMBERS,
+    labelKey: "enforce.ban",
+    headingKey: "confirm.ban.title",
+    bodyKey: "confirm.ban.body",
+    confirmKey: "confirm.ban.confirm",
+    doneKey: "done.ban",
+  },
+} as const;
+
+/** Whether the signed-in user's role holds `kind`'s bit. The server still decides rank. */
+export function mayEnforce(kind: EnforceKind): boolean {
+  return currentUserHasPermission(ENFORCE[kind].bit);
+}
 
 /** What the reader typed, kept by Queue.ts across re-reads of the same report. */
 export interface ActionDraft {
@@ -46,11 +90,13 @@ export interface ActionDraft {
   reason: string;
   amount: string;
   unit: LengthUnit;
+  enforce: string;
 }
 
 export const emptyActionDraft = (): ActionDraft => ({
   warn: "",
   reason: "",
+  enforce: "",
   amount: "",
   unit: "minutes",
 });
@@ -69,6 +115,8 @@ export interface ActionOptions {
   /** Whether the write was accepted; one runs at a time. */
   readonly onWrite: (write: ActionWrite) => boolean;
   readonly signal: AbortSignal;
+  /** The live report's control with this focus key, or its heading. */
+  readonly refocus: (key: string) => HTMLElement | null;
   /** For tests: the time a running timeout is measured against. */
   readonly now?: number;
 }
@@ -126,7 +174,12 @@ export function buildActionForms(o: ActionOptions): ActionView {
     return b;
   };
   /** A single-line reason; `key` names its draft field. */
-  const reasonField = (id: string, key: "warn" | "reason", label: string): HTMLElement[] => {
+  const reasonField = (
+    id: string,
+    key: "warn" | "reason" | "enforce",
+    label: string,
+    hintText = t("act.reasonHint"),
+  ): HTMLElement[] => {
     const input = createElement("input", {
       id,
       type: "text",
@@ -138,11 +191,7 @@ export function buildActionForms(o: ActionOptions): ActionView {
     });
     input.value = draft[key];
     input.addEventListener("input", () => (draft[key] = input.value), { signal });
-    return [
-      createElement("label", { for: id }, label),
-      hint(`${id}-hint`, t("act.reasonHint")),
-      input,
-    ];
+    return [createElement("label", { for: id }, label), hint(`${id}-hint`, hintText), input];
   };
 
   if (holding) {
@@ -248,5 +297,87 @@ export function buildActionForms(o: ActionOptions): ActionView {
     element.appendChild(liftForm);
   }
 
+  // Last, after the reversible actions.
+  const kinds = (["removal", "kick", "ban"] as const).filter(
+    (k) => holding && mayEnforce(k) && (k !== "removal" || detail.targetType === "message"),
+  );
+  if (kinds.length > 0) {
+    const enforceForm = createElement("div", { class: "mod-work-form" });
+    const removed =
+      kinds[0] === "removal" &&
+      detail.history.some((e) => e.kind === "action" && e.action === "removal");
+    if (removed) enforceForm.appendChild(muted(t("enforce.removed")));
+    const offered = removed ? kinds.slice(1) : kinds;
+    if (offered.length > 0) {
+      enforceForm.append(
+        ...reasonField(`mod-enforce-${seq}`, "enforce", t("enforce.label"), t("enforce.hint")),
+      );
+    }
+    for (const kind of offered) {
+      const b = button(t(ENFORCE[kind].labelKey), kind, "button");
+      b.addEventListener(
+        "click",
+        () => {
+          if (b.getAttribute("aria-disabled") === "true") return;
+          confirmEnforce(
+            kind,
+            signal,
+            () => o.refocus(kind),
+            () => {
+              if (mayEnforce(kind)) send({ kind, reason: cleanReason(draft.enforce) });
+            },
+          );
+        },
+        { signal },
+      );
+      enforceForm.appendChild(b);
+    }
+    element.appendChild(enforceForm);
+  }
+
   return { element, takesInput: holding };
+}
+
+/**
+ * The destructive-action confirm (message-requests/decisions.ts's shape):
+ * Cancel first and focused, Escape and the backdrop cancel, focus returns to
+ * the opener, or to `fallbackFocus` when a role change rebuilt the report.
+ */
+function confirmEnforce(
+  kind: EnforceKind,
+  signal: AbortSignal,
+  fallbackFocus: () => HTMLElement | null,
+  onConfirm: () => void,
+): void {
+  const titleId = `mod-confirm-${++actSeq}`;
+  const content = createElement("div");
+  const header = createElement("div", { class: "modal-header" });
+  header.appendChild(createElement("h3", { id: titleId }, t(ENFORCE[kind].headingKey)));
+  const body = createElement("div", { class: "modal-body" });
+  body.appendChild(createElement("p", { class: "modal-danger-text" }, t(ENFORCE[kind].bodyKey)));
+  const footer = createElement("div", { class: "modal-footer" });
+  const cancel = createElement(
+    "button",
+    { class: "btn-modal-cancel", type: "button" },
+    t("confirm.cancel"),
+  );
+  const confirm = createElement(
+    "button",
+    { class: "btn-danger", type: "button", "data-testid": "mod-confirm" },
+    t(ENFORCE[kind].confirmKey),
+  );
+  footer.append(cancel, confirm);
+  content.append(header, body, footer);
+  const modal = createModal({
+    content,
+    ariaLabelledBy: titleId,
+    overlayAttrs: { "data-testid": "mod-confirm-dialog" },
+    signal,
+    fallbackFocus,
+  });
+  cancel.addEventListener("click", () => modal.close());
+  confirm.addEventListener("click", () => {
+    modal.close();
+    onConfirm();
+  });
 }

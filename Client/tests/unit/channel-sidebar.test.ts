@@ -33,6 +33,7 @@ vi.mock("@lib/e2eeCrypto", async (importOriginal) => {
 
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import {
+  addChannel,
   channelsStore,
   setChannels,
   setActiveChannel,
@@ -1514,16 +1515,22 @@ describe("ChannelSidebar", () => {
     expect(volMenu!.textContent).toContain("Reset Volume");
   });
 
-  // ── Voice moderation context menu (MUTE_MEMBERS) ──
+  // ── Voice moderation context menu (can_moderate_voice, B9-14) ──
 
   /** Signs in as a user whose role holds exactly `permissions`, puts one other
    *  user in the voice channel, mounts the sidebar and right-clicks their row.
-   *  Returns the open menu element (or null). */
+   *  Every channel carries `verdict` as its can_moderate_voice (null: absent);
+   *  by default the one the server computes with no channel override (the
+   *  role's MUTE_MEMBERS, ADMINISTRATOR included). Returns the open menu
+   *  element (or null). */
   function openVoiceMenuAs(
     permissions: number,
     voiceUser: Partial<VoiceStatePayload> = {},
     onVoiceModerate?: Parameters<typeof createChannelSidebar>[0]["onVoiceModerate"],
     channels: ReadyChannel[] = testChannels,
+    verdict: boolean | null = (permissions &
+      (Permission.MUTE_MEMBERS | Permission.ADMINISTRATOR)) !==
+      0,
   ): HTMLElement | null {
     sidebar.destroy?.();
     setRoles([{ id: 3, name: "Moderator", color: null, permissions }]);
@@ -1536,7 +1543,9 @@ describe("ChannelSidebar", () => {
     }));
     sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onVoiceModerate });
 
-    setChannels(channels);
+    setChannels(
+      channels.map((ch) => (verdict === null ? ch : { ...ch, can_moderate_voice: verdict })),
+    );
     updateVoiceState({
       channel_id: 3,
       user_id: 80,
@@ -1562,6 +1571,86 @@ describe("ChannelSidebar", () => {
     expect(menu!.querySelector('[data-action="voice-disconnect"]')).toBeNull();
     // The volume controls stay available to everyone.
     expect(menu!.textContent).toContain("Reset Volume");
+  });
+
+  it("follows the channel's verdict, not the role: an override that denies hides the section", () => {
+    const menu = openVoiceMenuAs(
+      Permission.MUTE_MEMBERS,
+      {},
+      voiceModCallbacks(),
+      testChannels,
+      false,
+    );
+    expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
+    expect(menu!.querySelector('[data-action="voice-mod-unavailable"]')).toBeNull();
+  });
+
+  it("follows the channel's verdict, not the role: a verdict of true offers the section", () => {
+    const menu = openVoiceMenuAs(
+      Permission.MANAGE_CHANNELS,
+      {},
+      voiceModCallbacks(),
+      testChannels,
+      true,
+    );
+    expect(menu!.querySelector('[data-action="server-mute"]')).not.toBeNull();
+  });
+
+  it("offers nothing without a verdict, and says why to a role holding MUTE_MEMBERS", () => {
+    const cb = voiceModCallbacks();
+    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, testChannels, null);
+    expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
+    expect(menu!.querySelector('[data-action="voice-disconnect"]')).toBeNull();
+    const why = menu!.querySelector('[data-action="voice-mod-unavailable"]');
+    expect(why!.textContent).toBe(
+      "Voice moderation unavailable: the server hasn't confirmed you can moderate this channel.",
+    );
+    expect(why!.getAttribute("aria-disabled")).toBe("true");
+    (why as HTMLElement).click();
+    expect(cb.onServerMute).not.toHaveBeenCalled();
+
+    const member = openVoiceMenuAs(Permission.SEND_MESSAGES, {}, cb, testChannels, null);
+    expect(member!.querySelector('[data-action="voice-mod-unavailable"]')).toBeNull();
+  });
+
+  it("reads each channel's verdict: moderating one voice channel is not moderating another", () => {
+    const channels: ReadyChannel[] = [
+      ...testChannels.map((ch) => (ch.id === 3 ? { ...ch, can_moderate_voice: false } : ch)),
+      {
+        id: 5,
+        name: "voice-two",
+        type: "voice",
+        category: "Voice Channels",
+        position: 1,
+        can_moderate_voice: true,
+      },
+    ];
+    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, voiceModCallbacks(), channels, null);
+    expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
+  });
+
+  it("takes a live channel_create verdict at the next open, and keeps it when one is absent", () => {
+    const cb = voiceModCallbacks();
+    expect(
+      openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb)!.querySelector(
+        '[data-action="server-mute"]',
+      ),
+    ).not.toBeNull();
+    const voice = testChannels.find((ch) => ch.id === 3)!;
+    const row = (): HTMLElement => container.querySelector(".voice-user-item") as HTMLElement;
+    const reopen = (): HTMLElement | null => {
+      row().dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      return document.querySelector(".user-vol-menu");
+    };
+
+    // An override edit revokes it (RefreshChannelVisibility's targeted channel_create).
+    addChannel({ ...voice, can_moderate_voice: false });
+    expect(reopen()!.querySelector('[data-action="server-mute"]')).toBeNull();
+    // A channel_create without the field changes nothing.
+    addChannel({ ...voice });
+    expect(reopen()!.querySelector('[data-action="server-mute"]')).toBeNull();
+    addChannel({ ...voice, can_moderate_voice: true });
+    expect(reopen()!.querySelector('[data-action="server-mute"]')).not.toBeNull();
   });
 
   it("hides the moderation section when the page wired no callbacks", () => {

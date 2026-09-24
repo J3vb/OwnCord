@@ -277,7 +277,9 @@ export interface ModerationReportDetail {
  *  timeout's duration is 60 to 2,419,200 seconds (Server/service/moderation.go). */
 export type ModerationActRequest =
   | { readonly kind: "warning"; readonly reason: string }
-  | { readonly kind: "timeout"; readonly reason: string; readonly duration_seconds: number };
+  | { readonly kind: "timeout"; readonly reason: string; readonly duration_seconds: number }
+  /** B9-14: removal acts on the reported message; kick is a force-logout. */
+  | { readonly kind: "removal" | "kick" | "ban"; readonly reason: string };
 
 /** POST /moderation/queue/{id}/close outcomes (Server/service/report.go). */
 export type ModerationOutcome = "actioned" | "no_action" | "duplicate";

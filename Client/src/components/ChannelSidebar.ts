@@ -36,6 +36,7 @@ import { roleHasPermission, canManageChannels, currentUserPermissions } from "@l
 import { Permission } from "@lib/types";
 import { importIdentityPublicKey, computeKeyFingerprint } from "@lib/e2eeCrypto";
 import { shellText } from "../i18n/shell";
+import { voiceText } from "../i18n/voice";
 
 const log = createLogger("ChannelSidebar");
 
@@ -177,11 +178,11 @@ export interface VoiceModerationCallbacks {
   readonly onDisconnect: (userId: number) => void;
 }
 
-/** Whether the signed-in user's role holds MUTE_MEMBERS. The server enforces
- *  it (and the rank rule the client cannot evaluate); this only decides whether
- *  the menu is worth offering. Derived through the same helper as the
- *  member-list moderation gates so the two cannot disagree about who is a
- *  moderator. */
+/** Whether the signed-in user's role holds MUTE_MEMBERS. Channel overrides can
+ *  take that away or keep it, so the voice menu follows each channel's
+ *  server-computed can_moderate_voice instead; this role-level answer only
+ *  decides whether a channel with no verdict says why moderation is missing.
+ *  Derived through the same helper as the member-list moderation gates. */
 export function canModerateVoice(): boolean {
   const role = getCurrentUser()?.role ?? "";
   return roleHasPermission(role, Permission.MUTE_MEMBERS);
@@ -323,16 +324,24 @@ function renderTextChannelItem(
   return item;
 }
 
-/** Moderation section for one participant row, or undefined when the local
- *  user may not moderate voice (which hides the section entirely). Move targets
- *  are the other voice channels; the server re-checks that the TARGET may
- *  connect to the one picked. */
+/** Moderation section for one participant row, from the channel's
+ *  server-computed can_moderate_voice (B9-14, Q5): undefined when it is false
+ *  (which hides the section entirely), and the reason it is unavailable when
+ *  the server gave no verdict to a role that holds MUTE_MEMBERS. Read when the
+ *  menu opens, so a role or override change since the last render counts. Move
+ *  targets are the other voice channels; the server re-checks rank, timeouts
+ *  and that the TARGET may connect to the one picked. */
 function buildVoiceModOptions(
   channelId: number,
   user: VoiceUser,
   cb?: VoiceModerationCallbacks,
-): VoiceModMenuOptions | undefined {
-  if (cb === undefined || !canModerateVoice()) return undefined;
+): VoiceModMenuOptions | string | undefined {
+  if (cb === undefined) return undefined;
+  const verdict = channelsStore.getState().channels.get(channelId)?.canModerateVoice;
+  if (verdict === undefined) {
+    return canModerateVoice() ? voiceText("volume.modUnknown") : undefined;
+  }
+  if (!verdict) return undefined;
   const moveTargets = Array.from(channelsStore.getState().channels.values())
     .filter((ch) => ch.type === "voice" && ch.id !== channelId)
     .map((ch) => ({ id: ch.id, name: ch.name }));

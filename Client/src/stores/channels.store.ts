@@ -31,6 +31,12 @@ export interface Channel {
   readonly lastMessageId: number | null;
   /** Whether the current user may post here (drives the composer affordance). */
   readonly canSend: boolean;
+  /**
+   * Whether the current user may mute, deafen, move or disconnect voice
+   * participants here, as the server computed it (ReadyChannel.can_moderate_voice).
+   * Absent when the server never said, which offers no voice moderation.
+   */
+  readonly canModerateVoice?: boolean | undefined;
   /** Per-channel cooldown in seconds (0 = off). Drives the composer countdown. */
   readonly slowMode: number;
   /**
@@ -107,6 +113,7 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       // The current server always sends can_send; older servers omit it, in
       // which case we default permissive (no gating) rather than guessing.
       canSend: ch.can_send ?? true,
+      canModerateVoice: ch.can_moderate_voice,
       slowMode: ch.slow_mode ?? 0,
       // Older servers omit these; "absent" reads as unflagged / unlimited,
       // which is also what an unconfigured channel sends.
@@ -178,6 +185,8 @@ export function addChannel(channel: ChannelCreatePayload): void {
       // and default permissive for a genuinely new channel. The server
       // enforces regardless.
       canSend: channel.can_send ?? existing?.canSend ?? true,
+      // Same targeted, absent-means-unchanged rule; a new channel stays unknown.
+      canModerateVoice: channel.can_moderate_voice ?? existing?.canModerateVoice,
       slowMode: channel.slow_mode ?? 0,
       nsfw: channel.nsfw ?? false,
       // channel_create never carries the per-viewer acknowledgement; keep the
