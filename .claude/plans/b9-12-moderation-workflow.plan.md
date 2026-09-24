@@ -277,6 +277,11 @@ B9-11 left no server gap: no server, protocol, schema or migration change.
   this change 94,100 B of 95,500 B and 63,978 B of 64,000 B, no budget change.
   The review, history and copy load with the lazy Moderation Center chunk;
   the startup growth is the three API methods and the grouped CSS.
+  After merging `dev` `32915716` (B9-9 #1775, #1776, the 940×500 sidebar fix
+  #1780), 94,418 B and 63,996 B, no budget change; the whole unit suite
+  (307 files, 6,686 passed, 152 expected-fail), the moderation and
+  text-expansion Playwright specs (33 passed) and both moderation fullstack
+  specs (3 passed) were re-run green on the merge.
 
 ### Evidence
 
