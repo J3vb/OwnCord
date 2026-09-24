@@ -729,10 +729,12 @@ function buildTotpDisableView(
   cancelBtn.addEventListener(
     "click",
     () => {
+      const hadFocus = confirmArea.contains(document.activeElement);
       confirmArea.style.display = "none";
       disableBtn.style.display = "";
       pwInput.value = "";
       setText(errorEl, "");
+      if (hadFocus) disableBtn.focus();
     },
     { signal },
   );
@@ -1082,9 +1084,11 @@ function buildSessionsSection(
   appendChildren(confirmArea, warning, errorEl, btnRow);
 
   const closeConfirm = (): void => {
+    const hadFocus = confirmArea.contains(document.activeElement);
     confirmArea.style.display = "none";
     revokeAllBtn.style.display = "";
     setText(errorEl, "");
+    if (hadFocus) revokeAllBtn.focus();
   };
   revokeAllBtn.addEventListener(
     "click",
@@ -1107,10 +1111,6 @@ function buildSessionsSection(
           // cleared and the app leaves. Otherwise refresh what is left.
           if (result.current_session_revoked || signal.aborted) return;
           closeConfirm();
-          // The confirm button was focused and is now hidden; hand focus to
-          // the trigger that is back on screen rather than drop it to <body>
-          // (B9-23 focus stability across a rebuilt section).
-          revokeAllBtn.focus();
           load();
         })
         .catch((err: unknown) => {
@@ -1217,6 +1217,7 @@ function buildDeleteAccountSection(
   });
 
   const errorEl = outcomeEl("error", "delete-account-error");
+  errorEl.id = "delete-account-error";
   errorEl.style.marginBottom = "8px";
 
   const btnRow = createElement("div", { style: "display:flex;gap:8px" });
@@ -1257,10 +1258,12 @@ function buildDeleteAccountSection(
   cancelBtn.addEventListener(
     "click",
     () => {
+      const hadFocus = confirmArea.contains(document.activeElement);
       confirmArea.style.display = "none";
       deleteBtn.style.display = "";
       passwordInput.value = "";
       setText(errorEl, "");
+      if (hadFocus) deleteBtn.focus();
     },
     { signal },
   );
@@ -1370,23 +1373,24 @@ export function buildAccountTab(
   usernameError.style.marginTop = "4px";
   editForm.appendChild(usernameError);
 
-  const openEditForm = () => {
+  let editOpener: HTMLElement = editUsernameBtn;
+  const openEditForm = (e: Event) => {
+    editOpener = e.currentTarget as HTMLElement;
     editForm.style.display = "flex";
     editInput.value = authStore.getState().user?.username ?? "";
     editInput.focus();
+  };
+  const closeEditForm = () => {
+    const hadFocus = editForm.contains(document.activeElement);
+    editForm.style.display = "none";
+    setText(usernameError, "");
+    if (hadFocus) editOpener.focus();
   };
 
   editUserProfileBtn.addEventListener("click", openEditForm, { signal });
   editUsernameBtn.addEventListener("click", openEditForm, { signal });
 
-  cancelBtn.addEventListener(
-    "click",
-    () => {
-      editForm.style.display = "none";
-      setText(usernameError, "");
-    },
-    { signal },
-  );
+  cancelBtn.addEventListener("click", closeEditForm, { signal });
 
   saveBtn.addEventListener(
     "click",
@@ -1413,7 +1417,7 @@ export function buildAccountTab(
             }),
           );
           setText(usernameValue, newName);
-          editForm.style.display = "none";
+          closeEditForm();
         })
         .catch((err: unknown) => {
           setText(usernameError, errorText(err, t("profile.usernameSaveFailed")));

@@ -103,8 +103,10 @@ test.describe("B9-23 connect form validation is field-linked", () => {
     const banner = page.locator(".error-banner.visible");
     await expect(banner).toHaveText(/Server address is required/);
     await expect(host).toHaveAttribute("aria-invalid", "true");
-    await expect(host).toHaveAttribute("aria-describedby", "connect-error-banner");
+    await expect(host).toHaveAccessibleDescription(/Server address is required/);
     await expect(host).toBeFocused();
+    // Announced once, through the focused field — the banner is not also live.
+    await expect(banner).not.toHaveAttribute("role", "alert");
   });
 
   test("the short-password error marks the password input invalid", async ({ page }) => {
@@ -177,13 +179,19 @@ test.describe("B9-23 account settings feedback and disclosure", () => {
     const password = pane.locator("[data-testid='delete-account-password']");
     await expect(password).toBeFocused();
     await expect(password).toHaveAccessibleName(/Enter your password/);
-    await expect(password).toHaveAttribute("aria-describedby", "delete-account-error");
 
     await pane.locator("[data-testid='delete-account-confirm']").click();
     const error = pane.locator("[data-testid='delete-account-error']");
     await expect(error).toHaveText("Password is required.");
     await expect(error).toHaveAttribute("role", "alert");
     await expect(error).toHaveClass(/form-error/);
+    await expect(password).toHaveAccessibleDescription("Password is required.");
+
+    // Cancelling by keyboard hands focus back to the trigger, not <body>.
+    await confirmArea.getByRole("button", { name: "Cancel" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(confirmArea).toBeHidden();
+    await expect(pane.locator("[data-testid='delete-account-trigger']")).toBeFocused();
   });
 
   test("the recovery overlay's error is associated with every field", async ({ page }) => {

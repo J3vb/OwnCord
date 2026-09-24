@@ -529,12 +529,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       "aria-describedby": "totp-error",
     });
     // A malformed code used to be a 500 ms red border with no text and no
-    // announcement, so a screen reader got nothing. A polite live region says
-    // what is wrong and is linked to the input (B9-23).
+    // announcement, so a screen reader got nothing. The message is the
+    // input's description and focus returns to the input, so it is read once
+    // with the field rather than also through a live region (B9-23).
     totpError = createElement("div", {
       class: "form-error",
       id: "totp-error",
-      role: "alert",
       "data-testid": "totp-invalid",
     });
 
@@ -700,8 +700,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   function updateErrorBanner(): void {
     // A field error is linked to its input and focus moves there, so a
     // keyboard/screen-reader user lands on the control to fix rather than on
-    // an unassociated sentence (B9-23). A server error names no field.
+    // an unassociated sentence (B9-23). The banner is only a live alert for a
+    // server error, which names no field, so each error is announced once.
     const field = formState === "error" ? errorField : null;
+    if (field === null) errorBanner.setAttribute("role", "alert");
+    else errorBanner.removeAttribute("role");
     for (const input of allFieldInputs()) {
       input.removeAttribute("aria-invalid");
       if (input.getAttribute("aria-describedby") === errorBanner.id) {

@@ -156,6 +156,12 @@ describe("ConnectPage", () => {
       expect(errorBanner!.classList.contains("visible")).toBe(true);
       expect(errorBanner!.textContent).toContain("at least 8 characters");
     });
+    // A field error is announced once: through the focused field's
+    // description, not also through a live alert.
+    const errorBanner = container.querySelector(".error-banner")!;
+    expect(errorBanner.hasAttribute("role")).toBe(false);
+    expect(passwordInput.getAttribute("aria-describedby")).toBe(errorBanner.id);
+    expect(document.activeElement).toBe(passwordInput);
 
     page.destroy?.();
   });
@@ -821,6 +827,10 @@ describe("ConnectPage", () => {
     const errorBanner = container.querySelector(".error-banner");
     expect(errorBanner!.classList.contains("visible")).toBe(true);
     expect(errorBanner!.textContent).toBe("Connection refused");
+    expect(errorBanner!.getAttribute("role")).toBe("alert");
+    for (const input of container.querySelectorAll(".connect-form input")) {
+      expect(input.getAttribute("aria-describedby")).not.toBe(errorBanner!.id);
+    }
 
     page.destroy?.();
   });
@@ -1359,6 +1369,11 @@ describe("ConnectPage", () => {
 
     expect(onTotpSubmit).not.toHaveBeenCalled();
     expect(totpInput.classList.contains("error")).toBe(true);
+    const totpError = container.querySelector("[data-testid='totp-invalid']")!;
+    expect(totpError.textContent).not.toBe("");
+    expect(totpError.hasAttribute("role")).toBe(false);
+    expect(totpInput.getAttribute("aria-describedby")).toBe(totpError.id);
+    expect(document.activeElement).toBe(totpInput);
 
     page.destroy?.();
   });
