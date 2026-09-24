@@ -227,14 +227,15 @@ B9-11 left no server gap: no server, protocol, schema or migration change.
   under the active filter), the report stays open and is read by id, and a
   `role="status"` line says "Your change moved this report out of the
   current filter. It stays open here." instead of the "no longer in this
-  list" alert. The report counts as the reader's own write from the moment
-  the POST is sent, so a `mod_queue` re-read that lands before the server's
-  204 (the server broadcasts first) keeps it open too, but only until the
-  answer: if that write fails, the quiet note is withdrawn and the report is
-  treated like any other that left the list; later background reads keep reading it by id until the reader
-  leaves it or changes the filter. A report that leaves the list for any
-  other reason (another moderator's write seen in a background read, a lost
-  409 race, a filter change) still closes with "no longer in this list".
+  list" alert; later background reads keep reading it by id until the reader
+  leaves it or changes the filter. The report counts as the reader's own
+  write from the moment the POST is sent, so a `mod_queue` re-read that lands
+  before the server's 204 (the server broadcasts first) keeps it open too,
+  but only until the answer: if that write fails, the quiet note is withdrawn
+  and the report is treated like any other that left the list. A report
+  that leaves the list for any other reason (another moderator's write seen
+  in a background read, a lost 409 race, a filter change) still closes with
+  "no longer in this list".
   After an own close the status also says it is under Show: Closed.
 - **Draft lifetime.** The unsaved note lives only for its report while the
   view is live: switching report, refusal, 404, the view closing, role loss
