@@ -91,7 +91,7 @@ Exercise first contact → safe preview → accept/block, labelled content → a
 
 ### Task 3: Measure native privacy and accessibility
 
-Collect first-party requests, native broker counters/capture and provider traffic; test warm-cache re-entry and logout. Run the approved screen-reader, keyboard, pointer, contrast, motion and zoom/reflow matrix on desktop targets. Synthetic test data only.
+Collect first-party requests, native broker counters/capture and provider traffic; test warm-cache re-entry and logout. Run the approved keyboard, pointer, contrast, motion and zoom/reflow matrix on desktop targets; the screen-reader clause is met by the automated ARIA name/role and keyboard/focus evidence, with no manual screen-reader pass (owner decision 2026-09-24). Synthetic test data only.
 
 ### Task 4: Ratchet and reconcile
 
@@ -129,8 +129,9 @@ evidence. No milestone defers its accessibility acceptance to B9-26.
 
 - [ ] **Keyboard:** Tab/Shift+Tab, Enter/Space, Escape and applicable arrow keys
       reach and operate every action; pointer parity; no hover-only action.
-- [ ] **Screen reader:** NVDA (Windows) and Orca (Linux) read names, roles, values, errors
-      and relevant status once; no concealed/private/secret content in its tree.
+- [ ] **Screen reader:** automated ARIA name/role and keyboard/focus tests prove names, roles,
+      values, errors and relevant status once; no concealed/private/secret content in the
+      accessibility tree. No manual NVDA/Orca pass (owner decision 2026-09-24, Q1 amendment).
 - [ ] **Focus:** visible indicator, logical order, dialog containment/restore,
       stable location through async update/removal, and a safe fallback opener.
 - [ ] **Contrast:** measure text, controls, status and focus at the Q1 thresholds in
