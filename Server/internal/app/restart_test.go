@@ -295,7 +295,9 @@ func TestRun_RestartRequest_DrainsCleanly(t *testing.T) {
 	// Wait for the server to actually serve before requesting the restart.
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
 	up := false
-	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
+	// Startup migrates a fresh DB; under -race on a loaded Windows CI runner that
+	// alone has taken 15s, so the deadline leaves generous headroom.
+	for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); {
 		resp, healthErr := http.Get(healthURL) //nolint:gosec // G107: loopback URL built from the test's own port
 		if healthErr == nil {
 			_, _ = io.Copy(io.Discard, resp.Body)

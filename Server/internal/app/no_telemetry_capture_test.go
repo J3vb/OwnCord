@@ -283,7 +283,9 @@ func openRegistration(t *testing.T, client *http.Client, base, ownerToken string
 
 func waitHealthy(t *testing.T, client *http.Client, url string) {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	// Startup migrates a fresh DB; under -race on a loaded Windows CI runner that
+	// alone has taken 15s, so the deadline leaves generous headroom.
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(url) //nolint:noctx // test poll
 		if err == nil {
