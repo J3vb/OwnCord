@@ -38,7 +38,7 @@ flowchart TB
     subgraph comm ["Communication layer (src/lib)"]
         API["api.ts<br/>REST client via httpProxy.ts<br/>(TOFU-pinned Rust tunnel)"]
         WSC["ws.ts<br/>reconnect w/ backoff, seq replay,<br/>generation counters, cert-tofu events"]
-        DISP["dispatcher.ts<br/>34 msg types → store mutators<br/>(handlers in features/*/wsHandlers.ts)"]
+        DISP["dispatcher.ts<br/>36 msg types → store mutators<br/>(handlers in features/*/wsHandlers.ts)"]
         LKS["livekitSession.ts (0.9k LOC facade)<br/>+ features/voice/<br/>voice state machine"]
         LKE["livekitE2EE.ts (1.0k LOC facade)<br/>+ features/voice/e2ee*<br/>key-holder election, room-key<br/>wrap/unwrap, peer verification"]
     end
