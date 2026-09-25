@@ -79,11 +79,18 @@ baselines and scorecards.
 
 | Status    |   Count |
 | --------- | ------: |
-| Fixed     |     453 |
-| Open      |       1 |
-| Declined  |       4 |
+| Fixed     |     466 |
+| Open      |       6 |
+| Declined  |       6 |
 | Duplicate |       1 |
-| **Total** | **459** |
+| **Total** | **479** |
+
+As of 2026-09-25, the B9 exit audit is filed as `OC-0460`–`OC-0479`: thirteen
+findings are fixed by PRs #1802, #1798 and #1800 (the keyboard context menus;
+the login, contrast, motion and roving-tabindex fixes with the shared
+keyboard-reachability helper; the owner-only backup policy; and the
+backup/upgrade hardening), two are declined (owner declined screen-reader-only
+work), and five stay open for after the beta.
 
 As of 2026-09-23, `OC-0446` and `OC-0447` (the k6 channel-spreading and
 restart-measurement harness fixes) and `OC-0448` (release tags moved only after
