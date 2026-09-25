@@ -548,6 +548,33 @@ describe("createPinnedPanelController", () => {
     expect(api.getPins).toHaveBeenCalledOnce();
   });
 
+  it("a cleanup while getPins is in flight cancels the open, and a later toggle still opens", async () => {
+    let resolvePins: (value: { messages: unknown[] }) => void;
+    const pending = new Promise<{ messages: unknown[] }>((resolve) => {
+      resolvePins = resolve;
+    });
+    const api = makeMockApi({
+      getPins: vi.fn().mockReturnValueOnce(pending).mockResolvedValue({ messages: [] }),
+    });
+
+    const controller = createPinnedPanelController({
+      api: api as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 42,
+    });
+
+    const opening = controller.toggle();
+    controller.cleanup(); // e.g. the narrow-width drawer opening over it
+    resolvePins!({ messages: [] });
+    await opening;
+
+    expect(createPinnedMessages).not.toHaveBeenCalled();
+    expect(mockPinnedMessagesMount).not.toHaveBeenCalled();
+
+    await controller.toggle();
+    expect(mockPinnedMessagesMount).toHaveBeenCalledOnce();
+  });
+
   it("re-checks getRoot after the getPins() await and does not mount on a torn-down page", async () => {
     // Same teardown-during-fetch race as InviteManagerController.open (OC-0055):
     // toggle() must not mount on the pre-await root once the page has torn
@@ -1086,6 +1113,26 @@ describe("createInviteManagerController (additional)", () => {
 
     expect(createInviteManager).toHaveBeenCalledOnce();
     expect(api.getInvites).toHaveBeenCalledOnce();
+  });
+
+  it("a cleanup while getInvites is in flight leaves the manager unmounted", async () => {
+    let resolveInvites: (value: unknown[]) => void;
+    const pending = new Promise<unknown[]>((resolve) => {
+      resolveInvites = resolve;
+    });
+    const api = makeMockApi({ getInvites: vi.fn().mockReturnValue(pending) });
+
+    const controller = createInviteManagerController({
+      api: api as never,
+      getRoot: () => root,
+    });
+
+    const opening = controller.open();
+    controller.cleanup();
+    resolveInvites!([makeInviteResponse()]);
+    await opening;
+
+    expect(createInviteManager).not.toHaveBeenCalled();
   });
 
   it("cleanup destroys instance when open", async () => {
