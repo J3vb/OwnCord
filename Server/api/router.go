@@ -53,6 +53,9 @@ type Runtime struct {
 	// webhook, LiveKit health and signalling-proxy routes are mounted only
 	// then — the `lkErr == nil` guard that used to live in this package.
 	VoiceEnabled bool
+	// SetupToken is required on the first-run setup request when non-empty
+	// (admin.SetupOptions.SetupToken). The app generates it per start.
+	SetupToken string
 }
 
 // warnOnServerConfig logs the settings that are legal but rarely what an
@@ -72,6 +75,35 @@ func warnOnServerConfig(cfg *config.Config) {
 			"the key has no effect yet: no route is mounted and no asset is served")
 	}
 	warnOnVoiceNodeIP(cfg)
+	warnOnAdminPeerAddress(cfg)
+}
+
+// warnOnAdminPeerAddress reports an admin perimeter that will most likely see
+// a relay's address instead of the client's. With trusted_proxies empty,
+// AdminIPRestrict checks the connecting address; behind a reverse proxy that
+// is the proxy (often 127.0.0.1), and in a container it can be the bridge
+// gateway (a 172.x address) for connections Docker's userland proxy relays,
+// such as published ports reached over IPv6. The default allowlist admits
+// both, so the perimeter then admits every client the relay carries.
+//
+// tls.mode "off" and a container are the two start-up signals for that
+// shape. It warns and never refuses: a LAN-only install matches it too, and
+// first-run setup is additionally gated by the start-up setup token.
+func warnOnAdminPeerAddress(cfg *config.Config) {
+	if len(cfg.Server.TrustedProxies) > 0 || len(cfg.Server.AdminAllowedCIDRs) == 0 {
+		return
+	}
+	container := updater.RunningInContainer()
+	if cfg.TLS.Mode != "off" && !container {
+		return
+	}
+	slog.Warn("admin_allowed_cidrs is checked against the connecting address and trusted_proxies is empty — "+
+		"behind a reverse proxy or a container port relay that address is the relay's (loopback or bridge), "+
+		"which the allowlist admits",
+		"tls_mode", cfg.TLS.Mode,
+		"container", container,
+		"fix", "set server.trusted_proxies to the proxy hop(s), or narrow server.admin_allowed_cidrs to "+
+			"addresses only the owner uses. Ignore this if clients reach the server directly on a LAN")
 }
 
 // warnOnVoiceNodeIP reports a voice.node_ip that remote clients cannot route
@@ -248,9 +280,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo)
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
-		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg})
+		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg, SetupToken: rt.SetupToken})
 	r.Group(func(r chi.Router) {
-		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
+		r.Use(AdminIPRestrict("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)
 
 		// Phase C Step 9 — plugin admin REST surface. The IP gate above is
@@ -511,12 +543,12 @@ func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimit
 	// panel's perimeter to the SFU's network. Falls back to
 	// admin_allowed_cidrs when unset.
 	webhookCIDRs := cfg.Server.LiveKitWebhookCIDRs()
-	r.With(AdminIPRestrict(webhookCIDRs, cfg.Server.TrustedProxies)).
+	r.With(AdminIPRestrict("server.livekit_webhook_allowed_cidrs", webhookCIDRs, cfg.Server.TrustedProxies)).
 		Post("/api/v1/livekit/webhook",
 			hub.NewLiveKitWebhookHandler(cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
 
 	// LiveKit health check — same perimeter as the webhook.
-	r.With(AdminIPRestrict(webhookCIDRs, cfg.Server.TrustedProxies)).
+	r.With(AdminIPRestrict("server.livekit_webhook_allowed_cidrs", webhookCIDRs, cfg.Server.TrustedProxies)).
 		Get("/api/v1/livekit/health", handleLiveKitHealth(hub))
 
 	// Reverse proxy LiveKit signaling through OwnCord's HTTPS server.
@@ -539,7 +571,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 	// admin_allowed_cidrs) so a central scraper can be admitted without
 	// widening /admin. The shape is documented in docs/deployment.md — keep
 	// the two in sync.
-	r.With(AdminIPRestrict(cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
+	r.With(AdminIPRestrict("server.metrics_allowed_cidrs", cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
 		Get("/api/v1/metrics", handleMetrics(MetricsSources{
 			ConnectedUsers: hub.ClientCount,
 			VoiceSessions:  hub.VoiceSessionCount,
@@ -563,7 +595,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 	// build, exporter == "prometheus"). Returns 404 in the default no-op build
 	// because telemetry.PrometheusHandler() returns nil.
 	if promH := telemetry.PrometheusHandler(); promH != nil {
-		r.With(AdminIPRestrict(cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
+		r.With(AdminIPRestrict("server.metrics_allowed_cidrs", cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
 			Mount("/metrics", promH)
 	}
 }

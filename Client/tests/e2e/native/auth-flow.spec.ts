@@ -83,7 +83,7 @@ test.describe("Authentication Flow", () => {
     await expect(nativePage.locator(".form-logo")).toBeVisible();
 
     // Mode switch link (Login/Register toggle)
-    await expect(nativePage.locator(".form-switch a")).toBeVisible();
+    await expect(nativePage.locator(".form-switch button")).toBeVisible();
   });
 
   test("password visibility toggle works", async ({ nativePage }) => {
@@ -198,7 +198,7 @@ test.describe("Authentication Flow", () => {
   });
 
   test("can switch between login and register modes", async ({ nativePage }) => {
-    const switchLink = nativePage.locator(".form-switch a");
+    const switchLink = nativePage.locator(".form-switch button");
     await expect(switchLink).toBeVisible();
 
     // Click to switch to register mode
@@ -209,7 +209,7 @@ test.describe("Authentication Flow", () => {
     await expect(inviteField).toBeVisible({ timeout: 3_000 });
 
     // Switch back
-    await nativePage.locator(".form-switch a").click();
+    await nativePage.locator(".form-switch button").click();
 
     // Invite field should be gone
     await expect(inviteField).not.toBeVisible({ timeout: 3_000 });

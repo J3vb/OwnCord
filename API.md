@@ -103,7 +103,7 @@ Routes are registered in the `Mount*Routes` function of the owning `Server/api/*
 - `PATCH /users/{id}` → the perimeter only, with a ban or role change re-checked in `ModerationService` (`BAN_MEMBERS`/`MANAGE_ROLES` plus role hierarchy).
 - logs ticket, support bundles, attention, account erasure → `ADMINISTRATOR`, which bypasses every bit check.
 - tokens, backups, updates, recovery credentials → **Owner role only**; `ADMINISTRATOR` does not bypass this.
-- `POST /admin/api/setup` and `GET /admin/api/setup/status` are unauthenticated; `/logs/stream` takes a single-use ticket.
+- `POST /admin/api/setup` and `GET /admin/api/setup/status` are unauthenticated (setup additionally requires the one-time token printed at start-up); `/logs/stream` takes a single-use ticket.
 
 ### Global middleware
 

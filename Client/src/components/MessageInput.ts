@@ -218,6 +218,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let gifUnavailable = options.gifApi === undefined;
   const controlButtons: HTMLButtonElement[] = [];
   let attachmentPreviewBar: HTMLDivElement | null = null;
+  /** The composer's single refusal line. It stays until the user edits or
+   *  sends rather than vanishing after a few seconds (A11Y-05), so it is one
+   *  reused node, not a fresh one per call. */
+  let uploadErrorEl: HTMLDivElement | null = null;
   /** Set by mount() when file uploads are wired; backs openFilePicker(). */
   let openPicker: (() => void) | null = null;
   let mentionPopup: MentionAutocompleteComponent | null = null;
@@ -449,7 +453,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
   function showUploadError(message: string): void {
     if (attachmentPreviewBar === null) return;
-    const errEl = createElement(
+    // One persistent refusal line: the user needs to read it after the fact,
+    // so it is not removed on a timer (A11Y-05). It is cleared by the next
+    // edit or successful send (clearUploadError).
+    clearUploadError();
+    uploadErrorEl = createElement(
       "div",
       {
         class: "attachment-upload-error",
@@ -460,19 +468,22 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // error with no attachments already queued renders into a display:none
     // container and is never seen.
     attachmentPreviewBar.classList.add("visible");
-    attachmentPreviewBar.appendChild(errEl);
-    const t = setTimeout(() => {
-      activeTimers.delete(t);
-      errEl.remove();
-      if (
-        attachmentPreviewBar !== null &&
-        pendingAttachments.length === 0 &&
-        attachmentPreviewBar.childElementCount === 0
-      ) {
-        attachmentPreviewBar.classList.remove("visible");
-      }
-    }, 4000);
-    activeTimers.add(t);
+    attachmentPreviewBar.appendChild(uploadErrorEl);
+  }
+
+  /** Clear the composer's refusal line and collapse the preview bar when it
+   *  held nothing else. */
+  function clearUploadError(): void {
+    if (uploadErrorEl === null) return;
+    uploadErrorEl.remove();
+    uploadErrorEl = null;
+    if (
+      attachmentPreviewBar !== null &&
+      pendingAttachments.length === 0 &&
+      attachmentPreviewBar.childElementCount === 0
+    ) {
+      attachmentPreviewBar.classList.remove("visible");
+    }
   }
 
   /** Reflect the current disabledReason onto the DOM (textarea + controls). */
@@ -550,6 +561,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.value = "";
     autoResize();
     textarea.focus();
+    clearUploadError();
   }
 
   /** Unique counter for preview items (before upload completes and we have a server ID). */
@@ -565,8 +577,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       }
       att.previewEl.remove();
       pendingAttachments.splice(idx, 1);
-      if (pendingAttachments.length === 0) {
-        attachmentPreviewBar?.classList.remove("visible");
+      if (pendingAttachments.length === 0 && attachmentPreviewBar?.childElementCount === 0) {
+        attachmentPreviewBar.classList.remove("visible");
       }
     }
   }
@@ -617,6 +629,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const tempId = `pending-${++previewCounter}`;
     const isImage = file.type.startsWith("image/");
 
+    // A valid attachment is the user acting on any earlier refusal.
+    clearUploadError();
     attachmentPreviewBar.classList.add("visible");
 
     const item = createElement("div", { class: "attachment-preview-item uploading" });
@@ -833,6 +847,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         autoResize();
         maybeEmitTyping();
         syncAutocomplete();
+        // An edit is the user acting on the refusal, so the line goes away.
+        clearUploadError();
       },
       { signal },
     );
@@ -1098,6 +1114,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     replyText = null;
     editBar = null;
     attachmentPreviewBar = null;
+    uploadErrorEl = null;
     openPicker = null;
   }
 

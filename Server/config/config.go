@@ -2,8 +2,6 @@
 package config
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"math"
@@ -682,11 +680,12 @@ func Load(cfgPath string) (*Config, error) {
 			"key", key, "file", cfgPath)
 	}
 
-	// Warn if using default dev credentials — these are public and insecure.
+	// Warn if using default dev or .env.example placeholder credentials —
+	// both are public and insecure.
 	// Clear credentials so downstream consumers (e.g. NewLiveKitClient) see
 	// empty values and refuse to start voice.
 	if IsDefaultVoiceCredentials(&cfg.Voice) {
-		slog.Warn("using default LiveKit dev credentials — voice will be disabled; set voice.livekit_api_key and voice.livekit_api_secret in config.yaml")
+		slog.Warn("using default or placeholder LiveKit credentials — voice will be disabled; set voice.livekit_api_key and voice.livekit_api_secret in config.yaml (or LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env under Docker)")
 		cfg.Voice.LiveKitAPIKey = ""
 		cfg.Voice.LiveKitAPISecret = ""
 	}
@@ -780,30 +779,6 @@ func warnInvalidCIDRs(key string, cidrs []string) {
 	}
 }
 
-// defaultLiveKitAPIKey and defaultLiveKitAPISecret are the well-known dev
-// credentials that ship in the default config. They must never be used in
-// production — NewLiveKitClient rejects them.
-const (
-	DefaultLiveKitAPIKey    = "devkey"
-	DefaultLiveKitAPISecret = "owncord-dev-secret-key-min-32chars" //nolint:gosec // G101: false positive — config key name, not a credential
-)
-
-// IsDefaultVoiceCredentials returns true when the voice config still uses
-// the well-known default dev credentials shipped in the source code.
-func IsDefaultVoiceCredentials(v *VoiceConfig) bool {
-	return v.LiveKitAPIKey == DefaultLiveKitAPIKey ||
-		v.LiveKitAPISecret == DefaultLiveKitAPISecret
-}
-
-// generateRandomKey returns a crypto-random hex string of the given byte length.
-func generateRandomKey(byteLen int) (string, error) {
-	b := make([]byte, byteLen)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("crypto/rand: %w", err)
-	}
-	return hex.EncodeToString(b), nil
-}
-
 // boundedKey is one integer key with a legal range. Out-of-range values are
 // clamped to the nearest bound and warned about, never rejected: Load is
 // warn-only by design (a warning must not brick a working install), and a
@@ -863,36 +838,4 @@ func applyBounds(cfg *Config) {
 		slog.Warn("config: value out of range", "key", b.key, "value", v, "using", fixed, "note", b.meaning)
 		*b.ptr = fixed
 	}
-}
-
-// ensureVoiceCredentials generates unique random LiveKit credentials when
-// API key/secret are empty, so voice works out of the box without shipping
-// known-public defaults. It also refills URL and quality: Unmarshal leaves them
-// alone when the section is merely empty, but a document that NAMES one with an
-// explicit `livekit_url: ""` overwrites the default, and an empty URL makes
-// NewLiveKitClient refuse and disables voice.
-func ensureVoiceCredentials(v *VoiceConfig) error {
-	if v.LiveKitAPIKey == "" {
-		key, err := generateRandomKey(8)
-		if err != nil {
-			return fmt.Errorf("generating LiveKit API key: %w", err)
-		}
-		v.LiveKitAPIKey = "key-" + key
-		slog.Warn("generated random LiveKit API key — voice tokens will break on restart; set voice.livekit_api_key in config.yaml for stable operation")
-	}
-	if v.LiveKitAPISecret == "" {
-		secret, err := generateRandomKey(32)
-		if err != nil {
-			return fmt.Errorf("generating LiveKit API secret: %w", err)
-		}
-		v.LiveKitAPISecret = secret
-		slog.Warn("generated random LiveKit API secret — set voice.livekit_api_secret in config.yaml for stable operation")
-	}
-	if v.LiveKitURL == "" {
-		v.LiveKitURL = "ws://localhost:7880"
-	}
-	if v.Quality == "" {
-		v.Quality = "medium"
-	}
-	return nil
 }

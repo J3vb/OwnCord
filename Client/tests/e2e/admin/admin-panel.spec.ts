@@ -12,7 +12,7 @@ async function navigate(page: Page, label: string): Promise<void> {
   await page.locator(".nav-item", { hasText: label }).click();
 }
 
-test("admin setup, channel CRUD, audit and login journey", async ({ page }) => {
+test("admin setup, channel CRUD, audit and login journey", async ({ page, adminServer }) => {
   // Release discovery is external to this CRUD journey and otherwise waits on GitHub.
   // Packaged updater tests own the update boundary. All setup/data routes stay real.
   await page.route("**/admin/api/updates", (route) =>
@@ -25,6 +25,7 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page }) => {
     await page.locator("#wizardBox .btn-accent", { hasText: "Get Started" }).click();
 
     // Account step.
+    await page.locator("#wizToken").fill(adminServer.setupToken());
     await page.locator("#wizUser").fill(OWNER.username);
     await page.locator("#wizPass").fill(OWNER.password);
     await page.locator("#wizConfirm").fill(OWNER.password);

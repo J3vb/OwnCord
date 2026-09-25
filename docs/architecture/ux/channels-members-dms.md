@@ -105,8 +105,10 @@ typing…" below the message list, excluding the current user (already
 
 ### 2.2 Member actions (context menu)
 
-Right-click / long-press a member → context menu (roles, kick, ban) — moderation
-affordances covered in [settings-and-admin.md §3](settings-and-admin.md). Actions
+Right-click / long-press a member, or Shift+F10 / the Menu key on a focused
+row → context menu (roles, kick, ban). Every context menu (member, channel, DM,
+voice participant) shares one keyboard model — `enableMenuKeyboard()` in
+`lib/context-menu.ts`. Moderation affordances are covered in [settings-and-admin.md §3](settings-and-admin.md). Actions
 the user lacks permission for are **not shown** (menu items gated by the actor's
 role), consistent with the affordance principle.
 

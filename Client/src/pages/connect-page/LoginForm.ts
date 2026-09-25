@@ -205,7 +205,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let registrationNotice: HTMLDivElement;
   let submitBtn: HTMLButtonElement;
   let submitBtnText: HTMLSpanElement;
-  let toggleModeBtn: HTMLAnchorElement;
+  let toggleModeBtn: HTMLButtonElement;
   let errorBanner: HTMLDivElement;
   let totpInput: HTMLInputElement;
   let totpError: HTMLDivElement;
@@ -423,14 +423,22 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     // Toggle mode link
     const formSwitch = createElement("div", { class: "form-switch" });
-    toggleModeBtn = createElement("a", {}, connectText("login.toRegister"));
+    // Buttons, not anchors: an <a> with no href is not focusable, so the
+    // login/register toggle and the recovery entry point would be unreachable
+    // by Tab (A11Y-02). They are styled as links by .form-switch button /
+    // .totp-backup-link.
+    toggleModeBtn = createElement("button", { type: "button" }, connectText("login.toRegister"));
     formSwitch.appendChild(toggleModeBtn);
-    // Outside .form-switch: that link is the login/register toggle.
-    let recoverLink: HTMLAnchorElement | null = null;
+    // Outside .form-switch: that button is the login/register toggle.
+    let recoverLink: HTMLButtonElement | null = null;
     if (onRecover !== undefined) {
       recoverLink = createElement(
-        "a",
-        { class: "totp-backup-link", "data-testid": "recover-account-link" },
+        "button",
+        {
+          type: "button",
+          class: "totp-backup-link",
+          "data-testid": "recover-account-link",
+        },
         connectText("login.recoverLink"),
       );
       recoverLink.addEventListener("click", openRecover, { signal });

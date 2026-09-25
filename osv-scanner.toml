@@ -6,19 +6,16 @@
 #     -L package-lock.json
 #
 # Each entry is a finding that is present at HEAD and reviewed as accepted, so
-# the scan fails on anything NEW. A new advisory, or a fixed version reaching an
-# ignored package, is not silent: `IgnoreVulns` matches the advisory ID, not the
-# package/version, and an entry that no longer matches anything is reported as
-# an unused ignore. Remove an entry when its dependency moves to the fixed
-# version named in the reason.
+# the scan fails on anything NEW. `IgnoredVulns` matches the advisory ID, not the
+# package/version, and osv-scanner does NOT report an entry that no longer
+# matches anything: a stale ignore here stays silent. Remove an entry when its
+# dependency moves to the fixed version named in the reason, and re-check the
+# list whenever a lockfile moves (cargo-deny, below, does fail on its own stale
+# Rust ignores).
 
 # --- Go: reached through the module graph, not called. govulncheck (a
 # separate, call-aware gate in Server Build & Test) is the authority here and
-# reports 0 reachable vulnerabilities; these two are module-level only.
-[[IgnoredVulns]]
-id = "GO-2026-6094"
-reason = "cel-go, module-level only: govulncheck reports it unreachable from our code"
-
+# reports 0 reachable vulnerabilities; this one is module-level only.
 [[IgnoredVulns]]
 id = "GO-2026-5932"
 reason = "golang.org/x/crypto, module-level only: govulncheck reports it unreachable from our code"
@@ -55,12 +52,14 @@ reason = "qs dev-only via stryker's typed-rest-client; not shipped"
 id = "GHSA-x5fp-wj9c-mxmx"
 reason = "qs dev-only via stryker's typed-rest-client; not shipped"
 
-# --- Rust: the same accepted advisories cargo-deny carries in
-# Client/src-tauri/deny.toml, which is the authoritative list with the full
-# reachability argument. Kept in step with it.
+# --- Rust: the accepted advisories cargo-deny carries in
+# Client/src-tauri/deny.toml (the authoritative list with the reachability
+# argument), kept in step with it, plus glib's unsound advisory, which
+# cargo-deny does not flag (`unsound = "workspace"`) and whose reasoning lives
+# in Client/src-tauri/.cargo/audit.toml for cargo-audit.
 [[IgnoredVulns]]
 id = "RUSTSEC-2024-0429"
-reason = "glib 0.18.5 pinned by the Linux GTK stack; unreachable API (see deny.toml)"
+reason = "glib 0.18.5 pinned by the Linux GTK stack; unreachable API (see Client/src-tauri/.cargo/audit.toml)"
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2024-0370"

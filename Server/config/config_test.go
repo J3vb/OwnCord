@@ -431,6 +431,9 @@ func TestIsDefaultVoiceCredentials(t *testing.T) {
 		{"only secret default", "custom-key", config.DefaultLiveKitAPISecret, true},
 		{"neither default", "custom-key", "custom-secret-long-enough-32chars", false},
 		{"both empty", "", "", false},
+		{"env.example placeholders", "change-me-api-key", "change-me-api-secret-must-be-at-least-32-characters", true},
+		{"only key placeholder", "change-me-api-key", "custom-secret-long-enough-32chars", true},
+		{"only secret placeholder", "custom-key", "change-me-api-secret-must-be-at-least-32-characters", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

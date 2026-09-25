@@ -67,8 +67,9 @@
   font-size: var(--font-size-sm);
   padding: 6px 8px;
 }
+/* The base --focus-ring outline is the ring (A11Y-03): a 1px border-colour
+   swap is not a >=2px/3:1 replacement. */
 .status-picker-custom-input:focus {
-  outline: none;
   border-color: var(--focus-ring);
 }
 

@@ -74,7 +74,7 @@
   margin: 8px 12px;
 }
 .settings-nav-item.danger {
-  color: var(--red);
+  color: var(--text-danger);
 }
 .settings-nav-item.danger:hover {
   background: color-mix(in srgb, var(--red) 10%, transparent);
