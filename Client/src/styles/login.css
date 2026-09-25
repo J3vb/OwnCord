@@ -292,7 +292,7 @@
   color: var(--green);
 }
 .srv-status-text.offline {
-  color: var(--red);
+  color: var(--text-danger);
 }
 .srv-status-text.unknown {
   color: var(--text-micro);
@@ -312,7 +312,7 @@
   color: var(--yellow);
 }
 .srv-latency.bad {
-  color: var(--red);
+  color: var(--text-danger);
 }
 .srv-compat-badge.client-older,
 .srv-compat-badge.server-older {
@@ -855,12 +855,18 @@
   font-size: var(--font-size-sm);
   color: var(--text-faint);
 }
-.form-switch a {
+/* A <button> styled as a link: an href-less <a> cannot be focused, so the
+   toggle is a real button (A11Y-02). A button does not inherit font-size or
+   zero its padding the way an anchor does, so both are set here. */
+.form-switch button {
+  font-size: inherit;
   color: var(--text-link);
   cursor: pointer;
   text-decoration: none;
+  padding: 0;
+  text-align: inherit;
 }
-.form-switch a:hover {
+.form-switch button:hover {
   text-decoration: underline;
 }
 
@@ -1003,11 +1009,18 @@
 }
 .totp-backup-link {
   display: block;
+  /* A block <button> shrinks to its text; span the row like the old <a>. */
+  width: 100%;
   text-align: center;
   margin-top: 8px;
   font-size: var(--font-size-xs);
-  color: var(--text-micro);
+  /* A qualified text token: --text-micro is incidental-only and reads below
+     the 4.5:1 bar, but this is text the user must read to recover (A11Y-02). */
+  color: var(--text-muted);
   cursor: pointer;
+  padding: 0;
+  background: none;
+  border: none;
 }
 .totp-backup-link:hover {
   color: var(--text-link);

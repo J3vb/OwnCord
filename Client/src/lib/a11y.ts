@@ -165,8 +165,9 @@ export function enableRovingNavigation(
 
       e.preventDefault();
       // Move the single Tab stop along with focus so tabbing away and back
-      // returns to the last visited cell, not the first.
-      origin.setAttribute("tabindex", "-1");
+      // returns to the last visited cell, not the first. Clear every cell, not
+      // just the origin: a mouse click can focus a cell that isn't the stop.
+      for (const cell of cells) cell.setAttribute("tabindex", "-1");
       const target = cells[to]!;
       target.setAttribute("tabindex", "0");
       target.focus();

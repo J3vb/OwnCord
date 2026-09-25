@@ -58,7 +58,7 @@ test.describe("Connect Page", () => {
   });
 
   test("login/register toggle switches form mode", async ({ page }) => {
-    const toggleLink = page.locator(".form-switch a");
+    const toggleLink = page.locator(".form-switch button");
     await expect(toggleLink).toHaveText(/Register/);
 
     await toggleLink.click();
@@ -73,6 +73,15 @@ test.describe("Connect Page", () => {
     await toggleLink.click();
     await expect(toggleLink).toHaveText(/Register/);
     await expect(submitBtnText).toHaveText("Login");
+  });
+
+  test("recover-account link spans the form and stays centred", async ({ page }) => {
+    // A block <button> shrinks to its text unlike the <a> it replaced, which
+    // left the link left-aligned under Login.
+    const link = page.locator("[data-testid='recover-account-link']");
+    const submit = page.locator("button.btn-primary[type='submit']");
+    const [linkBox, submitBox] = [await link.boundingBox(), await submit.boundingBox()];
+    expect(linkBox?.width).toBe(submitBox?.width);
   });
 
   test("clicking server profile auto-fills host field", async ({ page }) => {

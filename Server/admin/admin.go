@@ -16,6 +16,20 @@ import (
 //go:embed static
 var staticFiles embed.FS
 
+// leafFingerprint is the served TLS certificate's SHA-256 in the client's pin
+// format, set once at startup via SetLeafFingerprint. It is not a secret — it
+// is printed in the start-up banner for users to compare out of band — and it
+// is empty when there is no statically loaded certificate (TLS off, or ACME
+// before its first handshake). The admin dashboard and the setup wizard's
+// finish step surface it so the operator does not have to watch stderr.
+var leafFingerprint string
+
+// SetLeafFingerprint installs the served certificate's fingerprint for the
+// admin panel to surface. Call once at startup, next to SetDatabasePath.
+func SetLeafFingerprint(fp string) {
+	leafFingerprint = fp
+}
+
 // NewHandler returns an http.Handler that serves both the admin REST API and
 // the embedded admin panel static files.
 //

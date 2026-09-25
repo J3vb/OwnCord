@@ -166,7 +166,7 @@ test.describe("B9-18 connect and shell text", () => {
       "Self-hosted chat — Your server, your rules",
     );
     await expect(page.locator("label[for='host']")).toHaveText("Server Address");
-    await expect(page.locator(".form-switch a")).toHaveText("Need an account? Register");
+    await expect(page.locator(".form-switch button")).toHaveText("Need an account? Register");
     await expect(page.getByRole("button", { name: "Toggle password visibility" })).toBeVisible();
 
     await navigateToMainPageReady(page);
@@ -248,7 +248,7 @@ test.describe("B9-18 connect and shell text", () => {
       [page.locator("label[for='username']"), "Username"],
       [page.locator("label[for='password']"), "Password"],
       [page.locator(".connect-form .btn-text"), "Login"],
-      [page.locator(".form-switch a"), "Need an account? Register"],
+      [page.locator(".form-switch button"), "Need an account? Register"],
       [
         page.locator("[data-testid='recover-account-link']"),
         "Lost your password or 2FA device? Recover your account",
@@ -263,8 +263,8 @@ test.describe("B9-18 connect and shell text", () => {
     expect(await findUnnamedControls(page.locator(".connect-form"))).toEqual([]);
 
     // Register mode re-renders the title, the submit label and the switch link.
-    await page.locator(".form-switch a").click();
-    await expect(page.locator(".form-switch a")).toHaveText(
+    await page.locator(".form-switch button").click();
+    await expect(page.locator(".form-switch button")).toHaveText(
       expanded("Already have an account? Login"),
     );
     await expect(page.locator(".connect-form .btn-text")).toHaveText(expanded("Register"));

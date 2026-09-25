@@ -53,6 +53,13 @@ type setupResponse struct {
 	// Warnings lists non-fatal problems (e.g. config.yaml not writable).
 	// The account exists whenever this response is returned.
 	Warnings []string `json:"warnings,omitempty"`
+	// CertificateFingerprint is the served TLS leaf certificate's SHA-256 in
+	// the client's pin format, shown on the finish step so the operator can
+	// publish it for users to compare out of band. Omitted when there is no
+	// statically loaded certificate (TLS off, or ACME before its first
+	// handshake), and when the wizard changed tls.mode: the restart will serve
+	// a different certificate, which the dashboard shows once it is back.
+	CertificateFingerprint string `json:"certificate_fingerprint,omitempty"`
 }
 
 // handleSetupStatus returns whether initial setup is needed (no users exist).
@@ -162,14 +169,21 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 		}
 		setup.RecordSetup(r.Context(), uid, detail)
 
+		fingerprint := leafFingerprint
+		if req.Wizard != nil && req.Wizard.TLSMode != nil &&
+			(opts.RunningCfg == nil || *req.Wizard.TLSMode != opts.RunningCfg.TLS.Mode) {
+			fingerprint = ""
+		}
+
 		writeJSON(w, http.StatusCreated, setupResponse{
-			Token:           token,
-			UserID:          uid,
-			Username:        req.Username,
-			InviteCode:      inviteCode,
-			RestartRequired: restartRequired,
-			RestartURL:      restartURL,
-			Warnings:        warnings,
+			Token:                  token,
+			UserID:                 uid,
+			Username:               req.Username,
+			InviteCode:             inviteCode,
+			RestartRequired:        restartRequired,
+			RestartURL:             restartURL,
+			Warnings:               warnings,
+			CertificateFingerprint: fingerprint,
 		})
 
 		if restartRequired {

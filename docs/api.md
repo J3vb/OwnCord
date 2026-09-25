@@ -3142,7 +3142,8 @@ to `config.yaml` (consumed at startup).
   "invite_code": "abc123def",
   "restart_required": false,
   "restart_url": "",
-  "warnings": []
+  "warnings": [],
+  "certificate_fingerprint": "3f:a1:...:9c"
 }
 ```
 
@@ -3151,6 +3152,9 @@ to `config.yaml` (consumed at startup).
 after responding, and `restart_url` is where the admin panel will be reachable
 afterwards. `warnings` lists non-fatal problems (e.g. `config.yaml` not
 writable) — the account exists whenever this response is returned.
+`certificate_fingerprint` is as in [`GET /admin/api/stats`](#get-adminapistats),
+and is also omitted when `wizard.tls_mode` differs from the running mode —
+the restarted server serves a different certificate.
 
 ---
 
@@ -3171,9 +3175,15 @@ Aggregate counts for the admin dashboard.
   "channel_count": 9,
   "invite_count": 2,
   "db_size_bytes": 1048576,
-  "online_count": 3
+  "online_count": 3,
+  "certificate_fingerprint": "3f:a1:...:9c"
 }
 ```
+
+`certificate_fingerprint` is the served TLS leaf certificate's SHA-256 in the
+lower-case colon-hex form the desktop client shows before its trust prompt —
+the value users compare out of band. Omitted when there is no statically
+loaded certificate (TLS off, or ACME before its first handshake).
 
 ---
 

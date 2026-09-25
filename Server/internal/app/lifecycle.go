@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
@@ -160,8 +161,12 @@ func (a *App) startTLS() error {
 	}
 	a.tlsCfg = tlsResult.TLSConfig
 	a.httpHandler = tlsResult.HTTPHandler
+	// The admin dashboard and the setup wizard's finish step surface the same
+	// fingerprint the banner prints, so an operator does not have to watch
+	// stderr. Set before the router mounts the admin handler.
+	admin.SetLeafFingerprint(tlsResult.Fingerprint)
 
-	printBanner(a.cfg, a.deps.Version, a.tlsCfg != nil)
+	printBanner(a.cfg, a.deps.Version, a.tlsCfg != nil, tlsResult.Fingerprint)
 	return nil
 }
 

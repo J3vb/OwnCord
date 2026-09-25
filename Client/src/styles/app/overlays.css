@@ -31,7 +31,7 @@
   color: var(--on-accent);
 }
 .context-menu-item.danger {
-  color: var(--red);
+  color: var(--text-danger);
 }
 .context-menu-item.danger:hover {
   background: var(--danger-fill);
@@ -93,7 +93,7 @@
   color: var(--on-accent);
 }
 .context-menu__item--danger {
-  color: var(--red);
+  color: var(--text-danger);
 }
 .context-menu__item--danger:hover {
   background: var(--danger-fill);

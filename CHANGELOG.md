@@ -49,6 +49,12 @@ server's internals were reorganised behind service boundaries.
 
 ### Login & connection
 
+- **The server now shows its certificate fingerprint so you can compare it.**
+  The start-up banner, the admin Dashboard and the setup wizard's finish step
+  print the served certificate's SHA-256 in the same format the desktop client
+  shows before its trust prompt. Publish it out of band and compare — a
+  mismatch is the one warning that means an interception attempt. Previously
+  the disclosure told users to compare a fingerprint nothing printed.
 - The client and server now agree on a protocol version ("epoch") when
   connecting. This release is epoch 1; clients from v1.2.0-alpha.4 and earlier
   still connect.
@@ -93,6 +99,18 @@ server's internals were reorganised behind service boundaries.
   server says so at boot instead of leaving it to be discovered on a call. It
   warns, never refuses — a LAN-only or Tailscale-only server has a good reason
   to use a private address there.
+
+### Desktop UI
+
+- **Every right-click menu is usable without a mouse.** The member, channel, DM
+  and voice-participant menus open with **Shift+F10** (or the Menu key) on a
+  focused row, move with the arrow keys and Home/End, open the Change Role and
+  Move-to submenus with the right arrow, close with Escape, and return focus to
+  the row you opened them from. Moderators could previously only ban, kick,
+  change a role, server-mute or move a user — and members only block or mute —
+  by right-clicking.
+- The channel menu gains **Move Up** and **Move Down** for channel managers, so
+  reordering no longer needs a drag.
 
 ### Accounts & admin
 
@@ -207,6 +225,21 @@ server's internals were reorganised behind service boundaries.
   gone.** A plugin directory carrying only a `plugin.toml` no longer loads;
   convert it to `plugin.json`. A directory carrying both could previously leave
   the server honouring a different manifest than the one approved at install.
+- **The Docker quick-start no longer crash-loops.** It now ships a
+  `config.yaml.example` and tells you to copy it before `docker compose up -d`;
+  previously the compose file bind-mounted a config nothing created, so Docker
+  made a _directory_ at that path and the server failed to read its
+  configuration. The same pages now say which files come from the release's
+  source snapshot rather than its assets, and that `voice.livekit_url` must be
+  set to the LiveKit container (`ws://livekit:7880`) because compose injects
+  only the key and secret, with `voice.auto_download_livekit` set to `false`.
+- **`chatserver --version` and `--help` print and exit.** Asking a build what
+  it was no longer starts a server or writes a `config.yaml` into the working
+  directory.
+- **The Windows installer's SmartScreen warning is now explained.** The
+  quick-start tells you what "Windows protected your PC" means on first install
+  and on Update Now, and how to continue, since the installers are not
+  code-signed.
 - **The desktop app no longer reappears on the old version after starting an
   update.** Once the installer is launching, a launch handed to the still-running
   old process (shortcut, `owncord://` link, autostart) is ignored instead of
@@ -274,6 +307,31 @@ server's internals were reorganised behind service boundaries.
   show up in the audit log. Invite entries name the invite by id, never by
   code.
 - The owner check no longer costs a second database lookup on every request.
+- **A refused `/admin` request now names the setting behind it.** The `403`
+  body points at `server.admin_allowed_cidrs` (private networks by default), so
+  a VPS operator can tell a firewall from the allowlist; the metrics and LiveKit
+  webhook routes name their own allowlists the same way. The quick-start and
+  deployment pages describe the SSH tunnel (`ssh -L 8443:localhost:8443`) and
+  the allowlist entry for headless installs.
+
+### Accessibility
+
+- **The desktop client's login page is keyboard-operable.** The Register toggle
+  and the "recover your account" link are now real buttons reachable with Tab;
+  they were links without a destination, so a keyboard-only user could not
+  sign up or start recovery.
+- **The Appearance theme and accent pickers are one Tab stop each**, moved with
+  the arrow keys, instead of one stop per tile and swatch.
+- Focus rings are restored on channel mentions and message-link chips, and on
+  the status text field.
+- Composer refusals (message too long, uploads pending, a failed upload) now
+  stay on screen until you edit or send again, and use a text colour that meets
+  the contrast bar rather than vanishing after four seconds at about 3:1.
+- Destructive and status labels — Delete Channel, Log Out, "Offline", a slow
+  server's latency — use the accessible danger text colour instead of the raw
+  red fill colour.
+- The in-app **Reduce Motion** toggle now also stops the connect-page background
+  pulse and the primary-button shimmer.
 
 ### Documentation
 

@@ -17,7 +17,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon } from "@lib/icons";
-import { showContextMenu } from "@lib/context-menu";
+import { openMenuOnKeyboard, showContextMenu } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
 import { isRenderableAvatar } from "@lib/avatar";
 import {
@@ -251,41 +251,52 @@ function renderDmItem(
     { signal },
   );
 
+  const openDmMenu = (x: number, y: number): void => {
+    const items = [];
+    if (options.onToggleMute !== undefined) {
+      const toggle = options.onToggleMute;
+      items.push({
+        label: convo.muted === true ? requestsText("dm.unmute") : requestsText("dm.mute"),
+        testId: `dm-mute-${convo.channelId}`,
+        onClick: () => toggle(convo.channelId),
+      });
+    }
+    if (convo.isGroup === true && options.onRenameGroup !== undefined) {
+      const rename = options.onRenameGroup;
+      items.push({
+        label: requestsText("dm.renameGroup"),
+        testId: `dm-rename-${convo.channelId}`,
+        onClick: () => rename(convo.channelId),
+      });
+    }
+    if (options.onCloseDm !== undefined) {
+      const close = options.onCloseDm;
+      items.push({
+        label: convo.isGroup === true ? requestsText("dm.leaveGroup") : requestsText("dm.close"),
+        danger: true,
+        testId: `dm-close-${convo.channelId}`,
+        onClick: () => close(convo.channelId),
+      });
+    }
+    if (items.length === 0) return;
+    showContextMenu({
+      x,
+      y,
+      items,
+      signal,
+      className: "dm-context-menu",
+    });
+  };
   item.addEventListener(
     "contextmenu",
     (e: MouseEvent) => {
       e.preventDefault();
-      const items = [];
-      if (options.onToggleMute !== undefined) {
-        const toggle = options.onToggleMute;
-        items.push({
-          label: convo.muted === true ? requestsText("dm.unmute") : requestsText("dm.mute"),
-          testId: `dm-mute-${convo.channelId}`,
-          onClick: () => toggle(convo.channelId),
-        });
-      }
-      if (convo.isGroup === true && options.onRenameGroup !== undefined) {
-        const rename = options.onRenameGroup;
-        items.push({
-          label: requestsText("dm.renameGroup"),
-          testId: `dm-rename-${convo.channelId}`,
-          onClick: () => rename(convo.channelId),
-        });
-      }
-      if (options.onCloseDm !== undefined) {
-        const close = options.onCloseDm;
-        items.push({
-          label: convo.isGroup === true ? requestsText("dm.leaveGroup") : requestsText("dm.close"),
-          danger: true,
-          testId: `dm-close-${convo.channelId}`,
-          onClick: () => close(convo.channelId),
-        });
-      }
-      if (items.length === 0) return;
-      showContextMenu({ x: e.clientX, y: e.clientY, items, signal, className: "dm-context-menu" });
+      openDmMenu(e.clientX, e.clientY);
     },
     { signal },
   );
+  // Keyboard entry point (A11Y-01): Shift+F10 / Menu key on the focused row.
+  openMenuOnKeyboard(item, openDmMenu, signal);
 
   return item;
 }

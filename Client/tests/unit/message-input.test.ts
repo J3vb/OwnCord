@@ -699,7 +699,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("preview bar loses 'visible' again once the error auto-dismisses with nothing else queued", async () => {
+  it("keeps the error until the user edits, then clears and hides the preview bar (A11Y-05)", async () => {
     vi.useFakeTimers();
     const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
     const opts = makeOptions({ onUploadFile });
@@ -716,7 +716,15 @@ describe("MessageInput", () => {
     const previewBar = container.querySelector(".attachment-preview-bar");
     expect(previewBar!.classList.contains("visible")).toBe(true);
 
-    await vi.advanceTimersByTimeAsync(4000);
+    // A refusal is not a 4s toast: it survives well past the old window so
+    // the user can read it.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(container.querySelector(".attachment-upload-error")).not.toBeNull();
+    expect(previewBar!.classList.contains("visible")).toBe(true);
+
+    // Editing the textarea is the user acting on it -- the line clears.
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
     expect(container.querySelector(".attachment-upload-error")).toBeNull();
     expect(previewBar!.classList.contains("visible")).toBe(false);
 

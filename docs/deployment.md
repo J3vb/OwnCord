@@ -94,6 +94,11 @@ root filesystem is _not_ supported: the server writes its default
 
 ### Quick Start
 
+The `docker-compose.yml`, `.env.example`, `livekit.yaml.example` and
+`config.yaml.example` copied below are **not release assets**: take them from
+the source snapshot attached to each release (or the repository's `Server/`
+directory).
+
 ```bash
 cd Server
 
@@ -105,18 +110,46 @@ cp .env.example .env
 cp livekit.yaml.example livekit.yaml
 # Edit livekit.yaml — set node_ip to your server's public IP, and paste the same key/secret
 
-# 3. Create a minimal config.yaml for OwnCord (server name, TLS, etc.)
-# Leave voice.livekit_url and voice.livekit_binary unset — compose injects these via env vars
+# 3. Create config.yaml from the shipped example
+cp config.yaml.example config.yaml
+# Edit it: set voice.livekit_url to "ws://livekit:7880" (the compose service
+# address). The copied default is ws://localhost:7880, which is the server
+# container itself — voice would never reach the LiveKit container.
+# Set voice.auto_download_livekit to false (the copied default is true), or the
+# server downloads and runs a second LiveKit inside its own container.
+# Leave voice.livekit_api_key, voice.livekit_api_secret and voice.livekit_binary
+# unset: compose injects the key and secret from .env, and LiveKit runs as its
+# own container.
 
 # 4. Start
 docker compose up -d
 ```
 
+`docker compose` bind-mounts `./config.yaml` into the container, so the file
+must exist before the first start: without it Docker creates a _directory_ at
+that path and the server fails to read its configuration.
+
 On first start OwnCord creates its database and writes defaults into `/app/data`. Navigate to `https://<your-ip>:8443/admin` to create the Owner account, with the setup token from `docker compose logs owncord`.
+
+The admin panel and the setup wizard are gated by `server.admin_allowed_cidrs`
+(loopback and private networks by default), so on a VPS the wizard is
+unreachable from your laptop until you either tunnel to it —
+`ssh -L 8443:localhost:8443 user@your-server`, then browse to
+`https://localhost:8443/admin` — or add your address to that setting in
+`config.yaml`. A refusal names the setting in its `403` body.
 
 ### config.yaml for Docker
 
-You do **not** need to set `voice.livekit_api_key`, `voice.livekit_api_secret`, or `voice.livekit_binary` in your `config.yaml` when using Docker — these are injected via environment variables from `.env`. Set everything else as normal:
+The shipped compose file injects **only the LiveKit key and secret** as
+environment variables from `.env`. It does not set `voice.livekit_url`, so that
+key **must** be set in `config.yaml` — and it must point at the LiveKit
+container, `ws://livekit:7880`, not the copied default `ws://localhost:7880`
+(which is the server container itself). Set `voice.auto_download_livekit` to
+`false` (the copied default is `true`, which would download and run a second
+LiveKit inside the server container), leave `voice.livekit_binary` unset, and
+do not set `voice.livekit_api_key` / `voice.livekit_api_secret` in the file
+(the environment values win, and keeping secrets out of `config.yaml` is the
+point of `.env`). Set everything else as normal:
 
 ```yaml
 server:
@@ -125,6 +158,7 @@ server:
 
 voice:
   livekit_url: "ws://livekit:7880" # Docker service DNS — do not change
+  auto_download_livekit: false # LiveKit runs as its own container
   quality: "medium"
 
 tls:
@@ -166,7 +200,7 @@ stopped.
 
 ### LiveKit in Docker
 
-LiveKit runs as its own container (`livekit/livekit-server:v1.13.5`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.
+LiveKit runs as its own container (`livekit/livekit-server:v1.13.5`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset and `voice.auto_download_livekit` false. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.
 
 ---
 
@@ -328,11 +362,14 @@ a start, and a message to every user:
 1. Stop the server.
 2. Move `data/cert.pem` and `data/key.pem` aside (do not delete them yet).
 3. Start the server: a fresh pair is generated because both files are absent.
-4. Read the new certificate's fingerprint from the start-up banner.
+4. Read the new certificate's fingerprint from the start-up banner (also shown
+   on the admin Dashboard and the setup wizard's finish step).
 5. **Every desktop client sees the certificate-mismatch modal and must accept
    the new fingerprint.** Publish the new fingerprint out of band — a channel
-   post on another platform, a call — and have each person compare it before
-   accepting ([trust-model.md](trust-model.md)).
+   post on another platform, a call — and have each person **compare it,
+   character for character, against the prompt their client shows** before
+   accepting. A mismatch is indistinguishable from an interception attempt
+   ([trust-model.md](trust-model.md)).
 
 ### Let's Encrypt (ACME)
 

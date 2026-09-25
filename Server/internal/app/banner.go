@@ -15,8 +15,12 @@ import (
 )
 
 // printBanner writes the startup banner to stderr (so it doesn't mix with
-// the structured log output on stdout).
-func printBanner(cfg *config.Config, ver string, tls bool) {
+// the structured log output on stdout). fingerprint is the served leaf
+// certificate's SHA-256 in the client's pin format, or "" when there is none
+// to print (TLS off, or ACME before its first handshake); it is the value
+// users compare out of band before accepting the client's trust prompt
+// (BPR-051).
+func printBanner(cfg *config.Config, ver string, tls bool, fingerprint string) {
 	scheme := "http"
 	if tls {
 		scheme = "https"
@@ -32,6 +36,13 @@ func printBanner(cfg *config.Config, ver string, tls bool) {
 		tlsStatus = "enabled"
 	}
 
+	fpLine := ""
+	if fingerprint != "" {
+		fpLine = "\n    Certificate  " + fingerprint +
+			"\n                 compare this out of band before accepting the\n" +
+			"                 client's trust prompt"
+	}
+
 	banner := fmt.Sprintf(`
 
      ___                  ____              _
@@ -44,7 +55,7 @@ func printBanner(cfg *config.Config, ver string, tls bool) {
     Server   %s
     Version  %s
     TLS      %s
-    Platform %s/%s
+    Platform %s/%s%s
    ─────────────────────────────────────────────
     API      %s/api/v1/info
     WebSocket   %s/api/v1/ws
@@ -55,7 +66,7 @@ func printBanner(cfg *config.Config, ver string, tls bool) {
    ─────────────────────────────────────────────
     Press Ctrl+C to stop the server.
 
-`, cfg.Server.Name, ver, tlsStatus, runtime.GOOS, runtime.GOARCH,
+`, cfg.Server.Name, ver, tlsStatus, runtime.GOOS, runtime.GOARCH, fpLine,
 		baseURL, wsURL(scheme, localIP, port), adminURL, baseURL,
 		bannerQualifier(addrKind, localIP, port))
 
