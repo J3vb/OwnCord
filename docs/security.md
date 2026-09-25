@@ -314,6 +314,16 @@ The Tauri desktop client implements the following security measures:
 - The LiveKit proxy (`livekit_proxy`) reuses the pinned fingerprint from the WS proxy
 - All three native tunnels share one TOFU verifier — see [trust-model.md](trust-model.md)
 - Certificate mismatch triggers a modal requiring user acknowledgment
+- **First-contact defence is comparison out of band.** The fingerprint is what
+  the trust decision rests on, so read it from the server's start-up banner
+  (also on the admin Dashboard and the setup wizard's finish step) and compare
+  it against the prompt, character for character, over a channel the server is
+  not part of. The client cannot tell a wrong fingerprint from an interception
+  attempt, so accepting a mismatch is indistinguishable from accepting one.
+  The same rule applies when a certificate is rotated or renewed and every
+  client shows the mismatch prompt again — see
+  [trust-model.md](trust-model.md) and
+  [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate)
 - Update downloads validate `server_url` uses `https://` and rejects URLs with userinfo
 
 ### Input Validation
@@ -341,6 +351,11 @@ The Tauri desktop client implements the following security measures:
 - Client-side search requests are rate-limited (500ms minimum interval + 300ms debounce)
 
 ## Known Limitations
+
+The operator-facing list of what the beta does not do — certificate lifecycle
+and pin-break prompts, first-run defaults, owner lockout, restore and health
+limits, unsigned Windows installers — is [known-limitations.md](known-limitations.md).
+This section carries the security-relevant rows only.
 
 - Server auto-updates depend on a dedicated pinned minisign/Ed25519 server release key in [Server/updater/server_update_public_key.txt](../Server/updater/server_update_public_key.txt) and a signed release manifest that binds the shipped binary hash to the release version; Windows Authenticode/SmartScreen code signing is still separate work
 

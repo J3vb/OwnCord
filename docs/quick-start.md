@@ -12,10 +12,15 @@ Get OwnCord running with the fewest possible steps.
 
 ## Platform Support (Current Releases)
 
-| Component      | Windows x64 | Linux x64 | Linux ARM64       |
-| -------------- | ----------- | --------- | ----------------- |
-| Server binary  | Yes         | Yes       | Not published yet |
-| Desktop client | Yes         | Yes       | Yes               |
+| Component      | Windows x64 | Windows ARM64 | Linux x64 | Linux ARM64 |
+| -------------- | ----------- | ------------- | --------- | ----------- |
+| Server binary  | Yes         | Yes           | Yes       | Yes         |
+| Desktop client | Yes         | Yes           | Yes       | Yes         |
+| Docker server  | N/A         | N/A           | Yes       | Yes         |
+
+Every server asset is published for `amd64` and `arm64`; the Docker image is a
+single multi-architecture tag covering `linux/amd64` and `linux/arm64`. See the
+asset table in [Deployment](deployment.md#building-from-source) for filenames.
 
 ## Prerequisites
 

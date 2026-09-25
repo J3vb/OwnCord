@@ -77,10 +77,11 @@ services:
     # LiveKit config file — copy livekit.yaml.example → livekit.yaml and fill in
     command: --config /etc/livekit/livekit.yaml
     ports:
-      # 7880 is LiveKit's own API/signalling endpoint. OwnCord reaches it over
-      # the internal network and proxies signalling to clients at /livekit, so
-      # this mapping is only for clients that connect to LiveKit directly.
-      - "7880:7880" # LiveKit API (optional; direct clients only)
+      # 7880 is LiveKit's own API/signalling endpoint and is deliberately NOT
+      # published: clients tunnel signalling through the OwnCord server's
+      # /livekit proxy on :8443. Publishing it would expose LiveKit's API to
+      # the host network for no benefit — and would let anyone who knows the
+      # credentials in your .env mint room tokens directly.
       - "7881:7881" # TCP fallback for WebRTC (clients behind strict NAT)
       - "50000-60000:50000-60000/udp" # WebRTC UDP media streams
     volumes:

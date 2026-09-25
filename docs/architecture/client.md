@@ -1,10 +1,10 @@
 # Client Architecture (Tauri)
 
-**Verified against:** commit `5630aa1`, 2026-08-04 — except the native-CI
-paragraph, re-measured at `a3a0a49b`, 2026-09-18.
+**Verified against:** `origin/dev` at `4a70f7b8`, 2026-09-25.
 
-Desktop client built on Tauri v2: a TypeScript webview (~42k LOC, vanilla TS —
-no UI framework) plus ~4.7k LOC of Rust across 16 modules. State lives in a
+Desktop client built on Tauri v2: a TypeScript webview (~70k LOC of non-test
+sources, vanilla TS — no UI framework) plus ~13k LOC of Rust across 26 modules.
+State lives in a
 hand-rolled reactive store (`src/lib/store.ts`: immutable updates,
 microtask-batched notifications, selector subscriptions). Components are
 factory functions returning `{ element, mount, destroy }` built with the
@@ -192,8 +192,8 @@ install, boot, connect, media and recovery — nightly on unsigned builds, and i
 `release.yml` before `publish` on the signed bundles, where it also updates from
 the previous release and rolls back), Stryker mutation testing
 (manual-only), oxlint + type-checked ESLint, Prettier, Knip (non-blocking),
-strict `tsc`. Rust: 84 `cargo test --lib` tests across 10 of the 16 modules,
-blocking in CI together with `cargo clippy -D warnings`.
+strict `tsc`. Rust: the `cargo test --lib` suite lives beside the code across 22
+of the 26 modules, blocking in CI together with `cargo clippy -D warnings`.
 
 **Source of truth:** `src/main.ts`, `src/lib/dispatcher.ts` (+ `src/features/*/wsHandlers.ts`), `src/lib/ws.ts`,
 `src/lib/api.ts`, `src/lib/store.ts`, `src/stores/*.store.ts` (+ the `messages.store.ts` reducers in `src/features/messaging/`),

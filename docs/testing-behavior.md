@@ -4,7 +4,12 @@ A regression test must fail when the behavior is broken. Prefer observable outco
 
 ## Local and CI lanes
 
-Run client commands from `Client/`, after `npm ci`. Real-server suites need Go on PATH. Desktop builds run in Windows CI only.
+Run client commands from `Client/`, after `npm ci`. Real-server suites need Go
+on PATH. The packaged desktop artifacts are built and installed across four
+targets — Windows x64/ARM64 NSIS on `windows-latest`/`windows-11-arm`, Linux
+x64/ARM64 AppImage + deb on `ubuntu-22.04`/`ubuntu-22.04-arm` — by
+`client-artifact-smoke.yml`; the interactive native Playwright projects still
+run on Windows only.
 
 | Lane                           | Command                                                                                                                                   | Boundary and evidence                                                                                                                                                                                                                                                       |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
