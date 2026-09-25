@@ -1,6 +1,7 @@
 # Plan: B9-27 — Record HP-9 feature freeze and the B9 exit decision
 
-**Status:** DRAFT — 2026-09-23; planning only, implementation not started.
+**Status:** COMPLETE — 2026-09-25; the HP-9 exit was accepted by the owner and the
+freeze recorded in [hp-9-scorecard-2026-09-25.md](../../docs/plans/hp-9-scorecard-2026-09-25.md). Documentation-only; no product, test, workflow or dependency change.
 
 > **Milestone:** B9-27 of [b9-unified-experience-accessibility-polish.prd.md](../../docs/plans/b9-unified-experience-accessibility-polish.prd.md).
 > **Branch:** `docs/b9-27-hp9-freeze-and-exit`; branch from current `dev`, PR to `dev` only.
@@ -32,11 +33,11 @@ facts, not claims that tests or platform acceptance passed. Proposed paths later
 in this file are explicitly new work, not present behavior. Re-read this table
 at the actual implementation base; record drift before coding.
 
-| #   | Verified current state                                                                                                                                                         | Evidence at planning commit                              |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
-| 1   | HP-9 freezes features, strings, protocol, migrations and behavior and asks the owner to confirm or revise the B10 cut list.                                                    | `docs/plans/repo-health-roadmap-2026-08-23.md:1217-1239` |
-| 2   | The shortened B10 direction retains RC matrix, upgrade/rollback, protocol, zero unresolved advisory and owner go/no-go; the comprehension read remains open to settle at HP-9. | `docs/plans/repo-health-roadmap-2026-08-23.md:1263-1285` |
-| 3   | The current ledger has four open findings outside the B9 UI workstreams; none is closed by writing this plan.                                                                  | `.superpowers/findings-ledger.json:10331-10390`          |
+| #   | Verified current state                                                                                                                                              | Evidence at planning commit                                          |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| 1   | HP-9 freezes features, strings, protocol, migrations and behavior and asks the owner to confirm or revise the B10 cut list.                                         | `docs/plans/repo-health-roadmap-2026-08-23.md` (B9 §Hold point HP-9) |
+| 2   | The shortened B10 direction retains RC matrix, upgrade/rollback, protocol, zero unresolved advisory and owner go/no-go; the comprehension read was settled at HP-9. | `docs/plans/repo-health-roadmap-2026-08-23.md` (B10 opening block)   |
+| 3   | The current ledger has open low findings outside the B9 UI workstreams (six at 2026-09-25); none is closed by writing this plan.                                    | `.superpowers/findings-ledger.json`                                  |
 
 ## Patterns to mirror
 
@@ -136,7 +137,7 @@ evidence. No milestone defers its accessibility acceptance to B9-26.
       stable location through async update/removal, and a safe fallback opener.
 - [ ] **Contrast:** measure text, controls, status and focus at the Q1 thresholds in
       built-in/high-contrast themes, preset accents and the Q8 custom-accent fallback
-      (accent text/focus below 3:1 uses the theme default accent);
+      (accent as text below 4.5:1, and accent as focus below 3:1, use the theme default accent);
       information never depends on color alone.
 - [ ] **Reduced motion:** test both OS and app settings; no required animation,
       unwanted autoplay or motion-dependent feedback; preserve media controls.
