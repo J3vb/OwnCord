@@ -246,7 +246,7 @@
   @media(max-width:900px){.sidebar{width:200px}.content{padding:24px 20px}.stat-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}}
   /* U3: below 600px the nav wraps instead of being clipped to 56px, so every
      section stays reachable (the full drawer is AO-3). */
-  @media(max-width:600px){.admin{flex-direction:column}.sidebar{width:100%;height:auto;max-height:none;overflow:visible}.sidebar-nav{display:flex;flex-wrap:wrap;padding:8px}.sidebar-nav .sidebar-label,.sidebar-nav .sidebar-sep{display:none}.nav-item{width:auto}.content{padding:16px 12px}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{flex-direction:column}.modal{width:95vw;max-height:90vh}}
+  @media(max-width:600px){.admin{flex-direction:column}.sidebar{width:100%;height:auto;max-height:50vh;overflow-y:auto}.sidebar-nav{display:flex;flex-wrap:wrap;padding:8px}.sidebar-nav .sidebar-label,.sidebar-nav .sidebar-sep{display:none}.nav-item{width:auto}.content{padding:16px 12px}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{flex-direction:column}.modal{width:95vw;max-height:90vh}}
   @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}}
 </style>
 </head>
@@ -451,12 +451,15 @@ function roleColor(rid){
    unreadable as text. The client clamps every role colour through
    readableRoleColor() (B9 Q13); this is the same rule over the same four
    --bg-* surfaces: keep the colour only at 4.5:1 or better, otherwise fall
-   back to --text-normal. Seeded var() tokens are resolved through ROLE_HEX
-   because a CSS var cannot be parsed as a colour here. */
-const AO_SURFACES=[[23,24,27],[17,18,20],[11,12,14],[34,35,40]];
-const ROLE_HEX={'var(--role-owner)':'#e74c3c','var(--role-admin)':'#f39c12','var(--role-mod)':'#2ecc71','var(--role-member)':'#949ba4'};
+   back to --text-normal. Seeded var() tokens and the surfaces are read from
+   the :root tokens, because a CSS var cannot be parsed as a colour here. */
+function aoCssVar(value){
+  const m=/^var\((--[\w-]+)\)$/.exec(String(value||'').trim());
+  return m?getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim():value;
+}
 function aoParseColor(value){
-  const v=(ROLE_HEX[value]||value||'').trim().replace(/^#/,'');
+  let v=(value||'').trim().replace(/^#/,'');
+  if(/^[0-9a-f]{3}$/i.test(v))v=v.replace(/./g,'$&$&');
   if(!/^([0-9a-f]{6})$/i.test(v))return null;
   return [0,2,4].map(i=>parseInt(v.slice(i,i+2),16));
 }
@@ -464,10 +467,11 @@ function aoLum(c){const s=c/255;return s<=0.03928?s/12.92:Math.pow((s+0.055)/1.0
 function aoContrast(a,b){const l=x=>0.2126*aoLum(x[0])+0.7152*aoLum(x[1])+0.0722*aoLum(x[2]);const x=l(a),y=l(b);return(Math.max(x,y)+0.05)/(Math.min(x,y)+0.05)}
 const aoRoleTextCache={};
 function readableRoleColor(color){
-  const raw=ROLE_HEX[color]||color;
+  const raw=aoCssVar(color);
   if(aoRoleTextCache[raw]!==undefined)return aoRoleTextCache[raw];
   const rgb=aoParseColor(raw);
-  const out=(rgb&&AO_SURFACES.every(s=>aoContrast(rgb,s)>=4.5))?raw:'var(--text-normal)';
+  const surfaces=['--bg-primary','--bg-secondary','--bg-tertiary','--bg-input'].map(n=>aoParseColor(aoCssVar('var('+n+')')));
+  const out=(rgb&&surfaces.every(s=>s&&aoContrast(rgb,s)>=4.5))?raw:'var(--text-normal)';
   aoRoleTextCache[raw]=out;
   return out;
 }
@@ -511,12 +515,18 @@ function setModalHTML(html){
   if(head)o.setAttribute('aria-labelledby',head.id);else o.removeAttribute('aria-labelledby');
   /* Reset scroll so a second long dialog does not open past its header. */
   inner.scrollTop=0;
+  if(o.classList.contains('visible')&&!o.contains(document.activeElement))focusModalStart(inner);
+}
+function focusModalStart(inner){
+  const first=inner.querySelector(MODAL_FOCUSABLE);
+  if(first instanceof HTMLElement)first.focus();
+  else{inner.setAttribute('tabindex','-1');inner.focus()}
 }
 function openModal(html){
   state.retentionProposal=null;
   const o=document.getElementById('modal');
   const inner=document.getElementById('modalInner');
-  modalOpener=document.activeElement;
+  if(!o.classList.contains('visible'))modalOpener=document.activeElement;
   setModalHTML(html);
   o.classList.add('visible');o.setAttribute('aria-hidden','false');
   /* A later openModal replaces the content; an earlier one's deferred focus
@@ -524,10 +534,7 @@ function openModal(html){
   const seq=(openModal._seq=(openModal._seq||0)+1);
   setTimeout(()=>{
     if(seq!==openModal._seq)return;
-    const focusables=inner.querySelectorAll(MODAL_FOCUSABLE);
-    const first=focusables[0];
-    if(first instanceof HTMLElement)first.focus();
-    else{inner.setAttribute('tabindex','-1');inner.focus()}
+    focusModalStart(inner);
   },0);
 }
 function closeModal(){
@@ -1186,7 +1193,7 @@ async function openEditUser(uid,uname,currentRole){
      403. The current role is always listed so the select can show it. */
   const opts=roles.filter(r=>r.position<myPos||r.id===currentRole)
     .map(r=>'<option value="'+r.id+'" '+(currentRole===r.id?'selected':'')+'>'+esc(r.name)+'</option>').join('');
-  openModal('<div class="modal-header"><h3>Edit User</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:20px"><div class="avatar" style="background:var(--accent);width:48px;height:48px;font-size:20px">'+uname[0].toUpperCase()+'</div><div style="font-size:16px;font-weight:700;color:var(--text-normal)">'+esc(uname)+'</div></div><div class="form-group"><label class="form-label">Role</label><select class="form-input" id="editRoleSelect" style="appearance:auto">'+opts+'</select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveUserRole('+uid+')">Save</button></div>');
+  openModal('<div class="modal-header"><h3>Edit User</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:20px"><div class="avatar" style="background:var(--accent);width:48px;height:48px;font-size:20px">'+uname[0].toUpperCase()+'</div><div style="font-size:16px;font-weight:700;color:var(--text-normal)">'+esc(uname)+'</div></div><div class="form-group"><label class="form-label" for="editRoleSelect">Role</label><select class="form-input" id="editRoleSelect" style="appearance:auto">'+opts+'</select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveUserRole('+uid+')">Save</button></div>');
 }
 
 async function saveUserRole(uid){
@@ -1195,11 +1202,11 @@ async function saveUserRole(uid){
 }
 
 function openBanUser(uid,uname){
-  openModal('<div class="modal-header"><h3>Ban User</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:16px">Ban <strong style="color:var(--text-normal)">'+esc(uname)+'</strong> from the server?</p><div class="form-group"><label class="form-label">Reason</label><textarea class="form-input form-textarea" id="banReason" placeholder="Reason for ban..."></textarea></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmBan('+uid+')">Ban User</button></div>');
+  openModal('<div class="modal-header"><h3>Ban User</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:16px">Ban <strong style="color:var(--text-normal)">'+esc(uname)+'</strong> from the server?</p><div class="form-group"><label class="form-label" for="banReason">Reason</label><textarea class="form-input form-textarea" id="banReason" placeholder="Reason for ban..."></textarea></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmBan('+uid+')">Ban User</button></div>');
 }
 
 function openIssueRecovery(uid,uname){
-  openModal('<div class="modal-header"><h3>Issue Recovery Credential</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:12px">Give <strong style="color:var(--text-normal)">'+esc(uname)+'</strong> a one-time credential to get back in. Redeeming it sets a new password, signs out every device and skips two-factor. It works once and expires in 15 minutes. Make sure you know who you are talking to first.</p><div class="form-group"><label class="form-label">How did you verify them?</label><select class="form-input" id="recoveryVerification"><option value="in_person">In person</option><option value="voice_call">Voice call</option><option value="video_call">Video call</option><option value="trusted_contact">Through a trusted contact</option></select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="confirmIssueRecovery('+uid+')">Issue credential</button></div>');
+  openModal('<div class="modal-header"><h3>Issue Recovery Credential</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:12px">Give <strong style="color:var(--text-normal)">'+esc(uname)+'</strong> a one-time credential to get back in. Redeeming it sets a new password, signs out every device and skips two-factor. It works once and expires in 15 minutes. Make sure you know who you are talking to first.</p><div class="form-group"><label class="form-label" for="recoveryVerification">How did you verify them?</label><select class="form-input" id="recoveryVerification"><option value="in_person">In person</option><option value="voice_call">Voice call</option><option value="video_call">Video call</option><option value="trusted_contact">Through a trusted contact</option></select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="confirmIssueRecovery('+uid+')">Issue credential</button></div>');
 }
 
 async function confirmIssueRecovery(uid){
@@ -1290,7 +1297,7 @@ function categoryDatalist(listId){
 }
 
 function openChannelModal(){
-  openModal('<div class="modal-header"><h3>Create Channel</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label">Name <span class="req">*</span></label><input class="form-input" id="chName" placeholder="general"></div><div class="form-group"><label class="form-label">Type</label><select class="form-input" id="chType" style="appearance:auto"><option value="text">Text</option><option value="voice">Voice</option><option value="announcement">Announcement</option></select></div><div class="form-group"><label class="form-label">Category</label><input class="form-input" id="chCat" list="chCatList" placeholder="Text Channels" autocomplete="off">'+categoryDatalist('chCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Any name works, for voice and text channels alike. Leave blank for no category.</div></div><div class="form-group"><label class="form-label">Topic</label><input class="form-input" id="chTopic"></div><div class="form-group"><label class="form-label">Position</label><input class="form-input" id="chPos" type="number" value="0" min="0"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="createChannel()">Create</button></div>');
+  openModal('<div class="modal-header"><h3>Create Channel</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label" for="chName">Name <span class="req">*</span></label><input class="form-input" id="chName" placeholder="general"></div><div class="form-group"><label class="form-label" for="chType">Type</label><select class="form-input" id="chType" style="appearance:auto"><option value="text">Text</option><option value="voice">Voice</option><option value="announcement">Announcement</option></select></div><div class="form-group"><label class="form-label" for="chCat">Category</label><input class="form-input" id="chCat" list="chCatList" placeholder="Text Channels" autocomplete="off">'+categoryDatalist('chCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Any name works, for voice and text channels alike. Leave blank for no category.</div></div><div class="form-group"><label class="form-label" for="chTopic">Topic</label><input class="form-input" id="chTopic"></div><div class="form-group"><label class="form-label" for="chPos">Position</label><input class="form-input" id="chPos" type="number" value="0" min="0"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="createChannel()">Create</button></div>');
 }
 
 async function createChannel(){
@@ -1324,15 +1331,15 @@ function openChannelEditModal(id){
   const maxUsers=ch.voice_max_users||ch.VoiceMaxUsers||0;
   const maxVideo=ch.voice_max_video||ch.VoiceMaxVideo||0;
   const voiceRows=type!=='voice'?'':
-     '<div class="form-group"><label class="form-label">User limit (0 = unlimited)</label><input class="form-input" id="chEditMaxUsers" type="number" min="0" max="99" value="'+esc(maxUsers)+'"></div>'
-    +'<div class="form-group"><label class="form-label">Video limit (0 = unlimited)</label><input class="form-input" id="chEditMaxVideo" type="number" min="0" max="99" value="'+esc(maxVideo)+'"></div>';
+     '<div class="form-group"><label class="form-label" for="chEditMaxUsers">User limit (0 = unlimited)</label><input class="form-input" id="chEditMaxUsers" type="number" min="0" max="99" value="'+esc(maxUsers)+'"></div>'
+    +'<div class="form-group"><label class="form-label" for="chEditMaxVideo">Video limit (0 = unlimited)</label><input class="form-input" id="chEditMaxVideo" type="number" min="0" max="99" value="'+esc(maxVideo)+'"></div>';
   openModal('<div class="modal-header"><h3>Edit Channel</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div>'
     +'<div class="modal-body">'
-    +'<div class="form-group"><label class="form-label">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div>'
-    +'<div class="form-group"><label class="form-label">Topic</label><input class="form-input" id="chEditTopic" value="'+esc(topic)+'"></div>'
-    +'<div class="form-group"><label class="form-label">Category</label><input class="form-input" id="chEditCat" list="chEditCatList" value="'+esc(cat)+'" autocomplete="off">'+categoryDatalist('chEditCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Move the channel to another category, or blank it to leave it uncategorized.</div></div>'
-    +'<div class="form-group"><label class="form-label">Slow mode (seconds, 0 = off)</label><input class="form-input" id="chEditSlow" type="number" min="0" value="'+esc(slow)+'"></div>'
-    +'<div class="form-group"><label class="form-label">Position</label><input class="form-input" id="chEditPos" type="number" min="0" value="'+esc(pos)+'"></div>'
+    +'<div class="form-group"><label class="form-label" for="chEditName">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div>'
+    +'<div class="form-group"><label class="form-label" for="chEditTopic">Topic</label><input class="form-input" id="chEditTopic" value="'+esc(topic)+'"></div>'
+    +'<div class="form-group"><label class="form-label" for="chEditCat">Category</label><input class="form-input" id="chEditCat" list="chEditCatList" value="'+esc(cat)+'" autocomplete="off">'+categoryDatalist('chEditCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Move the channel to another category, or blank it to leave it uncategorized.</div></div>'
+    +'<div class="form-group"><label class="form-label" for="chEditSlow">Slow mode (seconds, 0 = off)</label><input class="form-input" id="chEditSlow" type="number" min="0" value="'+esc(slow)+'"></div>'
+    +'<div class="form-group"><label class="form-label" for="chEditPos">Position</label><input class="form-input" id="chEditPos" type="number" min="0" value="'+esc(pos)+'"></div>'
     +voiceRows
     +'<div class="setting-row"><div class="setting-info"><div class="setting-name" id="chEditArchived-name">Archived</div><div class="setting-desc">Hide the channel without deleting its messages</div></div><div class="setting-ctrl"><button class="toggle '+(archived?'on':'')+'" id="chEditArchived" role="switch" aria-checked="'+(archived?'true':'false')+'" aria-labelledby="chEditArchived-name" onclick="toggleSwitch(this)"></button></div></div>'
     +'<div class="setting-row"><div class="setting-info"><div class="setting-name" id="chEditNsfw-name">Age-restricted (NSFW)</div><div class="setting-desc">Clients show a one-time warning and mark the channel. The server does not filter or restrict anything.</div></div><div class="setting-ctrl"><button class="toggle '+(nsfw?'on':'')+'" id="chEditNsfw" role="switch" aria-checked="'+(nsfw?'true':'false')+'" aria-labelledby="chEditNsfw-name" onclick="toggleSwitch(this)"></button></div></div>'
@@ -1456,16 +1463,16 @@ function renderChannelPermsModal(){
     +'<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Uncheck a role to hide this channel from it (private channel). Changes apply to connected users immediately; users already in the voice channel are not disconnected.</p>'
     +quick
     +'<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--bg-active)">'
-    +'<div class="form-group"><label class="form-label">Override matrix</label>'
+    +'<div class="form-group"><label class="form-label" for="permTarget">Override matrix</label>'
     +'<select class="form-input" id="permTarget" style="appearance:auto" onchange="renderPermMatrix()">'+opts+'</select></div>'
     +'<p style="color:var(--text-muted);font-size:12px;margin:0 0 10px">Resolution order: base role permissions → role override → member override. A member deny beats a role allow; Administrator bypasses everything.</p>'
     +'<div id="permMatrix"></div>'
     +'<div id="permPreview"></div>'
     +'</div>'
     +'<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--bg-active)">'
-    +'<div class="form-group"><label class="form-label">Explain access</label>'
+    +'<div class="form-group"><label class="form-label" for="explainUser">Explain access</label>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap"><select class="form-input" id="explainUser" style="appearance:auto;flex:1;min-width:0">'+memberOpts+'</select>'
-    +'<select class="form-input" id="explainAction" style="appearance:auto;flex:1;min-width:0">'+actionOpts+'</select>'
+    +'<select class="form-input" id="explainAction" aria-label="Action to explain" style="appearance:auto;flex:1;min-width:0">'+actionOpts+'</select>'
     +'<button class="btn btn-ghost" onclick="explainAccess()">Explain</button></div></div>'
     +'<div id="permExplain"></div>'
     +'</div></div>'
@@ -1801,12 +1808,12 @@ function openRoleModal(id){
 
   openModal('<div class="modal-header"><h3>'+(role?'Edit Role':'Create Role')+'</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div>'
     +'<div class="modal-body">'
-    +'<div class="form-group"><label class="form-label">Name <span class="req">*</span></label><input class="form-input" id="roleName" maxlength="32" value="'+esc(name)+'" placeholder="Moderator"></div>'
-    +'<div class="form-group"><label class="form-label">Color</label><div style="display:flex;align-items:center;gap:10px">'
+    +'<div class="form-group"><label class="form-label" for="roleName">Name <span class="req">*</span></label><input class="form-input" id="roleName" maxlength="32" value="'+esc(name)+'" placeholder="Moderator"></div>'
+    +'<div class="form-group"><label class="form-label" for="roleColor">Color</label><div style="display:flex;align-items:center;gap:10px">'
       +'<input type="color" id="roleColor" value="'+esc(color||'#00c8ff')+'" style="width:44px;height:34px;padding:2px;background:var(--bg-input);border:1px solid var(--border-control);border-radius:var(--radius-sm)">'
       +'<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)"><input type="checkbox" id="roleNoColor" '+(color?'':'checked')+'> No color</label>'
     +'</div></div>'
-    +'<div class="form-group"><label class="form-label">Position (must be below your own rank of '+myPosition()+')</label><input class="form-input" id="rolePos" type="number" min="0" max="'+Math.max(0,myPosition()-1)+'" value="'+position+'"></div>'
+    +'<div class="form-group"><label class="form-label" for="rolePos">Position (must be below your own rank of '+myPosition()+')</label><input class="form-input" id="rolePos" type="number" min="0" max="'+Math.max(0,myPosition()-1)+'" value="'+position+'"></div>'
     +'<div class="form-group"><label class="form-label">Permissions</label>'+grid+'</div>'
     +'</div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveRole('+(role?role.id:'null')+')">'+(role?'Save':'Create')+'</button></div>');
@@ -1887,7 +1894,7 @@ async function renderAudit(){
 
   // Filter bar
   html+='<div class="filter-bar">';
-  html+='<input class="filter-search" placeholder="Search audit log..." value="'+esc(state.auditSearch)+'" oninput="state.auditSearch=this.value;refilterAudit()">';
+  html+='<input class="filter-search" aria-label="Search audit log" placeholder="Search audit log..." value="'+esc(state.auditSearch)+'" oninput="state.auditSearch=this.value;refilterAudit()">';
   html+='<select class="filter-select" onchange="state.auditActionFilter=this.value;refilterAudit()">';
   html+='<option value="all" '+(state.auditActionFilter==='all'?'selected':'')+'>All Actions</option>';
   actionTypes.forEach(t=>{html+='<option value="'+esc(t)+'" '+(state.auditActionFilter===t?'selected':'')+'>'+esc(t)+'</option>'});
@@ -1960,7 +1967,7 @@ function renderLogs(){
   let html='<div class="page-title">Server Logs</div><div class="page-desc">Real-time structured log stream</div>';
   html+='<div class="log-toolbar">';
   html+=lvlBtn('DEBUG')+lvlBtn('INFO')+lvlBtn('WARN')+lvlBtn('ERROR');
-  html+='<input class="filter-search" placeholder="Filter logs..." style="flex:1;min-width:150px" value="'+esc(state.logSearch)+'" oninput="state.logSearch=this.value;renderLogLines()">';
+  html+='<input class="filter-search" aria-label="Filter logs" placeholder="Filter logs..." style="flex:1;min-width:150px" value="'+esc(state.logSearch)+'" oninput="state.logSearch=this.value;renderLogLines()">';
   html+='<button class="btn btn-ghost" onclick="toggleLogAutoScroll()" id="autoScrollBtn" title="Auto-scroll">'+(state.logAutoScroll?'⬇ Auto':'⏸ Manual')+'</button>';
   html+='<button class="btn btn-ghost" onclick="toggleLogPause()" id="pauseBtn">'+(state.logPaused?'▶ Resume':'⏸ Pause')+'</button>';
   html+='<button class="btn btn-ghost" onclick="copyAllLogs()" title="Copy visible logs">Copy All</button>';
@@ -2169,7 +2176,7 @@ async function renderRetention(){
   let html='<div class="page-title">Message Retention</div><div class="page-desc">Messages older than the window are deleted permanently on every maintenance sweep. Pinned messages are exempt, and direct messages are never in scope.</div>';
 
   html+='<div class="section-card"><div class="section-card-header"><h3>Server-wide window</h3></div><div class="section-card-body">';
-  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Keep messages for</div><div class="setting-desc">Applies to every channel without its own override. 0 keeps everything indefinitely, which is the default; otherwise between 1 and 3650 days.</div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="retentionDays">Keep messages for</label><div class="setting-desc">Applies to every channel without its own override. 0 keeps everything indefinitely, which is the default; otherwise between 1 and 3650 days.</div></div>';
   html+='<div class="setting-ctrl" style="display:flex;gap:8px;align-items:center"><input class="form-input" id="retentionDays" type="number" min="0" max="3650" style="width:110px" value="'+esc(serverDays)+'"><button class="btn btn-accent" onclick="openApplyRetention()">Preview change</button></div></div>';
   html+='<div style="color:var(--text-muted);font-size:12px;margin-top:4px">Currently: <strong style="color:var(--text-normal)">'+esc(retentionLabel(serverDays))+'</strong></div>';
   html+='</div></div>';
@@ -2360,9 +2367,9 @@ async function renderTokens(){
 
 function openCreateTokenModal(){
   openModal('<div class="modal-header"><h3>Create API Token</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div>'+
-    '<div class="modal-body"><div class="form-group"><label class="form-label">Label</label><input id="tokLabel" class="form-input" placeholder="ci-bot" autofocus></div>'+
-    '<div class="form-group"><label class="form-label">User <span style="color:var(--text-muted)">(optional)</span></label><input id="tokUser" class="form-input" placeholder="owner (default)"></div>'+
-    '<div class="form-group"><label class="form-label">Expires in hours <span style="color:var(--text-muted)">(0 = never)</span></label><input id="tokExpires" class="form-input" type="number" min="0" value="0"></div></div>'+
+    '<div class="modal-body"><div class="form-group"><label class="form-label" for="tokLabel">Label</label><input id="tokLabel" class="form-input" placeholder="ci-bot" autofocus></div>'+
+    '<div class="form-group"><label class="form-label" for="tokUser">User <span style="color:var(--text-muted)">(optional)</span></label><input id="tokUser" class="form-input" placeholder="owner (default)"></div>'+
+    '<div class="form-group"><label class="form-label" for="tokExpires">Expires in hours <span style="color:var(--text-muted)">(0 = never)</span></label><input id="tokExpires" class="form-input" type="number" min="0" value="0"></div></div>'+
     '<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="createToken()">Create</button></div>');
 }
 
@@ -2437,8 +2444,8 @@ async function renderEmoji(){
   html+='<div class="section-card"><div class="section-card-header"><h3>Upload</h3></div><div class="section-card-body">';
   html+='<div style="color:var(--text-muted);font-size:13px;margin-bottom:10px">PNG, JPEG, GIF or WebP. Up to 512 KB and 128&times;128 pixels. Shortcodes are 2-32 characters of a-z, 0-9 or underscore.</div>';
   html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
-  html+='<input type="text" id="emojiShortcode" class="form-input" style="max-width:200px" placeholder="shortcode" maxlength="32">';
-  html+='<input type="file" id="emojiFile" accept="image/png,image/jpeg,image/gif,image/webp" class="form-input" style="max-width:320px;padding:8px">';
+  html+='<input type="text" id="emojiShortcode" aria-label="Emoji shortcode" class="form-input" style="max-width:200px" placeholder="shortcode" maxlength="32">';
+  html+='<input type="file" id="emojiFile" aria-label="Emoji image file" accept="image/png,image/jpeg,image/gif,image/webp" class="form-input" style="max-width:320px;padding:8px">';
   html+='<button class="btn btn-accent" onclick="uploadEmoji()">'+I.upload+' Upload</button>';
   html+='</div></div></div>';
 
@@ -2537,7 +2544,7 @@ async function renderPlugins(){
     html+='<div class="section-card"><div class="section-card-header"><h3>Install Plugin</h3></div><div class="section-card-body">';
     html+='<div style="color:var(--text-muted);font-size:13px;margin-bottom:10px">Upload a plugin package (.zip, max 16 MB) containing a plugin.json manifest at its root.</div>';
     html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
-    html+='<input type="file" id="pluginFile" accept=".zip,application/zip" class="form-input" style="max-width:320px;padding:8px" onchange="document.getElementById(\'pluginInstallBtn\').disabled=!this.files.length">';
+    html+='<input type="file" id="pluginFile" aria-label="Plugin package (.zip)" accept=".zip,application/zip" class="form-input" style="max-width:320px;padding:8px" onchange="document.getElementById(\'pluginInstallBtn\').disabled=!this.files.length">';
     html+='<button class="btn btn-accent" id="pluginInstallBtn" disabled onclick="installPlugin()">'+I.upload+' Install</button>';
     html+='</div></div></div>';
   }
