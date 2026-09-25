@@ -71,8 +71,6 @@ export function showUserVolumeMenu(
     "div",
     {
       class: "context-menu-item",
-      // Purely a label: not a menuitem, so roving navigation skips it.
-      role: "presentation",
       style: "font-weight:600;cursor:default;pointer-events:none",
     },
     username,
@@ -87,7 +85,6 @@ export function showUserVolumeMenu(
     "div",
     {
       class: "context-menu-item",
-      role: "presentation",
       style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
     },
     t("volume.user", { percent: currentVol }),
@@ -140,7 +137,6 @@ export function showUserVolumeMenu(
         "div",
         {
           class: "context-menu-item",
-          role: "presentation",
           "aria-disabled": "true",
           "data-action": "voice-mod-unavailable",
           style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",

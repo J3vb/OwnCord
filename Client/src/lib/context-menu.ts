@@ -83,12 +83,7 @@ export function createMenuItem(
   opts: { testId?: string; submenu?: boolean } = {},
 ): HTMLElement {
   const attrs: Record<string, string> = { class: className, role: "menuitem", tabindex: "-1" };
-  if (opts.submenu === true) {
-    attrs["aria-haspopup"] = "menu";
-    attrs["aria-expanded"] = "false";
-  } else {
-    attrs["type"] = "button";
-  }
+  if (opts.submenu !== true) attrs["type"] = "button";
   if (opts.testId !== undefined) attrs["data-testid"] = opts.testId;
   return createElement(opts.submenu === true ? "div" : "button", attrs, label);
 }
@@ -164,7 +159,7 @@ export function enableMenuKeyboard(menu: HTMLElement, opts: MenuKeyboardOptions)
           // Enter would otherwise also fire the trigger's click; stop it so the
           // submenu opens instead of the row activating.
           e.stopImmediatePropagation();
-          revealSubmenu(target, sub);
+          revealSubmenu(sub);
           return;
         }
       }
@@ -190,11 +185,10 @@ export function enableMenuKeyboard(menu: HTMLElement, opts: MenuKeyboardOptions)
   return restore;
 }
 
-/** Reveal a trigger's submenu and focus its first row. */
-function revealSubmenu(trigger: HTMLElement, submenu: HTMLElement): void {
+/** Reveal a submenu and focus its first row. */
+function revealSubmenu(submenu: HTMLElement): void {
   submenu.style.display = "";
   submenu.setAttribute("role", "menu");
-  trigger.setAttribute("aria-expanded", "true");
   setRovingTabindex(submenu, MENU_ITEM_SELECTOR);
   menuItems(submenu)[0]?.focus();
 }

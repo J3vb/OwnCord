@@ -463,14 +463,10 @@ function renderVoiceChannelItem(
         "data-voice-uid": String(user.userId),
       });
       // A remote participant's row opens the per-user volume/moderation menu
-      // (A11Y-01): make it a focusable button-like row so the menu is reachable
+      // (A11Y-01): make it a focusable row so the menu is reachable
       // from the keyboard too. The local user's own row has no menu.
       const ownRow = getCurrentUser()?.id === user.userId;
-      if (!ownRow) {
-        row.tabIndex = 0;
-        row.setAttribute("role", "button");
-        row.setAttribute("aria-haspopup", "menu");
-      }
+      if (!ownRow) row.tabIndex = 0;
 
       // Render the same identity a rename shows everywhere else (member list,
       // message rows, DM sidebar) — memberDisplayName prefers the nickname,

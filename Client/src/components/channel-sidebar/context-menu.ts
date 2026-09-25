@@ -241,13 +241,7 @@ export function attachChannelContextMenu(
     setOwnedTimeout(
       menuOwner.signal,
       () => {
-        document.addEventListener(
-          "mousedown",
-          (e) => {
-            if (!menu.contains(e.target as Node)) closeMenu();
-          },
-          { signal: menuOwner.signal },
-        );
+        document.addEventListener("click", closeMenu, { signal: menuOwner.signal });
       },
       0,
     );
