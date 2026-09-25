@@ -170,3 +170,54 @@ render path as a fallback; fail closed and record a blocker instead.
 ## Open questions
 
 No new owner decision is introduced by this milestone. The PRD's unresolved entry decisions still apply; stop if implementation would require a new product, UX or scope choice.
+
+## Implementation record — 2026-09-25
+
+Branch `fm/b9-26-impl`; base `dev` `7732f969` (the plan was drafted at
+`0beee8e4`, an ancestor with 83 commits between them; B9-25 merged as
+[#1795](https://github.com/J3vb/OwnCord/pull/1795), so its dependency is met).
+Q13 applied: no token file was edited, no Aurora treatment adopted, and no
+existing English string changed. No production code changed — this is a
+qualification lane and no journey exposed a defect, so no fix was needed.
+
+### Tasks
+
+- **Task 0** verified the inventory at the real base (all three rows hold) and
+  recorded the drift above; both budgets hold at the base.
+- **Task 1** is the journey matrix in
+  [b9-journey-evidence-2026-09-25.md](../../docs/plans/b9-journey-evidence-2026-09-25.md):
+  each requirement tied to a test, role, mode, platform and result.
+- **Task 2** ships five real-server journeys in
+  `Client/tests/e2e/fullstack/b9-journeys.spec.ts`: report → warn → notice →
+  appeal → decision (BPR-070..073); retention disclosure → self-erasure →
+  observer cleanup (BPR-052/BPR-054 client half); first-contact → accept →
+  block → composer gating (BPR-060); second-device session displacement →
+  "Use here" (BPR-090 lifecycle/compatibility); recovery-kit → logout →
+  recovery from the connect page (BPR-090). The one-live-socket rule is
+  respected: the displacement journey's second device is displaced by design,
+  the first-contact stranger owns its own socket, and the REST-only readers
+  carry no socket.
+- **Task 3** ships the native privacy journey in
+  `Client/tests/e2e/native/b9-journeys.spec.ts` (registered in
+  `playwright.config.native.ts`'s `native-core` project): consent gates the
+  broker, a warm-cache re-entry cannot bypass the gate, "Ask each time" admits
+  exactly the activated item, every first-party HTTP destination is the
+  configured server, and logout keeps that confinement. Runs in Windows CI;
+  its automated ARIA/keyboard evidence stands in for the dropped manual
+  screen-reader pass (owner 2026-09-24).
+- **Task 4** ratcheted the budgets: startup 96,606/97,000 B, MainPage
+  62,433/64,000 B, livekit 133,372/135,000 B, livekitSession 23,008/24,000 B.
+  No budget was raised and no threshold weakened. BPR-061/BPR-062 keep their
+  B5/B7 status; B8 stays deferred.
+- **Task 5** recorded the commands, exact head, results and limits in the
+  evidence manifest, and updated the PRD status table (B9-25 was merged this
+  cycle, so its row moves from Pending), this plan, the traceability header and
+  the register rows.
+
+### Validation
+
+From `Client/` at this head: `npx tsc -p tsconfig.e2e.json --noEmit` (clean);
+`npx playwright test --config playwright.config.fullstack.ts
+tests/e2e/fullstack/b9-journeys.spec.ts --workers=1` (5 passed); `npm run
+build:budget && npm run check:budgets` (all budgets ok). The full component
+gates run in CI on the PR; the native journey is CI-only (no Windows host here).
