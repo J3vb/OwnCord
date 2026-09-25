@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -73,10 +74,8 @@ func adminAllowlistAdmitsRelay(cidrs []string, container bool) bool {
 		if err != nil {
 			continue
 		}
-		for _, r := range ranges {
-			if p.Overlaps(r) {
-				return true
-			}
+		if slices.ContainsFunc(ranges, p.Overlaps) {
+			return true
 		}
 	}
 	return false
@@ -93,7 +92,7 @@ func defaultGateway() (netip.Addr, bool) {
 	if err != nil {
 		return netip.Addr{}, false
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		f := strings.Fields(line)
 		if len(f) < 3 || f[1] != "00000000" {
 			continue
