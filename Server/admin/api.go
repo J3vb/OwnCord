@@ -234,7 +234,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			Post("/logs/ticket", handleLogTicket(database))
 
 		r.Get("/stats", handleGetStats(svc.Users, hub))
-		r.Get("/me", handleGetMe())
+		r.Get("/me", handleGetMe(settings, version))
 		r.With(requirePerm(permissions.Administrator)).Post("/support-bundles/preview", bundles.preview)
 		r.With(requirePerm(permissions.Administrator)).Post("/support-bundles/download", bundles.download)
 		// Attention panel (RI-07): server health detail, ADMINISTRATOR like

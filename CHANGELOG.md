@@ -394,6 +394,15 @@ text was moved behind English catalogs ready for translation.
 - The admin panel's security policy now refuses any script that is not one of
   the panel's own files, so injected markup can no longer run code. The panel
   looks and works exactly as before.
+- **The admin panel's navigation is regrouped** into Overview, Community,
+  Moderation, Server, Operations and Integrations, with count badges for
+  pending registrations and active warnings and a dot when an update is
+  available. Existing `/admin#section` links still open the same pages.
+- A top bar now names the server, shows the signed-in account and role (and
+  the version, for the owner), and holds Sign out in its account menu.
+- Below 900 px wide the navigation is a drawer behind a menu button: it takes
+  keyboard focus when it opens and closes on Escape, an outside click or a
+  chosen page.
 - **Who may register is now a choice**: closed, invite only, approval, or open.
   Fresh installs default to invite only. Existing servers keep the behaviour
   they had — a server that required an invite still requires one, and

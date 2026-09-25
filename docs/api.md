@@ -3031,7 +3031,9 @@ admin. Violations return `403 FORBIDDEN`.
 ### GET /admin/api/me
 
 Describes the calling principal so a panel can hide what the role cannot use.
-Every route still re-checks its bit server-side.
+Every route still re-checks its bit server-side. `server_name` is the live
+`server_name` setting, for the panel's top bar. `version` is the build version
+and is present only for the owner, like the owner-only `GET /updates`.
 
 #### Response 200 OK
 
@@ -3043,7 +3045,8 @@ Every route still re-checks its bit server-side.
   "role_name": "Moderator",
   "role_position": 60,
   "permissions": 1048575,
-  "is_owner": false
+  "is_owner": false,
+  "server_name": "OwnCord Server"
 }
 ```
 

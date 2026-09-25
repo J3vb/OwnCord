@@ -33,6 +33,9 @@ const I={
   shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
   arrowUp:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
   arrowDown:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',
+  key:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6"/><path d="M15.5 7.5l3 3L22 7l-3-3"/></svg>',
+  activity:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+  chevronDown:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
   smile:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>',
 };
 
@@ -41,7 +44,7 @@ const PAGE_SIZE=50;
 const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   me:null,partialToken:'',
   usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
-  supportPreview:null,supportBusy:false,
+  supportPreview:null,supportBusy:false,badges:{pending:0,warnings:0,update:false},
   cachedStats:null,cachedUpdate:null,channelCache:{},roleList:[],pluginRuntime:'unknown',pluginBusy:false,
   logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
   logSearch:'',logAutoScroll:true,logPaused:false,logEventSource:null,logReconnectTimer:null,logConnectSeq:0,logMaxLines:2000};
@@ -55,6 +58,7 @@ function handleSessionExpired(){
   if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}
   if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}
   state.supportPreview=null;state.supportBusy=false;state.token='';state.me=null;localStorage.removeItem('admin_token');
+  resetShell();
   const err=document.getElementById('loginErr');if(err)err.textContent='Your session expired — sign in again.';
   showOverlay('loginOverlay');
 }
@@ -67,6 +71,7 @@ async function api(method,path,body,headers){
   if(res.status===204)return null;
   const data=await res.json();
   if(!res.ok)throw new Error(data.message||res.statusText);
+  if(method==='GET')noteBadgeSource(path,data);
   return data;
 }
 
@@ -275,32 +280,37 @@ async function enterApp(){
   const deepLink=sectionFromHash();
   if(deepLink)state.section=deepLink;
   if(!sectionAllowed(state.section))state.section='dashboard';
-  showApp();renderNav();renderContent();
+  showApp();renderTopbar();renderNav();renderContent();refreshBadges();
 }
 
 /* ═══ Nav ═══ */
 /* `allowed` mirrors the server-side gate on each section's routes; omitted
-   means perimeter-level (any principal the panel let in). */
+   means perimeter-level (any principal the panel let in). The groups are the
+   information architecture; the ids are the #hash routes and never change, so
+   a deep link such as /admin#audit keeps landing on its section. `badge`
+   returns a count (or true for a dot) shown on the item; Sign out lives in
+   the top bar's user menu, not here. */
 const NAV=[
-  {section:'Management'},
-  {id:'dashboard',label:'Dashboard',icon:I.dashboard},
-  {id:'users',label:'Users',icon:I.users},
+  {section:'Overview'},
+  {id:'dashboard',label:'Dashboard',icon:I.dashboard,badge:()=>state.badges.warnings,badgeText:'active warnings'},
+  {section:'Community'},
+  {id:'users',label:'Members',icon:I.users,badge:()=>state.badges.pending,badgeText:'pending registrations'},
+  {id:'roles',label:'Roles & permissions',icon:I.key,allowed:()=>can(PERM.MANAGE_ROLES)},
   {id:'channels',label:'Channels',icon:I.channels,allowed:()=>can(PERM.MANAGE_CHANNELS)},
-  {id:'roles',label:'Roles',icon:I.shield,allowed:()=>can(PERM.MANAGE_ROLES)},
   {id:'emoji',label:'Emoji',icon:I.smile,allowed:()=>can(PERM.MANAGE_SERVER)},
-  {sep:true},
-  {section:'Configuration'},
-  {id:'audit',label:'Audit Log',icon:I.audit,allowed:()=>can(PERM.VIEW_AUDIT_LOG)},
-  {id:'tokens',label:'API Tokens',icon:I.lock,allowed:isOwner},
-  {id:'plugins',label:'Plugins',icon:I.plugins,allowed:()=>can(PERM.ADMINISTRATOR)},
-  {id:'diagnostics',label:'Diagnostics',icon:I.shield,allowed:()=>can(PERM.ADMINISTRATOR)},
-  {id:'logs',label:'Server Logs',icon:I.logs,allowed:()=>can(PERM.ADMINISTRATOR)},
+  {section:'Moderation'},
+  {id:'audit',label:'Audit log',icon:I.audit,allowed:()=>can(PERM.VIEW_AUDIT_LOG)},
+  {section:'Server'},
   {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged,allowed:()=>can(PERM.MANAGE_SERVER)},
-  {id:'retention',label:'Retention',icon:I.trash,allowed:()=>can(PERM.MANAGE_SERVER)},
-  {id:'backups',label:'Backups',icon:I.backup,allowed:isOwner},
-  {id:'updates',label:'Updates',icon:I.updates,allowed:isOwner},
-  {sep:true},
-  {id:'logout',label:'Sign Out',icon:I.logout,danger:true},
+  {id:'retention',label:'Message retention',icon:I.trash,allowed:()=>can(PERM.MANAGE_SERVER)},
+  {id:'backups',label:'Backups & restore',icon:I.backup,allowed:isOwner},
+  {id:'updates',label:'Updates',icon:I.updates,badge:()=>state.badges.update,badgeText:'update available',allowed:isOwner},
+  {section:'Operations'},
+  {id:'logs',label:'Server logs',icon:I.logs,allowed:()=>can(PERM.ADMINISTRATOR)},
+  {id:'diagnostics',label:'Diagnostics',icon:I.activity,allowed:()=>can(PERM.ADMINISTRATOR)},
+  {section:'Integrations'},
+  {id:'tokens',label:'API tokens',icon:I.lock,allowed:isOwner},
+  {id:'plugins',label:'Plugins',icon:I.plugins,allowed:()=>can(PERM.ADMINISTRATOR)},
 ];
 
 /* True when the principal may open the section. Unknown ids are refused so a
@@ -311,44 +321,114 @@ function sectionAllowed(id){
   return !n.allowed||n.allowed();
 }
 
-/* Drops section labels with no visible item under them and separators that
-   would end up leading, trailing, or doubled once entries are filtered out. */
+/* Drops group labels with no visible item under them. */
 function visibleNav(){
-  const kept=NAV.filter(n=>n.section||n.sep||!n.allowed||n.allowed());
-  const out=[];
-  for(let i=0;i<kept.length;i++){
-    const n=kept[i];
-    if(n.section){
-      const next=kept[i+1];
-      if(!next||next.section||next.sep)continue;
-    }
-    if(n.sep){
-      const prev=out[out.length-1];
-      if(!prev||prev.sep)continue;
-    }
-    out.push(n);
-  }
-  while(out.length&&out[out.length-1].sep)out.pop();
-  return out;
+  const kept=NAV.filter(n=>n.section||!n.allowed||n.allowed());
+  return kept.filter((n,i)=>!n.section||(kept[i+1]&&!kept[i+1].section));
+}
+
+function navBadge(n){
+  const v=n.badge&&n.badge();
+  if(!v)return'';
+  const sr='<span class="sr-only"> ('+(v===true?'':v+' ')+n.badgeText+')</span>';
+  return v===true?'<span class="nav-dot" aria-hidden="true"></span>'+sr:'<span class="nav-badge" aria-hidden="true">'+(v>99?'99+':v)+'</span>'+sr;
 }
 
 function renderNav(){
   document.getElementById('sidebarNav').innerHTML=visibleNav().map(n=>{
     if(n.section)return'<div class="sidebar-label">'+n.section+'</div>';
-    if(n.sep)return'<div class="sidebar-sep"></div>';
-    const active=state.section===n.id?'active':'';
-    const cls=n.danger?'danger':'';
-    const unsaved=n.unsaved&&n.unsaved()?'<span class="unsaved-dot"></span>':'';
-    if(n.id==='logout')return'<button class="nav-item '+cls+'" data-action="doLogout">'+n.icon+'<span>'+n.label+'</span></button>';
-    return'<button class="nav-item '+active+' '+cls+'" role="tab" data-action="navigateTo" data-args="'+actArgs(n.id)+'">'+unsaved+n.icon+'<span>'+n.label+'</span></button>';
+    const active=state.section===n.id;
+    const unsaved=n.unsaved&&n.unsaved()?'<span class="unsaved-dot" aria-hidden="true"></span><span class="sr-only"> (unsaved changes)</span>':'';
+    return'<button class="nav-item'+(active?' active':'')+'"'+(active?' aria-current="page"':'')+' data-action="navigateTo" data-args="'+actArgs(n.id)+'">'+n.icon+'<span class="nav-label">'+esc(n.label)+'</span>'+unsaved+navBadge(n)+'</button>';
   }).join('');
+}
+
+/* ═══ Top bar ═══ */
+/* Which server this is and who is signed in: the name comes from the live
+   server_name setting, the version only for the owner (GET /me). */
+function renderTopbar(){
+  const me=state.me||{};
+  document.getElementById('topbarServer').textContent=me.server_name||'OwnCord';
+  const ver=String(me.version||'');
+  document.getElementById('topbarVersion').textContent=/^\d/.test(ver)?'v'+ver:ver;
+  const name=me.username||'';
+  document.getElementById('userMenuBtn').innerHTML='<span class="avatar" aria-hidden="true" style="background:var(--accent)">'+esc(name.charAt(0).toUpperCase())+'</span>'
+    +'<span class="user-menu-who"><span class="user-menu-name">'+esc(name)+'</span><span class="user-menu-role">'+esc(me.role_name||'')+'</span></span>'+I.chevronDown;
+  document.getElementById('userMenuBtn').setAttribute('aria-label','Account: '+name+(me.role_name?', '+me.role_name:''));
+}
+function isUserMenuOpen(){return !document.getElementById('userMenu').classList.contains('hidden')}
+function openUserMenu(){
+  document.getElementById('userMenu').classList.remove('hidden');
+  document.getElementById('userMenuBtn').setAttribute('aria-expanded','true');
+  document.querySelector('#userMenu button').focus();
+}
+function closeUserMenu(restoreFocus){
+  document.getElementById('userMenu').classList.add('hidden');
+  const b=document.getElementById('userMenuBtn');b.setAttribute('aria-expanded','false');
+  if(restoreFocus)b.focus();
+}
+/* A click, or focus moving, anywhere outside the open menu closes it. */
+document.addEventListener('click',e=>{
+  if(isUserMenuOpen()&&!(e.target instanceof Element&&e.target.closest('.user-menu-wrap')))closeUserMenu(false);
+});
+document.querySelector('.user-menu-wrap').addEventListener('focusout',e=>{
+  if(isUserMenuOpen()&&!(e.relatedTarget instanceof Node&&e.currentTarget.contains(e.relatedTarget)))closeUserMenu(false);
+});
+
+/* ═══ Nav drawer (below 900px) ═══ */
+/* Below the breakpoint the sidebar is a modal drawer: the menu button opens
+   it and moves focus in, the rest of the shell is inert while it is open,
+   Escape, the scrim, the close button or a chosen section close it, and focus
+   returns to the menu button. While closed it is visibility:hidden (admin.css),
+   so it is out of the tab order. */
+function isNavOpen(){return document.getElementById('adminShell').classList.contains('nav-open')}
+function openNav(){
+  document.getElementById('adminShell').classList.add('nav-open');
+  document.querySelector('#adminShell .main').inert=true;
+  document.getElementById('navToggle').setAttribute('aria-expanded','true');
+  const target=document.querySelector('#sidebarNav .nav-item.active')||document.getElementById('navClose');
+  target.focus();
+}
+function closeNav(restoreFocus=true){
+  if(!isNavOpen())return;
+  document.getElementById('adminShell').classList.remove('nav-open');
+  document.querySelector('#adminShell .main').inert=false;
+  const t=document.getElementById('navToggle');t.setAttribute('aria-expanded','false');
+  if(restoreFocus)t.focus();
+}
+/* Widening past the breakpoint (admin.css) turns the drawer back into the
+   sidebar, so nothing stays inert behind a drawer that is no longer shown. */
+window.addEventListener('resize',()=>{if(window.innerWidth>900)closeNav(false)});
+/* Sign-out and session expiry: close the popups and forget the last
+   principal's badge counts. */
+function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending:0,warnings:0,update:false}}
+
+/* ═══ Nav badges ═══ */
+/* Pending registrations (Members), active attention warnings (Dashboard) and
+   an available update (Updates). Every GET of a source route refreshes its
+   badge, so a page that loads the data keeps the count current for free;
+   refreshBadges loads what the principal may read once on sign-in. */
+function noteBadgeSource(path,data){
+  let v;
+  if(path==='/registrations'&&Array.isArray(data))v=['pending',data.length];
+  else if(path==='/attention'&&data&&Array.isArray(data.warnings))v=['warnings',data.warnings.filter(w=>!w.recovered_at).length];
+  else if(path==='/updates'&&data&&typeof data==='object')v=['update',!!data.update_available];
+  if(!v||state.badges[v[0]]===v[1])return;
+  state.badges[v[0]]=v[1];
+  if(document.getElementById('sidebarNav').childElementCount)renderNav();
+}
+function refreshBadges(){
+  const quiet=()=>{};
+  if(can(PERM.MANAGE_SERVER)&&state.section!=='users')api('GET','/registrations').catch(quiet);
+  if(can(PERM.ADMINISTRATOR)&&state.section!=='dashboard')api('GET','/attention').catch(quiet);
+  if(isOwner()&&state.section!=='dashboard'&&state.section!=='updates')api('GET','/updates').catch(quiet);
 }
 
 function navigateTo(id){
   if(!sectionAllowed(id)){showToast('You do not have permission to open that section','error');return}
   try{
     if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}}
-    state.section=id;renderNav();renderContent();
+    state.section=id;renderNav();renderContent();closeNav();
   }catch(err){
     console.error('[Admin] Tab navigation failed for "'+id+'":', err);
     var c=document.getElementById('content');
@@ -356,7 +436,7 @@ function navigateTo(id){
   }
 }
 
-function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}state.supportPreview=null;state.supportBusy=false;state.token='';state.me=null;localStorage.removeItem('admin_token');showOverlay('loginOverlay')}
+function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}state.supportPreview=null;state.supportBusy=false;state.token='';state.me=null;localStorage.removeItem('admin_token');resetShell();showOverlay('loginOverlay')}
 
 /* ═══ Content Router ═══ */
 function renderContent(){
@@ -402,6 +482,8 @@ function delegateActions(type,attr){
 delegateActions('click','data-action');
 delegateActions('input','data-input-action');
 delegateActions('change','data-change-action');
-Object.assign(ACTIONS,{closeModal,renderContent,navigateTo,doLogout,dismissToast,
+Object.assign(ACTIONS,{closeModal,renderContent,navigateTo,doLogout,dismissToast,openNav,
+  closeNav(){closeNav()},
+  toggleUserMenu(){if(isUserMenuOpen())closeUserMenu(true);else openUserMenu()},
   closeModalAndRefresh(){closeModal();renderContent()},
   toggleSwitch(){toggleSwitch(this)}});

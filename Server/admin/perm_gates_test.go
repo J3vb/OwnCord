@@ -555,9 +555,18 @@ func TestGetMe_ReportsCallerPermissions(t *testing.T) {
 		RolePosition int    `json:"role_position"`
 		Permissions  int64  `json:"permissions"`
 		IsOwner      bool   `json:"is_owner"`
+		ServerName   string `json:"server_name"`
+		Version      string `json:"version"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &me); err != nil {
 		t.Fatalf("unmarshal me: %v", err)
+	}
+	if me.ServerName != "Test Server" {
+		t.Errorf("server_name = %q, want the seeded setting", me.ServerName)
+	}
+	// Build identity stays owner-only, like GET /updates.
+	if me.Version != "" {
+		t.Errorf("version = %q reported to a moderator, want omitted", me.Version)
 	}
 	if me.Username != "moduser" || me.RoleName != "Moderator" {
 		t.Errorf("me = %+v, want moduser/Moderator", me)
@@ -580,12 +589,16 @@ func TestGetMe_OwnerFlagged(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 	var me struct {
-		IsOwner bool `json:"is_owner"`
+		IsOwner bool   `json:"is_owner"`
+		Version string `json:"version"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &me); err != nil {
 		t.Fatalf("unmarshal me: %v", err)
 	}
 	if !me.IsOwner {
 		t.Error("is_owner = false for the Owner role")
+	}
+	if me.Version != "1.0.0" {
+		t.Errorf("version = %q for the owner, want the build version", me.Version)
 	}
 }

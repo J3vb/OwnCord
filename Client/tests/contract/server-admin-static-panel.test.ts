@@ -36,6 +36,7 @@ window.__test = {
   closeModal: closeModal,
   applyRetention: applyRetention,
   navigateTo: navigateTo,
+  enterApp: enterApp,
   nav: NAV,
   wiz: wiz,
   wizStepCount: WIZ_STEP_COUNT,
@@ -72,6 +73,7 @@ interface Bridge {
   closeModal: () => void;
   applyRetention: () => Promise<void>;
   navigateTo: (id: string) => void;
+  enterApp: () => Promise<void>;
   nav: { id?: string }[];
   wiz: { step: number };
   wizStepCount: number;
@@ -802,5 +804,95 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
     release();
     await apply;
+  });
+
+  // AO-3. The shell groups the same #hash routes, shows who and where in a
+  // top bar, badges the nav from the routes that own the counts, and below
+  // 900px turns the sidebar into a drawer that takes focus and gives it back.
+  it("renders the grouped nav, top bar, badges and drawer (AO-3)", async () => {
+    const calls: FetchCall[] = [];
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p === "/me")
+        return {
+          json: {
+            id: 1,
+            username: "ada",
+            role_name: "Owner",
+            permissions: ADMINISTRATOR,
+            role_position: 100,
+            is_owner: true,
+            server_name: "Lab <b>",
+            version: "1.2.0",
+          },
+        };
+      if (p === "/registrations") return { json: [{ id: 1 }, { id: 2 }] };
+      if (p === "/attention")
+        return { json: { warnings: [{ id: "a" }, { id: "b", recovered_at: "x" }] } };
+      if (p === "/updates") return { json: { update_available: true } };
+      if (p.startsWith("/audit-log") || p.startsWith("/users")) return { json: [] };
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { bridge, dom: jsdom } = booted;
+    const doc = jsdom.window.document;
+    jsdom.window.location.hash = "#audit";
+    await bridge.enterApp();
+    await new Promise((resolve) => jsdom.window.setTimeout(resolve, 0));
+
+    // The deep link still lands on its section.
+    expect(bridge.state.section).toBe("audit");
+    const nav = doc.getElementById("sidebarNav")!;
+    expect([...nav.querySelectorAll(".sidebar-label")].map((e) => e.textContent)).toEqual([
+      "Overview",
+      "Community",
+      "Moderation",
+      "Server",
+      "Operations",
+      "Integrations",
+    ]);
+    expect(nav.querySelector('[aria-current="page"]')?.textContent).toBe("Audit log");
+    expect(nav.textContent).not.toMatch(/sign out/i);
+
+    // Badges come from the routes that own the counts; the dashboard count
+    // excludes recovered warnings.
+    const item = (id: string) => nav.querySelector(`[data-args='["${id}"]']`)!;
+    expect(item("users").textContent).toBe("Members2 (2 pending registrations)");
+    expect(item("dashboard").textContent).toBe("Dashboard1 (1 active warnings)");
+    expect(item("updates").querySelector(".nav-dot")).not.toBeNull();
+
+    // Top bar: server name as text, owner-only version, the signed-in user.
+    expect(doc.getElementById("topbarServer")!.textContent).toBe("Lab <b>");
+    expect(doc.getElementById("topbarVersion")!.textContent).toBe("v1.2.0");
+    expect(doc.getElementById("userMenuBtn")!.getAttribute("aria-label")).toBe(
+      "Account: ada, Owner",
+    );
+
+    // Drawer: focus moves in, Escape closes it and restores focus.
+    const toggle = doc.getElementById("navToggle") as HTMLButtonElement;
+    const shell = doc.getElementById("adminShell")!;
+    toggle.focus();
+    toggle.click();
+    expect(shell.classList.contains("nav-open")).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(doc.activeElement).toBe(nav.querySelector('[aria-current="page"]'));
+    doc.dispatchEvent(new jsdom.window.KeyboardEvent("keydown", { key: "Escape" }));
+    expect(shell.classList.contains("nav-open")).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(doc.activeElement).toBe(toggle);
+
+    // Choosing a section from the open drawer closes it.
+    toggle.click();
+    (item("users") as HTMLButtonElement).click();
+    expect(bridge.state.section).toBe("users");
+    expect(shell.classList.contains("nav-open")).toBe(false);
+
+    // Sign out moved to the user menu.
+    doc.getElementById("userMenuBtn")!.click();
+    expect(doc.getElementById("userMenu")!.classList.contains("hidden")).toBe(false);
+    (doc.querySelector('#userMenu [data-action="doLogout"]') as HTMLButtonElement).click();
+    expect(doc.getElementById("loginOverlay")!.classList.contains("visible")).toBe(true);
+    expect(bridge.state.token).toBe("");
   });
 });

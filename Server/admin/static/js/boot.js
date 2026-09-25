@@ -3,7 +3,15 @@
 
 /* ═══ Keyboard + Init ═══ */
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){if(document.querySelector('#toast.visible.error'))dismissToast();else closeModal()}
+  /* Escape closes the innermost thing: a dialog, then the user menu, then
+     the nav drawer; a persistent error toast goes first, as before. */
+  if(e.key==='Escape'){
+    if(document.querySelector('#toast.visible.error'))dismissToast();
+    else if(document.querySelector('.modal-overlay.visible'))closeModal();
+    else if(isUserMenuOpen())closeUserMenu(true);
+    else if(isNavOpen())closeNav();
+    else closeModal();
+  }
   /* "/" jumps to the page's search box — but only from outside a text
      field. The filter boxes are themselves .filter-search, so an unguarded
      preventDefault dropped every "/" typed into the very input it focuses
