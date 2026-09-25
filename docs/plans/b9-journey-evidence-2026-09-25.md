@@ -8,8 +8,8 @@ B9 chain's head before that was `7732f969`, B9-25 as
 **Journey head:** `66da915a0cdc4b1d8fc2bde632e8ca7099e1cfca` on `fm/b9-26-impl`;
 the fullstack results below are the 9-passed run at that commit. The review
 round after it tightened assertions in journeys B, F, G, H and I (no journey
-was removed or loosened); that revision is **pending the `client-fullstack` CI
-run** at the PR head, since this host has no Go toolchain to build the server.
+was removed or loosened); that revision was not re-run locally and is **pending the
+`client-fullstack` CI run** at the PR head.
 **Branch:** `fm/b9-26-impl`
 **Plan:** [`.claude/plans/b9-26-cross-feature-journeys.plan.md`](../../.claude/plans/b9-26-cross-feature-journeys.plan.md)
 **PRD:** [b9-unified-experience-accessibility-polish.prd.md](b9-unified-experience-accessibility-polish.prd.md)

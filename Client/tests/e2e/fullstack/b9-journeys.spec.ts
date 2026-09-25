@@ -260,17 +260,17 @@ test.describe("B9-26 moderation journey (real server)", () => {
     const center = alice.getByRole("region", { name: "Moderation" });
     const rows = center.getByTestId("mod-queue-row");
     const acts = center.getByTestId("mod-report").getByTestId("mod-act");
-    const status = center.getByTestId("mod-write-status");
+    const writeStatus = center.getByTestId("mod-write-status");
     await rows.filter({ hasText: "About bob" }).click();
     await expect(center.getByTestId("mod-report")).toContainText(text);
     await center.getByRole("button", { name: "Take this report" }).click();
-    await expect(status).toHaveText("You're now reviewing this report.");
+    await expect(writeStatus).toHaveText("You're now reviewing this report.");
     const warnReason = `synthetic warning ${crypto.randomUUID()}`;
     await acts
       .getByRole("textbox", { name: "Warning reason, shown to the member" })
       .fill(warnReason);
     await acts.getByRole("button", { name: "Issue warning" }).click();
-    await expect(status).toHaveText(
+    await expect(writeStatus).toHaveText(
       "Warning issued. The member sees it now, or the next time they sign in.",
     );
 
@@ -569,17 +569,7 @@ test.describe("B9-26 first-contact journey (real server)", () => {
       };
       expect(blocks.blocked_user_ids).toContain(strangerId);
       await expect
-        .poll(async () => {
-          const response = await fetch(`${server.origin}/api/v1/dms`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${stranger.token}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ recipient_id: bobId }),
-          });
-          return response.status;
-        })
+        .poll(() => status(server, "/api/v1/dms", stranger.token, { recipient_id: bobId }))
         .toBe(403);
 
       // The joined cross-feature assertion: the block the member menu set is
@@ -869,7 +859,10 @@ test.describe("B9-26 integrated accessibility matrix (real server)", () => {
       await center.getByTestId("mod-queue-row").first().focus();
       expect(await view.evaluate((el) => el.scrollLeft)).toBe(0);
 
-      await measure("queue row", center.getByTestId("mod-queue-row").first());
+      const row = center.getByTestId("mod-queue-row").first();
+      for (const part of ["what", "who", "state", "when"]) {
+        await measure(`queue row ${part}`, row.locator(`.mod-queue-${part}`));
+      }
 
       // Keyboard: the focused entry opens with Enter, and Escape leaves the
       // report back on its row.
