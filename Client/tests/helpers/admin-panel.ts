@@ -7,6 +7,7 @@
 // </body> can still reach their top-level bindings.
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { JSDOM } from "jsdom";
 
 const ADMIN_STATIC = path.resolve(__dirname, "../../../Server/admin/static");
 
@@ -22,19 +23,22 @@ export function adminIndexHtml(): string {
 
 /** index.html with its stylesheet and scripts inlined. */
 export function adminPanelHtml(): string {
-  const html = adminIndexHtml();
-  // Replacer functions, not replacement strings: the scripts contain `$&`.
-  const inlined = html
-    .replace(
-      /<link rel="stylesheet" href="([^"]+)">/g,
-      (_, href: string) => `<style>${asset(href)}</style>`,
-    )
-    .replace(
-      /<script src="([^"]+)"><\/script>/g,
-      (_, src: string) => `<script>${asset(src)}</script>`,
-    );
-  if (!/<script>/.test(inlined) || /<script src=/.test(inlined)) {
+  // Rewritten through a parsed DOM, not regexes over the markup. jsdom does not
+  // run the scripts here: runScripts is off by default.
+  const dom = new JSDOM(adminIndexHtml());
+  const doc = dom.window.document;
+  for (const link of doc.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')) {
+    const style = doc.createElement("style");
+    style.textContent = asset(link.getAttribute("href") ?? "");
+    link.replaceWith(style);
+  }
+  const scripts = doc.querySelectorAll<HTMLScriptElement>("script[src]");
+  if (scripts.length === 0) {
     throw new Error("expected Server/admin/static/index.html to load its scripts by <script src>");
   }
-  return inlined;
+  for (const script of scripts) {
+    script.textContent = asset(script.getAttribute("src") ?? "");
+    script.removeAttribute("src");
+  }
+  return dom.serialize();
 }
