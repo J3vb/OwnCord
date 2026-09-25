@@ -218,8 +218,13 @@ zoomed user actually has, after zooming.
 Screens that pass at 200 %: the connect page (B9-18), the shell's message
 surface, history and composer (B9-3, 18, 19, 21, 22), the search overlay, the
 report dialog (B9-10), and every settings tab the connect page's Settings gear
-(`button.settings-gear`) opens — Appearance, Notifications, Text & Images,
-Accessibility, Voice & Audio, Keybinds, Advanced and Logs (B9-20, 23).
+(`button.settings-gear`) opens except Logs — Appearance, Notifications, Text &
+Images, Accessibility, Voice & Audio, Keybinds and Advanced (B9-20, 23).
+
+Failing at 200 %: the Logs tab's controls row (`LogsTab.ts`) does not wrap, so
+its Copy All, Clear Logs and Refresh buttons push `.settings-content` into a
+sideways scroll at 640 CSS px. The spec records it as `test.fail` until the
+row is fixed.
 
 Blocked on navigation: below 800 CSS px `responsive.css` collapses
 `.unified-sidebar` to zero width with no toggle. Channels stay reachable

@@ -20,7 +20,7 @@
  * not. Designing responsive navigation is B8's workstream 6, so each of those
  * screens is `test.fixme`, naming its entry point, rather than rebuilt here.
  */
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import {
   buildTauriMockScript,
@@ -528,44 +528,69 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       await boot(page, [{ pattern: "/messages", status: 200, body: MOCK_MESSAGES }]);
       await openSettings(page);
       await openSettingsTab(page, "Account");
-      const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
+      const panel = page.locator("[data-testid='settings-overlay'] .settings-panel");
+      const pane = panel.locator(".settings-pane.active");
       await pane.waitFor();
       const screen: ZoomScreen = {
         name: "zoom-account-settings-640x400.png",
-        root: pane,
+        root: panel,
         actions: [
           pane.locator("[data-testid='profile-save-btn']"),
           pane.locator("[data-testid='delete-account-trigger']"),
+          panel.locator(".settings-close-btn"),
         ],
       };
       await expectScreenReflows(page, screen, testInfo);
     });
 
-    test("every settings tab opened from the connect page gear fits at 200 % zoom", async ({
-      page,
-    }, testInfo) => {
+    /** Open Settings from the connect page gear, a zoomed user's own entry point. */
+    async function openConnectSettings(page: Page): Promise<Locator> {
       await page.addInitScript(
         buildTauriMockScript({ httpRoutes: [HEALTH], simulateWsFlow: false }),
       );
       await page.goto("/");
       await page.locator(".connect-page .settings-gear").click();
       await expect(page.locator("[data-testid='settings-overlay']")).toHaveClass(/open/);
-      const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
-      const tabs = await settingsTabs(page).allInnerTexts();
+      return page.locator("[data-testid='settings-overlay'] .settings-panel");
+    }
+
+    async function expectSettingsTabReflows(
+      page: Page,
+      panel: Locator,
+      tab: string,
+      testInfo: TestInfo,
+    ): Promise<void> {
+      await openSettingsTab(page, tab);
+      await panel.locator(".settings-pane.active").waitFor();
+      await expectScreenReflows(
+        page,
+        {
+          name: `zoom-settings-${tab.trim().toLowerCase().replaceAll(/\W+/g, "-")}-640x400.png`,
+          root: panel,
+          actions: [panel.locator(".settings-close-btn")],
+        },
+        testInfo,
+      );
+    }
+
+    test("every settings tab opened from the connect page gear fits at 200 % zoom", async ({
+      page,
+    }, testInfo) => {
+      const panel = await openConnectSettings(page);
+      const tabs = (await settingsTabs(page).allInnerTexts()).filter((t) => t.trim() !== "Logs");
       expect(tabs.length, "settings tabs rendered").toBeGreaterThan(0);
-      for (const tab of tabs) {
-        await openSettingsTab(page, tab);
-        await pane.waitFor();
-        await expectScreenReflows(
-          page,
-          {
-            name: `zoom-settings-${tab.trim().toLowerCase().replaceAll(/\W+/g, "-")}-640x400.png`,
-            root: pane,
-            actions: [],
-          },
-          testInfo,
-        );
-      }
+      for (const tab of tabs) await expectSettingsTabReflows(page, panel, tab, testInfo);
+    });
+
+    test("the Logs tab opened from the connect page gear fits at 200 % zoom", async ({
+      page,
+    }, testInfo) => {
+      test.fail(
+        true,
+        "Known 1.4.10 defect: the Logs tab controls row (LogsTab.ts: filter and level selects, Copy All, Clear Logs, Refresh) does not wrap, so .settings-content scrolls sideways at 640 CSS px. Production CSS is out of scope for this change.",
+      );
+      const panel = await openConnectSettings(page);
+      await expectSettingsTabReflows(page, panel, "Logs", testInfo);
     });
   });
 });
