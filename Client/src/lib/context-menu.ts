@@ -116,7 +116,9 @@ export function enableMenuKeyboard(menu: HTMLElement, opts: MenuKeyboardOptions)
   // The row that invoked the menu held focus when we captured `previous`
   // (keyboard open); restore it on close so focus never drops to <body>.
   const restore = (): void => {
-    if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    const active = document.activeElement;
+    const lost = active === null || active === document.body || menu.contains(active);
+    if (lost && previous instanceof HTMLElement && previous.isConnected) previous.focus();
   };
   const close = (): void => {
     opts.onClose();

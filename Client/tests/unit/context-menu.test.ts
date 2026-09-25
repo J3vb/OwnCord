@@ -489,5 +489,19 @@ describe("showContextMenu", () => {
       expect(document.activeElement).toBe(invoker);
       invoker.remove();
     });
+
+    it("an outside click that moved focus to a control keeps it there", async () => {
+      const invoker = document.createElement("button");
+      const input = document.createElement("input");
+      document.body.append(invoker, input);
+      invoker.focus();
+      await open([{ label: "One", onClick: vi.fn() }]);
+      input.focus();
+      input.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      expect(document.querySelector(".kbd-menu")).toBeNull();
+      expect(document.activeElement).toBe(input);
+      invoker.remove();
+      input.remove();
+    });
   });
 });
