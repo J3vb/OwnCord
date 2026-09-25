@@ -31,6 +31,12 @@ it can never persist a file the next boot would reject. Two consequences: a
 malformed `OWNCORD_*` value fails a save as well as a boot, and saving with an
 empty `voice` section logs the same generated-credential warnings a boot does.
 
+While setup is open the server prints a one-time **setup token** beside the
+start-up banner, and the wizard requires it. The token is regenerated at every
+start, so to get a fresh one — including after re-opening setup by clearing the
+`setup_completed` setting ([security.md](security.md#first-run-setup)) —
+restart the server and read the new token from its start-up output.
+
 ## Config Key Reference
 
 ### Server (`server`)
