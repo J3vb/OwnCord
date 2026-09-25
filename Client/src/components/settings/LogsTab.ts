@@ -47,7 +47,7 @@ function formatLogEntry(entry: LogEntry): HTMLDivElement {
   const textEl = createElement(
     "span",
     {
-      style: `color: ${LOG_LEVEL_COLORS[entry.level]}`,
+      style: `color: ${LOG_LEVEL_COLORS[entry.level]}; overflow-wrap: anywhere;`,
     },
     text,
   );
@@ -145,7 +145,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
 
     // Controls row
     const controls = createElement("div", {
-      style: "display: flex; gap: 8px; margin-bottom: 8px; align-items: center;",
+      style: "display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; align-items: center;",
     });
 
     // Filter dropdown

@@ -584,11 +584,29 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     test("the Logs tab opened from the connect page gear fits at 200 % zoom", async ({
       page,
     }, testInfo) => {
-      test.fail(
-        true,
-        "Known 1.4.10 defect: the Logs tab controls row (LogsTab.ts: filter and level selects, Copy All, Clear Logs, Refresh) does not wrap, so .settings-content scrolls sideways at 640 CSS px. Production CSS is out of scope for this change.",
-      );
       const panel = await openConnectSettings(page);
+      await expectSettingsTabReflows(page, panel, "Logs", testInfo);
+    });
+
+    test("an unbroken log message in the Logs tab wraps at 200 % zoom", async ({
+      page,
+    }, testInfo) => {
+      const panel = await openConnectSettings(page);
+      // Real logs carry unbroken URLs, tokens and hashes; one must wrap, not scroll sideways.
+      // The logger is reached through the dev server's module graph; the
+      // production preview serves only the bundle, so there the test skips.
+      const logged = await page.evaluate(async (loggerPath) => {
+        try {
+          const { createLogger } = (await import(
+            /* @vite-ignore */ loggerPath
+          )) as typeof import("../../src/lib/logger");
+          createLogger("zoom").warn(`fetch failed https://example.invalid/${"a".repeat(300)}`);
+          return true;
+        } catch {
+          return false;
+        }
+      }, "/src/lib/logger.ts");
+      test.skip(!logged, "needs the dev server's modules");
       await expectSettingsTabReflows(page, panel, "Logs", testInfo);
     });
   });

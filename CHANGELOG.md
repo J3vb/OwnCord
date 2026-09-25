@@ -354,6 +354,10 @@ server's internals were reorganised behind service boundaries.
   red fill colour.
 - The in-app **Reduce Motion** toggle now also stops the connect-page background
   pulse and the primary-button shimmer.
+- **Settings > Logs no longer scrolls sideways at 200 % zoom.** Its filter and
+  level controls and its Copy All, Clear Logs and Refresh buttons wrap onto
+  more than one row, and a log line with a long unbroken URL, token or hash
+  wraps too, instead of pushing the pane into a horizontal scroll.
 
 ### Documentation
 
