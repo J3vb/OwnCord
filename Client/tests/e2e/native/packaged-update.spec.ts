@@ -13,13 +13,15 @@ import { configureNativeServer, nativeLogin } from "./helpers";
 const exec = promisify(execFile);
 
 /**
- * Hold the installed executable open with writers denied for `seconds`, the way
- * the exiting old process (its image stays mapped until Windows has torn it
- * down) or an on-access scanner does while the update installer runs. Resolves
- * once the handle is held. Tries pwsh first, like the cleanup below.
+ * Hold the installed executable open with writers denied until `seconds` after
+ * process `oldPid` has exited, the way the exiting old process (its image stays
+ * mapped until Windows has torn it down) or an on-access scanner does while the
+ * update installer runs. Anchoring on the exit, not on the click, keeps the
+ * hold in place however long the updater takes to launch the installer.
+ * Resolves once the handle is held. Tries pwsh first, like the cleanup below.
  */
-async function holdExecutable(exe: string, seconds: number) {
-  const script = `$f = [System.IO.File]::Open($env:OWNCORD_E2E_INSTALLED_EXE, 'Open', 'Read', 'Read'); [Console]::Out.WriteLine('held'); Start-Sleep -Seconds ${seconds}; $f.Close()`;
+async function holdExecutable(exe: string, oldPid: number, seconds: number) {
+  const script = `$f = [System.IO.File]::Open($env:OWNCORD_E2E_INSTALLED_EXE, 'Open', 'Read', 'Read'); [Console]::Out.WriteLine('held'); Wait-Process -Id ${oldPid} -Timeout 120 -ErrorAction SilentlyContinue; Start-Sleep -Seconds ${seconds}; $f.Close()`;
   for (const shell of ["pwsh", "powershell"]) {
     const holder = spawn(shell, ["-NoProfile", "-NonInteractive", "-Command", script], {
       env: { ...process.env, OWNCORD_E2E_INSTALLED_EXE: exe },
@@ -120,7 +122,7 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
     // installer skips a file it cannot open and /R then relaunches the OLD
     // binary. Force that race every run: the installer must wait for the lock
     // (src-tauri/nsis/hooks.nsh) and still relaunch the new version.
-    lock = await holdExecutable(exe, 5);
+    lock = await holdExecutable(exe, app.process.pid!, 5);
     await progress("installing valid update");
     await page.getByRole("button", { name: "Retry", exact: true }).click();
     await expect.poll(() => page.isClosed(), { timeout: 90_000 }).toBe(true);
