@@ -186,17 +186,17 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 			}
 			normalized[key] = string(mode)
 		case db.RetentionDaysKey:
-			days, err := strconv.Atoi(strings.TrimSpace(value))
-			if err != nil || days < 0 || (days != 0 && days < RetentionMinDays) || days > RetentionMaxDays {
-				return nil, fmt.Errorf("%s: must be 0 (keep forever) or between %d and %d", key, RetentionMinDays, RetentionMaxDays)
+			days, err := normalizeRetentionDays(key, value, RetentionMinDays, RetentionMaxDays)
+			if err != nil {
+				return nil, err
 			}
-			normalized[key] = strconv.Itoa(days)
+			normalized[key] = days
 		case "backup_retention":
-			days, err := strconv.Atoi(strings.TrimSpace(value))
-			if err != nil || days < 0 || (days != 0 && days < BackupRetentionMinDays) || days > BackupRetentionMaxDays {
-				return nil, fmt.Errorf("%s: must be 0 (keep forever) or between %d and %d", key, BackupRetentionMinDays, BackupRetentionMaxDays)
+			days, err := normalizeRetentionDays(key, value, BackupRetentionMinDays, BackupRetentionMaxDays)
+			if err != nil {
+				return nil, err
 			}
-			normalized[key] = strconv.Itoa(days)
+			normalized[key] = days
 		case "backup_schedule":
 			schedule := strings.ToLower(strings.TrimSpace(value))
 			switch schedule {
@@ -208,6 +208,16 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 		}
 	}
 	return normalized, nil
+}
+
+// normalizeRetentionDays accepts 0 (keep forever) or a day count in
+// [minDays, maxDays] and returns it in canonical decimal form.
+func normalizeRetentionDays(key, value string, minDays, maxDays int) (string, error) {
+	days, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || days < 0 || (days != 0 && days < minDays) || days > maxDays {
+		return "", fmt.Errorf("%s: must be 0 (keep forever) or between %d and %d", key, minDays, maxDays)
+	}
+	return strconv.Itoa(days), nil
 }
 
 func (s *SettingsService) validateRequire2FAUpdate(ctx context.Context, updates map[string]string) error {

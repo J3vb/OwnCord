@@ -225,7 +225,8 @@ exists, runs `VACUUM INTO`, removes the partial file on any error (OC-0212),
 then `CheckBackupIntegrity` runs `integrity_check` on the result and removes
 it on failure; an audit row (`backup_create`) records the name. The scheduled
 path judges freshness by the newest `*.db` mtime and prunes by mtime after
-`backup_retention` days, never removing the newest file. **Uploads are not
+`backup_retention` days, never removing the newest file or a
+`pre_restore_*` safety copy. **Uploads are not
 in a backup** (`docs/trust-model.md`, "At rest"), and neither is `totp.key`
 (O7).
 

@@ -557,13 +557,15 @@ database, prefer scheduling backups at a low-traffic time of day.
 
 The **Backup Schedule** (off / daily / weekly) and **Retention (days)**
 settings in the admin panel are enforced by the server's maintenance loop
-(checked every 15 minutes):
+(checked every 15 minutes). Only the Owner can change them; the panel shows
+both read-only to any other administrator:
 
 - A scheduled backup is taken when the newest backup on disk is older than
   the schedule interval — a manual backup resets the clock too.
-- Retention deletes backups older than the configured number of days, but
-  always keeps the newest one, so a stale schedule can never delete your
-  last copy.
+- Retention is `0` (keep forever) or between 7 and 3650 days. It deletes
+  backups older than that, but always keeps the newest one, so a stale
+  schedule can never delete your last copy, and it never removes the
+  `pre_restore_*` safety copies — delete those by hand.
 
 External scheduling still works if you prefer it — e.g. Linux cron:
 
