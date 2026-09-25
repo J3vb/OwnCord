@@ -13,7 +13,8 @@
  *
  * A screen is audited for the 1.4.10 failures the B9 lanes name:
  *
- * - no horizontal page scroll (`expectNoTwoDimensionalScroll`);
+ * - no horizontal page scroll, and no vertical scroll area inside the root
+ *   (the root included) that also scrolls sideways without asking for it;
  * - text-bearing elements and controls are not clipped by their own box
  *   (`scrollWidth > clientWidth`) nor by a clipping ancestor;
  * - visible interactive elements are not painted over by another element
@@ -40,6 +41,7 @@ export interface ReflowAudit {
   readonly pageOverflow: number;
   readonly clipped: readonly string[];
   readonly covered: readonly string[];
+  readonly twoDimensional: readonly string[];
 }
 
 /**
@@ -98,6 +100,21 @@ export async function auditReflow(root: Locator): Promise<ReflowAudit> {
           (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim() !== "",
         );
 
+      // Whether the element's own cascade asks for horizontal scrolling. A lone
+      // `overflow-y: auto` computes `overflow-x` to auto as well, so the
+      // specified value is read with overflow-y forced back to visible.
+      const intendsHorizontalScroll = (el: HTMLElement): boolean => {
+        const { scrollTop, scrollLeft } = el;
+        const value = el.style.getPropertyValue("overflow-y");
+        const priority = el.style.getPropertyPriority("overflow-y");
+        el.style.setProperty("overflow-y", "visible", "important");
+        const ox = getComputedStyle(el).overflowX;
+        el.style.setProperty("overflow-y", value, priority);
+        el.scrollTop = scrollTop;
+        el.scrollLeft = scrollLeft;
+        return ox === "auto" || ox === "scroll";
+      };
+
       const clipped: string[] = [];
       for (const el of node.querySelectorAll<HTMLElement>("*")) {
         if (!isPainted(el)) continue;
@@ -145,22 +162,26 @@ export async function auditReflow(root: Locator): Promise<ReflowAudit> {
         covered.push(`${label(el)} covered by ${label(top)}`);
       }
 
+      // A vertical scroll area that also overruns sideways is a two-dimensional
+      // scroll inside the page, unless it intends a horizontal scroll.
+      const twoDimensional: string[] = [];
+      for (const el of [node as HTMLElement, ...node.querySelectorAll<HTMLElement>("*")]) {
+        const oy = getComputedStyle(el).overflowY;
+        if (oy !== "auto" && oy !== "scroll") continue;
+        if (!isPainted(el) || el.scrollWidth <= el.clientWidth + 1) continue;
+        if (intendsHorizontalScroll(el)) continue;
+        twoDimensional.push(`${label(el)} (scrolls both ways ${el.scrollWidth}>${el.clientWidth})`);
+      }
+
       return {
         pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         clipped: [...new Set(clipped)],
         covered: [...new Set(covered)],
+        twoDimensional,
       };
     },
     { interactive: INTERACTIVE },
   );
-}
-
-/** Fail when the page scrolls sideways at all (1.4.10). */
-export async function expectNoTwoDimensionalScroll(page: Page): Promise<void> {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-  );
-  expect(overflow, "horizontal page scroll at 200 % zoom").toBe(0);
 }
 
 export interface ZoomScreen {
@@ -174,7 +195,7 @@ export interface ZoomScreen {
 
 /**
  * Audit one screen at the 200 % zoom viewport: no horizontal page scroll, no
- * text or control clipped without an intended scroll area, no control painted
+ * two-dimensional scroll area, no text or control clipped without an intended scroll area, no control painted
  * over within the screen, every primary action reachable, and one screenshot.
  */
 export async function expectScreenReflows(
@@ -182,8 +203,9 @@ export async function expectScreenReflows(
   screen: ZoomScreen,
   testInfo: TestInfo,
 ): Promise<void> {
-  await expectNoTwoDimensionalScroll(page);
   const audit = await auditReflow(screen.root);
+  expect(audit.pageOverflow, `horizontal page scroll at 200 % zoom (${screen.name})`).toBe(0);
+  expect(audit.twoDimensional, `two-dimensional scroll at 200 % zoom (${screen.name})`).toEqual([]);
   expect(audit.clipped, `clipped at 200 % zoom (${screen.name})`).toEqual([]);
   expect(audit.covered, `controls covered at 200 % zoom (${screen.name})`).toEqual([]);
   for (const action of screen.actions) {

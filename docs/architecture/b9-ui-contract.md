@@ -209,8 +209,23 @@ The OS 200 % zoom/reflow check is automated in
 `Client/tests/e2e/support/b9-zoom.ts` (`ZOOM_VIEWPORT`, `auditReflow`,
 `expectScreenReflows`): each screen is rendered at a 640×400 CSS viewport — the
 layout a 1280×800 window shows at 200 % page zoom — and asserted to have no
-horizontal page scroll, no text or control clipped without an intended scroll
-area, no control painted over, and every primary action reachable, with one
-screenshot per screen. `Client/tests/e2e/b9-zoom.spec.ts` runs it across the
-B9 lanes' screens; the sidebar's collapse below 800 px is B8's responsive
-navigation work, so that screen is deferred there.
+horizontal page scroll, no vertical scroll area that also scrolls sideways, no
+text or control clipped without an intended scroll area, no control painted
+over, and every primary action reachable, with one screenshot per screen.
+`Client/tests/e2e/b9-zoom.spec.ts` opens every screen through the entry point a
+zoomed user actually has, after zooming.
+
+Screens that pass at 200 %: the connect page (B9-18), the shell's message
+surface, history and composer (B9-3, 18, 19, 21, 22), the search overlay, and
+the report dialog (B9-10).
+
+Blocked on navigation: below 800 CSS px `responsive.css` collapses
+`.unified-sidebar` to zero width with no toggle. Channels stay reachable
+through the Ctrl+K quick switcher (`OverlayManagers.ts`), but DMs and the
+sidebar itself do not, and neither does any screen whose only entry point lives
+there. Those screens are `test.fixme`, each naming its entry point, until B8's
+responsive navigation lands: the Message Requests inbox and its Block confirm
+(B9-5, 6), My reports (the second half of B9-10), the Moderation Center
+queue, review, actions and ban confirm (B9-11, 12, 13, 14), the appeal review
+(B9-17), the Account pane and every settings tab (B9-20, 23), and the sidebar
+navigation half of B9-18 and B9-21. Their 200 % evidence is still open.

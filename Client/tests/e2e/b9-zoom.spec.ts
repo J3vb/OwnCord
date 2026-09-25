@@ -6,18 +6,19 @@
  * same way the manual screen-reader check was replaced by automated
  * accessibility evidence (owner decision 2026-09-24, BPR-091 amended).
  *
- * Each screen is opened at the normal 1280x800 window, then the viewport is
- * resized to the effective 200 % zoom size (640x400 CSS px — see
- * `support/b9-zoom.ts` for the model and why) and audited: no horizontal page
- * scroll, no text or control clipped without an intended scroll area, no
- * control painted over, every primary action reachable. One screenshot per
- * screen is attached as the test artifact.
+ * Every test runs at the effective 200 % zoom size from the start (640x400 CSS
+ * px — see `support/b9-zoom.ts` for the model and why) and reaches its screen
+ * through the entry point a zoomed user actually has. Each screen is audited:
+ * no horizontal page scroll, no two-dimensional scroll area, no text or control
+ * clipped without an intended scroll area, no control painted over, every
+ * primary action reachable. One screenshot per screen is attached.
  *
- * The shell's global sidebar is deliberately collapsed below 800 CSS px by the
- * `@media (max-width: 800px)` rule (`src/styles/app/responsive.css`); designing
- * responsive navigation rather than hiding it is B8's workstream 6, so the
- * navigation screen is marked `test.fixme` here and listed in the PR instead of
- * being rebuilt.
+ * The shell's global sidebar is collapsed to zero width below 800 CSS px by the
+ * `@media (max-width: 800px)` rule (`src/styles/app/responsive.css`), with no
+ * toggle. Channels stay reachable through the Ctrl+K quick switcher, but DMs,
+ * the sidebar itself and every screen whose only entry point lives in it do
+ * not. Designing responsive navigation is B8's workstream 6, so each of those
+ * screens is `test.fixme`, naming its entry point, rather than rebuilt here.
  */
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
@@ -27,7 +28,6 @@ import {
   MOCK_MESSAGES,
   openSettings,
   submitLogin,
-  switchSettingsTab,
   waitForWsReady,
 } from "./helpers";
 import {
@@ -37,7 +37,7 @@ import {
   type ZoomScreen,
 } from "./support/b9-zoom";
 
-test.use({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+test.use({ viewport: ZOOM_VIEWPORT, deviceScaleFactor: 1 });
 
 type Route = { pattern: string; status: number; body: unknown; method?: string };
 
@@ -191,9 +191,22 @@ async function boot(page: Page, routes: Route[], dm = false): Promise<void> {
   await waitForWsReady(page);
 }
 
-/** Resize to the effective 200 % zoom viewport, as the user zooming would. */
-async function zoomTo200(page: Page): Promise<void> {
-  await page.setViewportSize(ZOOM_VIEWPORT);
+/** Mark a screen whose only entry point sits in the collapsed sidebar. */
+function blockedOnNavigation(entryPoint: string): void {
+  test.fixme(
+    true,
+    `Blocked on responsive navigation (B8 workstream 6): the only entry point, ${entryPoint}, is inside .unified-sidebar, collapsed to zero width below 800 CSS px.`,
+  );
+}
+
+function settingsTabs(page: Page): Locator {
+  return page.locator("[data-testid='settings-overlay'] .settings-nav-item[role='tab']");
+}
+
+async function openSettingsTab(page: Page, name: string): Promise<void> {
+  const tab = settingsTabs(page).filter({ hasText: name.trim() }).first();
+  await tab.click();
+  await expect(tab).toHaveClass(/active/);
 }
 
 test.describe("B9 OS 200 % zoom reflow", () => {
@@ -203,7 +216,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
         buildTauriMockScript({ httpRoutes: [HEALTH], simulateWsFlow: false }),
       );
       await page.goto("/");
-      await zoomTo200(page);
       const screen: ZoomScreen = {
         name: "zoom-connect-640x400.png",
         root: page.locator(".connect-page"),
@@ -217,8 +229,10 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
   });
 
-  test.describe("B9-3 / B9-18 / B9-21 shell and channel list", () => {
-    test("the message surface and composer fit at 200 % zoom", async ({ page }, testInfo) => {
+  test.describe("B9-3 / B9-18 / B9-19 / B9-21 / B9-22 shell, message list and composer", () => {
+    test("the message surface, its history and composer fit at 200 % zoom", async ({
+      page,
+    }, testInfo) => {
       await boot(page, [{ pattern: "/messages", status: 200, body: MOCK_MESSAGES }]);
       const screen: ZoomScreen = {
         name: "zoom-shell-640x400.png",
@@ -229,18 +243,12 @@ test.describe("B9 OS 200 % zoom reflow", () => {
           page.locator("[data-testid='chat-header-name']"),
         ],
       };
-      await zoomTo200(page);
       await expectScreenReflows(page, screen, testInfo);
     });
 
-    // Deferred: the `@media (max-width: 800px)` rule collapses the sidebar, so
-    // a zoomed user cannot reach channels or DMs. Designing responsive
-    // navigation rather than hiding it is B8's workstream 6, not a B9 CSS fix.
-    test.fixme("the sidebar navigation stays reachable at 200 % zoom", async ({
-      page,
-    }, testInfo) => {
+    test("the sidebar navigation stays reachable at 200 % zoom", async ({ page }, testInfo) => {
+      blockedOnNavigation("the sidebar itself (channel list and dm-entry)");
       await boot(page, [{ pattern: "/messages", status: 200, body: MOCK_MESSAGES }], true);
-      await zoomTo200(page);
       await expectScreenReflows(
         page,
         {
@@ -253,22 +261,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
         },
         testInfo,
       );
-    });
-  });
-
-  test.describe("B9-19 / B9-22 message list and composer", () => {
-    test("a long history and its composer fit at 200 % zoom", async ({ page }, testInfo) => {
-      await boot(page, [{ pattern: "/messages", status: 200, body: MOCK_MESSAGES }]);
-      await zoomTo200(page);
-      const screen: ZoomScreen = {
-        name: "zoom-messaging-640x400.png",
-        root: page.locator("[data-testid='chat-area']"),
-        actions: [
-          page.locator("[data-testid='msg-textarea']"),
-          page.locator(".message-input-wrap .send-btn"),
-        ],
-      };
-      await expectScreenReflows(page, screen, testInfo);
     });
 
     test("the search overlay fits at 200 % zoom", async ({ page }, testInfo) => {
@@ -292,7 +284,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
         },
       ]);
       await page.keyboard.press("Control+f");
-      await zoomTo200(page);
       const screen: ZoomScreen = {
         name: "zoom-search-640x400.png",
         root: page.locator("[data-testid='search-overlay']"),
@@ -312,6 +303,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     test("the requests inbox fits and its decisions stay reachable at 200 % zoom", async ({
       page,
     }, testInfo) => {
+      blockedOnNavigation("dm-entry then dm-requests-entry");
       await boot(
         page,
         [
@@ -321,7 +313,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
         true,
       );
       await openInbox(page);
-      await zoomTo200(page);
       const item = page.locator("[data-testid='request-item']").first();
       const screen: ZoomScreen = {
         name: "zoom-message-requests-640x400.png",
@@ -336,6 +327,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
 
     test("the request Block confirm fits at 200 % zoom", async ({ page }, testInfo) => {
+      blockedOnNavigation("dm-entry then dm-requests-entry");
       await boot(
         page,
         [
@@ -352,7 +344,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
         .click();
       const dialog = page.getByRole("dialog", { name: "Block A Stranger?" });
       await dialog.waitFor();
-      await zoomTo200(page);
       const screen: ZoomScreen = {
         name: "zoom-request-block-640x400.png",
         root: dialog,
@@ -375,7 +366,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       await page.keyboard.press("Enter");
       const dialog = page.getByRole("dialog", { name: "Report message" });
       await dialog.waitFor();
-      await zoomTo200(page);
       const screen: ZoomScreen = {
         name: "zoom-report-dialog-640x400.png",
         root: dialog,
@@ -388,15 +378,15 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
 
     test("My reports in the Safety tab fits at 200 % zoom", async ({ page }, testInfo) => {
+      blockedOnNavigation("the user-bar Settings button then the Safety tab");
       await boot(page, [
         { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
         { pattern: "/api/v1/reports/mine", method: "GET", status: 200, body: MY_REPORTS },
       ]);
       await openSettings(page);
-      await switchSettingsTab(page, "Safety");
+      await openSettingsTab(page, "Safety");
       const section = page.getByRole("region", { name: "My reports" });
       await section.locator(".my-reports-item").first().waitFor();
-      await zoomTo200(page);
       const screen: ZoomScreen = {
         name: "zoom-my-reports-640x400.png",
         root: section,
@@ -421,6 +411,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     }
 
     test("the moderation queue fits at 200 % zoom", async ({ page }, testInfo) => {
+      blockedOnNavigation("moderation-btn");
       await boot(page, [
         { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
         { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
@@ -429,7 +420,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       await page.keyboard.press("Enter");
       const center = page.getByTestId("mod-center");
       await center.getByTestId("mod-queue-row").first().waitFor();
-      await zoomTo200(page);
       const screen: ZoomScreen = {
         name: "zoom-moderation-queue-640x400.png",
         root: center,
@@ -439,6 +429,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
 
     test("the moderation review and its actions fit at 200 % zoom", async ({ page }, testInfo) => {
+      blockedOnNavigation("moderation-btn");
       await boot(page, [
         { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
         { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
@@ -450,7 +441,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
         },
       ]);
       const center = await openReport(page);
-      await zoomTo200(page);
       const work = center.getByTestId("mod-work");
       const acts = center.getByTestId("mod-act");
       const review: ZoomScreen = {
@@ -477,6 +467,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
 
     test("the ban confirm fits at 200 % zoom", async ({ page }, testInfo) => {
+      blockedOnNavigation("moderation-btn");
       await boot(page, [
         { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
         { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
@@ -491,7 +482,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       await page.getByRole("button", { name: "Ban member" }).click();
       const dialog = page.getByRole("dialog", { name: "Ban this member?" });
       await dialog.waitFor();
-      await zoomTo200(page);
       const screen: ZoomScreen = {
         name: "zoom-ban-confirm-640x400.png",
         root: dialog,
@@ -506,6 +496,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
 
   test.describe("B9-17 appeal review", () => {
     test("the appeal decision form fits at 200 % zoom", async ({ page }, testInfo) => {
+      blockedOnNavigation("moderation-btn then the Appeals tab");
       await boot(page, [
         { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
         { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: [] },
@@ -519,7 +510,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       await center.locator(`[data-appeal-id="${HELD}"]`).click();
       const work = center.getByTestId("mod-appeal-work");
       await work.waitFor();
-      await zoomTo200(page);
       const screen: ZoomScreen = {
         name: "zoom-appeal-review-640x400.png",
         root: work,
@@ -534,12 +524,12 @@ test.describe("B9 OS 200 % zoom reflow", () => {
 
   test.describe("B9-20 / B9-23 account settings", () => {
     test("the account pane fits at 200 % zoom", async ({ page }, testInfo) => {
+      blockedOnNavigation("the user-bar Settings button");
       await boot(page, [{ pattern: "/messages", status: 200, body: MOCK_MESSAGES }]);
       await openSettings(page);
-      await switchSettingsTab(page, "Account");
+      await openSettingsTab(page, "Account");
       const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
       await pane.waitFor();
-      await zoomTo200(page);
       const screen: ZoomScreen = {
         name: "zoom-account-settings-640x400.png",
         root: pane,
@@ -552,23 +542,17 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
 
     test("every settings tab fits at 200 % zoom", async ({ page }, testInfo) => {
+      blockedOnNavigation("the user-bar Settings button");
       await boot(page, [{ pattern: "/messages", status: 200, body: MOCK_MESSAGES }]);
       await openSettings(page);
-      await zoomTo200(page);
       const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
-      for (const tab of [
-        "Notifications",
-        "Text & Images",
-        "Voice & Audio",
-        "Keybinds",
-        "Advanced",
-      ]) {
-        await switchSettingsTab(page, tab);
+      for (const tab of await settingsTabs(page).allInnerTexts()) {
+        await openSettingsTab(page, tab);
         await pane.waitFor();
         await expectScreenReflows(
           page,
           {
-            name: `zoom-settings-${tab.toLowerCase().replaceAll(/\W+/g, "-")}-640x400.png`,
+            name: `zoom-settings-${tab.trim().toLowerCase().replaceAll(/\W+/g, "-")}-640x400.png`,
             root: pane,
             actions: [],
           },
@@ -580,11 +564,17 @@ test.describe("B9 OS 200 % zoom reflow", () => {
 });
 
 test.describe("B9 OS 200 % zoom checks fail when the behaviour is removed (controls)", () => {
-  test("a clipped text sink and a covered control are both caught", async ({ page }) => {
+  test("a clipped text sink, a covered control and a 2D scroll area are all caught", async ({
+    page,
+  }) => {
     await boot(page, [{ pattern: "/messages", status: 200, body: MOCK_MESSAGES }]);
-    await zoomTo200(page);
     const root = page.locator("[data-testid='chat-area']");
-    expect(await auditReflow(root)).toMatchObject({ clipped: [], covered: [], pageOverflow: 0 });
+    expect(await auditReflow(root)).toMatchObject({
+      clipped: [],
+      covered: [],
+      twoDimensional: [],
+      pageOverflow: 0,
+    });
 
     await page.evaluate(() => {
       const area = document.querySelector<HTMLElement>("[data-testid='chat-area']")!;
@@ -605,18 +595,29 @@ test.describe("B9 OS 200 % zoom checks fail when the behaviour is removed (contr
       cover.style.cssText =
         "position:absolute;left:0;top:0;width:120px;height:32px;background:red;z-index:2";
       wrap.append(button, cover);
-      area.append(clipped, wrap);
+      // A vertical scroll area whose content also overruns it sideways.
+      const scroller = document.createElement("div");
+      scroller.id = "zz-2d";
+      scroller.style.cssText = "width:120px;height:40px;overflow-y:auto";
+      const wide = document.createElement("div");
+      wide.textContent = "wide";
+      wide.style.cssText = "width:400px;height:80px";
+      scroller.append(wide);
+      area.append(clipped, wrap, scroller);
     });
 
     const audit = await auditReflow(root);
     expect(audit.clipped.join("\n")).toContain("zz-clipped");
     expect(audit.covered.join("\n")).toContain("zz-covered");
+    expect(audit.twoDimensional.join("\n")).toContain("zz-2d");
+    expect(audit.clipped.join("\n")).not.toContain("wide");
 
     // Removing the faults makes the check pass again.
     await page.evaluate(() => {
       document.getElementById("zz-clipped")?.remove();
       document.getElementById("zz-cover-wrap")?.remove();
+      document.getElementById("zz-2d")?.remove();
     });
-    expect(await auditReflow(root)).toMatchObject({ clipped: [], covered: [] });
+    expect(await auditReflow(root)).toMatchObject({ clipped: [], covered: [], twoDimensional: [] });
   });
 });
