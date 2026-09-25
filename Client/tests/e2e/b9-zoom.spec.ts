@@ -585,14 +585,28 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       page,
     }, testInfo) => {
       const panel = await openConnectSettings(page);
+      await expectSettingsTabReflows(page, panel, "Logs", testInfo);
+    });
+
+    test("an unbroken log message in the Logs tab wraps at 200 % zoom", async ({
+      page,
+    }, testInfo) => {
+      const panel = await openConnectSettings(page);
       // Real logs carry unbroken URLs, tokens and hashes; one must wrap, not scroll sideways.
-      await page.evaluate(async () => {
-        const loggerPath = "/src/lib/logger.ts";
-        const { createLogger } = (await import(
-          /* @vite-ignore */ loggerPath
-        )) as typeof import("../../src/lib/logger");
-        createLogger("zoom").warn(`fetch failed https://example.invalid/${"a".repeat(300)}`);
-      });
+      // The logger is reached through the dev server's module graph; the
+      // production preview serves only the bundle, so there the test skips.
+      const logged = await page.evaluate(async (loggerPath) => {
+        try {
+          const { createLogger } = (await import(
+            /* @vite-ignore */ loggerPath
+          )) as typeof import("../../src/lib/logger");
+          createLogger("zoom").warn(`fetch failed https://example.invalid/${"a".repeat(300)}`);
+          return true;
+        } catch {
+          return false;
+        }
+      }, "/src/lib/logger.ts");
+      test.skip(!logged, "needs the dev server's modules");
       await expectSettingsTabReflows(page, panel, "Logs", testInfo);
     });
   });
