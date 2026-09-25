@@ -173,51 +173,66 @@ No new owner decision is introduced by this milestone. The PRD's unresolved entr
 
 ## Implementation record — 2026-09-25
 
-Branch `fm/b9-26-impl`; base `dev` `7732f969` (the plan was drafted at
-`0beee8e4`, an ancestor with 83 commits between them; B9-25 merged as
-[#1795](https://github.com/J3vb/OwnCord/pull/1795), so its dependency is met).
-Q13 applied: no token file was edited, no Aurora treatment adopted, and no
-existing English string changed. No production code changed — this is a
-qualification lane and no journey exposed a defect, so no fix was needed.
+Branch `fm/b9-26-impl`; drafted at `0beee8e4`, an ancestor of the base with 84
+commits between them (B9-1..B9-25 merged, the root agent guides #1796). `dev`
+`0a3e7183` was merged into the lane (merge, not rebase). Q13 applied: no token
+file was edited, no Aurora treatment adopted, and no existing English string
+changed. No production code changed — this is a qualification lane and no
+journey exposed a defect.
+
+The pipeline's review gate returned nine findings; the owner decided F1–F4 are
+required by this plan (fix, do not narrow the claims) and F5–F9 are also fixed.
+The pipeline's own fix round hit its 30-minute wall-clock limit, so the fixes
+were implemented as ordinary commits on this branch, per the 2026-09-25
+instruction.
 
 ### Tasks
 
 - **Task 0** verified the inventory at the real base (all three rows hold) and
-  recorded the drift above; both budgets hold at the base.
+  recorded the drift; the budgets hold at the base.
 - **Task 1** is the journey matrix in
   [b9-journey-evidence-2026-09-25.md](../../docs/plans/b9-journey-evidence-2026-09-25.md):
-  each requirement tied to a test, role, mode, platform and result.
-- **Task 2** ships five real-server journeys in
+  each requirement tied to a test, with allowed/refused roles, network, platform
+  and result columns, and a per-requirement coverage map (BPR-060..064,
+  070..073, 090..092).
+- **Task 2** ships nine real-server journeys in
   `Client/tests/e2e/fullstack/b9-journeys.spec.ts`: report → warn → notice →
-  appeal → decision (BPR-070..073); retention disclosure → self-erasure →
-  observer cleanup (BPR-052/BPR-054 client half); first-contact → accept →
-  block → composer gating (BPR-060); second-device session displacement →
-  "Use here" (BPR-090 lifecycle/compatibility); recovery-kit → logout →
-  recovery from the connect page (BPR-090). The one-live-socket rule is
-  respected: the displacement journey's second device is displaced by design,
-  the first-contact stranger owns its own socket, and the REST-only readers
-  carry no socket.
+  appeal → decision (BPR-070..073); retention → reported+appealed self-erasure →
+  observer cleanup with the report outcome surviving (BPR-052/BPR-054, BPR-070);
+  first-contact → text-only preview (real network interception) → accept → block
+  → composer gating (BPR-060); second-device displacement → "Use here"
+  (BPR-090); recovery-kit → logout → recovery (BPR-090); network cut → B9-25
+  notice → reconnect with state kept (BPR-090/BPR-092); refused roles (queue,
+  list and decide all 403 with no UI entry) (BPR-071); consent → acknowledge →
+  revoke → evidence (BPR-063/BPR-071); and the integrated 940×500/keyboard/
+  reduced-motion matrix (BPR-091). The one-live-socket rule is respected.
 - **Task 3** ships the native privacy journey in
   `Client/tests/e2e/native/b9-journeys.spec.ts` (registered in
   `playwright.config.native.ts`'s `native-core` project): consent gates the
-  broker, a warm-cache re-entry cannot bypass the gate, "Ask each time" admits
-  exactly the activated item, every first-party HTTP destination is the
-  configured server, and logout keeps that confinement. Runs in Windows CI;
-  its automated ARIA/keyboard evidence stands in for the dropped manual
-  screen-reader pass (owner 2026-09-24).
-- **Task 4** ratcheted the budgets: startup 96,606/97,000 B, MainPage
-  62,433/64,000 B, livekit 133,372/135,000 B, livekitSession 23,008/24,000 B.
-  No budget was raised and no threshold weakened. BPR-061/BPR-062 keep their
-  B5/B7 status; B8 stays deferred.
+  broker, "Ask each time" admits exactly the activated item (a length
+  assertion), a warm-cache re-entry after consent does not refetch, every
+  first-party HTTP destination is the configured server, and logout keeps that
+  confinement. Runs in Windows CI; the manifest records it as **pending that
+  run**, not desktop-qualified. Its automated ARIA/keyboard evidence stands in
+  for the dropped manual screen-reader pass (owner 2026-09-24).
+- **Task 4** re-baselined the budgets at this base: MainPage 64,000 → 63,500 B,
+  livekit 135,000 → 134,500 B and livekitSession 24,000 → 23,500 B (each
+  measured + a small documented headroom; startup stayed 97,000 B, already the
+  tightest the ratchet rule allows). No budget was raised. The startup and
+  memory baselines are the accepted B7 desktop figures, not measurable on this
+  headless host; the automatable proxies (production bundle sizes and the
+  keyed-reconciler interaction probe, `tests/unit/reconcile.test.ts`, 7 passed)
+  are recorded. BPR-061/BPR-062 keep their B5/B7 status; B8 stays deferred.
 - **Task 5** recorded the commands, exact head, results and limits in the
   evidence manifest, and updated the PRD status table (B9-25 was merged this
-  cycle, so its row moves from Pending), this plan, the traceability header and
-  the register rows.
+  cycle, so its row moves from Pending), this plan, the traceability header,
+  the README summary and the register rows.
 
 ### Validation
 
 From `Client/` at this head: `npx tsc -p tsconfig.e2e.json --noEmit` (clean);
 `npx playwright test --config playwright.config.fullstack.ts
-tests/e2e/fullstack/b9-journeys.spec.ts --workers=1` (5 passed); `npm run
+tests/e2e/fullstack/b9-journeys.spec.ts --workers=1` (9 passed);
+`npx vitest run tests/unit/reconcile.test.ts` (7 passed); `npm run
 build:budget && npm run check:budgets` (all budgets ok). The full component
 gates run in CI on the PR; the native journey is CI-only (no Windows host here).

@@ -10,9 +10,11 @@
  *  - every first-party HTTP destination the renderer asks for, proving it is
  *    the configured server and nothing else (no provider traffic directly);
  *  - every URL handed to the external-content broker, proving a link is
- *    fetched only after the viewer consents, and only once (a warm-cache
- *    re-entry does not refetch);
- *  - that logout stops first-party traffic to the server.
+ *    fetched only after the viewer consents, exactly once for the activated
+ *    item, and not re-fetched after a warm-cache re-entry that follows consent;
+ *  - that logout keeps destination confinement — every request, before and
+ *    after logout, still went only to the configured server (no provider or
+ *    third-party host is reached directly).
  *
  * The linked hosts are `.invalid`, so an admitted broker call is refused
  * without leaving the machine; the count of invocations is what is proven.
@@ -74,7 +76,7 @@ async function observeIpc(page: Page): Promise<void> {
 const state = (page: Page) => page.evaluate(() => window.__ipc ?? { http: [], broker: [] });
 
 // eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
-test("native privacy journey: consent gates the broker, re-entry is warm, and logout stops first-party traffic", async ({}, info) => {
+test("native privacy journey: consent gates the broker, a warm re-entry does not refetch, and logout keeps destination confinement", async ({}, info) => {
   const server = await startTestServer({ tls: true });
   let app: Awaited<ReturnType<typeof startNativeApp>> | undefined;
   const serverHost = new URL(server.origin).host;
@@ -118,15 +120,25 @@ test("native privacy journey: consent gates the broker, re-entry is warm, and lo
         await page.waitForTimeout(1_000);
         expect((await state(page)).broker).toEqual([]);
 
-        // Consent once, then the broker admits exactly this item ("Ask each
-        // time" admits the activated item only).
+        // Consent once, then the broker admits exactly this item: "Ask each
+        // time" admits the activated item only, so the list is exactly
+        // [PREVIEW] — a length assertion, not a Set, so a duplicate refetch
+        // would fail.
         await load.focus();
         await page.keyboard.press("Enter");
         const dialog = page.getByRole("dialog", { name: "Load external content on this server?" });
         await expect(dialog).toBeVisible();
         await dialog.getByRole("button", { name: "Ask each time" }).click();
-        await expect.poll(async () => (await state(page)).broker).toContain(PREVIEW);
-        expect(new Set((await state(page)).broker)).toEqual(new Set([PREVIEW]));
+        await expect.poll(async () => (await state(page)).broker).toEqual([PREVIEW]);
+
+        // A warm-cache re-entry after consent does not refetch the item: the
+        // broker list is the same length after a real remount.
+        const callsAfterConsent = (await state(page)).broker.length;
+        await channelItem(page, "privacy-other").click();
+        await waitForMessages(page);
+        await channelItem(page, "general").click();
+        await page.waitForTimeout(1_000);
+        expect((await state(page)).broker).toHaveLength(callsAfterConsent);
 
         // First-party confinement: every HTTP destination was the configured
         // server. No provider or third-party host was fetched directly.

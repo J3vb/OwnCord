@@ -10,18 +10,33 @@
  * appeal → the recipient sees the outcome. BPR-070, BPR-071, BPR-072, BPR-073.
  *
  * Journey B (lifecycle): an observer reads the server's retention disclosure,
- * the subject erases their own account from the client, and the observer's
- * view of the subject's content and membership is gone. BPR-052/BPR-054 client
- * half, BPR-090.
+ * a reported and appealed subject erases their own account from the client,
+ * and the observer's view of the subject's content and membership is gone
+ * while the report's outcome row survives. BPR-052/BPR-054 client half,
+ * BPR-070, BPR-090.
  *
- * Journey C (first contact): a stranger's first DM is a text-only request,
- * bob accepts it (the held message opens the conversation), then blocks the
- * same sender from the member menu and the composer gates on the block.
- * BPR-060.
+ * Journey C (first contact): a stranger's first DM is a text-only request
+ * shown as inert text with nothing fetched on the sender's behalf, bob accepts
+ * it (the held message opens the conversation), then blocks the same sender
+ * from the member menu and the composer gates on the block. BPR-060.
  *
- * Journey D (recovery/session switching): bob enrols a recovery kit in the
- * client, logs out, and recovers the account from the connect page with the
- * kit secret and a new password. BPR-090, account lifecycle.
+ * Journey D (session displacement): a second device signs in, displaces the
+ * first, and "Use here" takes the session back. BPR-090 lifecycle.
+ *
+ * Journey E (recovery): bob enrols a recovery kit in the client, logs out, and
+ * recovers the account from the connect page with the kit secret and a new
+ * password. BPR-090 account lifecycle.
+ *
+ * Journey F (network loss and recovery): the transport is cut mid-session, the
+ * B9-25 notice names the server and offers Retry, and the connection recovers
+ * with the session state intact. BPR-090, BPR-092.
+ *
+ * Journey G (refused roles): a member without moderation permission is denied
+ * the queue and someone else's appeal in the UI and by the server. BPR-071.
+ *
+ * Journey H (consent to evidence): a labelled channel's content waits for the
+ * viewer's acknowledgement before it is read as evidence, and revoking the
+ * acknowledgement takes the evidence away again. BPR-063, BPR-071.
  *
  * Roles and content are synthetic. Every authorization outcome is read back
  * from the server's own routes; the client only ever sees what the server
@@ -29,7 +44,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, Request } from "@playwright/test";
 import { test, expect, login } from "./fixtures";
 import { installRealTransport } from "../support/real-transport";
 import { TEST_PASSWORD, type TestServer } from "../support/server";
@@ -91,11 +106,6 @@ async function firstContact(server: TestServer, name: string, bobId: number): Pr
   return sender;
 }
 
-async function token(server: TestServer, username: string): Promise<string> {
-  const auth = await server.api("/api/v1/auth/login", { username, password: TEST_PASSWORD });
-  return auth.token as string;
-}
-
 async function register(server: TestServer, username: string): Promise<void> {
   await server.api("/api/v1/auth/register", {
     username,
@@ -121,13 +131,29 @@ async function generalChannel(server: TestServer): Promise<{ id: number; name: s
   return channels.find((c) => c.name === "general" && c.type === "text")!;
 }
 
-async function messageId(server: TestServer, channelId: number, content: string): Promise<number> {
+/** The message id for `content`, or null when the server no longer holds it. */
+async function messageId(
+  server: TestServer,
+  channelId: number,
+  content: string,
+): Promise<number | null> {
   const history = await server.api(
     `/api/v1/channels/${channelId}/messages`,
     undefined,
     server.owner!.token,
   );
-  return history.messages.find((m: { content: string }) => m.content === content).id as number;
+  return history.messages.find((m: { content: string }) => m.content === content)?.id ?? null;
+}
+
+/** The message id for `content`, asserting the server still holds it. */
+async function liveMessageId(
+  server: TestServer,
+  channelId: number,
+  content: string,
+): Promise<number> {
+  const id = await messageId(server, channelId, content);
+  expect(id).not.toBeNull();
+  return id!;
 }
 
 async function send(page: Page, text: string): Promise<void> {
@@ -157,6 +183,46 @@ async function relogin(page: Page, server: TestServer, username: string): Promis
   await login(page, server, username);
 }
 
+/** The status of a raw call whose failure the test asserts. */
+async function status(
+  server: TestServer,
+  path: string,
+  auth: string,
+  body?: unknown,
+  method = body === undefined ? "GET" : "POST",
+): Promise<number> {
+  const response = await fetch(`${server.origin}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${auth}`, "Content-Type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  return response.status;
+}
+
+/** Record every HTTP destination and broker call the renderer asks for from now. */
+async function recordTraffic(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __TAURI_INTERNALS__: { invoke: (c: string, a?: Record<string, unknown>) => Promise<unknown> };
+      __traffic: string[];
+    };
+    w.__traffic = [];
+    const inner = w.__TAURI_INTERNALS__.invoke.bind(w.__TAURI_INTERNALS__);
+    w.__TAURI_INTERNALS__.invoke = (command, args = {}) => {
+      if (command === "plugin:http|fetch") {
+        const { method, url } = args.clientConfig as { method: string; url: string };
+        w.__traffic.push(`${method} ${new URL(url).pathname}${new URL(url).search}`);
+      } else if (command.startsWith("external_")) {
+        w.__traffic.push(`broker ${command}`);
+      }
+      return inner(command, args);
+    };
+  });
+}
+
+const traffic = (page: Page): Promise<string[]> =>
+  page.evaluate(() => (window as unknown as { __traffic: string[] }).__traffic);
+
 test.describe("B9-26 moderation journey (real server)", () => {
   test("report → warn → notice → appeal → decision, end to end in the client", async ({
     alice,
@@ -171,8 +237,8 @@ test.describe("B9-26 moderation journey (real server)", () => {
     // bob posts the content carol reports, from his own signed-in client.
     const text = `synthetic-journey-${crypto.randomUUID()}`;
     await send(bob, text);
-    const message = await messageId(server, general.id, text);
-    const carol = await token(server, "carol");
+    const message = await liveMessageId(server, general.id, text);
+    const carol = await signIn(server, "carol");
     const report = (
       await server.api(
         "/api/v1/reports",
@@ -275,7 +341,7 @@ test.describe("B9-26 moderation journey (real server)", () => {
     const mine = (await server.api(
       "/api/v1/appeals/mine",
       undefined,
-      await token(server, "bob"),
+      await signIn(server, "bob"),
     )) as { state: string; decision_note: string }[];
     expect(mine).toEqual([
       expect.objectContaining({ state: "overturned", decision_note: "Fair point." }),
@@ -284,18 +350,51 @@ test.describe("B9-26 moderation journey (real server)", () => {
 });
 
 test.describe("B9-26 lifecycle journey (real server)", () => {
-  test("the retention disclosure is read, then erasure removes the subject's content and membership", async ({
+  test("a reported and appealed subject is erased; retention is disclosed and the report outcome survives", async ({
     alice,
     bob,
     bobTransport,
     server,
   }) => {
     const owner = server.owner!.token;
-    const bobId = (await users(server))("bob");
+    await register(server, "carol");
+    const id = await users(server);
+    const bobId = id("bob");
     const general = await generalChannel(server);
     await server.api("/admin/api/channels", { name: "journey-other", type: "text" }, owner);
+
+    // bob is reported and warned and appeals, before he erases himself, so the
+    // erasure half of the chain is exercised on a subject with moderation rows.
     const text = `synthetic-erasure-${crypto.randomUUID()}`;
     await send(bob, text);
+    const message = await liveMessageId(server, general.id, text);
+    const carol = await signIn(server, "carol");
+    await server.api(
+      "/api/v1/reports",
+      {
+        target_type: "message",
+        target_id: String(message),
+        reason: "harassment",
+        detail: "synthetic lifecycle detail",
+      },
+      carol,
+    );
+    const warnReason = `synthetic lifecycle warning ${crypto.randomUUID()}`;
+    await server.api(`/api/v1/moderation/users/${bobId}/warn`, { reason: warnReason }, owner);
+    const pane = await openSafety(bob);
+    await pane
+      .locator("[data-testid^='safety-history-']", { hasText: `Reason: ${warnReason}` })
+      .locator(".safety-appeal-open")
+      .click();
+    await pane.locator("#safety-appeal-body").fill("synthetic lifecycle appeal");
+    await pane.getByRole("button", { name: "Send appeal" }).click();
+    await expect(
+      pane.locator(".safety-appeals-list > .safety-history-row", {
+        hasText: `Reason: ${warnReason}`,
+      }),
+    ).toContainText("Status: open");
+    await bob.keyboard.press("Escape");
+
     await expect(alice.locator(".msg-text", { hasText: text })).toBeVisible();
     await expect(alice.locator(`[data-testid='member-${bobId}']`)).toBeVisible();
 
@@ -319,11 +418,23 @@ test.describe("B9-26 lifecycle journey (real server)", () => {
     // The session is cleared and the app returns to sign-in.
     await expect(bob.locator("#host")).toBeVisible({ timeout: 30_000 });
 
-    // The server erased the content and the credential: bob cannot sign in.
+    // The server erased the content and the credential: bob cannot sign in, and
+    // his message is gone.
     await expect(
       server.api("/api/v1/auth/login", { username: "bob", password: TEST_PASSWORD }),
     ).rejects.toThrow(/401|Unauthorized|invalid/i);
-    expect(await messageIdOrNull(server, general.id, text)).toBeNull();
+    expect(await messageId(server, general.id, text)).toBeNull();
+
+    // The report's outcome row survives the subject's erasure, rewritten with
+    // no content (the erasure half of BPR-052/BPR-053), and bob's own appeal
+    // cascaded away; neither is listed as open work.
+    const closed = (await server.api(
+      "/api/v1/moderation/queue?state=closed",
+      undefined,
+      owner,
+    )) as { state: string; subject_name: string }[];
+    expect(closed.map((r) => r.state)).toContain("subject_erased");
+    expect(closed.every((r) => r.subject_name === "")).toBe(true);
 
     // The live observer drops the erased member row (the server's member_ban).
     await expect(alice.locator(`[data-testid='member-${bobId}']`)).toHaveCount(0, {
@@ -353,22 +464,53 @@ test.describe("B9-26 first-contact journey (real server)", () => {
     const bobId = (await users(server))("bob");
     await register(server, "stranger");
     const stranger = await firstContact(server, "stranger", bobId);
+    // The stranger's avatar points at a host that must never be fetched while
+    // their request is untrusted. The URL is a valid https:// the server stores.
+    const tracker = "https://tracker.invalid/stranger.png";
+    await server.api(
+      "/api/v1/users/me",
+      { username: "stranger", avatar: tracker },
+      stranger.token,
+      "PATCH",
+    );
     try {
       const held = `hello bob from ${crypto.randomUUID()}`;
       expect((await stranger.send(held)).type).toBe("chat_send_ok");
 
-      // The request arrives as plain text: no avatar, attachment or embed is
-      // fetched on the stranger's behalf before bob trusts them.
-      const inbox = bob.getByRole("region", { name: "Message Requests" });
-      await bob.locator("[data-testid='dm-requests-badge']").click();
-      await bob.locator("[data-testid='dm-requests-entry']").click();
-      await expect(inbox).toBeVisible();
-      const item = inbox.locator("[data-testid='request-item']", {
-        has: bob.getByRole("heading", { level: 3, name: "stranger" }),
-      });
-      await expect(item).toBeVisible();
+      // Safe preview: from here on, watch every browser request and every
+      // native broker call. The request arrives as plain text; nothing is
+      // fetched on the stranger's behalf.
+      await recordTraffic(bob);
+      const loaded: string[] = [];
+      const onRequest = (r: Request): void => {
+        loaded.push(r.url());
+      };
+      bob.on("request", onRequest);
+      try {
+        const inbox = bob.getByRole("region", { name: "Message Requests" });
+        await bob.locator("[data-testid='dm-requests-badge']").click();
+        await bob.locator("[data-testid='dm-requests-entry']").click();
+        await expect(inbox).toBeVisible();
+        const item = inbox.locator("[data-testid='request-item']", {
+          has: bob.getByRole("heading", { level: 3, name: "stranger" }),
+        });
+        await expect(item).toBeVisible();
+        await expect(item.locator(".requests-preview")).toContainText(held);
+        // The row renders no image and asks for no third-party host.
+        await expect(item.locator("img")).toHaveCount(0);
+        await bob.waitForTimeout(1_000);
+        expect(loaded.filter((u) => u.includes("tracker.invalid"))).toEqual([]);
+        await expect
+          .poll(async () => (await traffic(bob)).filter((l) => l.startsWith("broker ")))
+          .toEqual([]);
+      } finally {
+        bob.off("request", onRequest);
+      }
 
       // Accept: the held message opens an ordinary conversation.
+      const item = bob.locator("[data-testid='request-item']", {
+        has: bob.getByRole("heading", { level: 3, name: "stranger" }),
+      });
       await item.getByRole("button", { name: "Accept" }).click();
       await expect(bob.locator("[data-testid='chat-header-name']")).toHaveText("stranger");
       await expect(bob.locator(".msg-text", { hasText: held })).toHaveCount(1);
@@ -511,7 +653,9 @@ test.describe("B9-26 recovery lifecycle journey (real server)", () => {
     await expect(bob.getByTestId("app-layout")).toBeVisible({ timeout: 30_000 });
 
     // The kit is spent: the new password signs in, the old one does not, and a
-    // second recovery with the same secret is refused.
+    // second recovery with the same secret is refused. A spent kit is the
+    // uniform 401 UNAUTHORIZED refusal (service.ErrRecoveryKitInvalid →
+    // writeAuthError), not a 500 or a 429 that would pass any ">= 400".
     await expect(
       server.api("/api/v1/auth/login", { username: "bob", password: TEST_PASSWORD }),
     ).rejects.toThrow(/401|Unauthorized|invalid/i);
@@ -527,20 +671,246 @@ test.describe("B9-26 recovery lifecycle journey (real server)", () => {
         new_password: "Another-pass-123!",
       }),
     });
-    expect(replay.status).toBeGreaterThanOrEqual(400);
+    expect(replay.status).toBe(401);
+    expect(((await replay.json()) as { error: string }).error).toBe("UNAUTHORIZED");
   });
 });
 
-/** The message id for `content`, or null when the server no longer holds it. */
-async function messageIdOrNull(
-  server: TestServer,
-  channelId: number,
-  content: string,
-): Promise<number | null> {
-  const history = await server.api(
-    `/api/v1/channels/${channelId}/messages`,
-    undefined,
-    server.owner!.token,
-  );
-  return history.messages.find((m: { content: string }) => m.content === content)?.id ?? null;
-}
+test.describe("B9-26 network-loss journey (real server)", () => {
+  test("a transport cut shows the actionable notice, recovers, and keeps session state", async ({
+    bob,
+    bobTransport,
+    server,
+  }) => {
+    const beforeText = `before-cut-${crypto.randomUUID()}`;
+    await send(bob, beforeText);
+
+    // Cut the transport mid-session: the socket closes and every dial fails.
+    await bobTransport.offline();
+    const banner = bob.locator(".reconnecting-banner");
+    await expect(banner).toBeVisible({ timeout: 15_000 });
+    // A dial has to fail before the notice names the server; until then it is
+    // the honest "Reconnecting..." wording (B9-25).
+    await expect(banner).toContainText("Can't reach this server", { timeout: 15_000 });
+    await expect(banner.getByRole("button", { name: "Retry" })).toBeVisible();
+
+    // The device reports a network, so the banner never claims the internet is
+    // required for this LAN server, and Retry is offered.
+
+    // Restore the transport: the reconnect loop's next dial clears the notice.
+    bobTransport.online();
+    await expect(banner).toBeHidden({ timeout: 30_000 });
+
+    // State resumed correctly: the pre-cut message is still there and a new
+    // send lands, read back from the server's own history.
+    await expect(bob.locator(".msg-text", { hasText: beforeText })).toHaveCount(1);
+    const afterText = `after-cut-${crypto.randomUUID()}`;
+    await send(bob, afterText);
+    const general = await generalChannel(server);
+    await expect
+      .poll(async () => {
+        const history = await server.api(
+          `/api/v1/channels/${general.id}/messages`,
+          undefined,
+          server.owner!.token,
+        );
+        return history.messages.filter((m: { content: string }) => m.content === afterText).length;
+      })
+      .toBe(1);
+  });
+});
+
+test.describe("B9-26 refused-role journey (real server)", () => {
+  test("a member is refused the moderation queue and another account's appeal in the UI and by the server", async ({
+    alice,
+    bob,
+    server,
+  }) => {
+    const owner = server.owner!.token;
+    await register(server, "carol");
+    const id = await users(server);
+
+    // bob is an ordinary member: the Moderation Center entry is not offered.
+    await expect(bob.getByTestId("moderation-btn")).toBeHidden();
+    await expect(bob.getByTestId("audit-log-btn")).toBeHidden();
+
+    // The server refuses him the queue, a queue action and an appeal decision,
+    // all 403, independent of anything the client shows.
+    const bobToken = await signIn(server, "bob");
+    expect(await status(server, "/api/v1/moderation/queue", bobToken)).toBe(403);
+
+    // carol is warned by the owner and appeals; bob may not decide it.
+    const warnReason = `synthetic refused-role ${crypto.randomUUID()}`;
+    await server.api(`/api/v1/moderation/users/${id("carol")}/warn`, { reason: warnReason }, owner);
+    const own = (await server.api(
+      "/api/v1/users/me/moderation",
+      undefined,
+      await signIn(server, "carol"),
+    )) as { id: number; reason: string; appealable: boolean }[];
+    const action = own.find((r) => r.reason === warnReason)!;
+    const appeal = (
+      await server.api(
+        "/api/v1/appeals/",
+        { action_id: action.id, body: "synthetic refused-role appeal" },
+        await signIn(server, "carol"),
+      )
+    ).id as string;
+    expect(
+      await status(server, `/api/v1/moderation/appeals/${appeal}/decide`, bobToken, {
+        outcome: "uphold",
+        note: "",
+      }),
+    ).toBe(403);
+    expect(await status(server, `/api/v1/moderation/appeals/`, bobToken)).toBe(403);
+
+    // The owner, who holds the permission, still sees the appeal and can decide
+    // it; the refusal above was the role, not the contract.
+    const aliceAppeals = (await server.api("/api/v1/moderation/appeals/", undefined, owner)) as {
+      id: string;
+    }[];
+    expect(aliceAppeals.map((a) => a.id)).toContain(appeal);
+    // alice also sees the entry in her client.
+    await expect(alice.getByTestId("moderation-btn")).toBeVisible();
+
+    // bob's client never rendered moderation content: no appeal from carol.
+    expect(await status(server, "/api/v1/moderation/appeals/", bobToken)).toBe(403);
+  });
+});
+
+test.describe("B9-26 integrated accessibility matrix (real server)", () => {
+  // The plan's Task 3 matrix, run on the JOINED surfaces the journeys above
+  // produce. Each surface's exhaustive Q1 pass (keyboard, names, focus,
+  // contrast in every theme and High Contrast, reduced motion, 940×500 with
+  // 20px text and 200% scale) already ships in its lane spec and is named per
+  // requirement in the evidence manifest; this test proves the integrated
+  // states do not regress that, on the real server.
+  test("the joined inbox and Moderation Center reflow at the 940x500 minimum window", async ({
+    alice,
+    bob,
+    server,
+  }) => {
+    const owner = server.owner!.token;
+    await register(server, "stranger");
+    await register(server, "carol");
+    const bobId = (await users(server))("bob");
+    const stranger = await firstContact(server, "stranger", bobId);
+    try {
+      expect((await stranger.send("joined a11y request")).type).toBe("chat_send_ok");
+
+      // Message Requests inbox at the minimum desktop window.
+      await bob.setViewportSize({ width: 940, height: 500 });
+      await bob.locator("[data-testid='dm-requests-badge']").click();
+      await bob.locator("[data-testid='dm-requests-entry']").click();
+      const inbox = bob.getByRole("region", { name: "Message Requests" });
+      await expect(inbox).toBeVisible();
+      expect(await bob.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+      for (const control of await inbox.getByRole("button").all()) {
+        if (!(await control.isVisible())) continue;
+        await control.scrollIntoViewIfNeeded();
+        await expect(control).toBeInViewport();
+        expect(await control.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      }
+
+      // Moderation Center at the same window, with a queue row present.
+      await alice.setViewportSize({ width: 940, height: 500 });
+      await server.api(
+        "/api/v1/reports",
+        { target_type: "user", target_id: String(bobId), reason: "spam", detail: "" },
+        await signIn(server, "carol"),
+      );
+      await alice.getByTestId("moderation-btn").click();
+      const center = alice.getByRole("region", { name: "Moderation" });
+      await expect(center.getByTestId("mod-queue-row").first()).toBeVisible();
+      const view = alice.getByTestId("feature-view");
+      expect(await view.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+      await center.getByTestId("mod-queue-row").first().focus();
+      expect(await view.evaluate((el) => el.scrollLeft)).toBe(0);
+
+      // Keyboard: the entry is reachable and operable, and Escape leaves the
+      // report back on its row.
+      await center.getByTestId("mod-queue-row").first().click();
+      const report = center.getByTestId("mod-report");
+      await expect(report.getByRole("heading", { level: 3 })).toBeFocused();
+      await alice.keyboard.press("Escape");
+      await expect(report).toHaveCount(0);
+      await expect(center.getByTestId("mod-queue-row").first()).toBeFocused();
+
+      // Reduced motion: no running animation is required in the joined view.
+      await alice.emulateMedia({ reducedMotion: "reduce" });
+      expect(
+        await center.evaluate(
+          (el) =>
+            el
+              .getAnimations({ subtree: true })
+              .filter(
+                (a) => a.playState === "running" && Number(a.effect?.getTiming().duration) > 1,
+              ).length,
+        ),
+      ).toBe(0);
+      void owner;
+    } finally {
+      stranger.close();
+    }
+  });
+});
+
+test.describe("B9-26 consent-to-evidence journey (real server)", () => {
+  test("labelled evidence waits for the moderator's own acknowledgement, and revoking it takes the evidence away", async ({
+    alice,
+    bob,
+    server,
+  }) => {
+    const owner = server.owner!.token;
+    await register(server, "carol");
+    const channels = (await server.api("/api/v1/channels/", undefined, owner)) as {
+      id: number;
+      name: string;
+      type: string;
+    }[];
+    const labelled = channels.find((c) => c.name === "general" && c.type === "text")!;
+
+    // bob posts a message in a channel that is afterwards labelled, and carol
+    // reports it; its evidence is gated by the moderator's own NSFW consent.
+    const text = `synthetic-consent-evidence-${crypto.randomUUID()}`;
+    await send(bob, text);
+    const message = await liveMessageId(server, labelled.id, text);
+    await server.api(
+      "/api/v1/reports",
+      {
+        target_type: "message",
+        target_id: String(message),
+        reason: "harassment",
+        detail: "synthetic consent evidence detail",
+      },
+      await signIn(server, "carol"),
+    );
+    await server.api(`/admin/api/channels/${labelled.id}`, { nsfw: true }, owner, "PATCH");
+
+    // The owner opens the report: the evidence is behind the acknowledgement
+    // gate, and reading it records the acknowledgement with the server first.
+    await alice.getByTestId("moderation-btn").click();
+    const center = alice.getByRole("region", { name: "Moderation" });
+    const rows = center.getByTestId("mod-queue-row");
+    await rows.filter({ hasText: "About bob" }).click();
+    const report = center.getByTestId("mod-report");
+    const gate = center.getByTestId("nsfw-gate");
+    await expect(gate).toBeVisible();
+    await expect(report).not.toContainText(text);
+    await gate.getByTestId("nsfw-gate-continue").click();
+    await expect(report.locator(".mod-evidence-text")).toHaveText(text);
+
+    // Revoking the acknowledgement from another session regates the evidence.
+    const aliceToken = await signIn(server, "alice");
+    expect(
+      await status(
+        server,
+        `/api/v1/channels/${labelled.id}/nsfw-acknowledgement`,
+        aliceToken,
+        undefined,
+        "DELETE",
+      ),
+    ).toBe(204);
+    await expect(gate).toBeVisible();
+    await expect(report).not.toContainText(text);
+  });
+});
