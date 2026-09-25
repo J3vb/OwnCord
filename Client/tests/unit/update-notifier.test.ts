@@ -154,6 +154,37 @@ describe("createUpdateNotifier download progress", () => {
     notifier.destroy?.();
   });
 
+  it("announces each install phase once through a live region, never the progress tick", async () => {
+    mockDownloadAndInstall.mockImplementation(() => {
+      onInstallState({ status: "downloading", progress: null });
+      return new Promise<void>(() => {});
+    });
+
+    const notifier = await mountWithAvailableUpdate();
+    const live = host.querySelector("[data-testid='update-announce']") as HTMLElement;
+    expect(live.getAttribute("role")).toBe("status");
+
+    (host.querySelector(".update-banner-install") as HTMLButtonElement).click();
+    expect(host.querySelector(".update-banner-text")?.textContent).toBe("Downloading update…");
+    expect(live.textContent).toBe("Downloading update…");
+
+    // A percentage tick changes the visible text but not the announcement.
+    onInstallState({ status: "downloading", progress: { received: 47, total: 100 } });
+    expect(host.querySelector(".update-banner-text")?.textContent).toBe("Downloading update… 47%");
+    expect(live.textContent).toBe("Downloading update…");
+
+    onInstallState({ status: "failed", restartRequired: false });
+    expect(live.textContent).toBe("Update failed. Please try again later.");
+    notifier.destroy?.();
+  });
+
+  it("announces an available update when the banner first appears", async () => {
+    const notifier = await mountWithAvailableUpdate();
+    const live = host.querySelector("[data-testid='update-announce']") as HTMLElement;
+    expect(live.textContent).toBe("Update v1.2.0 available");
+    notifier.destroy?.();
+  });
+
   it("does not throw (unhandled rejection) when destroyed mid-download and the download later fails", async () => {
     let rejectDownload: (err: Error) => void = () => {};
     mockDownloadAndInstall.mockImplementation(

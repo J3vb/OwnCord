@@ -16,6 +16,7 @@ function resetStore(): void {
   uiStore.setState(() => ({
     settingsOpen: false,
     connectionStatus: "disconnected" as const,
+    connectionDialFailed: false,
     transientError: null,
     sessionReplaced: false,
     updateRequiredHost: null,

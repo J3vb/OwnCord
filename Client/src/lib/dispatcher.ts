@@ -8,7 +8,7 @@
 // order of the two cross-domain handlers, `ready` and `error`. The handler
 // bodies live in features/*/wsHandlers.ts as plain functions.
 
-import type { WsClient } from "./ws";
+import type { ConnectionState, WsClient } from "./ws";
 import { toConnectionStatus, setActiveChannelProvider } from "./ws";
 import { setConnectionStatus } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
@@ -91,12 +91,28 @@ export type DispatcherCleanup = () => void;
 
 /**
  * The single writer for ui.store.connectionStatus (UX spec §3): collapses the
- * ws client's internal state machine onto the 3-state status. Wired once at
+ * ws client's internal state machine onto the 3-state status, and records
+ * whether a dial has failed in the current outage. That fact holds across the
+ * backoff's later dials and clears only on a connection or a fresh connect
+ * from a stopped socket (sign-in, server switch, "Use here"). Wired once at
  * startup and kept for the app's lifetime — deliberately separate from
  * wireDispatcher, whose listeners are torn down per connection.
  */
 export function wireConnectionStatus(ws: Pick<WsClient, "onStateChange">): () => void {
-  return ws.onStateChange((s) => setConnectionStatus(toConnectionStatus(s)));
+  let prev: ConnectionState = "disconnected";
+  let dialFailed = false;
+  return ws.onStateChange((s) => {
+    if (s === "connected" || (s === "connecting" && prev === "disconnected")) {
+      dialFailed = false;
+    } else if (
+      (prev === "connecting" || prev === "authenticating") &&
+      (s === "reconnecting" || s === "disconnected")
+    ) {
+      dialFailed = true;
+    }
+    prev = s;
+    setConnectionStatus(toConnectionStatus(s), dialFailed);
+  });
 }
 
 /**

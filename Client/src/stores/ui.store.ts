@@ -9,6 +9,12 @@ import type { ContentViewId } from "../features/navigation/destinations";
 export interface UiState {
   readonly settingsOpen: boolean;
   readonly connectionStatus: "connected" | "reconnecting" | "disconnected";
+  /**
+   * A dial has failed in the current outage. It stays set through the
+   * backoff's later dials; a drop from a live connection, before any dial has
+   * failed, leaves it false.
+   */
+  readonly connectionDialFailed: boolean;
   readonly transientError: string | null;
   /**
    * The server displaced this device's socket because the same account
@@ -55,6 +61,7 @@ export interface UpdateRequired {
 const INITIAL_STATE: UiState = {
   settingsOpen: false,
   connectionStatus: "disconnected",
+  connectionDialFailed: false,
   transientError: null,
   sessionReplaced: false,
   updateRequiredHost: null,
@@ -86,10 +93,14 @@ export function closeSettings(): void {
 }
 
 /** Set the WebSocket connection status. */
-export function setConnectionStatus(status: "connected" | "reconnecting" | "disconnected"): void {
+export function setConnectionStatus(
+  status: "connected" | "reconnecting" | "disconnected",
+  dialFailed = false,
+): void {
   uiStore.setState((prev) => ({
     ...prev,
     connectionStatus: status,
+    connectionDialFailed: dialFailed,
     // A live connection means this device is the one in use again.
     sessionReplaced: status === "connected" ? false : prev.sessionReplaced,
   }));

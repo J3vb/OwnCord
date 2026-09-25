@@ -1,7 +1,7 @@
 // UpdateNotifier — shows a non-modal banner when a client update is available.
 // Mounts at the top of the main page and allows the user to update or dismiss.
 
-import { createElement, appendChildren } from "@lib/dom";
+import { createElement, appendChildren, setText } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { checkForUpdate, downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/updater";
 import type { DownloadProgress, UpdateInstallState } from "@lib/updater";
@@ -31,10 +31,20 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
   const { serverUrl } = options;
   let container: Element | null = null;
   let banner: HTMLDivElement | null = null;
+  /** Polite live region carrying the coarse install status, so a screen
+   *  reader hears "update available / downloading / installed / failed" once —
+   *  never the once-a-percent progress tick, which would read out continuously. */
+  let liveRegion: HTMLDivElement | null = null;
   let dismissed = false;
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
   let unsubscribeInstall: (() => void) | null = null;
   let installState: UpdateInstallState = { status: "idle" };
+
+  function announce(text: string): void {
+    // Idempotent: re-setting identical text on a live region can re-read it,
+    // and the download phase fires this on every progress tick.
+    if (liveRegion !== null && liveRegion.textContent !== text) setText(liveRegion, text);
+  }
 
   async function performCheck(): Promise<void> {
     if (dismissed || installState.status !== "idle") return;
@@ -81,6 +91,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
 
     appendChildren(banner, text, dismissBtn);
     container.prepend(banner);
+    announce(connectText("update.unavailable"));
   }
 
   function showBanner(version: string, _notes: string): void {
@@ -115,6 +126,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
 
     appendChildren(banner, text, updateBtn, laterBtn);
     container.prepend(banner);
+    announce(connectText("update.available", { version }));
   }
 
   function installUpdate(): void {
@@ -141,6 +153,19 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
             ? connectText("update.installedRestart")
             : connectText("update.failed");
     banner.replaceChildren(createElement("span", { class: "update-banner-text" }, text));
+
+    // Announce only the coarse transition. A percentage tick is not a new
+    // event; reading "Downloading update… 47%" every frame is noise, so the
+    // live region keeps the phase and updates only when it changes.
+    if (state.status === "downloading") {
+      announce(connectText("update.downloading"));
+    } else if (state.status === "restarting") {
+      announce(connectText("update.installedRestarting"));
+    } else if (state.restartRequired) {
+      announce(connectText("update.installedRestart"));
+    } else {
+      announce(connectText("update.failed"));
+    }
 
     if (state.status === "failed") {
       if (!state.restartRequired) {
@@ -174,6 +199,17 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
 
   function mount(target: Element): void {
     container = target;
+    // Present from mount, empty: a screen reader skips a live region inserted
+    // already filled. The banner text itself is visual-only; this carries the
+    // phase so an update is heard once without reading every progress tick.
+    liveRegion = createElement("div", {
+      class: "sr-only",
+      role: "status",
+      "aria-live": "polite",
+      "aria-atomic": "true",
+      "data-testid": "update-announce",
+    });
+    target.appendChild(liveRegion);
     unsubscribeInstall = subscribeToUpdateInstall(renderInstallState);
     // Delay the check slightly so the main UI renders first
     checkTimer = setTimeout(() => {
@@ -190,6 +226,8 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       checkTimer = null;
     }
     removeBanner();
+    liveRegion?.remove();
+    liveRegion = null;
     container = null;
   }
 

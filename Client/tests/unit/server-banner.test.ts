@@ -47,12 +47,123 @@ describe("ServerBanner", () => {
     banner.destroy();
   });
 
-  it('showDisconnected adds visible class with "Disconnected" text', () => {
+  it("showDisconnected adds visible class with the server-unreachable notice", () => {
     const banner = createServerBanner();
     banner.showDisconnected();
 
     expect(banner.element.classList.contains("visible")).toBe(true);
-    expect(banner.element.textContent).toBe("Disconnected");
+    expect(banner.element.textContent).toBe(
+      "Can't reach this server right now. It may be down or blocked on this network.",
+    );
+
+    banner.destroy();
+  });
+
+  it("showDisconnected names the device's own network when it is offline", () => {
+    const banner = createServerBanner();
+    const onRetry = vi.fn();
+    banner.showDisconnected({ offline: true, onRetry });
+
+    expect(banner.element.textContent).toBe(
+      "Your device reports no network connection. If your server is on a local network, try again. Retry",
+    );
+    // A LAN with no default route can read offline while its server is
+    // reachable, so Retry stays offered.
+    banner.element.querySelector("button")!.click();
+    expect(onRetry).toHaveBeenCalledTimes(1);
+
+    banner.destroy();
+  });
+
+  it("offers a Retry on a disconnect that stays usable across repeated clicks", () => {
+    const banner = createServerBanner();
+    const onRetry = vi.fn();
+    banner.showDisconnected({ offline: false, onRetry });
+
+    const retry = banner.element.querySelector("button");
+    expect(retry?.textContent).toBe("Retry");
+    // The notice is stable for the whole outage, so a failed retry must be
+    // retryable again — the listener is not one-shot (BPR-092).
+    retry!.click();
+    retry!.click();
+    expect(onRetry).toHaveBeenCalledTimes(2);
+
+    banner.destroy();
+  });
+
+  it("keeps keyboard focus on Retry when a network flap re-renders the notice", () => {
+    const banner = createServerBanner();
+    document.body.append(banner.element);
+    const onRetry = vi.fn();
+    applyConnectionStatus(banner, "reconnecting", { offline: false, dialFailed: true, onRetry });
+
+    const retry = banner.element.querySelector("button")!;
+    retry.focus();
+    expect(document.activeElement).toBe(retry);
+
+    applyConnectionStatus(banner, "reconnecting", { offline: true, dialFailed: true, onRetry });
+    expect(banner.element.textContent).toBe(
+      "Your device reports no network connection. If your server is on a local network, try again. Retry",
+    );
+    applyConnectionStatus(banner, "reconnecting", { offline: false, dialFailed: true, onRetry });
+    expect(banner.element.textContent).toBe(
+      "Can't reach this server right now. It may be down or blocked on this network. Retry",
+    );
+
+    expect(banner.element.querySelector("button")).toBe(retry);
+    expect(document.activeElement).toBe(retry);
+    retry.click();
+    expect(onRetry).toHaveBeenCalledTimes(1);
+
+    applyConnectionStatus(banner, "reconnecting", { offline: false, dialFailed: false, onRetry });
+    expect(banner.element.querySelector("button")).toBeNull();
+
+    banner.destroy();
+  });
+
+  it("showReconnecting keeps Reconnecting... until a dial has actually failed", () => {
+    const banner = createServerBanner();
+    const onRetry = vi.fn();
+    banner.showReconnecting({ offline: false, onRetry });
+
+    expect(banner.element.textContent).toBe("Reconnecting...");
+    expect(banner.element.querySelector("button")).toBeNull();
+    expect(banner.liveElement.textContent).toBe("Reconnecting...");
+
+    banner.showReconnecting({ offline: false, dialFailed: true, onRetry });
+    expect(banner.element.textContent).toBe(
+      "Can't reach this server right now. It may be down or blocked on this network. Retry",
+    );
+    banner.element.querySelector("button")!.click();
+    expect(onRetry).toHaveBeenCalledTimes(1);
+
+    banner.destroy();
+  });
+
+  it("showReconnecting says the device is offline instead of promising progress", () => {
+    const banner = createServerBanner();
+    banner.showReconnecting({ offline: true });
+
+    expect(banner.element.classList.contains("visible")).toBe(true);
+    expect(banner.element.textContent).toBe(
+      "Your device reports no network connection. If your server is on a local network, try again.",
+    );
+
+    banner.destroy();
+  });
+
+  it("announces the notice once through its live region and clears it on hide", () => {
+    const banner = createServerBanner();
+    expect(banner.liveElement.getAttribute("role")).toBe("status");
+    expect(banner.liveElement.textContent).toBe("");
+
+    banner.showDisconnected();
+    expect(banner.liveElement.textContent).toBe(
+      "Can't reach this server right now. It may be down or blocked on this network.",
+    );
+
+    banner.hide();
+    expect(banner.liveElement.textContent).toBe("");
 
     banner.destroy();
   });
@@ -66,7 +177,9 @@ describe("ServerBanner", () => {
 
     applyConnectionStatus(banner, "disconnected");
     expect(banner.element.classList.contains("visible")).toBe(true);
-    expect(banner.element.textContent).toBe("Disconnected");
+    expect(banner.element.textContent).toBe(
+      "Can't reach this server right now. It may be down or blocked on this network.",
+    );
 
     applyConnectionStatus(banner, "connected");
     expect(banner.element.classList.contains("visible")).toBe(false);

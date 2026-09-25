@@ -87,7 +87,9 @@ source of truth in `ui.store.connectionStatus`
 > `authenticating` read as `reconnecting`, since a reconnect cycle passes
 > through them). Consumers subscribe to the store instead of wiring ad-hoc
 > callbacks: the reconnect banner (`MainPage`, synced at mount and now also
-> showing "Disconnected" instead of going stale), the composer gating
+> keeping "Reconnecting…" until a dial fails, then telling a device that reports
+> no network apart from an unreachable server, both with a Retry action, instead
+> of going stale — B9-25), the composer gating
 > (`ChannelController`, "Reconnecting…" / "Not connected" per the table), and
 > the presence picker (`UserBar` — previously dead in production because
 > `SidebarArea` never passed it a `ws`; it now gates on the store and receives

@@ -234,6 +234,8 @@ import { createMainPage } from "../../src/pages/MainPage";
 import { channelsStore, setChannels, setActiveChannel } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
+import { wireConnectionStatus } from "../../src/lib/dispatcher";
+import { createMockWsClient } from "../helpers/mock-ws";
 import { voiceStore, updateVoiceUserProfile } from "../../src/stores/voice.store";
 import { dmStore, updateDmParticipant } from "../../src/stores/dm.store";
 import { membersStore, updateMemberProfile } from "../../src/stores/members.store";
@@ -1182,6 +1184,161 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
     expect(uiStore.getState().sessionReplaced).toBe(false);
+  });
+
+  it("shows an actionable connection notice on disconnect and Retry redials (B9-25)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    uiStore.setState((prev) => ({
+      ...prev,
+      sessionReplaced: false,
+      connectionStatus: "disconnected",
+    }));
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toContain("Can't reach this server");
+    });
+
+    const retry = banner.querySelector("button")!;
+    expect(retry.textContent).toBe("Retry");
+    retry.click();
+    expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
+  });
+
+  it("keeps Reconnecting... until a dial fails, then offers Retry (B9-25)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    uiStore.setState((prev) => ({
+      ...prev,
+      sessionReplaced: false,
+      connectionStatus: "reconnecting",
+      connectionDialFailed: false,
+    }));
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toBe("Reconnecting...");
+    });
+    expect(banner.querySelector("button")).toBeNull();
+
+    // Same 3-state status: only the dial outcome changed.
+    uiStore.setState((prev) => ({ ...prev, connectionDialFailed: true }));
+    await vi.waitFor(() => {
+      expect(banner.textContent).toContain("Can't reach this server");
+    });
+    banner.querySelector("button")!.click();
+    expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
+    uiStore.setState((prev) => ({ ...prev, connectionDialFailed: false }));
+  });
+
+  it("holds one unreachable notice and Retry across repeated failed dials (B9-25)", async () => {
+    const socket = createMockWsClient();
+    const unwire = wireConnectionStatus(socket);
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    socket.simulateStateChange("connecting");
+    socket.simulateStateChange("authenticating");
+    socket.simulateStateChange("connected");
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    const live = container.querySelector<HTMLElement>("[data-testid='banner-announce']")!;
+    const unreachable =
+      "Can't reach this server right now. It may be down or blocked on this network.";
+    const announced: string[] = [];
+    const observer = new MutationObserver(() => announced.push(live.textContent ?? ""));
+    observer.observe(live, { childList: true, characterData: true, subtree: true });
+    const settle = async (): Promise<void> => {
+      uiStore.flush();
+      await Promise.resolve();
+    };
+
+    try {
+      socket.simulateStateChange("reconnecting");
+      await settle();
+      expect(banner.textContent).toBe("Reconnecting...");
+
+      socket.simulateStateChange("connecting");
+      socket.simulateStateChange("reconnecting");
+      await settle();
+      expect(banner.textContent).toBe(`${unreachable} Retry`);
+
+      for (let cycle = 0; cycle < 2; cycle++) {
+        socket.simulateStateChange("connecting");
+        await settle();
+        expect(banner.textContent).toBe(`${unreachable} Retry`);
+        expect(banner.querySelector("button")).not.toBeNull();
+        socket.simulateStateChange("reconnecting");
+        await settle();
+        expect(banner.textContent).toBe(`${unreachable} Retry`);
+        expect(banner.querySelector("button")).not.toBeNull();
+      }
+
+      expect(announced.filter((text) => text === unreachable)).toHaveLength(1);
+    } finally {
+      observer.disconnect();
+      unwire();
+      uiStore.setState((prev) => ({
+        ...prev,
+        connectionStatus: "disconnected",
+        connectionDialFailed: false,
+      }));
+    }
+  });
+
+  it("re-renders the notice on network loss and return without redialing (B9-25)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    uiStore.setState((prev) => ({
+      ...prev,
+      sessionReplaced: false,
+      connectionStatus: "disconnected",
+    }));
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toContain("Can't reach this server");
+    });
+
+    const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    try {
+      window.dispatchEvent(new Event("offline"));
+      expect(banner.textContent).toContain("Your device reports no network connection");
+
+      onLine.mockReturnValue(true);
+      window.dispatchEvent(new Event("online"));
+      expect(banner.textContent).toContain("Can't reach this server");
+    } finally {
+      onLine.mockRestore();
+    }
+    expect(ws.connect).not.toHaveBeenCalled();
+  });
+
+  it("does not clear a pending restart countdown on a network flap (B9-25)", () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    // The server announces a restart while the socket is live.
+    ws.emit("server_restart", { reason: "update", delay_seconds: 30 });
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    expect(banner.textContent).toBe("Server restarting in 30 seconds...");
+
+    // A network interface flaps (VPN toggle / Wi-Fi blip) during the
+    // countdown. The socket never dropped, so the countdown must survive.
+    window.dispatchEvent(new Event("offline"));
+    window.dispatchEvent(new Event("online"));
+    expect(banner.textContent).toBe("Server restarting in 30 seconds...");
+    expect(banner.classList.contains("visible")).toBe(true);
   });
 
   it("clears local auth when sign-out-everywhere revoked this device's session (B7-14)", async () => {

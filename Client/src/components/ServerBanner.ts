@@ -6,21 +6,103 @@
 import { createElement, setText } from "@lib/dom";
 import { shellText } from "../i18n/shell";
 
+/**
+ * Facts that make a connection notice actionable. `offline` is the device's
+ * own network state (`navigator.onLine`), which is not the same fact as the
+ * server's reachability: a device on a LAN with no internet still answers
+ * `onLine === true`. A false reading is only the device's report — a LAN
+ * with no default route can read offline while its server is reachable — so
+ * the notice keeps Retry either way. `dialFailed` says a dial attempt
+ * actually failed; until one has, a reconnect is still "Reconnecting...", not a claim that the
+ * server is unreachable. `onRetry` offers a manual re-dial while the
+ * socket is down. A browser that does not expose `navigator.onLine` leaves
+ * `offline` undefined and the notice stays the server-unreachable wording,
+ * never a claim about the internet.
+ */
+export interface ConnectionBannerOptions {
+  readonly offline?: boolean;
+  readonly dialFailed?: boolean;
+  readonly onRetry?: () => void;
+}
+
 export interface ServerBannerControl {
   readonly element: HTMLDivElement;
+  /**
+   * A polite live region carrying the notice text so a screen reader hears
+   * each state once (BPR-091). Kept out of `element` so the restart
+   * countdown's once-a-second tick does not re-announce. Append it once at
+   * mount; it is present (empty) from construction, since a screen reader
+   * skips a region inserted already filled.
+   */
+  readonly liveElement: HTMLDivElement;
   showRestart(seconds: number): void;
-  showReconnecting(): void;
-  showDisconnected(): void;
+  showReconnecting(opts?: ConnectionBannerOptions): void;
+  showDisconnected(opts?: ConnectionBannerOptions): void;
   /** Persistent "signed in elsewhere" notice with a "Use here" action. */
   showSignedInElsewhere(onUseHere: () => void): void;
   hide(): void;
   destroy(): void;
 }
 
+/**
+ * The state the socket is stuck in, said honestly. While the device itself
+ * reports no network, "Reconnecting..." promises progress the device cannot
+ * make, so the notice names the real gap instead. A LAN server with no internet
+ * still answers `onLine === true`, so the offline wording never claims the
+ * internet is required.
+ */
+function connectionNoticeText(opts: ConnectionBannerOptions): string {
+  return opts.offline === true
+    ? shellText("banner.deviceOffline")
+    : shellText("banner.serverUnreachable");
+}
+
 export function createServerBanner(): ServerBannerControl {
   let intervalId: ReturnType<typeof setInterval> | null = null;
 
   const root = createElement("div", { class: "reconnecting-banner" });
+  const liveElement = createElement("div", {
+    class: "sr-only",
+    role: "status",
+    "aria-live": "polite",
+    "aria-atomic": "true",
+    "data-testid": "banner-announce",
+  });
+
+  /** Announce once. The visible banner is not itself live — the restart
+   *  countdown rewrites it every second, which a live region would read out
+   *  on each tick. */
+  function announce(text: string): void {
+    if (liveElement.textContent !== text) setText(liveElement, text);
+  }
+
+  let onRetry: (() => void) | undefined;
+  const retry = createElement(
+    "button",
+    { class: "reconnecting-banner-action", type: "button" },
+    shellText("banner.retry"),
+  );
+  // Not `once`: the banner is stable for the whole outage, so a retry that
+  // fails must be retryable again. A second connect() safely supersedes the
+  // first through the ws generation counter (BPR-092 "working recovery").
+  retry.addEventListener("click", () => onRetry?.());
+
+  /**
+   * Render `text` plus an optional Retry action. While Retry is already shown,
+   * only the text in front of it changes, so a re-render during an outage
+   * (a Wi-Fi flap) keeps keyboard focus on the button.
+   */
+  function renderNotice(text: string, opts: ConnectionBannerOptions): void {
+    onRetry = opts.onRetry;
+    const label = root.firstChild;
+    if (onRetry === undefined) {
+      root.replaceChildren(text);
+    } else if (retry.parentNode === root && label !== null && label !== retry) {
+      label.textContent = `${text} `;
+    } else {
+      root.replaceChildren(`${text} `, retry);
+    }
+  }
 
   function clearCountdown(): void {
     if (intervalId !== null) {
@@ -33,29 +115,52 @@ export function createServerBanner(): ServerBannerControl {
     clearCountdown();
     let remaining = seconds;
     root.classList.add("visible");
-    setText(root, shellText("banner.restarting", { seconds: remaining }));
+    const first = shellText("banner.restarting", { seconds: remaining });
+    setText(root, first);
+    announce(first);
 
     intervalId = setInterval(() => {
       remaining -= 1;
       if (remaining <= 0) {
         clearCountdown();
+        // The transition to a connection notice goes through the live region.
         showReconnecting();
         return;
       }
+      // Visible countdown only; the live region keeps the initial
+      // announcement and is not re-read every second.
       setText(root, shellText("banner.restarting", { seconds: remaining }));
     }, 1000);
   }
 
-  function showReconnecting(): void {
+  /**
+   * A connection problem the socket is working to recover from. Until a dial
+   * has failed (a drop, an announced restart, "Use here"), it is the plain
+   * "Reconnecting...". Once one has, the notice is actionable for the rest of
+   * the outage, across the backoff's later dials (BPR-092). Retry is safe here: `connect()`
+   * cancels the pending backoff before dialing, so it cannot race the loop.
+   */
+  function showReconnecting(opts: ConnectionBannerOptions = {}): void {
     clearCountdown();
     root.classList.add("visible");
-    setText(root, shellText("banner.reconnecting"));
+    if (opts.dialFailed !== true && opts.offline !== true) {
+      root.replaceChildren(shellText("banner.reconnecting"));
+      announce(shellText("banner.reconnecting"));
+      return;
+    }
+    const text = connectionNoticeText(opts);
+    renderNotice(text, opts);
+    announce(text);
   }
 
-  function showDisconnected(): void {
+  function showDisconnected(opts: ConnectionBannerOptions = {}): void {
     clearCountdown();
     root.classList.add("visible");
-    setText(root, shellText("banner.disconnected"));
+    // Two distinct facts, two distinct answers (BPR-092). Neither wording
+    // tells the user the internet is required to reach a local server.
+    const text = connectionNoticeText(opts);
+    renderNotice(text, opts);
+    announce(text);
   }
 
   function showSignedInElsewhere(onUseHere: () => void): void {
@@ -68,20 +173,24 @@ export function createServerBanner(): ServerBannerControl {
     );
     useHere.addEventListener("click", onUseHere, { once: true });
     root.replaceChildren(`${shellText("banner.signedInElsewhere")} `, useHere);
+    announce(shellText("banner.signedInElsewhere"));
   }
 
   function hide(): void {
     clearCountdown();
     root.classList.remove("visible");
+    setText(liveElement, "");
   }
 
   function destroy(): void {
     clearCountdown();
     root.remove();
+    liveElement.remove();
   }
 
   return {
     element: root,
+    liveElement,
     showRestart,
     showReconnecting,
     showDisconnected,
@@ -93,17 +202,19 @@ export function createServerBanner(): ServerBannerControl {
 
 /**
  * Apply a store connection status to the banner (UX spec §3 table):
- * reconnecting → "Reconnecting...", disconnected → "Disconnected",
- * connected → hidden.
+ * reconnecting → "Reconnecting..." until a dial fails, then an actionable
+ * notice; disconnected → an actionable notice; connected → hidden. `opts` carries the device's own network fact and the
+ * manual retry action, so the notice answers the state honestly (BPR-092).
  */
 export function applyConnectionStatus(
   banner: ServerBannerControl,
   status: "connected" | "reconnecting" | "disconnected",
+  opts: ConnectionBannerOptions = {},
 ): void {
   if (status === "reconnecting") {
-    banner.showReconnecting();
+    banner.showReconnecting(opts);
   } else if (status === "disconnected") {
-    banner.showDisconnected();
+    banner.showDisconnected(opts);
   } else {
     banner.hide();
   }

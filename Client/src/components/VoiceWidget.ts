@@ -93,8 +93,17 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
    *  here instead — once, when it appears. */
   let modStatusEl: HTMLDivElement | null = null;
 
-  // Listen-only mode: "Grant Microphone" button
+  // Listen-only mode: "Grant Microphone" button + its persistent explanation.
   let grantMicBtn: HTMLButtonElement | null = null;
+  /**
+   * Whether the user has retried the microphone in this session and it is
+   * still unavailable. The widget cannot see *why* the OS refused (the
+   * notifier contract is a boolean), but it can honestly report the outcome
+   * of its own retry — so the guidance stops promising a grant that the retry
+   * just failed to obtain.
+   */
+  let micRetryFailed = false;
+  let micNoticeEl: HTMLDivElement | null = null;
 
   // Connection stats
   let signalWrap: HTMLButtonElement | null = null;
@@ -325,9 +334,29 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       }
     }
 
+    // Leaving listen-only clears the "retry failed" memory, so a later join
+    // that lands here again starts from the helpful hint rather than a stale
+    // claim about the permission.
+    if (!voice.listenOnly) micRetryFailed = false;
     // Show/hide "Grant Microphone" button based on listen-only state
     if (grantMicBtn) {
       grantMicBtn.style.display = voice.listenOnly ? "block" : "none";
+    }
+    // The persistent mic notice: how to change the state, and — once a retry
+    // has failed — that it is the system permission, not this app, that has to
+    // change. The wording never claims the mic is denied when the real cause
+    // (no device, in use by another app) is something a permission grant
+    // cannot fix.
+    if (micNoticeEl) {
+      const text = !voice.listenOnly
+        ? ""
+        : micRetryFailed
+          ? t("widget.listenOnlyBlocked")
+          : t("widget.listenOnlyHint");
+      // Set only on change: render() runs on unrelated store updates, and a
+      // screen reader can re-read a replaced text node even when identical,
+      // which would break the "announced once" goal.
+      if (micNoticeEl.textContent !== text) setText(micNoticeEl, text);
     }
   }
 
@@ -507,6 +536,11 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           setText(grantMicBtn, t("widget.requesting"));
         }
         void retryMicPermission().finally(() => {
+          // The retry swallowed its own error and only reports via store state,
+          // so read the state it left: still listen-only means the attempt did
+          // not acquire the mic, and the persistent notice should stop
+          // implying a permission grant is all that stands in the way.
+          micRetryFailed = voiceStore.getState().listenOnly;
           if (grantMicBtn) {
             setText(grantMicBtn, t("widget.grantMic"));
             // Delegate the disabled/title state back to render(), which
@@ -522,6 +556,20 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       { signal: disposable.signal },
     );
 
+    // A persistent line beside the Grant Microphone button: the button is
+    // hidden while nothing is wrong, but when the user is in listen-only mode
+    // the state needs a reason and a next step (BPR-092), not just a button.
+    micNoticeEl = createElement("div", {
+      // No `setting-desc`: its margin/font would apply even while this live
+      // region is empty (it stays rendered but empty outside listen-only mode
+      // so a screen reader hears it fill, not appear filled), adding a stray
+      // gap to every voice session. `.vw-mic-notice` owns its own type.
+      class: "vw-mic-notice",
+      "data-testid": "vw-mic-notice",
+      role: "status",
+      "aria-live": "polite",
+    });
+
     // A live region present from mount (screen readers skip one inserted
     // already filled) that only fills when a moderator-imposed state lands.
     modStatusEl = createElement("div", {
@@ -531,7 +579,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       "data-testid": "vw-mod-status",
     });
 
-    appendChildren(root, header, statsPane, modStatusEl, grantMicBtn, controls);
+    appendChildren(root, header, statsPane, modStatusEl, grantMicBtn, micNoticeEl, controls);
 
     render();
 

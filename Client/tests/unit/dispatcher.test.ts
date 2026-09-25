@@ -5088,4 +5088,52 @@ describe("wireConnectionStatus", () => {
     mockWs.simulateStateChange("connected");
     expect(uiStore.getState().connectionStatus).toBe("disconnected");
   });
+
+  it("keeps a dial failure for the whole outage, clearing it on a connection", () => {
+    const mockWs = createMockWsClient();
+    const unsub = wireConnectionStatus(mockWs);
+    const dialFailed = (): boolean => uiStore.getState().connectionDialFailed;
+
+    mockWs.simulateStateChange("connecting");
+    mockWs.simulateStateChange("authenticating");
+    mockWs.simulateStateChange("connected");
+    // A drop from a live connection has not failed a dial yet.
+    mockWs.simulateStateChange("reconnecting");
+    expect(dialFailed()).toBe(false);
+    mockWs.simulateStateChange("connecting");
+    expect(dialFailed()).toBe(false);
+
+    mockWs.simulateStateChange("reconnecting");
+    expect(dialFailed()).toBe(true);
+    // Later backoff dials, and their failures, keep the outage's fact.
+    for (let cycle = 0; cycle < 2; cycle++) {
+      mockWs.simulateStateChange("connecting");
+      expect(dialFailed()).toBe(true);
+      mockWs.simulateStateChange("reconnecting");
+      expect(dialFailed()).toBe(true);
+    }
+
+    mockWs.simulateStateChange("connecting");
+    mockWs.simulateStateChange("authenticating");
+    mockWs.simulateStateChange("connected");
+    expect(dialFailed()).toBe(false);
+
+    unsub();
+  });
+
+  it("starts a fresh outage when a stopped socket connects again", () => {
+    const mockWs = createMockWsClient();
+    const unsub = wireConnectionStatus(mockWs);
+    const dialFailed = (): boolean => uiStore.getState().connectionDialFailed;
+
+    mockWs.simulateStateChange("connecting");
+    mockWs.simulateStateChange("disconnected");
+    expect(dialFailed()).toBe(true);
+
+    // Sign-in, a server switch or "Use here" dials from a stopped socket.
+    mockWs.simulateStateChange("connecting");
+    expect(dialFailed()).toBe(false);
+
+    unsub();
+  });
 });

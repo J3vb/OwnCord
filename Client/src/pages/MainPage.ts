@@ -162,6 +162,15 @@ function getCurrentUserId(): number {
   return authStore.getState().user?.id ?? 0;
 }
 
+/**
+ * The device's own network fact, apart from the server's reachability: a LAN
+ * server with no internet still answers `onLine`. `undefined` where the host
+ * does not expose the API, so a notice never claims the internet is required.
+ */
+function deviceNetworkOffline(): boolean | undefined {
+  return typeof navigator.onLine === "boolean" ? !navigator.onLine : undefined;
+}
+
 export function createMainPage(options: MainPageOptions): MountableComponent {
   const { ws, api } = options;
 
@@ -229,7 +238,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   // Refs we need to update reactively
   let banner: ServerBannerControl | null = null;
-
   // Video grid (owned by ChatArea, referenced for remote video wiring)
   let videoGrid: VideoGridComponent | null = null;
 
@@ -403,6 +411,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // --- Reconnect banner ---
     banner = createServerBanner();
     root.appendChild(banner.element);
+    // The live region is a sibling: the visible banner rewrites its restart
+    // countdown every second, which a live region would read out each tick.
+    root.appendChild(banner.liveElement);
 
     // "Use here" takes the connection back: this device connects again and
     // the server displaces the other one (last connect wins).
@@ -412,15 +423,52 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       setSessionReplaced(false);
       ws.connect({ host: api.getConfig().host, token });
     };
+    // Retry is safe on a plain disconnect: connect() re-dials and the native
+    // proxy re-validates the certificate, so a TOFU mismatch re-latches rather
+    // than being bypassed. It also cancels any pending backoff attempt, so it
+    // cannot race the reconnect loop.
+    const retryConnection = (): void => {
+      const token = authStore.getState().token;
+      if (token === null) return;
+      ws.connect({ host: api.getConfig().host, token });
+    };
     // Signed-in-elsewhere outranks the connection status it leaves behind
-    // ("disconnected"), so every banner refresh goes through here.
+    // ("disconnected"), so every banner refresh goes through here. The device's
+    // own network fact stays apart from the server's reachability: a LAN server
+    // with no internet still answers onLine, and `undefined` (host without the
+    // API) never claims the internet is required.
     const syncBanner = (): void => {
       if (banner === null) return;
       const state = uiStore.getState();
       if (state.sessionReplaced) banner.showSignedInElsewhere(useHere);
-      else applyConnectionStatus(banner, state.connectionStatus);
+      else
+        applyConnectionStatus(banner, state.connectionStatus, {
+          offline: deviceNetworkOffline(),
+          dialFailed: state.connectionDialFailed,
+          onRetry: retryConnection,
+        });
     };
     unsubscribers.push(uiStore.subscribeSelector((s) => s.sessionReplaced, syncBanner));
+    unsubscribers.push(uiStore.subscribeSelector((s) => s.connectionDialFailed, syncBanner));
+
+    // Losing or regaining the device's network only re-renders, so the banner
+    // says the true thing immediately; the reconnect loop and Retry own
+    // recovery. Only re-render while the socket is actually down — a network
+    // flap during a live connection (a VPN toggle, a Wi-Fi flap) must not
+    // route to `applyConnectionStatus("connected")` and clear an announced
+    // server-restart countdown. Owned by a Disposable so the lifecycle guard
+    // sees both listeners torn down with the page.
+    const networkOwner = new Disposable();
+    unsubscribers.push(() => networkOwner.destroy());
+    const syncBannerIfNotConnected = (): void => {
+      if (uiStore.getState().connectionStatus !== "connected") syncBanner();
+    };
+    window.addEventListener("online", syncBannerIfNotConnected, {
+      signal: networkOwner.signal,
+    });
+    window.addEventListener("offline", syncBannerIfNotConnected, {
+      signal: networkOwner.signal,
+    });
 
     // A sign-in not yet reviewed: listed on connect and on window focus.
     const sessionNotice = new Disposable();
