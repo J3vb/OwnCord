@@ -178,9 +178,11 @@ tokens, no keys.
 Motion is reduced when the in-app **Reduce Motion** toggle is on, or when
 **Sync with OS** is on and the OS asks for it. Sync with OS defaults to on.
 Either source can reduce motion, and neither can force it back on over the
-other. `lib/os-motion.ts` is the single writer of the `reduced-motion` class
-on `<html>`, and `app/accessibility.css` zeroes animation and transition
-durations under it. Feedback never depends on an animation playing.
+other. `syncOsMotionListener()` in `lib/os-motion.ts` derives the
+`reduced-motion` class on `<html>` (`applyStoredAppearance()` in
+`lib/appearance.ts` pre-sets it from the manual preference, then calls it), and
+`app/accessibility.css` zeroes animation and transition durations under it.
+Feedback never depends on an animation playing.
 
 ## Teardown ownership
 

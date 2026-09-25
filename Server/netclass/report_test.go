@@ -189,7 +189,7 @@ func TestReport_RequiredPortsIncludeLiveKitOnlyWhenVoiceIsOn(t *testing.T) {
 	p.VoiceEnabled = true
 	on := BuildReport(addrs(t, "192.168.1.50"), p)
 
-	want := map[string]string{"8443": "tcp", "7880": "tcp", "7881": "tcp", "50000-60000": "udp"}
+	want := map[string]string{"8443": "tcp", "7881": "tcp", "50000-60000": "udp"}
 	got := map[string]string{}
 	for _, rp := range on.RequiredPorts {
 		got[rp.Port] = rp.Protocol
@@ -198,6 +198,11 @@ func TestReport_RequiredPortsIncludeLiveKitOnlyWhenVoiceIsOn(t *testing.T) {
 		if got[port] != proto {
 			t.Errorf("RequiredPorts missing %s/%s; got %+v", port, proto, on.RequiredPorts)
 		}
+	}
+	// 7880 is LiveKit's own API: signalling is tunnelled through /livekit on
+	// the chat port, so telling an owner to forward it would expose that API.
+	if _, listed := got["7880"]; listed {
+		t.Errorf("RequiredPorts lists 7880 (LiveKit API); got %+v", on.RequiredPorts)
 	}
 }
 

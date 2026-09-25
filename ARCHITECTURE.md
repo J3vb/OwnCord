@@ -30,7 +30,7 @@ flowchart LR
         UPS["file storage<br/>uploads/"]
     end
 
-    LK["LiveKit server<br/>(managed subprocess or external;<br/>:7880 signalling, TCP 7881 / UDP 50000-60000 media)"]
+    LK["LiveKit server<br/>(managed subprocess or external;<br/>:7880 API, TCP 7881 / UDP 50000-60000 media)"]
     REL["OwnCord releases<br/>(GitHub, minisign-signed)"]
     BR["System browser"]
     NET["external hosts"]
@@ -42,7 +42,7 @@ flowchart LR
     WV -.->|"WebRTC media, direct"| LK
     WV -.->|"opens https://host/admin"| BR
     BR -->|"HTTPS, browser CA trust<br/>(not TOFU-pinned)"| ADM
-    HUB <-->|"webhooks + server SDK"| LK
+    HUB <-->|"server SDK (webhooks: operator opt-in)"| LK
     RTR --> DBF
     HUB --> DBF
     RTR --> UPS
@@ -264,7 +264,7 @@ No federation, no directory or discovery service, and no required external servi
 - **Standalone binaries.** One Go binary per architecture (Windows x64/ARM64, Linux x64/ARM64), built with `CGO_ENABLED=0` on Linux for a fully static binary. The first run generates `config.yaml`, a `data/` directory (database, TLS certificate, uploads, backups) and a self-signed TLS pair; the setup wizard creates the Owner account.
 - **Docker.** `ghcr.io/j3vb/owncord-server` is a multi-arch (`linux/amd64`/`linux/arm64`) image built `FROM gcr.io/distroless/static-debian12`, running as non-root (uid 65532) with no shell inside the container. The shipped `docker-compose.yml` runs LiveKit as a separate container on an internal Docker network (`ws://livekit:7880`) and drops all Linux capabilities (`cap_drop: ALL`, `no-new-privileges:true`). The image ships its own `HEALTHCHECK`. In a container the admin panel's in-place self-update is refused (`503 CONTAINER_DEPLOYMENT`; the image sets `OWNCORD_CONTAINER=1`): upgrading is `docker compose pull && docker compose up -d`, and backup restore and wizard restarts rely on the compose file's `restart: unless-stopped`.
 - **Process supervision.** A crash needs a supervisor to restart the binary: a systemd unit template ships at `deploy/owncord.service` (`Restart=always`); on Windows use NSSM, since Task Scheduler only starts the process and never restarts it. After a self-update, backup restore or setup-wizard restart, the server drains, exits cleanly and lets the supervisor relaunch it. `server.restart_mode: auto` (the default) detects systemd (`INVOCATION_ID`) and containers; NSSM needs `OWNCORD_SERVER_RESTART_MODE=supervised`; an unsupervised server (`spawn`) starts its own replacement.
-- **Ports.** `8443/TCP` (HTTPS + WebSocket, REST, admin, uploads) is always required; `80/TCP` only for ACME HTTP-01. For voice: `7880/TCP` (LiveKit signalling) and `7881/TCP` (TCP fallback) plus `50000-60000/UDP` (WebRTC media). The UDP range cannot be carried by an HTTP reverse proxy and must reach the LiveKit host directly.
+- **Ports.** `8443/TCP` (HTTPS + WebSocket, REST, admin, uploads) is always required; `80/TCP` only for ACME HTTP-01. For voice: `7881/TCP` (LiveKit TCP fallback) plus `50000-60000/UDP` (WebRTC media). `7880/TCP` is LiveKit's own API/signalling endpoint and is **not** required: remote clients tunnel signalling through `:8443/livekit`, and exposing `7880` needlessly exposes LiveKit's API. The UDP range cannot be carried by an HTTP reverse proxy and must reach the LiveKit host directly.
 - **Port forwarding and Tailscale.** Behind CGNAT no port-forwarding rule can work; [docs/tailscale.md](docs/tailscale.md) documents Tailscale as the zero-config alternative (the admin panel then needs `100.64.0.0/10` added to `server.admin_allowed_cidrs`, since it is not in the private-range default). Hairpin NAT only breaks LAN clients that use the public address (give them the LAN address, or use split-horizon DNS), and an ISP-blocked port is avoided by staying on a high port such as 8443. [docs/port-forwarding.md](docs/port-forwarding.md) covers manual forwarding and states plainly that the server can never verify its own inbound reachability: an outside network must test it.
 - **Reverse proxy.** Not required: OwnCord terminates its own TLS and proxies LiveKit signalling at `/livekit/*`. For a public domain, fronting with Caddy/nginx/Traefik is the recommended way to get qualified ACME certificate renewal, since OwnCord's own domain-ACME support is implemented but not qualified. A reverse proxy can front everything on `8443`, but never the LiveKit UDP media range.
 

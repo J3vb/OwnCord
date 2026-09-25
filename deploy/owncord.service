@@ -29,9 +29,10 @@ ExecStart=/opt/owncord/chatserver
 # they did under on-failure.
 Restart=always
 RestartSec=3
-# A crash-looping binary still trips systemd's start limit (default 5 starts
-# in 10s) and parks the unit as failed; raise StartLimitIntervalSec /
-# StartLimitBurst in [Unit] if you want a longer leash.
+# RestartSec=3 means at most 4 starts fit in systemd's default 10s start-limit
+# window, so the default burst of 5 is never reached and a crash loop restarts
+# forever instead of parking the unit as failed. To make a crash loop trip the
+# limit, set StartLimitBurst to 3 (≤ the 4 starts that fit in the window).
 
 # The server drains gracefully on SIGTERM with a 30s budget, and its worst
 # case is ≈55s; 60s waits that out. Past 60s systemd SIGKILLs a wedged
@@ -48,6 +49,13 @@ PrivateTmp=true
 # renames the new binary into place (chatserver -> chatserver.old swap), and
 # the data dir (SQLite, uploads, certs, backups) lives beneath it by default.
 # If you disable self-update and move data_dir elsewhere, narrow this.
+#
+# ProtectSystem=strict makes the REST of the filesystem read-only, so any
+# directory the server writes to outside /opt/owncord must be listed here too
+# or that write fails with EROFS — including the documented off-disk
+# backup.dir and upload.storage_dir. Add a line like the example below for
+# each extra path you configure:
+#   ReadWritePaths=/mnt/backup-disk/owncord
 ReadWritePaths=/opt/owncord
 
 # Only needed for tls.mode: acme (binds :80 for HTTP-01 challenges) as a

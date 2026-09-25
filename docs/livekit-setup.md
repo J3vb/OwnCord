@@ -49,9 +49,12 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
 
    | Port          | Protocol | Purpose                 |
    | ------------- | -------- | ----------------------- |
-   | `7880`        | TCP      | LiveKit signaling       |
    | `7881`        | TCP      | TCP fallback for WebRTC |
    | `50000-60000` | UDP      | WebRTC media            |
+
+   `7880/TCP` is LiveKit's own API/signalling endpoint and does not need to be
+   opened: OwnCord proxies signalling to clients through `/livekit` on its own
+   `8443` port.
 
 > **`node_ip` is required** for remote clients. Without it, LiveKit advertises internal Docker IP addresses as ICE candidates, which are unreachable from the internet. If your cloud VM has a metadata service (AWS, GCP, DigitalOcean) you can use `use_external_ip: true` instead.
 
@@ -115,13 +118,15 @@ Environment variable overrides use the `OWNCORD_` prefix: `OWNCORD_VOICE_LIVEKIT
 
 ## 3. Ports and Firewall
 
-| Port            | Protocol      | Purpose                                  |
-| --------------- | ------------- | ---------------------------------------- |
-| **7880**        | TCP (HTTP/WS) | LiveKit signaling (WebSocket + REST API) |
-| **7881**        | TCP           | LiveKit internal RTC (TURN/TCP fallback) |
-| **50000-60000** | UDP           | Media transport (RTP audio/video)        |
+| Port            | Protocol | Purpose                                  |
+| --------------- | -------- | ---------------------------------------- |
+| **7881**        | TCP      | LiveKit internal RTC (TURN/TCP fallback) |
+| **50000-60000** | UDP      | Media transport (RTP audio/video)        |
 
-These three rows are the ones voice needs; the complete list, including the
+`7880/TCP` (LiveKit's own HTTP/WS API) stays internal: OwnCord reaches it on
+the host or Docker network and proxies client signalling through `/livekit`.
+
+These two rows are the ones voice needs; the complete list, including the
 chat port and the ACME port, is the canonical table in
 [deployment.md](deployment.md#firewall-and-ports).
 
@@ -180,7 +185,13 @@ Client                     OwnCord Server              LiveKit Server
 
 ## 6. Webhook Integration
 
-LiveKit sends webhooks to `POST /api/v1/livekit/webhook`. The endpoint verifies the JWT and handles `participant_left` to clean up ghost voice states when a user disconnects from LiveKit without sending a `voice_leave` message.
+Neither shipped LiveKit config (`Server/livekit.yaml.example`, the managed
+`Server/ws/livekit_process.go`) defines a `webhook:` block, so LiveKit sends no
+webhooks by default and the server relies on its own server SDK plus client
+`voice_leave` frames. If you configure LiveKit to post webhooks to
+`POST /api/v1/livekit/webhook` (operator opt-in), the endpoint verifies the JWT
+and handles `participant_left` to clean up ghost voice states when a user
+disconnects from LiveKit without sending a `voice_leave` message.
 
 ---
 
@@ -203,7 +214,7 @@ LiveKit sends webhooks to `POST /api/v1/livekit/webhook`. The endpoint verifies 
 
 - [ ] Change `livekit_api_key` from `"devkey"` to a random string
 - [ ] Change `livekit_api_secret` to a random 32+ character string
-- [ ] Open firewall ports: 7880/TCP, 50000-60000/UDP
+- [ ] Open firewall ports: 7881/TCP, 50000-60000/UDP
 - [ ] If using ACME/manual TLS, ensure LiveKit proxy at `/livekit` is working
 - [ ] Test voice by joining a voice channel from two clients
 - [ ] Check `/api/v1/livekit/health` returns `{"status": "ok"}`

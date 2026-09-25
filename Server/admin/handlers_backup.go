@@ -185,6 +185,38 @@ func handleDeleteBackup(database *db.DB) http.Handler {
 	})
 }
 
+// verifyRestoreSource refuses a backup that must not replace the live
+// database, writing the error response itself. It runs before the pre-restore
+// safety copy and before anything is closed.
+func verifyRestoreSource(w http.ResponseWriter, r *http.Request, name, target string) bool {
+	// Refuse to overwrite the live database with a file SQLite itself
+	// rejects — a truncated pre-crash backup, a stray non-database .db.
+	// The pre-restore safety copy would make this survivable, but "restore
+	// succeeded" followed by a broken server is still the worst UX here.
+	if err := db.CheckBackupIntegrity(context.WithoutCancel(r.Context()), target); err != nil {
+		slog.Error("restore refused: backup failed integrity check", "backup", name, "err", err)
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "backup file failed integrity verification")
+		return false
+	}
+
+	// Refuse a backup a NEWER server wrote (REL-02): restoring it would put
+	// this older binary on a schema it has never seen, and it would then
+	// boot silently on it.
+	ahead, err := db.CheckBackupSchemaAhead(context.WithoutCancel(r.Context()), target)
+	if err != nil {
+		slog.Error("restore refused: could not read backup schema version", "backup", name, "err", err)
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not verify the backup's schema version")
+		return false
+	}
+	if len(ahead) > 0 {
+		slog.Warn("restore refused: backup schema is newer than this server", "backup", name, "unknown_migrations", strings.Join(ahead, ","))
+		writeErr(w, http.StatusConflict, "SCHEMA_TOO_NEW",
+			"backup was written by a newer server version; upgrade this server before restoring it")
+		return false
+	}
+	return true
+}
+
 func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "name")
@@ -216,13 +248,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			return
 		}
 
-		// Refuse to overwrite the live database with a file SQLite itself
-		// rejects — a truncated pre-crash backup, a stray non-database .db.
-		// The pre-restore safety copy would make this survivable, but "restore
-		// succeeded" followed by a broken server is still the worst UX here.
-		if err := db.CheckBackupIntegrity(context.WithoutCancel(r.Context()), target); err != nil {
-			slog.Error("restore refused: backup failed integrity check", "backup", name, "err", err)
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "backup file failed integrity verification")
+		if !verifyRestoreSource(w, r, name, target) {
 			return
 		}
 
@@ -249,7 +275,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		// the same directory the rest of the backup handlers read and write, or
 		// a server started from another working directory writes it somewhere
 		// the operator will never find it.
-		preRestore := filepath.Join(backupBaseDir, "pre_restore_"+time.Now().UTC().Format("20060102_150405")+".db")
+		preRestore := filepath.Join(backupBaseDir, preRestoreBackupPrefix+time.Now().UTC().Format("20060102_150405")+".db")
 		if err := database.BackupToSafe(context.WithoutCancel(r.Context()), preRestore, backupBaseDir); err != nil {
 			// Fail closed. The admin panel promises "a pre-restore backup will
 			// be created" before an irreversible overwrite; proceeding without

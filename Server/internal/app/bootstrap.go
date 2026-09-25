@@ -11,6 +11,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/updater"
 )
 
+// removeOldBinaryFn is the self-update cleanup App.start invokes once every
+// start stage has succeeded. A var so a test can observe when it runs relative
+// to the stages without writing a .old beside the real test binary.
+var removeOldBinaryFn = removeOldBinary
+
 // removeOldBinary deletes the binary a previous self-update left behind.
 func removeOldBinary(log *slog.Logger) {
 	// Clean up old binary from a previous update. Bounded retry: in spawn
