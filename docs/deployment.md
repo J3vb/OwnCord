@@ -179,7 +179,7 @@ When `chatserver.exe` starts for the first time:
 3. **TLS certificate** -- A self-signed certificate is generated at `data/cert.pem` / `data/key.pem`
 4. **Database migration** -- SQLite database is created and all migrations run
 5. **Status reset** -- All user statuses are set to `offline`, stale voice states are cleared
-6. **Setup wizard** -- Navigate to `https://localhost:8443/admin` to run the first-time setup wizard. It asks for the setup token printed in the start-up output (the terminal, `docker compose logs owncord`, or the service's log); set `OWNCORD_SETUP_TOKEN` to choose it yourself
+6. **Setup wizard** -- Navigate to `https://localhost:8443/admin` to run the first-time setup wizard. It asks for the setup token printed in the start-up output (the terminal, `docker compose logs owncord`, or the service's log)
 
 The setup wizard creates the Owner account and walks through the basics (server
 name, port, TLS mode, upload limit, voice, registration and welcome

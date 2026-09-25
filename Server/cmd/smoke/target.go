@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 )
 
@@ -33,6 +34,8 @@ type target interface {
 	// API, so without this a failed assertion arrives with no sight of what
 	// the server said while failing it.
 	annotate(phase string, cause error) error
+	// log is everything the running server has printed so far.
+	log() (string, error)
 	cleanup() // release the temp dir or volume; safe on a half-built target
 }
 
@@ -55,14 +58,20 @@ const defaultBaseURL = "https://127.0.0.1:8443"
 // so the file under test is untouched.
 const noLiveKitDownload = "OWNCORD_VOICE_AUTO_DOWNLOAD_LIVEKIT=false"
 
-// setupTokenEnv fixes the first-run setup token of every server the
-// rehearsal launches, so installFixture can complete setup without reading
-// the console. A release older than the token ignores both the variable and
+// setupTokenLine matches the first-run setup token the server prints in its
+// start-up output. A release older than the token prints none, and ignores
 // the request field.
-const (
-	rehearsalSetupToken = "rehearsal-setup-token" //nolint:gosec // throwaway temp-dir server, like fixturePassword
-	setupTokenEnv       = "OWNCORD_SETUP_TOKEN=" + rehearsalSetupToken
-)
+var setupTokenLine = regexp.MustCompile(`Setup token\s+(\S+)`)
+
+// setupTokenIn returns the last setup token in a server's output, or "" when
+// it printed none.
+func setupTokenIn(log string) string {
+	m := setupTokenLine.FindAllStringSubmatch(log, -1)
+	if len(m) == 0 {
+		return ""
+	}
+	return m[len(m)-1][1]
+}
 
 // newTarget builds the deployment mode the flags selected.
 func newTarget(oldRef, newRef string, useDocker bool) (target, error) {
@@ -134,7 +143,7 @@ func (t *standaloneTarget) start(version string) error {
 		return fmt.Errorf("start %s: the %s server has not been drained", version, t.version)
 	}
 	t.boots++
-	s, err := start(bin, t.dir, fmt.Sprintf("boot%d-%s.log", t.boots, version), noLiveKitDownload, setupTokenEnv)
+	s, err := start(bin, t.dir, fmt.Sprintf("boot%d-%s.log", t.boots, version), noLiveKitDownload)
 	if err != nil {
 		return err
 	}
@@ -177,6 +186,13 @@ func (t *standaloneTarget) annotate(phase string, cause error) error {
 		return fmt.Errorf("%s: %w", phase, cause)
 	}
 	return t.running.annotate(phase, cause)
+}
+
+func (t *standaloneTarget) log() (string, error) {
+	if t.running == nil {
+		return "", errors.New("no server is running")
+	}
+	return t.running.log()
 }
 
 // archive copies out exactly what the rollback documentation will tell an owner

@@ -8,6 +8,7 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	stdlog "log"
@@ -324,7 +325,7 @@ func stopHub(ctx context.Context, hub dispatchHub) error {
 // Its close step stops the router's own background goroutine (rate-limiter
 // cleanup); the hub it serves is stopped by the step above.
 func (a *App) startRouter() error {
-	a.runtime.SetupToken = setupToken()
+	a.runtime.SetupToken = rand.Text()
 	router, cleanup := api.NewRouter(a.cfg, a.database, a.deps.Version, a.deps.LogBuf, a.plugins, a.runtime)
 	a.router = router
 	// Print the token only while setup is still open. A failed check prints

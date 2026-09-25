@@ -108,7 +108,7 @@ address, so behind a same-host reverse proxy or a container port relay with
 `server.trusted_proxies` empty every request looks local; the token keeps
 creating the Owner account tied to access to the server's own console. It is
 written to stderr only, never to the log stream, and is regenerated at every
-start unless `OWNCORD_SETUP_TOKEN` pins it for a scripted install.
+start.
 
 `POST /admin/api/setup` is unauthenticated: it is how the first Owner account
 comes to exist, and until B4-10 the only thing standing in front of it was

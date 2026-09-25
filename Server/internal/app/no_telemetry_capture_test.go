@@ -97,11 +97,6 @@ func TestNoAutomaticTelemetry_Capture(t *testing.T) {
 	rec := &dialRecorder{}
 	rec.install(t)
 
-	// A fixed setup token through the documented override, so the test can
-	// complete first-run setup without reading the console.
-	const setupToken = "capture-setup-token"
-	t.Setenv("OWNCORD_SETUP_TOKEN", setupToken)
-
 	port := freePort(t)
 	a := bootTestApp(t, strconv.Itoa(port), "")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -139,7 +134,7 @@ func TestNoAutomaticTelemetry_Capture(t *testing.T) {
 		InviteCode string `json:"invite_code"`
 	}
 	postJSONInto(t, client, base+"/admin/api/setup", "", map[string]any{
-		"username": "owner", "password": "OwnerPass1!x", "setup_token": setupToken,
+		"username": "owner", "password": "OwnerPass1!x", "setup_token": a.runtime.SetupToken,
 	}, http.StatusCreated, &setup)
 	if setup.InviteCode == "" {
 		t.Fatal("setup returned no invite code")

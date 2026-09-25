@@ -213,8 +213,7 @@ func (t *dockerTarget) start(version string) error {
 		"-p", containerPublish,
 		"--cap-drop=ALL",
 		"--security-opt=no-new-privileges:true",
-		"-e", noLiveKitDownload,
-		"-e", setupTokenEnv)
+		"-e", noLiveKitDownload)
 	for _, kv := range t.extraEnv {
 		args = append(args, "-e", kv)
 	}
@@ -642,6 +641,16 @@ func writeTar(w io.Writer, root, prefix string) error {
 
 // docker runs one docker command and returns its stdout. A failure carries the
 // command and docker's own stderr: "exit status 1" alone is not a reason.
+// log is everything the container has printed, stdout and stderr together:
+// the setup token is on stderr, which docker() drops.
+func (t *dockerTarget) log() (string, error) {
+	out, err := exec.Command("docker", "logs", t.name).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker logs %s: %w: %s", t.name, err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
 func docker(args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command("docker", args...)

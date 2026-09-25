@@ -5,9 +5,6 @@ import { resolve, join } from "node:path";
 import { freePort, freeUdpPort, startProcess, stopProcess, waitForHttp } from "./process";
 
 export const TEST_PASSWORD = "OwnCord-E2E-pass-123!";
-// Fixed first-run setup token (OWNCORD_SETUP_TOKEN) so seeding can complete
-// setup without reading the server's console.
-export const SETUP_TOKEN = "owncord-e2e-setup-token";
 
 /** No database shortcuts: setup, accounts and channels use production HTTP routes. */
 export async function startTestServer(
@@ -75,8 +72,14 @@ export async function startTestServer(
   // JSON is valid YAML; avoids platform-specific escaping of temporary paths.
   await writeFile(join(directory, "config.yaml"), JSON.stringify(config));
   const origin = `${options.tls ? "https" : "http"}://127.0.0.1:${port}`;
-  const env = { ...(options.env ?? process.env), OWNCORD_SETUP_TOKEN: SETUP_TOKEN };
+  const env = options.env ?? process.env;
   let running = startProcess(binary, [], directory, env);
+  // The one-time first-run setup token this process printed at start-up.
+  const setupToken = () => {
+    const token = /Setup token\s+(\S+)/.exec(running.log())?.[1];
+    if (!token) throw new Error(`OwnCord printed no setup token\n${running.log()}`);
+    return token;
+  };
   const logs: string[] = [];
   const http = await request.newContext({ ignoreHTTPSErrors: !!options.tls, timeout: 15_000 });
   const ready = async () => {
@@ -121,7 +124,7 @@ export async function startTestServer(
       owner = await api("/admin/api/setup", {
         username: "alice",
         password: TEST_PASSWORD,
-        setup_token: SETUP_TOKEN,
+        setup_token: setupToken(),
       });
       await api("/api/v1/auth/register", {
         username: "bob",
@@ -139,6 +142,7 @@ export async function startTestServer(
       directory,
       api,
       owner,
+      setupToken,
       log: () => [...logs, running.log()].join("\n"),
       async stop() {
         await stopProcess(running.child);

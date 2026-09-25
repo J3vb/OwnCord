@@ -154,8 +154,7 @@ server's internals were reorganised behind service boundaries.
 
 - **First-run setup asks for a setup token.** The server prints a one-time
   token in its start-up output while setup is open, and the setup wizard asks
-  for it before creating the Owner account. Set `OWNCORD_SETUP_TOKEN` to fix
-  the value for scripted installs.
+  for it before creating the Owner account.
 - **The `.env.example` placeholder LiveKit credentials are refused** like the
   `devkey` defaults: voice stays off until real values are set.
 - **A start-up warning** names an admin allowlist that will see a proxy's or

@@ -3103,9 +3103,8 @@ reopen the wizard; afterwards the endpoint returns an error.
 **Auth:** None (public), plus the one-time setup token
 **Rate limit:** 5 requests/minute per IP
 
-`setup_token` must equal the token the server printed in its start-up output
-(or `OWNCORD_SETUP_TOKEN` when that is set); a missing or different value is
-`403 FORBIDDEN`. The server makes a fresh token each time it starts.
+`setup_token` must equal the token the server printed in its start-up output;
+a missing or different value is `403 FORBIDDEN`. The server makes a fresh token each time it starts.
 
 #### Request
 
