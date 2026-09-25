@@ -153,6 +153,10 @@ Beta readiness is defined by each phase's exit gates and the owner's hold-point 
 | Identity and performance | Desktop visual review passes; existing B7 budgets are not weakened.                                                                                                                                                                         |
 | Phase closure            | The owner accepts HP-9 and the exact-SHA evidence; every exit row passes.                                                                                                                                                                   |
 
+**B10: beta qualification and public release.** The shortened release checklist ([roadmap B10](docs/plans/repo-health-roadmap-2026-08-23.md#b10--qualify-and-publish-the-public-beta), owner direction 2026-09-18, confirmed at HP-9 on 2026-09-25): the RC matrix on one SHA; in-place alpha upgrade and rollback; the protocol-epoch re-run; the desktop/server/Docker matrix; one capacity comparison at the RC; zero open P0/P1 and zero unresolved advisory; packaging, provenance, signing and update checks; safe release notes; the BPR-051 comprehension read (Q11); and the HP-10 owner go/no-go. Publication is the `v1.2.0-beta.1` tag on `main`, with the two release-environment approvals.
+
+**B11: beta-to-stable.** The beta-to-stable gate the 2026-09-18 direction left unnamed, given the id B11 by owner decision Q12 (2026-09-25). It carries the moved work: thirty consecutive green integration runs (with `main` exempt from `cancel-in-progress`), the fourteen-day soak on the named hosts, the moved documentation half, post-beta TLS (B6-3..B6-5), the D-03 certificate-verifier change, the Linux voice device test, the `chatserver restore` CLI (OP-10) and the setup-time recovery kit (D-17).
+
 ## Out of scope
 
 From [beta-product-requirements-2026-08-23.md](docs/plans/beta-product-requirements-2026-08-23.md) "Explicitly outside beta":

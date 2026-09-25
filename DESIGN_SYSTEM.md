@@ -201,7 +201,7 @@ The only `@media` width breakpoints in `Client/src/styles/`:
 
 ## Accessibility
 
-The full contract is [docs/architecture/b9-ui-contract.md](docs/architecture/b9-ui-contract.md); this is the design-facing summary. It is a **WCAG 2.2 AA-oriented checklist, not a certification claim**: automated checks plus an owner OS-zoom review are the acceptance evidence.
+The full contract is [docs/architecture/b9-ui-contract.md](docs/architecture/b9-ui-contract.md); this is the design-facing summary. It is a **WCAG 2.2 AA-oriented checklist, not a certification claim**: automated checks are the acceptance evidence (the manual screen-reader recordings were declined on 2026-09-24 and the OS 200 % zoom check was automated on 2026-09-25; see the contract's [checks](docs/architecture/b9-ui-contract.md#checks-for-a-feature-pr)).
 
 ### Thresholds (owner decision Q1)
 
