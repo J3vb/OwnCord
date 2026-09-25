@@ -50,7 +50,9 @@
      chat area. The backdrop is fixed to the viewport and covers the app. Both
      sit on the modal layer (100): the backdrop precedes the drawer, so the
      drawer paints over it, and the dialogs and menus the drawer opens are
-     mounted on <body> after the app, so they paint over the drawer. */
+     mounted on <body> after the app, so they paint over the drawer. The
+     composer's popovers (pickers.css) sit below this layer, and the pinned
+     panel closes when the drawer opens. */
   .sidebar-drawer-backdrop.open {
     display: block;
   }

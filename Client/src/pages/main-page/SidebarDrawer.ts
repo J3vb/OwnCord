@@ -33,6 +33,8 @@ export interface SidebarDrawerOptions {
   readonly toggle: HTMLButtonElement;
   /** Where to put focus on close if the toggle is gone. */
   readonly fallbackFocus?: () => HTMLElement | null;
+  /** Called on open, to close a panel that would otherwise paint over it. */
+  readonly onOpen?: () => void;
 }
 
 export interface SidebarDrawer {
@@ -79,6 +81,7 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   function openDrawer(): void {
     if (open) return;
     open = true;
+    opts.onOpen?.();
     // sync() clears `inert` first: focus cannot move into an inert subtree.
     sync();
     // Capture the opener now — focusDialog reads document.activeElement.
@@ -108,8 +111,15 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
     signal: owner.signal,
   });
 
+  // Only an Escape pressed in the drawer or on its toggle: one in a dialog
+  // opened from the drawer is that dialog's to handle.
   owner.onEvent(document, "keydown", (e: KeyboardEvent) => {
     if (e.key !== "Escape" || !open) return;
+    const target = e.target;
+    const inDrawer =
+      target === document.body ||
+      (target instanceof Node && (sidebar.contains(target) || toggle.contains(target)));
+    if (!inDrawer) return;
     e.preventDefault();
     closeDrawer("dismiss");
   });

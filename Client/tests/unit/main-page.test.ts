@@ -224,6 +224,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
         sidebarToggle: document.createElement("button"),
       },
       sidebarToggle: document.createElement("button"),
+      closePinnedPanel: vi.fn(),
       searchCtrl: { open: vi.fn(), cleanup: vi.fn() },
       dmProfileSlot,
       children: [],

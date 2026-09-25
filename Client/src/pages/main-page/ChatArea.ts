@@ -54,6 +54,8 @@ export interface ChatAreaResult {
   readonly sidebarToggle: HTMLButtonElement;
   /** The search overlay controller. */
   readonly searchCtrl: SearchOverlayController;
+  /** Close the pinned-messages panel if it is open. */
+  readonly closePinnedPanel: () => void;
   /** Slot for the DM profile sidebar (right panel, sibling of chat area). */
   readonly dmProfileSlot: HTMLDivElement;
   /** All child MountableComponents for cleanup. */
@@ -193,6 +195,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     chatHeaderRefs: chatHeader.refs,
     sidebarToggle: chatHeader.refs.sidebarToggle,
     searchCtrl,
+    closePinnedPanel: pinnedCtrl.cleanup,
     dmProfileSlot,
     children,
     unsubscribers,
