@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -78,6 +79,76 @@ func assertReleased(t *testing.T, a *App, port int, leakOpt goleak.Option) {
 	}
 }
 
+// TestAppRun_StartFailure_KeepsOldBinary is REL-01: the previous binary's
+// cleanup must not run until every start stage has succeeded, so a migration
+// (or other start) failure leaves the documented rollback copy in place.
+// removeOldBinary used to run as the first act of start(), before any stage
+// could prove the new binary bootable.
+func TestAppRun_StartFailure_KeepsOldBinary(t *testing.T) {
+	var cleanupRan bool
+	prev := removeOldBinaryFn
+	removeOldBinaryFn = func(*slog.Logger) { cleanupRan = true }
+	t.Cleanup(func() { removeOldBinaryFn = prev })
+
+	a := bootTestApp(t, "0", "migrate")
+	if err := a.Run(context.Background()); err == nil {
+		t.Fatal("Run() = nil, want the injected migrate failure")
+	}
+	if cleanupRan {
+		t.Error("old-binary cleanup ran despite a start-stage failure: the rollback copy is gone (REL-01)")
+	}
+}
+
+// TestAppRun_Success_RemovesOldBinaryAfterStages is the positive control for
+// the test above: on a successful start the cleanup does run.
+func TestAppRun_Success_RemovesOldBinaryAfterStages(t *testing.T) {
+	var cleanupRan bool
+	prev := removeOldBinaryFn
+	removeOldBinaryFn = func(*slog.Logger) { cleanupRan = true }
+	t.Cleanup(func() { removeOldBinaryFn = prev })
+
+	a := bootTestApp(t, "0", "")
+	// Cancel immediately: Run serves until the context is done and then
+	// returns cleanly, which is enough to reach the post-stage cleanup.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := a.Run(ctx); err != nil {
+		t.Fatalf("Run() = %v, want a clean shutdown", err)
+	}
+	if !cleanupRan {
+		t.Error("old-binary cleanup did not run on a successful start")
+	}
+}
+
+// TestAppRun_PortInUse_KeepsOldBinary is REL-01 for the listener: a port
+// another process holds must fail start-up before the rollback copy is
+// removed. The bind used to happen asynchronously in serve(), after the
+// cleanup had already run.
+func TestAppRun_PortInUse_KeepsOldBinary(t *testing.T) {
+	var cleanupRan bool
+	prev := removeOldBinaryFn
+	removeOldBinaryFn = func(*slog.Logger) { cleanupRan = true }
+	t.Cleanup(func() { removeOldBinaryFn = prev })
+	prevEvery := bindRetryEvery
+	bindRetryEvery = time.Millisecond
+	t.Cleanup(func() { bindRetryEvery = prevEvery })
+
+	held, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("hold port: %v", err)
+	}
+	defer held.Close() //nolint:errcheck
+	port := held.Addr().(*net.TCPAddr).Port
+
+	a := bootTestApp(t, fmt.Sprint(port), "")
+	if err := a.Run(context.Background()); err == nil {
+		t.Fatal("Run() = nil, want a bind failure on a held port")
+	}
+	if cleanupRan {
+		t.Error("old-binary cleanup ran despite the listener failing to bind: the rollback copy is gone (REL-01)")
+	}
+}
+
 func TestAppRun_EveryStageFailure_ReleasesEverythingItStarted(t *testing.T) {
 	for _, name := range stageNames() {
 		t.Run(name, func(t *testing.T) {
@@ -113,10 +184,10 @@ func stageNames() []string {
 
 // TestAppRun_ListenerBindFailure_ReleasesEverythingItStarted is the same
 // four properties for a real failure rather than an injected one: every
-// stage starts, and the listener itself refuses to bind. An out-of-range
-// port fails the first attempt with an error isAddrInUse does not recognise,
-// so serveAndWait takes the serve-error branch immediately instead of
-// retrying for ~10s. This is the path OC-0027 was about.
+// stage up to http starts, and the listener itself refuses to bind. An
+// out-of-range port fails the first attempt with an error isAddrInUse does
+// not recognise, so the http stage fails immediately instead of retrying for
+// ~10s. This is the path OC-0027 was about.
 func TestAppRun_ListenerBindFailure_ReleasesEverythingItStarted(t *testing.T) {
 	leakOpt := goleak.IgnoreCurrent()
 	a := bootTestApp(t, "99999", "")
@@ -125,11 +196,11 @@ func TestAppRun_ListenerBindFailure_ReleasesEverythingItStarted(t *testing.T) {
 	if err == nil {
 		t.Fatal("Run() = nil, want a listener error for an out-of-range port")
 	}
-	if !strings.Contains(err.Error(), "server error") {
-		t.Errorf("Run() = %v, want the serve error", err)
+	if !strings.Contains(err.Error(), "starting http") {
+		t.Errorf("Run() = %v, want the http stage's bind error", err)
 	}
 	if a.hub == nil {
-		t.Fatal("every stage runs before the listener binds, so the hub must have been built")
+		t.Fatal("the hub stage runs before the listener binds, so the hub must have been built")
 	}
 	// Port 99999 was never bindable, so only the release assertions apply.
 	if pingErr := a.database.PingRead(context.Background()); pingErr == nil {
@@ -238,7 +309,7 @@ func TestAppRun_CallerCancel_KeepsBackgroundWorkersAliveThroughTheDrain(t *testi
 	}
 
 	// The steps that must find bgCtx still live, in the order Close runs them.
-	for _, stage := range []string{"signals", "http", "maintenance", "audit-writer"} {
+	for _, stage := range []string{"http", "signals", "maintenance", "audit-writer"} {
 		if err, ran := bgErrAt[stage]; !ran {
 			t.Errorf("the %q close step never ran", stage)
 		} else if err != nil {

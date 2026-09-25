@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
@@ -106,6 +107,15 @@ func actorRoleFromContext(r *http.Request) *db.Role {
 		return nil
 	}
 	return role
+}
+
+// isOwnerFromContext reports whether the authenticated principal holds the
+// Owner role, using the same predicate as ownerOnlyMiddleware. A missing role
+// fails closed (false). It exists for handlers that gate individual keys or
+// fields rather than a whole route.
+func isOwnerFromContext(r *http.Request) bool {
+	role := actorRoleFromContext(r)
+	return role != nil && permissions.IsOwner(role.ID, role.Position)
 }
 
 // supportSession refuses API-token principals and binds previews to the exact

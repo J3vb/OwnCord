@@ -45,6 +45,34 @@ var allowedSettingKeys = map[string]struct{}{
 	db.RetentionDaysKey: {},
 }
 
+// ownerOnlySettingKeys are the settings that decide the owner-only backup
+// policy (BPR-072). They stay on the read surface — the admin panel renders
+// them and GET /settings is MANAGE_SERVER — but a PATCH carrying either must
+// come from the Owner, because they indirectly control which of the owner's
+// backups survive: backup_retention is what the maintenance sweep prunes by,
+// and backup_schedule is whether new copies are taken at all.
+var ownerOnlySettingKeys = map[string]struct{}{
+	"backup_schedule":  {},
+	"backup_retention": {},
+}
+
+// IsOwnerOnlySettingKey reports whether a setting key changes the owner-only
+// backup policy, so the admin PATCH can require the Owner for just those keys
+// without growing a second copy of the list.
+func IsOwnerOnlySettingKey(key string) bool {
+	_, ok := ownerOnlySettingKeys[key]
+	return ok
+}
+
+// Backup retention bounds. The minimum is deliberately well above 1: a single
+// low value would let the maintenance sweep prune the owner's history down to
+// the newest file. The maximum mirrors the message-retention ceiling, past
+// which pruneExpiredBackups' -days*24h arithmetic would overflow.
+const (
+	BackupRetentionMinDays = 7
+	BackupRetentionMaxDays = db.RetentionMaxDays
+)
+
 // List returns every setting as a key→value map.
 func (s *SettingsService) List(ctx context.Context) (map[string]string, error) {
 	return s.st.GetAllSettings(ctx)
@@ -158,14 +186,38 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 			}
 			normalized[key] = string(mode)
 		case db.RetentionDaysKey:
-			days, err := strconv.Atoi(strings.TrimSpace(value))
-			if err != nil || days < 0 || (days != 0 && days < RetentionMinDays) || days > RetentionMaxDays {
-				return nil, fmt.Errorf("%s: must be 0 (keep forever) or between %d and %d", key, RetentionMinDays, RetentionMaxDays)
+			days, err := normalizeRetentionDays(key, value, RetentionMinDays, RetentionMaxDays)
+			if err != nil {
+				return nil, err
 			}
-			normalized[key] = strconv.Itoa(days)
+			normalized[key] = days
+		case "backup_retention":
+			days, err := normalizeRetentionDays(key, value, BackupRetentionMinDays, BackupRetentionMaxDays)
+			if err != nil {
+				return nil, err
+			}
+			normalized[key] = days
+		case "backup_schedule":
+			schedule := strings.ToLower(strings.TrimSpace(value))
+			switch schedule {
+			case "off", "daily", "weekly":
+				normalized[key] = schedule
+			default:
+				return nil, fmt.Errorf("%s: must be one of off, daily, weekly", key)
+			}
 		}
 	}
 	return normalized, nil
+}
+
+// normalizeRetentionDays accepts 0 (keep forever) or a day count in
+// [minDays, maxDays] and returns it in canonical decimal form.
+func normalizeRetentionDays(key, value string, minDays, maxDays int) (string, error) {
+	days, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || days < 0 || (days != 0 && days < minDays) || days > maxDays {
+		return "", fmt.Errorf("%s: must be 0 (keep forever) or between %d and %d", key, minDays, maxDays)
+	}
+	return strconv.Itoa(days), nil
 }
 
 func (s *SettingsService) validateRequire2FAUpdate(ctx context.Context, updates map[string]string) error {

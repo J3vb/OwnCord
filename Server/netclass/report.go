@@ -131,8 +131,8 @@ func BuildReport(addrs []netip.Addr, p Params) Report {
 }
 
 func requiredPorts(p Params) []RequiredPort {
-	// Capacity 4: the chat port, plus LiveKit's three when voice is on.
-	ports := make([]RequiredPort, 0, 4)
+	// Capacity 3: the chat port, plus LiveKit's two when voice is on.
+	ports := make([]RequiredPort, 0, 3)
 	ports = append(ports,
 		RequiredPort{Port: strconv.Itoa(p.ListenPort), Protocol: "tcp", Purpose: "OwnCord HTTPS, REST API and WebSocket"},
 	)
@@ -140,9 +140,10 @@ func requiredPorts(p Params) []RequiredPort {
 		return ports
 	}
 	// Voice is where direct port forwarding actually fails: the media range
-	// is UDP and no HTTP reverse proxy can carry it.
+	// is UDP and no HTTP reverse proxy can carry it. LiveKit's own API port
+	// (7880) is deliberately absent: clients tunnel signalling through
+	// /livekit on the chat port, so forwarding it only exposes LiveKit's API.
 	return append(ports,
-		RequiredPort{Port: "7880", Protocol: "tcp", Purpose: "LiveKit signalling"},
 		RequiredPort{Port: "7881", Protocol: "tcp", Purpose: "LiveKit TCP media fallback"},
 		RequiredPort{Port: "50000-60000", Protocol: "udp", Purpose: "LiveKit WebRTC media (ICE)"},
 	)

@@ -64,9 +64,13 @@ guide's instructions touch:
 
 | Port          | Protocol | Purpose              |
 | ------------- | -------- | -------------------- |
-| `7880`        | TCP      | LiveKit signalling   |
 | `7881`        | TCP      | LiveKit TCP fallback |
 | `50000-60000` | UDP      | LiveKit media        |
+
+You do **not** need to expose `7880/TCP`: clients tunnel LiveKit signalling
+through OwnCord's own `:8443/livekit` proxy (see
+[deployment.md](deployment.md#reverse-proxy-topology)). Forwarding it only exposes
+LiveKit's API endpoint unnecessarily.
 
 **This is where port forwarding actually goes wrong.** Chat needs one TCP port
 and is easy to get right. Voice needs a 10,000-port UDP range, and forgetting it
@@ -76,7 +80,7 @@ nobody hears anything, because the media never arrives.
 
 Two things are needed together:
 
-1. Forward `50000-60000/UDP` (and `7880/TCP`, `7881/TCP`) to the server.
+1. Forward `50000-60000/UDP` (and `7881/TCP`) to the server.
 2. Set `voice.node_ip` to your **public** address. It is the address LiveKit
    advertises in its ICE candidates, so a private value hands remote clients
    something they cannot route to. The server warns at start-up if it is not a
@@ -91,7 +95,7 @@ A reverse proxy cannot carry the UDP range. No HTTP proxy can.
    firewall rules).
 3. Set a static/reserved LAN IP for your server machine.
 4. Add a forwarding rule for `8443/TCP` to that LAN IP.
-5. If using voice/video, add `7880/TCP`, `7881/TCP`, and `50000-60000/UDP`.
+5. If using voice/video, add `7881/TCP` and `50000-60000/UDP`.
 6. Save and apply rules.
 
 ## Connect Address to Share

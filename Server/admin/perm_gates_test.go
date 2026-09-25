@@ -255,6 +255,68 @@ func sortedOwnerOnlyRoutes(routes []admin.OwnerOnlyRoute) []admin.OwnerOnlyRoute
 	return sorted
 }
 
+// TestBackupPolicySettings_NonOwnerForbidden pins BPR-072: the backup policy
+// is owner-only even though PATCH /settings otherwise only needs MANAGE_SERVER.
+// A MANAGE_SERVER holder and an ADMINISTRATOR that is not the Owner must both
+// get 403 when the request carries backup_schedule or backup_retention, while
+// the Owner and a plain setting both succeed — so the refusal is the owner
+// check on those keys, not a route that rejects everyone.
+func TestBackupPolicySettings_NonOwnerForbidden(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	_, manageToken := createRoleUser(t, database, 20, "ServerAdmin", permissions.ManageServer, 50, "serveradminuser")
+	_, adminToken := createRoleUser(t, database, 21, "Administrator", permissions.Administrator, 90, "administratoruser")
+	_, ownerToken := createRoleUser(t, database, permissions.OwnerRoleID, "Owner", permissions.Administrator, 100, "backuppolicyowner")
+
+	validValue := map[string]string{"backup_schedule": "daily", "backup_retention": "30"}
+	for _, key := range []string{"backup_schedule", "backup_retention"} {
+		for _, tc := range []struct {
+			name  string
+			token string
+		}{
+			{"MANAGE_SERVER non-owner", manageToken},
+			{"ADMINISTRATOR non-owner", adminToken},
+		} {
+			w := doRequest(t, handler, http.MethodPatch, "/settings", tc.token, map[string]string{key: validValue[key]})
+			if w.Code != http.StatusForbidden {
+				t.Errorf("%s PATCH %s = %d, want 403; body: %s", tc.name, key, w.Code, w.Body.String())
+			}
+		}
+		// Positive control: the Owner may set it.
+		w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{key: validValue[key]})
+		if w.Code != http.StatusOK {
+			t.Errorf("Owner PATCH %s = %d, want 200; body: %s", key, w.Code, w.Body.String())
+		}
+	}
+
+	// Positive control: the same MANAGE_SERVER token succeeds on an ordinary
+	// setting, proving the 403s above are the owner-only key gate.
+	if w := doRequest(t, handler, http.MethodPatch, "/settings", manageToken, map[string]string{"motd": "hello"}); w.Code != http.StatusOK {
+		t.Errorf("MANAGE_SERVER PATCH motd = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestBackupPolicySettings_BoundedRetention rejects out-of-range backup
+// retention values before they reach the maintenance sweep.
+func TestBackupPolicySettings_BoundedRetention(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	_, ownerToken := createRoleUser(t, database, permissions.OwnerRoleID, "Owner", permissions.Administrator, 100, "retentionowner")
+
+	for _, value := range []string{"1", "6", "banana", "-1", "99999"} {
+		w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{"backup_retention": value})
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("PATCH backup_retention=%q = %d, want 400; body: %s", value, w.Code, w.Body.String())
+		}
+	}
+	for _, value := range []string{"0", "7", "3650"} {
+		w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{"backup_retention": value})
+		if w.Code != http.StatusOK {
+			t.Errorf("PATCH backup_retention=%q = %d, want 200; body: %s", value, w.Code, w.Body.String())
+		}
+	}
+}
+
 // TestOwnerOnlyControlsStayOwnerOnly extends TestOwnerOnlyRoutes_ModeratorForbidden
 // by walking the ACTUAL set of owner-only routes NewAdminAPI wires
 // (admin.OwnerOnlyRoutesForTest) instead of a hand-listed subset (P2-13,

@@ -43,6 +43,19 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 			return
 		}
 
+		// The backup policy is owner-only (BPR-072): these keys decide which
+		// scheduled copies survive and whether new ones are taken, so a
+		// MANAGE_SERVER (or ADMINISTRATOR) non-owner must not reach them even
+		// though the rest of the settings page is theirs. Refuse the whole
+		// request rather than silently dropping the keys — a partial write
+		// would report success for a policy the caller cannot set.
+		for key := range updates {
+			if service.IsOwnerOnlySettingKey(key) && !isOwnerFromContext(r) {
+				writeErr(w, http.StatusForbidden, "FORBIDDEN", "owner role required")
+				return
+			}
+		}
+
 		if value, changing := updates["retention_days"]; changing {
 			if retention == nil {
 				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention service unavailable")

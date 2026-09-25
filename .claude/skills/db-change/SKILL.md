@@ -1,6 +1,6 @@
 ---
 name: db-change
-description: Change OwnCord's SQLite schema or queries — add a migration, edit Server/db/queries/*.sql, and regenerate the sqlc layer. Use before touching anything under Server/db/ or Server/migrations/.
+description: Change OwnCord's SQLite schema or queries — add a migration, edit Server/db/queries/sqlite/*.sql, and regenerate the sqlc layer. Use before touching anything under Server/db/ or Server/migrations/.
 ---
 
 # db-change

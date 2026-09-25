@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS invites (
 );
 `)
 	migrFS := fstest.MapFS{
-		"001_schema.sql": {Data: schema},
+		"001_initial_schema.sql": {Data: schema},
 	}
 	if err := db.MigrateFS(database, migrFS); err != nil {
 		t.Fatalf("MigrateFS: %v", err)

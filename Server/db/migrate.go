@@ -22,12 +22,103 @@ package db
 // filename without executing the SQL, so subsequent runs treat them as done.
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
+	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/J3vb/OwnCord/Server/migrations"
 )
+
+// ErrSchemaAhead is returned when schema_versions records a migration the
+// running binary does not carry — the database was migrated by a NEWER server.
+// Continuing would run this older binary against a schema it has never seen,
+// which is the documented way to lose the database (docs/deployment.md), so
+// start-up and backup restore both refuse it.
+var ErrSchemaAhead = errors.New("database schema is newer than this server")
+
+// schemaVersionsAheadOf returns the recorded migration filenames the given
+// set does not contain, sorted. A database with no schema_versions table yet
+// (pre-tracking, or a fresh file) has nothing ahead of it. Both start-up
+// (migrateFSCount) and the restore guard (CheckBackupSchemaAhead) compare
+// through it.
+func schemaVersionsAheadOf(versions []string, filenames []string) []string {
+	known := make(map[string]struct{}, len(filenames))
+	for _, name := range filenames {
+		known[name] = struct{}{}
+	}
+	var ahead []string
+	for _, v := range versions {
+		if _, ok := known[v]; !ok {
+			ahead = append(ahead, v)
+		}
+	}
+	sort.Strings(ahead)
+	return ahead
+}
+
+// schemaAheadError is the operator-facing refusal, naming the unknown
+// migrations and the documented reversal path.
+func schemaAheadError(ahead []string) error {
+	return fmt.Errorf("%w: unknown migration(s) %s; this database was migrated by a newer server. Restore the pre-upgrade archive or follow Server/rollback/README.md before starting this version",
+		ErrSchemaAhead, strings.Join(ahead, ", "))
+}
+
+// CheckBackupSchemaAhead opens the SQLite file at path read-only and reports
+// whether its schema_versions names migrations that are absent from the
+// running binary's embedded migration set — the database was migrated by a
+// NEWER server. The admin restore path uses it to refuse such a backup BEFORE
+// it replaces the live database. A missing schema_versions table (a
+// pre-tracking or corrupt file) returns no unknowns — integrity_check has
+// already rejected a file SQLite cannot read.
+func CheckBackupSchemaAhead(ctx context.Context, path string) ([]string, error) {
+	abs, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return nil, fmt.Errorf("CheckBackupSchemaAhead: resolving path: %w", err)
+	}
+	conn, err := sql.Open("sqlite", "file:"+filepath.ToSlash(abs)+"?mode=ro&_pragma=busy_timeout(2000)")
+	if err != nil {
+		return nil, fmt.Errorf("CheckBackupSchemaAhead: open: %w", err)
+	}
+	defer conn.Close() //nolint:errcheck
+
+	filenames, err := sqlFilenames(migrations.FS)
+	if err != nil {
+		return nil, err
+	}
+
+	var exists string
+	err = conn.QueryRowContext(ctx,
+		"SELECT name FROM sqlite_master WHERE type='table' AND name='schema_versions'").Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("CheckBackupSchemaAhead: %w", err)
+	}
+
+	rows, err := conn.QueryContext(ctx, "SELECT version FROM schema_versions")
+	if err != nil {
+		return nil, fmt.Errorf("CheckBackupSchemaAhead: reading schema_versions: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+	var versions []string
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, fmt.Errorf("CheckBackupSchemaAhead: %w", err)
+		}
+		versions = append(versions, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("CheckBackupSchemaAhead: %w", err)
+	}
+	return schemaVersionsAheadOf(versions, filenames), nil
+}
 
 const createSchemaVersions = `
 CREATE TABLE IF NOT EXISTS schema_versions (
@@ -72,6 +163,28 @@ func schemaVersionsExists(d *DB) (bool, error) {
 		return false, fmt.Errorf("schemaVersionsExists: %w", err)
 	}
 	return true, nil
+}
+
+// recordedSchemaVersions returns every version in schema_versions. The table
+// must exist (ensureSchemaVersions has run).
+func recordedSchemaVersions(d *DB) ([]string, error) {
+	rows, err := d.writer.Query("SELECT version FROM schema_versions")
+	if err != nil {
+		return nil, fmt.Errorf("reading schema_versions: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+	var versions []string
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, fmt.Errorf("reading schema_versions: %w", err)
+		}
+		versions = append(versions, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reading schema_versions: %w", err)
+	}
+	return versions, nil
 }
 
 // isApplied reports whether a migration filename has already been recorded.
@@ -196,6 +309,19 @@ func migrateFSCount(database *DB, fsys fs.FS) (int, error) {
 	// the correct next step before applying migrations normally.
 	if err := ensureSchemaVersions(database); err != nil {
 		return 0, err
+	}
+
+	// Refuse a schema a newer server produced (REL-02). migrateFSCount only
+	// looked at embedded files before, so an older binary booted silently on a
+	// newer database and could corrupt it. The manual rollback reversals each
+	// delete their own schema_versions row, so the supported path is not
+	// blocked by this.
+	recorded, err := recordedSchemaVersions(database)
+	if err != nil {
+		return 0, err
+	}
+	if ahead := schemaVersionsAheadOf(recorded, filenames); len(ahead) > 0 {
+		return 0, schemaAheadError(ahead)
 	}
 
 	// Normal path: apply any migration not yet recorded.

@@ -178,9 +178,11 @@ tokens, no keys.
 Motion is reduced when the in-app **Reduce Motion** toggle is on, or when
 **Sync with OS** is on and the OS asks for it. Sync with OS defaults to on.
 Either source can reduce motion, and neither can force it back on over the
-other. `lib/os-motion.ts` is the single writer of the `reduced-motion` class
-on `<html>`, and `app/accessibility.css` zeroes animation and transition
-durations under it. Feedback never depends on an animation playing.
+other. `syncOsMotionListener()` in `lib/os-motion.ts` derives the
+`reduced-motion` class on `<html>` (`applyStoredAppearance()` in
+`lib/appearance.ts` pre-sets it from the manual preference, then calls it), and
+`app/accessibility.css` zeroes animation and transition durations under it.
+Feedback never depends on an animation playing.
 
 ## Teardown ownership
 
@@ -205,3 +207,36 @@ From `Client/tests/e2e/support/b9-accessibility.ts`:
 `Client/tests/e2e/b9-primitives.spec.ts` shows each one in use, including
 the negative controls that prove each check fails when its behaviour is
 removed.
+
+The OS 200 % zoom/reflow check is automated in
+`Client/tests/e2e/support/b9-zoom.ts` (`ZOOM_VIEWPORT`, `auditReflow`,
+`expectScreenReflows`): each screen is rendered at a 640×400 CSS viewport — the
+layout a 1280×800 window shows at 200 % page zoom — and asserted to have no
+horizontal page scroll, no vertical scroll area that also scrolls sideways, no
+text or control clipped without an intended scroll area, no control painted
+over, and every primary action reachable, with one screenshot per screen.
+`Client/tests/e2e/b9-zoom.spec.ts` opens every screen through the entry point a
+zoomed user actually has, after zooming.
+
+Screens that pass at 200 %: the connect page (B9-18), the shell's message
+surface, history and composer (B9-3, 18, 19, 21, 22), the search overlay, the
+report dialog (B9-10), and every settings tab the connect page's Settings gear
+(`button.settings-gear`) opens except Logs — Appearance, Notifications, Text &
+Images, Accessibility, Voice & Audio, Keybinds and Advanced (B9-20, 23).
+
+Failing at 200 %: the Logs tab's controls row (`LogsTab.ts`) does not wrap, so
+its Copy All, Clear Logs and Refresh buttons push `.settings-content` into a
+sideways scroll at 640 CSS px. The spec records it as `test.fail` until the
+row is fixed.
+
+Blocked on navigation: below 800 CSS px `responsive.css` collapses
+`.unified-sidebar` to zero width with no toggle. Channels stay reachable
+through the Ctrl+K quick switcher (`OverlayManagers.ts`), but DMs and the
+sidebar itself do not, and neither does any screen whose only entry point lives
+there. Those screens are `test.fixme`, each naming its entry point, until B8's
+responsive navigation lands: the Message Requests inbox and its Block confirm
+(B9-5, 6), My reports (the second half of B9-10), the Moderation Center
+queue, review, actions and ban confirm (B9-11, 12, 13, 14), the appeal review
+(B9-17), the signed-in Account pane (B9-20, 23; the user-bar Settings
+button), and the sidebar navigation half of B9-18 and B9-21. Their 200 %
+evidence is still open.

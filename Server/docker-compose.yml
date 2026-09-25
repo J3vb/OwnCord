@@ -9,9 +9,9 @@
 #   4. docker compose up -d
 #
 # LiveKit runs as a separate container on the same internal network.
-# The OwnCord server reaches it at ws://livekit:7880 (Docker DNS).
-# Browser clients reach LiveKit directly via the ports published below,
-# so your firewall must allow TCP 7880-7881 and UDP 50000-60000.
+# The OwnCord server reaches it at ws://livekit:7880 (Docker DNS), and it
+# proxies signalling to clients at :8443/livekit — so 7880 need not be
+# published or forwarded. Firewall TCP 7881 and UDP 50000-60000 for media.
 
 # Log rotation shared by both services: without a cap the default json-file
 # driver grows unbounded on the host disk.
@@ -77,7 +77,10 @@ services:
     # LiveKit config file — copy livekit.yaml.example → livekit.yaml and fill in
     command: --config /etc/livekit/livekit.yaml
     ports:
-      - "7880:7880" # WebSocket API (OwnCord server + browser signalling)
+      # 7880 is LiveKit's own API/signalling endpoint. OwnCord reaches it over
+      # the internal network and proxies signalling to clients at /livekit, so
+      # this mapping is only for clients that connect to LiveKit directly.
+      - "7880:7880" # LiveKit API (optional; direct clients only)
       - "7881:7881" # TCP fallback for WebRTC (clients behind strict NAT)
       - "50000-60000:50000-60000/udp" # WebRTC UDP media streams
     volumes:

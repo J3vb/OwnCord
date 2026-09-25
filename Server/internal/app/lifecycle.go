@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	stdlog "log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -41,7 +42,7 @@ type stage struct {
 }
 
 // stages is the start sequence. Close walks the steps these register in
-// reverse, so this list IS the shutdown order read backwards. Two orderings
+// reverse, so this list IS the shutdown order read backwards. Three orderings
 // here are load-bearing rather than incidental:
 //
 //   - the database opens before the audit writer and event persistence start,
@@ -49,7 +50,11 @@ type stage struct {
 //   - ACME and the HTTP server start AFTER the maintenance loop, so the
 //     reverse walk drains in-flight HTTP handlers (whose broadcasts must
 //     still reach a live hub) before anything else is stopped — which is the
-//     order run()'s explicit shutdown call used to impose by hand.
+//     order run()'s explicit shutdown call used to impose by hand;
+//   - signals are armed BEFORE the http stage, whose bind retries for about
+//     ten seconds while the port is in use: a SIGINT/SIGTERM in that window
+//     must drain through Close, not kill the process with the LiveKit child
+//     and the audit and event queues already running.
 func (a *App) stages() []stage {
 	return []stage{
 		{"data-dir", a.startDataDir},
@@ -66,8 +71,8 @@ func (a *App) stages() []stage {
 		{"audit-writer", a.startAuditWriter},
 		{"maintenance", a.startMaintenance},
 		{"acme", a.startACME},
-		{"http", a.startHTTP},
 		{"signals", a.startSignals},
+		{"http", a.startHTTP},
 	}
 }
 
@@ -123,8 +128,6 @@ func (a *App) Run(ctx context.Context) (err error) {
 // stages that did come up are already registered with Close, which Run runs
 // regardless.
 func (a *App) start() error {
-	removeOldBinary(a.log)
-
 	for _, st := range a.stages() {
 		if st.name == a.failStage {
 			return fmt.Errorf("starting %s: %w", st.name, errStageInjected)
@@ -133,6 +136,15 @@ func (a *App) start() error {
 			return fmt.Errorf("starting %s: %w", st.name, err)
 		}
 	}
+	// Only once every stage is up is the previous binary safe to remove. It
+	// used to be the FIRST act of start(), before the data-dir, TLS, database,
+	// migrate and later stages — so a migration error (or any other start
+	// failure) left an operator with no chatserver.old to roll back to, and
+	// under systemd Restart=always the unit has nothing local to fall back on
+	// (REL-01). Deferring it past the stages preserves the documented rollback
+	// copy through every start-up refusal; the schema-ahead check in
+	// db.MigrateFS stops that copy from then booting on a newer schema.
+	removeOldBinaryFn(a.log)
 	return nil
 }
 
@@ -140,7 +152,7 @@ func (a *App) start() error {
 // The graceful shutdown that used to follow it inline is now the http stage's
 // close step, so it happens on the error path too.
 func (a *App) serve() error {
-	return serveAndWait(a.serveCtx, a.log, a.deps.Restart, a.srv, a.tlsCfg, a.addr, a.deps.Version)
+	return serveAndWait(a.serveCtx, a.log, a.deps.Restart, a.srv, a.ln, a.tlsCfg, a.addr, a.deps.Version)
 }
 
 // startDataDir creates the configured data directory and warns about the
@@ -411,10 +423,24 @@ func (a *App) startHTTP() error {
 		IdleTimeout:  120 * time.Second,
 		ErrorLog:     stdlog.New(io.Discard, "", 0), // suppress TLS handshake noise
 	}
+	// Shutdown closes only the listeners Serve has taken, so a later stage
+	// failing before serve() would otherwise leave the port bound. Registered
+	// before the http step so the reverse walk runs it after Shutdown.
+	a.onClose("listener", func(context.Context) error {
+		if a.ln != nil {
+			_ = a.ln.Close()
+		}
+		return nil
+	})
 	a.onClose("http", func(ctx context.Context) error {
 		return shutdownServers(ctx, a.log, a.srv, a.acmeSrv, a.hub)
 	})
-	return nil
+	// Bind here, not in serve(): a port that cannot be bound must fail start()
+	// before the previous binary is removed (REL-01).
+	return serveWithBindRetry(a.log, "server", func() (err error) {
+		a.ln, err = net.Listen("tcp", a.addr)
+		return err
+	})
 }
 
 // startSignals arms the shutdown context. The coordinator's context is the
