@@ -72,7 +72,14 @@ export async function startTestServer(
   // JSON is valid YAML; avoids platform-specific escaping of temporary paths.
   await writeFile(join(directory, "config.yaml"), JSON.stringify(config));
   const origin = `${options.tls ? "https" : "http"}://127.0.0.1:${port}`;
-  let running = startProcess(binary, [], directory, options.env ?? process.env);
+  const env = options.env ?? process.env;
+  let running = startProcess(binary, [], directory, env);
+  // The one-time first-run setup token this process printed at start-up.
+  const setupToken = () => {
+    const token = /Setup token\s+(\S+)/.exec(running.log())?.[1];
+    if (!token) throw new Error(`OwnCord printed no setup token\n${running.log()}`);
+    return token;
+  };
   const logs: string[] = [];
   const http = await request.newContext({ ignoreHTTPSErrors: !!options.tls, timeout: 15_000 });
   const ready = async () => {
@@ -114,7 +121,11 @@ export async function startTestServer(
     if (options.livekit) await waitForHttp(`http://127.0.0.1:${livekitPort}`, running);
     let owner: { token: string; invite_code: string; user_id: number } | undefined;
     if (options.seed !== false) {
-      owner = await api("/admin/api/setup", { username: "alice", password: TEST_PASSWORD });
+      owner = await api("/admin/api/setup", {
+        username: "alice",
+        password: TEST_PASSWORD,
+        setup_token: setupToken(),
+      });
       await api("/api/v1/auth/register", {
         username: "bob",
         password: TEST_PASSWORD,
@@ -131,6 +142,7 @@ export async function startTestServer(
       directory,
       api,
       owner,
+      setupToken,
       log: () => [...logs, running.log()].join("\n"),
       async stop() {
         await stopProcess(running.child);
@@ -139,7 +151,7 @@ export async function startTestServer(
       async restart() {
         await stopProcess(running.child);
         logs.push(running.log());
-        running = startProcess(binary, [], directory, options.env ?? process.env);
+        running = startProcess(binary, [], directory, env);
         await ready();
         if (options.livekit) await waitForHttp(`http://127.0.0.1:${livekitPort}`, running);
       },

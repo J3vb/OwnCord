@@ -74,7 +74,11 @@ func runUpgrade(oldRef, newRef string, useDocker bool) error {
 	if err := t.start("old"); err != nil {
 		return err
 	}
-	f, err := installFixture(t.baseURL())
+	serverLog, err := t.log()
+	if err != nil {
+		return t.annotate(phasePopulate, err)
+	}
+	f, err := installFixture(t.baseURL(), serverLog)
 	if err != nil {
 		return t.annotate(phasePopulate, err)
 	}

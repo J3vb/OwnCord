@@ -101,8 +101,8 @@ type fixture struct {
 
 // installFixture populates a freshly booted server. It runs against the OLD
 // version, so everything it creates is state the upgrade has to carry over.
-func installFixture(baseURL string) (fixture, error) {
-	token, err := runSetup(baseURL)
+func installFixture(baseURL, serverLog string) (fixture, error) {
+	token, err := runSetup(baseURL, serverLog)
 	if err != nil {
 		return fixture{}, err
 	}
@@ -160,8 +160,9 @@ func createBackup(baseURL, token string) (string, error) {
 	return created.Path, nil
 }
 
-// runSetup creates the owner account through the first-run wizard.
-func runSetup(baseURL string) (string, error) {
+// runSetup creates the owner account through the first-run wizard, with the
+// setup token found in the server's start-up output.
+func runSetup(baseURL, serverLog string) (string, error) {
 	// Wizard fields that live in config.yaml — port, tls_mode, tls_domain,
 	// upload_max_size_mb, voice_quality, voice_auto_download — are
 	// deliberately omitted. Setting any of them makes the server restart
@@ -169,8 +170,9 @@ func runSetup(baseURL string) (string, error) {
 	// very file whose hash the rehearsal compares, so the fixture would be
 	// mutating the thing under test and racing a restart while doing it.
 	body, err := json.Marshal(map[string]any{
-		"username": fixtureUser,
-		"password": fixturePassword,
+		"username":    fixtureUser,
+		"password":    fixturePassword,
+		"setup_token": setupTokenIn(serverLog),
 		"wizard": map[string]any{
 			"server_name": "Upgrade Rehearsal",
 			"motd":        "rehearsal fixture",

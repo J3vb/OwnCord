@@ -129,7 +129,7 @@ docker compose up -d
 must exist before the first start: without it Docker creates a _directory_ at
 that path and the server fails to read its configuration.
 
-On first start OwnCord creates its database and writes defaults into `/app/data`. Navigate to `https://<your-ip>:8443/admin` to create the Owner account.
+On first start OwnCord creates its database and writes defaults into `/app/data`. Navigate to `https://<your-ip>:8443/admin` to create the Owner account, with the setup token from `docker compose logs owncord`.
 
 The admin panel and the setup wizard are gated by `server.admin_allowed_cidrs`
 (loopback and private networks by default), so on a VPS the wizard is
@@ -213,7 +213,7 @@ When `chatserver.exe` starts for the first time:
 3. **TLS certificate** -- A self-signed certificate is generated at `data/cert.pem` / `data/key.pem`
 4. **Database migration** -- SQLite database is created and all migrations run
 5. **Status reset** -- All user statuses are set to `offline`, stale voice states are cleared
-6. **Setup wizard** -- Navigate to `https://localhost:8443/admin` to run the first-time setup wizard
+6. **Setup wizard** -- Navigate to `https://localhost:8443/admin` to run the first-time setup wizard. It asks for the setup token printed in the start-up output (the terminal, `docker compose logs owncord`, or the service's log)
 
 The setup wizard creates the Owner account and walks through the basics (server
 name, port, TLS mode, upload limit, voice, registration and welcome
@@ -467,7 +467,10 @@ cert management), three things matter:
 3. **Tell OwnCord about the proxy.** Set `server.trusted_proxies` to the
    proxy's own address(es) (e.g. `["10.0.0.2/32"]`) so client IPs come from
    `X-Forwarded-For` for rate limiting and the admin IP allowlist. List only
-   the proxy hops, never client networks.
+   the proxy hops, never client networks. A proxy on the same host is
+   `["127.0.0.1/32", "::1/128"]`: without it the allowlist sees the proxy's
+   loopback address on every request, and the server warns about this shape
+   at start-up.
 
 Working nginx snippet:
 
