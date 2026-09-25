@@ -322,6 +322,21 @@ reorganised behind service boundaries.
 
 ### Admin panel
 
+- **The admin panel now matches the app's look and is readable for everyone.**
+  It uses the same dark neon palette as the desktop client, and every text,
+  status badge, input edge and danger button meets WCAG contrast targets.
+- **Keyboard focus is visible again** on the admin panel: tabbing shows a cyan
+  ring on links, buttons and fields instead of nothing.
+- Dialogs take focus when they open, keep Tab inside, hand focus back when they
+  close, and announce their title; form fields, search boxes and file pickers
+  have proper labels; toggles report their on/off state; icon buttons have names.
+- **Error notifications now stay until you dismiss them**, so a failure can be
+  read and acted on, and the panel honours your system's reduced-motion
+  setting.
+- On a narrow window the admin panel's navigation stays reachable and wide
+  tables scroll instead of being cut off.
+- Audit log, dashboard activity and pending registration times now show in
+  your local time; hover one to see the exact UTC time.
 - **Who may register is now a choice**: closed, invite only, approval, or open.
   Fresh installs default to invite only. Existing servers keep the behaviour
   they had — a server that required an invite still requires one, and
