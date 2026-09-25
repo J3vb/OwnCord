@@ -192,14 +192,15 @@ the signal aborts. The lifecycle rules are in `Client/CLAUDE.md` (B7-11).
 
 From `Client/tests/e2e/support/b9-accessibility.ts`:
 
-| Helper                           | What it checks                                                                                                    |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `setAppearance(page, prefs)`     | stores theme, accent, High Contrast, font size, Large Font and motion prefs, then reloads so startup applies them |
-| `findUnnamedControls(root)`      | every visible focusable control under `root` has an accessible name                                               |
-| `focusIndicator(page)`           | the focused element's ring is visible, at least 2px, and 3:1 against its background                               |
-| `textContrast(locator, pseudo?)` | text (or `::placeholder`) against its composited background                                                       |
-| `tokenContrasts(page, pairs)`    | token pairs as the page resolves them                                                                             |
-| `mountSharedControls(page)`      | the shared-controls fixture, including its pending, error and success states                                      |
+| Helper                            | What it checks                                                                                                    |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `setAppearance(page, prefs)`      | stores theme, accent, High Contrast, font size, Large Font and motion prefs, then reloads so startup applies them |
+| `findUnnamedControls(root)`       | every visible focusable control under `root` has an accessible name                                               |
+| `focusIndicator(page)`            | the focused element's ring is visible, at least 2px, and 3:1 against its background                               |
+| `keyboardReachable(page, target)` | Tab from the top of the document reaches `target`; a named control can still be unfocusable                       |
+| `textContrast(locator, pseudo?)`  | text (or `::placeholder`) against its composited background                                                       |
+| `tokenContrasts(page, pairs)`     | token pairs as the page resolves them                                                                             |
+| `mountSharedControls(page)`       | the shared-controls fixture, including its pending, error and success states                                      |
 
 `Client/tests/e2e/b9-primitives.spec.ts` shows each one in use, including
 the negative controls that prove each check fails when its behaviour is

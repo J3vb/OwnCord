@@ -166,6 +166,27 @@ export async function findUnnamedControls(root: Locator): Promise<string[]> {
   return unnamed;
 }
 
+/**
+ * Tab from the top of the document until `target` is focused, or fail. An
+ * element can be visible and named yet still be unreachable by keyboard (an
+ * href-less <a>, a click-only <div>), which `findUnnamedControls` cannot see
+ * because its FOCUSABLE selector only matches elements that are already
+ * focusable. Tab is the only check that sees what a keyboard user actually
+ * reaches (A11Y-08). Returns false when the target is not focused within 150
+ * presses, well past the shell's tab stops.
+ */
+export async function keyboardReachable(page: Page, target: Locator): Promise<boolean> {
+  // Drop focus to the document so the first Tab starts at the top.
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+  });
+  for (let i = 0; i < 150; i++) {
+    await page.keyboard.press("Tab");
+    if (await target.evaluate((el) => el === document.activeElement)) return true;
+  }
+  return false;
+}
+
 export interface FocusIndicator {
   readonly element: string;
   readonly style: string;

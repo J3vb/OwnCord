@@ -22,6 +22,7 @@ import {
   openSettings,
   switchSettingsTab,
 } from "./helpers";
+import { findUnnamedControls, keyboardReachable } from "./support/b9-accessibility";
 
 const banner = (page: Page) => page.locator(".reconnecting-banner");
 const bannerLive = (page: Page) => page.locator("[data-testid='banner-announce']");
@@ -96,6 +97,14 @@ test.describe("B9-25 network limitations are actionable", () => {
     await expect(banner(page)).toContainText("Can't reach this server", { timeout: 10_000 });
     const retry = banner(page).getByRole("button", { name: "Retry" });
     await expect(retry).toBeVisible();
+
+    // The recovery control carries a name and is reachable by Tab, not merely
+    // focusable (A11Y-08; this spec historically skipped the shared helpers).
+    // The banner leads the DOM, so a walk from the document top reaches Retry
+    // without cycling through the header's search box (whose focus opens the
+    // search overlay).
+    expect(await findUnnamedControls(banner(page))).toEqual([]);
+    expect(await keyboardReachable(page, retry)).toBe(true);
 
     // Retry dials at once instead of waiting out the backoff, and a failed
     // retry lands back on the same actionable notice.

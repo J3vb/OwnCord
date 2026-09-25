@@ -57,7 +57,7 @@ async function mockRegisterConflict(page: import("@playwright/test").Page): Prom
 }
 
 async function switchToRegisterMode(page: import("@playwright/test").Page): Promise<void> {
-  const toggleLink = page.locator(".form-switch a");
+  const toggleLink = page.locator(".form-switch button");
   await toggleLink.click();
   // Verify we're in register mode
   await expect(page.locator(".btn-text")).toHaveText("Register");
@@ -87,7 +87,7 @@ test.describe("Register Flow — Mode Toggle", () => {
   test("toggle back to login hides invite code field", async ({ page }) => {
     await switchToRegisterMode(page);
     // Toggle back
-    const toggleLink = page.locator(".form-switch a");
+    const toggleLink = page.locator(".form-switch button");
     await toggleLink.click();
 
     await expect(page.locator(".btn-text")).toHaveText("Login");

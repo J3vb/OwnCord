@@ -293,11 +293,16 @@
     background var(--transition-fast),
     color var(--transition-fast);
 }
-.channel-mention:hover,
+.channel-mention:hover {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+/* The keyboard focus indicator is the base --focus-ring outline (A11Y-03):
+   an --accent fill measures 2.15:1 on dark and midnight, below the 3:1 bar,
+   and the contract bans --accent as a focus indicator. */
 .channel-mention:focus-visible {
   background: var(--accent);
   color: var(--on-accent);
-  outline: none;
 }
 /* owncord://message/… permalinks pasted into chat, rendered as a compact chip
    instead of a raw URL. Unresolvable links stay plain text and never get here. */
@@ -328,10 +333,13 @@
   letter-spacing: 0.03em;
 }
 
-.message-link-chip:hover,
+/* As with the channel mention: keep the fill for hover only and let base.css
+   draw the --focus-ring outline on keyboard focus (A11Y-03). */
+.message-link-chip:hover {
+  background: var(--accent);
+}
 .message-link-chip:focus-visible {
   background: var(--accent);
-  outline: none;
 }
 
 .message-link-chip:hover .mlc-channel,

@@ -346,6 +346,28 @@ describe("enableRovingNavigation", () => {
     expect(onCell).toHaveBeenCalledTimes(1);
     ac.abort();
   });
+
+  it("keeps one Tab stop when an arrow starts from a cell focused by mouse", () => {
+    const [first, , third, fourth] = Array.from({ length: 4 }, () => {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      container.appendChild(cell);
+      return cell;
+    });
+    setRovingTabindex(container, ".cell");
+    const ac = new AbortController();
+    enableRovingNavigation(container, ".cell", ac.signal);
+
+    // A click focuses a tabindex=-1 cell without moving the stop off `first`.
+    third!.focus();
+    third!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }),
+    );
+
+    expect(Array.from(container.querySelectorAll(".cell[tabindex='0']"))).toEqual([fourth]);
+    expect(first!.getAttribute("tabindex")).toBe("-1");
+    ac.abort();
+  });
 });
 
 describe("setRovingTabindex", () => {
