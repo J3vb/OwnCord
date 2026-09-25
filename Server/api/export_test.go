@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strconv"
+	"testing"
 
 	"github.com/J3vb/OwnCord/Server/safefetch"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -169,3 +170,12 @@ func SecurityHeaders(next http.Handler) http.Handler {
 // WarnOnServerConfigForTest exposes warnOnServerConfig so B6-6's node_ip
 // warning can be asserted without standing up a whole router.
 var WarnOnServerConfigForTest = warnOnServerConfig
+
+// SetRouteTablePathForTest points the container bridge-gateway lookup at a
+// fixture route table for the duration of the test.
+func SetRouteTablePathForTest(t *testing.T, path string) {
+	t.Helper()
+	prev := routeTablePath
+	routeTablePath = path
+	t.Cleanup(func() { routeTablePath = prev })
+}

@@ -4,13 +4,17 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"os"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -83,7 +87,7 @@ func warnOnServerConfig(cfg *config.Config) {
 // a relay's address instead of the client's. With trusted_proxies empty,
 // AdminIPRestrict checks the connecting address; behind a reverse proxy that
 // is the proxy (often 127.0.0.1), and in a container it can be the bridge
-// gateway (a 172.x address) for connections Docker's userland proxy relays,
+// gateway (the default route) for connections the engine's port relay carries,
 // such as published ports reached over IPv6. The default allowlist admits
 // both, so the perimeter then admits every client the relay carries.
 //
@@ -116,18 +120,24 @@ func warnOnAdminPeerAddress(cfg *config.Config) {
 
 // adminAllowlistAdmitsRelay reports whether any admin_allowed_cidrs entry
 // admits a relay's likely connecting address: loopback (a same-host reverse
-// proxy), or — inside a container — the 172.16.0.0/12 bridge range the Docker
-// userland proxy relays published ports through. An entry is tested for
-// overlap, so both a broad prefix (0.0.0.0/0) and the relay's exact /32
-// count; invalid entries are skipped here because config.Load already warned
-// about them.
+// proxy), or — inside a container — the bridge gateway the engine relays
+// published ports through. That gateway is the container's default route,
+// whatever pool the engine (Docker, Podman) allocated the network from; when
+// the route table cannot be read it falls back to Docker's default
+// 172.16.0.0/12 pool. An entry is tested for overlap, so both a broad prefix
+// (0.0.0.0/0) and the relay's exact /32 count; invalid entries are skipped
+// here because config.Load already warned about them.
 func adminAllowlistAdmitsRelay(cidrs []string, container bool) bool {
 	ranges := []netip.Prefix{
 		netip.MustParsePrefix("127.0.0.0/8"),
 		netip.MustParsePrefix("::1/128"),
 	}
 	if container {
-		ranges = append(ranges, netip.MustParsePrefix("172.16.0.0/12"))
+		bridge := netip.MustParsePrefix("172.16.0.0/12")
+		if gw, ok := defaultGateway(); ok {
+			bridge = netip.PrefixFrom(gw, 32)
+		}
+		ranges = append(ranges, bridge)
 	}
 	for _, c := range cidrs {
 		p, err := netip.ParsePrefix(c)
@@ -141,6 +151,33 @@ func adminAllowlistAdmitsRelay(cidrs []string, container bool) bool {
 		}
 	}
 	return false
+}
+
+// routeTablePath is the kernel's IPv4 route table; a variable so tests can
+// point it at a fixture.
+var routeTablePath = "/proc/net/route"
+
+// defaultGateway returns the IPv4 gateway of the default route in
+// routeTablePath, whose addresses are hex in host byte order.
+func defaultGateway() (netip.Addr, bool) {
+	data, err := os.ReadFile(routeTablePath)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 || f[1] != "00000000" {
+			continue
+		}
+		gw, err := strconv.ParseUint(f[2], 16, 32)
+		if err != nil || gw == 0 {
+			continue
+		}
+		var b [4]byte
+		binary.NativeEndian.PutUint32(b[:], uint32(gw))
+		return netip.AddrFrom4(b), true
+	}
+	return netip.Addr{}, false
 }
 
 // warnOnVoiceNodeIP reports a voice.node_ip that remote clients cannot route

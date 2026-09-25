@@ -3,11 +3,16 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -623,33 +628,51 @@ func TestReachabilityWarningsAreNotGatedByTheFlag(t *testing.T) {
 // TestWarnOnServerConfig_AdminPeerAddress pins the start-up warning for an
 // admin perimeter that would compare a relay's address: trusted_proxies empty
 // with TLS off (a terminating proxy in front) or inside a container. It fires
-// only while admin_allowed_cidrs still admits the loopback or bridge range,
-// so a narrowed allowlist that excludes those peers must stay silent.
+// only while admin_allowed_cidrs still admits loopback or the container's
+// bridge gateway (its default route, whatever pool the engine used), so a
+// narrowed allowlist that excludes those peers must stay silent.
 func TestWarnOnServerConfig_AdminPeerAddress(t *testing.T) {
 	cases := []struct {
 		name      string
 		tlsMode   string
 		container string
+		gateway   string // default-route gateway in the route table; "" = table unreadable
 		trusted   []string
 		allowed   []string
 		wantWarn  bool
 	}{
-		{"tls off, no trusted proxies", "off", "0", nil, []string{"127.0.0.0/8"}, true},
-		{"container, no trusted proxies", "self_signed", "1", nil, []string{"172.16.0.0/12"}, true},
-		{"trusted proxies set", "off", "1", []string{"127.0.0.1/32"}, []string{"127.0.0.0/8"}, false},
-		{"direct TLS on the host", "self_signed", "0", nil, []string{"127.0.0.0/8"}, false},
-		{"perimeter disabled", "off", "1", nil, nil, false},
+		{"tls off, no trusted proxies", "off", "0", "", nil, []string{"127.0.0.0/8"}, true},
+		{"container, no trusted proxies", "self_signed", "1", "172.17.0.1", nil, []string{"172.16.0.0/12"}, true},
+		{"container, route table unreadable", "self_signed", "1", "", nil, []string{"172.16.0.0/12"}, true},
+		{"trusted proxies set", "off", "1", "172.17.0.1", []string{"127.0.0.1/32"}, []string{"127.0.0.0/8"}, false},
+		{"direct TLS on the host", "self_signed", "0", "", nil, []string{"127.0.0.0/8"}, false},
+		{"perimeter disabled", "off", "1", "172.17.0.1", nil, nil, false},
+		// A bridge outside Docker's default pool — Podman's 10.88.0.0/16, or
+		// a custom Docker pool — is still the relay's address.
+		{"podman bridge admitted by a LAN allowlist", "self_signed", "1", "10.88.0.1", nil, []string{"10.0.0.0/8"}, true},
+		{"custom docker pool admitted", "self_signed", "1", "192.168.16.1", nil, []string{"192.168.0.0/16"}, true},
 		// The owner narrowed the allowlist so no relay address is admitted;
 		// the warning's own suggested fix must silence it.
-		{"narrowed allowlist, loopback excluded", "off", "1", nil, []string{"192.168.1.10/32"}, false},
-		{"narrowed allowlist, bridge excluded", "off", "1", nil, []string{"10.0.0.0/8"}, false},
+		{"narrowed allowlist, loopback excluded", "off", "1", "172.17.0.1", nil, []string{"192.168.1.10/32"}, false},
+		{"narrowed allowlist, bridge excluded", "off", "1", "172.17.0.1", nil, []string{"10.0.0.0/8"}, false},
+		{"narrowed allowlist, podman bridge excluded", "off", "1", "10.88.0.1", nil, []string{"10.1.0.0/16"}, false},
 		// A broader prefix that still overlaps the relay ranges keeps the
 		// warning, because the relay is still admitted.
-		{"catch-all allowlist still warns", "off", "0", nil, []string{"0.0.0.0/0"}, true},
+		{"catch-all allowlist still warns", "off", "0", "", nil, []string{"0.0.0.0/0"}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("OWNCORD_CONTAINER", tc.container)
+			routes := filepath.Join(t.TempDir(), "route")
+			if tc.gateway != "" {
+				gw := netip.MustParseAddr(tc.gateway).As4()
+				table := "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n" +
+					fmt.Sprintf("eth0\t00000000\t%08X\t0003\t0\t0\t0\t00000000\t0\t0\t0\n", binary.NativeEndian.Uint32(gw[:]))
+				if err := os.WriteFile(routes, []byte(table), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			api.SetRouteTablePathForTest(t, routes)
 			var buf bytes.Buffer
 			prev := slog.Default()
 			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
