@@ -227,6 +227,12 @@ or a plan. The most-used entries:
 - [docs/api.md](docs/api.md), [docs/protocol.md](docs/protocol.md), [docs/schema.md](docs/schema.md), [docs/server-configuration.md](docs/server-configuration.md) — reference contracts
 - [docs/plans/README.md](docs/plans/README.md) — plan index; records each plan's state and is the authority over a plan's own header
 
+Condensed context files for AI coding agents and new contributors, at the
+repository root (each names its sources, which win on conflict):
+[AGENTS.md](AGENTS.md), [PRD.md](PRD.md), [ARCHITECTURE.md](ARCHITECTURE.md),
+[DESIGN_SYSTEM.md](DESIGN_SYSTEM.md), [CODE_STYLE.md](CODE_STYLE.md),
+[DATABASE.md](DATABASE.md), [API.md](API.md), [SECURITY.md](SECURITY.md).
+
 Audits are dated snapshots and are not maintained after the fact — read them as
 history. [docs/README.md](docs/README.md#audits--dated-not-maintained) lists all
 nine, newest first.
