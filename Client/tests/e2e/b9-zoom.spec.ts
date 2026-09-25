@@ -221,7 +221,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
         actions: [
           page.locator(".connect-form button[type='submit']"),
           page.locator(".btn-add-server"),
-          page.locator(".form-switch a"),
+          page.locator(".form-switch > *"),
         ],
       };
       await expectScreenReflows(page, screen, testInfo);
