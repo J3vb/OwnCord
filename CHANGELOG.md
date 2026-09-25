@@ -274,14 +274,15 @@ server's internals were reorganised behind service boundaries.
   they were links without a destination, so a keyboard-only user could not
   sign up or start recovery.
 - **The Appearance theme and accent pickers are one Tab stop each**, moved with
-  the arrow keys, instead of thirteen separate stops.
+  the arrow keys, instead of one stop per tile and swatch.
 - Focus rings are restored on channel mentions and message-link chips, and on
   the status text field.
 - Composer refusals (message too long, uploads pending, a failed upload) now
   stay on screen until you edit or send again, and use a text colour that meets
   the contrast bar rather than vanishing after four seconds at about 3:1.
-- Destructive labels — Delete Channel, Log Out, "Offline" — use the accessible
-  danger text colour instead of the raw red fill colour.
+- Destructive and status labels — Delete Channel, Log Out, "Offline", a slow
+  server's latency — use the accessible danger text colour instead of the raw
+  red fill colour.
 - The in-app **Reduce Motion** toggle now also stops the connect-page background
   pulse and the primary-button shimmer.
 
