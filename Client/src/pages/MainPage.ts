@@ -81,6 +81,8 @@ import { startRingChime, stopRingChime } from "@lib/notifications";
 import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
 import { createChatArea } from "./main-page/ChatArea";
+import { createSidebarDrawer } from "./main-page/SidebarDrawer";
+import type { SidebarDrawer } from "./main-page/SidebarDrawer";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { NAVIGATION_DESTINATIONS } from "../features/navigation/destinations";
 import { createContentNavigator } from "../features/navigation/contentView";
@@ -271,6 +273,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // DM calls: the banner draws a ring, the controller owns its lifetime.
   let callBanner: IncomingCallBannerComponent | null = null;
   let ringCtrl: RingController | null = null;
+
+  // The narrow-width sidebar drawer (WCAG 1.4.10). Null above 800px in
+  // practice, but always created so the breakpoint is decided by CSS, not JS.
+  let sidebarDrawer: SidebarDrawer | null = null;
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -585,11 +591,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
 
     // The composer of the channel on screen, else the sidebar's first control.
-    const focusReachable = (): void => {
+    const focusReachable = (): HTMLElement | null => {
       const reachable =
         chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea:enabled") ??
         sidebar.sidebarWrapper.querySelector<HTMLElement>("button");
       reachable?.focus();
+      return reachable;
     };
 
     contentNav = createContentNavigator({
@@ -611,6 +618,19 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       chatAreaResult.dmProfileSlot,
     );
     root.appendChild(app);
+
+    // The narrow-width sidebar drawer (WCAG 1.4.10 Reflow): the header's menu
+    // button opens the existing sidebar over the chat area below 800px. Built
+    // after the sidebar is in `app`, so the backdrop shares their container.
+    sidebarDrawer = createSidebarDrawer({
+      sidebar: sidebar.sidebarWrapper,
+      toggle: chatAreaResult.sidebarToggle,
+      fallbackFocus: focusReachable,
+    });
+    unsubscribers.push(() => {
+      sidebarDrawer?.destroy();
+      sidebarDrawer = null;
+    });
 
     // --- Moderation notices (B9-15, Q4): persistent, above the app row ---
     const notices = new Disposable();

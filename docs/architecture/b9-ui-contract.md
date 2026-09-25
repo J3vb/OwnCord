@@ -42,6 +42,16 @@ the owner on 2026-09-23:
 Disabled controls are exempt from contrast, as WCAG allows. Colour is never
 the only signal: an error says it is an error in words.
 
+At 800px or less (a 1280px window at 200 % zoom) the sidebar collapses to
+zero width. Every entry point that lives only there — channels and DMs, the
+requests inbox, the Moderation Center, Settings and My reports — must stay
+reachable: the header's menu button opens the existing `.unified-sidebar` as
+an overlay drawer, which closes on Escape, on an outside click and after
+choosing a destination, moves focus into the drawer on open and back to the
+button on close, and exposes `aria-expanded`. Above 800px nothing changes.
+`Client/tests/e2e/b9-responsive-nav.spec.ts` pins the keyboard and pointer
+paths at the 640×400 zoom viewport.
+
 ## Colour tokens
 
 `Client/src/styles/tokens.css` holds the dark defaults, which midnight shares

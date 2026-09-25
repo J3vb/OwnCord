@@ -43,9 +43,10 @@ and only when it changes something a contributor or fork holder must do
 
 User-visible: you can now recover your own account without an email server,
 two-factor sign-in survives a server restart, the operator chooses who may
-register, messages can be set to expire, and deleting an account really
-deletes it. Not user-visible: the protocol carries a version number, and the
-server's internals were reorganised behind service boundaries.
+register, messages can be set to expire, deleting an account really deletes
+it, and a zoomed desktop window can still reach navigation. Not user-visible:
+the protocol carries a version number, and the server's internals were
+reorganised behind service boundaries.
 
 ### Login & connection
 
@@ -247,6 +248,14 @@ server's internals were reorganised behind service boundaries.
   outbound connection you did not configure.
 - Per-user volume settings and DM notes saved by an older client are now
   carried across to this version instead of being left behind.
+
+### Desktop UI
+
+- **A zoomed window can reach the sidebar again.** At 200 % zoom (or any
+  window at most 800 px wide) the sidebar collapsed to nothing and channels,
+  DMs, Message Requests, the Moderation Center and Settings became
+  unreachable. A menu button in the header now opens it as a drawer that
+  closes on Escape, on an outside click, and after choosing a destination.
 
 ### Admin panel
 
