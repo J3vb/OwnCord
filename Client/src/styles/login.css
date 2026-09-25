@@ -1009,6 +1009,8 @@
 }
 .totp-backup-link {
   display: block;
+  /* A block <button> shrinks to its text; span the row like the old <a>. */
+  width: 100%;
   text-align: center;
   margin-top: 8px;
   font-size: var(--font-size-xs);
