@@ -47,7 +47,7 @@ function formatLogEntry(entry: LogEntry): HTMLDivElement {
   const textEl = createElement(
     "span",
     {
-      style: `color: ${LOG_LEVEL_COLORS[entry.level]}`,
+      style: `color: ${LOG_LEVEL_COLORS[entry.level]}; overflow-wrap: anywhere;`,
     },
     text,
   );

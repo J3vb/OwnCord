@@ -585,6 +585,14 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       page,
     }, testInfo) => {
       const panel = await openConnectSettings(page);
+      // Real logs carry unbroken URLs, tokens and hashes; one must wrap, not scroll sideways.
+      await page.evaluate(async () => {
+        const loggerPath = "/src/lib/logger.ts";
+        const { createLogger } = (await import(
+          /* @vite-ignore */ loggerPath
+        )) as typeof import("../../src/lib/logger");
+        createLogger("zoom").warn(`fetch failed https://example.invalid/${"a".repeat(300)}`);
+      });
       await expectSettingsTabReflows(page, panel, "Logs", testInfo);
     });
   });
