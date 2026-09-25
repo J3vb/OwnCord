@@ -196,13 +196,13 @@ server's internals were reorganised behind service boundaries.
 - **First-run setup asks for a setup token.** The server prints a one-time
   token in its start-up output while setup is open, and the setup wizard asks
   for it before creating the Owner account. Restarting the server prints a
-  fresh token, which is how you reopen setup.
+  fresh token, which is how you get one after reopening setup.
 - **The `.env.example` placeholder LiveKit credentials are refused** like the
   `devkey` defaults: voice stays off until real values are set.
 - **A start-up warning** names an admin allowlist that will see a proxy's or
   container relay's address because `server.trusted_proxies` is empty. It stays
-  silent once the allowlist no longer admits the loopback or bridge range, so
-  narrowing `server.admin_allowed_cidrs` is a real fix.
+  silent once the allowlist no longer admits loopback or the container's bridge
+  gateway, so narrowing `server.admin_allowed_cidrs` is a real fix.
 - **ARM64 server builds.** Releases now carry four server assets instead of
   two: `chatserver.exe` and `chatserver-windows-arm64.exe` for Windows,
   `chatserver-linux-amd64.tar.gz` and `chatserver-linux-arm64.tar.gz` for
