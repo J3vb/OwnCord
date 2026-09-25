@@ -21,4 +21,7 @@ Three things worth knowing before you open a pull request:
 
 New to the codebase? [docs/README.md](docs/README.md) indexes everything, and
 [docs/architecture/](docs/architecture/README.md) explains how the server and
-client fit together.
+client fit together. Working with an AI coding agent? Point it at
+[AGENTS.md](AGENTS.md), which routes each kind of change to the one condensed
+context file it needs ([ARCHITECTURE.md](ARCHITECTURE.md),
+[CODE_STYLE.md](CODE_STYLE.md) and the others at the repository root).
