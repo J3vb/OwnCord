@@ -27,6 +27,12 @@ type SetupOptions struct {
 	RunningCfg *config.Config
 	// Restart replaces the process-restart hook (tests). Nil = requestRestart.
 	Restart func(reason string)
+	// SetupToken, when non-empty, must accompany POST /api/setup. The server
+	// generates one per start and prints it to its own console only, so
+	// creating the owner account takes access to the host's start-up output,
+	// not just an address inside admin_allowed_cidrs. Empty = not required
+	// (the direct-construction test path).
+	SetupToken string
 }
 
 // ─── Wizard payload ──────────────────────────────────────────────────────────

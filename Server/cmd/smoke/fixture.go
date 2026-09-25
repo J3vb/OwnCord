@@ -169,8 +169,9 @@ func runSetup(baseURL string) (string, error) {
 	// very file whose hash the rehearsal compares, so the fixture would be
 	// mutating the thing under test and racing a restart while doing it.
 	body, err := json.Marshal(map[string]any{
-		"username": fixtureUser,
-		"password": fixturePassword,
+		"username":    fixtureUser,
+		"password":    fixturePassword,
+		"setup_token": rehearsalSetupToken,
 		"wizard": map[string]any{
 			"server_name": "Upgrade Rehearsal",
 			"motd":        "rehearsal fixture",

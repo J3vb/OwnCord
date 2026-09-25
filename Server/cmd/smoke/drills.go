@@ -474,7 +474,7 @@ func (d *drill) bootAt(dir, logName string, extraEnv ...string) error {
 	if err := os.MkdirAll(filepath.Join(dir, "data"), 0o700); err != nil {
 		return err
 	}
-	s, err := start(d.bin, dir, name, append([]string{noLiveKitDownload}, extraEnv...)...)
+	s, err := start(d.bin, dir, name, append([]string{noLiveKitDownload, setupTokenEnv}, extraEnv...)...)
 	if err != nil {
 		return err
 	}
@@ -1955,7 +1955,7 @@ func (d *drill) stepCBrokenConfig() ([]failure, error) {
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(broken), 0o600); err != nil {
 		return nil, err
 	}
-	s, err := start(d.bin, dir, "C-broken.log", noLiveKitDownload)
+	s, err := start(d.bin, dir, "C-broken.log", noLiveKitDownload, setupTokenEnv)
 	if err != nil {
 		return nil, err
 	}

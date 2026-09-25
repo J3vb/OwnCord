@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -28,6 +29,9 @@ type setupStatusResponse struct {
 type setupRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	// SetupToken is the one-time token the server printed at start-up; see
+	// SetupOptions.SetupToken.
+	SetupToken string `json:"setup_token"`
 	// Wizard carries the optional first-run configuration. Absent = legacy
 	// behaviour: create the owner account only.
 	Wizard *setupWizardRequest `json:"wizard,omitempty"`
@@ -127,7 +131,7 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 	proxyNets := setupParseCIDRList(trustedProxies)
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		req, host, ok := setupPrecheck(w, r, limiter, allowedOrigins, proxyNets)
+		req, host, ok := setupPrecheck(w, r, limiter, allowedOrigins, proxyNets, opts.SetupToken)
 		if !ok {
 			return
 		}
@@ -182,7 +186,7 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 // the caller from config.Server.TrustedProxies) makes both honour
 // trusted_proxies the same way every other session-creating path does
 // (OC-0274) instead of trusting the raw, possibly-a-proxy RemoteAddr.
-func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLimiter, allowedOrigins []string, proxyNets []*net.IPNet) (setupRequest, string, bool) {
+func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLimiter, allowedOrigins []string, proxyNets []*net.IPNet, setupToken string) (setupRequest, string, bool) {
 	var req setupRequest
 
 	// CSRF protection: reject cross-origin requests (BUG-097).
@@ -208,6 +212,14 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		return req, "", false
+	}
+
+	// Checked after the rate limit, so guesses are bounded like any other
+	// setup attempt, and before any other field is looked at.
+	if setupToken != "" && subtle.ConstantTimeCompare([]byte(req.SetupToken), []byte(setupToken)) != 1 {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN",
+			"setup token missing or incorrect — copy it from the server's start-up output")
 		return req, "", false
 	}
 

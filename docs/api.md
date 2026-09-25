@@ -3100,13 +3100,18 @@ flag (migration 043) is unset — the flag is set in the same transaction as the
 first owner and never cleared by the server, so erasing every account does not
 reopen the wizard; afterwards the endpoint returns an error.
 
-**Auth:** None (public)
+**Auth:** None (public), plus the one-time setup token
 **Rate limit:** 5 requests/minute per IP
+
+`setup_token` must equal the token the server printed in its start-up output
+(or `OWNCORD_SETUP_TOKEN` when that is set); a missing or different value is
+`403 FORBIDDEN`. The server makes a fresh token each time it starts.
 
 #### Request
 
 ```json
 {
+  "setup_token": "token-from-start-up-output",
   "username": "owner",
   "password": "MyStr0ng!Pass",
   "wizard": {

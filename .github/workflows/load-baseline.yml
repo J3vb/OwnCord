@@ -132,6 +132,9 @@ jobs:
       CEILING_MAX: ${{ inputs.ceiling_max }}
       SEED_USERS_INPUT: ${{ inputs.users }}
       CONNECTIONS: ${{ inputs.connections }}
+      # Fixed first-run setup token for the throwaway server, so the seed
+      # step can complete setup without reading its console.
+      OWNCORD_SETUP_TOKEN: load-baseline-setup-token
     strategy:
       fail-fast: false
       matrix:
@@ -361,6 +364,7 @@ jobs:
             --memory=4g --memory-swap=4g \
             -v "$WORK:/app" -w /app \
             -e OWNCORD_SECURITY_AUTH_RATE_LIMIT_MULTIPLIER=100 \
+            -e OWNCORD_SETUP_TOKEN \
             -e OWNCORD_VOICE_LIVEKIT_API_KEY="$LIVEKIT_API_KEY" \
             -e OWNCORD_VOICE_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET" \
             -e OWNCORD_VOICE_LIVEKIT_URL=ws://127.0.0.1:7880 \
@@ -440,7 +444,7 @@ jobs:
           BASE="$HTTP_BASE"
           TOKEN=$(curl -sk -X POST "$BASE/admin/api/setup" \
             -H 'Content-Type: application/json' \
-            -d '{"username":"loadadmin","password":"LoadTest123!Admin"}' | jq -r .token)
+            -d "$(jq -nc --arg t "$OWNCORD_SETUP_TOKEN" '{username:"loadadmin",password:"LoadTest123!Admin",setup_token:$t}')" | jq -r .token)
           if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
             echo "::error::setup failed"
             exit 1

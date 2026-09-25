@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test, expect } from "./fixtures";
+import { SETUP_TOKEN } from "../support/server";
 
 // One atomic user journey with a fresh process/database on EVERY attempt.
 // Retries must replay setup, not silently replace the wizard with login.
@@ -25,6 +26,7 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page }) => {
     await page.locator("#wizardBox .btn-accent", { hasText: "Get Started" }).click();
 
     // Account step.
+    await page.locator("#wizToken").fill(SETUP_TOKEN);
     await page.locator("#wizUser").fill(OWNER.username);
     await page.locator("#wizPass").fill(OWNER.password);
     await page.locator("#wizConfirm").fill(OWNER.password);

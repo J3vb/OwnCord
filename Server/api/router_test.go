@@ -619,3 +619,41 @@ func TestReachabilityWarningsAreNotGatedByTheFlag(t *testing.T) {
 		t.Errorf("the node_ip warning was silenced by the report flag being off:\n%s", buf.String())
 	}
 }
+
+// TestWarnOnServerConfig_AdminPeerAddress pins the start-up warning for an
+// admin perimeter that would compare a relay's address: trusted_proxies empty
+// with TLS off (a terminating proxy in front) or inside a container.
+func TestWarnOnServerConfig_AdminPeerAddress(t *testing.T) {
+	cases := []struct {
+		name      string
+		tlsMode   string
+		container string
+		trusted   []string
+		allowed   []string
+		wantWarn  bool
+	}{
+		{"tls off, no trusted proxies", "off", "0", nil, []string{"127.0.0.0/8"}, true},
+		{"container, no trusted proxies", "self_signed", "1", nil, []string{"172.16.0.0/12"}, true},
+		{"trusted proxies set", "off", "1", []string{"127.0.0.1/32"}, []string{"127.0.0.0/8"}, false},
+		{"direct TLS on the host", "self_signed", "0", nil, []string{"127.0.0.0/8"}, false},
+		{"perimeter disabled", "off", "1", nil, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("OWNCORD_CONTAINER", tc.container)
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
+			api.WarnOnServerConfigForTest(&config.Config{
+				Server: config.ServerConfig{TrustedProxies: tc.trusted, AdminAllowedCIDRs: tc.allowed},
+				TLS:    config.TLSConfig{Mode: tc.tlsMode},
+			})
+
+			if got := strings.Contains(buf.String(), "trusted_proxies is empty"); got != tc.wantWarn {
+				t.Errorf("warned = %v, want %v; log:\n%s", got, tc.wantWarn, buf.String())
+			}
+		})
+	}
+}

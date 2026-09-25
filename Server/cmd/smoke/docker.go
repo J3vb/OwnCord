@@ -213,7 +213,8 @@ func (t *dockerTarget) start(version string) error {
 		"-p", containerPublish,
 		"--cap-drop=ALL",
 		"--security-opt=no-new-privileges:true",
-		"-e", noLiveKitDownload)
+		"-e", noLiveKitDownload,
+		"-e", setupTokenEnv)
 	for _, kv := range t.extraEnv {
 		args = append(args, "-e", kv)
 	}

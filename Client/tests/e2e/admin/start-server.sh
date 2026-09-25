@@ -28,6 +28,8 @@ cleanup() {
 trap cleanup EXIT
 
 cd "$RUN_DIR"
+# Fixed first-run setup token, the same one tests/e2e/support/server.ts uses.
+OWNCORD_SETUP_TOKEN=owncord-e2e-setup-token \
 OWNCORD_SERVER_PORT="$PORT" \
 OWNCORD_SERVER_DATA_DIR="$RUN_DIR/data" \
 OWNCORD_DATABASE_PATH="$RUN_DIR/data/chatserver.db" \

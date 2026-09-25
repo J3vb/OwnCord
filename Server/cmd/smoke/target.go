@@ -55,6 +55,15 @@ const defaultBaseURL = "https://127.0.0.1:8443"
 // so the file under test is untouched.
 const noLiveKitDownload = "OWNCORD_VOICE_AUTO_DOWNLOAD_LIVEKIT=false"
 
+// setupTokenEnv fixes the first-run setup token of every server the
+// rehearsal launches, so installFixture can complete setup without reading
+// the console. A release older than the token ignores both the variable and
+// the request field.
+const (
+	rehearsalSetupToken = "rehearsal-setup-token" //nolint:gosec // throwaway temp-dir server, like fixturePassword
+	setupTokenEnv       = "OWNCORD_SETUP_TOKEN=" + rehearsalSetupToken
+)
+
 // newTarget builds the deployment mode the flags selected.
 func newTarget(oldRef, newRef string, useDocker bool) (target, error) {
 	if useDocker {
@@ -125,7 +134,7 @@ func (t *standaloneTarget) start(version string) error {
 		return fmt.Errorf("start %s: the %s server has not been drained", version, t.version)
 	}
 	t.boots++
-	s, err := start(bin, t.dir, fmt.Sprintf("boot%d-%s.log", t.boots, version), noLiveKitDownload)
+	s, err := start(bin, t.dir, fmt.Sprintf("boot%d-%s.log", t.boots, version), noLiveKitDownload, setupTokenEnv)
 	if err != nil {
 		return err
 	}

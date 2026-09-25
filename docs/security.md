@@ -101,6 +101,15 @@ Users can delete their own account via `DELETE /api/v1/auth/account` with passwo
 
 ## First-run setup
 
+While setup is open the server prints a one-time **setup token** in its
+start-up output, beside the banner, and `POST /admin/api/setup` refuses any
+request that does not carry it. The admin IP allowlist compares the connecting
+address, so behind a same-host reverse proxy or a container port relay with
+`server.trusted_proxies` empty every request looks local; the token keeps
+creating the Owner account tied to access to the server's own console. It is
+written to stderr only, never to the log stream, and is regenerated at every
+start unless `OWNCORD_SETUP_TOKEN` pins it for a scripted install.
+
 `POST /admin/api/setup` is unauthenticated: it is how the first Owner account
 comes to exist, and until B4-10 the only thing standing in front of it was
 "no users exist". Account erasure can now empty that table — the

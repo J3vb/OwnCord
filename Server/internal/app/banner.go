@@ -1,6 +1,7 @@
 package app
 
 import (
+	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"net"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/diskutil"
@@ -60,6 +62,32 @@ func printBanner(cfg *config.Config, ver string, tls bool) {
 		bannerQualifier(addrKind, localIP, port))
 
 	_, _ = fmt.Fprint(os.Stderr, banner)
+}
+
+// setupToken returns the token the first-run setup wizard requires:
+// OWNCORD_SETUP_TOKEN when set (scripted installs and test harnesses), else a
+// fresh random one for this process.
+func setupToken() string {
+	if t := strings.TrimSpace(os.Getenv("OWNCORD_SETUP_TOKEN")); t != "" {
+		return t
+	}
+	return rand.Text()
+}
+
+// printSetupToken writes the setup token to stderr beside the banner. It is
+// deliberately never passed to slog: the log buffer is streamed to the admin
+// panel and may be shipped elsewhere, and the token must stay on the console
+// of whoever started the server.
+func printSetupToken(token string) {
+	_, _ = fmt.Fprintf(os.Stderr, `   ─────────────────────────────────────────────
+    First-run setup is open. The setup wizard at /admin asks for
+    this token; it is valid until setup completes or the server
+    restarts.
+
+    Setup token  %s
+   ─────────────────────────────────────────────
+
+`, token)
 }
 
 // wsURL builds the WebSocket URL with the correct scheme.
