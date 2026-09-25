@@ -1410,10 +1410,11 @@ open a circuit breaker that skips one tick and then retries:
 
 The server handles `Ctrl+C` (SIGINT) and `SIGTERM`:
 
-1. Unregisters the signal handler and cancels the root context
-2. Shuts down the ACME listener, then drains in-flight HTTP handlers
-3. Stops the hub on the same 30-second budget: sends the restart notice,
+1. Shuts down the ACME listener, then drains in-flight HTTP handlers
+2. Stops the hub on the same 30-second budget: sends the restart notice,
    stops the LiveKit process and closes every WebSocket connection
+3. Unregisters the signal handler, so a second `Ctrl+C` during steps 1–2 does
+   not cut the drain short
 4. Joins the maintenance loop, flushes the audit queue and drains event
    persistence
 5. Stops the router's cleanup goroutine, closes the plugin runtime, shuts

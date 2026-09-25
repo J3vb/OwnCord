@@ -530,29 +530,29 @@ close function, which is exactly what B3-3's failure-injection test now pins.
 order. There is no `defer` stack and no second teardown path: `App.Run` closes
 on every return — a failed start, a serve error and a clean shutdown alike.
 
-| #   | Stage (`App.stages()`) | Close step, and what it does                                                      |
-| --- | ---------------------- | --------------------------------------------------------------------------------- |
-| 1   | (in `Run`) `bgCtx`     | `background-context` — cancels bgCtx; registered first, so it runs **last**       |
-| 2   | `data-dir`             | —                                                                                 |
-| 3   | `tls`                  | —                                                                                 |
-| 4   | `database`             | `database` — `database.Close()`, registered before the migration runs             |
-| 5   | `migrate`              | —                                                                                 |
-| 6   | `erasure-markers`      | `erasure-markers` — `markers.Close()`, releases the deletion-marker file          |
-| 7   | `push-vapid-key`       | —                                                                                 |
-| 8   | `telemetry`            | `telemetry` — bounded OTel shutdown                                               |
-| 9   | `plugins`              | `plugins` — `registry.Close`                                                      |
-| 10  | `hub`                  | `hub` — `GracefulStopContext`, the only caller of `LiveKitProcess.Stop`           |
-| 11  | `router`               | `router` — the rate-limiter cleanup goroutine                                     |
-| 12  | `event-persistence`    | `event-persistence` — drains the persister, cancels bgCtx, joins the pruner       |
-| 13  | `audit-writer`         | `audit-writer` — drains the audit queue                                           |
-| 14  | `maintenance`          | `maintenance` — joins the maintenance loop                                        |
-| 15  | `acme`                 | — (shut down by the `http` step, in the order the drain requires)                 |
-| 16  | `http`                 | `http` — ACME shutdown, then in-flight handlers, then the hub, on one 30s budget  |
-| 17  | `signals`              | `signals` — unregisters the signal handler; registered last, so it runs **first** |
+| #   | Stage (`App.stages()`) | Close step, and what it does                                                                                              |
+| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 1   | (in `Run`) `bgCtx`     | `background-context` — cancels bgCtx; registered first, so it runs **last**                                               |
+| 2   | `data-dir`             | —                                                                                                                         |
+| 3   | `tls`                  | —                                                                                                                         |
+| 4   | `database`             | `database` — `database.Close()`, registered before the migration runs                                                     |
+| 5   | `migrate`              | —                                                                                                                         |
+| 6   | `erasure-markers`      | `erasure-markers` — `markers.Close()`, releases the deletion-marker file                                                  |
+| 7   | `push-vapid-key`       | —                                                                                                                         |
+| 8   | `telemetry`            | `telemetry` — bounded OTel shutdown                                                                                       |
+| 9   | `plugins`              | `plugins` — `registry.Close`                                                                                              |
+| 10  | `hub`                  | `hub` — `GracefulStopContext`, the only caller of `LiveKitProcess.Stop`                                                   |
+| 11  | `router`               | `router` — the rate-limiter cleanup goroutine                                                                             |
+| 12  | `event-persistence`    | `event-persistence` — drains the persister, cancels bgCtx, joins the pruner                                               |
+| 13  | `audit-writer`         | `audit-writer` — drains the audit queue                                                                                   |
+| 14  | `maintenance`          | `maintenance` — joins the maintenance loop                                                                                |
+| 15  | `acme`                 | — (shut down by the `http` step, in the order the drain requires)                                                         |
+| 16  | `signals`              | `signals` — unregisters the signal handler; armed before the bind retry below                                             |
+| 17  | `http`                 | `http` — ACME shutdown, then in-flight handlers, then the hub, on one 30s budget, then `listener` releases the bound port |
 
-Close order is therefore `signals`, `http`, `maintenance`, `audit-writer`,
+Close order is therefore `http`, `listener`, `signals`, `maintenance`, `audit-writer`,
 `event-persistence`, `router`, `hub`, `plugins`, `telemetry`,
-`erasure-markers`, `database`, `background-context`. All three facts hold, and
+`erasure-markers`, `database`, `background-context`. All four facts hold, and
 now hold **because of the ordering rule** rather than because of where a
 `defer` happened to sit: `push-vapid-key` is deliberately absent — it registers
 no closer.
@@ -563,7 +563,11 @@ no closer.
   the event persister are still live — which is why ACME and the HTTP server
   start one stage after the maintenance loop rather than before it;
 - the `hub` step is reached on every return from `Run`, so a supervised
-  livekit-server process is never orphaned (OC-0027).
+  livekit-server process is never orphaned (OC-0027);
+- `signals` starts before `http`, whose bind retries for about 10 seconds
+  while the port is in use: a SIGINT/SIGTERM in that window cancels the serve
+  context and drains through `Close` instead of killing the process with the
+  LiveKit child and queued audit and event rows still live.
 
 `App.Close` reports the **first** error and still runs every later step: the
 steps below a failing one are the ones that release the database handle, the

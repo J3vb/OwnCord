@@ -41,7 +41,7 @@ type stage struct {
 }
 
 // stages is the start sequence. Close walks the steps these register in
-// reverse, so this list IS the shutdown order read backwards. Two orderings
+// reverse, so this list IS the shutdown order read backwards. Three orderings
 // here are load-bearing rather than incidental:
 //
 //   - the database opens before the audit writer and event persistence start,
@@ -49,7 +49,11 @@ type stage struct {
 //   - ACME and the HTTP server start AFTER the maintenance loop, so the
 //     reverse walk drains in-flight HTTP handlers (whose broadcasts must
 //     still reach a live hub) before anything else is stopped — which is the
-//     order run()'s explicit shutdown call used to impose by hand.
+//     order run()'s explicit shutdown call used to impose by hand;
+//   - signals are armed BEFORE the http stage, whose bind retries for about
+//     ten seconds while the port is in use: a SIGINT/SIGTERM in that window
+//     must drain through Close, not kill the process with the LiveKit child
+//     and the audit and event queues already running.
 func (a *App) stages() []stage {
 	return []stage{
 		{"data-dir", a.startDataDir},
