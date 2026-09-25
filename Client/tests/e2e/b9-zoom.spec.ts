@@ -105,7 +105,6 @@ const MY_REPORTS = [
   },
 ];
 
-const OPEN = "a".repeat(32);
 const MINE = "d".repeat(32);
 
 const modRow = (id: string, state: string, assignee: number, reason: string, target = "user") => ({
