@@ -100,6 +100,18 @@ server's internals were reorganised behind service boundaries.
   warns, never refuses — a LAN-only or Tailscale-only server has a good reason
   to use a private address there.
 
+### Desktop UI
+
+- **Every right-click menu is usable without a mouse.** The member, channel, DM
+  and voice-participant menus open with **Shift+F10** (or the Menu key) on a
+  focused row, move with the arrow keys and Home/End, open the Change Role and
+  Move-to submenus with the right arrow, close with Escape, and return focus to
+  the row you opened them from. Moderators could previously only ban, kick,
+  change a role, server-mute or move a user — and members only block or mute —
+  by right-clicking.
+- The channel menu gains **Move Up** and **Move Down** for channel managers, so
+  reordering no longer needs a drag.
+
 ### Accounts & admin
 
 - The connectivity diagnostics now name the kind of address a client connected
