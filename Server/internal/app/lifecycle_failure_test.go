@@ -309,7 +309,7 @@ func TestAppRun_CallerCancel_KeepsBackgroundWorkersAliveThroughTheDrain(t *testi
 	}
 
 	// The steps that must find bgCtx still live, in the order Close runs them.
-	for _, stage := range []string{"signals", "http", "maintenance", "audit-writer"} {
+	for _, stage := range []string{"http", "signals", "maintenance", "audit-writer"} {
 		if err, ran := bgErrAt[stage]; !ran {
 			t.Errorf("the %q close step never ran", stage)
 		} else if err != nil {

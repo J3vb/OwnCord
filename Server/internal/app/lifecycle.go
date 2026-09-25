@@ -66,8 +66,8 @@ func (a *App) stages() []stage {
 		{"audit-writer", a.startAuditWriter},
 		{"maintenance", a.startMaintenance},
 		{"acme", a.startACME},
-		{"http", a.startHTTP},
 		{"signals", a.startSignals},
+		{"http", a.startHTTP},
 	}
 }
 
