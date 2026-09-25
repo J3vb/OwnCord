@@ -23,6 +23,7 @@ import { formatUntil, safetyText } from "../i18n/safety";
 import { voiceStore, getChannelVoiceUsers, getPeerVerification } from "@stores/voice.store";
 import type { PeerVerification, VoiceUser } from "@stores/voice.store";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
+import { openMenuOnKeyboard } from "@lib/context-menu";
 import { attachStreamPreview, attachScrollCollapse } from "@lib/streamPreview";
 import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
@@ -461,6 +462,15 @@ function renderVoiceChannelItem(
         class: rowClasses,
         "data-voice-uid": String(user.userId),
       });
+      // A remote participant's row opens the per-user volume/moderation menu
+      // (A11Y-01): make it a focusable button-like row so the menu is reachable
+      // from the keyboard too. The local user's own row has no menu.
+      const ownRow = getCurrentUser()?.id === user.userId;
+      if (!ownRow) {
+        row.tabIndex = 0;
+        row.setAttribute("role", "button");
+        row.setAttribute("aria-haspopup", "menu");
+      }
 
       // Render the same identity a rename shows everywhere else (member list,
       // message rows, DM sidebar) — memberDisplayName prefers the nickname,
@@ -573,25 +583,31 @@ function renderVoiceChannelItem(
 
       // Right-click for per-user volume (skip for own user)
       if (currentUser === null || currentUser.id !== user.userId) {
+        const openVolumeMenu = (x: number, y: number): void => {
+          showUserVolumeMenu(
+            user.userId,
+            user.username || shellText("common.unknown"),
+            x,
+            y,
+            // lifetimeSignal (not the per-render `signal`): the menu is
+            // mounted on document.body, independent of this row's render,
+            // and must not be torn down by an unrelated re-render (OC-0282).
+            lifetimeSignal,
+            buildVoiceModOptions(channel.id, user, onVoiceModerate),
+          );
+        };
         row.addEventListener(
           "contextmenu",
           (e) => {
             e.preventDefault();
             e.stopPropagation();
-            showUserVolumeMenu(
-              user.userId,
-              user.username || shellText("common.unknown"),
-              e.clientX,
-              e.clientY,
-              // lifetimeSignal (not the per-render `signal`): the menu is
-              // mounted on document.body, independent of this row's render,
-              // and must not be torn down by an unrelated re-render (OC-0282).
-              lifetimeSignal,
-              buildVoiceModOptions(channel.id, user, onVoiceModerate),
-            );
+            openVolumeMenu(e.clientX, e.clientY);
           },
           { signal },
         );
+        // Keyboard entry point (A11Y-01): Shift+F10 / Menu key on the focused
+        // participant row opens the same menu.
+        openMenuOnKeyboard(row, openVolumeMenu, signal);
       }
 
       // Click to watch stream (if user has camera or screenshare)
@@ -689,6 +705,8 @@ function renderChannelItem(
     onEditChannel,
     onDeleteChannel,
     onPurgeChannel,
+    channels,
+    onReorderChannel,
   );
   if (containerEl !== undefined && channels !== undefined) {
     attachDragHandlers(

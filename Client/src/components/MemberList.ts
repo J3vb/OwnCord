@@ -18,6 +18,7 @@ import { blocksStore } from "@stores/blocks.store";
 import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { createMemberContextMenu } from "@components/AdminActions";
 import type { UserProfilePopupComponent } from "@components/UserProfilePopup";
+import { openMenuOnKeyboard } from "@lib/context-menu";
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
 import { roleHasPermission } from "@lib/permissions";
 import { createAvatarElement } from "@lib/avatar";
@@ -340,94 +341,101 @@ function createMemberItem(
     { signal },
   );
 
-  // Context menu for admin actions
+  // Context menu for admin actions. `openContextMenu` takes viewport
+  // coordinates; the keyboard path (Shift+F10 / the Menu key) anchors to the
+  // row's own edge instead of a pointer position.
+  const openContextMenu = (clientX: number, clientY: number): void => {
+    // Don't show context menu for yourself
+    const currentUserId = authStore.getState().user?.id ?? 0;
+    if (member.id === currentUserId) return;
+
+    // Moderation actions are permission-gated per item (a role name told us
+    // nothing about what its bits allow); block/unblock is open to everyone.
+    // The role name is read live from authStore, not the opts snapshot
+    // taken once at mount -- dispatcher.ts keeps authStore.user.role
+    // current on every self MEMBER_UPDATE precisely so gates like this one
+    // see a promotion/demotion without waiting for the sidebar to rebuild.
+    const gates = moderationGates(authStore.getState().user?.role ?? opts.currentUserRole);
+    const showAdminActions = gates.canKick || gates.canBan || gates.canManageRoles;
+
+    closeActiveMenu();
+    releaseMenuDismiss();
+
+    // Roles come from the server's `ready` payload — a hardcoded list made
+    // custom roles unreachable and, worse, unresolvable to a role id, so
+    // picking one silently did nothing.
+    const availableRoles = assignableRoleNames();
+    const isBlocked = blocksStore.getState().blockedByMe.has(member.id);
+
+    activeMenu = createMemberContextMenu({
+      userId: member.id,
+      username: member.username,
+      currentRole: member.role.toLowerCase(),
+      availableRoles,
+      showAdminActions,
+      canKick: gates.canKick,
+      canBan: gates.canBan,
+      canManageRoles: gates.canManageRoles,
+      isBlocked,
+      onToggleBlock: () => opts.onToggleBlock(member.id, member.username, !isBlocked),
+      onKick: () => opts.onKick(member.id, member.username),
+      onBan: (reason: string, durationHours: number) =>
+        opts.onBan(member.id, member.username, reason, durationHours),
+      onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
+    });
+
+    // Position at the anchor, kept on screen: a member low in the list at the
+    // 940x500 minimum window opened the menu past the bottom edge, leaving
+    // Force Logout, Ban and Block unreachable. When it does not fit below
+    // the anchor it is anchored by its bottom edge instead. The placement
+    // is re-run whenever the menu resizes, so the ban form expanding later
+    // cannot push Confirm Ban and Block off-screen from either anchor.
+    const menuEl = activeMenu.element;
+    menuEl.style.position = "fixed";
+    menuEl.style.zIndex = "1000";
+    document.body.appendChild(menuEl);
+    const margin = 8;
+    const place = (): void => {
+      const { innerWidth: vw, innerHeight: vh } = window;
+      const height = menuEl.offsetHeight;
+      const left = Math.min(clientX, vw - menuEl.offsetWidth - margin);
+      menuEl.style.left = `${Math.max(margin, left)}px`;
+      if (clientY + height > vh - margin) {
+        const bottom = Math.min(vh - clientY, vh - height - margin);
+        menuEl.style.top = "";
+        menuEl.style.bottom = `${Math.max(margin, bottom)}px`;
+      } else {
+        menuEl.style.bottom = "";
+        menuEl.style.top = `${clientY}px`;
+      }
+    };
+    place();
+
+    // Close on outside click (deferred so this click doesn't close it)
+    const dismiss = new Disposable();
+    menuDismiss = dismiss;
+    const resizeObserver = new ResizeObserver(place);
+    resizeObserver.observe(menuEl);
+    dismiss.addCleanup(() => resizeObserver.disconnect());
+    setOwnedTimeout(
+      dismiss.signal,
+      () => {
+        document.addEventListener("mousedown", handleOutsideClick, { signal: dismiss.signal });
+      },
+      0,
+    );
+  };
   item.addEventListener(
     "contextmenu",
     (e) => {
       e.preventDefault();
-
-      // Don't show context menu for yourself
-      const currentUserId = authStore.getState().user?.id ?? 0;
-      if (member.id === currentUserId) return;
-
-      // Moderation actions are permission-gated per item (a role name told us
-      // nothing about what its bits allow); block/unblock is open to everyone.
-      // The role name is read live from authStore, not the opts snapshot
-      // taken once at mount -- dispatcher.ts keeps authStore.user.role
-      // current on every self MEMBER_UPDATE precisely so gates like this one
-      // see a promotion/demotion without waiting for the sidebar to rebuild.
-      const gates = moderationGates(authStore.getState().user?.role ?? opts.currentUserRole);
-      const showAdminActions = gates.canKick || gates.canBan || gates.canManageRoles;
-
-      closeActiveMenu();
-      releaseMenuDismiss();
-
-      // Roles come from the server's `ready` payload — a hardcoded list made
-      // custom roles unreachable and, worse, unresolvable to a role id, so
-      // picking one silently did nothing.
-      const availableRoles = assignableRoleNames();
-      const isBlocked = blocksStore.getState().blockedByMe.has(member.id);
-
-      activeMenu = createMemberContextMenu({
-        userId: member.id,
-        username: member.username,
-        currentRole: member.role.toLowerCase(),
-        availableRoles,
-        showAdminActions,
-        canKick: gates.canKick,
-        canBan: gates.canBan,
-        canManageRoles: gates.canManageRoles,
-        isBlocked,
-        onToggleBlock: () => opts.onToggleBlock(member.id, member.username, !isBlocked),
-        onKick: () => opts.onKick(member.id, member.username),
-        onBan: (reason: string, durationHours: number) =>
-          opts.onBan(member.id, member.username, reason, durationHours),
-        onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
-      });
-
-      // Position at mouse, kept on screen: a member low in the list at the
-      // 940x500 minimum window opened the menu past the bottom edge, leaving
-      // Force Logout, Ban and Block unreachable. When it does not fit below
-      // the pointer it is anchored by its bottom edge instead. The placement
-      // is re-run whenever the menu resizes, so the ban form expanding later
-      // cannot push Confirm Ban and Block off-screen from either anchor.
-      const menuEl = activeMenu.element;
-      menuEl.style.position = "fixed";
-      menuEl.style.zIndex = "1000";
-      document.body.appendChild(menuEl);
-      const margin = 8;
-      const place = (): void => {
-        const { innerWidth: vw, innerHeight: vh } = window;
-        const height = menuEl.offsetHeight;
-        const left = Math.min(e.clientX, vw - menuEl.offsetWidth - margin);
-        menuEl.style.left = `${Math.max(margin, left)}px`;
-        if (e.clientY + height > vh - margin) {
-          const bottom = Math.min(vh - e.clientY, vh - height - margin);
-          menuEl.style.top = "";
-          menuEl.style.bottom = `${Math.max(margin, bottom)}px`;
-        } else {
-          menuEl.style.bottom = "";
-          menuEl.style.top = `${e.clientY}px`;
-        }
-      };
-      place();
-
-      // Close on outside click (deferred so this click doesn't close it)
-      const dismiss = new Disposable();
-      menuDismiss = dismiss;
-      const resizeObserver = new ResizeObserver(place);
-      resizeObserver.observe(menuEl);
-      dismiss.addCleanup(() => resizeObserver.disconnect());
-      setOwnedTimeout(
-        dismiss.signal,
-        () => {
-          document.addEventListener("mousedown", handleOutsideClick, { signal: dismiss.signal });
-        },
-        0,
-      );
+      openContextMenu(e.clientX, e.clientY);
     },
     { signal },
   );
+  // Keyboard entry point (A11Y-01): Shift+F10 / Menu key opens the menu,
+  // focused on its first item, and Escape restores focus to this row.
+  openMenuOnKeyboard(item, openContextMenu, signal);
 
   return item;
 }

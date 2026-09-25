@@ -7,6 +7,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { createMenuItem } from "@lib/context-menu";
 import { shellText } from "../i18n/shell";
 
 /** Server-side bounds on one purge request (docs/api.md). */
@@ -48,11 +49,9 @@ export function appendPurgeSection(menu: HTMLElement, opts: PurgeSectionOptions)
     menu.appendChild(createElement("div", { class: opts.separatorClass }));
   }
 
-  const trigger = createElement(
-    "div",
-    { class: opts.itemClass, "data-testid": "ctx-purge-messages" },
-    shellText("purge.trigger"),
-  );
+  const trigger = createMenuItem(shellText("purge.trigger"), opts.itemClass, {
+    testId: "ctx-purge-messages",
+  });
 
   const form = createElement("div", {
     class: "context-menu__reason",
@@ -73,11 +72,9 @@ export function appendPurgeSection(menu: HTMLElement, opts: PurgeSectionOptions)
     { style: "font-size:11px;color:var(--text-muted);margin-top:4px" },
     shellText("purge.hint", { min: PURGE_MIN_COUNT, max: PURGE_MAX_COUNT }),
   );
-  const confirm = createElement(
-    "div",
-    { class: opts.dangerItemClass, "data-testid": "purge-confirm" },
-    shellText("purge.confirm"),
-  );
+  const confirm = createMenuItem(shellText("purge.confirm"), opts.dangerItemClass, {
+    testId: "purge-confirm",
+  });
   appendChildren(form, countInput, hint, confirm);
 
   trigger.addEventListener(
@@ -86,6 +83,9 @@ export function appendPurgeSection(menu: HTMLElement, opts: PurgeSectionOptions)
       e.stopPropagation();
       trigger.style.display = "none";
       form.style.display = "";
+      // The confirm button is a menuitem with tabindex -1 (roving navigation
+      // owns the Tab stop); now that its form is shown it must be Tab-reachable.
+      confirm.setAttribute("tabindex", "0");
       countInput.focus();
     },
     { signal },
@@ -122,6 +122,8 @@ export function appendPurgeSection(menu: HTMLElement, opts: PurgeSectionOptions)
     },
     { signal },
   );
+  // Enter in the count field runs the purge, exactly as the button does; when
+  // the count is cleared, Enter reaches the confirm button natively.
   countInput.addEventListener(
     "keydown",
     (e: KeyboardEvent) => {
