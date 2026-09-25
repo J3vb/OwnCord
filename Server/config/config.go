@@ -682,11 +682,12 @@ func Load(cfgPath string) (*Config, error) {
 			"key", key, "file", cfgPath)
 	}
 
-	// Warn if using default dev credentials — these are public and insecure.
+	// Warn if using default dev or .env.example placeholder credentials —
+	// both are public and insecure.
 	// Clear credentials so downstream consumers (e.g. NewLiveKitClient) see
 	// empty values and refuse to start voice.
 	if IsDefaultVoiceCredentials(&cfg.Voice) {
-		slog.Warn("using default LiveKit dev credentials — voice will be disabled; set voice.livekit_api_key and voice.livekit_api_secret in config.yaml")
+		slog.Warn("using default or placeholder LiveKit credentials — voice will be disabled; set voice.livekit_api_key and voice.livekit_api_secret in config.yaml (or LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env under Docker)")
 		cfg.Voice.LiveKitAPIKey = ""
 		cfg.Voice.LiveKitAPISecret = ""
 	}
@@ -788,11 +789,20 @@ const (
 	DefaultLiveKitAPISecret = "owncord-dev-secret-key-min-32chars" //nolint:gosec // G101: false positive — config key name, not a credential
 )
 
+// placeholderCredentialPrefix starts the LiveKit key and secret shipped in
+// Server/.env.example. Those values are public in this repository, so an
+// install that copied the file without editing it must be treated exactly
+// like one still on the dev defaults.
+const placeholderCredentialPrefix = "change-me"
+
 // IsDefaultVoiceCredentials returns true when the voice config still uses
-// the well-known default dev credentials shipped in the source code.
+// the well-known default dev credentials shipped in the source code, or the
+// placeholder values from Server/.env.example.
 func IsDefaultVoiceCredentials(v *VoiceConfig) bool {
 	return v.LiveKitAPIKey == DefaultLiveKitAPIKey ||
-		v.LiveKitAPISecret == DefaultLiveKitAPISecret
+		v.LiveKitAPISecret == DefaultLiveKitAPISecret ||
+		strings.HasPrefix(v.LiveKitAPIKey, placeholderCredentialPrefix) ||
+		strings.HasPrefix(v.LiveKitAPISecret, placeholderCredentialPrefix)
 }
 
 // generateRandomKey returns a crypto-random hex string of the given byte length.

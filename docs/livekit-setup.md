@@ -24,6 +24,10 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
    LIVEKIT_API_SECRET=my-secret-at-least-32-characters-long
    ```
 
+   The server refuses the placeholder values `.env.example` ships (anything
+   starting with `change-me`) the same way it refuses the `devkey` dev
+   defaults: voice stays off and a start-up warning says why.
+
 2. **Edit `livekit.yaml`** (copy from `livekit.yaml.example`) — use the same key/secret and set your public IP:
 
    ```yaml
