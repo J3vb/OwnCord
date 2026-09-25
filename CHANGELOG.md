@@ -212,7 +212,7 @@ server's internals were reorganised behind service boundaries.
   configuration. The same pages now say which files come from the release's
   source snapshot rather than its assets, and that `voice.livekit_url` must be
   set to the LiveKit container (`ws://livekit:7880`) because compose injects
-  only the key and secret.
+  only the key and secret, with `voice.auto_download_livekit` set to `false`.
 - **`chatserver --version` and `--help` print and exit.** Asking a build what
   it was no longer starts a server or writes a `config.yaml` into the working
   directory.
@@ -289,7 +289,8 @@ server's internals were reorganised behind service boundaries.
 - The owner check no longer costs a second database lookup on every request.
 - **A refused `/admin` request now names the setting behind it.** The `403`
   body points at `server.admin_allowed_cidrs` (private networks by default), so
-  a VPS operator can tell a firewall from the allowlist. The quick-start and
+  a VPS operator can tell a firewall from the allowlist; the metrics and LiveKit
+  webhook routes name their own allowlists the same way. The quick-start and
   deployment pages describe the SSH tunnel (`ssh -L 8443:localhost:8443`) and
   the allowlist entry for headless installs.
 
