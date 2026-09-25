@@ -230,7 +230,8 @@ instruction.
 
 ### Validation
 
-From `Client/` at this head: `npx tsc -p tsconfig.e2e.json --noEmit` (clean);
+From `Client/` at `66da915a` (the review-round revision is pending the
+`client-fullstack` CI run; the manifest owns the results): `npx tsc -p tsconfig.e2e.json --noEmit` (clean);
 `npx playwright test --config playwright.config.fullstack.ts
 tests/e2e/fullstack/b9-journeys.spec.ts --workers=1` (9 passed);
 `npx vitest run tests/unit/reconcile.test.ts` (7 passed); `npm run
