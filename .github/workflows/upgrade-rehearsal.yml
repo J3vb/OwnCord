@@ -66,6 +66,11 @@ on:
         description: "Release tag to upgrade FROM (default: the newest published release)"
         required: false
         type: string
+      release:
+        description: "Called from release.yml: rehearse the happy path only, skip the B6-11 drills"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -224,12 +229,18 @@ jobs:
       # workflow would rebuild all three. `owncord-rehearsal:head` is still
       # present here — the cleanup is two steps down.
       #
-      # Guarded off the workflow_call path until the owner answers the plan's
+      # Guarded off the release path until the owner answers the plan's
       # question 5 (whether a known finding may block a release). Until then a
-      # release rehearses the happy path only, exactly as it does today, and
+      # release rehearses the happy path only, and
       # these steps run on the nightly and on dispatch.
+      #
+      # The guard is the `release` input, not `github.event_name`: inside a
+      # called workflow the github context is the CALLER's, so event_name is
+      # `push` (or `workflow_dispatch` for a release dry run), never
+      # `workflow_call`, and a guard on it skips nothing. `inputs.release` is
+      # unset on the schedule and on a direct dispatch, so `!` admits both.
       - name: Fetch and verify livekit-server ${{ env.LIVEKIT_VERSION }}
-        if: github.event_name != 'workflow_call'
+        if: ${{ !inputs.release }}
         working-directory: Server
         # continue-on-error, because a fetch that fails must cost phase S its
         # measurement and not cost the run: the drill prints `skipped` when
@@ -253,14 +264,14 @@ jobs:
       # one whose size it knows: 24 MB is the budget the drill's own arithmetic
       # assumes (R7 measured the ENOSPC on that figure).
       - name: Mount a filesystem that can fill
-        if: github.event_name != 'workflow_call'
+        if: ${{ !inputs.release }}
         working-directory: Server
         run: |
           mkdir -p "$RUNNER_TEMP/drill-fs"
           sudo mount -t tmpfs -o "size=24m,uid=$(id -u),gid=$(id -g)" tmpfs "$RUNNER_TEMP/drill-fs"
 
       - name: Failure and recovery drills (standalone)
-        if: github.event_name != 'workflow_call'
+        if: ${{ !inputs.release }}
         working-directory: Server
         run: go run ./cmd/smoke -drills -data-fs "$RUNNER_TEMP/drill-fs" "$HEAD_BINARY"
 
@@ -269,7 +280,7 @@ jobs:
       # itself, so this leg needs no host mount. R, C and S are properties of
       # the process and the standalone leg above already measured them.
       - name: Failure and recovery drills (container, disk pressure only)
-        if: github.event_name != 'workflow_call'
+        if: ${{ !inputs.release }}
         working-directory: Server
         run: go run ./cmd/smoke -drills -docker -phases D owncord-rehearsal:head
 

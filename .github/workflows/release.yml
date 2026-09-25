@@ -4,15 +4,41 @@ on:
   push:
     tags:
       - "v*"
+  # Dry run (D-02). The release tag cannot be deleted or moved (the "Release
+  # tags" ruleset), so without this the first execution of everything below
+  # is a public tag, and a failure there costs a version number. A dispatch
+  # runs every job a tag would — gate evidence, version check, every build,
+  # smoke and rehearsal, both `environment: release` approvals, signing,
+  # attestation and every verification — and then stops short of the two
+  # writes a user can consume: no release tag moves on GHCR and no GitHub
+  # Release is created. What it does leave: an untagged image digest on GHCR
+  # with its attestation (the same state a failed verification leaves), the
+  # attestations in the public Sigstore log, and a `dry-run-release`
+  # workflow artifact holding everything `gh release create` would have
+  # published. Dispatch it on the commit you are about to tag, with the
+  # version the tag will carry: the client manifests must already say it.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version the tag will carry, without the v (e.g. 2.0.0-beta.1); must match the client manifests"
+        required: true
+        type: string
 
 # A deleted-and-re-pushed tag (it has happened — see the checksum note in the
 # publish job) must not race two publish runs: `gh release create` fails
 # loudly on the second run, but the ghcr :latest push does not, and which run
 # wins it would be arbitrary. Queue, never cancel — a half-cancelled release
-# is worse than a slow one.
+# is worse than a slow one. A dry run queues in the same group as the tag it
+# rehearses: the two share the gha cache scopes the image digest check reads.
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
   cancel-in-progress: false
+
+# Every job reads the tag from here, never from GITHUB_REF_NAME, which is the
+# branch on a dry run. On a tag push the two are the same string.
+env:
+  RELEASE_TAG: ${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
+  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
 
 # Least privilege by default. Without this, every job below inherits whatever
 # the repository's default GITHUB_TOKEN permissions are; each job then names
@@ -77,7 +103,7 @@ jobs:
       - name: Compare tag with client manifests
         shell: bash
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          TAG_VERSION="${RELEASE_TAG#v}"
           TAURI_VERSION=$(node -p "require('./Client/src-tauri/tauri.conf.json').version")
           NPM_VERSION=$(node -p "require('./Client/package.json').version")
           CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Client/src-tauri/Cargo.toml | head -1)
@@ -316,25 +342,46 @@ jobs:
       - name: Extract version from tag
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       # Every row builds on its own architecture rather than cross-compiling,
       # because the smoke below has to EXECUTE the artifact that ships. A
       # cross-compiled asset could only be type-checked, which is the exact gap
       # B6-1 exists to close.
-      - name: Build server (Windows)
-        if: runner.os == 'Windows'
+      #
+      # Built twice, and the two builds must be byte-identical (BPR-005 "rebuild
+      # twice and compare", D-11). The second build runs from another checkout
+      # of the same commit, at a different path, with an empty build cache, so
+      # it shares nothing with the first but the module downloads go.sum pins.
+      # -trimpath is what lets two paths agree: without it the checkout path is
+      # compiled into every file:line the binary carries. Both checkouts are
+      # clean, so the vcs.* build stamp agrees too. The second checkout is a
+      # local clone, not a `git worktree`: go does not recognise a worktree's
+      # `.git` file and would build it with no vcs.* stamp at all (measured).
+      # One function holds the command line, so the builds cannot drift apart.
+      - name: Build server, rebuild it from a second checkout, and compare
         shell: bash
         working-directory: Server
-        run: go build -o "${{ matrix.asset }}" -ldflags "-s -w -X main.version=$VERSION" .
-
-      - name: Build server (Linux)
-        if: runner.os == 'Linux'
-        working-directory: Server
         env:
-          CGO_ENABLED: "0"
-        run: go build -o chatserver -ldflags "-s -w -X main.version=$VERSION" .
+          ASSET: ${{ matrix.asset }}
+          OUT: ${{ runner.os == 'Windows' && matrix.asset || 'chatserver' }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = Linux ]; then export CGO_ENABLED=0; fi
+          build() { go build -trimpath -o "$1" -ldflags "-s -w -X main.version=$VERSION" .; }
+          build "$OUT"
+          rebuild="$RUNNER_TEMP/rebuild"
+          git clone --quiet --no-checkout .. "$rebuild"
+          git -C "$rebuild" checkout --quiet --detach "$(git rev-parse HEAD)"
+          (cd "$rebuild/Server" && GOCACHE="$RUNNER_TEMP/gocache-rebuild" build "$RUNNER_TEMP/$OUT")
+          first=$(sha256sum "$OUT" | cut -d' ' -f1)
+          second=$(sha256sum "$RUNNER_TEMP/$OUT" | cut -d' ' -f1)
+          if [ "$first" != "$second" ]; then
+            echo "::error::$OUT is not reproducible: $first here, $second from a clean rebuild at another path"
+            exit 1
+          fi
+          echo "$ASSET: $OUT built twice, from two paths with two caches, one sha256 $first" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # Smoke the EXACT artifact that ships: this feed drives the signed
       # self-update, so a binary that compiles but dies on boot would deploy
@@ -537,7 +584,7 @@ jobs:
       - name: Extract version from tag
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
@@ -624,6 +671,10 @@ jobs:
     # for another. The ignore above is deliberate and is re-examined when
     # actionlint learns the syntax.
     uses: ./.github/workflows/upgrade-rehearsal.yml
+    # Happy path only: the B6-11 drills stay off the release path (see the
+    # `release` input in upgrade-rehearsal.yml).
+    with:
+      release: true
     permissions:
       contents: read
 
@@ -670,7 +721,7 @@ jobs:
       - name: Extract version from tag
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
@@ -683,14 +734,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The semver tags come from RELEASE_TAG rather than the git ref, so a dry
+      # run computes (and prints) the same tags the real run would write.
+      #
+      # OCI metadata goes on as manifest and index ANNOTATIONS, not labels.
+      # A label lives in the image config, and the smoke builds carry none, so
+      # labelling this build alone would make every per-platform config differ
+      # from the one smoked and fail the equality check below on every tag.
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
           images: ghcr.io/${{ github.repository_owner }}/owncord-server
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ env.RELEASE_TAG }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.RELEASE_TAG }}
             type=raw,value=latest
 
       # `subject-name` must be lower-case for GHCR, and github.repository_owner
@@ -733,7 +793,7 @@ jobs:
           # Upload an untagged candidate. A cache miss or failed verification
           # must leave EVERY release tag where it was (OC-0448).
           outputs: type=image,name=ghcr.io/${{ steps.owner.outputs.lower }}/owncord-server,push-by-digest=true,name-canonical=true
-          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: |
             type=gha,scope=server-amd64
             type=gha,scope=server-arm64
@@ -759,6 +819,7 @@ jobs:
                 ;;
             esac
           done
+          echo "Pushed manifest $IMAGE@$DIGEST carries linux/amd64 and linux/arm64" >> "$GITHUB_STEP_SUMMARY"
 
       # The digest an owner pulls has to be the one that booted on native
       # hardware, and this is the only step that can say so.
@@ -807,7 +868,7 @@ jobs:
               echo "::error::linux/$arch was smoked as image config $smoked but pushed as $pushed — check whether the gha cache scope server-$arch was hit before suspecting a genuinely different image (see the comment above this step)"
               exit 1
             fi
-            echo "linux/$arch: smoked == pushed ($pushed)"
+            echo "linux/$arch: smoked == pushed ($pushed)" | tee -a "$GITHUB_STEP_SUMMARY"
           done
 
       # Records the image in the public Sigstore log, and pushes the
@@ -835,6 +896,9 @@ jobs:
       # Registry writes across tags are not transactional: a transport failure
       # during promotion can be partial, but a verification failure reaches no
       # tag write at all. Leave this as the final, success-only step.
+      #
+      # A dry run stops here, inside the script rather than on an `if:`: the
+      # job carries no conditional anywhere, so nothing but DRY_RUN can skip it.
       - name: Promote verified digest to release tags
         id: promote-tags
         env:
@@ -850,6 +914,10 @@ jobs:
           if [ "${#args[@]}" -eq 0 ]; then
             echo "::error::metadata-action reported no release tags"
             exit 1
+          fi
+          if [ "$DRY_RUN" = true ]; then
+            echo "Dry run: would promote $IMAGE@$DIGEST to: ${args[*]}" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
           docker buildx imagetools create "${args[@]}" "$IMAGE@$DIGEST"
 
@@ -935,14 +1003,14 @@ jobs:
       - name: Extract version from tag
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Create source snapshot (AGPL source availability)
         shell: bash
         run: |
           git archive --format=tar.gz --prefix="OwnCord-${VERSION}/" \
-            -o "owncord-src-${GITHUB_REF_NAME}.tar.gz" HEAD
+            -o "owncord-src-${RELEASE_TAG}.tar.gz" HEAD
 
       # Checksum lines must use bare asset filenames: the v1.0.0 updater's
       # ParseChecksumFile does an exact match on the last field, so a
@@ -1011,6 +1079,51 @@ jobs:
           for f in windows/chatserver*.exe windows/server-update-manifest.json; do
             base64 -d "$f.sig" > "$RUNNER_TEMP/asset.minisig"
             minisign -Vm "$f" -x "$RUNNER_TEMP/asset.minisig" -p "$RUNNER_TEMP/server_update.pub"
+          done
+
+      # B6-1's contract with the updater, asserted rather than read off a
+      # listing: each of the four assets serverDownloadAssetName resolves
+      # (Server/updater/download.go) was built, is in the signed update manifest
+      # and in checksums.sha256 with its own hash, and each Windows one has the
+      # detached signature the step above verified. The manifest and checksums
+      # are built from the files on disk, so a matrix row that stopped
+      # uploading would otherwise publish a release that strands one
+      # architecture with no error anywhere. The table is the run's evidence.
+      - name: Every server asset the updater resolves is covered
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### Server assets"
+            echo "| asset | sha256 | update manifest | checksums.sha256 | minisign |"
+            echo "| --- | --- | --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for f in windows/chatserver.exe windows/chatserver-windows-arm64.exe \
+                   linux/chatserver-linux-amd64.tar.gz linux/chatserver-linux-arm64.tar.gz; do
+            name=$(basename "$f")
+            if [ ! -f "$f" ]; then
+              echo "::error::$name was not built"
+              exit 1
+            fi
+            hash=$(sha256sum "$f" | cut -d' ' -f1)
+            if ! jq -e --arg a "$name" --arg h "$hash" 'any(.assets[]; .asset == $a and .sha256 == $h)' \
+                windows/server-update-manifest.json > /dev/null; then
+              echo "::error::$name is not in the update manifest with its sha256"
+              exit 1
+            fi
+            if ! grep -qxF "$hash  $name" checksums.sha256; then
+              echo "::error::$name is not in checksums.sha256 with its sha256"
+              exit 1
+            fi
+            sig="n/a (manifest-bound)"
+            if [ "${f%%/*}" = windows ]; then
+              if [ ! -f "$f.sig" ]; then
+                echo "::error::$name has no detached signature"
+                exit 1
+              fi
+              sig="verified"
+            fi
+            echo "| $name | \`$hash\` | yes | yes | $sig |" >> "$GITHUB_STEP_SUMMARY"
           done
 
       # Subjects are globs over the staging directories rather than an
@@ -1087,8 +1200,8 @@ jobs:
       - name: Extract this tag's release notes
         shell: bash
         env:
-          TAG: ${{ github.ref_name }}
-          DOC_BASE: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.ref_name }}
+          TAG: ${{ env.RELEASE_TAG }}
+          DOC_BASE: ${{ github.server_url }}/${{ github.repository }}/blob/${{ env.RELEASE_TAG }}
         run: |
           # Headings carry an optional title ("## v1.2.0-alpha.1 — Discord
           # feature parity"), so match the tag as a whole word, not a prefix:
@@ -1115,11 +1228,28 @@ jobs:
       # clients poll for updates. The former mirror step to a separate public
       # releases repo existed only to work around this repo being private.
       - name: Create GitHub Release
+        if: env.DRY_RUN != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mapfile -t assets < <(find windows linux -type f)
           assets+=(checksums.sha256 owncord-src-*.tar.gz)
-          gh release create "${GITHUB_REF_NAME}" \
+          gh release create "${RELEASE_TAG}" \
             --notes-file release-notes.md \
             "${assets[@]}"
+
+      # Dry run only: everything `gh release create` would have published, so
+      # the owner can read the notes and run the off-runner verification
+      # before the tag exists.
+      - name: Upload the would-be release (dry run)
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dry-run-release
+          path: |
+            windows
+            linux
+            checksums.sha256
+            owncord-src-*.tar.gz
+            release-notes.md
+          retention-days: 7
