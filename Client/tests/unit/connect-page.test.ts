@@ -475,7 +475,7 @@ describe("ConnectPage", () => {
       expect(page.isUsingSavedPassword()).toBe(true);
     });
 
-    const toggle = container.querySelector(".form-switch a") as HTMLElement;
+    const toggle = container.querySelector(".form-switch button") as HTMLElement;
     toggle.click();
     expect(page.isUsingSavedPassword()).toBe(false);
 
@@ -571,7 +571,7 @@ describe("ConnectPage", () => {
     const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
     page.mount(container);
 
-    const toggle = container.querySelector(".form-switch a") as HTMLElement;
+    const toggle = container.querySelector(".form-switch button") as HTMLElement;
     toggle.click();
 
     const hostInput = container.querySelector("#host") as HTMLInputElement;
@@ -661,7 +661,7 @@ describe("ConnectPage", () => {
       expect(page.isUsingSavedPassword()).toBe(true);
     });
 
-    const toggle = container.querySelector(".form-switch a") as HTMLElement;
+    const toggle = container.querySelector(".form-switch button") as HTMLElement;
     toggle.click();
     expect(page.isUsingSavedPassword()).toBe(false);
 
@@ -709,7 +709,7 @@ describe("ConnectPage", () => {
     });
 
     // Switch to Register without touching the password field.
-    const toggle = container.querySelector(".form-switch a") as HTMLElement;
+    const toggle = container.querySelector(".form-switch button") as HTMLElement;
     toggle.click();
 
     expect(page.isUsingSavedPassword()).toBe(false);
@@ -745,7 +745,7 @@ describe("ConnectPage", () => {
     page.mount(container);
 
     // Switch to Register FIRST, then pick the saved server.
-    (container.querySelector(".form-switch a") as HTMLElement).click();
+    (container.querySelector(".form-switch button") as HTMLElement).click();
     (container.querySelector(".server-item") as HTMLElement).click();
 
     await vi.waitFor(() => {
@@ -784,7 +784,7 @@ describe("ConnectPage", () => {
 
     // Click the server (load starts), switch to Register, THEN let it land.
     (container.querySelector(".server-item") as HTMLElement).click();
-    (container.querySelector(".form-switch a") as HTMLElement).click();
+    (container.querySelector(".form-switch button") as HTMLElement).click();
     resolveCredential({ username: "saveduser", token: "tok", hasPassword: true });
 
     await vi.waitFor(() => {
@@ -850,7 +850,7 @@ describe("ConnectPage", () => {
     expect(inviteGroup.classList.contains("form-group--hidden")).toBe(true);
 
     // Click toggle link
-    const toggleLink = container.querySelector(".form-switch a") as HTMLElement;
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
     toggleLink.click();
 
     // Now in register mode — invite group visible
@@ -1547,7 +1547,7 @@ describe("ConnectPage", () => {
     page.mount(container);
 
     // Switch to register mode
-    const toggleLink = container.querySelector(".form-switch a") as HTMLElement;
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
     toggleLink.click();
 
     const hostInput = container.querySelector("#host") as HTMLInputElement;
@@ -1579,7 +1579,7 @@ describe("ConnectPage", () => {
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
-    const toggleLink = container.querySelector(".form-switch a") as HTMLElement;
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
     toggleLink.click();
 
     const hostInput = container.querySelector("#host") as HTMLInputElement;
@@ -1790,7 +1790,7 @@ describe("ConnectPage", () => {
     const errorBanner = container.querySelector(".error-banner")!;
     expect(errorBanner.classList.contains("visible")).toBe(true);
 
-    const toggleLink = container.querySelector(".form-switch a") as HTMLElement;
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
     toggleLink.click();
 
     expect(errorBanner.classList.contains("visible")).toBe(false);
@@ -1804,7 +1804,7 @@ describe("ConnectPage", () => {
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
-    const toggleLink = container.querySelector(".form-switch a") as HTMLElement;
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
     toggleLink.click(); // to register
     toggleLink.click(); // back to login
 
@@ -1969,7 +1969,7 @@ describe("ConnectPage", () => {
     page.mount(container);
 
     // Switch to register mode
-    const toggleLink = container.querySelector(".form-switch a") as HTMLElement;
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
     toggleLink.click();
 
     const hostInput = container.querySelector("#host") as HTMLInputElement;
@@ -2037,7 +2037,7 @@ describe("ConnectPage", () => {
     const host = el.querySelector("#host") as HTMLInputElement;
     host.value = "localhost:8443";
     host.dispatchEvent(new Event("input", { bubbles: true }));
-    const toggle = el.querySelector(".form-switch a") as HTMLElement;
+    const toggle = el.querySelector(".form-switch button") as HTMLElement;
     toggle.click();
     (el.querySelector("#username") as HTMLInputElement).value = "newuser";
     (el.querySelector("#password") as HTMLInputElement).value = "password123";
@@ -2052,7 +2052,7 @@ describe("ConnectPage", () => {
     const host = el.querySelector("#host") as HTMLInputElement;
     host.value = "localhost:8443";
     host.dispatchEvent(new Event("input", { bubbles: true }));
-    (el.querySelector(".form-switch a") as HTMLElement).click();
+    (el.querySelector(".form-switch button") as HTMLElement).click();
   }
 
   it("invite mode requires an invite code and hides no notice", async () => {
@@ -2158,7 +2158,7 @@ describe("ConnectPage", () => {
     host.dispatchEvent(new Event("input", { bubbles: true }));
     expect(notice.textContent).not.toContain(retention);
 
-    (container.querySelector(".form-switch a") as HTMLElement).click();
+    (container.querySelector(".form-switch button") as HTMLElement).click();
     expect(notice.classList.contains("visible")).toBe(true);
     expect(notice.textContent).toBe(retention);
 
@@ -2224,7 +2224,7 @@ describe("ConnectPage", () => {
     page.mount(container);
 
     (container.querySelector(".server-item") as HTMLElement).click();
-    const toggle = container.querySelector(".form-switch a") as HTMLElement;
+    const toggle = container.querySelector(".form-switch button") as HTMLElement;
     toggle.click();
     expect(
       (container.querySelector(".btn-primary[type='submit']") as HTMLButtonElement).disabled,

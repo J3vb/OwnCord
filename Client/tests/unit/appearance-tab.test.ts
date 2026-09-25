@@ -59,6 +59,28 @@ describe("AppearanceTab — Accessibility", () => {
     expect(themeRow?.getAttribute("role")).toBe("radiogroup");
   });
 
+  it("theme and accent groups are one Tab stop with arrow-key movement (A11Y-09)", () => {
+    const section = buildAppearanceTab(ac.signal);
+    container.appendChild(section);
+
+    for (const group of [".theme-options", ".accent-swatches"]) {
+      const row = container.querySelector(group)!;
+      // Exactly one cell in the group is tabbable.
+      expect(row.querySelectorAll("[role='radio'][tabindex='0']").length).toBe(1);
+
+      const first = row.querySelector("[tabindex='0']") as HTMLElement;
+      first.focus();
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      const next = row.querySelector("[tabindex='0']") as HTMLElement;
+      expect(next).not.toBe(first);
+      expect(document.activeElement).toBe(next);
+
+      // Enter activates the focused cell through its own click handler.
+      next.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(next.getAttribute("aria-checked")).toBe("true");
+    }
+  });
+
   it("theme tiles have role=radio and aria-checked", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);

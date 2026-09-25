@@ -21,6 +21,7 @@ import {
   submitLogin,
   waitForWsReady,
 } from "./helpers";
+import { findUnnamedControls, keyboardReachable } from "./support/b9-accessibility";
 
 const DM_CHANNELS = [
   {
@@ -128,6 +129,12 @@ test.describe("B9-4 shared navigation", () => {
   }) => {
     const header = page.locator("[data-testid='chat-header-name']");
 
+    // The shell's controls are named and the settings opener is reachable by
+    // Tab (A11Y-08; this spec historically skipped the shared helpers).
+    expect(await findUnnamedControls(page.locator("[data-testid='unified-sidebar']"))).toEqual([]);
+    const gear = page.locator("button[aria-label='Settings']");
+    expect(await keyboardReachable(page, gear)).toBe(true);
+
     // channels → DM
     await page.locator("[data-testid='dm-entry']").first().click();
     await expect(header).toHaveText("otheruser");
@@ -140,7 +147,6 @@ test.describe("B9-4 shared navigation", () => {
     await expectNoView(page);
 
     // → settings, Escape closes it and focus returns to the opener.
-    const gear = page.locator("button[aria-label='Settings']");
     await gear.focus();
     await page.keyboard.press("Enter");
     const overlay = page.locator("[data-testid='settings-overlay']");

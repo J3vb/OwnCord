@@ -1,6 +1,12 @@
 /* Accessibility: reduced motion */
+/* The pseudo-element selectors are load-bearing: animation-duration is not
+   inherited and `*` matches elements only, so the connect page's ::before
+   pulse and the button shimmer (both ::after) kept running under the in-app
+   toggle (A11Y-04). */
 .reduced-motion,
-.reduced-motion * {
+.reduced-motion *,
+.reduced-motion *::before,
+.reduced-motion *::after {
   animation-duration: 0s !important;
   transition-duration: 0s !important;
 }

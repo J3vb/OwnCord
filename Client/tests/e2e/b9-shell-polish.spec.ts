@@ -20,11 +20,11 @@
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  mockTauriFullSession,
   MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
   navigateToMainPageReady,
 } from "./helpers";
+import { findUnnamedControls, focusIndicator, keyboardReachable } from "./support/b9-accessibility";
 
 /** A long channel list in two categories, to exercise scroll and roving. */
 const LONG_CHANNELS = Array.from({ length: 40 }, (_, i) => ({
@@ -78,6 +78,12 @@ test.describe("B9-21 shell polish", () => {
     // Exactly one row is tabbable.
     await expect(page.locator(".channel-list .channel-item[tabindex='0']")).toHaveCount(1);
 
+    // The sidebar's controls are named and the rows are actually reachable by
+    // Tab, not merely focusable (A11Y-08; the reference-fixture gaps).
+    const sidebar = page.locator("[data-testid='unified-sidebar']");
+    expect(await findUnnamedControls(sidebar)).toEqual([]);
+    expect(await keyboardReachable(page, rows.first())).toBe(true);
+
     // Tab into the list, then rove with ArrowDown and activate with Enter.
     await rows.first().focus();
     const firstName = await rows.first().locator(".ch-name").textContent();
@@ -87,16 +93,11 @@ test.describe("B9-21 shell polish", () => {
     );
     expect(focusedName).not.toBe(firstName);
 
-    // The focus ring is visible on the roved row (Q1: 2px). Read it before
-    // activating, since Enter changes the active row.
-    const ring = await page.evaluate(() => {
-      const el = document.activeElement as HTMLElement;
-      const cs = getComputedStyle(el);
-      return { cls: el.className, style: cs.outlineStyle, width: parseFloat(cs.outlineWidth) };
-    });
-    expect(ring.cls).toContain("channel-item");
-    expect(ring.style).not.toBe("none");
-    expect(ring.width).toBeGreaterThanOrEqual(2);
+    // The shared indicator check: visible ring, >=2px, and >=3:1 (Q1), which
+    // the local outline-width read could not see.
+    const indicator = await focusIndicator(page);
+    expect(indicator.element).toContain("channel-item");
+    expect(indicator.problems).toEqual([]);
 
     await page.keyboard.press("Enter");
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText(focusedName ?? "");

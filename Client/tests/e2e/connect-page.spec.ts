@@ -58,7 +58,7 @@ test.describe("Connect Page", () => {
   });
 
   test("login/register toggle switches form mode", async ({ page }) => {
-    const toggleLink = page.locator(".form-switch a");
+    const toggleLink = page.locator(".form-switch button");
     await expect(toggleLink).toHaveText(/Register/);
 
     await toggleLink.click();

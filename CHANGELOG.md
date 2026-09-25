@@ -267,6 +267,24 @@ server's internals were reorganised behind service boundaries.
   code.
 - The owner check no longer costs a second database lookup on every request.
 
+### Accessibility
+
+- **The desktop client's login page is keyboard-operable.** The Register toggle
+  and the "recover your account" link are now real buttons reachable with Tab;
+  they were links without a destination, so a keyboard-only user could not
+  sign up or start recovery.
+- **The Appearance theme and accent pickers are one Tab stop each**, moved with
+  the arrow keys, instead of thirteen separate stops.
+- Focus rings are restored on channel mentions and message-link chips, and on
+  the status text field.
+- Composer refusals (message too long, uploads pending, a failed upload) now
+  stay on screen until you edit or send again, and use a text colour that meets
+  the contrast bar rather than vanishing after four seconds at about 3:1.
+- Destructive labels — Delete Channel, Log Out, "Offline" — use the accessible
+  danger text colour instead of the raw red fill colour.
+- The in-app **Reduce Motion** toggle now also stops the connect-page background
+  pulse and the primary-button shimmer.
+
 ### Documentation
 
 - `docs/trust-model.md` answers "who can read my messages?": the server

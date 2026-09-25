@@ -6,6 +6,7 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, applyTheme, THEMES, createToggle } from "./helpers";
 import type { ThemeName } from "./helpers";
 import { applyAccent, getActiveThemeName, restoreTheme } from "@lib/themes";
+import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
 import {
   applyFontSize,
   effectiveFontSize,
@@ -41,7 +42,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
       {
         class: `theme-opt ${name}${isActive ? " active" : ""}`,
         role: "radio",
-        tabindex: "0",
+        tabindex: isActive ? "0" : "-1",
         "aria-checked": isActive ? "true" : "false",
         "aria-label": name.charAt(0).toUpperCase() + name.slice(1),
       },
@@ -81,6 +82,10 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
     themeRow.appendChild(btn);
   }
+  // One Tab stop with arrow-key movement (contract Keyboard table). The theme
+  // tiles are a horizontal row, so ArrowLeft/Right is the stepping axis.
+  setRovingTabindex(themeRow, "[role='radio']");
+  enableRovingNavigation(themeRow, "[role='radio']", signal);
   appendChildren(section, themeHeader, themeRow);
 
   // Font size slider
@@ -157,7 +162,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   }
 
   const accentHeader = createElement("h3", {}, t("appearance.accentColor"));
-  const swatchesRow = createElement("div", { class: "accent-swatches" });
+  const swatchesRow = createElement("div", { class: "accent-swatches", role: "radiogroup" });
 
   // Declare hexInput early so swatch closures can reference it after construction
   const hexInputRow = createElement("div", { class: "accent-hex-row" });
@@ -194,7 +199,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
       class: `accent-swatch${color === currentAccent ? " active" : ""}`,
       title: color,
       role: "radio",
-      tabindex: "0",
+      tabindex: color === currentAccent ? "0" : "-1",
       "aria-label": color,
       "aria-checked": color === currentAccent ? "true" : "false",
     });
@@ -221,6 +226,9 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
     swatchesRow.appendChild(swatch);
   }
+  // Same roving behaviour as the theme tiles (A11Y-09).
+  setRovingTabindex(swatchesRow, "[role='radio']");
+  enableRovingNavigation(swatchesRow, "[role='radio']", signal);
 
   hexInput.addEventListener(
     "input",
