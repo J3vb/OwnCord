@@ -1,7 +1,7 @@
 /* ── Emoji Picker ── */
 .emoji-picker {
   position: absolute;
-  z-index: 200;
+  z-index: 90;
   bottom: 100%;
   right: 0;
   background: var(--bg-primary);
@@ -20,7 +20,7 @@
 /* Mention autocomplete — anchored above the composer, same shell as the pickers */
 .mention-autocomplete {
   position: absolute;
-  z-index: 200;
+  z-index: 90;
   bottom: 100%;
   left: 0;
   right: 0;
@@ -133,7 +133,7 @@
 /* ── GIF Picker ── */
 .gif-picker {
   position: absolute;
-  z-index: 200;
+  z-index: 90;
   bottom: 100%;
   right: 0;
   background: var(--bg-primary);

@@ -82,6 +82,7 @@ test.describe("B9 narrow-width sidebar drawer", () => {
           { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
           { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
           { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+          { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
           { pattern: "/api/v1/dm-requests", status: 200, body: { requests: REQUESTS } },
           {
             pattern: "/api/v1/moderation/queue",
@@ -194,6 +195,25 @@ test.describe("B9 narrow-width sidebar drawer", () => {
     await expect(picker).toBeHidden();
     await expect(toggle(page)).toHaveAttribute("aria-expanded", "true");
     await expect(sidebar(page)).toHaveClass(/drawer-open/);
+  });
+
+  test("opening the drawer closes the pinned panel, so nothing covers its right edge", async ({
+    page,
+  }) => {
+    await page.getByTestId("pin-btn").click();
+    await expect(page.locator(".pinned-panel")).toBeVisible();
+
+    await toggle(page).click();
+    await expect(sidebar(page)).toHaveClass(/drawer-open/);
+    await expect(page.locator(".pinned-panel")).toHaveCount(0);
+
+    const add = sidebar(page).locator(".sidebar-dm-section .category-add-btn");
+    const hitTestable = await add.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return top !== null && el.contains(top);
+    });
+    expect(hitTestable).toBe(true);
   });
 
   test("a pointer opens the drawer and an outside click closes it", async ({ page }) => {

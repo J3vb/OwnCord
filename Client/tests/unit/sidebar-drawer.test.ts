@@ -3,8 +3,13 @@ import { createSidebarDrawer } from "../../src/pages/main-page/SidebarDrawer";
 import type { SidebarDrawer } from "../../src/pages/main-page/SidebarDrawer";
 import { setActiveChannel } from "@stores/channels.store";
 import { openSettings, closeSettings } from "@stores/ui.store";
+import { createModal } from "@lib/modalFactory";
 
-function setup(): { sidebar: HTMLElement; toggle: HTMLButtonElement; drawer: SidebarDrawer } {
+function setup(onOpen?: () => void): {
+  sidebar: HTMLElement;
+  toggle: HTMLButtonElement;
+  drawer: SidebarDrawer;
+} {
   const app = document.createElement("div");
   document.body.appendChild(app);
   const sidebar = document.createElement("div");
@@ -13,7 +18,7 @@ function setup(): { sidebar: HTMLElement; toggle: HTMLButtonElement; drawer: Sid
   const button = document.createElement("button");
   app.append(sidebar, button);
   const toggle = button as HTMLButtonElement;
-  const drawer = createSidebarDrawer({ sidebar, toggle });
+  const drawer = createSidebarDrawer({ sidebar, toggle, ...(onOpen ? { onOpen } : {}) });
   return { sidebar, toggle, drawer };
 }
 
@@ -66,13 +71,49 @@ describe("SidebarDrawer", () => {
     expect(document.activeElement).toBe(s.toggle);
   });
 
-  it("closes on Escape", () => {
+  it("closes on Escape pressed in the drawer", () => {
+    const s = setup();
+    drawer = s.drawer;
+    const inside = document.createElement("button");
+    s.sidebar.appendChild(inside);
+    s.toggle.click();
+    inside.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(s.sidebar.classList.contains("drawer-open")).toBe(false);
+    expect(s.toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("closes on Escape pressed on the toggle", () => {
     const s = setup();
     drawer = s.drawer;
     s.toggle.click();
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    s.toggle.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(s.sidebar.classList.contains("drawer-open")).toBe(false);
-    expect(s.toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("leaves Escape in a dialog opened from it to the dialog", () => {
+    const s = setup();
+    drawer = s.drawer;
+    s.toggle.click();
+    const field = document.createElement("input");
+    const onClose = vi.fn();
+    const modal = createModal({ content: field, onClose });
+    field.focus();
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(s.sidebar.classList.contains("drawer-open")).toBe(true);
+    expect(s.toggle.getAttribute("aria-expanded")).toBe("true");
+    modal.destroy();
+  });
+
+  it("runs the open hook on open only", () => {
+    const onOpen = vi.fn();
+    const s = setup(onOpen);
+    drawer = s.drawer;
+    expect(onOpen).not.toHaveBeenCalled();
+    s.toggle.click();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    s.toggle.click();
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
   it("closes on a pointer press outside, on the backdrop", () => {
