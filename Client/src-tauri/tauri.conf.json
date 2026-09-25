@@ -51,7 +51,8 @@
     "windows": {
       "nsis": {
         "displayLanguageSelector": false,
-        "installerIcon": "icons/icon.ico"
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "./nsis/hooks.nsh"
       }
     }
   },

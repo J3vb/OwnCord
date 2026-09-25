@@ -160,3 +160,24 @@ On Windows, with an installed older build and a newer one on the server:
 3. The old window comes back. How long it stays depends on how long
    `ShellExecuteW` takes. To make the gap longer on purpose, pause the process
    in a debugger with a breakpoint on `ShellExecuteW`.
+
+## 6. Addendum (2026-09-25): H4 was wrong for silent installs, and it is fixed
+
+CI reproduced the update race twice on one pull request (`Client E2E (Windows
+native)`, runs 36179772961 attempts 1 and 2): the app log shows the alpha.5
+download finishing and the installer launching, then a live `owncord-client`
+reports alpha.4 for the whole 90 s wait. §3 H4 assumed a locked exe always
+produces a dialog. That holds for a passive (`/P`) installer, but the CI
+packages and any `installMode: "quiet"` build run NSIS silently (`/S`), where a
+file that cannot be opened for writing is skipped and `/R` relaunches whatever
+is still in `$INSTDIR`: the old binary. The lock is the exiting old process
+itself (`std::process::exit(0)` after `ShellExecuteW`; the image stays mapped
+until Windows finishes the teardown), and the template only sleeps 500 ms
+after its running-app check. Upstream replaced that check with the Restart
+Manager in tauri-apps/tauri#14479 (merged 2026-09-15, not in `@tauri-apps/cli`
+2.11.5). Until that ships, `Client/src-tauri/nsis/hooks.nsh` makes the
+installer wait, bounded, for the old executable to unlock before overwriting
+it, and `tests/e2e/native/packaged-update.spec.ts` holds the executable locked
+across every update so the race is forced on every run instead of once a
+fortnight.
+
