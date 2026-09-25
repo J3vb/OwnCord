@@ -326,6 +326,8 @@ server's internals were reorganised behind service boundaries.
   setting.
 - On a narrow window the admin panel's navigation stays reachable and wide
   tables scroll instead of being cut off.
+- Audit log, dashboard activity and pending registration times now show in
+  your local time; hover one to see the exact UTC time.
 - **Who may register is now a choice**: closed, invite only, approval, or open.
   Fresh installs default to invite only. Existing servers keep the behaviour
   they had — a server that required an invite still requires one, and
