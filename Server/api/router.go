@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"slices"
 	"time"
 
@@ -87,14 +88,21 @@ func warnOnServerConfig(cfg *config.Config) {
 // both, so the perimeter then admits every client the relay carries.
 //
 // tls.mode "off" and a container are the two start-up signals for that
-// shape. It warns and never refuses: a LAN-only install matches it too, and
-// first-run setup is additionally gated by the start-up setup token.
+// shape, but the warning fires only when the configured allowlist still
+// admits the relay's address: an owner who narrowed admin_allowed_cidrs so
+// the loopback/bridge ranges are excluded has already closed the hole, and
+// the warning's own suggested fix must silence it. It warns and never
+// refuses: a LAN-only install matches it too, and first-run setup is
+// additionally gated by the start-up setup token.
 func warnOnAdminPeerAddress(cfg *config.Config) {
 	if len(cfg.Server.TrustedProxies) > 0 || len(cfg.Server.AdminAllowedCIDRs) == 0 {
 		return
 	}
 	container := updater.RunningInContainer()
 	if cfg.TLS.Mode != "off" && !container {
+		return
+	}
+	if !adminAllowlistAdmitsRelay(cfg.Server.AdminAllowedCIDRs, container) {
 		return
 	}
 	slog.Warn("admin_allowed_cidrs is checked against the connecting address and trusted_proxies is empty — "+
@@ -104,6 +112,35 @@ func warnOnAdminPeerAddress(cfg *config.Config) {
 		"container", container,
 		"fix", "set server.trusted_proxies to the proxy hop(s), or narrow server.admin_allowed_cidrs to "+
 			"addresses only the owner uses. Ignore this if clients reach the server directly on a LAN")
+}
+
+// adminAllowlistAdmitsRelay reports whether any admin_allowed_cidrs entry
+// admits a relay's likely connecting address: loopback (a same-host reverse
+// proxy), or — inside a container — the 172.16.0.0/12 bridge range the Docker
+// userland proxy relays published ports through. An entry is tested for
+// overlap, so both a broad prefix (0.0.0.0/0) and the relay's exact /32
+// count; invalid entries are skipped here because config.Load already warned
+// about them.
+func adminAllowlistAdmitsRelay(cidrs []string, container bool) bool {
+	ranges := []netip.Prefix{
+		netip.MustParsePrefix("127.0.0.0/8"),
+		netip.MustParsePrefix("::1/128"),
+	}
+	if container {
+		ranges = append(ranges, netip.MustParsePrefix("172.16.0.0/12"))
+	}
+	for _, c := range cidrs {
+		p, err := netip.ParsePrefix(c)
+		if err != nil {
+			continue
+		}
+		for _, r := range ranges {
+			if p.Overlaps(r) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // warnOnVoiceNodeIP reports a voice.node_ip that remote clients cannot route

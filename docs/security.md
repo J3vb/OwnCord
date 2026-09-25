@@ -137,8 +137,14 @@ not a network one:
 UPDATE settings SET value = '0' WHERE key = 'setup_completed';
 ```
 
-The next `POST /admin/api/setup` then creates a new Owner and sets the flag
-again. `0` is the only _value_ that opens setup: the gate stands in front of an
+The server prints the setup token only at start-up while setup is open, so
+**restart the server after this change**: it prints a fresh one-time token
+beside the banner, and the next `POST /admin/api/setup` that carries it
+creates a new Owner and sets the flag again. A server left running never
+prints the token the reopened wizard is waiting for, so a wizard attempt
+against a live process is refused.
+
+`0` is the only _value_ that opens setup: the gate stands in front of an
 unauthenticated endpoint, so a flag holding anything else — corrupted,
 hand-edited to something the server does not recognise — is treated as
 closed. A missing row is the one case that is not: it is what every database

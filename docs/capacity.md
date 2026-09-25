@@ -151,8 +151,11 @@ To run it by hand, after booting the server with the `docker run` above:
 # 1. the population: owner, a text channel, a voice channel, an invite, 250 users
 #    (a fresh install is invite mode, so the invite admits every registration)
 BASE=https://127.0.0.1:8443
+# The first-run setup token the server printed at start-up. It goes to stderr
+# beside the banner, and `docker logs` includes both streams.
+SETUP_TOKEN=$(docker logs owncord-sut 2>&1 | sed -n 's/.*Setup token[[:space:]]*//p' | tail -n 1)
 TOKEN=$(curl -sk -X POST "$BASE/admin/api/setup" -H 'Content-Type: application/json' \
-  -d '{"username":"loadadmin","password":"LoadTest123!Admin"}' | jq -r .token)
+  -d "$(jq -nc --arg t "$SETUP_TOKEN" '{username:"loadadmin",password:"LoadTest123!Admin",setup_token:$t}')" | jq -r .token)
 CHANNEL_ID=$(curl -sk -X POST "$BASE/admin/api/channels" -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"name":"loadtest","type":"text"}' | jq -r .id)
 VOICE_ID=$(curl -sk -X POST "$BASE/admin/api/channels" -H "Authorization: Bearer $TOKEN" \

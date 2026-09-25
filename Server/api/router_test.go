@@ -622,7 +622,9 @@ func TestReachabilityWarningsAreNotGatedByTheFlag(t *testing.T) {
 
 // TestWarnOnServerConfig_AdminPeerAddress pins the start-up warning for an
 // admin perimeter that would compare a relay's address: trusted_proxies empty
-// with TLS off (a terminating proxy in front) or inside a container.
+// with TLS off (a terminating proxy in front) or inside a container. It fires
+// only while admin_allowed_cidrs still admits the loopback or bridge range,
+// so a narrowed allowlist that excludes those peers must stay silent.
 func TestWarnOnServerConfig_AdminPeerAddress(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -637,6 +639,13 @@ func TestWarnOnServerConfig_AdminPeerAddress(t *testing.T) {
 		{"trusted proxies set", "off", "1", []string{"127.0.0.1/32"}, []string{"127.0.0.0/8"}, false},
 		{"direct TLS on the host", "self_signed", "0", nil, []string{"127.0.0.0/8"}, false},
 		{"perimeter disabled", "off", "1", nil, nil, false},
+		// The owner narrowed the allowlist so no relay address is admitted;
+		// the warning's own suggested fix must silence it.
+		{"narrowed allowlist, loopback excluded", "off", "1", nil, []string{"192.168.1.10/32"}, false},
+		{"narrowed allowlist, bridge excluded", "off", "1", nil, []string{"10.0.0.0/8"}, false},
+		// A broader prefix that still overlaps the relay ranges keeps the
+		// warning, because the relay is still admitted.
+		{"catch-all allowlist still warns", "off", "0", nil, []string{"0.0.0.0/0"}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
