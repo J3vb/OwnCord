@@ -1895,7 +1895,7 @@ async function renderAudit(){
   // Filter bar
   html+='<div class="filter-bar">';
   html+='<input class="filter-search" aria-label="Search audit log" placeholder="Search audit log..." value="'+esc(state.auditSearch)+'" oninput="state.auditSearch=this.value;refilterAudit()">';
-  html+='<select class="filter-select" onchange="state.auditActionFilter=this.value;refilterAudit()">';
+  html+='<select class="filter-select" aria-label="Filter by action" onchange="state.auditActionFilter=this.value;refilterAudit()">';
   html+='<option value="all" '+(state.auditActionFilter==='all'?'selected':'')+'>All Actions</option>';
   actionTypes.forEach(t=>{html+='<option value="'+esc(t)+'" '+(state.auditActionFilter===t?'selected':'')+'>'+esc(t)+'</option>'});
   html+='</select>';
