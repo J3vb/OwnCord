@@ -340,6 +340,9 @@ reorganised behind service boundaries.
   tables scroll instead of being cut off.
 - Audit log, dashboard activity and pending registration times now show in
   your local time; hover one to see the exact UTC time.
+- The admin panel's security policy now refuses any script that is not one of
+  the panel's own files, so injected markup can no longer run code. The panel
+  looks and works exactly as before.
 - **Who may register is now a choice**: closed, invite only, approval, or open.
   Fresh installs default to invite only. Existing servers keep the behaviour
   they had — a server that required an invite still requires one, and

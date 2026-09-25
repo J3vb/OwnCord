@@ -6,12 +6,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/updater"
+	"github.com/go-chi/chi/v5"
 )
 
 // ─── NewHandler ───────────────────────────────────────────────────────────────
@@ -44,21 +46,75 @@ func TestNewHandler_ServesStaticRoot(t *testing.T) {
 	if ct == "" {
 		t.Error("Content-Type header missing on / response")
 	}
-
-	body := w.Body.String()
-	if !strings.Contains(body, "api('POST','/logs/ticket')") {
-		t.Error("admin root should request log stream tickets before opening EventSource")
-	}
-	if !strings.Contains(body, "/admin/api/logs/stream?ticket=") {
-		t.Error("admin root should connect to log stream with a ticket query parameter")
-	}
-	if strings.Contains(body, "/admin/api/logs/stream?token=") {
-		t.Error("admin root should not use the deprecated token-based log stream URL")
+	if !strings.Contains(w.Body.String(), `<script src="/admin/js/core.js"></script>`) {
+		t.Error("admin root does not load the panel's core script")
 	}
 }
 
-// TestNewHandler_SetsCSPOnRoot verifies that the root path response includes a
-// Content-Security-Policy header allowing inline scripts and styles.
+// panelAssetRe matches the stylesheet and scripts index.html loads. They are
+// absolute because the panel is served at both /admin and /admin/, and a
+// relative path would resolve to /admin.css from the first.
+var panelAssetRe = regexp.MustCompile(`(?:src|href)="/admin/([^"]+\.(?:css|js))"`)
+
+// TestNewHandler_ServesPanelAssets verifies that every stylesheet and script
+// index.html references is served from the embedded tree with its type, so a
+// renamed or unembedded file fails here rather than as a blank panel. The
+// handler is mounted at /admin exactly as api/router.go mounts it: chi's Mount
+// leaves the prefix on URL.Path, which an unmounted request would not show.
+func TestNewHandler_ServesPanelAssets(t *testing.T) {
+	database := openAdminTestDB(t)
+	h := chi.NewRouter()
+	h.Mount("/admin", admin.NewHandler(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database)))
+
+	index := httptest.NewRecorder()
+	h.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/admin", nil))
+	assets := panelAssetRe.FindAllStringSubmatch(index.Body.String(), -1)
+	if len(assets) < 2 {
+		t.Fatalf("index.html references %d stylesheets/scripts, want the stylesheet and the scripts", len(assets))
+	}
+	for _, m := range assets {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/admin/"+m[1], nil))
+		if w.Code != http.StatusOK {
+			t.Errorf("GET /admin/%s status = %d, want 200", m[1], w.Code)
+			continue
+		}
+		want := "text/javascript"
+		if strings.HasSuffix(m[1], ".css") {
+			want = "text/css"
+		}
+		if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, want) {
+			t.Errorf("GET /admin/%s Content-Type = %q, want %s", m[1], ct, want)
+		}
+	}
+
+	for _, path := range []string{"/admin/js", "/admin/js/", "/admin/nope.js", "/admin/js/../admin.go"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusNotFound {
+			t.Errorf("GET %s status = %d, want 404", path, w.Code)
+		}
+	}
+
+	// The log viewer is served as a script now, not inside the document.
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/admin/js/operations.js", nil))
+	body := w.Body.String()
+	if !strings.Contains(body, "api('POST','/logs/ticket')") {
+		t.Error("admin panel should request log stream tickets before opening EventSource")
+	}
+	if !strings.Contains(body, "/admin/api/logs/stream?ticket=") {
+		t.Error("admin panel should connect to log stream with a ticket query parameter")
+	}
+	if strings.Contains(body, "/admin/api/logs/stream?token=") {
+		t.Error("admin panel should not use the deprecated token-based log stream URL")
+	}
+}
+
+// TestNewHandler_SetsCSPOnRoot verifies that the admin document's
+// Content-Security-Policy runs only the panel's own script files: no inline
+// script, no eval. Inline styles stay allowed while the markup carries style=
+// attributes.
 func TestNewHandler_SetsCSPOnRoot(t *testing.T) {
 	database := openAdminTestDB(t)
 	h := admin.NewHandler(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
@@ -69,7 +125,52 @@ func TestNewHandler_SetsCSPOnRoot(t *testing.T) {
 
 	csp := w.Header().Get("Content-Security-Policy")
 	if csp == "" {
-		t.Error("Content-Security-Policy header missing on / response")
+		t.Fatal("Content-Security-Policy header missing on / response")
+	}
+	directives := map[string]string{}
+	for d := range strings.SplitSeq(csp, ";") {
+		name, value, _ := strings.Cut(strings.TrimSpace(d), " ")
+		directives[name] = value
+	}
+	for name, want := range map[string]string{
+		"default-src": "'self'",
+		"script-src":  "'self'",
+		"img-src":     "'self' blob:",
+		"style-src":   "'self' 'unsafe-inline'",
+	} {
+		if got, ok := directives[name]; !ok || got != want {
+			t.Errorf("CSP %s = %q, want %q (full policy %q)", name, got, want, csp)
+		}
+	}
+	for _, name := range []string{"script-src-elem", "script-src-attr"} {
+		if v, ok := directives[name]; ok {
+			t.Errorf("CSP carries %s %q, which would override script-src", name, v)
+		}
+	}
+}
+
+// The CSP above is only safe to ship if the panel needs nothing it forbids:
+// an inline handler or inline <script> would be refused by the browser, and
+// the control it wires would silently do nothing. Controls name a handler in
+// data-action (static/js/core.js) instead.
+var (
+	inlineHandlerRe = regexp.MustCompile(`\son[a-z]+\s*=\s*["']`)
+	scriptTagRe     = regexp.MustCompile(`<script\b[^>]*>`)
+)
+
+func TestAdminPanelHasNoInlineScript(t *testing.T) {
+	source := adminPanelSource(t)
+
+	if m := inlineHandlerRe.FindString(source); m != "" {
+		t.Errorf("inline event handler attribute %q; use data-action and register the handler in ACTIONS", m)
+	}
+	for _, tag := range scriptTagRe.FindAllString(source, -1) {
+		if !strings.Contains(tag, " src=") {
+			t.Errorf("inline script element %q; CSP script-src 'self' refuses it", tag)
+		}
+	}
+	if strings.Contains(source, "javascript:") {
+		t.Error("javascript: URL; CSP script-src 'self' refuses it")
 	}
 }
 

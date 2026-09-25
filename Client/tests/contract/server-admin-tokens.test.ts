@@ -3,7 +3,7 @@
 // module carries no JavaScript engine (see docs/contributing.md#testing).
 //
 // AO-1 (admin UI overhaul) hand-copies the client's Refined Neon (neon-glow)
-// token values into Server/admin/static/index.html's :root. There is no build
+// token values into Server/admin/static/admin.css's :root. There is no build
 // step and no generated file to keep the two in step, so this test is the tie:
 // every admin token that mirrors a client token must resolve to the same value
 // as Client/src/styles/tokens.css overridden by theme-neon-glow.css. Change
@@ -14,13 +14,12 @@
 // media query or a commented-out block changes what the test sees.
 import { describe, it, expect } from "vitest";
 import { JSDOM } from "jsdom";
+import { adminPanelHtml } from "../helpers/admin-panel";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const CLIENT = path.resolve(__dirname, "../../src/styles");
-const ADMIN_HTML_PATH = path.resolve(__dirname, "../../../Server/admin/static/index.html");
-
-const adminWindow = new JSDOM(readFileSync(ADMIN_HTML_PATH, "utf8")).window;
+const adminWindow = new JSDOM(adminPanelHtml()).window;
 const adminStyle = adminWindow.getComputedStyle(adminWindow.document.documentElement);
 
 const clientWindow = new JSDOM(
@@ -106,7 +105,7 @@ const MIRRORED: ReadonlyArray<readonly [string, string]> = [
   ["--role-member", "--role-member"],
 ];
 
-describe("Server/admin/static/index.html — Refined Neon tokens equal the client's (AO-1)", () => {
+describe("Server/admin/static — Refined Neon tokens equal the client's (AO-1)", () => {
   it.each(MIRRORED)("%s equals the client's %s", (adminName, clientName) => {
     const actual = adminValue(adminName);
     expect(actual, `admin ${adminName} is missing from :root`).not.toBe("");

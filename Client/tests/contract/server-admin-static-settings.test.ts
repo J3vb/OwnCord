@@ -3,20 +3,18 @@
 // module carries no JavaScript engine, so nothing under Server/ can execute
 // this SPA. See docs/contributing.md#testing for the membership rule.
 //
-// Loads the real Server/admin/static/index.html (the Go admin panel's
-// single-file SPA) into a scripted jsdom window and drives its inline
-// Settings-page save logic directly, the same way a browser would.
+// Loads the real admin panel (Server/admin/static, the Go admin panel's SPA)
+// into a scripted jsdom window and drives its Settings-page save logic
+// directly, the same way a browser would.
 //
-// There is no bundler or module system for this file — it is one inline
-// <script> executed as a classic script — so the only faithful way to test
+// There is no bundler or module system for the panel — its scripts are
+// classic scripts sharing one global scope — so the only faithful way to test
 // it is to actually run it, not to re-implement its logic in TypeScript.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { readFileSync } from "node:fs";
-import path from "node:path";
+import { adminPanelHtml } from "../helpers/admin-panel";
 
-const ADMIN_HTML_PATH = path.resolve(__dirname, "../../../Server/admin/static/index.html");
-const ADMIN_HTML_SOURCE = readFileSync(ADMIN_HTML_PATH, "utf8");
+const ADMIN_HTML_SOURCE = adminPanelHtml();
 
 // The page's own <script> is a classic (non-module) script, so its top-level
 // `const`/`function` declarations live in the window's shared global script
@@ -104,7 +102,7 @@ const LOADED_SETTINGS = {
   require_2fa: "true",
 };
 
-describe("Server/admin/static/index.html — Settings save (OC-0422)", () => {
+describe("Server/admin/static — Settings save (OC-0422)", () => {
   let dom: JSDOM | undefined;
 
   afterEach(() => {

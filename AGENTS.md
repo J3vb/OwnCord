@@ -90,7 +90,7 @@ From the repository root. `node scripts/run.mjs --list` prints the exact command
 | `npm run format`            | Prettier over the whole repository, `gofmt -w` over `Server/`, `cargo fmt --all` over the Tauri backend                     |
 | `npm run release:preflight` | `check` plus a client production build                                                                                      |
 
-`npm run check` is the local mirror of CI's static, unit and drift gates. It does **not** run the Playwright jobs, govulncheck, npm audit, the coverage-floor scripts, `typecheck:e2e`, or the tag-gated Go tests below. A step whose tool is not on PATH (golangci-lint, sqlc, shellcheck, actionlint, gofmt) prints `--- SKIP` and the run still reports passed. Server and client checks are independent, except across the contract paths listed in `scripts/ci-select.mjs` (`SERVER_READS_OUTSIDE`, `CLIENT_READS_OUTSIDE`). For example, a change to `protocol/schema.json`, `Server/admin/static/index.html` or a regenerated `docs/api.md` needs both.
+`npm run check` is the local mirror of CI's static, unit and drift gates. It does **not** run the Playwright jobs, govulncheck, npm audit, the coverage-floor scripts, `typecheck:e2e`, or the tag-gated Go tests below. A step whose tool is not on PATH (golangci-lint, sqlc, shellcheck, actionlint, gofmt) prints `--- SKIP` and the run still reports passed. Server and client checks are independent, except across the contract paths listed in `scripts/ci-select.mjs` (`SERVER_READS_OUTSIDE`, `CLIENT_READS_OUTSIDE`). For example, a change to `protocol/schema.json`, anything under `Server/admin/static/` or a regenerated `docs/api.md` needs both.
 
 Client (from `Client/`):
 

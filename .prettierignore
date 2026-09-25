@@ -20,6 +20,10 @@ docs/audit-*.md
 # Carried forward from the client's own ignore file — a deliberate exclusion,
 # not an oversight.
 *.html
+# The admin panel's stylesheet and scripts, split out of its index.html (which
+# the line above already excluded). Their compact hand-written style is what
+# the Go pins in Server/admin/*_test.go grep for, character for character.
+Server/admin/static/
 
 # Session scratch from the remember plugin. Gitignored by a nested
 # .remember/.gitignore, which Prettier does not read — it honours only the root

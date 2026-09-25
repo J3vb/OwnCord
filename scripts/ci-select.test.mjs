@@ -136,6 +136,14 @@ test("the admin panel HTML runs the client unit suite, though it lives under Ser
   assert.equal(sel.server, true);
 });
 
+test("the admin panel's scripts and stylesheet run the client unit suite too", () => {
+  for (const file of ["Server/admin/static/js/members.js", "Server/admin/static/admin.css"]) {
+    const sel = picked("M\t" + file);
+    assert.equal(sel.client, true, file + " is loaded by the tests/contract admin specs");
+    assert.equal(sel.server, true);
+  }
+});
+
 test("the findings ledger runs the server job, because the smoke drill reads it", () => {
   assert.equal(runs("M\t.superpowers/findings-ledger.json", "server"), true);
 });
