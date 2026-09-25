@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -67,6 +68,7 @@ type App struct {
 	router      http.Handler
 	addr        string
 	srv         *http.Server
+	ln          net.Listener
 	acmeSrv     *http.Server
 	persister   *ws.EventPersister
 	prunerDone  <-chan struct{}

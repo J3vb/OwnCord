@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -35,21 +36,21 @@ func startACMEServer(log *slog.Logger, httpHandler http.Handler) *http.Server {
 	return acmeSrv
 }
 
-// serveAndWait starts the listener and blocks until it fails or a
+// serveAndWait serves on the bound listener and blocks until it fails or a
 // shutdown or restart signal arrives. App.serve calls it after every stage
 // is up.
-func serveAndWait(ctx context.Context, log *slog.Logger, rc *RestartCoordinator, srv *http.Server, tlsCfg *tls.Config, addr, version string) error {
+func serveAndWait(ctx context.Context, log *slog.Logger, rc *RestartCoordinator, srv *http.Server, ln net.Listener, tlsCfg *tls.Config, addr, version string) error {
 	// Start serving in a goroutine.
 	serveErr := make(chan error, 1)
 	go func() {
 		log.Info("server starting", "addr", addr, "tls", tlsCfg != nil, "version", version)
 
-		err := serveWithBindRetry(log, "server", func() error {
-			if tlsCfg != nil {
-				return srv.ListenAndServeTLS("", "")
-			}
-			return srv.ListenAndServe()
-		})
+		var err error
+		if tlsCfg != nil {
+			err = srv.ServeTLS(ln, "", "")
+		} else {
+			err = srv.Serve(ln)
+		}
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- err
 		}

@@ -120,6 +120,35 @@ func TestAppRun_Success_RemovesOldBinaryAfterStages(t *testing.T) {
 	}
 }
 
+// TestAppRun_PortInUse_KeepsOldBinary is REL-01 for the listener: a port
+// another process holds must fail start-up before the rollback copy is
+// removed. The bind used to happen asynchronously in serve(), after the
+// cleanup had already run.
+func TestAppRun_PortInUse_KeepsOldBinary(t *testing.T) {
+	var cleanupRan bool
+	prev := removeOldBinaryFn
+	removeOldBinaryFn = func(*slog.Logger) { cleanupRan = true }
+	t.Cleanup(func() { removeOldBinaryFn = prev })
+	prevEvery := bindRetryEvery
+	bindRetryEvery = time.Millisecond
+	t.Cleanup(func() { bindRetryEvery = prevEvery })
+
+	held, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("hold port: %v", err)
+	}
+	defer held.Close() //nolint:errcheck
+	port := held.Addr().(*net.TCPAddr).Port
+
+	a := bootTestApp(t, fmt.Sprint(port), "")
+	if err := a.Run(context.Background()); err == nil {
+		t.Fatal("Run() = nil, want a bind failure on a held port")
+	}
+	if cleanupRan {
+		t.Error("old-binary cleanup ran despite the listener failing to bind: the rollback copy is gone (REL-01)")
+	}
+}
+
 func TestAppRun_EveryStageFailure_ReleasesEverythingItStarted(t *testing.T) {
 	for _, name := range stageNames() {
 		t.Run(name, func(t *testing.T) {
@@ -155,10 +184,10 @@ func stageNames() []string {
 
 // TestAppRun_ListenerBindFailure_ReleasesEverythingItStarted is the same
 // four properties for a real failure rather than an injected one: every
-// stage starts, and the listener itself refuses to bind. An out-of-range
-// port fails the first attempt with an error isAddrInUse does not recognise,
-// so serveAndWait takes the serve-error branch immediately instead of
-// retrying for ~10s. This is the path OC-0027 was about.
+// stage up to http starts, and the listener itself refuses to bind. An
+// out-of-range port fails the first attempt with an error isAddrInUse does
+// not recognise, so the http stage fails immediately instead of retrying for
+// ~10s. This is the path OC-0027 was about.
 func TestAppRun_ListenerBindFailure_ReleasesEverythingItStarted(t *testing.T) {
 	leakOpt := goleak.IgnoreCurrent()
 	a := bootTestApp(t, "99999", "")
@@ -167,11 +196,11 @@ func TestAppRun_ListenerBindFailure_ReleasesEverythingItStarted(t *testing.T) {
 	if err == nil {
 		t.Fatal("Run() = nil, want a listener error for an out-of-range port")
 	}
-	if !strings.Contains(err.Error(), "server error") {
-		t.Errorf("Run() = %v, want the serve error", err)
+	if !strings.Contains(err.Error(), "starting http") {
+		t.Errorf("Run() = %v, want the http stage's bind error", err)
 	}
 	if a.hub == nil {
-		t.Fatal("every stage runs before the listener binds, so the hub must have been built")
+		t.Fatal("the hub stage runs before the listener binds, so the hub must have been built")
 	}
 	// Port 99999 was never bindable, so only the release assertions apply.
 	if pingErr := a.database.PingRead(context.Background()); pingErr == nil {
