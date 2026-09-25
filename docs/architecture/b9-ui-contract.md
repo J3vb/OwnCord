@@ -150,7 +150,8 @@ beside it) everywhere else. The `@font-face` is in `base.css`; font-src is
   focus to the opener on close.
   - Pass `ariaLabel` or `ariaLabelledBy` to name the dialog.
   - Pass `fallbackFocus` when the dialog can remove its own opener (deleting
-    the row that opened it). Otherwise focus drops to `<body>`.
+    the row that opened it) or the opener can turn `inert` (a sidebar control
+    once the narrow-width drawer closes). Otherwise focus drops to `<body>`.
 - Pending states keep focus where it is. Mark a busy button with
   `aria-busy="true"` and `aria-disabled="true"`, not `disabled`: disabling
   the focused button moves focus to `<body>`. Exception: the Settings
