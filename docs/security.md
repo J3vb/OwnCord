@@ -140,9 +140,9 @@ UPDATE settings SET value = '0' WHERE key = 'setup_completed';
 The server prints the setup token only at start-up while setup is open, so
 **restart the server after this change**: it prints a fresh one-time token
 beside the banner, and the next `POST /admin/api/setup` that carries it
-creates a new Owner and sets the flag again. A server left running never
-prints the token the reopened wizard is waiting for, so a wizard attempt
-against a live process is refused.
+creates a new Owner and sets the flag again. A running process does not
+print a token when setup is reopened, so restart it rather than reuse the
+one from an earlier start.
 
 `0` is the only _value_ that opens setup: the gate stands in front of an
 unauthenticated endpoint, so a flag holding anything else — corrupted,
