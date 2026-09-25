@@ -57,6 +57,7 @@ export default defineConfig({
         "http-cancellation.spec.ts",
         "long-session.spec.ts",
         "b9-content-consent.spec.ts",
+        "b9-journeys.spec.ts",
       ],
     },
     {

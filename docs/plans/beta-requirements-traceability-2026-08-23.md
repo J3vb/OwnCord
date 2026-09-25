@@ -11,6 +11,14 @@
 _2026-09-23 (B9-0):_ the B9 entry baseline
 ([b9-entry-baseline-2026-09-23.md](b9-entry-baseline-2026-09-23.md)) qualifies
 no row; BPR-060..064, BPR-070..073 and BPR-090..092 keep their status
+_2026-09-25 (B9-26):_ the cross-feature journey evidence
+([b9-journey-evidence-2026-09-25.md](b9-journey-evidence-2026-09-25.md))
+records the B9 client halves of BPR-060, BPR-070..073, BPR-090 and BPR-092 (the
+automated keyboard/focus half of BPR-091), plus BPR-063 evidence, as
+automated-tested on the real server at the journey head. The desktop privacy
+journey for BPR-061/BPR-062 is CI-only (non-Windows host here) and is **pending
+the `client-native` run**, not claimed. BPR-061/BPR-062 keep their B5/B7 status
+and BPR-092's unsupported-browser half stays with B8
 
 ## How to use this document
 
