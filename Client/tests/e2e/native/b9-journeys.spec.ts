@@ -8,7 +8,8 @@
  * the real requests unchanged. This records:
  *
  *  - every first-party HTTP destination the renderer asks for, proving it is
- *    the configured server and nothing else (no provider traffic directly);
+ *    the configured server's pinned loopback tunnel and nothing else (no
+ *    provider traffic directly);
  *  - every URL handed to the external-content broker, proving a link is
  *    fetched only after the viewer consents, exactly once for the activated
  *    item, and not re-fetched after a warm-cache re-entry that follows consent;
@@ -97,6 +98,14 @@ test("native privacy journey: consent gates the broker, a warm re-entry does not
         await nativeLoginAndReady(page);
         await waitForMessages(page);
         await expect(channelItem(page, "privacy-other")).toBeVisible();
+        // REST rides the Rust TOFU tunnel pinned to the server, so the
+        // renderer's only first-party destination is that tunnel's loopback
+        // host. start_http_proxy reuses a live tunnel, returning its port.
+        const tunnelHost = `127.0.0.1:${await page.evaluate(
+          (host) =>
+            (window as any).__TAURI_INTERNALS__.invoke("start_http_proxy", { remoteHost: host }),
+          serverHost,
+        )}`;
         // The startup traffic (health, server-info, ready) lands before the
         // observer is installed; only the post-login journey is measured.
         await observeIpc(page);
@@ -141,12 +150,16 @@ test("native privacy journey: consent gates the broker, a warm re-entry does not
         expect((await state(page)).broker).toHaveLength(callsAfterConsent);
 
         // First-party confinement: every HTTP destination was the configured
-        // server. No provider or third-party host was fetched directly.
+        // server's tunnel. No provider or third-party host was fetched directly.
         const { http } = await state(page);
         expect(http.length).toBeGreaterThan(0);
-        expect([...new Set(http)]).toEqual([serverHost]);
+        expect([...new Set(http)]).toEqual([tunnelHost]);
         await info.attach("native-first-party-destinations.json", {
-          body: JSON.stringify({ serverHost, destinations: [...new Set(http)] }, null, 2),
+          body: JSON.stringify(
+            { serverHost, tunnelHost, destinations: [...new Set(http)] },
+            null,
+            2,
+          ),
           contentType: "application/json",
         });
         await info.attach("native-broker-invocations.json", {
@@ -164,10 +177,10 @@ test("native privacy journey: consent gates the broker, a warm re-entry does not
         await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
         await page.waitForTimeout(1_500);
         const afterLogout = await state(page);
-        expect([...new Set(afterLogout.http)]).toEqual([serverHost]);
+        expect([...new Set(afterLogout.http)]).toEqual([tunnelHost]);
         await info.attach("native-destinations-through-logout.json", {
           body: JSON.stringify(
-            { serverHost, destinations: [...new Set(afterLogout.http)] },
+            { serverHost, tunnelHost, destinations: [...new Set(afterLogout.http)] },
             null,
             2,
           ),
