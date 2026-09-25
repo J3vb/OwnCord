@@ -3682,9 +3682,16 @@ lower-case); a change of mode is audited as `registration_mode_change`
 naming the old and new mode, and while `require_2fa` is on the mode cannot
 leave `closed`.
 
-`backup_schedule` (`off`/`daily`/`weekly`) and `backup_retention` (days) are
-enforced by the server's maintenance loop — see the Backup Strategy section
-of `docs/deployment.md` for the exact semantics.
+`backup_schedule` (`off`/`daily`/`weekly`) and `backup_retention` (days,
+`0` to keep backups forever or `7`–`3650`) decide the owner-only backup
+policy (BPR-072) and are enforced by the server's maintenance loop — see the
+Backup Strategy section of `docs/deployment.md` for the exact semantics.
+Because they control which of the owner's backups survive, they are the one
+pair of settings a PATCH may not change without the **Owner** role: a request
+carrying either key from a non-owner principal is refused with `403 FORBIDDEN`
+even though the rest of this route only needs `MANAGE_SERVER`. `ADMINISTRATOR`
+does not bypass it. Retention pruning never removes the `pre_restore_*`
+safety copies.
 
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change

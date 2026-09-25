@@ -274,7 +274,7 @@ func openAdminTestDB(t *testing.T) *db.DB {
 	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
-		"001_schema.sql": {Data: adminSchema},
+		"001_initial_schema.sql": {Data: adminSchema},
 	}
 	if err := db.MigrateFS(database, migrFS); err != nil {
 		t.Fatalf("MigrateFS: %v", err)
@@ -1115,8 +1115,14 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 		"backup_retention",
 	}
 
-	// Boolean-typed settings require valid boolean values; others accept any string.
-	booleanKeys := map[string]bool{"require_2fa": true}
+	// Boolean-typed settings require valid boolean values; others accept any
+	// string, except the enumerated/validated keys which need a valid value.
+	validValues := map[string]string{
+		"require_2fa":       "0",
+		"registration_mode": "closed",
+		"backup_schedule":   "daily",
+		"backup_retention":  "30",
+	}
 
 	for _, key := range whitelistedKeys {
 		t.Run(key, func(t *testing.T) {
@@ -1125,11 +1131,8 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 			token := createAdminUser(t, database)
 
 			value := "testvalue"
-			if booleanKeys[key] {
-				value = "0"
-			}
-			if key == "registration_mode" {
-				value = "closed"
+			if valid, ok := validValues[key]; ok {
+				value = valid
 			}
 			body := map[string]string{key: value}
 			w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)

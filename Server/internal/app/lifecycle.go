@@ -122,8 +122,6 @@ func (a *App) Run(ctx context.Context) (err error) {
 // stages that did come up are already registered with Close, which Run runs
 // regardless.
 func (a *App) start() error {
-	removeOldBinary(a.log)
-
 	for _, st := range a.stages() {
 		if st.name == a.failStage {
 			return fmt.Errorf("starting %s: %w", st.name, errStageInjected)
@@ -132,6 +130,15 @@ func (a *App) start() error {
 			return fmt.Errorf("starting %s: %w", st.name, err)
 		}
 	}
+	// Only once every stage is up is the previous binary safe to remove. It
+	// used to be the FIRST act of start(), before the data-dir, TLS, database,
+	// migrate and later stages — so a migration error (or any other start
+	// failure) left an operator with no chatserver.old to roll back to, and
+	// under systemd Restart=always the unit has nothing local to fall back on
+	// (REL-01). Deferring it past the stages preserves the documented rollback
+	// copy through every start-up refusal; the schema-ahead check in
+	// db.MigrateFS stops that copy from then booting on a newer schema.
+	removeOldBinaryFn(a.log)
 	return nil
 }
 

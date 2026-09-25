@@ -347,6 +347,55 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 	}
 }
 
+// TestHandleRestoreBackup_RefusesNewerSchema is REL-02: a backup whose
+// schema_versions names migrations the running server does not have must be
+// refused with 409 SCHEMA_TOO_NEW before the live database is touched.
+func TestHandleRestoreBackup_RefusesNewerSchema(t *testing.T) {
+	tmpDir := chdirTemp(t)
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+
+	backupDir := filepath.Join(tmpDir, "data", "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll backups: %v", err)
+	}
+	// A real SQLite backup carrying a migration row the live server lacks.
+	backupName := "scheduled_99991231_235959.db"
+	backupPath := filepath.Join(backupDir, backupName)
+	newer, err := db.Open(backupPath)
+	if err != nil {
+		t.Fatalf("db.Open backup fixture: %v", err)
+	}
+	if _, err := newer.ExecContext(context.Background(),
+		`CREATE TABLE schema_versions (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))`); err != nil {
+		t.Fatalf("create schema_versions in backup fixture: %v", err)
+	}
+	if _, err := newer.ExecContext(context.Background(),
+		"INSERT INTO schema_versions (version) VALUES ('999_from_newer.sql')"); err != nil {
+		t.Fatalf("seed newer migration: %v", err)
+	}
+	if err := newer.Close(); err != nil {
+		t.Fatalf("close backup fixture: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("restore of a newer-schema backup = %d, want 409; body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "SCHEMA_TOO_NEW") {
+		t.Errorf("body = %s, want SCHEMA_TOO_NEW", w.Body.String())
+	}
+	// No pre-restore safety copy may have been taken: the refusal precedes it.
+	if entries, err := os.ReadDir(backupDir); err == nil {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), "pre_restore_") {
+				t.Errorf("a pre-restore copy was taken despite the refusal: %s", e.Name())
+			}
+		}
+	}
+}
+
 // Restore must drain accepted sends before advancing the durable retry floor,
 // then persist that floor before the first byte of the database is replaced.
 func TestHandleRestoreBackup_PreservesRetryFloorBeforeCopy(t *testing.T) {

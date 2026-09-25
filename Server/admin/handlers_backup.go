@@ -226,6 +226,23 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			return
 		}
 
+		// Refuse a backup a NEWER server wrote (REL-02): restoring it would put
+		// this older binary on a schema it has never seen, and it would then
+		// boot silently on it. Checked before the pre-restore safety copy and
+		// before anything is closed.
+		ahead, err := db.CheckBackupSchemaAhead(context.WithoutCancel(r.Context()), target)
+		if err != nil {
+			slog.Error("restore refused: could not read backup schema version", "backup", name, "err", err)
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not verify the backup's schema version")
+			return
+		}
+		if len(ahead) > 0 {
+			slog.Warn("restore refused: backup schema is newer than this server", "backup", name, "unknown_migrations", strings.Join(ahead, ","))
+			writeErr(w, http.StatusConflict, "SCHEMA_TOO_NEW",
+				"backup was written by a newer server version; upgrade this server before restoring it")
+			return
+		}
+
 		dbPath := dbFilePath
 
 		actor := actorFromContext(r)

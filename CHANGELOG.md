@@ -114,6 +114,12 @@ server's internals were reorganised behind service boundaries.
 
 ### Accounts & admin
 
+- **The backup schedule and retention window are now owner-only.** Any other
+  administrator, including one holding MANAGE_SERVER or ADMINISTRATOR, is
+  refused when they try to change them, matching the owner-only backup and
+  restore buttons they already could not use. The panel shows both fields
+  read-only to a non-owner. Retention must be `0` (keep forever) or between 7
+  and 3650 days, and the `pre_restore_*` safety copies are never pruned.
 - The connectivity diagnostics now name the kind of address a client connected
   from (`address_class`), so a Tailscale peer is no longer reported as coming
   from the public internet. Addresses in `100.64.0.0/10` were previously counted
@@ -170,6 +176,19 @@ server's internals were reorganised behind service boundaries.
 
 ### Installing & updating
 
+- **A failed start-up no longer discards your rollback binary.** A
+  self-updated server used to delete `chatserver.old` before it had proved it
+  could boot, so a migration (or any later start-up failure) left no local
+  rollback. It is now removed only after every start-up stage succeeds.
+- **An older server refuses to start on a database a newer one has migrated,**
+  naming the migrations it does not recognise, instead of serving on a schema
+  it has never seen. Restoring a backup written by a newer server is refused
+  the same way before the live database is touched.
+- **The shipped systemd unit's comment now says off-disk directories need
+  `ReadWritePaths` too.** With `ProtectSystem=strict`, a documented off-disk
+  `backup.dir` (or `upload.storage_dir`) is read-only unless the unit allows
+  it, so following the deployment guide exactly previously produced failing
+  backups. Add a `ReadWritePaths=` line for each such path.
 - **ARM64 server builds.** Releases now carry four server assets instead of
   two: `chatserver.exe` and `chatserver-windows-arm64.exe` for Windows,
   `chatserver-linux-amd64.tar.gz` and `chatserver-linux-arm64.tar.gz` for

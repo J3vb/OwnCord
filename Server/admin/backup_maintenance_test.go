@@ -142,6 +142,46 @@ func TestMaintainBackups_RetentionNeverDeletesNewest(t *testing.T) {
 	}
 }
 
+// TestMaintainBackups_RetentionKeepsPreRestoreCopies locks the safety rule:
+// the pre_restore_* copies written before an admin restore are not retention
+// history and survive pruning even when they are older than the window.
+func TestMaintainBackups_RetentionKeepsPreRestoreCopies(t *testing.T) {
+	database := openAdminTestDB(t)
+	dir := t.TempDir()
+	admin.SetBackupBaseDir(dir)
+	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
+	ctx := context.Background()
+
+	mustSetSetting(t, database, "backup_schedule", "off")
+	mustSetSetting(t, database, "backup_retention", "7")
+
+	ancientManual := filepath.Join(dir, "chatserver_a.db")
+	ancientSafety := filepath.Join(dir, "pre_restore_20200101_000000.db")
+	newest := filepath.Join(dir, "chatserver_b.db")
+	for _, p := range []string{ancientManual, ancientSafety, newest} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backdate(t, ancientManual, 400*24*time.Hour)
+	backdate(t, ancientSafety, 400*24*time.Hour)
+	backdate(t, newest, time.Hour)
+
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+		t.Fatalf("MaintainBackups: %v", err)
+	}
+	got := listBackupFiles(t, dir)
+	want := map[string]bool{"pre_restore_20200101_000000.db": true, "chatserver_b.db": true}
+	if len(got) != len(want) {
+		t.Fatalf("files = %v, want exactly %v (expired manual pruned, safety copy kept)", got, want)
+	}
+	for _, name := range got {
+		if !want[name] {
+			t.Errorf("unexpected surviving file %q", name)
+		}
+	}
+}
+
 // TestMaintainBackups_OutOfRangeRetentionPrunesNothing is OC-0393's second
 // instance: pruneExpiredBackups builds its cutoff with the identical
 // now.Add(-days*24h) arithmetic as the message-retention sweep, and

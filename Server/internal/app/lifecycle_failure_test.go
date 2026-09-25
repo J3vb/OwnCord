@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -75,6 +76,47 @@ func assertReleased(t *testing.T, a *App, port int, leakOpt goleak.Option) {
 	assertPortFree(t, port)
 	if err := goleak.Find(leakOpt); err != nil {
 		t.Errorf("goroutine leaked after Run returned: %v", err)
+	}
+}
+
+// TestAppRun_StartFailure_KeepsOldBinary is REL-01: the previous binary's
+// cleanup must not run until every start stage has succeeded, so a migration
+// (or other start) failure leaves the documented rollback copy in place.
+// removeOldBinary used to run as the first act of start(), before any stage
+// could prove the new binary bootable.
+func TestAppRun_StartFailure_KeepsOldBinary(t *testing.T) {
+	var cleanupRan bool
+	prev := removeOldBinaryFn
+	removeOldBinaryFn = func(*slog.Logger) { cleanupRan = true }
+	t.Cleanup(func() { removeOldBinaryFn = prev })
+
+	a := bootTestApp(t, "0", "migrate")
+	if err := a.Run(context.Background()); err == nil {
+		t.Fatal("Run() = nil, want the injected migrate failure")
+	}
+	if cleanupRan {
+		t.Error("old-binary cleanup ran despite a start-stage failure: the rollback copy is gone (REL-01)")
+	}
+}
+
+// TestAppRun_Success_RemovesOldBinaryAfterStages is the positive control for
+// the test above: on a successful start the cleanup does run.
+func TestAppRun_Success_RemovesOldBinaryAfterStages(t *testing.T) {
+	var cleanupRan bool
+	prev := removeOldBinaryFn
+	removeOldBinaryFn = func(*slog.Logger) { cleanupRan = true }
+	t.Cleanup(func() { removeOldBinaryFn = prev })
+
+	a := bootTestApp(t, "0", "")
+	// Cancel immediately: Run serves until the context is done and then
+	// returns cleanly, which is enough to reach the post-stage cleanup.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := a.Run(ctx); err != nil {
+		t.Fatalf("Run() = %v, want a clean shutdown", err)
+	}
+	if !cleanupRan {
+		t.Error("old-binary cleanup did not run on a successful start")
 	}
 }
 

@@ -45,6 +45,34 @@ var allowedSettingKeys = map[string]struct{}{
 	db.RetentionDaysKey: {},
 }
 
+// ownerOnlySettingKeys are the settings that decide the owner-only backup
+// policy (BPR-072). They stay on the read surface — the admin panel renders
+// them and GET /settings is MANAGE_SERVER — but a PATCH carrying either must
+// come from the Owner, because they indirectly control which of the owner's
+// backups survive: backup_retention is what the maintenance sweep prunes by,
+// and backup_schedule is whether new copies are taken at all.
+var ownerOnlySettingKeys = map[string]struct{}{
+	"backup_schedule":  {},
+	"backup_retention": {},
+}
+
+// IsOwnerOnlySettingKey reports whether a setting key changes the owner-only
+// backup policy, so the admin PATCH can require the Owner for just those keys
+// without growing a second copy of the list.
+func IsOwnerOnlySettingKey(key string) bool {
+	_, ok := ownerOnlySettingKeys[key]
+	return ok
+}
+
+// Backup retention bounds. The minimum is deliberately well above 1: a single
+// low value would let the maintenance sweep prune the owner's history down to
+// the newest file. The maximum mirrors the message-retention ceiling, past
+// which pruneExpiredBackups' -days*24h arithmetic would overflow.
+const (
+	BackupRetentionMinDays = 7
+	BackupRetentionMaxDays = db.RetentionMaxDays
+)
+
 // List returns every setting as a key→value map.
 func (s *SettingsService) List(ctx context.Context) (map[string]string, error) {
 	return s.st.GetAllSettings(ctx)
@@ -163,6 +191,20 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 				return nil, fmt.Errorf("%s: must be 0 (keep forever) or between %d and %d", key, RetentionMinDays, RetentionMaxDays)
 			}
 			normalized[key] = strconv.Itoa(days)
+		case "backup_retention":
+			days, err := strconv.Atoi(strings.TrimSpace(value))
+			if err != nil || days < 0 || (days != 0 && days < BackupRetentionMinDays) || days > BackupRetentionMaxDays {
+				return nil, fmt.Errorf("%s: must be 0 (keep forever) or between %d and %d", key, BackupRetentionMinDays, BackupRetentionMaxDays)
+			}
+			normalized[key] = strconv.Itoa(days)
+		case "backup_schedule":
+			schedule := strings.ToLower(strings.TrimSpace(value))
+			switch schedule {
+			case "off", "daily", "weekly":
+				normalized[key] = schedule
+			default:
+				return nil, fmt.Errorf("%s: must be one of off, daily, weekly", key)
+			}
 		}
 	}
 	return normalized, nil
