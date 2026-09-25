@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// defaultLiveKitAPIKey and defaultLiveKitAPISecret are the well-known dev
+// DefaultLiveKitAPIKey and DefaultLiveKitAPISecret are the well-known dev
 // credentials that ship in the default config. They must never be used in
 // production — NewLiveKitClient rejects them.
 const (

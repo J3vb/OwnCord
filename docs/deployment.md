@@ -112,7 +112,7 @@ cp livekit.yaml.example livekit.yaml
 docker compose up -d
 ```
 
-On first start OwnCord creates its database and writes defaults into `/app/data`. Navigate to `https://<your-ip>:8443/admin` to create the Owner account.
+On first start OwnCord creates its database and writes defaults into `/app/data`. Navigate to `https://<your-ip>:8443/admin` to create the Owner account, with the setup token from `docker compose logs owncord`.
 
 ### config.yaml for Docker
 
