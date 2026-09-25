@@ -6,22 +6,38 @@
 <title>OwnCord — Admin Panel</title>
 <style>
   :root {
-    --bg-tertiary:#1e1f22;--bg-secondary:#2b2d31;--bg-primary:#313338;
-    --bg-input:#1e1f22;--bg-hover:#35373c;--bg-active:#404249;
-    --bg-overlay:rgba(0,0,0,.7);--bg-card:#2b2d31;--bg-table-hover:rgba(88,101,242,.06);
-    --accent:#5865f2;--accent-hover:#4752c4;--accent-active:#3c45a5;--accent-glow:rgba(88,101,242,.25);
-    --text-normal:#dbdee1;--text-muted:#949ba4;--text-faint:#80848e;--text-micro:#6d6f78;--text-link:#00a8fc;
-    --green:#23a55a;--yellow:#f0b232;--red:#f23f43;--border:#3f4147;--border-strong:#4e5058;
-    --role-owner:#e74c3c;--role-admin:#f39c12;--role-mod:#2ecc71;--role-member:#949ba4;
-    --font-body:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    /* The client's Refined Neon (neon-glow) values from
+       Client/src/styles/tokens.css + theme-neon-glow.css. The equality is
+       pinned by Client/tests/contract/server-admin-tokens.test.ts — change
+       both sides together. */
+    --bg-tertiary:#0b0c0e;--bg-secondary:#111214;--bg-primary:#17181b;--bg-input:#222328;
+    --bg-hover:#1d1e22;--bg-active:#27282d;--bg-overlay:rgba(0,0,0,.7);
+    --accent:#00c8ff;--accent-hover:#26d0ff;--accent-active:#4dd9ff;--on-accent:#000;
+    --accent-text:#2fd0ff;--focus-ring:#2fd0ff;--accent-secondary:#7b2fff;
+    --text-normal:#dfe2e6;--text-muted:#a3a9b2;--header-primary:#f4f5f7;
+    --text-faint:#80848e;/* incidental only, never page content */
+    --text-link:#2fd0ff;
+    --text-positive:#5cc389;--text-warning:#f2b84b;--text-danger:#ff8f92;
+    --green:#23a55a;--yellow:#f0b232;--red:#f23f43;/* fills only */
+    --danger-fill:#d0302f;--danger-fill-hover:#b3272a;--on-fill:#fff;--on-warning:#1e1f22;
+    --border:rgba(0,200,255,.08);--border-strong:rgba(0,200,255,.15);--border-control:#5f6773;
+    --radius-sm:4px;--radius-md:8px;--radius-lg:12px;--radius-pill:999px;
+    --font-body:"Segoe UI Variable Text","Segoe UI","Inter Variable",system-ui,sans-serif;
     --font-mono:"Cascadia Code","Consolas",monospace;
-    --radius-sm:4px;--radius-md:8px;--sidebar-w:240px;
+    --sidebar-w:240px;
+    /* Admin-only aliases: --bg-card maps to the client's --bg-secondary,
+       --bg-table-hover to --bg-hover, and --accent-glow is a 15% accent tint. */
+    --bg-card:var(--bg-secondary);--bg-table-hover:var(--bg-hover);--accent-glow:rgba(0,200,255,.15);
+    --role-owner:#e74c3c;--role-admin:#f39c12;--role-mod:#2ecc71;--role-member:#949ba4;
   }
+  :focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%;overflow:hidden}
   body{font-family:var(--font-body);font-size:14px;color:var(--text-normal);background:var(--bg-tertiary);-webkit-font-smoothing:antialiased}
-  button{font-family:inherit;border:none;cursor:pointer;outline:none}
-  input,select,textarea{font-family:inherit;border:none;outline:none}
+  /* No outline:none anywhere: :focus-visible above is the one focus indicator
+     (B9 U1). */
+  button{font-family:inherit;border:none;cursor:pointer}
+  input,select,textarea{font-family:inherit;border:none}
   ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}
   ::-webkit-scrollbar-thumb{background:var(--bg-tertiary);border-radius:3px}
   ::-webkit-scrollbar-thumb:hover{background:var(--bg-hover)}
@@ -30,125 +46,135 @@
   .sidebar{width:var(--sidebar-w);background:var(--bg-secondary);display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto}
   .sidebar-header{padding:20px 16px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
   .sidebar-brand{display:flex;align-items:center;gap:10px}
-  .sidebar-logo{width:36px;height:36px;border-radius:10px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .sidebar-logo{width:36px;height:36px;border-radius:10px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
   .sidebar-logo svg{width:22px;height:22px}
-  .sidebar-title{font-size:15px;font-weight:700;color:white}
-  .sidebar-subtitle{font-size:11px;color:var(--text-faint);letter-spacing:.03em}
+  .sidebar-title{font-size:15px;font-weight:700;color:var(--header-primary)}
+  .sidebar-subtitle{font-size:11px;color:var(--text-muted);letter-spacing:.03em}
   .sidebar-nav{flex:1;padding:8px}
-  .sidebar-label{font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;padding:12px 12px 4px}
+  .sidebar-label{font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase;padding:12px 12px 4px}
   .sidebar-sep{height:1px;background:var(--border);margin:4px 12px}
   .nav-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:var(--radius-sm);font-size:14px;color:var(--text-muted);background:transparent;width:100%;text-align:left;transition:all .15s;position:relative}
   .nav-item:hover{background:var(--bg-hover);color:var(--text-normal)}
-  .nav-item.active{background:var(--bg-active);color:white}
+  .nav-item.active{background:var(--bg-active);color:var(--header-primary)}
   .nav-item svg{width:18px;height:18px;flex-shrink:0;opacity:.7}
   .nav-item.active svg{opacity:1}
-  .nav-item.danger{color:var(--red)}.nav-item.danger:hover{background:rgba(242,63,67,.1)}
+  .nav-item.danger{color:var(--text-danger)}.nav-item.danger:hover{background:rgba(255,143,146,.1)}
   .nav-item .unsaved-dot{position:absolute;left:6px;top:50%;transform:translateY(-50%);width:6px;height:6px;border-radius:50%;background:var(--yellow)}
-  .sidebar-footer{padding:12px 16px;border-top:1px solid var(--border);flex-shrink:0;font-size:11px;color:var(--text-micro);text-align:center}
+  .sidebar-footer{padding:12px 16px;border-top:1px solid var(--border);flex-shrink:0;font-size:11px;color:var(--text-muted);text-align:center}
 
   .content{flex:1;overflow-y:auto;padding:32px 40px;background:var(--bg-primary)}
-  .page-title{font-size:22px;font-weight:700;color:white;margin-bottom:4px}
-  .page-desc{font-size:13px;color:var(--text-faint);margin-bottom:24px}
+  .page-title{font-size:22px;font-weight:700;color:var(--header-primary);margin-bottom:4px}
+  .page-desc{font-size:13px;color:var(--text-muted);margin-bottom:24px}
 
   .stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:24px}
   .stat-card{background:var(--bg-card);border-radius:var(--radius-md);padding:18px 20px;border:1px solid var(--border);transition:border-color .2s}
   .stat-card:hover{border-color:var(--border-strong)}
   .stat-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-  .stat-card-label{font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.04em;text-transform:uppercase}
+  .stat-card-label{font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase}
   .stat-card-icon{width:32px;height:32px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0}
   .stat-card-icon svg{width:16px;height:16px}
-  .stat-card-value{font-size:28px;font-weight:700;color:white;font-family:var(--font-mono);line-height:1.1}
-  .stat-card-sub{font-size:12px;color:var(--text-faint);margin-top:4px;font-family:var(--font-mono)}
+  .stat-card-value{font-size:28px;font-weight:700;color:var(--header-primary);font-family:var(--font-mono);line-height:1.1}
+  .stat-card-sub{font-size:12px;color:var(--text-muted);margin-top:4px;font-family:var(--font-mono)}
 
   .section-card{background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border);margin-bottom:20px;overflow:hidden}
   .section-card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
-  .section-card-header h3{font-size:14px;font-weight:700;color:white}
+  .section-card-header h3{font-size:14px;font-weight:700;color:var(--header-primary)}
   .section-card-body{padding:16px 20px}
-  .section-card-body.no-pad{padding:0}
+  /* U3: a wide table scrolls inside its card instead of being clipped by it.
+     Only the no-pad body holds tables, so padded bodies keep visible overflow
+     for their buttons and tooltips. */
+  .section-card-body.no-pad{padding:0;overflow-x:auto}
 
   .tbl{width:100%;border-collapse:collapse}
-  .tbl th{font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.04em;text-transform:uppercase;text-align:left;padding:10px 16px;border-bottom:2px solid var(--border)}
+  .tbl th{font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase;text-align:left;padding:10px 16px;border-bottom:2px solid var(--border)}
   .tbl td{padding:10px 16px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:middle}
   .tbl tr:hover td{background:var(--bg-table-hover)}
   .tbl tr:last-child td{border-bottom:none}
 
-  .avatar{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:white;flex-shrink:0}
+  .avatar{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:var(--on-accent);flex-shrink:0}
   .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;flex-shrink:0}
-  .dot.online{background:var(--green)}.dot.offline{background:var(--text-micro)}.dot.banned{background:var(--red)}
+  .dot.online{background:var(--green)}.dot.offline{background:var(--text-muted)}.dot.banned{background:var(--red)}
   .role-badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.06)}
   .role-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-  .act-btn{width:28px;height:28px;border-radius:var(--radius-sm);background:transparent;color:var(--text-faint);display:inline-flex;align-items:center;justify-content:center;transition:all .15s}
+  .act-btn{width:28px;height:28px;border-radius:var(--radius-sm);background:transparent;color:var(--text-muted);display:inline-flex;align-items:center;justify-content:center;transition:all .15s}
   .act-btn:hover{background:var(--bg-active);color:var(--text-normal)}
-  .act-btn.danger:hover{background:var(--red);color:white}
+  .act-btn.danger:hover{background:var(--danger-fill);color:var(--on-fill)}
   .act-btn svg{width:14px;height:14px}
   .act-group{display:flex;gap:2px}
 
   .badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px}
-  .badge-green{background:rgba(35,165,90,.15);color:var(--green)}
-  .badge-red{background:rgba(242,63,67,.15);color:var(--red)}
-  .badge-yellow{background:rgba(240,178,50,.15);color:var(--yellow)}
-  .badge-muted{background:rgba(128,132,142,.15);color:var(--text-faint)}
-  .badge-accent{background:var(--accent-glow);color:var(--accent)}
+  .badge-green{background:rgba(92,195,137,.15);color:var(--text-positive)}
+  .badge-red{background:rgba(255,143,146,.15);color:var(--text-danger)}
+  .badge-yellow{background:rgba(242,184,75,.15);color:var(--text-warning)}
+  .badge-muted{background:rgba(163,169,178,.15);color:var(--text-muted)}
+  .badge-accent{background:var(--accent-glow);color:var(--accent-text)}
 
   .filter-bar{display:flex;gap:10px;margin-bottom:16px;align-items:center;flex-wrap:wrap}
-  .filter-search{flex:1;min-width:200px;padding:8px 12px;background:var(--bg-input);color:var(--text-normal);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;transition:border-color .2s}
-  .filter-search::placeholder{color:var(--text-micro)}.filter-search:focus{border-color:var(--accent)}
-  .filter-select{padding:8px 28px 8px 10px;background:var(--bg-input);color:var(--text-normal);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;appearance:none;cursor:pointer}
+  .filter-search{flex:1;min-width:200px;padding:8px 12px;background:var(--bg-input);color:var(--text-normal);border:1px solid var(--border-control);border-radius:var(--radius-sm);font-size:13px;transition:border-color .2s}
+  .filter-search::placeholder{color:var(--text-muted)}.filter-search:focus{border-color:var(--accent)}
+  .filter-select{padding:8px 28px 8px 10px;background:var(--bg-input);color:var(--text-normal);border:1px solid var(--border-control);border-radius:var(--radius-sm);font-size:13px;appearance:none;cursor:pointer}
   .filter-select:focus{border-color:var(--accent)}
 
   .btn{padding:8px 16px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;transition:all .15s;display:inline-flex;align-items:center;gap:6px}
-  .btn-accent{background:var(--accent);color:white}.btn-accent:hover{background:var(--accent-hover)}
-  .btn-danger{background:var(--red);color:white}.btn-danger:hover{background:#d83135}
+  .btn svg{width:16px;height:16px}
+  .btn-accent,.btn-primary{background:var(--accent);color:var(--on-accent)}.btn-accent:hover,.btn-primary:hover{background:var(--accent-hover)}
+  .btn-danger{background:var(--danger-fill);color:var(--on-fill)}.btn-danger:hover{background:var(--danger-fill-hover)}
   .btn-ghost{background:var(--bg-hover);color:var(--text-muted)}.btn-ghost:hover{background:var(--bg-active);color:var(--text-normal)}
-  .btn-outline{background:transparent;color:var(--text-muted);border:1px solid var(--border)}.btn-outline:hover{border-color:var(--border-strong);color:var(--text-normal)}
+  .btn-outline{background:transparent;color:var(--text-muted);border:1px solid var(--border-control)}.btn-outline:hover{border-color:var(--border-strong);color:var(--text-normal)}
   .btn:disabled{opacity:.5;cursor:not-allowed}
-  .btn .spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:white;border-radius:50%;animation:spin .6s linear infinite}
+  .btn .spinner{width:14px;height:14px;border:2px solid rgba(0,0,0,.3);border-top-color:var(--on-accent);border-radius:50%;animation:spin .6s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
 
   .form-group{margin-bottom:16px}
   .form-label{display:block;font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.02em;text-transform:uppercase;margin-bottom:6px}
-  .form-label .req{color:var(--red);margin-left:2px}
-  .form-input{width:100%;padding:10px 12px;background:var(--bg-input);color:var(--text-normal);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;transition:border-color .2s}
-  .form-input::placeholder{color:var(--text-micro)}.form-input:focus{border-color:var(--accent)}
+  .form-label .req{color:var(--text-danger);margin-left:2px}
+  .form-input{width:100%;padding:10px 12px;background:var(--bg-input);color:var(--text-normal);border:1px solid var(--border-control);border-radius:var(--radius-sm);font-size:14px;transition:border-color .2s}
+  .form-input::placeholder{color:var(--text-muted)}.form-input:focus{border-color:var(--accent)}
   .form-textarea{resize:vertical;min-height:80px}
   .role-swatch{width:14px;height:14px;border-radius:50%;flex-shrink:0;border:1px solid var(--border-strong)}
   .perm-group{margin-bottom:14px}
-  .perm-group-title{font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px}
+  .perm-group-title{font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px}
   .perm-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px}
   .perm-item{display:flex;align-items:flex-start;gap:7px;font-size:13px;color:var(--text-muted);cursor:pointer}
   .perm-item input{margin-top:2px;flex-shrink:0}
   .perm-item.locked{opacity:.45;cursor:not-allowed}
   @media(max-width:600px){.perm-grid{grid-template-columns:1fr}}
-  .toggle{width:40px;height:22px;border-radius:11px;background:var(--border-strong);cursor:pointer;position:relative;transition:background .2s;flex-shrink:0;padding:0;appearance:none;-webkit-appearance:none;border:none}
-  .toggle.on{background:var(--green)}
-  .toggle::after{content:'';position:absolute;width:16px;height:16px;border-radius:50%;background:white;top:3px;left:3px;transition:transform .2s}
+  .toggle{width:40px;height:22px;border-radius:11px;background:var(--border-control);cursor:pointer;position:relative;transition:background .2s;flex-shrink:0;padding:0;appearance:none;-webkit-appearance:none;border:none}
+  .toggle.on{background:var(--accent)}
+  .toggle::after{content:'';position:absolute;width:16px;height:16px;border-radius:50%;background:var(--on-fill);top:3px;left:3px;transition:transform .2s}
   .toggle.on::after{transform:translateX(18px)}
   .setting-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)}
   .setting-row:last-child{border-bottom:none}
   .setting-info{flex:1;min-width:0}.setting-name{font-size:14px;color:var(--text-normal);margin-bottom:2px}
-  .setting-desc{font-size:12px;color:var(--text-faint)}.setting-ctrl{flex-shrink:0;margin-left:16px}
+  .setting-desc{font-size:12px;color:var(--text-muted)}.setting-ctrl{flex-shrink:0;margin-left:16px}
 
   .modal-overlay{position:fixed;inset:0;background:var(--bg-overlay);display:none;align-items:center;justify-content:center;z-index:100}
   .modal-overlay.visible{display:flex}
   .modal{background:var(--bg-primary);border-radius:var(--radius-md);width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 48px rgba(0,0,0,.5);animation:modalIn .25s cubic-bezier(.16,1,.3,1)}
   @keyframes modalIn{from{opacity:0;transform:translateY(20px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
   .modal-header{padding:20px 24px 0;display:flex;align-items:center;justify-content:space-between}
-  .modal-header h3{font-size:18px;font-weight:700;color:white}
-  .modal-close{background:transparent;color:var(--text-faint);font-size:20px;padding:4px;border-radius:var(--radius-sm);transition:color .15s}
+  .modal-header h3{font-size:18px;font-weight:700;color:var(--header-primary)}
+  .modal-close{background:transparent;color:var(--text-muted);font-size:20px;padding:4px;border-radius:var(--radius-sm);transition:color .15s}
   .modal-close:hover{color:var(--text-normal)}
   .modal-body{padding:20px 24px}
   .modal-footer{padding:16px 24px;background:var(--bg-secondary);border-radius:0 0 var(--radius-md) var(--radius-md);display:flex;justify-content:flex-end;gap:8px}
 
   .pagination{display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin-top:4px}
-  .pagination-info{font-size:12px;color:var(--text-faint)}
+  .pagination-info{font-size:12px;color:var(--text-muted)}
   .pagination-btns{display:flex;gap:4px}
   .page-btn{width:32px;height:32px;border-radius:var(--radius-sm);background:transparent;color:var(--text-muted);font-size:13px;display:flex;align-items:center;justify-content:center;transition:all .15s}
   .page-btn:hover{background:var(--bg-hover);color:var(--text-normal)}
-  .page-btn.active{background:var(--accent);color:white}
+  .page-btn.active{background:var(--accent);color:var(--on-accent)}
   .page-btn:disabled{opacity:.3;cursor:not-allowed}
 
   .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:var(--radius-md);font-size:13px;font-weight:600;display:none;align-items:center;gap:8px;z-index:200;box-shadow:0 4px 24px rgba(0,0,0,.4);animation:toastIn .3s cubic-bezier(.16,1,.3,1)}
-  .toast.visible{display:flex}.toast.success{background:var(--green);color:white}.toast.error{background:var(--red);color:white}.toast.info{background:var(--accent);color:white}
+  .toast svg{width:16px;height:16px;flex-shrink:0}
+  .toast.visible{display:flex}
+  .toast.success{background:var(--green);color:var(--on-warning)}
+  .toast.error{background:var(--danger-fill);color:var(--on-fill)}
+  .toast.info{background:var(--accent);color:var(--on-accent)}
+  .toast .toast-close{margin-left:4px;background:transparent;color:inherit;font-size:16px;line-height:1;opacity:.8;cursor:pointer}
+  .toast .toast-close:hover{opacity:1}
   @keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
 
   .activity-item{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
@@ -157,13 +183,13 @@
   .activity-icon svg{width:14px;height:14px}
   .activity-text{font-size:13px;color:var(--text-muted);line-height:1.4}
   .activity-text strong{color:var(--text-normal)}
-  .activity-time{font-size:11px;color:var(--text-micro);margin-top:2px}
+  .activity-time{font-size:11px;color:var(--text-muted);margin-top:2px}
 
   .update-card{display:flex;align-items:flex-start;gap:16px;padding:20px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border)}
   .update-icon{width:48px;height:48px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0}
   .update-icon svg{width:24px;height:24px}
-  .update-info{flex:1}.update-ver{font-size:18px;font-weight:700;color:white}
-  .update-notes{font-size:13px;color:var(--text-faint);margin-top:6px;line-height:1.5}
+  .update-info{flex:1}.update-ver{font-size:18px;font-weight:700;color:var(--header-primary)}
+  .update-notes{font-size:13px;color:var(--text-muted);margin-top:6px;line-height:1.5}
 
   .code-copy{display:flex;align-items:center;gap:8px;background:var(--bg-tertiary);padding:8px 12px;border-radius:var(--radius-sm);margin-top:8px}
   .code-copy code{flex:1;font-family:var(--font-mono);font-size:13px;color:var(--text-link);word-break:break-all}
@@ -173,44 +199,44 @@
   .auth-overlay{position:fixed;inset:0;background:var(--bg-tertiary);display:none;align-items:center;justify-content:center;z-index:50}
   .auth-overlay.visible{display:flex}
   .auth-box{background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-md);padding:32px;width:380px}
-  .auth-box h2{font-size:20px;font-weight:700;color:white;margin-bottom:20px}
-  .auth-error{color:var(--red);font-size:13px;margin-top:10px;min-height:20px}
+  .auth-box h2{font-size:20px;font-weight:700;color:var(--header-primary);margin-bottom:20px}
+  .auth-error{color:var(--text-danger);font-size:13px;margin-top:10px;min-height:20px}
   .auth-box.wizard{width:560px;max-width:94vw;max-height:92vh;overflow-y:auto}
   .wiz-steps{display:flex;gap:6px;margin-bottom:20px}
   .wiz-dot{height:4px;flex:1;border-radius:2px;background:var(--border);transition:background .2s}
   .wiz-dot.active{background:var(--accent)}
   .wiz-dot.done{background:var(--accent);opacity:.45}
   .wiz-sub{color:var(--text-muted);font-size:14px;margin-bottom:20px;line-height:1.5}
-  .wiz-hint{color:var(--text-faint);font-size:12px;margin-top:6px;line-height:1.4}
+  .wiz-hint{color:var(--text-muted);font-size:12px;margin-top:6px;line-height:1.4}
   .wiz-nav{display:flex;justify-content:space-between;gap:8px;margin-top:24px}
   .wiz-review-row{display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
   .wiz-review-row .k{color:var(--text-muted);white-space:nowrap}
   .wiz-review-row .v{color:var(--text-normal);font-weight:600;text-align:right;word-break:break-word}
-  .wiz-callout{background:rgba(240,178,50,.1);border:1px solid rgba(240,178,50,.35);color:var(--yellow);font-size:13px;padding:10px 12px;border-radius:var(--radius-sm);margin-top:16px;line-height:1.45}
-  .wiz-skip{display:block;width:100%;text-align:center;margin-top:14px;color:var(--text-faint);font-size:12px;cursor:pointer;text-decoration:underline;background:none}
-  .wiz-skip:hover{color:var(--text-muted)}
+  .wiz-callout{background:rgba(242,184,75,.1);border:1px solid rgba(242,184,75,.35);color:var(--text-warning);font-size:13px;padding:10px 12px;border-radius:var(--radius-sm);margin-top:16px;line-height:1.45}
+  .wiz-skip{display:block;width:100%;text-align:center;margin-top:14px;color:var(--text-muted);font-size:12px;cursor:pointer;text-decoration:underline;background:none}
+  .wiz-skip:hover{color:var(--text-normal)}
   .wiz-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
   .wiz-toggle-row .lbl{font-size:14px;color:var(--text-normal)}
 
   /* Log viewer */
   .log-toolbar{display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
-  .level-toggle{padding:4px 10px;border-radius:10px;font-size:11px;font-weight:700;background:var(--bg-hover);color:var(--text-micro);transition:all .15s;text-transform:uppercase;letter-spacing:.03em}
-  .level-toggle:hover{color:var(--text-muted)}
-  .level-toggle.active-debug{background:rgba(128,132,142,.2);color:var(--text-muted)}
-  .level-toggle.active-info{background:rgba(35,165,90,.2);color:var(--green)}
-  .level-toggle.active-warn{background:rgba(240,178,50,.2);color:var(--yellow)}
-  .level-toggle.active-error{background:rgba(242,63,67,.2);color:var(--red)}
+  .level-toggle{padding:4px 10px;border-radius:10px;font-size:11px;font-weight:700;background:var(--bg-hover);color:var(--text-muted);transition:all .15s;text-transform:uppercase;letter-spacing:.03em}
+  .level-toggle:hover{color:var(--text-normal)}
+  .level-toggle.active-debug{background:rgba(163,169,178,.2);color:var(--text-normal)}
+  .level-toggle.active-info{background:rgba(92,195,137,.2);color:var(--text-positive)}
+  .level-toggle.active-warn{background:rgba(242,184,75,.2);color:var(--text-warning)}
+  .level-toggle.active-error{background:rgba(255,143,146,.2);color:var(--text-danger)}
   .log-output{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:12px;line-height:1.6;padding:8px 12px;overflow-y:auto;height:calc(100vh - 240px);white-space:pre-wrap;word-break:break-all}
   .log-line{padding:1px 0}
-  .log-line .log-ts{color:var(--text-micro);margin-right:8px}
+  .log-line .log-ts{color:var(--text-muted);margin-right:8px}
   .log-line .log-lvl{display:inline-block;width:44px;font-weight:700;margin-right:6px}
-  .log-line .log-src{color:var(--text-faint);margin-right:8px;font-size:11px}
-  .log-line.l-debug .log-lvl{color:var(--text-micro)}
-  .log-line.l-info .log-lvl{color:var(--green)}
-  .log-line.l-warn .log-lvl{color:var(--yellow)}
-  .log-line.l-error .log-lvl{color:var(--red)}
-  .log-line.l-error{color:#f5a0a2}
-  .log-status{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11px;color:var(--text-micro)}
+  .log-line .log-src{color:var(--text-muted);margin-right:8px;font-size:11px}
+  .log-line.l-debug .log-lvl{color:var(--text-muted)}
+  .log-line.l-info .log-lvl{color:var(--text-positive)}
+  .log-line.l-warn .log-lvl{color:var(--text-warning)}
+  .log-line.l-error .log-lvl{color:var(--text-danger)}
+  .log-line.l-error{color:var(--text-danger)}
+  .log-status{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11px;color:var(--text-muted)}
   .log-status .dot-live{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
   .log-status .dot-off{width:6px;height:6px;border-radius:50%;background:var(--red)}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
@@ -218,7 +244,10 @@
   .hidden{display:none!important}
 
   @media(max-width:900px){.sidebar{width:200px}.content{padding:24px 20px}.stat-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}}
-  @media(max-width:600px){.admin{flex-direction:column}.sidebar{width:100%;height:auto;max-height:56px;overflow:hidden}.content{padding:16px 12px}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{flex-direction:column}.modal{width:95vw;max-height:90vh}}
+  /* U3: below 600px the nav wraps instead of being clipped to 56px, so every
+     section stays reachable (the full drawer is AO-3). */
+  @media(max-width:600px){.admin{flex-direction:column}.sidebar{width:100%;height:auto;max-height:none;overflow:visible}.sidebar-nav{display:flex;flex-wrap:wrap;padding:8px}.sidebar-nav .sidebar-label,.sidebar-nav .sidebar-sep{display:none}.nav-item{width:auto}.content{padding:16px 12px}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{flex-direction:column}.modal{width:95vw;max-height:90vh}}
+  @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}}
 </style>
 </head>
 <body>
@@ -234,7 +263,7 @@
     <h2>Setup Complete!</h2>
     <p style="color:var(--text-muted);font-size:14px;margin-bottom:16px">Your owner account has been created. Here's your invite code:</p>
     <div class="code-copy"><code id="inviteCode"></code><button class="btn btn-ghost" onclick="copyInvite()">Copy</button></div>
-    <p style="color:var(--yellow);font-size:13px;margin:16px 0">Save this code! Share it with people you want to invite.</p>
+    <p style="color:var(--text-warning);font-size:13px;margin:16px 0">Save this code! Share it with people you want to invite.</p>
     <div id="setupWarnings"></div>
     <div id="setupFingerprint" style="display:none">
       <p style="font-size:13px;color:var(--text-muted);margin:16px 0 8px">Your certificate fingerprint. Users compare it against the prompt their client shows before they accept the connection — publish it out of band. A mismatch is the one warning that means an interception attempt.</p>
@@ -254,8 +283,8 @@
   <div class="auth-box">
     <h2>OwnCord Admin</h2>
     <div id="loginStep1">
-      <div class="form-group"><label class="form-label">Username</label><input class="form-input" id="loginUser" autocomplete="username" placeholder="admin"></div>
-      <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+      <div class="form-group"><label class="form-label" for="loginUser">Username</label><input class="form-input" id="loginUser" autocomplete="username" placeholder="admin"></div>
+      <div class="form-group"><label class="form-label" for="loginPass">Password</label><input class="form-input" id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••"></div>
       <button class="btn btn-accent" id="loginBtn" style="width:100%">Sign In</button>
     </div>
     <!-- Second step of a two-factor sign-in. Hidden until the login response
@@ -274,7 +303,7 @@
 <div class="admin hidden" id="adminShell">
   <div class="sidebar">
     <div class="sidebar-header"><div class="sidebar-brand">
-      <div class="sidebar-logo"><svg viewBox="0 0 24 24" fill="white"><path d="M12 2L4 5.5v5c0 5.25 3.4 10.15 8 11.5 4.6-1.35 8-6.25 8-11.5v-5L12 2zm0 3l1.5 3h3.2l-2.6 1.9 1 3.1L12 11.1 8.9 13l1-3.1L7.3 8h3.2L12 5z"/></svg></div>
+      <div class="sidebar-logo"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L4 5.5v5c0 5.25 3.4 10.15 8 11.5 4.6-1.35 8-6.25 8-11.5v-5L12 2zm0 3l1.5 3h3.2l-2.6 1.9 1 3.1L12 11.1 8.9 13l1-3.1L7.3 8h3.2L12 5z"/></svg></div>
       <div><div class="sidebar-title">OwnCord</div><div class="sidebar-subtitle">Admin Panel</div></div>
     </div></div>
     <nav class="sidebar-nav" id="sidebarNav" role="navigation" aria-label="Admin sections"></nav>
@@ -386,8 +415,13 @@ function fmtBytes(b){if(b<1024)return b+' B';if(b<1048576)return(b/1024).toFixed
    a value that already carries one (or an offset) is passed through unchanged,
    so this is a no-op on the columns the server formats itself. */
 function utcDate(s){const v=String(s);return new Date(/[Zz]|[+-]\d\d:?\d\d$/.test(v)?v:v.replace(' ','T')+'Z')}
+/* U9: one local-time formatter for the SQLite naive-UTC strings (audit,
+   dashboard activity, pending registrations). The UTC instant stays available
+   as a tooltip; the visible text is the viewer's local time, matching the
+   Tokens and Backups tables. */
+function fmtLocal(s){if(!s)return'';const d=utcDate(s);if(isNaN(d.getTime()))return esc(String(s));return'<span title="'+esc(d.toISOString())+'">'+esc(d.toLocaleString())+'</span>'}
 function actionBadge(a){if(!a)return'badge-muted';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'badge-red';if(a.includes('create'))return'badge-green';if(a.includes('update'))return'badge-yellow';return'badge-accent'}
-function actionColor(a){if(!a)return'var(--accent)';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'var(--red)';if(a.includes('create'))return'var(--green)';if(a.includes('update'))return'var(--yellow)';return'var(--accent)'}
+function actionColor(a){if(!a)return'var(--accent)';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'var(--text-danger)';if(a.includes('create'))return'var(--text-positive)';if(a.includes('update'))return'var(--text-warning)';return'var(--accent)'}
 /* Roles are createable now, so the four seeded ids are a fallback, not the set.
    Anything role-shaped prefers the live list (state.roleList, filled by the
    Roles section and by openEditUser) and only then the seeded map — otherwise a
@@ -413,6 +447,30 @@ function roleColor(rid){
   if(r&&r.color)return r.color;
   return{1:'var(--role-owner)',2:'var(--role-admin)',3:'var(--role-mod)'}[rid]||'var(--role-member)';
 }
+/* Role colours are server-set, so an admin can pick a value that is
+   unreadable as text. The client clamps every role colour through
+   readableRoleColor() (B9 Q13); this is the same rule over the same four
+   --bg-* surfaces: keep the colour only at 4.5:1 or better, otherwise fall
+   back to --text-normal. Seeded var() tokens are resolved through ROLE_HEX
+   because a CSS var cannot be parsed as a colour here. */
+const AO_SURFACES=[[23,24,27],[17,18,20],[11,12,14],[34,35,40]];
+const ROLE_HEX={'var(--role-owner)':'#e74c3c','var(--role-admin)':'#f39c12','var(--role-mod)':'#2ecc71','var(--role-member)':'#949ba4'};
+function aoParseColor(value){
+  const v=(ROLE_HEX[value]||value||'').trim().replace(/^#/,'');
+  if(!/^([0-9a-f]{6})$/i.test(v))return null;
+  return [0,2,4].map(i=>parseInt(v.slice(i,i+2),16));
+}
+function aoLum(c){const s=c/255;return s<=0.03928?s/12.92:Math.pow((s+0.055)/1.055,2.4)}
+function aoContrast(a,b){const l=x=>0.2126*aoLum(x[0])+0.7152*aoLum(x[1])+0.0722*aoLum(x[2]);const x=l(a),y=l(b);return(Math.max(x,y)+0.05)/(Math.min(x,y)+0.05)}
+const aoRoleTextCache={};
+function readableRoleColor(color){
+  const raw=ROLE_HEX[color]||color;
+  if(aoRoleTextCache[raw]!==undefined)return aoRoleTextCache[raw];
+  const rgb=aoParseColor(raw);
+  const out=(rgb&&AO_SURFACES.every(s=>aoContrast(rgb,s)>=4.5))?raw:'var(--text-normal)';
+  aoRoleTextCache[raw]=out;
+  return out;
+}
 /* name is the server-supplied role_name where the caller has one (the users
    list ships it); it wins over any cache because it is always current. */
 function roleName(rid,name){
@@ -425,21 +483,71 @@ function roleName(rid,name){
 function showToast(msg,type='success'){
   const t=document.getElementById('toast');
   t.className='toast visible '+type;
-  t.innerHTML=(type==='success'?I.check:type==='error'?I.ban:I.check)+'<span>'+esc(msg)+'</span>';
-  clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('visible'),3000);
+  /* Errors persist until dismissed (U7): a message that vanishes after three
+     seconds cannot be re-read or acted on. Success/info auto-dismiss. */
+  t.innerHTML=(type==='success'?I.check:type==='error'?I.ban:I.check)+'<span>'+esc(msg)+'</span>'
+    +(type==='error'?'<button class="toast-close" aria-label="Dismiss notification" onclick="dismissToast()">&times;</button>':'');
+  clearTimeout(window._tt);
+  if(type!=='error')window._tt=setTimeout(()=>t.classList.remove('visible'),3000);
 }
+function dismissToast(){clearTimeout(window._tt);document.getElementById('toast').classList.remove('visible')}
 
+/* U6: every .toggle is a role=switch button; this keeps its visual class and
+   its aria-checked state in step in one place. */
+function toggleSwitch(el){el.classList.toggle('on');el.setAttribute('aria-checked',el.classList.contains('on')?'true':'false')}
+
+/* U5: the reused dialog moves focus in, traps Tab, and restores it on close.
+   One modal exists at a time, so a module-level opener is enough. */
+let modalOpener=null;
+const MODAL_FOCUSABLE='a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+/* Writes dialog content and gives the reused wrapper its accessible name from
+   the first heading, so role=dialog is never unnamed (U5). */
+function setModalHTML(html){
+  const o=document.getElementById('modal');
+  const inner=document.getElementById('modalInner');
+  inner.innerHTML=html;
+  inner.querySelectorAll('h1,h2,h3').forEach((h,i)=>{h.id=h.id||('modalTitle'+(i||''))});
+  const head=inner.querySelector('h1,h2,h3');
+  if(head)o.setAttribute('aria-labelledby',head.id);else o.removeAttribute('aria-labelledby');
+  /* Reset scroll so a second long dialog does not open past its header. */
+  inner.scrollTop=0;
+}
 function openModal(html){
   state.retentionProposal=null;
   const o=document.getElementById('modal');
-  document.getElementById('modalInner').innerHTML=html;
+  const inner=document.getElementById('modalInner');
+  modalOpener=document.activeElement;
+  setModalHTML(html);
   o.classList.add('visible');o.setAttribute('aria-hidden','false');
+  /* A later openModal replaces the content; an earlier one's deferred focus
+     must not steal it. */
+  const seq=(openModal._seq=(openModal._seq||0)+1);
+  setTimeout(()=>{
+    if(seq!==openModal._seq)return;
+    const focusables=inner.querySelectorAll(MODAL_FOCUSABLE);
+    const first=focusables[0];
+    if(first instanceof HTMLElement)first.focus();
+    else{inner.setAttribute('tabindex','-1');inner.focus()}
+  },0);
 }
 function closeModal(){
   state.retentionProposal=null;
   const o=document.getElementById('modal');
   o.classList.remove('visible');o.setAttribute('aria-hidden','true');
+  openModal._seq=(openModal._seq||0)+1;
+  if(modalOpener instanceof HTMLElement)modalOpener.focus();
+  modalOpener=null;
 }
+/* Keep Tab inside the dialog while it is open. */
+document.getElementById('modal').addEventListener('keydown',e=>{
+  if(e.key!=='Tab')return;
+  const inner=document.getElementById('modalInner');
+  const focusables=Array.from(inner.querySelectorAll(MODAL_FOCUSABLE));
+  if(!focusables.length)return;
+  const first=focusables[0],last=focusables[focusables.length-1];
+  if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
+  else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
+});
 
 /* ═══ Auth ═══ */
 function hideAll(){['setupOverlay','setupSuccessOverlay','loginOverlay'].forEach(id=>document.getElementById(id).classList.remove('visible'));document.getElementById('adminShell').classList.add('hidden')}
@@ -555,7 +663,7 @@ function renderWizard(){
       h+='<h2>Uploads &amp; voice</h2>'
         +'<p class="wiz-sub">Limits for file sharing and voice chat quality.</p>'
         +wizField('wizUpload','Max upload size (MB)','<input class="form-input" id="wizUpload" type="number" min="1" max="10240" value="'+esc(d.upload_max_size_mb)+'"><div class="wiz-hint">The largest file anyone can share. 100 MB suits most servers.</div>')
-        +'<div class="wiz-toggle-row"><div><div class="lbl">Voice chat</div><div class="wiz-hint" style="margin-top:2px">Downloads the voice engine (LiveKit, ~40 MB, one time) from the official LiveKit project and manages it for you. Turn off only if you run your own LiveKit server.</div></div><button class="toggle'+(d.voice_auto_download?' on':'')+'" id="wizVoiceDl" onclick="this.classList.toggle(\'on\')"></button></div>'
+        +'<div class="wiz-toggle-row"><div><div class="lbl" id="wizVoiceDl-name">Voice chat</div><div class="wiz-hint" style="margin-top:2px">Downloads the voice engine (LiveKit, ~40 MB, one time) from the official LiveKit project and manages it for you. Turn off only if you run your own LiveKit server.</div></div><button class="toggle'+(d.voice_auto_download?' on':'')+'" id="wizVoiceDl" role="switch" aria-checked="'+(d.voice_auto_download?'true':'false')+'" aria-labelledby="wizVoiceDl-name" onclick="toggleSwitch(this)"></button></div>'
         +wizField('wizVoice','Voice quality','<select class="filter-select" id="wizVoice" style="width:100%">'
           +'<option value="low"'+(d.voice_quality==='low'?' selected':'')+'>Low &mdash; least bandwidth, phone-call quality</option>'
           +'<option value="medium"'+(d.voice_quality==='medium'?' selected':'')+'>Medium &mdash; recommended balance</option>'
@@ -834,7 +942,7 @@ function navigateTo(id){
   }catch(err){
     console.error('[Admin] Tab navigation failed for "'+id+'":', err);
     var c=document.getElementById('content');
-    if(c)c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">Failed to navigate to '+esc(id)+': '+esc(err&&err.message||String(err))+'</p><button class="btn btn-accent" onclick="navigateTo(\'dashboard\')">Back to Dashboard</button>';
+    if(c)c.innerHTML='<div class="page-title">Error</div><p style="color:var(--text-danger)">Failed to navigate to '+esc(id)+': '+esc(err&&err.message||String(err))+'</p><button class="btn btn-accent" onclick="navigateTo(\'dashboard\')">Back to Dashboard</button>';
   }
 }
 
@@ -889,19 +997,19 @@ function renderContent(){
   const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,settings:renderSettings,retention:renderRetention,backups:renderBackups,updates:renderUpdates};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
-  if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" onclick="navigateTo(\'dashboard\')">Back to Dashboard</button>';return}
+  if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--text-danger)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" onclick="navigateTo(\'dashboard\')">Back to Dashboard</button>';return}
   try{
     const result=fn();
     if(result instanceof Promise){
       const renderSection=state.section;
       result.then(function(html){if(state.section===renderSection)c.innerHTML=html}).catch(function(e){
         console.error('[Admin] Render error in "'+renderSection+'":', e);
-        if(state.section===renderSection)c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">'+esc(e&&e.message||String(e))+'</p><button class="btn btn-accent" onclick="renderContent()">Retry</button>';
+        if(state.section===renderSection)c.innerHTML='<div class="page-title">Error</div><p style="color:var(--text-danger)">'+esc(e&&e.message||String(e))+'</p><button class="btn btn-accent" onclick="renderContent()">Retry</button>';
       });
     }else{c.innerHTML=result}
   }catch(e){
     console.error('[Admin] Sync render error in "'+state.section+'":', e);
-    c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">'+esc(e&&e.message||String(e))+'</p><button class="btn btn-accent" onclick="renderContent()">Retry</button>';
+    c.innerHTML='<div class="page-title">Error</div><p style="color:var(--text-danger)">'+esc(e&&e.message||String(e))+'</p><button class="btn btn-accent" onclick="renderContent()">Retry</button>';
   }
 }
 
@@ -918,7 +1026,7 @@ function renderAttention(rep){
   const warnings=(rep&&rep.warnings)||[],signals=(rep&&rep.signals)||[];
   const active=warnings.filter(w=>!w.recovered_at);
   let html='<div class="section-card" id="attentionPanel"><div class="section-card-header"><h3>Attention'+(active.length?' ('+active.length+')':'')+'</h3><button class="btn btn-ghost" onclick="renderContent()">Refresh</button></div><div class="section-card-body">';
-  if(!rep||!rep.evaluated_at)html+='<p class="attn-pending" style="color:var(--text-faint)">The server has not evaluated its health yet.</p>';
+  if(!rep||!rep.evaluated_at)html+='<p class="attn-pending" style="color:var(--text-muted)">The server has not evaluated its health yet.</p>';
   else{
     html+='<div class="activity-time">Evaluated '+esc(attnTime(rep.evaluated_at))+'</div>';
     if(!active.length)html+='<p class="attn-none" style="margin-top:8px">No active warnings.</p>';
@@ -942,7 +1050,7 @@ function renderAttention(rep){
 
 /* ═══ Dashboard ═══ */
 async function renderDashboard(){
-  try{state.cachedStats=await api('GET','/stats')}catch(e){return'<div class="page-title">Dashboard</div><p style="color:var(--red)">Failed to load stats: '+esc(e.message)+'</p>'}
+  try{state.cachedStats=await api('GET','/stats')}catch(e){return'<div class="page-title">Dashboard</div><p style="color:var(--text-danger)">Failed to load stats: '+esc(e.message)+'</p>'}
   /* Update checks are owner-only; skip the call for everyone else instead of
      spending a guaranteed 403 on every dashboard load. */
   if(isOwner()){try{state.cachedUpdate=await api('GET','/updates')}catch(e){/* the banner is optional; the Updates page reports the failure */}}
@@ -952,13 +1060,13 @@ async function renderDashboard(){
   /* Attention is server health detail: ADMINISTRATOR, like the route. */
   if(can(PERM.ADMINISTRATOR)){
     try{html+=renderAttention(await api('GET','/attention'))}
-    catch(e){html+='<div class="section-card" id="attentionPanel"><div class="section-card-header"><h3>Attention</h3></div><div class="section-card-body"><p style="color:var(--red)">Could not load attention state: '+esc(e.message)+'</p></div></div>'}
+    catch(e){html+='<div class="section-card" id="attentionPanel"><div class="section-card-header"><h3>Attention</h3></div><div class="section-card-body"><p style="color:var(--text-danger)">Could not load attention state: '+esc(e.message)+'</p></div></div>'}
   }
   html+='<div class="stat-grid">';
-  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Total Users</span><div class="stat-card-icon" style="background:rgba(35,165,90,.15);color:var(--green)">'+I.users+'</div></div><div class="stat-card-value">'+(s.user_count||0)+'</div><div class="stat-card-sub">registered</div></div>';
+  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Total Users</span><div class="stat-card-icon" style="background:rgba(92,195,137,.15);color:var(--text-positive)">'+I.users+'</div></div><div class="stat-card-value">'+(s.user_count||0)+'</div><div class="stat-card-sub">registered</div></div>';
   html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Messages</span><div class="stat-card-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.megaphone+'</div></div><div class="stat-card-value">'+(s.message_count||0).toLocaleString()+'</div><div class="stat-card-sub">total</div></div>';
-  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Channels</span><div class="stat-card-icon" style="background:rgba(240,178,50,.15);color:var(--yellow)">'+I.channels+'</div></div><div class="stat-card-value">'+(s.channel_count||0)+'</div><div class="stat-card-sub">active</div></div>';
-  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Database</span><div class="stat-card-icon" style="background:rgba(88,101,242,.15);color:var(--accent)">'+I.backup+'</div></div><div class="stat-card-value">'+fmtBytes(s.db_size_bytes||0)+'</div><div class="stat-card-sub">SQLite</div></div>';
+  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Channels</span><div class="stat-card-icon" style="background:rgba(242,184,75,.15);color:var(--text-warning)">'+I.channels+'</div></div><div class="stat-card-value">'+(s.channel_count||0)+'</div><div class="stat-card-sub">active</div></div>';
+  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Database</span><div class="stat-card-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.backup+'</div></div><div class="stat-card-value">'+fmtBytes(s.db_size_bytes||0)+'</div><div class="stat-card-sub">SQLite</div></div>';
   html+='</div>';
   // The certificate users compare out of band before accepting the client's
   // trust prompt (BPR-051). Shown only when the server serves a statically
@@ -971,7 +1079,7 @@ async function renderDashboard(){
     const entries=await api('GET','/audit-log?limit=5&offset=0');
     if(entries&&entries.length){
       html+='<div class="section-card"><div class="section-card-header"><h3>Recent Activity</h3><button class="btn btn-ghost" onclick="navigateTo(\'audit\')">View All</button></div><div class="section-card-body">';
-      entries.forEach(a=>{html+='<div class="activity-item"><div class="activity-icon" style="background:'+actionColor(a.action)+'22;color:'+actionColor(a.action)+'">'+I.audit+'</div><div><div class="activity-text"><strong>'+esc(a.actor_name||a.actor_id)+'</strong> '+esc(a.action)+' <strong>'+esc(a.target_type)+(a.target_id?' #'+a.target_id:'')+'</strong></div><div class="activity-time">'+esc(a.created_at)+(a.detail?' — '+esc(a.detail):'')+'</div></div></div>'});
+      entries.forEach(a=>{html+='<div class="activity-item"><div class="activity-icon" style="background:'+actionColor(a.action)+'22;color:'+actionColor(a.action)+'">'+I.audit+'</div><div><div class="activity-text"><strong>'+esc(a.actor_name||a.actor_id)+'</strong> '+esc(a.action)+' <strong>'+esc(a.target_type)+(a.target_id?' #'+a.target_id:'')+'</strong></div><div class="activity-time">'+fmtLocal(a.created_at)+(a.detail?' — '+esc(a.detail):'')+'</div></div></div>'});
       html+='</div></div>';
     }
   }catch(e){}
@@ -996,7 +1104,7 @@ async function renderUsers(){
      Same shape as MessageService.GetMessages (limit+1, hasMore from the
      overflow); limit=51 is inside the server's 1..500 clamp. */
   let rows;
-  try{rows=await api('GET','/users?limit='+(PAGE_SIZE+1)+'&offset='+offset)}catch(e){return'<div class="page-title">Users</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  try{rows=await api('GET','/users?limit='+(PAGE_SIZE+1)+'&offset='+offset)}catch(e){return'<div class="page-title">Users</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   const hasMore=rows.length>PAGE_SIZE;
   const users=rows.slice(0,PAGE_SIZE);
   let html='<div class="page-title">Users</div><div class="page-desc">Manage server members</div>';
@@ -1008,15 +1116,15 @@ async function renderUsers(){
     if(pending.length){
       html+='<div class="section-card"><div class="section-card-header"><h3>Pending registrations ('+pending.length+')</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>User</th><th>Applied</th><th style="text-align:right">Decision</th></tr></thead><tbody>';
       pending.forEach(p=>{
-        html+='<tr><td><strong>'+esc(p.username)+'</strong></td><td>'+esc(p.created_at)+'</td><td><div class="act-group" style="justify-content:flex-end">'
-          +'<button class="act-btn" title="Approve" onclick="decideRegistration('+p.id+',\'approve\')">'+I.check+'</button>'
-          +'<button class="act-btn danger" title="Deny" onclick="decideRegistration('+p.id+',\'deny\')">'+I.ban+'</button></div></td></tr>';
+        html+='<tr><td><strong>'+esc(p.username)+'</strong></td><td>'+fmtLocal(p.created_at)+'</td><td><div class="act-group" style="justify-content:flex-end">'
+          +'<button class="act-btn" title="Approve" aria-label="Approve" onclick="decideRegistration('+p.id+',\'approve\')">'+I.check+'</button>'
+          +'<button class="act-btn danger" title="Deny" aria-label="Deny" onclick="decideRegistration('+p.id+',\'deny\')">'+I.ban+'</button></div></td></tr>';
       });
       html+='</tbody></table></div></div>';
     }
   }
   html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Banned</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!users.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No users found</td></tr>';
+  if(!users.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">No users found</td></tr>';
   users.forEach(u=>{
     const uid=u.id||u.ID;const uname=u.Username||u.username||'';const rid=u.role_id||u.RoleID||4;
     const status=u.Status||u.status||'offline';const banned=effectiveBan(u);
@@ -1030,16 +1138,16 @@ async function renderUsers(){
     const banReason=u.ban_reason||u.BanReason||'';
     const bannedCell=banned
       ?'<span class="badge badge-red" title="'+esc(banReason||'No reason given')+'">Yes</span>'
-        +(banReason?'<div style="font-size:11px;color:var(--text-faint);margin-top:2px">'+esc(banReason)+'</div>':'')
+        +(banReason?'<div style="font-size:11px;color:var(--text-muted);margin-top:2px">'+esc(banReason)+'</div>':'')
       :'<span class="badge badge-muted">No</span>';
     html+='<td>'+bannedCell+'</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end">';
-    if(can(PERM.MANAGE_ROLES))html+='<button class="act-btn" title="Edit role" onclick="openEditUser('+uid+',\''+jsq(uname)+'\','+rid+')">'+I.edit+'</button>';
-    if(can(PERM.KICK_MEMBERS))html+='<button class="act-btn" title="Force Logout" onclick="forceLogout('+uid+')">'+I.disconnect+'</button>';
-    if(isOwner()&&!banned&&uid!==(state.me&&state.me.id))html+='<button class="act-btn" title="Issue recovery credential" onclick="openIssueRecovery('+uid+',\''+jsq(uname)+'\')">'+I.lock+'</button>';
+    if(can(PERM.MANAGE_ROLES))html+='<button class="act-btn" title="Edit role" aria-label="Edit role" onclick="openEditUser('+uid+',\''+jsq(uname)+'\','+rid+')">'+I.edit+'</button>';
+    if(can(PERM.KICK_MEMBERS))html+='<button class="act-btn" title="Force Logout" aria-label="Force Logout" onclick="forceLogout('+uid+')">'+I.disconnect+'</button>';
+    if(isOwner()&&!banned&&uid!==(state.me&&state.me.id))html+='<button class="act-btn" title="Issue recovery credential" aria-label="Issue recovery credential" onclick="openIssueRecovery('+uid+',\''+jsq(uname)+'\')">'+I.lock+'</button>';
     if(can(PERM.BAN_MEMBERS)){
-      if(banned)html+='<button class="act-btn" title="Unban" onclick="unbanUser('+uid+')">'+I.check+'</button>';
-      else html+='<button class="act-btn danger" title="Ban" onclick="openBanUser('+uid+',\''+jsq(uname)+'\')">'+I.ban+'</button>';
+      if(banned)html+='<button class="act-btn" title="Unban" aria-label="Unban" onclick="unbanUser('+uid+')">'+I.check+'</button>';
+      else html+='<button class="act-btn danger" title="Ban" aria-label="Ban" onclick="openBanUser('+uid+',\''+jsq(uname)+'\')">'+I.ban+'</button>';
     }
     /* Erasure (B4-9) is the only irreversible action in the panel, so it sits
        last behind a gap rather than beside Force Logout — a slip aimed at a
@@ -1047,7 +1155,7 @@ async function renderUsers(){
        the route's gate; the service refuses erasing yourself, so that row
        does not offer it. */
     if(can(PERM.ADMINISTRATOR)&&uid!==(state.me&&state.me.id))
-      html+='<span style="display:inline-block;width:14px"></span><button class="act-btn danger" title="Erase account permanently" onclick="openEraseUser('+uid+',\''+jsq(uname)+'\')">'+I.trash+'</button>';
+      html+='<span style="display:inline-block;width:14px"></span><button class="act-btn danger" title="Erase account permanently" aria-label="Erase account permanently" onclick="openEraseUser('+uid+',\''+jsq(uname)+'\')">'+I.trash+'</button>';
     html+='</div></td></tr>';
   });
   html+='</tbody></table></div></div>';
@@ -1078,7 +1186,7 @@ async function openEditUser(uid,uname,currentRole){
      403. The current role is always listed so the select can show it. */
   const opts=roles.filter(r=>r.position<myPos||r.id===currentRole)
     .map(r=>'<option value="'+r.id+'" '+(currentRole===r.id?'selected':'')+'>'+esc(r.name)+'</option>').join('');
-  openModal('<div class="modal-header"><h3>Edit User</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:20px"><div class="avatar" style="background:var(--accent);width:48px;height:48px;font-size:20px">'+uname[0].toUpperCase()+'</div><div style="font-size:16px;font-weight:700;color:white">'+esc(uname)+'</div></div><div class="form-group"><label class="form-label">Role</label><select class="form-input" id="editRoleSelect" style="appearance:auto">'+opts+'</select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveUserRole('+uid+')">Save</button></div>');
+  openModal('<div class="modal-header"><h3>Edit User</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:20px"><div class="avatar" style="background:var(--accent);width:48px;height:48px;font-size:20px">'+uname[0].toUpperCase()+'</div><div style="font-size:16px;font-weight:700;color:var(--text-normal)">'+esc(uname)+'</div></div><div class="form-group"><label class="form-label">Role</label><select class="form-input" id="editRoleSelect" style="appearance:auto">'+opts+'</select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveUserRole('+uid+')">Save</button></div>');
 }
 
 async function saveUserRole(uid){
@@ -1087,11 +1195,11 @@ async function saveUserRole(uid){
 }
 
 function openBanUser(uid,uname){
-  openModal('<div class="modal-header"><h3>Ban User</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:16px">Ban <strong style="color:white">'+esc(uname)+'</strong> from the server?</p><div class="form-group"><label class="form-label">Reason</label><textarea class="form-input form-textarea" id="banReason" placeholder="Reason for ban..."></textarea></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmBan('+uid+')">Ban User</button></div>');
+  openModal('<div class="modal-header"><h3>Ban User</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:16px">Ban <strong style="color:var(--text-normal)">'+esc(uname)+'</strong> from the server?</p><div class="form-group"><label class="form-label">Reason</label><textarea class="form-input form-textarea" id="banReason" placeholder="Reason for ban..."></textarea></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmBan('+uid+')">Ban User</button></div>');
 }
 
 function openIssueRecovery(uid,uname){
-  openModal('<div class="modal-header"><h3>Issue Recovery Credential</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:12px">Give <strong style="color:white">'+esc(uname)+'</strong> a one-time credential to get back in. Redeeming it sets a new password, signs out every device and skips two-factor. It works once and expires in 15 minutes. Make sure you know who you are talking to first.</p><div class="form-group"><label class="form-label">How did you verify them?</label><select class="form-input" id="recoveryVerification"><option value="in_person">In person</option><option value="voice_call">Voice call</option><option value="video_call">Video call</option><option value="trusted_contact">Through a trusted contact</option></select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="confirmIssueRecovery('+uid+')">Issue credential</button></div>');
+  openModal('<div class="modal-header"><h3>Issue Recovery Credential</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:12px">Give <strong style="color:var(--text-normal)">'+esc(uname)+'</strong> a one-time credential to get back in. Redeeming it sets a new password, signs out every device and skips two-factor. It works once and expires in 15 minutes. Make sure you know who you are talking to first.</p><div class="form-group"><label class="form-label">How did you verify them?</label><select class="form-input" id="recoveryVerification"><option value="in_person">In person</option><option value="voice_call">Voice call</option><option value="video_call">Video call</option><option value="trusted_contact">Through a trusted contact</option></select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="confirmIssueRecovery('+uid+')">Issue credential</button></div>');
 }
 
 async function confirmIssueRecovery(uid){
@@ -1099,7 +1207,7 @@ async function confirmIssueRecovery(uid){
   try{
     const r=await api('POST','/users/'+uid+'/recovery-credential',{verification});
     const until=r.expires_at?new Date(r.expires_at).toLocaleTimeString():'15 minutes from now';
-    openModal('<div class="modal-header"><h3>Recovery Credential</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:12px">Hand this to <strong style="color:white">'+esc(r.username)+'</strong> over the channel you verified them on. It is shown once and expires at '+esc(until)+'.</p><code style="display:block;font-size:18px;letter-spacing:1px;padding:12px;background:var(--bg-tertiary);border-radius:6px;user-select:all;text-align:center">'+esc(r.credential)+'</code><p style="color:var(--text-faint);font-size:12px;margin-top:10px">They enter it with their username and a new password in the client\u2019s account-recovery form (POST /api/v1/auth/recover). Issuing another one replaces this credential.</p></div><div class="modal-footer"><button class="btn btn-primary" onclick="closeModal()">Done</button></div>');
+    openModal('<div class="modal-header"><h3>Recovery Credential</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:12px">Hand this to <strong style="color:var(--text-normal)">'+esc(r.username)+'</strong> over the channel you verified them on. It is shown once and expires at '+esc(until)+'.</p><code style="display:block;font-size:18px;letter-spacing:1px;padding:12px;background:var(--bg-tertiary);border-radius:6px;user-select:all;text-align:center">'+esc(r.credential)+'</code><p style="color:var(--text-muted);font-size:12px;margin-top:10px">They enter it with their username and a new password in the client\u2019s account-recovery form (POST /api/v1/auth/recover). Issuing another one replaces this credential.</p></div><div class="modal-footer"><button class="btn btn-primary" onclick="closeModal()">Done</button></div>');
   }catch(e){showToast(e.message,'error')}
 }
 
@@ -1118,12 +1226,12 @@ async function unbanUser(uid){
    what goes and asks for the username to be typed, so the action cannot be
    completed by clicking through. */
 function openEraseUser(uid,uname){
-  openModal('<div class="modal-header"><h3>Erase Account</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
+  openModal('<div class="modal-header"><h3>Erase Account</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div>'
     +'<div class="modal-body">'
-    +'<p style="color:var(--text-muted)">Permanently erase <strong style="color:white">'+esc(uname)+'</strong>. <strong style="color:var(--red)">This cannot be undone</strong> — nothing erased here can be recovered afterwards.</p>'
+    +'<p style="color:var(--text-muted)">Permanently erase <strong style="color:var(--text-normal)">'+esc(uname)+'</strong>. <strong style="color:var(--text-danger)">This cannot be undone</strong> — nothing erased here can be recovered afterwards.</p>'
     +'<p style="color:var(--text-muted);margin-top:10px">Deleted for good: the account, every message and direct message it sent, its uploads and avatar, its reactions, read state, sessions, API tokens, two-factor secrets and recovery codes, and the invites it created.</p>'
-    +'<p style="color:var(--text-faint);font-size:12px;margin-top:8px">Kept: its audit-log entries, with the account no longer named, and any custom emoji it uploaded, reassigned to another admin.</p>'
-    +'<div class="form-group" style="margin-top:16px"><label class="form-label" for="eraseConfirm">Type <strong style="color:white">'+esc(uname)+'</strong> to confirm</label><input class="form-input" id="eraseConfirm" autocomplete="off" autocapitalize="off" spellcheck="false"></div>'
+    +'<p style="color:var(--text-muted);font-size:12px;margin-top:8px">Kept: its audit-log entries, with the account no longer named, and any custom emoji it uploaded, reassigned to another admin.</p>'
+    +'<div class="form-group" style="margin-top:16px"><label class="form-label" for="eraseConfirm">Type <strong style="color:var(--text-normal)">'+esc(uname)+'</strong> to confirm</label><input class="form-input" id="eraseConfirm" autocomplete="off" autocapitalize="off" spellcheck="false"></div>'
     +'</div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmEraseUser('+uid+',\''+jsq(uname)+'\')">Erase permanently</button></div>');
 }
@@ -1135,7 +1243,7 @@ async function confirmEraseUser(uid,uname){
 }
 
 async function forceLogout(uid){
-  openModal('<div class="modal-header"><h3>Force Logout</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Terminate all sessions for this user? They can sign back in immediately &mdash; this is not a removal.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmForceLogout('+uid+')">Force Logout</button></div>');
+  openModal('<div class="modal-header"><h3>Force Logout</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Terminate all sessions for this user? They can sign back in immediately &mdash; this is not a removal.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmForceLogout('+uid+')">Force Logout</button></div>');
 }
 
 async function confirmForceLogout(uid){
@@ -1145,7 +1253,7 @@ async function confirmForceLogout(uid){
 /* ═══ Channels ═══ */
 async function renderChannels(){
   let channels;
-  try{channels=await api('GET','/channels')}catch(e){return'<div class="page-title">Channels</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  try{channels=await api('GET','/channels')}catch(e){return'<div class="page-title">Channels</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   const chIcon=t=>t==='voice'?I.voice:t==='announcement'?I.megaphone:I.channels;
   /* Categories are free text — a channel of any type may live under any one of
      them. Collect the ones already in use so the create/edit forms can offer
@@ -1154,18 +1262,18 @@ async function renderChannels(){
   let html='<div class="page-title">Channels</div><div class="page-desc">'+channels.length+' channels</div>';
   html+='<div class="filter-bar"><button class="btn btn-accent" onclick="openChannelModal(null)">'+I.plus+' Create Channel</button></div>';
   html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Channel</th><th>Type</th><th>Category</th><th>Archived</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!channels.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No channels</td></tr>';
+  if(!channels.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">No channels</td></tr>';
   channels.forEach(ch=>{
     const id=ch.id||ch.ID;const name=ch.name||ch.Name||'';const type=ch.type||ch.Type||'text';
     const cat=ch.category||ch.Category||'';const archived=ch.archived||ch.Archived||false;
-    html+='<tr><td><div style="display:flex;align-items:center;gap:8px"><span style="color:var(--text-faint)">'+chIcon(type)+'</span><strong>'+esc(name)+'</strong></div></td>';
+    html+='<tr><td><div style="display:flex;align-items:center;gap:8px"><span style="color:var(--text-muted)">'+chIcon(type)+'</span><strong>'+esc(name)+'</strong></div></td>';
     html+='<td><span class="badge '+(type==='voice'?'badge-yellow':type==='announcement'?'badge-accent':'badge-muted')+'">'+esc(type)+'</span></td>';
-    html+='<td style="font-size:12px;color:var(--text-faint)">'+esc(cat)+'</td>';
+    html+='<td style="font-size:12px;color:var(--text-muted)">'+esc(cat)+'</td>';
     html+='<td>'+(archived?'<span class="badge badge-muted">Yes</span>':'<span class="badge badge-green">No</span>')+'</td>';
-    const lockBtn=type==='dm'?'':'<button class="act-btn" title="Access (private channel)" onclick="openChannelPermsModal('+id+',\''+jsq(name)+'\')">'+I.lock+'</button>';
+    const lockBtn=type==='dm'?'':'<button class="act-btn" title="Access (private channel)" aria-label="Access (private channel)" onclick="openChannelPermsModal('+id+',\''+jsq(name)+'\')">'+I.lock+'</button>';
     state.channelCache[id]=ch;
     if(cat)catSet[cat]=true;
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" onclick="openChannelEditModal('+id+')">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" onclick="openDeleteChannel('+id+',\''+jsq(name)+'\')">'+I.trash+'</button></div></td></tr>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" aria-label="Edit" onclick="openChannelEditModal('+id+')">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" aria-label="Delete" onclick="openDeleteChannel('+id+',\''+jsq(name)+'\')">'+I.trash+'</button></div></td></tr>';
   });
   html+='</tbody></table></div></div>';
   state.channelCategories=Object.keys(catSet).sort();
@@ -1182,7 +1290,7 @@ function categoryDatalist(listId){
 }
 
 function openChannelModal(){
-  openModal('<div class="modal-header"><h3>Create Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label">Name <span class="req">*</span></label><input class="form-input" id="chName" placeholder="general"></div><div class="form-group"><label class="form-label">Type</label><select class="form-input" id="chType" style="appearance:auto"><option value="text">Text</option><option value="voice">Voice</option><option value="announcement">Announcement</option></select></div><div class="form-group"><label class="form-label">Category</label><input class="form-input" id="chCat" list="chCatList" placeholder="Text Channels" autocomplete="off">'+categoryDatalist('chCatList')+'<div style="font-size:11px;color:var(--text-faint);margin-top:4px">Any name works, for voice and text channels alike. Leave blank for no category.</div></div><div class="form-group"><label class="form-label">Topic</label><input class="form-input" id="chTopic"></div><div class="form-group"><label class="form-label">Position</label><input class="form-input" id="chPos" type="number" value="0" min="0"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="createChannel()">Create</button></div>');
+  openModal('<div class="modal-header"><h3>Create Channel</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label">Name <span class="req">*</span></label><input class="form-input" id="chName" placeholder="general"></div><div class="form-group"><label class="form-label">Type</label><select class="form-input" id="chType" style="appearance:auto"><option value="text">Text</option><option value="voice">Voice</option><option value="announcement">Announcement</option></select></div><div class="form-group"><label class="form-label">Category</label><input class="form-input" id="chCat" list="chCatList" placeholder="Text Channels" autocomplete="off">'+categoryDatalist('chCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Any name works, for voice and text channels alike. Leave blank for no category.</div></div><div class="form-group"><label class="form-label">Topic</label><input class="form-input" id="chTopic"></div><div class="form-group"><label class="form-label">Position</label><input class="form-input" id="chPos" type="number" value="0" min="0"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="createChannel()">Create</button></div>');
 }
 
 async function createChannel(){
@@ -1218,16 +1326,16 @@ function openChannelEditModal(id){
   const voiceRows=type!=='voice'?'':
      '<div class="form-group"><label class="form-label">User limit (0 = unlimited)</label><input class="form-input" id="chEditMaxUsers" type="number" min="0" max="99" value="'+esc(maxUsers)+'"></div>'
     +'<div class="form-group"><label class="form-label">Video limit (0 = unlimited)</label><input class="form-input" id="chEditMaxVideo" type="number" min="0" max="99" value="'+esc(maxVideo)+'"></div>';
-  openModal('<div class="modal-header"><h3>Edit Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
+  openModal('<div class="modal-header"><h3>Edit Channel</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div>'
     +'<div class="modal-body">'
     +'<div class="form-group"><label class="form-label">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div>'
     +'<div class="form-group"><label class="form-label">Topic</label><input class="form-input" id="chEditTopic" value="'+esc(topic)+'"></div>'
-    +'<div class="form-group"><label class="form-label">Category</label><input class="form-input" id="chEditCat" list="chEditCatList" value="'+esc(cat)+'" autocomplete="off">'+categoryDatalist('chEditCatList')+'<div style="font-size:11px;color:var(--text-faint);margin-top:4px">Move the channel to another category, or blank it to leave it uncategorized.</div></div>'
+    +'<div class="form-group"><label class="form-label">Category</label><input class="form-input" id="chEditCat" list="chEditCatList" value="'+esc(cat)+'" autocomplete="off">'+categoryDatalist('chEditCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Move the channel to another category, or blank it to leave it uncategorized.</div></div>'
     +'<div class="form-group"><label class="form-label">Slow mode (seconds, 0 = off)</label><input class="form-input" id="chEditSlow" type="number" min="0" value="'+esc(slow)+'"></div>'
     +'<div class="form-group"><label class="form-label">Position</label><input class="form-input" id="chEditPos" type="number" min="0" value="'+esc(pos)+'"></div>'
     +voiceRows
-    +'<div class="setting-row"><div class="setting-info"><div class="setting-name">Archived</div><div class="setting-desc">Hide the channel without deleting its messages</div></div><div class="setting-ctrl"><button class="toggle '+(archived?'on':'')+'" id="chEditArchived" onclick="this.classList.toggle(\'on\')"></button></div></div>'
-    +'<div class="setting-row"><div class="setting-info"><div class="setting-name">Age-restricted (NSFW)</div><div class="setting-desc">Clients show a one-time warning and mark the channel. The server does not filter or restrict anything.</div></div><div class="setting-ctrl"><button class="toggle '+(nsfw?'on':'')+'" id="chEditNsfw" onclick="this.classList.toggle(\'on\')"></button></div></div>'
+    +'<div class="setting-row"><div class="setting-info"><div class="setting-name" id="chEditArchived-name">Archived</div><div class="setting-desc">Hide the channel without deleting its messages</div></div><div class="setting-ctrl"><button class="toggle '+(archived?'on':'')+'" id="chEditArchived" role="switch" aria-checked="'+(archived?'true':'false')+'" aria-labelledby="chEditArchived-name" onclick="toggleSwitch(this)"></button></div></div>'
+    +'<div class="setting-row"><div class="setting-info"><div class="setting-name" id="chEditNsfw-name">Age-restricted (NSFW)</div><div class="setting-desc">Clients show a one-time warning and mark the channel. The server does not filter or restrict anything.</div></div><div class="setting-ctrl"><button class="toggle '+(nsfw?'on':'')+'" id="chEditNsfw" role="switch" aria-checked="'+(nsfw?'true':'false')+'" aria-labelledby="chEditNsfw-name" onclick="toggleSwitch(this)"></button></div></div>'
     +'</div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveChannelEdit('+id+')">Save</button></div>');
 }
@@ -1256,7 +1364,7 @@ async function saveChannelEdit(id){
 }
 
 function openDeleteChannel(id,name){
-  openModal('<div class="modal-header"><h3>Delete Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Permanently delete <strong style="color:white">#'+esc(name)+'</strong> and all its messages?</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmDeleteChannel('+id+')">Delete</button></div>');
+  openModal('<div class="modal-header"><h3>Delete Channel</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Permanently delete <strong style="color:var(--text-normal)">#'+esc(name)+'</strong> and all its messages?</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmDeleteChannel('+id+')">Delete</button></div>');
 }
 
 async function confirmDeleteChannel(id){
@@ -1317,9 +1425,9 @@ function renderChannelPermsModal(){
     const isAdmin=(role.permissions&ADMIN_BIT)!==0;
     const canAccess=isAdmin||((role.deny&0x2)===0);
     quick+='<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bg-active)">'
-      +'<span style="color:'+roleColor(role.role_id)+';font-weight:600">'+esc(role.role_name)+'</span>'
+      +'<span style="color:'+readableRoleColor(roleColor(role.role_id))+';font-weight:600">'+esc(role.role_name)+'</span>'
       +(isAdmin
-        ?'<span style="font-size:12px;color:var(--text-faint)">always has access</span>'
+        ?'<span style="font-size:12px;color:var(--text-muted)">always has access</span>'
         :'<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted);cursor:pointer"><input type="checkbox" id="permRole'+role.role_id+'" '+(canAccess?'checked':'')+'> Can access</label>')
       +'</div>';
   });
@@ -1343,14 +1451,14 @@ function renderChannelPermsModal(){
   let actionOpts='';
   ACCESS_ACTIONS.forEach(a=>{actionOpts+='<option value="'+a[0]+'">'+esc(a[1])+'</option>'});
 
-  openModal('<div class="modal-header"><h3>Channel Permissions — #'+esc(pc.name)+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
+  openModal('<div class="modal-header"><h3>Channel Permissions — #'+esc(pc.name)+'</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div>'
     +'<div class="modal-body">'
     +'<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Uncheck a role to hide this channel from it (private channel). Changes apply to connected users immediately; users already in the voice channel are not disconnected.</p>'
     +quick
     +'<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--bg-active)">'
     +'<div class="form-group"><label class="form-label">Override matrix</label>'
     +'<select class="form-input" id="permTarget" style="appearance:auto" onchange="renderPermMatrix()">'+opts+'</select></div>'
-    +'<p style="color:var(--text-faint);font-size:12px;margin:0 0 10px">Resolution order: base role permissions → role override → member override. A member deny beats a role allow; Administrator bypasses everything.</p>'
+    +'<p style="color:var(--text-muted);font-size:12px;margin:0 0 10px">Resolution order: base role permissions → role override → member override. A member deny beats a role allow; Administrator bypasses everything.</p>'
     +'<div id="permMatrix"></div>'
     +'<div id="permPreview"></div>'
     +'</div>'
@@ -1373,7 +1481,7 @@ function renderPermMatrix(){
   const pv=document.getElementById('permPreview');if(pv)pv.innerHTML='';
   const sel=document.getElementById('permTarget');
   const val=sel?sel.value:'';
-  if(!val){box.innerHTML='<p style="color:var(--text-faint);font-size:12px">Pick a role or member above to edit its per-channel bits.</p>';return}
+  if(!val){box.innerHTML='<p style="color:var(--text-muted);font-size:12px">Pick a role or member above to edit its per-channel bits.</p>';return}
   const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
   let allow=0,deny=0,adminNote='';
   if(kind==='r'){
@@ -1384,7 +1492,7 @@ function renderPermMatrix(){
     if(o){allow=o.allow;deny=o.deny}
   }
   let html='';
-  if(adminNote)html+='<p style="color:var(--yellow);font-size:12px;margin:0 0 8px">'+esc(adminNote)+'</p>';
+  if(adminNote)html+='<p style="color:var(--text-warning);font-size:12px;margin:0 0 8px">'+esc(adminNote)+'</p>';
   html+='<table class="tbl"><thead><tr><th>Permission</th><th style="text-align:center">Allow</th><th style="text-align:center">Inherit</th><th style="text-align:center">Deny</th></tr></thead><tbody>';
   OVERRIDE_BITS.forEach(b=>{
     const bit=b[0],label=b[1],st=overrideStateOf(allow,deny,bit);
@@ -1432,7 +1540,7 @@ const ACCESS_ACTIONS=[
   ['moderate_voice','Moderate voice'],
 ];
 function accessActionLabel(a){const f=ACCESS_ACTIONS.find(x=>x[0]===a);return f?f[1]:a}
-function accessVerdict(ok){return ok?'<span style="color:var(--green)">Allowed</span>':'<span style="color:var(--red)">Denied</span>'}
+function accessVerdict(ok){return ok?'<span style="color:var(--text-positive)">Allowed</span>':'<span style="color:var(--text-danger)">Denied</span>'}
 function layerLabel(v){return v==='allow'?'allow':v==='deny'?'deny':'—'}
 
 async function explainAccess(){
@@ -1447,16 +1555,16 @@ async function explainAccess(){
   }catch(e){showToast(e.message,'error');return}
   const rs=r.restrictions||{};
   const facts=['Role: '+esc(r.role_name||'none')];
-  if(rs.banned)facts.push('<span style="color:var(--red)">banned</span>');
+  if(rs.banned)facts.push('<span style="color:var(--text-danger)">banned</span>');
   if(rs.registration_status&&rs.registration_status!=='active')facts.push('registration '+esc(rs.registration_status));
-  if(rs.timed_out)facts.push('<span style="color:var(--yellow)">timed out</span>');
+  if(rs.timed_out)facts.push('<span style="color:var(--text-warning)">timed out</span>');
   if(rs.channel_nsfw)facts.push('NSFW '+(rs.nsfw_acknowledged?'acknowledged':'not acknowledged'));
   if(rs.channel_archived)facts.push('channel archived');
   let html='<p style="font-size:12px;color:var(--text-muted);margin:8px 0">'+esc(r.username)+' · '+facts.join(' · ')+'</p>';
   (r.decisions||[]).forEach(d=>{
     html+='<div style="margin:8px 0"><div style="font-size:13px"><b>'+esc(accessActionLabel(d.action))+'</b>: '+accessVerdict(d.allowed)
-      +(d.reason?' <span style="color:var(--text-faint)">— '+esc(d.reason)+'</span>':'')
-      +(d.administrator_bypass?' <span style="color:var(--text-faint)">(Administrator bypasses overrides)</span>':'')+'</div>';
+      +(d.reason?' <span style="color:var(--text-muted)">— '+esc(d.reason)+'</span>':'')
+      +(d.administrator_bypass?' <span style="color:var(--text-muted)">(Administrator bypasses overrides)</span>':'')+'</div>';
     if((d.bits||[]).length){
       html+='<table class="tbl"><thead><tr><th>Bit</th><th>Base role</th><th>Role override</th><th>Member override</th><th>Effective</th></tr></thead><tbody>';
       d.bits.forEach(b=>{
@@ -1491,7 +1599,7 @@ async function previewPermChange(){
     html+='<table class="tbl"><thead><tr><th>Member</th><th>Action</th><th>Now</th><th>After save</th></tr></thead><tbody>';
     members.forEach(m=>{(m.changes||[]).forEach(c=>{
       html+='<tr><td>'+esc(m.username)+'</td><td>'+esc(accessActionLabel(c.action))+'</td><td>'+accessVerdict(c.before)+'</td><td>'+accessVerdict(c.after)
-        +(c.after_reason?' <span style="color:var(--text-faint);font-size:12px">— '+esc(c.after_reason)+'</span>':'')+'</td></tr>';
+        +(c.after_reason?' <span style="color:var(--text-muted);font-size:12px">— '+esc(c.after_reason)+'</span>':'')+'</td></tr>';
     })});
     html+='</tbody></table>';
   }
@@ -1601,36 +1709,36 @@ function canGrantBit(bit){
 
 async function renderRoles(){
   let roles;
-  try{roles=await api('GET','/roles')}catch(e){return'<div class="page-title">Roles</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  try{roles=await api('GET','/roles')}catch(e){return'<div class="page-title">Roles</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   state.roleList=roles||[];
   let html='<div class="page-title">Roles</div><div class="page-desc">'+state.roleList.length+' roles, highest rank first. You can only manage roles below your own.</div>';
   html+='<div class="filter-bar"><button class="btn btn-accent" onclick="openRoleModal(null)">'+I.plus+' Create Role</button></div>';
   html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Role</th><th>Members</th><th>Position</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!state.roleList.length)html+='<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:24px">No roles</td></tr>';
+  if(!state.roleList.length)html+='<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px">No roles</td></tr>';
   /* Only the manageable slice can be reordered — the reorder endpoint takes
      exactly the roles below the caller, so the arrows move within that slice. */
   const movable=state.roleList.filter(canManageRole);
   state.roleList.forEach(role=>{
     const mine=canManageRole(role);
     const mIdx=movable.findIndex(r=>r.id===role.id);
-    const swatch='<span class="role-swatch" style="background:'+(role.color?esc(role.color):'var(--text-micro)')+'"></span>';
-    html+='<tr><td><div style="display:flex;align-items:center;gap:8px">'+swatch+'<strong style="color:'+(role.color?esc(role.color):'var(--text-normal)')+'">'+esc(role.name)+'</strong>';
+    const swatch='<span class="role-swatch" style="background:'+(role.color?esc(role.color):'var(--text-muted)')+'"></span>';
+    html+='<tr><td><div style="display:flex;align-items:center;gap:8px">'+swatch+'<strong style="color:'+(role.color?readableRoleColor(role.color):'var(--text-normal)')+'">'+esc(role.name)+'</strong>';
     if(role.is_default)html+='<span class="badge badge-muted">default</span>';
     if(!mine)html+='<span class="badge badge-muted">above you</span>';
     html+='</div></td>';
     html+='<td style="color:var(--text-muted)">'+(role.member_count||0)+'</td>';
-    html+='<td style="font-size:12px;color:var(--text-faint)">'+role.position+'</td>';
+    html+='<td style="font-size:12px;color:var(--text-muted)">'+role.position+'</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end">';
     if(mine){
       const upDisabled=mIdx<=0?'disabled style="opacity:.3"':'';
       const downDisabled=(mIdx<0||mIdx>=movable.length-1)?'disabled style="opacity:.3"':'';
-      html+='<button class="act-btn" title="Move up" '+upDisabled+' onclick="moveRole('+role.id+',-1)">'+I.arrowUp+'</button>';
-      html+='<button class="act-btn" title="Move down" '+downDisabled+' onclick="moveRole('+role.id+',1)">'+I.arrowDown+'</button>';
-      html+='<button class="act-btn" title="Edit" onclick="openRoleModal('+role.id+')">'+I.edit+'</button>';
-      if(role.is_default)html+='<button class="act-btn" title="The default role cannot be deleted" disabled style="opacity:.3">'+I.trash+'</button>';
-      else html+='<button class="act-btn danger" title="Delete" onclick="openDeleteRole('+role.id+')">'+I.trash+'</button>';
+      html+='<button class="act-btn" title="Move up" aria-label="Move up" '+upDisabled+' onclick="moveRole('+role.id+',-1)">'+I.arrowUp+'</button>';
+      html+='<button class="act-btn" title="Move down" aria-label="Move down" '+downDisabled+' onclick="moveRole('+role.id+',1)">'+I.arrowDown+'</button>';
+      html+='<button class="act-btn" title="Edit" aria-label="Edit" onclick="openRoleModal('+role.id+')">'+I.edit+'</button>';
+      if(role.is_default)html+='<button class="act-btn" title="The default role cannot be deleted" aria-label="The default role cannot be deleted" disabled style="opacity:.3">'+I.trash+'</button>';
+      else html+='<button class="act-btn danger" title="Delete" aria-label="Delete" onclick="openDeleteRole('+role.id+')">'+I.trash+'</button>';
     }else{
-      html+='<span style="font-size:12px;color:var(--text-micro)">read-only</span>';
+      html+='<span style="font-size:12px;color:var(--text-muted)">read-only</span>';
     }
     html+='</div></td></tr>';
   });
@@ -1691,11 +1799,11 @@ function openRoleModal(id){
     grid+='</div></div>';
   });
 
-  openModal('<div class="modal-header"><h3>'+(role?'Edit Role':'Create Role')+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
+  openModal('<div class="modal-header"><h3>'+(role?'Edit Role':'Create Role')+'</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div>'
     +'<div class="modal-body">'
     +'<div class="form-group"><label class="form-label">Name <span class="req">*</span></label><input class="form-input" id="roleName" maxlength="32" value="'+esc(name)+'" placeholder="Moderator"></div>'
     +'<div class="form-group"><label class="form-label">Color</label><div style="display:flex;align-items:center;gap:10px">'
-      +'<input type="color" id="roleColor" value="'+esc(color||'#5865F2')+'" style="width:44px;height:34px;padding:2px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm)">'
+      +'<input type="color" id="roleColor" value="'+esc(color||'#00c8ff')+'" style="width:44px;height:34px;padding:2px;background:var(--bg-input);border:1px solid var(--border-control);border-radius:var(--radius-sm)">'
       +'<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)"><input type="checkbox" id="roleNoColor" '+(color?'':'checked')+'> No color</label>'
     +'</div></div>'
     +'<div class="form-group"><label class="form-label">Position (must be below your own rank of '+myPosition()+')</label><input class="form-input" id="rolePos" type="number" min="0" max="'+Math.max(0,myPosition()-1)+'" value="'+position+'"></div>'
@@ -1739,11 +1847,11 @@ function openDeleteRole(id){
   const count=role.member_count||0;
   const members=count===0
     ?'No members hold this role.'
-    :'<strong style="color:white">'+count+' member'+(count===1?'':'s')+'</strong> will be moved to <strong style="color:white">'+esc(fallbackName)+'</strong>.';
-  openModal('<div class="modal-header"><h3>Delete Role</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
-    +'<div class="modal-body"><p style="color:var(--text-muted)">Delete <strong style="color:'+(role.color?esc(role.color):'white')+'">'+esc(role.name)+'</strong>?</p>'
+    :'<strong style="color:var(--text-normal)">'+count+' member'+(count===1?'':'s')+'</strong> will be moved to <strong style="color:var(--text-normal)">'+esc(fallbackName)+'</strong>.';
+  openModal('<div class="modal-header"><h3>Delete Role</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div>'
+    +'<div class="modal-body"><p style="color:var(--text-muted)">Delete <strong style="color:'+(role.color?readableRoleColor(role.color):'var(--text-normal)')+'">'+esc(role.name)+'</strong>?</p>'
     +'<p style="color:var(--text-muted);margin-top:8px">'+members+'</p>'
-    +'<p style="color:var(--text-faint);font-size:12px;margin-top:8px">Its channel permission overrides are removed too. This cannot be undone.</p></div>'
+    +'<p style="color:var(--text-muted);font-size:12px;margin-top:8px">Its channel permission overrides are removed too. This cannot be undone.</p></div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmDeleteRole('+id+')">Delete</button></div>');
 }
 
@@ -1759,7 +1867,7 @@ async function renderAudit(){
   // empty page at an exact multiple of PAGE_SIZE. The cache keeps the sliced
   // page so the "N entries on this page" label stays accurate.
   let entries;
-  try{entries=await api('GET','/audit-log?limit='+(PAGE_SIZE+1)+'&offset='+offset)}catch(e){return'<div class="page-title">Audit Log</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  try{entries=await api('GET','/audit-log?limit='+(PAGE_SIZE+1)+'&offset='+offset)}catch(e){return'<div class="page-title">Audit Log</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   const hasMore=!!entries&&entries.length>PAGE_SIZE;
   state.auditCache=(entries||[]).slice(0,PAGE_SIZE);
 
@@ -1790,7 +1898,7 @@ async function renderAudit(){
 
   // Table
   html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead><tbody id="auditTbody">';
-  if(!filtered.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No matching entries</td></tr>';
+  if(!filtered.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">No matching entries</td></tr>';
   else filtered.forEach(e=>{html+=renderAuditRow(e)});
   html+='</tbody></table></div></div>';
 
@@ -1816,17 +1924,17 @@ function auditFiltered(){
 }
 
 function renderAuditRow(e){
-  return'<tr><td style="font-size:12px;color:var(--text-faint);white-space:nowrap">'+esc(e.created_at)+'</td>'
+  return'<tr><td style="font-size:12px;color:var(--text-muted);white-space:nowrap">'+fmtLocal(e.created_at)+'</td>'
     +'<td><strong>'+esc(e.actor_name||e.actor_id)+'</strong></td>'
     +'<td><span class="badge '+actionBadge(e.action)+'">'+esc(e.action)+'</span></td>'
     +'<td>'+esc(e.target_type)+(e.target_id?' #'+e.target_id:'')+'</td>'
-    +'<td style="font-size:12px;color:var(--text-faint)">'+esc(e.detail)+'</td></tr>';
+    +'<td style="font-size:12px;color:var(--text-muted)">'+esc(e.detail)+'</td></tr>';
 }
 
 function refilterAudit(){
   const tbody=document.getElementById('auditTbody');if(!tbody)return;
   const filtered=auditFiltered();
-  if(!filtered.length)tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No matching entries</td></tr>';
+  if(!filtered.length)tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">No matching entries</td></tr>';
   else tbody.innerHTML=filtered.map(renderAuditRow).join('');
 }
 
@@ -1935,7 +2043,7 @@ function appendLogLine(entry){
   const div=document.createElement('div');
   div.className='log-line l-'+entry.level.toLowerCase();
   const ts=entry.ts?entry.ts.substring(11,23):'';
-  div.innerHTML='<span class="log-ts">'+esc(ts)+'</span><span class="log-lvl">'+esc(entry.level)+'</span><span class="log-src">['+esc(entry.source||'server')+']</span>'+esc(entry.msg)+(entry.attrs&&entry.attrs!=='{}'?' <span style="color:var(--text-micro)">'+esc(entry.attrs)+'</span>':'');
+  div.innerHTML='<span class="log-ts">'+esc(ts)+'</span><span class="log-lvl">'+esc(entry.level)+'</span><span class="log-src">['+esc(entry.source||'server')+']</span>'+esc(entry.msg)+(entry.attrs&&entry.attrs!=='{}'?' <span style="color:var(--text-muted)">'+esc(entry.attrs)+'</span>':'');
   out.appendChild(div);
   // Trim DOM to max lines
   while(out.children.length>state.logMaxLines)out.removeChild(out.firstChild);
@@ -1959,28 +2067,28 @@ function clearLogs(){state.logEntries=[];const out=document.getElementById('logO
 /* ═══ Settings ═══ */
 async function renderSettings(){
   let settings;
-  try{settings=await api('GET','/settings')}catch(e){return'<div class="page-title">Settings</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  try{settings=await api('GET','/settings')}catch(e){return'<div class="page-title">Settings</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   state._settings={...settings};
   const v=k=>settings[k]||'';
   const isOn=k=>v(k)==='1'||v(k)==='true';
   let html='<div class="page-title">Server Settings</div><div class="page-desc">Configure your OwnCord server</div>';
   html+='<div class="section-card"><div class="section-card-header"><h3>General</h3></div><div class="section-card-body">';
-  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Server Name</div></div><div class="setting-ctrl"><input class="form-input" id="s-server_name" value="'+esc(v('server_name'))+'" style="width:240px" oninput="markSettingsChanged()"></div></div>';
-  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Server Icon URL</div><div class="setting-desc">Not used by the server or client yet &mdash; stored for a future release</div></div><div class="setting-ctrl"><input class="form-input" id="s-server_icon" value="'+esc(v('server_icon'))+'" style="width:240px" disabled title="Not implemented yet"></div></div>';
-  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Message of the Day</div><div class="setting-desc">Shown to users when they connect</div></div><div class="setting-ctrl"><input class="form-input" id="s-motd" value="'+esc(v('motd'))+'" style="width:300px" oninput="markSettingsChanged()"></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-server_name">Server Name</label></div><div class="setting-ctrl"><input class="form-input" id="s-server_name" value="'+esc(v('server_name'))+'" style="width:240px" oninput="markSettingsChanged()"></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-server_icon">Server Icon URL</label><div class="setting-desc">Not used by the server or client yet &mdash; stored for a future release</div></div><div class="setting-ctrl"><input class="form-input" id="s-server_icon" value="'+esc(v('server_icon'))+'" style="width:240px" disabled title="Not implemented yet"></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-motd">Message of the Day</label><div class="setting-desc">Shown to users when they connect</div></div><div class="setting-ctrl"><input class="form-input" id="s-motd" value="'+esc(v('motd'))+'" style="width:300px" oninput="markSettingsChanged()"></div></div>';
   html+='</div></div>';
   html+='<div class="section-card"><div class="section-card-header"><h3>Limits</h3></div><div class="section-card-body">';
-  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Max Upload Size (bytes)</div><div class="setting-desc">Controlled by upload.max_size_mb in config.yaml (requires restart) &mdash; this display value has no effect</div></div><div class="setting-ctrl"><input class="form-input" id="s-max_upload_bytes" value="'+esc(v('max_upload_bytes'))+'" style="width:160px" type="number" disabled title="Set upload.max_size_mb in config.yaml and restart"></div></div>';
-  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Voice Quality</div><div class="setting-desc">Controlled by voice.quality in config.yaml (requires restart) &mdash; this display value has no effect</div></div><div class="setting-ctrl"><select class="filter-select" id="s-voice_quality" disabled title="Set voice.quality in config.yaml and restart"><option value="low" '+(v('voice_quality')==='low'?'selected':'')+'>Low</option><option value="medium" '+(v('voice_quality')==='medium'?'selected':'')+'>Medium</option><option value="high" '+(v('voice_quality')==='high'?'selected':'')+'>High</option></select></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-max_upload_bytes">Max Upload Size (bytes)</label><div class="setting-desc">Controlled by upload.max_size_mb in config.yaml (requires restart) &mdash; this display value has no effect</div></div><div class="setting-ctrl"><input class="form-input" id="s-max_upload_bytes" value="'+esc(v('max_upload_bytes'))+'" style="width:160px" type="number" disabled title="Set upload.max_size_mb in config.yaml and restart"></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-voice_quality">Voice Quality</label><div class="setting-desc">Controlled by voice.quality in config.yaml (requires restart) &mdash; this display value has no effect</div></div><div class="setting-ctrl"><select class="filter-select" id="s-voice_quality" disabled title="Set voice.quality in config.yaml and restart"><option value="low" '+(v('voice_quality')==='low'?'selected':'')+'>Low</option><option value="medium" '+(v('voice_quality')==='medium'?'selected':'')+'>Medium</option><option value="high" '+(v('voice_quality')==='high'?'selected':'')+'>High</option></select></div></div>';
   html+='</div></div>';
   html+='<div class="section-card"><div class="section-card-header"><h3>Security</h3></div><div class="section-card-body">';
-  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Require 2FA</div><div class="setting-desc">Require all users to enable two-factor authentication</div></div><div class="setting-ctrl"><button class="toggle '+(isOn('require_2fa')?'on':'')+'" id="s-require_2fa" onclick="this.classList.toggle(\'on\');markSettingsChanged()"></button></div></div>';
-  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Registration</div><div class="setting-desc">Closed: nobody can register. Invite: a valid invite code is required. Approval: new accounts wait in Users until you approve them. Open: anyone can register.</div></div><div class="setting-ctrl"><select class="filter-select" id="s-registration_mode" onchange="markSettingsChanged()">'+regModeOptions(v('registration_mode')||'invite')+'</select></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require 2FA</div><div class="setting-desc">Require all users to enable two-factor authentication</div></div><div class="setting-ctrl"><button class="toggle '+(isOn('require_2fa')?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+(isOn('require_2fa')?'true':'false')+'" aria-labelledby="s-require_2fa-name" onclick="toggleSwitch(this);markSettingsChanged()"></button></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-registration_mode">Registration</label><div class="setting-desc">Closed: nobody can register. Invite: a valid invite code is required. Approval: new accounts wait in Users until you approve them. Open: anyone can register.</div></div><div class="setting-ctrl"><select class="filter-select" id="s-registration_mode" onchange="markSettingsChanged()">'+regModeOptions(v('registration_mode')||'invite')+'</select></div></div>';
   html+='</div></div>';
   const owner=isOwner();
   html+='<div class="section-card"><div class="section-card-header"><h3>Backup</h3></div><div class="section-card-body">';
-  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Schedule</div><div class="setting-desc">'+(owner?'':'Owner only. ')+'The backup policy is owner-only (BPR-072).</div></div><div class="setting-ctrl"><select class="filter-select" id="s-backup_schedule" '+(owner?'':'disabled title="Owner role required"')+' onchange="markSettingsChanged()"><option value="off" '+(v('backup_schedule')==='off'?'selected':'')+'>Off</option><option value="daily" '+(v('backup_schedule')==='daily'?'selected':'')+'>Daily</option><option value="weekly" '+(v('backup_schedule')==='weekly'?'selected':'')+'>Weekly</option></select></div></div>';
-  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Retention (days)</div><div class="setting-desc">'+(owner?'0 keeps backups forever.':'Owner only. 0 keeps backups forever.')+'</div></div><div class="setting-ctrl"><input class="form-input" id="s-backup_retention" value="'+esc(v('backup_retention'))+'" style="width:100px" type="number" '+(owner?'':'disabled title="Owner role required"')+' oninput="markSettingsChanged()"></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-backup_schedule">Schedule</label><div class="setting-desc">'+(owner?'':'Owner only. ')+'The backup policy is owner-only (BPR-072).</div></div><div class="setting-ctrl"><select class="filter-select" id="s-backup_schedule" '+(owner?'':'disabled title="Owner role required"')+' onchange="markSettingsChanged()"><option value="off" '+(v('backup_schedule')==='off'?'selected':'')+'>Off</option><option value="daily" '+(v('backup_schedule')==='daily'?'selected':'')+'>Daily</option><option value="weekly" '+(v('backup_schedule')==='weekly'?'selected':'')+'>Weekly</option></select></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-backup_retention">Retention (days)</label><div class="setting-desc">'+(owner?'0 keeps backups forever.':'Owner only. 0 keeps backups forever.')+'</div></div><div class="setting-ctrl"><input class="form-input" id="s-backup_retention" value="'+esc(v('backup_retention'))+'" style="width:100px" type="number" '+(owner?'':'disabled title="Owner role required"')+' oninput="markSettingsChanged()"></div></div>';
   html+='</div></div>';
   html+='<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button class="btn btn-accent" id="saveSettingsBtn" '+(state.settingsChanged?'':'disabled')+' onclick="saveSettings()">Save Changes</button></div>';
   return html;
@@ -2031,7 +2139,7 @@ function retentionLabel(days){return days>0?days+' day'+(days===1?'':'s'):'Kept 
 async function renderRetention(){
   let policy,preview;
   try{policy=await api('GET','/retention');preview=await api('GET','/retention/preview')}
-  catch(e){return'<div class="page-title">Message Retention</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  catch(e){return'<div class="page-title">Message Retention</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   /* The channel list is MANAGE_CHANNELS while this page is MANAGE_SERVER, so
      a principal holding only the latter cannot read it. Degrade to the
      channels the policy and the preview already name rather than failing the
@@ -2063,17 +2171,17 @@ async function renderRetention(){
   html+='<div class="section-card"><div class="section-card-header"><h3>Server-wide window</h3></div><div class="section-card-body">';
   html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Keep messages for</div><div class="setting-desc">Applies to every channel without its own override. 0 keeps everything indefinitely, which is the default; otherwise between 1 and 3650 days.</div></div>';
   html+='<div class="setting-ctrl" style="display:flex;gap:8px;align-items:center"><input class="form-input" id="retentionDays" type="number" min="0" max="3650" style="width:110px" value="'+esc(serverDays)+'"><button class="btn btn-accent" onclick="openApplyRetention()">Preview change</button></div></div>';
-  html+='<div style="color:var(--text-faint);font-size:12px;margin-top:4px">Currently: <strong style="color:var(--text-normal)">'+esc(retentionLabel(serverDays))+'</strong></div>';
+  html+='<div style="color:var(--text-muted);font-size:12px;margin-top:4px">Currently: <strong style="color:var(--text-normal)">'+esc(retentionLabel(serverDays))+'</strong></div>';
   html+='</div></div>';
 
   html+='<div class="section-card"><div class="section-card-header"><h3>Effect preview</h3><button class="btn btn-ghost" onclick="renderContent()">'+I.refresh+' Refresh</button></div><div class="section-card-body">';
-  if(!preview||!preview.length)html+='<div style="color:var(--text-faint);font-size:13px">No channel has a retention window, so the next sweep removes nothing.</div>';
-  else if(totalDue===0)html+='<div style="color:var(--text-faint);font-size:13px">A window applies to '+preview.length+' channel'+(preview.length===1?'':'s')+', but nothing is past it yet — the next sweep removes nothing.</div>';
-  else html+='<div style="color:var(--yellow);font-size:13px">The next sweep permanently deletes <strong>'+totalDue.toLocaleString()+'</strong> message'+(totalDue===1?'':'s')+' across '+preview.length+' channel'+(preview.length===1?'':'s')+'. This cannot be undone.</div>';
+  if(!preview||!preview.length)html+='<div style="color:var(--text-muted);font-size:13px">No channel has a retention window, so the next sweep removes nothing.</div>';
+  else if(totalDue===0)html+='<div style="color:var(--text-muted);font-size:13px">A window applies to '+preview.length+' channel'+(preview.length===1?'':'s')+', but nothing is past it yet — the next sweep removes nothing.</div>';
+  else html+='<div style="color:var(--text-warning);font-size:13px">The next sweep permanently deletes <strong>'+totalDue.toLocaleString()+'</strong> message'+(totalDue===1?'':'s')+' across '+preview.length+' channel'+(preview.length===1?'':'s')+'. This cannot be undone.</div>';
   html+='</div></div>';
 
   html+='<div class="section-card"><div class="section-card-header"><h3>Channels</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Channel</th><th>Window</th><th>Source</th><th>Next sweep removes</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!rows.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No channels</td></tr>';
+  if(!rows.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">No channels</td></tr>';
   rows.forEach(r=>{
     const w=windows[r.id];
     const has=Object.prototype.hasOwnProperty.call(overrides,r.id);
@@ -2082,7 +2190,7 @@ async function renderRetention(){
     html+='<tr><td><strong>'+esc(r.name)+'</strong></td>';
     html+='<td>'+esc(retentionLabel(days))+'</td>';
     html+='<td>'+(has?'<span class="badge badge-yellow">channel</span>':'<span class="badge badge-muted">server</span>')+'</td>';
-    html+='<td'+(due?' style="color:var(--red)"':' style="color:var(--text-faint)"')+'>'+due.toLocaleString()+'</td>';
+    html+='<td'+(due?' style="color:var(--text-danger)"':' style="color:var(--text-muted)"')+'>'+due.toLocaleString()+'</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" onclick="openChannelRetention('+r.id+',\''+jsq(r.name)+'\')">'+(has?'Edit override':'Override')+'</button>';
     if(has)html+='<button class="btn btn-ghost" onclick="clearChannelRetention('+r.id+')">Use server policy</button>';
     html+='</div></td></tr>';
@@ -2121,20 +2229,20 @@ async function previewRetentionChange(change){
     const preview=await api('POST','/retention/preview',{proposed:change,revision:pending.revision});
     if(state.retentionProposal!==pending)return;
     pending.preview=preview;
-    let html='<div class="modal-header"><h3>Confirm retention change</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body">';
+    let html='<div class="modal-header"><h3>Confirm retention change</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body">';
     html+='<p><strong>'+esc(proposedRetentionLabel(change))+'</strong></p>';
-    html+='<p style="color:var(--yellow);margin-top:12px">Under the proposed policy, <strong>'+Number(preview.would_delete).toLocaleString()+'</strong> messages are currently eligible for permanent deletion across '+Number(preview.affected_channels).toLocaleString()+' channels.</p>';
-    html+='<p style="color:var(--red);margin-top:8px">Deletion cannot be undone. The policy continues to apply on future maintenance sweeps.</p>';
+    html+='<p style="color:var(--text-warning);margin-top:12px">Under the proposed policy, <strong>'+Number(preview.would_delete).toLocaleString()+'</strong> messages are currently eligible for permanent deletion across '+Number(preview.affected_channels).toLocaleString()+' channels.</p>';
+    html+='<p style="color:var(--text-danger);margin-top:8px">Deletion cannot be undone. The policy continues to apply on future maintenance sweeps.</p>';
     html+='<p style="margin-top:8px">Protected exclusions: '+Number(preview.protected_pinned).toLocaleString()+' pinned messages, '+Number(preview.protected_indefinite).toLocaleString()+' messages kept indefinitely, and '+Number(preview.protected_direct_messages).toLocaleString()+' direct messages. Counts are separate; pinned messages in indefinite channels are counted as indefinite.</p>';
-    html+='<p style="color:var(--text-faint);margin-top:8px">Observed at '+esc(preview.observed_at)+'. Counts can change as messages arrive, age or are pinned. This preview expires after 15 minutes.</p>';
+    html+='<p style="color:var(--text-muted);margin-top:8px">Observed at '+esc(preview.observed_at)+'. Counts can change as messages arrive, age or are pinned. This preview expires after 15 minutes.</p>';
     html+='<table class="tbl" style="margin-top:12px"><thead><tr><th>Channel</th><th>Proposed window</th><th>Would delete</th><th>Protected</th></tr></thead><tbody>';
     (preview.channels||[]).forEach(ch=>{html+='<tr><td>'+esc(ch.channel_name)+'</td><td>'+esc(retentionLabel(ch.days))+' ('+esc(ch.source)+')</td><td>'+Number(ch.would_delete).toLocaleString()+'</td><td>'+Number(ch.protected_pinned+ch.protected_indefinite).toLocaleString()+'</td></tr>'});
     html+='</tbody></table></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button id="applyRetentionPreview" class="btn btn-danger" onclick="applyRetention()">Apply window</button></div>';
-    document.getElementById('modalInner').innerHTML=html;
+    setModalHTML(html);
   }catch(e){
     if(state.retentionProposal!==pending)return;
     state.retentionProposal=null;
-    document.getElementById('modalInner').innerHTML='<div class="modal-header"><h3>Preview unavailable</h3></div><div class="modal-body" role="alert">'+esc(e.message)+'</div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal();renderContent()">Reload policy</button></div>';
+    setModalHTML('<div class="modal-header"><h3>Preview unavailable</h3></div><div class="modal-body" role="alert">'+esc(e.message)+'</div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal();renderContent()">Reload policy</button></div>');
   }
 }
 
@@ -2157,16 +2265,16 @@ async function applyRetention(){
   }catch(e){
     if(state.retentionProposal!==pending)return;
     state.retentionProposal=null;
-    document.getElementById('modalInner').innerHTML='<div class="modal-header"><h3>Retention change needs review</h3></div><div class="modal-body" role="alert">'+esc(e.message)+'</div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal();renderContent()">Reload policy</button></div>';
+    setModalHTML('<div class="modal-header"><h3>Retention change needs review</h3></div><div class="modal-body" role="alert">'+esc(e.message)+'</div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal();renderContent()">Reload policy</button></div>');
   }
 }
 
 function openChannelRetention(id,name){
   const row=(state.retentionPolicyChannels||[]).find(c=>c.channel_id===id);
   const current=row?row.days:0;
-  openModal('<div class="modal-header"><h3>Retention — #'+esc(name)+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
+  openModal('<div class="modal-header"><h3>Retention — #'+esc(name)+'</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div>'
     +'<div class="modal-body">'
-    +'<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">An override replaces the server-wide window for this channel, in either direction. <strong style="color:white">0 keeps this channel forever</strong>, even under a server window. <strong style="color:var(--red)">Messages the window removes are deleted permanently.</strong></p>'
+    +'<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">An override replaces the server-wide window for this channel, in either direction. <strong style="color:var(--text-normal)">0 keeps this channel forever</strong>, even under a server window. <strong style="color:var(--text-danger)">Messages the window removes are deleted permanently.</strong></p>'
     +'<div class="form-group"><label class="form-label" for="chRetDays">Keep messages for (days)</label><input class="form-input" id="chRetDays" type="number" min="0" max="3650" value="'+esc(current)+'"></div>'
     +'</div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="saveChannelRetention('+id+')">Preview override</button></div>');
@@ -2185,16 +2293,16 @@ async function clearChannelRetention(id){
 /* ═══ Backups ═══ */
 async function renderBackups(){
   let backups;
-  try{backups=await api('GET','/backups')}catch(e){return'<div class="page-title">Backups</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  try{backups=await api('GET','/backups')}catch(e){return'<div class="page-title">Backups</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   let html='<div class="page-title">Backups</div><div class="page-desc">Database backup and restore</div>';
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px"><div class="section-card"><div class="section-card-header"><h3>Manual Backup</h3></div><div class="section-card-body" style="text-align:center;padding:32px"><button class="btn btn-accent" style="font-size:15px;padding:12px 32px" onclick="createBackup()" '+(state.backupRunning?'disabled':'')+'>'+(state.backupRunning?'<div class="spinner"></div> Running...':I.download+' Create Backup Now')+'</button></div></div>';
-  html+='<div class="section-card"><div class="section-card-header"><h3>Schedule</h3></div><div class="section-card-body"><p style="color:var(--text-faint);font-size:13px">Configure backup schedule in Settings.</p><button class="btn btn-ghost" style="margin-top:8px" onclick="navigateTo(\'settings\')">Go to Settings</button></div></div></div>';
+  html+='<div class="section-card"><div class="section-card-header"><h3>Schedule</h3></div><div class="section-card-body"><p style="color:var(--text-muted);font-size:13px">Configure backup schedule in Settings.</p><button class="btn btn-ghost" style="margin-top:8px" onclick="navigateTo(\'settings\')">Go to Settings</button></div></div></div>';
   html+='<div class="section-card"><div class="section-card-header"><h3>Backup History</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Filename</th><th>Size</th><th>Date</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!backups||!backups.length)html+='<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:24px">No backups found</td></tr>';
+  if(!backups||!backups.length)html+='<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px">No backups found</td></tr>';
   else backups.forEach(b=>{
     html+='<tr><td><code style="font-family:var(--font-mono);font-size:12px">'+esc(b.name)+'</code></td>';
     html+='<td>'+fmtBytes(b.size)+'</td><td>'+(b.date?new Date(b.date).toLocaleString():'')+'</td>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" onclick="openRestoreModal(\''+jsq(b.name)+'\')">Restore</button><button class="act-btn danger" title="Delete" onclick="openDeleteBackupModal(\''+jsq(b.name)+'\')">'+I.trash+'</button></div></td></tr>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" onclick="openRestoreModal(\''+jsq(b.name)+'\')">Restore</button><button class="act-btn danger" title="Delete" aria-label="Delete" onclick="openDeleteBackupModal(\''+jsq(b.name)+'\')">'+I.trash+'</button></div></td></tr>';
   });
   html+='</tbody></table></div></div>';
   return html;
@@ -2206,7 +2314,7 @@ async function createBackup(){
 }
 
 function openRestoreModal(name){
-  openModal('<div class="modal-header"><h3>Restore Backup</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Overwrite the current database with <strong style="color:white">'+esc(name)+'</strong>? A pre-restore backup will be created. Server restart recommended after restore.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmRestore(\''+jsq(name)+'\')">Restore</button></div>');
+  openModal('<div class="modal-header"><h3>Restore Backup</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Overwrite the current database with <strong style="color:var(--text-normal)">'+esc(name)+'</strong>? A pre-restore backup will be created. Server restart recommended after restore.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmRestore(\''+jsq(name)+'\')">Restore</button></div>');
 }
 
 async function confirmRestore(name){
@@ -2217,7 +2325,7 @@ async function confirmRestore(name){
    action here. It also used to report success without looking at the response,
    so a failed delete said "Backup deleted" and left the file in place. */
 function openDeleteBackupModal(name){
-  openModal('<div class="modal-header"><h3>Delete Backup</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Permanently delete <strong style="color:white">'+esc(name)+'</strong>? This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmDeleteBackup(\''+jsq(name)+'\')">Delete</button></div>');
+  openModal('<div class="modal-header"><h3>Delete Backup</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Permanently delete <strong style="color:var(--text-normal)">'+esc(name)+'</strong>? This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmDeleteBackup(\''+jsq(name)+'\')">Delete</button></div>');
 }
 
 async function confirmDeleteBackup(name){
@@ -2232,29 +2340,29 @@ function tokenStatus(t){
 }
 async function renderTokens(){
   let tokens;
-  try{tokens=await api('GET','/tokens')}catch(e){return'<div class="page-title">API Tokens</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  try{tokens=await api('GET','/tokens')}catch(e){return'<div class="page-title">API Tokens</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   let html='<div class="page-title">API Tokens</div><div class="page-desc">Long-lived bearer tokens for bots, CI, and the introspection MCP tool. A token authenticates as its bound user. Owner only.</div>';
   html+='<div style="margin-bottom:16px"><button class="btn btn-accent" onclick="openCreateTokenModal()">'+I.plus+' Create Token</button></div>';
   html+='<div class="section-card"><div class="section-card-header"><h3>Tokens</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Label</th><th>User</th><th>Created</th><th>Last Used</th><th>Expires</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!tokens||!tokens.length)html+='<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:24px">No API tokens</td></tr>';
+  if(!tokens||!tokens.length)html+='<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">No API tokens</td></tr>';
   else tokens.forEach(t=>{
     const revoked=!!t.revoked_at;
     html+='<tr><td>'+esc(t.label||'—')+'</td><td>'+esc(t.username)+'</td>';
     html+='<td>'+(t.created_at?utcDate(t.created_at).toLocaleString():'')+'</td>';
-    html+='<td>'+(t.last_used?utcDate(t.last_used).toLocaleString():'<span style="color:var(--text-faint)">never</span>')+'</td>';
-    html+='<td>'+(t.expires_at?utcDate(t.expires_at).toLocaleString():'<span style="color:var(--text-faint)">never</span>')+'</td>';
+    html+='<td>'+(t.last_used?utcDate(t.last_used).toLocaleString():'<span style="color:var(--text-muted)">never</span>')+'</td>';
+    html+='<td>'+(t.expires_at?utcDate(t.expires_at).toLocaleString():'<span style="color:var(--text-muted)">never</span>')+'</td>';
     html+='<td>'+tokenStatus(t)+'</td>';
-    html+='<td><div class="act-group" style="justify-content:flex-end">'+(revoked?'':'<button class="act-btn danger" title="Revoke" onclick="confirmRevokeToken('+t.id+',\''+jsq(t.label)+'\')">'+I.trash+'</button>')+'</div></td></tr>';
+    html+='<td><div class="act-group" style="justify-content:flex-end">'+(revoked?'':'<button class="act-btn danger" title="Revoke" aria-label="Revoke" onclick="confirmRevokeToken('+t.id+',\''+jsq(t.label)+'\')">'+I.trash+'</button>')+'</div></td></tr>';
   });
   html+='</tbody></table></div></div>';
   return html;
 }
 
 function openCreateTokenModal(){
-  openModal('<div class="modal-header"><h3>Create API Token</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'+
+  openModal('<div class="modal-header"><h3>Create API Token</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div>'+
     '<div class="modal-body"><div class="form-group"><label class="form-label">Label</label><input id="tokLabel" class="form-input" placeholder="ci-bot" autofocus></div>'+
-    '<div class="form-group"><label class="form-label">User <span style="color:var(--text-faint)">(optional)</span></label><input id="tokUser" class="form-input" placeholder="owner (default)"></div>'+
-    '<div class="form-group"><label class="form-label">Expires in hours <span style="color:var(--text-faint)">(0 = never)</span></label><input id="tokExpires" class="form-input" type="number" min="0" value="0"></div></div>'+
+    '<div class="form-group"><label class="form-label">User <span style="color:var(--text-muted)">(optional)</span></label><input id="tokUser" class="form-input" placeholder="owner (default)"></div>'+
+    '<div class="form-group"><label class="form-label">Expires in hours <span style="color:var(--text-muted)">(0 = never)</span></label><input id="tokExpires" class="form-input" type="number" min="0" value="0"></div></div>'+
     '<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="createToken()">Create</button></div>');
 }
 
@@ -2271,8 +2379,8 @@ async function createToken(){
 
 // The raw token is shown exactly once here — it is never recoverable afterward.
 function showTokenOnceModal(d){
-  openModal('<div class="modal-header"><h3>Token Created</h3><button class="modal-close" onclick="closeModal();renderContent()">&times;</button></div>'+
-    '<div class="modal-body"><p style="color:var(--text-muted)">Store this token now — it is shown only once and cannot be recovered. Bound to <strong style="color:white">'+esc(d.user)+'</strong>.</p>'+
+  openModal('<div class="modal-header"><h3>Token Created</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal();renderContent()">&times;</button></div>'+
+    '<div class="modal-body"><p style="color:var(--text-muted)">Store this token now — it is shown only once and cannot be recovered. Bound to <strong style="color:var(--text-normal)">'+esc(d.user)+'</strong>.</p>'+
     '<div style="display:flex;gap:8px;margin-top:12px"><code style="flex:1;font-family:var(--font-mono);font-size:12px;background:var(--bg-active);padding:10px;border-radius:var(--radius-sm);word-break:break-all">'+esc(d.token)+'</code>'+
     '<button class="btn btn-ghost" onclick="copyToken(\''+jsq(d.token)+'\')">Copy</button></div></div>'+
     '<div class="modal-footer"><button class="btn btn-accent" onclick="closeModal();renderContent()">Done</button></div>');
@@ -2280,7 +2388,7 @@ function showTokenOnceModal(d){
 function copyToken(t){navigator.clipboard.writeText(t).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed — select the token and copy it manually','error'))}
 
 function confirmRevokeToken(id,label){
-  openModal('<div class="modal-header"><h3>Revoke Token</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Revoke <strong style="color:white">'+esc(label||('#'+id))+'</strong>? Any client using it will immediately lose access. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="revokeToken('+id+')">Revoke</button></div>');
+  openModal('<div class="modal-header"><h3>Revoke Token</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Revoke <strong style="color:var(--text-normal)">'+esc(label||('#'+id))+'</strong>? Any client using it will immediately lose access. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="revokeToken('+id+')">Revoke</button></div>');
 }
 async function revokeToken(id){
   try{await api('DELETE','/tokens/'+id);closeModal();showToast('Token revoked');renderContent()}catch(e){showToast(e.message,'error')}
@@ -2322,12 +2430,12 @@ async function loadEmojiThumbnails(){
 
 async function renderEmoji(){
   let list;
-  try{list=await emojiApi('GET','/')}catch(e){return'<div class="page-title">Emoji</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  try{list=await emojiApi('GET','/')}catch(e){return'<div class="page-title">Emoji</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   if(!Array.isArray(list))list=[];
 
   let html='<div class="page-title">Emoji</div><div class="page-desc">Server-wide custom emoji, usable as <span style="font-family:var(--font-mono)">:shortcode:</span> in messages and reactions</div>';
   html+='<div class="section-card"><div class="section-card-header"><h3>Upload</h3></div><div class="section-card-body">';
-  html+='<div style="color:var(--text-faint);font-size:13px;margin-bottom:10px">PNG, JPEG, GIF or WebP. Up to 512 KB and 128&times;128 pixels. Shortcodes are 2-32 characters of a-z, 0-9 or underscore.</div>';
+  html+='<div style="color:var(--text-muted);font-size:13px;margin-bottom:10px">PNG, JPEG, GIF or WebP. Up to 512 KB and 128&times;128 pixels. Shortcodes are 2-32 characters of a-z, 0-9 or underscore.</div>';
   html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
   html+='<input type="text" id="emojiShortcode" class="form-input" style="max-width:200px" placeholder="shortcode" maxlength="32">';
   html+='<input type="file" id="emojiFile" accept="image/png,image/jpeg,image/gif,image/webp" class="form-input" style="max-width:320px;padding:8px">';
@@ -2336,11 +2444,11 @@ async function renderEmoji(){
 
   html+='<div class="section-card"><div class="section-card-header"><h3>Installed ('+list.length+')</h3><button class="btn btn-ghost" onclick="renderContent()">'+I.refresh+' Refresh</button></div><div class="section-card-body no-pad">';
   html+='<table class="tbl"><thead><tr><th style="width:60px">Preview</th><th>Shortcode</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!list.length)html+='<tr><td colspan="3" style="text-align:center;color:var(--text-faint);padding:24px">No custom emoji yet</td></tr>';
+  if(!list.length)html+='<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:24px">No custom emoji yet</td></tr>';
   else list.forEach(function(e){
     html+='<tr><td><img alt="'+esc(e.shortcode)+'" data-emoji-url="'+esc(e.url)+'" style="width:32px;height:32px;object-fit:contain"></td>';
     html+='<td style="font-family:var(--font-mono)">:'+esc(e.shortcode)+':</td>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn danger" title="Delete" onclick="confirmDeleteEmoji('+e.id+',\''+jsq(e.shortcode)+'\')">'+I.trash+'</button></div></td></tr>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn danger" title="Delete" aria-label="Delete" onclick="confirmDeleteEmoji('+e.id+',\''+jsq(e.shortcode)+'\')">'+I.trash+'</button></div></td></tr>';
   });
   html+='</tbody></table></div></div>';
   setTimeout(loadEmojiThumbnails,0);
@@ -2366,7 +2474,7 @@ async function uploadEmoji(){
 }
 
 function confirmDeleteEmoji(id,shortcode){
-  openModal('<div class="modal-header"><h3>Delete Emoji</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Delete <strong style="color:white">:'+esc(shortcode)+':</strong>? Messages and reactions that use it will show the plain text instead. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="deleteEmoji('+id+')">Delete</button></div>');
+  openModal('<div class="modal-header"><h3>Delete Emoji</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Delete <strong style="color:var(--text-normal)">:'+esc(shortcode)+':</strong>? Messages and reactions that use it will show the plain text instead. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="deleteEmoji('+id+')">Delete</button></div>');
 }
 
 async function deleteEmoji(id){
@@ -2417,17 +2525,17 @@ async function renderPlugins(){
     rows=out.data||[];
     state.pluginRuntime=out.res.headers.get('X-Plugin-Runtime')||'unknown';
   }catch(e){
-    return'<div class="page-title">Plugins</div><p style="color:var(--red)">'+esc(e.message)+'</p><button class="btn btn-accent" onclick="renderContent()">Retry</button>';
+    return'<div class="page-title">Plugins</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p><button class="btn btn-accent" onclick="renderContent()">Retry</button>';
   }
 
   const disabled=state.pluginRuntime==='disabled';
   let html='<div class="page-title">Plugins</div><div class="page-desc">Install and manage server plugins</div>';
 
   if(disabled){
-    html+='<div class="section-card" style="border-color:var(--yellow)"><div class="section-card-body"><strong style="color:var(--yellow)">Plugin runtime is disabled on this server.</strong><div style="color:var(--text-faint);font-size:13px;margin-top:4px">Installed plugins are listed below but cannot be installed, enabled, or removed until the runtime is turned on in the server configuration.</div></div></div>';
+    html+='<div class="section-card" style="border-color:var(--yellow)"><div class="section-card-body"><strong style="color:var(--text-warning)">Plugin runtime is disabled on this server.</strong><div style="color:var(--text-muted);font-size:13px;margin-top:4px">Installed plugins are listed below but cannot be installed, enabled, or removed until the runtime is turned on in the server configuration.</div></div></div>';
   }else{
     html+='<div class="section-card"><div class="section-card-header"><h3>Install Plugin</h3></div><div class="section-card-body">';
-    html+='<div style="color:var(--text-faint);font-size:13px;margin-bottom:10px">Upload a plugin package (.zip, max 16 MB) containing a plugin.json manifest at its root.</div>';
+    html+='<div style="color:var(--text-muted);font-size:13px;margin-bottom:10px">Upload a plugin package (.zip, max 16 MB) containing a plugin.json manifest at its root.</div>';
     html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
     html+='<input type="file" id="pluginFile" accept=".zip,application/zip" class="form-input" style="max-width:320px;padding:8px" onchange="document.getElementById(\'pluginInstallBtn\').disabled=!this.files.length">';
     html+='<button class="btn btn-accent" id="pluginInstallBtn" disabled onclick="installPlugin()">'+I.upload+' Install</button>';
@@ -2438,7 +2546,7 @@ async function renderPlugins(){
   html+='<table class="tbl"><thead><tr><th>Plugin</th><th>Version</th><th>Status</th><th>Installed</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
   if(!rows.length){
     const empty=disabled?'No plugins installed — and the runtime is off':'No plugins installed yet';
-    html+='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">'+empty+'</td></tr>';
+    html+='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">'+empty+'</td></tr>';
   }else rows.forEach(row=>{
     const id=row.id!==undefined?row.id:row.ID;
     const name=row.name||row.Name||'';
@@ -2446,16 +2554,16 @@ async function renderPlugins(){
     const enabled=row.enabled!==undefined?row.enabled:row.Enabled;
     const installed=row.installed_at||row.InstalledAt||'';
     const summary=pluginManifestSummary(row);
-    html+='<tr><td><div><strong>'+esc(name)+'</strong>'+(summary?'<div style="font-size:12px;color:var(--text-faint);margin-top:2px">'+esc(summary)+'</div>':'')+'</div></td>';
+    html+='<tr><td><div><strong>'+esc(name)+'</strong>'+(summary?'<div style="font-size:12px;color:var(--text-muted);margin-top:2px">'+esc(summary)+'</div>':'')+'</div></td>';
     html+='<td style="font-family:var(--font-mono);font-size:12px">'+esc(version||'—')+'</td>';
     html+='<td>'+(enabled?'<span class="badge badge-green">Enabled</span>':'<span class="badge badge-muted">Disabled</span>')+'</td>';
-    html+='<td style="font-size:12px;color:var(--text-faint)">'+(installed?new Date(installed).toLocaleString():'')+'</td>';
+    html+='<td style="font-size:12px;color:var(--text-muted)">'+(installed?new Date(installed).toLocaleString():'')+'</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end">';
     if(disabled){
-      html+='<span style="font-size:12px;color:var(--text-faint)">runtime off</span>';
+      html+='<span style="font-size:12px;color:var(--text-muted)">runtime off</span>';
     }else{
       html+='<button class="btn btn-ghost" onclick="setPluginEnabled('+id+','+(enabled?'false':'true')+')">'+(enabled?'Disable':'Enable')+'</button>';
-      html+='<button class="act-btn danger" title="Uninstall" onclick="openUninstallPlugin('+id+',\''+jsq(name)+'\')">'+I.trash+'</button>';
+      html+='<button class="act-btn danger" title="Uninstall" aria-label="Uninstall" onclick="openUninstallPlugin('+id+',\''+jsq(name)+'\')">'+I.trash+'</button>';
     }
     html+='</div></td></tr>';
   });
@@ -2499,7 +2607,7 @@ async function setPluginEnabled(id,enable){
 }
 
 function openUninstallPlugin(id,name){
-  openModal('<div class="modal-header"><h3>Uninstall Plugin</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Remove <strong style="color:white">'+esc(name)+'</strong> and its files from the server? Any data it stored is discarded. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="uninstallPlugin('+id+')">Uninstall</button></div>');
+  openModal('<div class="modal-header"><h3>Uninstall Plugin</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Remove <strong style="color:var(--text-normal)">'+esc(name)+'</strong> and its files from the server? Any data it stored is discarded. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="uninstallPlugin('+id+')">Uninstall</button></div>');
 }
 
 async function uninstallPlugin(id){
@@ -2522,10 +2630,10 @@ async function renderUpdates(){
   try{info=await api('GET','/updates')}catch(e){checkError=e.message||'Update check failed'}
   let html='<div class="page-title">Updates</div><div class="page-desc">Server version management</div>';
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">';
-  html+='<div class="update-card"><div class="update-icon" style="background:rgba(35,165,90,.15);color:var(--green)">'+I.check+'</div><div class="update-info"><div class="update-ver">'+(info?esc(info.current):'unknown')+'</div><div class="update-notes">Current version</div></div></div>';
-  if(checkError)html+='<div class="update-card" style="border-color:var(--red)"><div class="update-icon" style="background:rgba(242,63,67,.15);color:var(--red)">'+I.ban+'</div><div class="update-info"><div class="update-ver">Check failed</div><div class="update-notes">'+esc(checkError)+'</div></div></div>';
+  html+='<div class="update-card"><div class="update-icon" style="background:rgba(92,195,137,.15);color:var(--text-positive)">'+I.check+'</div><div class="update-info"><div class="update-ver">'+(info?esc(info.current):'unknown')+'</div><div class="update-notes">Current version</div></div></div>';
+  if(checkError)html+='<div class="update-card" style="border-color:var(--red)"><div class="update-icon" style="background:rgba(255,143,146,.15);color:var(--text-danger)">'+I.ban+'</div><div class="update-info"><div class="update-ver">Check failed</div><div class="update-notes">'+esc(checkError)+'</div></div></div>';
   else if(info&&info.update_available)html+='<div class="update-card" style="border-color:var(--accent)"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">'+esc(info.latest)+' <span class="badge badge-accent">New</span></div><div class="update-notes">Available for download</div></div></div>';
-  else html+='<div class="update-card"><div class="update-icon" style="background:rgba(35,165,90,.15);color:var(--green)">'+I.check+'</div><div class="update-info"><div class="update-ver">Up to date</div><div class="update-notes">You\'re running the latest version</div></div></div>';
+  else html+='<div class="update-card"><div class="update-icon" style="background:rgba(92,195,137,.15);color:var(--text-positive)">'+I.check+'</div><div class="update-info"><div class="update-ver">Up to date</div><div class="update-notes">You\'re running the latest version</div></div></div>';
   html+='</div>';
   if(info&&info.update_available&&info.can_apply===false){
     /* Container deployments: the binary is image content, so in-place apply is
@@ -2543,7 +2651,7 @@ async function renderUpdates(){
 }
 
 async function applyUpdate(){
-  openModal('<div class="modal-header"><h3>Apply Update</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">This will restart the server. All connected users will be briefly disconnected. Continue?</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmApplyUpdate()">Update & Restart</button></div>');
+  openModal('<div class="modal-header"><h3>Apply Update</h3><button class="modal-close" aria-label="Close dialog" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">This will restart the server. All connected users will be briefly disconnected. Continue?</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmApplyUpdate()">Update & Restart</button></div>');
 }
 
 async function confirmApplyUpdate(){
