@@ -204,3 +204,13 @@ From `Client/tests/e2e/support/b9-accessibility.ts`:
 `Client/tests/e2e/b9-primitives.spec.ts` shows each one in use, including
 the negative controls that prove each check fails when its behaviour is
 removed.
+
+The OS 200 % zoom/reflow check is automated in
+`Client/tests/e2e/support/b9-zoom.ts` (`ZOOM_VIEWPORT`, `auditReflow`,
+`expectScreenReflows`): each screen is rendered at a 640×400 CSS viewport — the
+layout a 1280×800 window shows at 200 % page zoom — and asserted to have no
+horizontal page scroll, no text or control clipped without an intended scroll
+area, no control painted over, and every primary action reachable, with one
+screenshot per screen. `Client/tests/e2e/b9-zoom.spec.ts` runs it across the
+B9 lanes' screens; the sidebar's collapse below 800 px is B8's responsive
+navigation work, so that screen is deferred there.
