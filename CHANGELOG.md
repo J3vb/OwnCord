@@ -189,6 +189,10 @@ server's internals were reorganised behind service boundaries.
   `backup.dir` (or `upload.storage_dir`) is read-only unless the unit allows
   it, so following the deployment guide exactly previously produced failing
   backups. Add a `ReadWritePaths=` line for each such path.
+- **The connectivity report no longer tells you to forward `7880/TCP`.**
+  Clients tunnel LiveKit signalling through `:8443/livekit`, so voice needs
+  only `7881/TCP` and `50000-60000/UDP`; forwarding 7880 just exposed
+  LiveKit's API.
 - **ARM64 server builds.** Releases now carry four server assets instead of
   two: `chatserver.exe` and `chatserver-windows-arm64.exe` for Windows,
   `chatserver-linux-amd64.tar.gz` and `chatserver-linux-arm64.tar.gz` for
