@@ -312,7 +312,7 @@
   color: var(--yellow);
 }
 .srv-latency.bad {
-  color: var(--red);
+  color: var(--text-danger);
 }
 .srv-compat-badge.client-older,
 .srv-compat-badge.server-older {

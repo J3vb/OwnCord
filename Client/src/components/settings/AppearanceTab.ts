@@ -162,7 +162,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   }
 
   const accentHeader = createElement("h3", {}, t("appearance.accentColor"));
-  const swatchesRow = createElement("div", { class: "accent-swatches", role: "radiogroup" });
+  const swatchesRow = createElement("div", { class: "accent-swatches" });
 
   // Declare hexInput early so swatch closures can reference it after construction
   const hexInputRow = createElement("div", { class: "accent-hex-row" });

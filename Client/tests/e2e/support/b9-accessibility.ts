@@ -167,32 +167,20 @@ export async function findUnnamedControls(root: Locator): Promise<string[]> {
 }
 
 /**
- * Tab from a start point until `target` is focused, or fail. An element can be
- * visible and named yet still be unreachable by keyboard (an href-less <a>, a
- * click-only <div>), which `findUnnamedControls` cannot see because its
- * FOCUSABLE selector only matches elements that are already focusable. Tab is
- * the only check that sees what a keyboard user actually reaches (A11Y-08).
- *
- * `from` sets the starting focus so a target deep in a long page is found
- * without a page-wide Tab walk; without one, Tab starts from the top of the
- * document. Returns false when the target is not focused within `maxTabs`
- * presses (the default walks well past the shell's tab stops).
+ * Tab from the top of the document until `target` is focused, or fail. An
+ * element can be visible and named yet still be unreachable by keyboard (an
+ * href-less <a>, a click-only <div>), which `findUnnamedControls` cannot see
+ * because its FOCUSABLE selector only matches elements that are already
+ * focusable. Tab is the only check that sees what a keyboard user actually
+ * reaches (A11Y-08). Returns false when the target is not focused within 150
+ * presses, well past the shell's tab stops.
  */
-export async function keyboardReachable(
-  page: Page,
-  target: Locator,
-  options: { readonly from?: Locator; readonly maxTabs?: number } = {},
-): Promise<boolean> {
-  const maxTabs = options.maxTabs ?? 150;
-  if (options.from !== undefined) {
-    await options.from.focus();
-  } else {
-    // Drop focus to the document so the first Tab starts at the top.
-    await page.evaluate(() => {
-      (document.activeElement as HTMLElement | null)?.blur();
-    });
-  }
-  for (let i = 0; i < maxTabs; i++) {
+export async function keyboardReachable(page: Page, target: Locator): Promise<boolean> {
+  // Drop focus to the document so the first Tab starts at the top.
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+  });
+  for (let i = 0; i < 150; i++) {
     await page.keyboard.press("Tab");
     if (await target.evaluate((el) => el === document.activeElement)) return true;
   }
