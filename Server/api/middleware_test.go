@@ -901,7 +901,7 @@ func TestMaxBodySize_PassesThrough(t *testing.T) {
 // ─── AdminIPRestrict tests ──────────────────────────────────────────────────
 
 func TestAdminIPRestrict_AllowedCIDR(t *testing.T) {
-	h := api.AdminIPRestrict([]string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
@@ -914,7 +914,7 @@ func TestAdminIPRestrict_AllowedCIDR(t *testing.T) {
 }
 
 func TestAdminIPRestrict_BlockedCIDR(t *testing.T) {
-	h := api.AdminIPRestrict([]string{"10.0.0.0/8"}, nil)(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"10.0.0.0/8"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.168.1.1:9999" // not in 10.0.0.0/8
@@ -926,8 +926,30 @@ func TestAdminIPRestrict_BlockedCIDR(t *testing.T) {
 	}
 }
 
+// TestAdminIPRestrict_BlockedNamesTheSetting pins OP-05: the refusal must name
+// server.admin_allowed_cidrs so a self-hoster on a VPS can fix it without
+// reading the source, and must not disclose the configured CIDRs or the
+// address the server saw. Without the name the operator sees a bare "access
+// denied" and has no way to tell a firewall from this setting.
+func TestAdminIPRestrict_BlockedNamesTheSetting(t *testing.T) {
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"10.0.0.0/8"}, nil)(http.HandlerFunc(ok))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.168.1.1:9999"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "server.admin_allowed_cidrs") {
+		t.Errorf("403 body does not name server.admin_allowed_cidrs: %s", body)
+	}
+	if strings.Contains(body, "192.168.1.1") || strings.Contains(body, "10.0.0.0/8") {
+		t.Errorf("403 body leaks the client address or the configured CIDRs: %s", body)
+	}
+}
+
 func TestAdminIPRestrict_EmptyAllowsAll(t *testing.T) {
-	h := api.AdminIPRestrict(nil, nil)(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", nil, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "203.0.113.1:9999"
@@ -943,7 +965,7 @@ func TestAdminIPRestrict_InvalidCIDR(t *testing.T) {
 	// Invalid CIDR should fail closed: the entry is skipped at construction,
 	// leaving a non-empty allowed list with zero parsed networks — nothing
 	// matches, so access is denied.
-	h := api.AdminIPRestrict([]string{"not-a-cidr"}, nil)(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"not-a-cidr"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
@@ -956,7 +978,7 @@ func TestAdminIPRestrict_InvalidCIDR(t *testing.T) {
 }
 
 func TestAdminIPRestrict_MultipleCIDRs(t *testing.T) {
-	h := api.AdminIPRestrict([]string{"10.0.0.0/8", "192.168.0.0/16"}, nil)(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"10.0.0.0/8", "192.168.0.0/16"}, nil)(http.HandlerFunc(ok))
 
 	// First CIDR matches.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -993,7 +1015,7 @@ func TestAdminIPRestrict_MultipleCIDRs(t *testing.T) {
 // X-Forwarded-For and checked against admin CIDRs.
 func TestAdminIPRestrict_TrustedProxy_UsesXForwardedFor(t *testing.T) {
 	// Admin allowed: only 203.0.113.0/24. Trusted proxy: 127.0.0.1.
-	h := api.AdminIPRestrict(
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs",
 		[]string{"203.0.113.0/24"},
 		[]string{"127.0.0.0/8"},
 	)(http.HandlerFunc(ok))
@@ -1022,7 +1044,7 @@ func TestAdminIPRestrict_TrustedProxy_UsesXForwardedFor(t *testing.T) {
 // TestAdminIPRestrict_TrustedProxy_UsesXRealIP verifies X-Real-IP is preferred
 // over X-Forwarded-For when both are present from a trusted proxy.
 func TestAdminIPRestrict_TrustedProxy_UsesXRealIP(t *testing.T) {
-	h := api.AdminIPRestrict(
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs",
 		[]string{"203.0.113.0/24"},
 		[]string{"127.0.0.0/8"},
 	)(http.HandlerFunc(ok))
@@ -1040,7 +1062,7 @@ func TestAdminIPRestrict_TrustedProxy_UsesXRealIP(t *testing.T) {
 // TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders verifies that proxy headers
 // are ignored when the connecting IP is NOT a trusted proxy.
 func TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders(t *testing.T) {
-	h := api.AdminIPRestrict(
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs",
 		[]string{"203.0.113.0/24"},
 		[]string{"10.0.0.0/8"}, // only 10.x is trusted
 	)(http.HandlerFunc(ok))
@@ -1060,7 +1082,7 @@ func TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders(t *testing.T) {
 // without trusted proxies, a proxy on localhost makes everything appear local.
 func TestAdminIPRestrict_ProxyCollapse_WithoutTrusted(t *testing.T) {
 	// Admin CIDR: private networks. No trusted proxies.
-	h := api.AdminIPRestrict(
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs",
 		[]string{"127.0.0.0/8", "10.0.0.0/8"},
 		nil, // no trusted proxies
 	)(http.HandlerFunc(ok))

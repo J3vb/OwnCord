@@ -16,7 +16,7 @@ import (
 // buildMetricsRouter creates a chi router with the metrics endpoint behind AdminIPRestrict.
 func buildMetricsRouter(allowedCIDRs []string) http.Handler {
 	r := chi.NewRouter()
-	r.With(api.AdminIPRestrict(allowedCIDRs, nil)).
+	r.With(api.AdminIPRestrict("server.metrics_allowed_cidrs", allowedCIDRs, nil)).
 		Get("/api/v1/metrics", api.HandleMetricsForTest(api.MetricsSources{
 			ConnectedUsers: func() int { return 5 },
 			VoiceSessions:  func() int { return 2 },

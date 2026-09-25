@@ -414,7 +414,9 @@ The authoritative example is the file the server writes itself: on first start
 `Load` writes `defaultYAML` (`Server/config/config.go`) to `config.yaml` beside
 the binary, comments and all. That generated copy is the one kept in step with
 the key reference above — the hand-maintained example that used to sit here had
-already drifted from it, so it is gone.
+already drifted from it, so it is gone. `Server/config.yaml.example`, which the
+Docker quick-start copies, is a byte-for-byte copy of that template, pinned by
+`TestConfigExampleMatchesGeneratedTemplate` (`Server/config/parity_test.go`).
 
 ## See Also
 

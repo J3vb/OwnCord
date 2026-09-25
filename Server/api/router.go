@@ -250,7 +250,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
 		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg})
 	r.Group(func(r chi.Router) {
-		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
+		r.Use(AdminIPRestrict("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)
 
 		// Phase C Step 9 — plugin admin REST surface. The IP gate above is
@@ -511,12 +511,12 @@ func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimit
 	// panel's perimeter to the SFU's network. Falls back to
 	// admin_allowed_cidrs when unset.
 	webhookCIDRs := cfg.Server.LiveKitWebhookCIDRs()
-	r.With(AdminIPRestrict(webhookCIDRs, cfg.Server.TrustedProxies)).
+	r.With(AdminIPRestrict("server.livekit_webhook_allowed_cidrs", webhookCIDRs, cfg.Server.TrustedProxies)).
 		Post("/api/v1/livekit/webhook",
 			hub.NewLiveKitWebhookHandler(cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
 
 	// LiveKit health check — same perimeter as the webhook.
-	r.With(AdminIPRestrict(webhookCIDRs, cfg.Server.TrustedProxies)).
+	r.With(AdminIPRestrict("server.livekit_webhook_allowed_cidrs", webhookCIDRs, cfg.Server.TrustedProxies)).
 		Get("/api/v1/livekit/health", handleLiveKitHealth(hub))
 
 	// Reverse proxy LiveKit signaling through OwnCord's HTTPS server.
@@ -539,7 +539,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 	// admin_allowed_cidrs) so a central scraper can be admitted without
 	// widening /admin. The shape is documented in docs/deployment.md — keep
 	// the two in sync.
-	r.With(AdminIPRestrict(cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
+	r.With(AdminIPRestrict("server.metrics_allowed_cidrs", cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
 		Get("/api/v1/metrics", handleMetrics(MetricsSources{
 			ConnectedUsers: hub.ClientCount,
 			VoiceSessions:  hub.VoiceSessionCount,
@@ -563,7 +563,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 	// build, exporter == "prometheus"). Returns 404 in the default no-op build
 	// because telemetry.PrometheusHandler() returns nil.
 	if promH := telemetry.PrometheusHandler(); promH != nil {
-		r.With(AdminIPRestrict(cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
+		r.With(AdminIPRestrict("server.metrics_allowed_cidrs", cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
 			Mount("/metrics", promH)
 	}
 }

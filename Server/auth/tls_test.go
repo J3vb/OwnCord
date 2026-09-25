@@ -196,6 +196,62 @@ func TestLoadOrGenerateModeManualValidFiles(t *testing.T) {
 	}
 }
 
+// TestLeafFingerprint pins OP-01's one cross-language contract: the server
+// must print the leaf SHA-256 in exactly the lower-case colon-hex form the
+// desktop client shows and pins (Client/src-tauri/src/tofu.rs:23-31). A
+// mismatch — upper case, no colons, a different byte order — would make the
+// compare-out-of-band step fail for every user, which reads as an
+// interception attempt.
+func TestLeafFingerprint(t *testing.T) {
+	cert := tls.Certificate{Certificate: [][]byte{[]byte("abc")}}
+
+	// Known SHA-256("abc"), colon-hex, lower case — the exact string the
+	// client-side pin comparison depends on. Pinned as a literal rather than
+	// recomputed in the test, so a change to the hash, the case or the
+	// separators fails rather than tracking the implementation.
+	want := "ba:78:16:bf:8f:01:cf:ea:41:41:40:de:5d:ae:22:23:" +
+		"b0:03:61:a3:96:17:7a:9c:b4:10:ff:61:f2:00:15:ad"
+	got := auth.LeafFingerprint(cert)
+	if got != want {
+		t.Errorf("LeafFingerprint = %q, want %q", got, want)
+	}
+
+	if got := auth.LeafFingerprint(tls.Certificate{}); got != "" {
+		t.Errorf("LeafFingerprint of a cert with no leaf = %q, want empty", got)
+	}
+}
+
+// TestLoadOrGenerate_PublishesFingerprint pins that the modes with a
+// statically loaded certificate carry the fingerprint into TLSResult, and
+// that TLS off and ACME do not claim one they cannot know at start-up.
+func TestLoadOrGenerate_PublishesFingerprint(t *testing.T) {
+	tmpDir := t.TempDir()
+	certFile := filepath.Join(tmpDir, "cert.pem")
+	keyFile := filepath.Join(tmpDir, "key.pem")
+
+	for _, mode := range []string{"self_signed", "manual"} {
+		cfg := config.TLSConfig{Mode: mode, CertFile: certFile, KeyFile: keyFile}
+		result, err := auth.LoadOrGenerate(cfg)
+		if err != nil {
+			t.Fatalf("LoadOrGenerate(mode=%s): %v", mode, err)
+		}
+		if want := auth.LeafFingerprint(result.TLSConfig.Certificates[0]); result.Fingerprint != want {
+			t.Errorf("mode=%s Fingerprint = %q, want %q", mode, result.Fingerprint, want)
+		}
+		if result.Fingerprint == "" {
+			t.Errorf("mode=%s Fingerprint is empty", mode)
+		}
+	}
+
+	off, err := auth.LoadOrGenerate(config.TLSConfig{Mode: "off"})
+	if err != nil {
+		t.Fatalf("LoadOrGenerate(mode=off): %v", err)
+	}
+	if off.Fingerprint != "" {
+		t.Errorf("mode=off Fingerprint = %q, want empty", off.Fingerprint)
+	}
+}
+
 func TestLoadOrGenerateUnknownMode(t *testing.T) {
 	cfg := config.TLSConfig{Mode: "unknown_mode"}
 

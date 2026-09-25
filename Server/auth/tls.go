@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -31,6 +32,26 @@ import (
 type TLSResult struct {
 	TLSConfig   *tls.Config
 	HTTPHandler http.Handler // non-nil only for ACME mode
+	// Fingerprint is the SHA-256 of the served leaf certificate in the
+	// lower-case colon-hex form the desktop client shows and pins
+	// (Client/src-tauri/src/tofu.rs). It is empty for TLS off and for ACME
+	// before the first handshake, where the leaf is not known at start-up.
+	Fingerprint string
+}
+
+// LeafFingerprint formats cert's leaf DER as lower-case colon-hex
+// ("aa:bb:cc:..."), byte-for-byte the pin format the desktop client uses.
+// Returns "" when cert carries no leaf.
+func LeafFingerprint(cert tls.Certificate) string {
+	if len(cert.Certificate) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(cert.Certificate[0])
+	parts := make([]string, len(sum))
+	for i, b := range sum {
+		parts[i] = fmt.Sprintf("%02x", b)
+	}
+	return strings.Join(parts, ":")
 }
 
 // GenerateSelfSigned generates an ECDSA P-256 self-signed TLS certificate
@@ -102,14 +123,14 @@ func LoadOrGenerate(cfg config.TLSConfig) (*TLSResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &TLSResult{TLSConfig: tlsCfg}, nil
+		return &TLSResult{TLSConfig: tlsCfg, Fingerprint: certConfigFingerprint(tlsCfg)}, nil
 
 	case "manual":
 		tlsCfg, err := loadCertPair(cfg.CertFile, cfg.KeyFile)
 		if err != nil {
 			return nil, err
 		}
-		return &TLSResult{TLSConfig: tlsCfg}, nil
+		return &TLSResult{TLSConfig: tlsCfg, Fingerprint: certConfigFingerprint(tlsCfg)}, nil
 
 	case "acme":
 		return loadACME(cfg)
@@ -145,6 +166,16 @@ func loadCertPair(certFile, keyFile string) (*tls.Config, error) {
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS12,
 	}, nil
+}
+
+// certConfigFingerprint is the leaf fingerprint of a config that has a
+// statically loaded certificate, or "" when it has none (ACME's cert is
+// fetched on the first handshake, so it cannot be printed at start-up).
+func certConfigFingerprint(cfg *tls.Config) string {
+	if cfg == nil || len(cfg.Certificates) == 0 {
+		return ""
+	}
+	return LeafFingerprint(cfg.Certificates[0])
 }
 
 // writePEM encodes data as a PEM block and writes it to path (mode 0600).

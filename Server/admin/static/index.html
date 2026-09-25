@@ -236,6 +236,10 @@
     <div class="code-copy"><code id="inviteCode"></code><button class="btn btn-ghost" onclick="copyInvite()">Copy</button></div>
     <p style="color:var(--yellow);font-size:13px;margin:16px 0">Save this code! Share it with people you want to invite.</p>
     <div id="setupWarnings"></div>
+    <div id="setupFingerprint" style="display:none">
+      <p style="font-size:13px;color:var(--text-muted);margin:16px 0 8px">Your certificate fingerprint. Users compare it against the prompt their client shows before they accept the connection — publish it out of band. A mismatch is the one warning that means an interception attempt.</p>
+      <div class="code-copy"><code id="certFingerprint"></code></div>
+    </div>
     <div id="setupRestart" style="display:none">
       <p style="color:var(--text-muted);font-size:14px;margin-bottom:8px"><span class="spinner" style="display:inline-block;width:13px;height:13px;border:2px solid var(--border-strong);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;vertical-align:-2px;margin-right:6px"></span>Applying your settings — the server is restarting…</p>
       <p style="font-size:14px;margin-bottom:8px">When it's back, open: <a id="restartLink" href="#" style="color:var(--text-link);word-break:break-all"></a></p>
@@ -662,6 +666,8 @@ async function wizFinish(){
     document.getElementById('inviteCode').textContent=resp.invite_code;
     const warn=document.getElementById('setupWarnings');warn.innerHTML='';
     (resp.warnings||[]).forEach(wm=>{const div=document.createElement('div');div.className='wiz-callout';div.style.marginBottom='12px';div.textContent=wm;warn.appendChild(div)});
+    const fp=document.getElementById('setupFingerprint');const fpc=document.getElementById('certFingerprint');
+    if(resp.certificate_fingerprint&&fp&&fpc){fpc.textContent=resp.certificate_fingerprint;fp.style.display='block'}
     showOverlay('setupSuccessOverlay');
     if(resp.restart_required&&resp.restart_url)beginRestartWait(resp.restart_url);
   }catch(e){
@@ -952,6 +958,12 @@ async function renderDashboard(){
   html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Channels</span><div class="stat-card-icon" style="background:rgba(240,178,50,.15);color:var(--yellow)">'+I.channels+'</div></div><div class="stat-card-value">'+(s.channel_count||0)+'</div><div class="stat-card-sub">active</div></div>';
   html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Database</span><div class="stat-card-icon" style="background:rgba(88,101,242,.15);color:var(--accent)">'+I.backup+'</div></div><div class="stat-card-value">'+fmtBytes(s.db_size_bytes||0)+'</div><div class="stat-card-sub">SQLite</div></div>';
   html+='</div>';
+  // The certificate users compare out of band before accepting the client's
+  // trust prompt (BPR-051). Shown only when the server serves a statically
+  // loaded certificate (not with TLS off or ACME before its first handshake).
+  if(s.certificate_fingerprint){
+    html+='<div class="section-card"><div class="section-card-header"><h3>Certificate Fingerprint</h3></div><div class="section-card-body"><p style="font-size:13px;color:var(--text-muted);margin:0 0 8px">Users compare this against the prompt their client shows before they accept the connection. Publish it out of band — another platform, a call. A mismatch is the one warning that means an interception attempt.</p><code style="display:block;word-break:break-all;font-size:13px">'+esc(s.certificate_fingerprint)+'</code></div></div>';
+  }
   // Recent audit — VIEW_AUDIT_LOG only.
   if(can(PERM.VIEW_AUDIT_LOG))try{
     const entries=await api('GET','/audit-log?limit=5&offset=0');

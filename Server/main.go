@@ -18,7 +18,48 @@ import (
 // release.yml and the Dockerfile name; app.Deps carries it into the process.
 var version = "dev"
 
+// usageText is what `--help` prints. It lists the subcommands main dispatches
+// before starting the server, so an operator can find them without reading the
+// source.
+const usageText = `OwnCord chat server
+
+Usage:
+  chatserver                 Start the server (reads config.yaml in the
+                             working directory, creating it with defaults if
+                             absent).
+  chatserver --version       Print the build version and exit.
+  chatserver --help          Print this help and exit.
+  chatserver healthcheck     Probe the running server's /health and exit 0/1.
+  chatserver token <cmd>     Mint, list or revoke API tokens (run
+                             "chatserver token" for its own usage).
+`
+
+// infoOutput returns the text `args[0]` asks for and true when it is an
+// informational flag, or "" and false otherwise. Kept out of main so the
+// dispatch is testable without a subprocess, and so main()'s only job is to
+// print it and return before any server or logging setup.
+func infoOutput(args []string) (string, bool) {
+	if len(args) == 0 {
+		return "", false
+	}
+	switch args[0] {
+	case "--version":
+		return version + "\n", true
+	case "--help":
+		return usageText, true
+	}
+	return "", false
+}
+
 func main() {
+	// `--version`/`--help` print and exit before any server or logging setup.
+	// Without this they were treated as no argument at all: the server started and config.Load wrote a config.yaml
+	// into the cwd, so asking a build what it was had a side effect.
+	if out, ok := infoOutput(os.Args[1:]); ok {
+		fmt.Print(out)
+		return
+	}
+
 	// `server healthcheck` probes the running instance's /health and exits
 	// 0/1. It exists for container healthchecks: the distroless image has no
 	// shell or curl, so the binary is its own probe.
