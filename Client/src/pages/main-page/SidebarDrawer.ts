@@ -45,14 +45,14 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   let open = false;
   let restoreFocusRef: (() => void) | null = null;
 
-  // The backdrop sits in the sidebar's parent so it shares the drawer's
-  // stacking context, but it is `position: fixed`, so the parent's own layout
-  // is irrelevant.
+  // The backdrop sits just before the sidebar so it shares the drawer's
+  // stacking layer and paints under it, but it is `position: fixed`, so the
+  // parent's own layout is irrelevant.
   const backdrop = createElement("div", {
     class: "sidebar-drawer-backdrop",
     "data-testid": "sidebar-drawer-backdrop",
   });
-  (sidebar.parentElement ?? document.body).appendChild(backdrop);
+  sidebar.before(backdrop);
 
   /** True while the media query collapses the sidebar (window <= 800px). */
   function isNarrow(): boolean {
@@ -114,14 +114,10 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
     closeDrawer("dismiss");
   });
 
-  // Any pointer press outside the drawer closes it. A press on the toggle is
-  // ignored so its own click handler owns the toggle semantics.
-  owner.onEvent(document, "pointerdown", (e: PointerEvent) => {
-    if (!open) return;
-    const target = e.target;
-    if (target instanceof Node && (sidebar.contains(target) || toggle.contains(target))) return;
-    closeDrawer("dismiss");
-  });
+  // A press outside the drawer lands on the backdrop, which covers the app. A
+  // dialog or menu opened from the drawer paints above both, so a press inside
+  // it neither closes the drawer nor pulls focus back to the toggle.
+  owner.onEvent(backdrop, "pointerdown", () => closeDrawer("dismiss"));
 
   // A destination chosen: every sidebar entry ends in one of these stores, so
   // this fires for a channel, a DM, the requests inbox, the Moderation Center

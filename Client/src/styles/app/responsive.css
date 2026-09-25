@@ -14,7 +14,7 @@
   display: none;
   position: fixed;
   inset: 0;
-  z-index: 399;
+  z-index: 100;
   background: var(--scrim);
 }
 .ch-sidebar-toggle {
@@ -22,7 +22,6 @@
 }
 
 @media (max-width: 800px) {
-  .channel-sidebar,
   .unified-sidebar {
     width: 0;
     overflow: hidden;
@@ -48,7 +47,10 @@
   }
 
   /* The drawer: the same sidebar element, taken out of flow and shown over the
-     chat area. The backdrop is fixed to the viewport and covers the app. */
+     chat area. The backdrop is fixed to the viewport and covers the app. Both
+     sit on the modal layer (100): the backdrop precedes the drawer, so the
+     drawer paints over it, and the dialogs and menus the drawer opens are
+     mounted on <body> after the app, so they paint over the drawer. */
   .sidebar-drawer-backdrop.open {
     display: block;
   }
@@ -59,7 +61,7 @@
     left: 0;
     width: min(280px, 85vw);
     overflow: hidden;
-    z-index: 400;
+    z-index: 100;
     box-shadow: var(--shadow-lg);
   }
 }

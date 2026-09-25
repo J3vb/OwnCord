@@ -145,6 +145,24 @@ export async function auditReflow(root: Locator): Promise<ReflowAudit> {
         }
       }
 
+      // Whether (x, y) lies outside the visible port of a scroll area the
+      // element sits in: it is scrolled away there, reachable by scrolling,
+      // and whatever paints at that point is not covering it.
+      const isScrolledAway = (el: Element, x: number, y: number): boolean => {
+        for (
+          let p = el.parentElement;
+          p !== null && p !== node.parentElement;
+          p = p.parentElement
+        ) {
+          const cs = getComputedStyle(p);
+          const scrolls = [cs.overflowX, cs.overflowY].some((o) => o === "auto" || o === "scroll");
+          if (!scrolls) continue;
+          const q = p.getBoundingClientRect();
+          if (x < q.left || x >= q.right || y < q.top || y >= q.bottom) return true;
+        }
+        return false;
+      };
+
       // A control is covered when the element painted at its centre is a
       // different element still inside this screen root. Only hit-testable
       // controls are considered: a hidden hover-reveal bar is keyboard-reachable
@@ -156,6 +174,7 @@ export async function auditReflow(root: Locator): Promise<ReflowAudit> {
         const x = r.left + r.width / 2;
         const y = r.top + r.height / 2;
         if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) continue;
+        if (isScrolledAway(el, x, y)) continue;
         const top = document.elementFromPoint(x, y);
         if (top === null || top === el || el.contains(top)) continue;
         if (!node.contains(top)) continue;

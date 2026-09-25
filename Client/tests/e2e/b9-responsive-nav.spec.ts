@@ -10,9 +10,12 @@
  * button opens the sidebar as a drawer and that each destination is reachable
  * from it: keyboard-only for Settings, the Moderation Center, a DM and the
  * requests inbox, plus one pointer path for opening and outside-click closing.
+ * It also pins that the open drawer paints its channel and conversation lists
+ * (not just focusable rows) and that a dialog opened from it paints above it.
  *
- * The zoom lane's own spec (b9-zoom.spec.ts) carries the deferred sidebar
- * screen; this is the behavioural counterpart, not a copy of it.
+ * The zoom lane's own spec (b9-zoom.spec.ts) audits the reflow of the screens
+ * reached through the drawer; this is the behavioural counterpart, not a copy
+ * of it.
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
@@ -153,6 +156,44 @@ test.describe("B9 narrow-width sidebar drawer", () => {
     await activate(page, page.locator("[data-testid='dm-requests-entry']"));
     await expect(page.locator("[data-testid='requests-inbox']")).toBeVisible();
     await expect(sidebar(page)).not.toHaveClass(/drawer-open/);
+  });
+
+  test("the open drawer shows the channel list and, in DM mode, the conversations", async ({
+    page,
+  }) => {
+    await toggle(page).click();
+    await expect(sidebar(page).locator(".channel-list .channel-item").first()).toBeVisible();
+    await expect(sidebar(page).locator(".channel-list .channel-item").first()).toBeInViewport();
+
+    await sidebar(page).locator("[data-testid='dm-entry']").first().click();
+    await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("otheruser");
+
+    await toggle(page).click();
+    const convo = sidebar(page).locator(".dm-conversation-list .dm-item").first();
+    await expect(convo).toBeVisible();
+    await expect(convo).toBeInViewport();
+  });
+
+  test("a dialog opened from the drawer paints above it and a press in it keeps the drawer", async ({
+    page,
+  }) => {
+    await toggle(page).click();
+    await sidebar(page).locator(".sidebar-dm-section .category-add-btn").click();
+    const picker = page.locator(".dm-member-picker-modal");
+    await expect(picker).toBeVisible();
+
+    // The topmost element at the dialog's centre belongs to the dialog.
+    const box = (await picker.boundingBox())!;
+    const onTop = await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.closest(".dm-member-picker-modal") !== null,
+      { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+    );
+    expect(onTop).toBe(true);
+
+    await picker.getByRole("button", { name: "Cancel" }).click();
+    await expect(picker).toBeHidden();
+    await expect(toggle(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(sidebar(page)).toHaveClass(/drawer-open/);
   });
 
   test("a pointer opens the drawer and an outside click closes it", async ({ page }) => {
