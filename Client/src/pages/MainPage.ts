@@ -266,12 +266,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  status/name live (see toggleDmProfile) -- null while the panel is
    *  closed. Always cleared alongside dmProfileSidebar itself. */
   let dmProfileUnsub: (() => void) | null = null;
-  /** Bumped by every open and every close. The lazily-loaded panel mounts only
-   *  when its import resolves with the epoch it started at, so a click during
-   *  the import (or a teardown) cannot mount a panel after a close. The panel
-   *  opens rarely (a DM header click), so its code stays out of the eager
-   *  bundle. */
-  let dmProfileEpoch = 0;
+  /** The in-flight load of the lazily-imported panel -- non-null from an open
+   *  click until the panel mounts. The panel opens rarely (a DM header click),
+   *  so its code stays out of the eager bundle. A pending load counts as open,
+   *  and closeDmProfile clears it, so the import mounts only if it is still
+   *  the current load when it resolves. */
+  let dmProfileLoad: object | null = null;
 
   // B9-4: the content view (Message Requests, Moderation) shown in place of
   // the chat column. Created in mount, once the chat column exists.
@@ -327,14 +327,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  The panel's code is loaded on first open (it is opened only by a DM
    *  header click, so it stays out of the eager MainPage chunk). The slot check
    *  and the DM-mode check run synchronously, and the panel mounts once the
-   *  import resolves; a click during that fetch is ignored rather than opening
-   *  a second panel.
+   *  import resolves. A panel still loading counts as open, so the last click
+   *  wins as it did when the panel mounted synchronously: a second click during
+   *  the fetch closes it (the import is then dropped) and a third opens it
+   *  again, and only one panel is ever mounted.
    */
   function toggleDmProfile(): void {
     if (dmProfileSlot === null) return;
 
-    // If already open, close it
-    if (dmProfileSidebar !== null) {
+    // If already open (or loading), close it
+    if (dmProfileSidebar !== null || dmProfileLoad !== null) {
       closeDmProfile();
       return;
     }
@@ -347,11 +349,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const profileUser = buildDmProfileUser(channelId);
     if (profileUser === null) return;
 
-    const epoch = ++dmProfileEpoch;
+    const load = {};
+    dmProfileLoad = load;
     void import("@components/DmProfileSidebar").then(
       ({ createDmProfileSidebar }) => {
-        // A later open/close (or teardown) supersedes this import: drop it.
-        if (tornDown || epoch !== dmProfileEpoch || dmProfileSlot === null) return;
+        // A close (or teardown) since the click supersedes this import: drop it.
+        if (tornDown || dmProfileLoad !== load || dmProfileSlot === null) return;
+        dmProfileLoad = null;
 
         dmProfileSidebar = createDmProfileSidebar({
           user: profileUser,
@@ -388,6 +392,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       () => {
         // The panel could not load; a later click may retry.
+        if (dmProfileLoad === load) dmProfileLoad = null;
       },
     );
   }
@@ -418,7 +423,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   /** Close the DM profile sidebar if open. */
   function closeDmProfile(): void {
     // Supersede any in-flight lazy open, so it cannot mount after this close.
-    dmProfileEpoch++;
+    dmProfileLoad = null;
     if (dmProfileUnsub !== null) {
       dmProfileUnsub();
       dmProfileUnsub = null;

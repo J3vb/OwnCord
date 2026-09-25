@@ -75,12 +75,31 @@ describe("SidebarDrawer", () => {
     expect(s.toggle.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("closes on a pointer press outside", () => {
+  it("closes on a pointer press outside, on the backdrop", () => {
+    const s = setup();
+    drawer = s.drawer;
+    s.toggle.focus();
+    s.toggle.click();
+    document
+      .querySelector(".sidebar-drawer-backdrop")!
+      .dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(s.sidebar.classList.contains("drawer-open")).toBe(false);
+    expect(document.activeElement).toBe(s.toggle);
+  });
+
+  it("stays open, and leaves focus alone, for a press in a dialog opened from it", () => {
     const s = setup();
     drawer = s.drawer;
     s.toggle.click();
-    document.dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    expect(s.sidebar.classList.contains("drawer-open")).toBe(false);
+    // A dialog or menu the drawer opens is mounted on <body>, above the drawer.
+    const dialog = document.createElement("div");
+    const field = document.createElement("input");
+    dialog.appendChild(field);
+    document.body.appendChild(dialog);
+    field.focus();
+    dialog.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(s.sidebar.classList.contains("drawer-open")).toBe(true);
+    expect(document.activeElement).toBe(field);
   });
 
   it("does not close on a pointer press inside", () => {

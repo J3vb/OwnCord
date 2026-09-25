@@ -246,6 +246,6 @@ the Message Requests inbox and its Block confirm (B9-5, 6), My reports (the
 second half of B9-10), the Moderation Center queue, review, actions and ban
 confirm (B9-11, 12, 13, 14), the appeal review (B9-17), the signed-in Account
 pane (B9-20, 23; the user-bar Settings button), and the sidebar navigation half
-of B9-18 and B9-21. Their 200 % evidence is the drawer journey in
-`Client/tests/e2e/b9-responsive-nav.spec.ts`; the corresponding screens in
-`b9-zoom.spec.ts` are switched on once the drawer lands.
+of B9-18 and B9-21. `b9-zoom.spec.ts` reaches each of those screens through
+the drawer and runs the reflow audit on it, like every other screen, and
+`Client/tests/e2e/b9-responsive-nav.spec.ts` pins the drawer journey itself.
