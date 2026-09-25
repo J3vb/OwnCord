@@ -541,12 +541,19 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       await expectScreenReflows(page, screen, testInfo);
     });
 
-    test("every settings tab fits at 200 % zoom", async ({ page }, testInfo) => {
-      blockedOnNavigation("the user-bar Settings button");
-      await boot(page, [{ pattern: "/messages", status: 200, body: MOCK_MESSAGES }]);
-      await openSettings(page);
+    test("every settings tab opened from the connect page gear fits at 200 % zoom", async ({
+      page,
+    }, testInfo) => {
+      await page.addInitScript(
+        buildTauriMockScript({ httpRoutes: [HEALTH], simulateWsFlow: false }),
+      );
+      await page.goto("/");
+      await page.locator(".connect-page .settings-gear").click();
+      await expect(page.locator("[data-testid='settings-overlay']")).toHaveClass(/open/);
       const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
-      for (const tab of await settingsTabs(page).allInnerTexts()) {
+      const tabs = await settingsTabs(page).allInnerTexts();
+      expect(tabs.length, "settings tabs rendered").toBeGreaterThan(0);
+      for (const tab of tabs) {
         await openSettingsTab(page, tab);
         await pane.waitFor();
         await expectScreenReflows(

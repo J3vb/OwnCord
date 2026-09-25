@@ -216,8 +216,10 @@ over, and every primary action reachable, with one screenshot per screen.
 zoomed user actually has, after zooming.
 
 Screens that pass at 200 %: the connect page (B9-18), the shell's message
-surface, history and composer (B9-3, 18, 19, 21, 22), the search overlay, and
-the report dialog (B9-10).
+surface, history and composer (B9-3, 18, 19, 21, 22), the search overlay, the
+report dialog (B9-10), and every settings tab the connect page's Settings gear
+(`button.settings-gear`) opens — Appearance, Notifications, Text & Images,
+Accessibility, Voice & Audio, Keybinds, Advanced and Logs (B9-20, 23).
 
 Blocked on navigation: below 800 CSS px `responsive.css` collapses
 `.unified-sidebar` to zero width with no toggle. Channels stay reachable
@@ -227,5 +229,6 @@ there. Those screens are `test.fixme`, each naming its entry point, until B8's
 responsive navigation lands: the Message Requests inbox and its Block confirm
 (B9-5, 6), My reports (the second half of B9-10), the Moderation Center
 queue, review, actions and ban confirm (B9-11, 12, 13, 14), the appeal review
-(B9-17), the Account pane and every settings tab (B9-20, 23), and the sidebar
-navigation half of B9-18 and B9-21. Their 200 % evidence is still open.
+(B9-17), the signed-in Account pane (B9-20, 23; the user-bar Settings
+button), and the sidebar navigation half of B9-18 and B9-21. Their 200 %
+evidence is still open.
