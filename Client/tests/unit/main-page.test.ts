@@ -11,6 +11,13 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// jsdom has no matchMedia; the lazily-loaded sidebar drawer reads its
+// breakpoint from it. Wide: the drawer stays out of the way.
+vi.stubGlobal(
+  "matchMedia",
+  vi.fn(() => Object.assign(new EventTarget(), { matches: false, media: "" })),
+);
+
 // B9-8: this suite exercises content the viewer has already consented to;
 // the consent gate itself is proven in src/features/content-consent/external.test.ts.
 vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({

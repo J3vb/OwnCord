@@ -99,7 +99,12 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
     setOwnedTimeout(
       page.signal,
       () => {
-        if (opener !== null && opener.isConnected && opener.style.display !== "none") {
+        if (
+          opener !== null &&
+          opener.isConnected &&
+          opener.style.display !== "none" &&
+          opener.closest("[inert]") === null
+        ) {
           opener.focus();
         } else {
           opts.fallbackFocus();

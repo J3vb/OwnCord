@@ -68,6 +68,22 @@ async function openWithKeyboard(page: Page): Promise<void> {
   await expect(sidebar(page)).toBeVisible();
 }
 
+/**
+ * Focus returned somewhere a keyboard user can act: the composer or the menu
+ * button, never <body> and never a control inside the closed (inert) sidebar.
+ */
+async function expectFocusReachable(page: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const el = document.activeElement;
+        if (el === null || el === document.body || el.closest("[inert]") !== null) return null;
+        return el.getAttribute("data-testid");
+      }),
+    )
+    .toMatch(/^(msg-textarea|sidebar-toggle)$/);
+}
+
 /** Focus `keyboardTarget` then activate it, the way the keyboard model does. */
 async function activate(page: Page, keyboardTarget: ReturnType<Page["locator"]>): Promise<void> {
   await keyboardTarget.focus();
@@ -135,6 +151,7 @@ test.describe("B9 narrow-width sidebar drawer", () => {
     await expect(sidebar(page)).not.toHaveClass(/drawer-open/);
     await page.keyboard.press("Escape");
     await expect(page.locator("[data-testid='settings-overlay']")).not.toHaveClass(/open/);
+    await expectFocusReachable(page);
 
     // The Moderation Center. A content view replaces the chat column (and with
     // it the header's menu button), so the B9-4 back path — Close/Escape —
@@ -145,6 +162,7 @@ test.describe("B9 narrow-width sidebar drawer", () => {
     await expect(sidebar(page)).not.toHaveClass(/drawer-open/);
     await page.keyboard.press("Escape");
     await expect(page.locator("[data-testid='chat-area']")).toBeVisible();
+    await expectFocusReachable(page);
 
     // A DM.
     await openWithKeyboard(page);

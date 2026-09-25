@@ -23,8 +23,8 @@ import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { shellText } from "../../i18n/shell";
 
-/** The breakpoint `responsive.css` collapses the sidebar at. Keep in step. */
-const NARROW_MAX = 800;
+/** The media query `responsive.css` collapses the sidebar under. Keep in step. */
+const NARROW_QUERY = "(max-width: 800px)";
 
 export interface SidebarDrawerOptions {
   /** The `.unified-sidebar` element the drawer shows and hides. */
@@ -44,6 +44,7 @@ export interface SidebarDrawer {
 export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   const { sidebar, toggle } = opts;
   const owner = new Disposable();
+  const narrow = window.matchMedia(NARROW_QUERY);
   let open = false;
   let restoreFocusRef: (() => void) | null = null;
 
@@ -56,18 +57,13 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   });
   sidebar.before(backdrop);
 
-  /** True while the media query collapses the sidebar (window <= 800px). */
-  function isNarrow(): boolean {
-    return window.innerWidth > 0 && window.innerWidth <= NARROW_MAX;
-  }
-
   function sync(): void {
     sidebar.classList.toggle("drawer-open", open);
     backdrop.classList.toggle("open", open);
     // Below the breakpoint the closed sidebar is off-screen, so its controls
     // must not stay tabbable off-screen; above it, the sidebar is in flow and
     // must stay fully interactive.
-    sidebar.inert = isNarrow() && !open;
+    sidebar.inert = narrow.matches && !open;
     toggle.setAttribute("aria-expanded", String(open));
     const label = open ? shellText("sidebar.close") : shellText("sidebar.open");
     toggle.setAttribute("aria-label", label);
@@ -148,20 +144,20 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   // Crossing the breakpoint changes whether the closed sidebar is off-screen
   // (and so inert), and a drawer left open while the window widens would linger
   // and re-appear on the next shrink.
-  owner.onEvent(window, "resize", () => {
-    if (window.innerWidth <= NARROW_MAX) {
-      // Staying/becoming narrow only changes whether the closed sidebar is
-      // inert; the open state is unchanged.
+  narrow.addEventListener(
+    "change",
+    () => {
+      if (!narrow.matches) {
+        // Widening puts the sidebar back in flow and hides the toggle. Focus
+        // that was inside the drawer stays on the now-visible sidebar, so drop
+        // the restore rather than yank it to a hidden button.
+        open = false;
+        restoreFocusRef = null;
+      }
       sync();
-      return;
-    }
-    // Widening puts the sidebar back in flow and hides the toggle. Focus that
-    // was inside the drawer stays on the now-visible sidebar, so drop the
-    // restore rather than yank it to a hidden button.
-    open = false;
-    restoreFocusRef = null;
-    sync();
-  });
+    },
+    { signal: owner.signal },
+  );
 
   return {
     destroy: () => {

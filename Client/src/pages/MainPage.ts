@@ -622,13 +622,20 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       getCurrentUserId,
     });
 
-    // The composer of the channel on screen, else the sidebar's first control.
+    // The composer of the channel on screen, else the header's menu button
+    // (shown only at narrow width, where the closed sidebar is inert), else
+    // the sidebar's first control: the first of them that takes focus.
     const focusReachable = (): HTMLElement | null => {
-      const reachable =
-        chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea:enabled") ??
-        sidebar.sidebarWrapper.querySelector<HTMLElement>("button");
-      reachable?.focus();
-      return reachable;
+      const candidates = [
+        chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea:enabled"),
+        chatAreaResult.sidebarToggle,
+        sidebar.sidebarWrapper.querySelector<HTMLElement>("button"),
+      ];
+      for (const el of candidates) {
+        el?.focus();
+        if (el != null && document.activeElement === el) return el;
+      }
+      return null;
     };
 
     contentNav = createContentNavigator({
@@ -685,6 +692,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const safety = NAVIGATION_DESTINATIONS.safety;
     const settingsOverlay = createSettingsOverlay({
       onClose: () => closeSettings(),
+      fallbackFocus: focusReachable,
       onChangePassword: async (oldPassword, newPassword) => {
         try {
           const outcome = await api.changePassword(oldPassword, newPassword);

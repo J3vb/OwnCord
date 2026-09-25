@@ -5,6 +5,17 @@ import { setActiveChannel } from "@stores/channels.store";
 import { openSettings, closeSettings } from "@stores/ui.store";
 import { createModal } from "@lib/modalFactory";
 
+/** A controllable `(max-width: 800px)` media query: jsdom has no matchMedia. */
+class FakeMediaQueryList extends EventTarget {
+  matches = false;
+  readonly media = "(max-width: 800px)";
+  set(matches: boolean): void {
+    this.matches = matches;
+    this.dispatchEvent(new Event("change"));
+  }
+}
+let narrow: FakeMediaQueryList;
+
 function setup(onOpen?: () => void): {
   sidebar: HTMLElement;
   toggle: HTMLButtonElement;
@@ -28,12 +39,18 @@ describe("SidebarDrawer", () => {
   beforeEach(() => {
     closeSettings();
     setActiveChannel(null);
+    narrow = new FakeMediaQueryList();
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => narrow),
+    );
   });
 
   afterEach(() => {
     drawer?.destroy();
     drawer = null;
     document.body.replaceChildren();
+    vi.unstubAllGlobals();
   });
 
   it("starts closed", () => {
@@ -185,27 +202,34 @@ describe("SidebarDrawer", () => {
     expect(document.activeElement).toBe(outside);
   });
 
-  it("makes the closed drawer inert only while the window is narrow", () => {
-    const width = Object.getOwnPropertyDescriptor(window, "innerWidth");
-    const original = window.innerWidth;
-    const setWidth = (value: number): void => {
-      Object.defineProperty(window, "innerWidth", { configurable: true, value });
-    };
-
+  it("makes the closed drawer inert only while the breakpoint query matches", () => {
     const s = setup();
     drawer = s.drawer;
+    expect(s.sidebar.inert).toBe(false);
+    narrow.set(true);
+    expect(s.sidebar.inert).toBe(true);
+    s.toggle.click();
+    expect(s.sidebar.inert).toBe(false);
+    narrow.set(false);
+    expect(s.sidebar.inert).toBe(false);
+    // Widening closed the drawer, so narrowing again leaves it shut and inert.
+    expect(s.sidebar.classList.contains("drawer-open")).toBe(false);
+    narrow.set(true);
+    expect(s.sidebar.inert).toBe(true);
+  });
+
+  it("reads the breakpoint from the stylesheet's media query, not the window width", () => {
+    // A zoomed 1601px window is 800.5 CSS px wide: innerWidth may report 800
+    // while `(max-width: 800px)` does not match and the sidebar stays in flow.
+    const width = Object.getOwnPropertyDescriptor(window, "innerWidth");
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
     try {
-      setWidth(640);
-      window.dispatchEvent(new Event("resize"));
-      expect(s.sidebar.inert).toBe(true);
-      s.toggle.click();
-      expect(s.sidebar.inert).toBe(false);
-      setWidth(1000);
-      window.dispatchEvent(new Event("resize"));
+      const s = setup();
+      drawer = s.drawer;
+      expect(window.matchMedia).toHaveBeenCalledWith("(max-width: 800px)");
       expect(s.sidebar.inert).toBe(false);
     } finally {
       if (width !== undefined) Object.defineProperty(window, "innerWidth", width);
-      else setWidth(original);
     }
   });
 

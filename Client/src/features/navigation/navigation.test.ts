@@ -328,6 +328,21 @@ describe("closing a view", () => {
     expect(document.activeElement).toBe(fallback);
   });
 
+  it("falls back when the opener sits in an inert subtree (the closed sidebar drawer)", () => {
+    vi.useFakeTimers();
+    const region = document.createElement("div");
+    const btn = document.createElement("button");
+    region.appendChild(btn);
+    document.body.appendChild(region);
+    nav.open("moderation", btn);
+    region.setAttribute("inert", "");
+
+    nav.close();
+    vi.runAllTimers();
+
+    expect(document.activeElement).toBe(fallback);
+  });
+
   it("falls back when the opener is hidden", () => {
     vi.useFakeTimers();
     const btn = opener();
