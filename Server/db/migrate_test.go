@@ -26,6 +26,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -876,5 +879,70 @@ func TestMigrate_SchemaAheadAllowsKnownMigrationsOnly(t *testing.T) {
 	}
 	if err := db.MigrateFS(database, fsys); err != nil {
 		t.Fatalf("re-run with no unknowns: %v", err)
+	}
+}
+
+// TestCheckBackupSchemaAhead_NamesUnknownMigrations is the restore half of
+// REL-02: a backup file migrated by a newer server reports exactly the
+// migrations this binary does not carry, and none of the ones it does.
+func TestCheckBackupSchemaAhead_NamesUnknownMigrations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "newer.db")
+	database, err := db.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if _, err := database.ExecContext(context.Background(),
+		"INSERT INTO schema_versions (version) VALUES ('999_from_newer.sql')"); err != nil {
+		t.Fatalf("seed newer version: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	ahead, err := db.CheckBackupSchemaAhead(context.Background(), path)
+	if err != nil {
+		t.Fatalf("CheckBackupSchemaAhead: %v", err)
+	}
+	if !slices.Equal(ahead, []string{"999_from_newer.sql"}) {
+		t.Errorf("ahead = %v, want [999_from_newer.sql]", ahead)
+	}
+}
+
+// TestCheckBackupSchemaAhead_NoSchemaVersionsTable: a file with no
+// schema_versions table (pre-tracking) has nothing ahead of this binary.
+func TestCheckBackupSchemaAhead_NoSchemaVersionsTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "untracked.db")
+	conn, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := conn.Exec("CREATE TABLE t (id INTEGER)"); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	ahead, err := db.CheckBackupSchemaAhead(context.Background(), path)
+	if err != nil {
+		t.Fatalf("CheckBackupSchemaAhead: %v", err)
+	}
+	if len(ahead) != 0 {
+		t.Errorf("ahead = %v, want none", ahead)
+	}
+}
+
+// TestCheckBackupSchemaAhead_NotADatabase: a file SQLite cannot read is an
+// error, never a silent "nothing ahead" that would let the restore proceed.
+func TestCheckBackupSchemaAhead_NotADatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "garbage.db")
+	if err := os.WriteFile(path, []byte(strings.Repeat("not a database ", 100)), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := db.CheckBackupSchemaAhead(context.Background(), path); err == nil {
+		t.Fatal("CheckBackupSchemaAhead accepted a non-SQLite file")
 	}
 }
