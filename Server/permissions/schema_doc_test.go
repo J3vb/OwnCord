@@ -12,8 +12,8 @@ import (
 
 // TestSchemaDocBitMapCoversEveryPermissionBit is the doc half of the B5-8
 // four-file bit (HP-5 review): TestAdminPanelPermGridCoversEveryPermissionBit
-// (Server/admin/perm_grid_test.go) checks the admin panel's HTML against
-// permissions.AllPerms; this checks docs/schema.md's "Bit Map" table and its
+// (Server/admin/perm_grid_test.go) checks the admin panel's permission grid
+// against permissions.AllPerms; this checks docs/schema.md's "Bit Map" table and its
 // "reserved" line against the same source of truth, so a bit added to
 // permissions.go without updating the doc — or left on the reserved line —
 // fails here instead of shipping a stale contract.
