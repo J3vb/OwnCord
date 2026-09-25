@@ -266,7 +266,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		// the same directory the rest of the backup handlers read and write, or
 		// a server started from another working directory writes it somewhere
 		// the operator will never find it.
-		preRestore := filepath.Join(backupBaseDir, "pre_restore_"+time.Now().UTC().Format("20060102_150405")+".db")
+		preRestore := filepath.Join(backupBaseDir, preRestoreBackupPrefix+time.Now().UTC().Format("20060102_150405")+".db")
 		if err := database.BackupToSafe(context.WithoutCancel(r.Context()), preRestore, backupBaseDir); err != nil {
 			// Fail closed. The admin panel promises "a pre-restore backup will
 			// be created" before an irreversible overwrite; proceeding without
