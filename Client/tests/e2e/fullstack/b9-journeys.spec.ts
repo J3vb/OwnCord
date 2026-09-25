@@ -28,11 +28,12 @@
  * password. BPR-090 account lifecycle.
  *
  * Journey F (network loss and recovery): the transport is cut mid-session, the
- * B9-25 notice names the server and offers Retry, and the connection recovers
- * with the session state intact. BPR-090, BPR-092.
+ * B9-25 notice says this server is unreachable and offers Retry, and the
+ * connection recovers with the session state intact. BPR-090, BPR-092.
  *
  * Journey G (refused roles): a member without moderation permission is denied
- * the queue and someone else's appeal in the UI and by the server. BPR-071.
+ * the queue, a queue action and someone else's appeal in the UI and by the
+ * server. BPR-071.
  *
  * Journey H (consent to evidence): a labelled channel's content waits for the
  * viewer's acknowledgement before it is read as evidence, and revoking the
@@ -48,6 +49,7 @@ import type { Locator, Page, Request } from "@playwright/test";
 import { test, expect, login } from "./fixtures";
 import { installRealTransport } from "../support/real-transport";
 import { TEST_PASSWORD, type TestServer } from "../support/server";
+import { Q1, textContrast } from "../support/b9-accessibility";
 
 type Frame = { type: string; id?: string; payload?: Record<string, unknown> };
 
@@ -369,16 +371,18 @@ test.describe("B9-26 lifecycle journey (real server)", () => {
     await send(bob, text);
     const message = await liveMessageId(server, general.id, text);
     const carol = await signIn(server, "carol");
-    await server.api(
-      "/api/v1/reports",
-      {
-        target_type: "message",
-        target_id: String(message),
-        reason: "harassment",
-        detail: "synthetic lifecycle detail",
-      },
-      carol,
-    );
+    const report = (
+      await server.api(
+        "/api/v1/reports",
+        {
+          target_type: "message",
+          target_id: String(message),
+          reason: "harassment",
+          detail: "synthetic lifecycle detail",
+        },
+        carol,
+      )
+    ).id as string;
     const warnReason = `synthetic lifecycle warning ${crypto.randomUUID()}`;
     await server.api(`/api/v1/moderation/users/${bobId}/warn`, { reason: warnReason }, owner);
     const pane = await openSafety(bob);
@@ -394,6 +398,12 @@ test.describe("B9-26 lifecycle journey (real server)", () => {
       }),
     ).toContainText("Status: open");
     await bob.keyboard.press("Escape");
+    const appealsOf = async (state: string): Promise<{ id: string; appellant_id: number }[]> =>
+      (await server.api(`/api/v1/moderation/appeals/?state=${state}`, undefined, owner)) as {
+        id: string;
+        appellant_id: number;
+      }[];
+    const bobAppeal = (await appealsOf("")).find((a) => a.appellant_id === bobId)!.id;
 
     await expect(alice.locator(".msg-text", { hasText: text })).toBeVisible();
     await expect(alice.locator(`[data-testid='member-${bobId}']`)).toBeVisible();
@@ -428,13 +438,21 @@ test.describe("B9-26 lifecycle journey (real server)", () => {
     // The report's outcome row survives the subject's erasure, rewritten with
     // no content (the erasure half of BPR-052/BPR-053), and bob's own appeal
     // cascaded away; neither is listed as open work.
-    const closed = (await server.api(
-      "/api/v1/moderation/queue?state=closed",
-      undefined,
-      owner,
-    )) as { state: string; subject_name: string }[];
-    expect(closed.map((r) => r.state)).toContain("subject_erased");
-    expect(closed.every((r) => r.subject_name === "")).toBe(true);
+    const queue = async (
+      state: string,
+    ): Promise<{ id: string; state: string; subject_name: string }[]> =>
+      (await server.api(`/api/v1/moderation/queue?state=${state}`, undefined, owner)) as {
+        id: string;
+        state: string;
+        subject_name: string;
+      }[];
+    expect((await queue("closed")).find((r) => r.id === report)).toEqual(
+      expect.objectContaining({ state: "subject_erased", subject_name: "" }),
+    );
+    expect((await queue("")).map((r) => r.id)).not.toContain(report);
+    for (const state of ["", "decided"]) {
+      expect((await appealsOf(state)).map((a) => a.id)).not.toContain(bobAppeal);
+    }
 
     // The live observer drops the erased member row (the server's member_ban).
     await expect(alice.locator(`[data-testid='member-${bobId}']`)).toHaveCount(0, {
@@ -689,13 +707,13 @@ test.describe("B9-26 network-loss journey (real server)", () => {
     await bobTransport.offline();
     const banner = bob.locator(".reconnecting-banner");
     await expect(banner).toBeVisible({ timeout: 15_000 });
-    // A dial has to fail before the notice names the server; until then it is
-    // the honest "Reconnecting..." wording (B9-25).
+    // A dial has to fail before the notice says this server is unreachable;
+    // until then it is the honest "Reconnecting..." wording (B9-25).
     await expect(banner).toContainText("Can't reach this server", { timeout: 15_000 });
     await expect(banner.getByRole("button", { name: "Retry" })).toBeVisible();
-
-    // The device reports a network, so the banner never claims the internet is
-    // required for this LAN server, and Retry is offered.
+    // The device reports a network, so the banner never claims the device is
+    // offline for this LAN server.
+    await expect(banner).not.toContainText("Your device reports no network");
 
     // Restore the transport: the reconnect loop's next dial clears the notice.
     bobTransport.online();
@@ -738,6 +756,21 @@ test.describe("B9-26 refused-role journey (real server)", () => {
     // all 403, independent of anything the client shows.
     const bobToken = await signIn(server, "bob");
     expect(await status(server, "/api/v1/moderation/queue", bobToken)).toBe(403);
+    const report = (
+      await server.api(
+        "/api/v1/reports",
+        { target_type: "user", target_id: String(id("carol")), reason: "spam", detail: "" },
+        owner,
+      )
+    ).id as string;
+    expect(await status(server, `/api/v1/moderation/queue/${report}/assign`, bobToken, {})).toBe(
+      403,
+    );
+    expect(
+      await status(server, `/api/v1/moderation/queue/${report}/close`, bobToken, {
+        outcome: "no_action",
+      }),
+    ).toBe(403);
 
     // carol is warned by the owner and appeals; bob may not decide it.
     const warnReason = `synthetic refused-role ${crypto.randomUUID()}`;
@@ -771,9 +804,6 @@ test.describe("B9-26 refused-role journey (real server)", () => {
     expect(aliceAppeals.map((a) => a.id)).toContain(appeal);
     // alice also sees the entry in her client.
     await expect(alice.getByTestId("moderation-btn")).toBeVisible();
-
-    // bob's client never rendered moderation content: no appeal from carol.
-    expect(await status(server, "/api/v1/moderation/appeals/", bobToken)).toBe(403);
   });
 });
 
@@ -784,12 +814,11 @@ test.describe("B9-26 integrated accessibility matrix (real server)", () => {
   // 20px text and 200% scale) already ships in its lane spec and is named per
   // requirement in the evidence manifest; this test proves the integrated
   // states do not regress that, on the real server.
-  test("the joined inbox and Moderation Center reflow at the 940x500 minimum window", async ({
+  test("the joined inbox and Moderation Center reflow at the 940x500 minimum window with 20 px text", async ({
     alice,
     bob,
     server,
   }) => {
-    const owner = server.owner!.token;
     await register(server, "stranger");
     await register(server, "carol");
     const bobId = (await users(server))("bob");
@@ -797,8 +826,19 @@ test.describe("B9-26 integrated accessibility matrix (real server)", () => {
     try {
       expect((await stranger.send("joined a11y request")).type).toBe("chat_send_ok");
 
+      // 20 px text: the value the Appearance slider's single writer
+      // (applyFontSize) puts on the root.
+      const largeText = (page: Page): Promise<void> =>
+        page.evaluate(() => document.documentElement.style.setProperty("--font-size", "20px"));
+      const contrastFailures: string[] = [];
+      const measure = async (name: string, locator: Locator): Promise<void> => {
+        const { ratio } = await textContrast(locator);
+        if (ratio < Q1.text) contrastFailures.push(`${name} ${ratio.toFixed(2)} < ${Q1.text}`);
+      };
+
       // Message Requests inbox at the minimum desktop window.
       await bob.setViewportSize({ width: 940, height: 500 });
+      await largeText(bob);
       await bob.locator("[data-testid='dm-requests-badge']").click();
       await bob.locator("[data-testid='dm-requests-entry']").click();
       const inbox = bob.getByRole("region", { name: "Message Requests" });
@@ -810,9 +850,12 @@ test.describe("B9-26 integrated accessibility matrix (real server)", () => {
         await expect(control).toBeInViewport();
         expect(await control.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
       }
+      await measure("request preview", inbox.locator(".requests-preview").first());
+      await measure("accept button", inbox.getByRole("button", { name: "Accept" }).first());
 
       // Moderation Center at the same window, with a queue row present.
       await alice.setViewportSize({ width: 940, height: 500 });
+      await largeText(alice);
       await server.api(
         "/api/v1/reports",
         { target_type: "user", target_id: String(bobId), reason: "spam", detail: "" },
@@ -826,11 +869,14 @@ test.describe("B9-26 integrated accessibility matrix (real server)", () => {
       await center.getByTestId("mod-queue-row").first().focus();
       expect(await view.evaluate((el) => el.scrollLeft)).toBe(0);
 
-      // Keyboard: the entry is reachable and operable, and Escape leaves the
+      await measure("queue row", center.getByTestId("mod-queue-row").first());
+
+      // Keyboard: the focused entry opens with Enter, and Escape leaves the
       // report back on its row.
-      await center.getByTestId("mod-queue-row").first().click();
+      await alice.keyboard.press("Enter");
       const report = center.getByTestId("mod-report");
       await expect(report.getByRole("heading", { level: 3 })).toBeFocused();
+      await measure("report heading", report.getByRole("heading", { level: 3 }));
       await alice.keyboard.press("Escape");
       await expect(report).toHaveCount(0);
       await expect(center.getByTestId("mod-queue-row").first()).toBeFocused();
@@ -847,7 +893,7 @@ test.describe("B9-26 integrated accessibility matrix (real server)", () => {
               ).length,
         ),
       ).toBe(0);
-      void owner;
+      expect(contrastFailures).toEqual([]);
     } finally {
       stranger.close();
     }
@@ -862,12 +908,7 @@ test.describe("B9-26 consent-to-evidence journey (real server)", () => {
   }) => {
     const owner = server.owner!.token;
     await register(server, "carol");
-    const channels = (await server.api("/api/v1/channels/", undefined, owner)) as {
-      id: number;
-      name: string;
-      type: string;
-    }[];
-    const labelled = channels.find((c) => c.name === "general" && c.type === "text")!;
+    const labelled = await generalChannel(server);
 
     // bob posts a message in a channel that is afterwards labelled, and carol
     // reports it; its evidence is gated by the moderator's own NSFW consent.

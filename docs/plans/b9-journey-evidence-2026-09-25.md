@@ -5,11 +5,11 @@
 agent guides merged as [#1796](https://github.com/J3vb/OwnCord/pull/1796); the
 B9 chain's head before that was `7732f969`, B9-25 as
 [#1795](https://github.com/J3vb/OwnCord/pull/1795))
-**Journey head:** the commit carrying this manifest; the results below were
-first measured on the uncommitted lane head now committed as the journey-head
-commit on `fm/b9-26-impl` (recorded in the plan's implementation record and the
-PR). The fullstack suite is re-run at that exact head before the PR is marked
-ready; this manifest is updated with the resulting SHA then.
+**Journey head:** `66da915a0cdc4b1d8fc2bde632e8ca7099e1cfca` on `fm/b9-26-impl`;
+the fullstack results below are the 9-passed run at that commit. The review
+round after it tightened assertions in journeys B, F, G, H and I (no journey
+was removed or loosened); that revision is **pending the `client-fullstack` CI
+run** at the PR head, since this host has no Go toolchain to build the server.
 **Branch:** `fm/b9-26-impl`
 **Plan:** [`.claude/plans/b9-26-cross-feature-journeys.plan.md`](../../.claude/plans/b9-26-cross-feature-journeys.plan.md)
 **PRD:** [b9-unified-experience-accessibility-polish.prd.md](b9-unified-experience-accessibility-polish.prd.md)
@@ -63,20 +63,20 @@ the seam, not the endpoints.
 
 Command for every fullstack row, from `Client/`:
 `npx playwright test --config playwright.config.fullstack.ts tests/e2e/fullstack/b9-journeys.spec.ts --workers=1`
-— **9 passed** at the journey head.
+— **9 passed** at `66da915a`.
 
-| #   | Journey                                                                                                                              | Requirements                                  | Allowed roles                                  | Refused roles                                 | Network              | Platform                   | Result                                                                                                                                                                                                 |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- | ---------------------------------------------- | --------------------------------------------- | -------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A   | Report → warn → notice → appeal → appeal decision, chained in the client                                                             | BPR-070, BPR-071, BPR-072, BPR-073            | owner (alice), reporter (carol), subject (bob) | —                                             | online throughout    | fullstack (real Go server) | Pass (8.4 s)                                                                                                                                                                                           |
-| B   | Retention disclosed → reported + appealed subject self-erases → observer's content and membership gone, report outcome survives      | BPR-052/BPR-054 client half, BPR-070, BPR-090 | owner (alice), reporter (carol), subject (bob) | —                                             | online throughout    | fullstack (real Go server) | Pass (11.4 s)                                                                                                                                                                                          |
-| C   | First-contact text-only request → accept → block from member menu → composer gates                                                   | BPR-060                                       | member (bob)                                   | stranger blocked, new DM refused 403          | online throughout    | fullstack (real Go server) | Pass (5.4 s)                                                                                                                                                                                           |
-| D   | Second device signs in → first shows "Signed in elsewhere" → "Use here" takes it back                                                | BPR-090 lifecycle/compatibility               | member (bob), second device                    | first device displaced                        | online throughout    | fullstack (real Go server) | Pass (5.9 s)                                                                                                                                                                                           |
-| E   | Recovery-kit enrolment → logout → recovery from the connect page                                                                     | BPR-090 account lifecycle                     | member (bob)                                   | spent kit refused (401)                       | online throughout    | fullstack (real Go server) | Pass (7.1 s)                                                                                                                                                                                           |
-| F   | Transport cut mid-session → B9-25 notice names the server + Retry → reconnect, state kept                                            | BPR-090, BPR-092                              | member (bob)                                   | —                                             | **cut and restored** | fullstack (real Go server) | Pass (5.9 s)                                                                                                                                                                                           |
-| G   | Member refused the queue and another account's appeal, in UI and by the server                                                       | BPR-071                                       | owner (alice)                                  | member (bob): queue 403, list 403, decide 403 | online throughout    | fullstack (real Go server) | Pass (6.5 s)                                                                                                                                                                                           |
-| H   | Labelled channel's evidence waits for the moderator's own acknowledgement; revoke takes it away                                      | BPR-063, BPR-071                              | owner (alice), reporter (carol)                | —                                             | online throughout    | fullstack (real Go server) | Pass (6.6 s)                                                                                                                                                                                           |
-| I   | Integrated accessibility matrix: joined inbox + Moderation Center reflow at 940×500, keyboard, reduced motion                        | BPR-091                                       | member (bob), owner (alice)                    | —                                             | online throughout    | fullstack (real Go server) | Pass (7.0 s)                                                                                                                                                                                           |
-| J   | External-content consent gates the native broker; warm re-entry after consent does not refetch; destinations confined through logout | BPR-061, BPR-062, BPR-092 (desktop)           | member (alice)                                 | —                                             | online throughout    | native (Windows WebView2)  | **CI-only**; spec in `Client/tests/e2e/native/b9-journeys.spec.ts`. Not run on this headless host, so **pending the `client-native` CI run** — not claimed as desktop-qualified until it passes there. |
+| #   | Journey                                                                                                                              | Requirements                                  | Allowed roles                                  | Refused roles                                               | Network              | Platform                   | Result                                                                                                                                                                                                 |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------- | -------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A   | Report → warn → notice → appeal → appeal decision, chained in the client                                                             | BPR-070, BPR-071, BPR-072, BPR-073            | owner (alice), reporter (carol), subject (bob) | —                                                           | online throughout    | fullstack (real Go server) | Pass (8.4 s)                                                                                                                                                                                           |
+| B   | Retention disclosed → reported + appealed subject self-erases → observer's content and membership gone, report outcome survives      | BPR-052/BPR-054 client half, BPR-070, BPR-090 | owner (alice), reporter (carol), subject (bob) | —                                                           | online throughout    | fullstack (real Go server) | Pass at `66da915a` (11.4 s); tightened revision pending `client-fullstack` CI                                                                                                                          |
+| C   | First-contact text-only request → accept → block from member menu → composer gates                                                   | BPR-060                                       | member (bob)                                   | stranger blocked, new DM refused 403                        | online throughout    | fullstack (real Go server) | Pass (5.4 s)                                                                                                                                                                                           |
+| D   | Second device signs in → first shows "Signed in elsewhere" → "Use here" takes it back                                                | BPR-090 lifecycle/compatibility               | member (bob), second device                    | first device displaced                                      | online throughout    | fullstack (real Go server) | Pass (5.9 s)                                                                                                                                                                                           |
+| E   | Recovery-kit enrolment → logout → recovery from the connect page                                                                     | BPR-090 account lifecycle                     | member (bob)                                   | spent kit refused (401)                                     | online throughout    | fullstack (real Go server) | Pass (7.1 s)                                                                                                                                                                                           |
+| F   | Transport cut mid-session → B9-25 notice says this server is unreachable + Retry → reconnect, state kept                             | BPR-090, BPR-092                              | member (bob)                                   | —                                                           | **cut and restored** | fullstack (real Go server) | Pass at `66da915a` (5.9 s); tightened revision pending `client-fullstack` CI                                                                                                                           |
+| G   | Member refused the queue, a queue action and another account's appeal, in UI and by the server                                       | BPR-071                                       | owner (alice)                                  | member (bob): queue, assign, close, list and decide all 403 | online throughout    | fullstack (real Go server) | Pass at `66da915a` (6.5 s); tightened revision pending `client-fullstack` CI                                                                                                                           |
+| H   | Labelled channel's evidence waits for the moderator's own acknowledgement; revoke takes it away                                      | BPR-063, BPR-071                              | owner (alice), reporter (carol)                | —                                                           | online throughout    | fullstack (real Go server) | Pass at `66da915a` (6.6 s); tightened revision pending `client-fullstack` CI                                                                                                                           |
+| I   | Integrated accessibility matrix: joined inbox + Moderation Center at 940×500 with 20 px text, contrast, keyboard, reduced motion     | BPR-091                                       | member (bob), owner (alice)                    | —                                                           | online throughout    | fullstack (real Go server) | Pass at `66da915a` (7.0 s); tightened revision pending `client-fullstack` CI                                                                                                                           |
+| J   | External-content consent gates the native broker; warm re-entry after consent does not refetch; destinations confined through logout | BPR-061, BPR-062, BPR-092 (desktop)           | member (alice)                                 | —                                                           | online throughout    | native (Windows WebView2)  | **CI-only**; spec in `Client/tests/e2e/native/b9-journeys.spec.ts`. Not run on this headless host, so **pending the `client-native` CI run** — not claimed as desktop-qualified until it passes there. |
 
 Requirement coverage map (BPR-060..064, 070..073, 090..092):
 
@@ -108,9 +108,10 @@ the server's `/appeals/mine` agrees.
 sentence from `server-info` (this server keeps indefinitely). The subject is
 reported and warned and appeals first, then erases their own account through the
 client; the server refuses the erased credential, hard-deletes the content, the
-report's outcome row survives rewritten (`state: subject_erased`, no subject),
-bob's own appeal cascades away, and `member_ban` drops the live observer's
-member row. No tombstone is owed live, so the rendered message persists until
+report's outcome row survives rewritten (`state: subject_erased`, no subject)
+and is no longer in the open queue, bob's own appeal (listed for the owner
+before the erasure) is gone from both the open and decided appeal lists, and
+`member_ban` drops the live observer's member row. No tombstone is owed live, so the rendered message persists until
 the next authoritative re-read; the join is that re-reading the channel no
 longer returns it.
 
@@ -136,13 +137,14 @@ is the uniform 401 `UNAUTHORIZED` (`service.ErrRecoveryKitInvalid`), not a 500 o
 
 **F — network loss and recovery.** The transport is cut mid-session
 (`bobTransport.offline()` fails every dial); the B9-25 notice first says
-"Reconnecting...", then names the server with a Retry once a dial has failed.
+"Reconnecting...", then says this server is unreachable, with a Retry, once a
+dial has failed, and never claims the device itself is offline.
 Restoring the transport clears the notice; the pre-cut message is still rendered
 and a new send lands, confirmed from the server's own history.
 
-**G — refused roles.** A member is denied the queue, the queue action and an
-appeal decision by the server (403), and the client offers no Moderation Center
-entry. The owner, who holds the permission, still sees the appeal and can decide
+**G — refused roles.** A member is denied the queue, taking and closing a
+report (queue actions), the appeals list and an appeal decision by the server
+(403), and the client offers no Moderation Center entry. The owner, who holds the permission, still sees the appeal and can decide
 it — the refusal was the role, not the contract.
 
 **H — consent to evidence.** A labelled channel's evidence is concealed until
@@ -151,9 +153,10 @@ the evidence is read; revoking it from another session regates the evidence.
 
 **I — integrated accessibility matrix.** The plan's Task 3 matrix, run on the
 joined surfaces: the Message Requests inbox and the Moderation Center reflow at
-the 940×500 minimum window (no horizontal scroll, no clipped control), the
-queue row is keyboard-operable with Escape returning focus to the row, and no
-running animation is required under reduced motion.
+the 940×500 minimum window with 20 px text (no horizontal scroll, no clipped
+control), their text meets the Q1 4.5:1 contrast bar, the focused queue row
+opens with Enter and Escape returns focus to it, and no running animation is
+required under reduced motion.
 
 **J — desktop privacy (native).** The genuine Tauri IPC is observed (a
 `window.fetch` to `ipc.localhost`); a link reaches the external-content broker
@@ -200,15 +203,19 @@ CI-only one.
 B9-26 is the agreed re-baseline point. `npm run build:budget && npm run check:budgets`,
 from `Client/`, at this head (deterministic across two runs):
 
-| Chunk                 | Measured  | Budget (was)            | Change                                                                                               | Headroom |
-| --------------------- | --------- | ----------------------- | ---------------------------------------------------------------------------------------------------- | -------- |
-| startup closure       | 96,606 B  | 97,000 B (97,000)       | none — measured + 500 B would exceed 97,000, so this is already the tightest the ratchet rule allows | 394 B    |
-| MainPage              | 62,433 B  | **63,500 B (64,000)**   | ratcheted down 500 B                                                                                 | 1,067 B  |
-| livekit (lazy)        | 133,372 B | **134,500 B (135,000)** | ratcheted down 500 B                                                                                 | 1,128 B  |
-| livekitSession (lazy) | 23,008 B  | **23,500 B (24,000)**   | ratcheted down 500 B                                                                                 | 492 B    |
+One rule for every budget (owner decision 2026-09-25), never raising one:
+new budget = min(current budget, measured + 1,000 B rounded up to the next 500 B).
 
-No budget was raised; three were lowered and startup was left at its already-tight
-value. The `Client/bundle-budgets.json` notes record each new figure.
+| Chunk                 | Measured  | Rule result           | Budget (was)            | Headroom |
+| --------------------- | --------- | --------------------- | ----------------------- | -------- |
+| startup closure       | 96,606 B  | min(97,000, 98,000)   | 97,000 B (97,000)       | 394 B    |
+| MainPage              | 62,433 B  | min(64,000, 63,500)   | **63,500 B (64,000)**   | 1,067 B  |
+| livekit (lazy)        | 133,372 B | min(135,000, 134,500) | **134,500 B (135,000)** | 1,128 B  |
+| livekitSession (lazy) | 23,008 B  | min(24,000, 24,500)   | 24,000 B (24,000)       | 992 B    |
+
+No budget was raised; two were lowered. Startup headroom is tight (394 B)
+ahead of B9-27. `Client/bundle-budgets.json` records the rule once and each
+figure in its note.
 
 **Startup.** The accepted B7 baseline is a Windows 11 desktop with
 `npm run tauri dev` (`docs/plans/b7-0-client-baseline-2026-09-19.md`): 598 ms to
@@ -236,7 +243,8 @@ in CI and is not re-run in this lane; recorded as a CI gate, not a result.
 - Journey J (native) runs only in `client-native` on Windows in CI; not observed
   on this host, so its matrix row is documented as pending that run.
 - The owner's OS 200 % zoom checks remain owner items where a lane lists them;
-  journey I covers the automatable 940×500 / 20 px reflow but not OS zoom.
+  journey I covers the automatable 940×500 / 20 px reflow and contrast, but
+  not OS zoom.
 - No new ledger finding was opened: the journeys exposed no defect. The one
   pre-existing limitation (a deleted message is not tombstoned live; the
   observer sees it gone on the next read) is existing accepted behaviour,
@@ -244,7 +252,8 @@ in CI and is not re-run in this lane; recorded as a CI gate, not a result.
 
 ## Validation commands
 
-From `Client/`, at the journey head:
+From `Client/`, at `66da915a` (the fullstack re-run of the review-round
+revision is pending `client-fullstack` CI):
 
 - `npx tsc -p tsconfig.e2e.json --noEmit` — the E2E specs typecheck.
 - `npx playwright test --config playwright.config.fullstack.ts tests/e2e/fullstack/b9-journeys.spec.ts --workers=1` — 9 passed.

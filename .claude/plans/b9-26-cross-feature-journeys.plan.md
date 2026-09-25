@@ -215,10 +215,10 @@ instruction.
   confinement. Runs in Windows CI; the manifest records it as **pending that
   run**, not desktop-qualified. Its automated ARIA/keyboard evidence stands in
   for the dropped manual screen-reader pass (owner 2026-09-24).
-- **Task 4** re-baselined the budgets at this base: MainPage 64,000 → 63,500 B,
-  livekit 135,000 → 134,500 B and livekitSession 24,000 → 23,500 B (each
-  measured + a small documented headroom; startup stayed 97,000 B, already the
-  tightest the ratchet rule allows). No budget was raised. The startup and
+- **Task 4** re-baselined the budgets at this base by one rule, new =
+  min(current, measured + 1,000 B rounded up to the next 500 B): MainPage
+  64,000 → 63,500 B and livekit 135,000 → 134,500 B; livekitSession stayed
+  24,000 B and startup 97,000 B (394 B headroom, tight ahead of B9-27). No budget was raised. The startup and
   memory baselines are the accepted B7 desktop figures, not measurable on this
   headless host; the automatable proxies (production bundle sizes and the
   keyed-reconciler interaction probe, `tests/unit/reconcile.test.ts`, 7 passed)

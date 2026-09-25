@@ -129,12 +129,12 @@ recovery-kit→logout→recovery, network cut→B9-25 notice→reconnect, refuse
 denials of the queue and another account's appeal, consent→acknowledge→
 revoke→evidence, and the integrated 940×500/keyboard/reduced-motion matrix. One
 native journey ([native/b9-journeys.spec.ts](../../Client/tests/e2e/native/b9-journeys.spec.ts))
-proves the external-content consent/broker join and destination confinement in
-the real Windows app; it is CI-only on this non-Windows host and **pending the
-`client-native` run**, not claimed. No production fix was required; the shared
+is written to prove the external-content consent/broker join and destination
+confinement in the real Windows app and is **pending the `client-native` run**;
+it is CI-only on this non-Windows host and not claimed. No production fix was required; the shared
 budgets were re-baselined downward (MainPage 64,000→63,500 B, livekit
-135,000→134,500 B, livekitSession 24,000→23,500 B; startup 96,606/97,000 B
-unchanged), never raised. Accessibility evidence is automated; the manual
+135,000→134,500 B; livekitSession 23,008/24,000 B and startup 96,606/97,000 B
+unchanged, by one min(current, measured + 1,000 B rounded up to 500 B) rule), never raised. Accessibility evidence is automated; the manual
 NVDA/Orca check is dropped (owner 2026-09-24).
 
 > **Drafted:** 2026-09-23. **Planning branch:** `docs/b9-unified-experience-plan`.
