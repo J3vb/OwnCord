@@ -814,11 +814,21 @@ service.
    - stable public IPv4/IPv6 with an eligible public-CA flow;
    - private LAN/offline with an OwnCord local CA and explicit device trust;
    - manual certificate mode for advanced owners.
+     _(deferred 2026-09-11 by owner decision; recorded at HP-6 as an accepted
+     limitation and moved to B11 by D-01, 2026-09-25: B6-3 – B6-5 were not built
+     for the beta. `tls.mode: "acme"` stays in the code, implemented but
+     unqualified, with renewal the owner's responsibility; a reverse proxy is the
+     recommended HTTPS path for a public domain, and no public-IP or offline TLS
+     story is claimed for the beta. The exit bullet and evidence below carry the
+     same narrowing.)_
 4. Keep reverse proxies optional. Validate direct port-forwarded operation and
    document blocked-port, CGNAT, hairpin-NAT, dynamic-IP, and firewall limits
    honestly.
 5. Protect certificate/account keys, persist renewal state, hot-reload
    certificates, renew with ample margin, and exercise expiry/rotation.
+   _(deferred 2026-09-11 by owner decision; moved to B11 by D-01, 2026-09-25 —
+   B6-5 was not built for the beta, and certificate rotation is exercised
+   against the supported self-signed mode only.)_
 6. Add the disabled-by-default optional browser-hosting switch and stable
    origin/path contract. B8 supplies the final signed client bundle.
 7. Rehearse alpha-to-beta database, attachment, configuration, credential, and
@@ -867,6 +877,11 @@ service.
 15. _(added 2026-08-28)_ R-09: the exact-SHA gate already runs at tag time
     (the `gate-evidence` job in `release.yml`, B1-7); `environment: release`
     lands in B2-0. B6 rehearses one tag against both before HP-6.
+    _(amended 2026-09-25 by B6-16: both are wired — `gate-evidence` verifies
+    the exact-SHA record and `environment: release` gates the docker push and
+    publish jobs behind the required reviewer, so R-09's phase is now
+    `B1/B6/B10`. The rehearsal itself is the first beta tag run, which is still
+    owed, and B6-12 stays in-progress until that run exists.)_
 16. _(added 2026-08-28; amended 2026-08-31)_ Add `GET /api/v1/server-info`
     with the browser-hosting flag alongside workstream 6's default-off
     hosting switch, so one endpoint answers "what is this server, and is
@@ -923,12 +938,19 @@ reverse-proxy paths.
   latency, resource, and failure measurements.
 - Backup/restore, disk pressure, certificate rotation, update, and rollback
   drills pass.
+  _(amended 2026-09-25, D-01: certificate rotation is exercised against the
+  supported self-signed mode; the public-CA/ACME rotation half moves to B11 with
+  B6-3 – B6-5.)_
 - Release inputs and outputs are traceable and signed.
 
 ### Required evidence
 
 - artifact and container install/boot matrix;
 - ACME staging, public-IP, local-CA, expiry, and rotation reports;
+  _(deferred with B6-3 – B6-5 (owner decision 2026-09-11; D-01 accepted
+  limitation 2026-09-25): no public-CA, public-IP or guided local-CA report
+  exists for the beta; the self-signed lifecycle and the recommended
+  reverse-proxy path are what HP-6 signs around. These reports move to B11.)_
 - network-mode integration matrix;
 - load-test dataset and reproducible commands;
 - upgrade/rollback/restore drill;
@@ -1343,23 +1365,23 @@ item text. **B11 is the beta-to-stable gate** that receives the moved work
 (items 2, 3, 11's moved half, 13 and 14); it reopens after B10 publishes the
 beta.
 
-| Item  | Verdict             | Note                                                                                                                                                                                                                                                                                                             |
-| ----- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1     | keep                | Required matrix on the RC SHA.                                                                                                                                                                                                                                                                                   |
-| 2     | moved               | Thirty consecutive green integration runs move to B11, the beta-to-stable gate.                                                                                                                                                                                                                                  |
-| 3     | moved               | The fourteen-day RC soak moves to B11, the beta-to-stable gate.                                                                                                                                                                                                                                                  |
-| 4     | keep                | In-place upgrade from alpha data and rollback. B6-8's rehearsal already runs both legs in CI before anything is signed or pushed (`.github/workflows/release.yml:550-562`).                                                                                                                                      |
-| 5     | keep                | Protocol-epoch re-run; not discussed, unchanged.                                                                                                                                                                                                                                                                 |
-| 6, 7  | keep                | Already narrowed to desktop clients, server artifacts, and Docker by the 2026-09-18 B8 deferral above; what remains after that narrowing is kept.                                                                                                                                                                |
-| 8     | reduced             | Reduced to one comparison run at the RC against B6-9's already-published 250/100/25 result, instead of reproducing the full profile.                                                                                                                                                                             |
-| 9     | keep                | Zero open P0/P1, zero unresolved advisory.                                                                                                                                                                                                                                                                       |
-| 10    | keep                | Version agreement, source snapshot, licenses, SBOM, provenance, checksums, signatures, update manifests, install/update/rollback; automated by B6-12 where true (`.github/workflows/release.yml`, SBOM/provenance/checksum/signing/update-manifest steps at lines 311, 632-633, 723-733, 815-820, 823, 889-903). |
-| 11    | reduced             | Kept, reduced to setup, security, privacy, operator, and recovery documentation; moderation, accessibility, support, feedback, and contribution documentation move to B11, the beta-to-stable gate.                                                                                                              |
-| 12    | keep                | Safe release notes and coordinated disclosure.                                                                                                                                                                                                                                                                   |
-| 13    | moved (with item 2) | Exists only to make item 2 countable; moves with it.                                                                                                                                                                                                                                                             |
-| 14    | moved (with item 3) | Soak hosts; moves with item 3.                                                                                                                                                                                                                                                                                   |
-| 15    | keep as written     | BPR-051's non-developer comprehension read. Confirmed at HP-9 (2026-09-25): run against the release PR's CI artifacts before the tag (see Q11), and record it on the R-08 release scorecard.                                                                                                                     |
-| HP-10 | keep                | Owner go/no-go.                                                                                                                                                                                                                                                                                                  |
+| Item  | Verdict             | Note                                                                                                                                                                                                                                                                                                                                                            |
+| ----- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | keep                | Required matrix on the RC SHA.                                                                                                                                                                                                                                                                                                                                  |
+| 2     | moved               | Thirty consecutive green integration runs move to B11, the beta-to-stable gate.                                                                                                                                                                                                                                                                                 |
+| 3     | moved               | The fourteen-day RC soak moves to B11, the beta-to-stable gate.                                                                                                                                                                                                                                                                                                 |
+| 4     | keep                | In-place upgrade from alpha data and rollback. B6-8's rehearsal already runs both legs in CI before anything is signed or pushed (the `upgrade-rehearsal` job in `.github/workflows/release.yml`).                                                                                                                                                              |
+| 5     | keep                | Protocol-epoch re-run; not discussed, unchanged.                                                                                                                                                                                                                                                                                                                |
+| 6, 7  | keep                | Already narrowed to desktop clients, server artifacts, and Docker by the 2026-09-18 B8 deferral above; what remains after that narrowing is kept.                                                                                                                                                                                                               |
+| 8     | reduced             | Reduced to one comparison run at the RC against B6-9's already-published 250/100/25 result, instead of reproducing the full profile.                                                                                                                                                                                                                            |
+| 9     | keep                | Zero open P0/P1, zero unresolved advisory.                                                                                                                                                                                                                                                                                                                      |
+| 10    | keep                | Version agreement, source snapshot, licenses, SBOM, provenance, checksums, signatures, update manifests, install/update/rollback; automated by B6-12 where true (`.github/workflows/release.yml`: the `verify-versions`, `release-server` SBOM, `release-server-docker` attestation, and `publish` source-snapshot/checksum/update-manifest/sign/attest steps). |
+| 11    | reduced             | Kept, reduced to setup, security, privacy, operator, and recovery documentation; moderation, accessibility, support, feedback, and contribution documentation move to B11, the beta-to-stable gate.                                                                                                                                                             |
+| 12    | keep                | Safe release notes and coordinated disclosure.                                                                                                                                                                                                                                                                                                                  |
+| 13    | moved (with item 2) | Exists only to make item 2 countable; moves with it.                                                                                                                                                                                                                                                                                                            |
+| 14    | moved (with item 3) | Soak hosts; moves with item 3.                                                                                                                                                                                                                                                                                                                                  |
+| 15    | keep as written     | BPR-051's non-developer comprehension read. Confirmed at HP-9 (2026-09-25): run against the release PR's CI artifacts before the tag (see Q11), and record it on the R-08 release scorecard.                                                                                                                                                                    |
+| HP-10 | keep                | Owner go/no-go.                                                                                                                                                                                                                                                                                                                                                 |
 
 **Objective:** prove one immutable release candidate satisfies the complete
 product, security, platform, upgrade, operations, and community contract before
@@ -1598,6 +1620,14 @@ row in [plans/README.md](README.md) is the status authority); B10 (beta
 qualification and publication) is next, and B11 is the beta-to-stable gate the
 moved B10 rows land in. The dated notes below are retained as historical
 execution evidence, not today's instruction to start B2/B3.
+
+_B6-16 final pass, 2026-09-25:_ B6-16 reconciled the register, traceability and
+this roadmap against what B6 shipped. The TLS block (workstreams 3 and 5,
+B6-3 – B6-5) is the owner's **accepted limitation D-01** — the built-in
+public-CA lifecycle is implemented but unqualified, a reverse proxy is the
+recommended HTTPS path, and those rows plus their ACME/public-IP/local-CA
+evidence move to B11. B6-1 stays `in-progress` and B6-12 stays `in-progress`:
+both await the first beta tag run, which is also the HP-6 rehearsal (D-02).
 
 _Audit update, 2026-09-06, at `61ac2b9`:_ B0–B4 remain accepted; B5-0..B5-9
 and B5-11 are merged, with B5-12's initial reconciliation also merged.

@@ -269,6 +269,90 @@ Three consequences worth knowing before you open a PR:
 
 - Squash merge, and a conventional commit subject on the squashed commit.
 
+## Release procedure
+
+This is the one end-to-end procedure for cutting a release. It supersedes the
+older per-phase notes, which named a moving tag and line numbers. Every step
+runs on `main` or against it; the order matters, because the release workflow
+fails closed on any missing input.
+
+1. **Reconcile `main` into `dev` first (only if the last release was squashed).**
+   A release PR that was squash-merged makes `dev` diverge from `main`, so
+   `git merge-tree origin/main origin/dev` conflicts. Precedent: #1425 for
+   `v1.2.0-alpha.4`. The reconciliation landed for this release as a real merge
+   commit, `#1809`/`07a11f9a` — one commit with `main` as a parent, not a
+   squash. Do it again whenever the divergence test reports conflicts.
+
+2. **Bump the three client manifests to the release version.** They must all
+   read the same version, because `release.yml`'s `verify-versions` job compares
+   each against the tag and fails the whole run on any mismatch:
+   - `Client/src-tauri/tauri.conf.json` (`version`),
+   - `Client/package.json` (`version`),
+   - `Client/src-tauri/Cargo.toml` (`version`).
+
+   For the first beta that version is **`2.0.0-beta.1`**, so the tag is
+   `v2.0.0-beta.1`. It sits above the published `v1.2.0-alpha.*` releases, which
+   is what keeps semver auto-update working for existing servers. This is a
+   release-time edit: do not land it ahead of the tag.
+
+3. **Put the release notes under the tag heading.** `release.yml` extracts this
+   tag's notes by finding the exact `## v2.0.0-beta.1` heading and stopping at
+   the next `## `, and it aborts the publish if that section is absent or empty.
+   In the normal flow the working notes live under `## Unreleased` and you
+   rename that heading to the tag; the beta's section is already written (RE-04
+   moved it to `## v2.0.0-beta.1` in this lane), so at tag time only confirm it
+   and start a fresh `## Unreleased` for the work that follows.
+
+4. **Flip the platform table and the alpha wording.** In `docs/quick-start.md`
+   the "Server binary / Linux ARM64" row changes from "Not published yet" to the
+   tag that publishes it. Flip the project-status wording (README badge and
+   text, `SECURITY.md`, `CLAUDE.md`, `AGENTS.md`, `PRD.md`) from alpha to beta;
+   the hobby-project disclaimer stays.
+
+5. **Open the release PR from `dev` into `main`.** Every CI job runs on a PR
+   into `main` (a legitimately skipped check would block the release, so the
+   classifier is bypassed). This is the first full Tauri build of the frozen
+   tree and the point at which the workflows carried from `dev` land on `main`,
+   so it is also where their schedules first register.
+
+6. **Merge the release PR with a merge commit.** Squash-merging `dev` into
+   `main` recreates the step-1 divergence at every release; a merge commit keeps
+   `dev` and `main` sharing history. Squash stays the rule for PRs into `dev`.
+
+7. **Tag on `main`.** Cut the tag (`v2.0.0-beta.1`) on the merge commit. The
+   release ruleset forbids deleting a tag, so a failed first tag run costs a
+   `beta.2`, not a rewrite. The beta stays a **full release**, not a
+   pre-release: `gh release create` is called without `--prerelease`, so
+   existing servers' `/releases/latest` updater still sees it.
+
+8. **Approve the two `environment: release` stops.** The `release-server-docker`
+   and `publish` jobs each wait on the required reviewer; record who approved
+   and when. Nothing is pushed to `ghcr.io` or published until both pass.
+
+9. **Verify the published assets off-runner.** Run the `deployment.md`
+   [Verifying a Download](deployment.md#verifying-a-download) commands from a
+   machine that is not the runner: checksums, minisign on the server assets,
+   and `gh attestation verify` for the files and the container image.
+   Record the **timestamped-signature exception** here: the Windows client
+   installers are **unsigned** (D-08, owner decision — code signing is declined
+   for the beta), so first launch shows the SmartScreen "Windows protected your
+   PC" prompt and the quick-start's note is the user-facing half of the
+   decision. The server assets and every provenance/SBOM attestation are still
+   signed and must verify.
+
+10. **Dispatch one `upgrade-rehearsal.yml` run** (`gh workflow run
+upgrade-rehearsal.yml --ref dev`) and record its run id. The workflow is
+    inert until it reaches `main`; this is its first registered run, and the
+    public drill log needs the owner's OK before dispatch.
+
+Two facts are easy to get wrong and are recorded here deliberately, by owner
+decision: `dev`→`main` release PRs use a **merge commit** (step 6, **D-13**);
+the release is a **full release, not a pre-release** (step 7, **D-14**). The
+major-version bump changes nothing about protocol compatibility: that is keyed
+on `protocol_epoch` (`protocol/schema.json`, still **1** for this beta), never on
+the version string, so a `2.x` client speaks the same epoch as the
+`1.2.0-alpha.*` releases and the epoch-1 fixtures keep replaying.
+
 ## Branch Naming
 
 - `feature/<name>` -- new features
