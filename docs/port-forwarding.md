@@ -69,7 +69,7 @@ guide's instructions touch:
 
 You do **not** need to expose `7880/TCP`: clients tunnel LiveKit signalling
 through OwnCord's own `:8443/livekit` proxy (see
-[deployment.md](deployment.md#reverse-proxy)). Forwarding it only exposes
+[deployment.md](deployment.md#reverse-proxy-topology)). Forwarding it only exposes
 LiveKit's API endpoint unnecessarily.
 
 **This is where port forwarding actually goes wrong.** Chat needs one TCP port
