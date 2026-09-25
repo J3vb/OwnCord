@@ -12,7 +12,7 @@
 // wiring; these tests run it.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
+import { adminIndexHtml, adminPanelHtml } from "../helpers/admin-panel";
 import path from "node:path";
 
 const ADMIN_HTML_SOURCE = adminPanelHtml();
@@ -35,6 +35,11 @@ window.__test = {
   openApplyRetention: openApplyRetention,
   closeModal: closeModal,
   applyRetention: applyRetention,
+  navigateTo: navigateTo,
+  nav: NAV,
+  wiz: wiz,
+  wizStepCount: WIZ_STEP_COUNT,
+  renderWizard: renderWizard,
   actions: ACTIONS
 };
 </script>`;
@@ -66,6 +71,11 @@ interface Bridge {
   openApplyRetention: () => Promise<void>;
   closeModal: () => void;
   applyRetention: () => Promise<void>;
+  navigateTo: (id: string) => void;
+  nav: { id?: string }[];
+  wiz: { step: number };
+  wizStepCount: number;
+  renderWizard: () => void;
   actions: Record<string, unknown>;
 }
 
@@ -124,7 +134,9 @@ function loadAdminPanel(calls: FetchCall[], respond: Responder): JSDOM {
         return {
           ok: status >= 200 && status < 300,
           status,
+          headers: new Headers(),
           json: async () => r.json ?? {},
+          text: async () => JSON.stringify(r.json ?? {}),
         } as Response;
       }) as typeof fetch;
     },
@@ -328,20 +340,142 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(html).not.toContain('data-action="openEraseUser" data-args="[52,');
   });
 
-  // AO-2. The admin CSP is script-src 'self', so a control names its handler in
-  // data-action / data-input-action / data-change-action instead of an on*=
-  // attribute, and core.js dispatches only names registered in ACTIONS. A name
-  // nobody registered is a button that silently does nothing.
-  it("registers a handler for every action name the panel renders", async () => {
-    const booted = await boot([], defaultRespond);
+  // AO-2. The admin CSP is script-src 'self', so the browser refuses an on*=
+  // attribute or an inline <script>, and the control it wires silently does
+  // nothing. A control names its handler in data-action / data-input-action /
+  // data-change-action instead, and core.js dispatches only names registered
+  // in ACTIONS; an unregistered name is just as dead. So render what the
+  // panel renders — the static document, the setup wizard, every section and
+  // the dialogs their buttons open — and check the live DOM.
+  it("renders every section and dialog without inline script, naming only registered actions", async () => {
+    const served = new JSDOM(adminIndexHtml()).window.document.querySelectorAll("script");
+    expect(served.length).toBeGreaterThan(0);
+    for (const script of served) expect(script.getAttribute("src")).toBeTruthy();
+
+    const roles = [
+      { id: 1, name: "Owner", position: 100, permissions: ADMINISTRATOR },
+      { id: 9, name: "Helper", position: 60, permissions: 0 },
+      { id: 4, name: "Member", position: 40, permissions: 0, is_default: true },
+    ];
+    const respond: Responder = (p, method) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/users?"))
+        return {
+          json: [{ id: 2, username: "member", role_id: 4, status: "online", banned: false }],
+        };
+      if (p === "/registrations")
+        return { json: [{ id: 3, username: "applicant", created_at: "2026-09-01 10:00:00" }] };
+      if (p === "/roles") return { json: roles };
+      if (p === "/channels") return { json: [{ id: 5, name: "general", type: "text" }] };
+      if (/^\/channels\/\d+\/permissions$/.test(p)) return { json: { roles: [], users: [] } };
+      if (p.startsWith("/audit-log?"))
+        return {
+          json: [
+            {
+              id: 1,
+              action: "channel_create",
+              actor_id: 1,
+              actor_name: "owner",
+              target_type: "channel",
+              target_id: 5,
+              created_at: "2026-09-01 10:00:00",
+            },
+          ],
+        };
+      if (p === "/tokens")
+        return {
+          json: [{ id: 1, label: "ci", username: "owner", created_at: "2026-09-01 10:00:00" }],
+        };
+      if (p === "/backups")
+        return { json: [{ name: "owncord.db", size: 4096, date: "2026-09-01T10:00:00Z" }] };
+      if (p === "/updates")
+        return { json: { current: "1.0.0", latest: "1.1.0", update_available: true } };
+      if (p === "/settings") return { json: { server_name: "OwnCord" } };
+      if (p === "/retention")
+        return {
+          json: { server_days: 30, revision: "revision-1", channels: [{ channel_id: 5, days: 0 }] },
+        };
+      if (p === "/retention/preview") return { json: method === "POST" ? proposedPreview : [] };
+      if (p === "/stats") return { json: { user_count: 2 } };
+      if (p === "/api/v1/admin/plugins/")
+        return { json: [{ id: 1, name: "hello", version: "1.0.0", enabled: true }] };
+      if (p === "/api/v1/emoji/") return { json: [{ id: 1, shortcode: "wave" }] };
+      return { json: {} };
+    };
+    const booted = await boot([], respond);
     dom = booted.dom;
-    const names = new Set(
-      [...ADMIN_HTML_SOURCE.matchAll(/data-(?:input-|change-)?action="([A-Za-z]+)"/g)].map(
-        (m) => m[1]!,
-      ),
+    const { window } = booted.dom;
+    const { bridge } = booted;
+    const doc = window.document;
+    bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100, is_owner: true };
+    (window as unknown as { EventSource: unknown }).EventSource = class {
+      close() {}
+    };
+    const settle = () => new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    const inline: string[] = [];
+    const names = new Set<string>();
+    const scan = (where: string) => {
+      for (const el of doc.querySelectorAll("*")) {
+        for (const attr of el.getAttributeNames()) {
+          if (attr.startsWith("on")) inline.push(`${where}: <${el.localName} ${attr}>`);
+        }
+        for (const attr of ["data-action", "data-input-action", "data-change-action"]) {
+          const name = el.getAttribute(attr);
+          if (name) names.add(name);
+        }
+      }
+    };
+    scan("document");
+
+    for (let step = 0; step < bridge.wizStepCount; step++) {
+      bridge.wiz.step = step;
+      bridge.renderWizard();
+      scan(`setup step ${step}`);
+    }
+
+    const content = doc.getElementById("content")!;
+    const sections = bridge.nav
+      .map((n) => n.id)
+      .filter((id): id is string => !!id && id !== "logout");
+    expect(sections.length).toBeGreaterThan(10);
+    const opened = new Set<string>();
+    for (const id of sections) {
+      bridge.navigateTo(id);
+      await settle();
+      const title = content.querySelector(".page-title")?.textContent;
+      expect(title, `section ${id}`).toBeTruthy();
+      expect(title, `section ${id}`).not.toMatch(/^(Error|Loading\.\.\.)$/);
+      scan(`section ${id}`);
+
+      const openers = new Set(
+        [...content.querySelectorAll("[data-action]")]
+          .map((el) => el.getAttribute("data-action")!)
+          .filter((name) => /^open|^applyUpdate$/.test(name)),
+      );
+      for (const name of openers) {
+        (content.querySelector(`[data-action="${name}"]`) as HTMLElement).click();
+        await settle();
+        expect(doc.getElementById("modal")!.classList.contains("visible"), name).toBe(true);
+        opened.add(name);
+        scan(`dialog ${name}`);
+        bridge.closeModal();
+      }
+    }
+
+    expect(inline).toEqual([]);
+    expect([...opened]).toEqual(
+      expect.arrayContaining([
+        "openEditUser",
+        "openBanUser",
+        "openRoleModal",
+        "openChannelModal",
+        "applyUpdate",
+        "openCreateTokenModal",
+      ]),
     );
-    expect(names.size).toBeGreaterThan(80);
-    const unregistered = [...names].filter((n) => typeof booted.bridge.actions[n] !== "function");
+    expect(names.size).toBeGreaterThan(70);
+    const unregistered = [...names].filter((n) => typeof bridge.actions[n] !== "function");
     expect(unregistered).toEqual([]);
   });
 

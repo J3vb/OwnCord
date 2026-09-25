@@ -6,6 +6,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"path"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -86,6 +87,12 @@ func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.
 		if info, err := fs.Stat(staticFS, name); err != nil || info.IsDir() {
 			http.NotFound(w, req)
 			return
+		}
+		switch path.Ext(name) {
+		case ".css":
+			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		case ".js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		}
 		http.ServeFileFS(w, req, staticFS, name)
 	})

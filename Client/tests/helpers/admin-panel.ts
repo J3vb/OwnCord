@@ -15,9 +15,14 @@ function asset(href: string): string {
   return readFileSync(path.join(ADMIN_STATIC, href.slice("/admin/".length)), "utf8");
 }
 
+/** index.html exactly as the server serves it. */
+export function adminIndexHtml(): string {
+  return readFileSync(path.join(ADMIN_STATIC, "index.html"), "utf8");
+}
+
 /** index.html with its stylesheet and scripts inlined. */
 export function adminPanelHtml(): string {
-  const html = readFileSync(path.join(ADMIN_STATIC, "index.html"), "utf8");
+  const html = adminIndexHtml();
   // Replacer functions, not replacement strings: the scripts contain `$&`.
   const inlined = html
     .replace(

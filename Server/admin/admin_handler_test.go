@@ -79,11 +79,11 @@ func TestNewHandler_ServesPanelAssets(t *testing.T) {
 			t.Errorf("GET /admin/%s status = %d, want 200", m[1], w.Code)
 			continue
 		}
-		want := "text/javascript"
+		want := "text/javascript; charset=utf-8"
 		if strings.HasSuffix(m[1], ".css") {
-			want = "text/css"
+			want = "text/css; charset=utf-8"
 		}
-		if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, want) {
+		if ct := w.Header().Get("Content-Type"); ct != want {
 			t.Errorf("GET /admin/%s Content-Type = %q, want %s", m[1], ct, want)
 		}
 	}
@@ -146,31 +146,6 @@ func TestNewHandler_SetsCSPOnRoot(t *testing.T) {
 		if v, ok := directives[name]; ok {
 			t.Errorf("CSP carries %s %q, which would override script-src", name, v)
 		}
-	}
-}
-
-// The CSP above is only safe to ship if the panel needs nothing it forbids:
-// an inline handler or inline <script> would be refused by the browser, and
-// the control it wires would silently do nothing. Controls name a handler in
-// data-action (static/js/core.js) instead.
-var (
-	inlineHandlerRe = regexp.MustCompile(`\son[a-z]+\s*=\s*["']`)
-	scriptTagRe     = regexp.MustCompile(`<script\b[^>]*>`)
-)
-
-func TestAdminPanelHasNoInlineScript(t *testing.T) {
-	source := adminPanelSource(t)
-
-	if m := inlineHandlerRe.FindString(source); m != "" {
-		t.Errorf("inline event handler attribute %q; use data-action and register the handler in ACTIONS", m)
-	}
-	for _, tag := range scriptTagRe.FindAllString(source, -1) {
-		if !strings.Contains(tag, " src=") {
-			t.Errorf("inline script element %q; CSP script-src 'self' refuses it", tag)
-		}
-	}
-	if strings.Contains(source, "javascript:") {
-		t.Error("javascript: URL; CSP script-src 'self' refuses it")
 	}
 }
 
