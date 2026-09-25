@@ -6,10 +6,64 @@
     overflow: hidden;
   }
 }
+
+/* The narrow-width drawer's backdrop and toggle. Both exist in the DOM at every
+   width; the media rule below is what makes them matter only below 800px, where
+   the sidebar itself collapses (WCAG 1.4.10 Reflow). */
+.sidebar-drawer-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--scrim);
+}
+.ch-sidebar-toggle {
+  display: none;
+}
+
 @media (max-width: 800px) {
-  .channel-sidebar,
   .unified-sidebar {
     width: 0;
     overflow: hidden;
+  }
+
+  .ch-sidebar-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast);
+  }
+  .ch-sidebar-toggle:hover {
+    background: var(--bg-hover);
+    color: var(--text-normal);
+  }
+
+  /* The drawer: the same sidebar element, taken out of flow and shown over the
+     chat area. The backdrop is fixed to the viewport and covers the app. Both
+     sit on the modal layer (100): the backdrop precedes the drawer, so the
+     drawer paints over it, and the dialogs and menus the drawer opens are
+     mounted on <body> after the app, so they paint over the drawer. The
+     composer's popovers (pickers.css) sit below this layer, and the pinned
+     panel closes when the drawer opens. */
+  .sidebar-drawer-backdrop.open {
+    display: block;
+  }
+  .unified-sidebar.drawer-open {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(280px, 85vw);
+    overflow: hidden;
+    z-index: 100;
+    box-shadow: var(--shadow-lg);
   }
 }

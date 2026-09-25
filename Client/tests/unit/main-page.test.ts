@@ -11,6 +11,13 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// jsdom has no matchMedia; the lazily-loaded sidebar drawer reads its
+// breakpoint from it. Wide: the drawer stays out of the way.
+vi.stubGlobal(
+  "matchMedia",
+  vi.fn(() => Object.assign(new EventTarget(), { matches: false, media: "" })),
+);
+
 // B9-8: this suite exercises content the viewer has already consented to;
 // the consent gate itself is proven in src/features/content-consent/external.test.ts.
 vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
@@ -221,7 +228,10 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        sidebarToggle: document.createElement("button"),
       },
+      sidebarToggle: document.createElement("button"),
+      closePinnedPanel: vi.fn(),
       searchCtrl: { open: vi.fn(), cleanup: vi.fn() },
       dmProfileSlot,
       children: [],
@@ -1045,7 +1055,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     }
   });
 
-  it("scopes DM profile notes to the connected host, like channel mutes and the NSFW gate (OC-0143)", () => {
+  it("scopes DM profile notes to the connected host, like channel mutes and the NSFW gate (OC-0143)", async () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(60, dmChannel(60, "dm-carol"));
@@ -1080,6 +1090,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
     chatAreaOpts.onToggleDmProfile();
+    // The panel loads on demand; wait for its import to mount it.
+    await vi.waitFor(() => {
+      expect(
+        capturedChatAreaRef.current!.dmProfileSlot.querySelector('[data-testid="dps-note"]'),
+      ).not.toBeNull();
+    });
 
     const noteEl = capturedChatAreaRef.current!.dmProfileSlot.querySelector(
       '[data-testid="dps-note"]',
@@ -1395,7 +1411,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
   });
 
-  it("keeps the open DM profile panel's status and name live, like the chat header does (OC-0309)", () => {
+  it("keeps the open DM profile panel's status and name live, like the chat header does (OC-0309)", async () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(70, dmChannel(70, "dm-bob"));
@@ -1425,6 +1441,10 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     chatAreaOpts.onToggleDmProfile();
 
     const slot = capturedChatAreaRef.current!.dmProfileSlot;
+    // The panel loads on demand; wait for its import to mount it.
+    await vi.waitFor(() => {
+      expect(slot.querySelector('[data-testid="dps-status"]')).not.toBeNull();
+    });
     const statusEl = slot.querySelector('[data-testid="dps-status"]') as HTMLElement;
     const nameEl = slot.querySelector('[data-testid="dps-username"]') as HTMLElement;
     expect(statusEl.textContent).toContain("Online");
@@ -1440,6 +1460,70 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     expect(statusEl.textContent).toContain("Offline");
     expect(nameEl.textContent).toBe("Bobby");
+  });
+
+  /** Mount the page on a DM with bob and return its profile toggle and slot. */
+  function mountOnDm(): { toggle: () => void; slot: HTMLElement } {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(70, dmChannel(70, "dm-bob"));
+      return { ...prev, channels: ch, activeChannelId: 70 };
+    });
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 70,
+          recipient: { id: 7, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 7, username: "bob", avatar: "", status: "online" }],
+          name: "bob",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
+    return {
+      toggle: () => chatAreaOpts.onToggleDmProfile(),
+      slot: capturedChatAreaRef.current!.dmProfileSlot,
+    };
+  }
+
+  /** Let the panel's lazy import (and anything it schedules) settle. */
+  async function settleDmProfileImport(): Promise<void> {
+    await import("@components/DmProfileSidebar");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  it("a close click while the DM profile panel is still loading leaves it closed", async () => {
+    const { toggle, slot } = mountOnDm();
+    toggle();
+    toggle();
+    await settleDmProfileImport();
+    expect(slot.querySelector('[data-testid="dps-status"]')).toBeNull();
+
+    // The dropped load does not wedge the toggle: the next click opens it.
+    toggle();
+    await vi.waitFor(() => {
+      expect(slot.querySelectorAll('[data-testid="dps-status"]')).toHaveLength(1);
+    });
+  });
+
+  it("the last of several quick DM profile clicks wins, with one panel at most", async () => {
+    const { toggle, slot } = mountOnDm();
+    toggle();
+    toggle();
+    toggle();
+    await settleDmProfileImport();
+    expect(slot.querySelectorAll('[data-testid="dps-status"]')).toHaveLength(1);
+
+    toggle();
+    expect(slot.querySelector('[data-testid="dps-status"]')).toBeNull();
   });
 });
 

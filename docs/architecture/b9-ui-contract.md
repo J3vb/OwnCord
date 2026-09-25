@@ -42,6 +42,16 @@ the owner on 2026-09-23:
 Disabled controls are exempt from contrast, as WCAG allows. Colour is never
 the only signal: an error says it is an error in words.
 
+At 800px or less (a 1280px window at 200 % zoom) the sidebar collapses to
+zero width. Every entry point that lives only there — channels and DMs, the
+requests inbox, the Moderation Center, Settings and My reports — must stay
+reachable: the header's menu button opens the existing `.unified-sidebar` as
+an overlay drawer, which closes on Escape, on an outside click and after
+choosing a destination, moves focus into the drawer on open and back to the
+button on close, and exposes `aria-expanded`. Above 800px nothing changes.
+`Client/tests/e2e/b9-responsive-nav.spec.ts` pins the keyboard and pointer
+paths at the 640×400 zoom viewport.
+
 ## Colour tokens
 
 `Client/src/styles/tokens.css` holds the dark defaults, which midnight shares
@@ -140,7 +150,8 @@ beside it) everywhere else. The `@font-face` is in `base.css`; font-src is
   focus to the opener on close.
   - Pass `ariaLabel` or `ariaLabelledBy` to name the dialog.
   - Pass `fallbackFocus` when the dialog can remove its own opener (deleting
-    the row that opened it). Otherwise focus drops to `<body>`.
+    the row that opened it) or the opener can turn `inert` (a sidebar control
+    once the narrow-width drawer closes). Otherwise focus drops to `<body>`.
 - Pending states keep focus where it is. Mark a busy button with
   `aria-busy="true"` and `aria-disabled="true"`, not `disabled`: disabling
   the focused button moves focus to `<body>`. Exception: the Settings
@@ -228,14 +239,13 @@ level selects, its Copy All, Clear Logs and Refresh buttons, and any log line
 holding an unbroken URL, token or hash no longer push `.settings-content` into a
 sideways scroll at 640 CSS px.
 
-Blocked on navigation: below 800 CSS px `responsive.css` collapses
-`.unified-sidebar` to zero width with no toggle. Channels stay reachable
-through the Ctrl+K quick switcher (`OverlayManagers.ts`), but DMs and the
-sidebar itself do not, and neither does any screen whose only entry point lives
-there. Those screens are `test.fixme`, each naming its entry point, until B8's
-responsive navigation lands: the Message Requests inbox and its Block confirm
-(B9-5, 6), My reports (the second half of B9-10), the Moderation Center
-queue, review, actions and ban confirm (B9-11, 12, 13, 14), the appeal review
-(B9-17), the signed-in Account pane (B9-20, 23; the user-bar Settings
-button), and the sidebar navigation half of B9-18 and B9-21. Their 200 %
-evidence is still open.
+Navigation at 200 %: below 800 CSS px `responsive.css` collapses
+`.unified-sidebar` to zero width, so the header's menu button opens it as the
+drawer above. That restores every entry point that lives only in the sidebar —
+the Message Requests inbox and its Block confirm (B9-5, 6), My reports (the
+second half of B9-10), the Moderation Center queue, review, actions and ban
+confirm (B9-11, 12, 13, 14), the appeal review (B9-17), the signed-in Account
+pane (B9-20, 23; the user-bar Settings button), and the sidebar navigation half
+of B9-18 and B9-21. `b9-zoom.spec.ts` reaches each of those screens through
+the drawer and runs the reflow audit on it, like every other screen, and
+`Client/tests/e2e/b9-responsive-nav.spec.ts` pins the drawer journey itself.

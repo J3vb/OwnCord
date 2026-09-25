@@ -183,9 +183,10 @@ export function enableRovingNavigation(
  * so call this before anything inside the dialog grabs focus.
  *
  * `fallback` names a safe target for when the opener is gone by close time (a
- * re-render replaced it, or the dialog deleted the row that opened it);
- * without one, focus would drop to <body> and a screen reader to the top of
- * the document.
+ * re-render replaced it, or the dialog deleted the row that opened it) or can
+ * no longer take focus (it sits in an `inert` subtree, such as the collapsed
+ * narrow-width sidebar); without one, focus would drop to <body> and a screen
+ * reader to the top of the document.
  */
 export function focusDialog(
   container: HTMLElement,
@@ -195,7 +196,11 @@ export function focusDialog(
   const firstFocusable = queryFocusable(container)[0];
   (firstFocusable ?? container).focus();
   return () => {
-    if (previous instanceof HTMLElement && previous.isConnected) {
+    if (
+      previous instanceof HTMLElement &&
+      previous.isConnected &&
+      previous.closest("[inert]") === null
+    ) {
       previous.focus();
       return;
     }

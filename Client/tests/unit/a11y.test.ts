@@ -244,6 +244,26 @@ describe("focusDialog", () => {
     expect(document.activeElement).not.toBe(outside);
   });
 
+  it("focuses the fallback when the opener is in an inert subtree by close time", () => {
+    const region = document.createElement("div");
+    const opener = document.createElement("button");
+    const fallback = document.createElement("button");
+    region.appendChild(opener);
+    container.append(region, fallback);
+    opener.focus();
+
+    const dialog = document.createElement("div");
+    applyDialogSemantics(dialog);
+    container.appendChild(dialog);
+    const restore = focusDialog(dialog, () => fallback);
+
+    // e.g. the narrow-width sidebar drawer closed while the dialog was open
+    region.setAttribute("inert", "");
+    restore();
+
+    expect(document.activeElement).toBe(fallback);
+  });
+
   it("focuses the fallback when the opener is gone by close time", () => {
     const opener = document.createElement("button");
     const fallback = document.createElement("button");

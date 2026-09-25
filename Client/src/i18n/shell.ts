@@ -205,6 +205,9 @@ export const shellText = defineCatalog("shell", {
   "status.customLabel": "Custom status",
   "status.change": "Change status",
 
+  "sidebar.open": "Open navigation",
+  "sidebar.close": "Close navigation",
+
   "quickSwitch.label": "Switch server",
   "quickSwitch.title": "Switch Server",
   "quickSwitch.subtitle": "You’ll disconnect from the current server.",

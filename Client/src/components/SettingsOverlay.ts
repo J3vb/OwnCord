@@ -36,6 +36,8 @@ import { createLogsTab } from "./settings/LogsTab";
 
 export interface SettingsOverlayOptions {
   onClose(): void;
+  /** Where focus goes on close when the opener is gone or cannot take focus. */
+  fallbackFocus?(): HTMLElement | null;
   /**
    * Change the password. Resolves with the server's partial-success body
    * when the password changed but the other sessions could not be revoked
@@ -252,7 +254,7 @@ export function createSettingsOverlay(
     // Move focus in only on the closed→open transition — a repeated show()
     // would otherwise capture an element inside the panel as the "opener".
     if (!wasOpen && panel !== null) {
-      restoreFocus = focusDialog(panel);
+      restoreFocus = focusDialog(panel, options.fallbackFocus);
     }
   }
 

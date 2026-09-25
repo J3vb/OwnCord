@@ -14,11 +14,11 @@
  * primary action reachable. One screenshot per screen is attached.
  *
  * The shell's global sidebar is collapsed to zero width below 800 CSS px by the
- * `@media (max-width: 800px)` rule (`src/styles/app/responsive.css`), with no
- * toggle. Channels stay reachable through the Ctrl+K quick switcher, but DMs,
- * the sidebar itself and every screen whose only entry point lives in it do
- * not. Designing responsive navigation is B8's workstream 6, so each of those
- * screens is `test.fixme`, naming its entry point, rather than rebuilt here.
+ * `@media (max-width: 800px)` rule (`src/styles/app/responsive.css`), and the
+ * chat header's menu button opens it as a drawer. Every screen whose only entry
+ * point lives in the sidebar (the sidebar itself, DMs and the requests inbox,
+ * My reports and the Account pane behind the user-bar Settings button, the
+ * Moderation Center) is reached through that drawer, as a zoomed user would.
  */
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect, test } from "./fixtures";
@@ -190,12 +190,11 @@ async function boot(page: Page, routes: Route[], dm = false): Promise<void> {
   await waitForWsReady(page);
 }
 
-/** Mark a screen whose only entry point sits in the collapsed sidebar. */
-function blockedOnNavigation(entryPoint: string): void {
-  test.fixme(
-    true,
-    `Blocked on responsive navigation (B8 workstream 6): the only entry point, ${entryPoint}, is inside .unified-sidebar, collapsed to zero width below 800 CSS px.`,
-  );
+/** Open the collapsed sidebar as a drawer with the chat header's menu button. */
+async function openDrawer(page: Page): Promise<void> {
+  const toggle = page.getByTestId("sidebar-toggle");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
 }
 
 function settingsTabs(page: Page): Locator {
@@ -246,8 +245,8 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
 
     test("the sidebar navigation stays reachable at 200 % zoom", async ({ page }, testInfo) => {
-      blockedOnNavigation("the sidebar itself (channel list and dm-entry)");
       await boot(page, [{ pattern: "/messages", status: 200, body: MOCK_MESSAGES }], true);
+      await openDrawer(page);
       await expectScreenReflows(
         page,
         {
@@ -294,7 +293,9 @@ test.describe("B9 OS 200 % zoom reflow", () => {
 
   test.describe("B9-5 / B9-6 message requests", () => {
     async function openInbox(page: Page): Promise<void> {
+      await openDrawer(page);
       await page.locator("[data-testid='dm-entry']").first().click();
+      await openDrawer(page);
       await page.locator("[data-testid='dm-requests-entry']").click();
       await page.locator("[data-testid='request-item']").first().waitFor();
     }
@@ -302,7 +303,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     test("the requests inbox fits and its decisions stay reachable at 200 % zoom", async ({
       page,
     }, testInfo) => {
-      blockedOnNavigation("dm-entry then dm-requests-entry");
       await boot(
         page,
         [
@@ -326,7 +326,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
 
     test("the request Block confirm fits at 200 % zoom", async ({ page }, testInfo) => {
-      blockedOnNavigation("dm-entry then dm-requests-entry");
       await boot(
         page,
         [
@@ -377,11 +376,11 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
 
     test("My reports in the Safety tab fits at 200 % zoom", async ({ page }, testInfo) => {
-      blockedOnNavigation("the user-bar Settings button then the Safety tab");
       await boot(page, [
         { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
         { pattern: "/api/v1/reports/mine", method: "GET", status: 200, body: MY_REPORTS },
       ]);
+      await openDrawer(page);
       await openSettings(page);
       await openSettingsTab(page, "Safety");
       const section = page.getByRole("region", { name: "My reports" });
@@ -399,6 +398,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     const QUEUE = [modRow(MINE, "assigned", 1, "harassment", "message")];
 
     async function openReport(page: Page): Promise<Locator> {
+      await openDrawer(page);
       await page.getByTestId("moderation-btn").focus();
       await page.keyboard.press("Enter");
       const center = page.getByTestId("mod-center");
@@ -410,11 +410,11 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     }
 
     test("the moderation queue fits at 200 % zoom", async ({ page }, testInfo) => {
-      blockedOnNavigation("moderation-btn");
       await boot(page, [
         { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
         { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
       ]);
+      await openDrawer(page);
       await page.getByTestId("moderation-btn").focus();
       await page.keyboard.press("Enter");
       const center = page.getByTestId("mod-center");
@@ -428,7 +428,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
 
     test("the moderation review and its actions fit at 200 % zoom", async ({ page }, testInfo) => {
-      blockedOnNavigation("moderation-btn");
       await boot(page, [
         { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
         { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
@@ -466,7 +465,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
 
     test("the ban confirm fits at 200 % zoom", async ({ page }, testInfo) => {
-      blockedOnNavigation("moderation-btn");
       await boot(page, [
         { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
         { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
@@ -495,13 +493,13 @@ test.describe("B9 OS 200 % zoom reflow", () => {
 
   test.describe("B9-17 appeal review", () => {
     test("the appeal decision form fits at 200 % zoom", async ({ page }, testInfo) => {
-      blockedOnNavigation("moderation-btn then the Appeals tab");
       await boot(page, [
         { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
         { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: [] },
         { pattern: APPEALS_Q, method: "GET", status: 200, body: APPEALS },
         { pattern: `${APPEALS_Q}/${HELD}`, method: "GET", status: 200, body: APPEAL_DETAIL },
       ]);
+      await openDrawer(page);
       await page.getByTestId("moderation-btn").focus();
       await page.keyboard.press("Enter");
       const center = page.getByTestId("mod-center");
@@ -523,8 +521,8 @@ test.describe("B9 OS 200 % zoom reflow", () => {
 
   test.describe("B9-20 / B9-23 account settings", () => {
     test("the account pane fits at 200 % zoom", async ({ page }, testInfo) => {
-      blockedOnNavigation("the user-bar Settings button");
       await boot(page, [{ pattern: "/messages", status: 200, body: MOCK_MESSAGES }]);
+      await openDrawer(page);
       await openSettings(page);
       await openSettingsTab(page, "Account");
       const panel = page.locator("[data-testid='settings-overlay'] .settings-panel");

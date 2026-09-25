@@ -166,7 +166,8 @@ export function createQuickSwitcherManager(
  * nulls the root MainPage handed out, but the pre-await root still points at
  * the now-detached node — mounting on it would create an instance whose
  * document-level listeners nothing ever tears down), catch -> log -> toast,
- * and `finally opening = false`.
+ * and `finally opening = false`. A close() during the fetch cancels that
+ * open: its result is dropped rather than mounted.
  */
 function createAsyncOverlayController<T>(opts: {
   readonly getRoot: () => HTMLDivElement | null;
@@ -181,8 +182,11 @@ function createAsyncOverlayController<T>(opts: {
 }): { open(): Promise<void>; close(): void; isOpen(): boolean } {
   let instance: MountableComponent | null = null;
   let opening = false;
+  let generation = 0;
 
   function close(): void {
+    generation++;
+    opening = false;
     if (instance !== null) {
       instance.destroy?.();
       instance = null;
@@ -194,17 +198,20 @@ function createAsyncOverlayController<T>(opts: {
     if (instance !== null || root === null || opening) return;
     if (opts.canOpen?.() === false) return;
     opening = true;
+    const gen = generation;
     try {
       const data = await opts.load();
+      if (gen !== generation) return;
       const liveRoot = opts.getRoot();
       if (liveRoot === null) return;
       instance = opts.build(data, liveRoot, close);
       instance.mount(liveRoot);
     } catch (err) {
+      if (gen !== generation) return;
       log.error(opts.errorLog, { error: String(err) });
       showToast(opts.errorToast, "error");
     } finally {
-      opening = false;
+      if (gen === generation) opening = false;
     }
   }
 

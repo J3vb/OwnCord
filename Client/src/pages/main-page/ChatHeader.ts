@@ -5,6 +5,7 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { messagingText } from "../../i18n/messaging";
+import { shellText } from "../../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -17,6 +18,11 @@ export interface ChatHeaderRefs {
   /** The DM call button. Hidden outside DMs — a guild voice channel is joined
    *  from the sidebar, and a text channel has nobody in particular to call. */
   readonly callBtn: HTMLButtonElement;
+  /**
+   * The narrow-width sidebar toggle. Hidden above 800px; visible below it,
+   * where the sidebar collapses. The drawer owns its `aria-expanded`.
+   */
+  readonly sidebarToggle: HTMLButtonElement;
 }
 
 export interface ChatHeaderOptions {
@@ -36,6 +42,21 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   refs: ChatHeaderRefs;
 } {
   const header = createElement("div", { class: "chat-header", "data-testid": "chat-header" });
+
+  // The narrow-width navigation toggle. Always in the DOM (the drawer owns the
+  // open state), but hidden by default and revealed by the <=800px media rule
+  // in responsive.css, together with the rule that collapses the sidebar.
+  const sidebarToggle = createElement("button", {
+    type: "button",
+    class: "ch-sidebar-toggle",
+    title: shellText("sidebar.open"),
+    "aria-label": shellText("sidebar.open"),
+    "aria-expanded": "false",
+    "aria-controls": "unified-sidebar",
+    "data-testid": "sidebar-toggle",
+  });
+  sidebarToggle.appendChild(createIcon("menu", 18));
+
   const hash = createElement("span", { class: "ch-hash" }, "#");
   const nameEl = createElement(
     "span",
@@ -103,8 +124,11 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   }
   appendChildren(tools, searchInput, callBtn, pinBtn);
 
-  appendChildren(header, nameGroup, divider, topicEl, tools);
-  return { element: header, refs: { hashEl: hash, nameEl, topicEl, callBtn } };
+  appendChildren(header, sidebarToggle, nameGroup, divider, topicEl, tools);
+  return {
+    element: header,
+    refs: { hashEl: hash, nameEl, topicEl, callBtn, sidebarToggle },
+  };
 }
 
 // ---------------------------------------------------------------------------
