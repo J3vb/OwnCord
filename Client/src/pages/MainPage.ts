@@ -71,7 +71,6 @@ import type { VideoModeController } from "./main-page/VideoModeController";
 import { createChannelController } from "./main-page/ChannelController";
 import type { ChannelController } from "./main-page/ChannelController";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
-import { createDmProfileSidebar } from "@components/DmProfileSidebar";
 import type { DmProfileData, DmProfileSidebarComponent } from "@components/DmProfileSidebar";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
 import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
@@ -81,7 +80,6 @@ import { startRingChime, stopRingChime } from "@lib/notifications";
 import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
 import { createChatArea } from "./main-page/ChatArea";
-import { createSidebarDrawer } from "./main-page/SidebarDrawer";
 import type { SidebarDrawer } from "./main-page/SidebarDrawer";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { NAVIGATION_DESTINATIONS } from "../features/navigation/destinations";
@@ -233,6 +231,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   let container: Element | null = null;
   let root: HTMLDivElement | null = null;
+  /** Set by destroy(), so a lazily-loaded controller that resolves after the
+   *  page is gone never mounts its listeners onto a dead tree. */
+  let tornDown = false;
 
   // Child components tracked for cleanup
   let children: MountableComponent[] = [];
@@ -265,6 +266,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  status/name live (see toggleDmProfile) -- null while the panel is
    *  closed. Always cleared alongside dmProfileSidebar itself. */
   let dmProfileUnsub: (() => void) | null = null;
+  /** Bumped by every open and every close. The lazily-loaded panel mounts only
+   *  when its import resolves with the epoch it started at, so a click during
+   *  the import (or a teardown) cannot mount a panel after a close. The panel
+   *  opens rarely (a DM header click), so its code stays out of the eager
+   *  bundle. */
+  let dmProfileEpoch = 0;
 
   // B9-4: the content view (Message Requests, Moderation) shown in place of
   // the chat column. Created in mount, once the chat column exists.
@@ -315,7 +322,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     presenceSender.send(status);
   }
 
-  /** Toggle the DM profile sidebar open/closed for the current DM partner. */
+  /** Toggle the DM profile sidebar open/closed for the current DM partner.
+   *
+   *  The panel's code is loaded on first open (it is opened only by a DM
+   *  header click, so it stays out of the eager MainPage chunk). The slot check
+   *  and the DM-mode check run synchronously, and the panel mounts once the
+   *  import resolves; a click during that fetch is ignored rather than opening
+   *  a second panel.
+   */
   function toggleDmProfile(): void {
     if (dmProfileSlot === null) return;
 
@@ -333,38 +347,49 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const profileUser = buildDmProfileUser(channelId);
     if (profileUser === null) return;
 
-    dmProfileSidebar = createDmProfileSidebar({
-      user: profileUser,
-      host: apiConfig.host ?? "",
-      onClose: () => {
-        closeDmProfile();
-      },
-    });
-    dmProfileSidebar.mount(dmProfileSlot);
+    const epoch = ++dmProfileEpoch;
+    void import("@components/DmProfileSidebar").then(
+      ({ createDmProfileSidebar }) => {
+        // A later open/close (or teardown) supersedes this import: drop it.
+        if (tornDown || epoch !== dmProfileEpoch || dmProfileSlot === null) return;
 
-    // Keep the panel's status and name live across presence/rename/nickname
-    // changes for as long as it stays open on this DM -- otherwise it is
-    // painted once from this open-time snapshot and never updated until
-    // re-mounted, leaving it disagreeing with the chat header it was opened
-    // from (which ChannelController.ts:621-638 already keeps live the same
-    // way). Torn down in closeDmProfile.
-    const recipientId = profileUser.id;
-    const refresh = (): void => {
-      const next = buildDmProfileUser(channelId);
-      if (next !== null) dmProfileSidebar?.update(next);
-    };
-    const unsubMembers = membersStore.subscribeSelector(
-      (s) => s.members.get(recipientId)?.status,
-      refresh,
+        dmProfileSidebar = createDmProfileSidebar({
+          user: profileUser,
+          host: apiConfig.host ?? "",
+          onClose: () => {
+            closeDmProfile();
+          },
+        });
+        dmProfileSidebar.mount(dmProfileSlot);
+
+        // Keep the panel's status and name live across presence/rename/
+        // nickname changes for as long as it stays open on this DM --
+        // otherwise it is painted once from this open-time snapshot and never
+        // updated until re-mounted, leaving it disagreeing with the chat
+        // header it was opened from (which ChannelController.ts:621-638
+        // already keeps live the same way). Torn down in closeDmProfile.
+        const recipientId = profileUser.id;
+        const refresh = (): void => {
+          const next = buildDmProfileUser(channelId);
+          if (next !== null) dmProfileSidebar?.update(next);
+        };
+        const unsubMembers = membersStore.subscribeSelector(
+          (s) => s.members.get(recipientId)?.status,
+          refresh,
+        );
+        const unsubDm = dmStore.subscribeSelector(
+          (s) => s.channels.find((c) => c.channelId === channelId),
+          refresh,
+        );
+        dmProfileUnsub = () => {
+          unsubMembers();
+          unsubDm();
+        };
+      },
+      () => {
+        // The panel could not load; a later click may retry.
+      },
     );
-    const unsubDm = dmStore.subscribeSelector(
-      (s) => s.channels.find((c) => c.channelId === channelId),
-      refresh,
-    );
-    dmProfileUnsub = () => {
-      unsubMembers();
-      unsubDm();
-    };
   }
 
   /**
@@ -392,6 +417,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   /** Close the DM profile sidebar if open. */
   function closeDmProfile(): void {
+    // Supersede any in-flight lazy open, so it cannot mount after this close.
+    dmProfileEpoch++;
     if (dmProfileUnsub !== null) {
       dmProfileUnsub();
       dmProfileUnsub = null;
@@ -622,10 +649,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // The narrow-width sidebar drawer (WCAG 1.4.10 Reflow): the header's menu
     // button opens the existing sidebar over the chat area below 800px. Built
     // after the sidebar is in `app`, so the backdrop shares their container.
-    sidebarDrawer = createSidebarDrawer({
-      sidebar: sidebar.sidebarWrapper,
-      toggle: chatAreaResult.sidebarToggle,
-      fallbackFocus: focusReachable,
+    // Loaded on demand: the drawer only matters below the 800px breakpoint,
+    // so its controller stays out of the eager MainPage chunk (bundle budget).
+    void import("./main-page/SidebarDrawer").then(({ createSidebarDrawer }) => {
+      if (tornDown) return;
+      sidebarDrawer = createSidebarDrawer({
+        sidebar: sidebar.sidebarWrapper,
+        toggle: chatAreaResult.sidebarToggle,
+        fallbackFocus: focusReachable,
+      });
     });
     unsubscribers.push(() => {
       sidebarDrawer?.destroy();
@@ -1111,6 +1143,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   function destroy(): void {
     log.info("MainPage destroying");
+    tornDown = true;
     try {
       // closeSettings() is otherwise only ever called from the overlay's own
       // onClose — a non-user-initiated unmount (401, ban, server shutdown)
