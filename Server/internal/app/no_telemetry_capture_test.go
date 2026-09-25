@@ -134,7 +134,7 @@ func TestNoAutomaticTelemetry_Capture(t *testing.T) {
 		InviteCode string `json:"invite_code"`
 	}
 	postJSONInto(t, client, base+"/admin/api/setup", "", map[string]any{
-		"username": "owner", "password": "OwnerPass1!x",
+		"username": "owner", "password": "OwnerPass1!x", "setup_token": a.runtime.SetupToken,
 	}, http.StatusCreated, &setup)
 	if setup.InviteCode == "" {
 		t.Fatal("setup returned no invite code")

@@ -1240,7 +1240,7 @@ func (d *drill) phaseR() error {
 // (D3's "restore drops newer data"), and 20 authenticated sockets watching for
 // the restart.
 func (d *drill) stepRFix(r *rState) ([]failure, error) {
-	token, err := runSetup(d.baseURL())
+	token, err := d.setup()
 	if err != nil {
 		return nil, d.annotate(err)
 	}
@@ -1881,7 +1881,7 @@ func (d *drill) phaseC() error {
 // overwritten with a file SQLite itself rejects, and the pre-restore safety
 // copy is the only thing standing between them and a dead install.
 func (d *drill) stepCCorruptBackup() ([]failure, error) {
-	token, err := runSetup(d.baseURL())
+	token, err := d.setup()
 	if err != nil {
 		return nil, d.annotate(err)
 	}
@@ -2156,7 +2156,7 @@ func (d *drill) phaseD() error {
 	}
 
 	s := &dStage{}
-	if s.token, err = runSetup(d.baseURL()); err != nil {
+	if s.token, err = d.setup(); err != nil {
 		return d.annotate(err)
 	}
 	if s.text, err = pickChannel(s.token, "text"); err != nil {
@@ -2574,6 +2574,25 @@ func (d *drill) awaitHealthyAgain() error {
 	return d.annotate(fmt.Errorf("/health still says %s after the space was given back, want 200 ok", last))
 }
 
+// setup runs the first-run wizard with the setup token the drill's server
+// printed at start-up.
+func (d *drill) setup() (string, error) {
+	var serverLog string
+	var err error
+	switch {
+	case d.container != nil:
+		serverLog, err = d.container.log()
+	case d.srv != nil:
+		serverLog, err = d.srv.log()
+	default:
+		err = errors.New("no server to read a setup token from")
+	}
+	if err != nil {
+		return "", err
+	}
+	return runSetup(d.baseURL(), serverLog)
+}
+
 // logText is everything the server has said, whichever leg wrote it.
 func (d *drill) logText() (string, error) {
 	if d.container != nil {
@@ -2832,7 +2851,7 @@ func (d *drill) phaseS() error {
 // saying the SFU is down, and the join working again after the supervisor's
 // first restart.
 func (d *drill) stepSSupervised(bin string) ([]failure, error) {
-	token, err := runSetup(d.baseURL())
+	token, err := d.setup()
 	if err != nil {
 		return nil, d.annotate(err)
 	}
@@ -2983,7 +3002,7 @@ func (d *drill) stepSExternalAbsent() ([]failure, error) {
 	if err := d.bootAt(dir, "S2.log", "OWNCORD_VOICE_LIVEKIT_URL=ws://127.0.0.1:1"); err != nil {
 		return nil, err
 	}
-	token, err := runSetup(d.baseURL())
+	token, err := d.setup()
 	if err != nil {
 		return nil, d.annotate(err)
 	}

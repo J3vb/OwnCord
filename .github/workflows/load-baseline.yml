@@ -438,9 +438,16 @@ jobs:
       - name: Seed owner, channels, invite and ${{ env.SEED_USERS }} users
         run: |
           BASE="$HTTP_BASE"
+          # The one-time setup token the server printed at start-up.
+          if [ "${MATRIX_LEG}" = "constrained" ]; then
+            SERVER_LOG=$(docker logs owncord-sut 2>&1)
+          else
+            SERVER_LOG=$(cat "$WORK/server.log")
+          fi
+          SETUP_TOKEN=$(printf '%s\n' "$SERVER_LOG" | sed -n 's/.*Setup token[[:space:]]*//p' | tail -n 1)
           TOKEN=$(curl -sk -X POST "$BASE/admin/api/setup" \
             -H 'Content-Type: application/json' \
-            -d '{"username":"loadadmin","password":"LoadTest123!Admin"}' | jq -r .token)
+            -d "$(jq -nc --arg t "$SETUP_TOKEN" '{username:"loadadmin",password:"LoadTest123!Admin",setup_token:$t}')" | jq -r .token)
           if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
             echo "::error::setup failed"
             exit 1
@@ -506,6 +513,8 @@ jobs:
             esac
             if [ $((i % 50)) -eq 0 ]; then echo "registered $i/${USERS:-250}"; fi
           done
+        env:
+          MATRIX_LEG: ${{ matrix.leg }}
 
       - name: Install k6
         run: |

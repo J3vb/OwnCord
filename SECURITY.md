@@ -117,10 +117,11 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
   recovery for 15 minutes. No administrator below the owner can reset another
   account's credentials.
 - The first-run setup endpoint (which creates the first Owner account) is
-  unauthenticated by necessity, but is gated by a `setup_completed` flag that
-  is written once and never cleared by the server, so an emptied users table
-  (via account deletion or erasure) does not reopen it to the next caller on
-  an allowed network.
+  unauthenticated by necessity, but requires the one-time setup token the
+  server prints to its own console at start-up, and is gated by a
+  `setup_completed` flag that is written once and never cleared by the
+  server, so an emptied users table (via account deletion or erasure) does
+  not reopen it to the next caller on an allowed network.
 
 ### Authorization
 

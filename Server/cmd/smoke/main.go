@@ -327,6 +327,12 @@ func (s *server) drain(phase string) error {
 	}
 }
 
+// log is everything the server has printed so far, stdout and stderr.
+func (s *server) log() (string, error) {
+	data, err := os.ReadFile(s.logPath)
+	return string(data), err
+}
+
 // annotate wraps a phase failure with the server's log, so a CI failure carries
 // the reason rather than only the symptom.
 func (s *server) annotate(phase string, cause error) error {

@@ -494,7 +494,7 @@ const WIZ_STEP_COUNT=6;
 function wizInit(defaults){
   wiz.defaults=defaults||null;wiz.step=0;wiz.skip=false;wiz.busy=false;
   const d=defaults||{};
-  wiz.data={username:'',password:'',confirm:'',
+  wiz.data={setup_token:'',username:'',password:'',confirm:'',
     server_name:d.server_name||'OwnCord Server',
     motd:(d.motd===undefined||d.motd===null)?'Welcome!':d.motd,
     registration_mode:d.registration_mode||'invite',
@@ -531,6 +531,7 @@ function renderWizard(){
     case 1:
       h+='<h2>Create your admin account</h2>'
         +'<p class="wiz-sub">This is the owner account for managing the server. Pick a strong password — this account can do everything.</p>'
+        +wizField('wizToken','Setup Token','<input class="form-input" id="wizToken" autocomplete="off" spellcheck="false" value="'+esc(d.setup_token)+'"><div class="wiz-hint">Printed in the server&#39;s start-up output (the terminal it runs in, <code>docker compose logs owncord</code>, or the service log). It proves you have access to the server itself.</div>')
         +wizField('wizUser','Username','<input class="form-input" id="wizUser" autocomplete="username" placeholder="Choose a username" value="'+esc(d.username)+'">')
         +wizField('wizPass','Password','<input class="form-input" id="wizPass" type="password" autocomplete="new-password" placeholder="Min 8 characters">')
         +wizField('wizConfirm','Confirm Password','<input class="form-input" id="wizConfirm" type="password" autocomplete="new-password" placeholder="Re-enter password">')
@@ -604,7 +605,7 @@ function wizCollect(){
   const g=id=>{const el=document.getElementById(id);return el?el.value:undefined};
   const d=wiz.data;
   switch(wiz.step){
-    case 1:d.username=(g('wizUser')||'').trim();d.password=g('wizPass')||'';d.confirm=g('wizConfirm')||'';break;
+    case 1:d.setup_token=(g('wizToken')||'').trim();d.username=(g('wizUser')||'').trim();d.password=g('wizPass')||'';d.confirm=g('wizConfirm')||'';break;
     case 2:d.server_name=(g('wizName')||'').trim();d.port=g('wizPort');d.tls_mode=g('wizTLS')||d.tls_mode;d.tls_domain=(g('wizDomain')||'').trim();break;
     case 3:{d.upload_max_size_mb=g('wizUpload');d.voice_quality=g('wizVoice')||d.voice_quality;const vd=document.getElementById('wizVoiceDl');if(vd)d.voice_auto_download=vd.classList.contains('on');break}
     case 4:{const t=document.getElementById('wizReg');if(t)d.registration_mode=t.value;d.motd=(g('wizMotd')||'').trim();break}
@@ -628,6 +629,7 @@ function wizNext(){
   const fail=msg=>{const e=document.getElementById('wizErr');if(e)e.textContent=msg};
   switch(wiz.step){
     case 1:
+      if(!d.setup_token)return fail('Enter the setup token from the server\'s start-up output.');
       if(!d.username||!d.password)return fail('Username and password are required.');
       if(d.password.length<8)return fail('Password must be at least 8 characters.');
       if(d.password!==d.confirm)return fail('Passwords do not match.');
@@ -652,7 +654,7 @@ async function wizFinish(){
   if(wiz.busy)return;wiz.busy=true;
   const btn=document.getElementById('wizNextBtn');if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Setting up…'}
   const d=wiz.data;
-  const body={username:d.username,password:d.password};
+  const body={setup_token:d.setup_token,username:d.username,password:d.password};
   if(!wiz.skip){
     body.wizard={server_name:d.server_name,motd:d.motd,registration_mode:d.registration_mode||'invite',
       port:Number(d.port),tls_mode:d.tls_mode,upload_max_size_mb:Number(d.upload_max_size_mb),

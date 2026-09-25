@@ -73,6 +73,22 @@ func printBanner(cfg *config.Config, ver string, tls bool, fingerprint string) {
 	_, _ = fmt.Fprint(os.Stderr, banner)
 }
 
+// printSetupToken writes the setup token to stderr beside the banner. It is
+// deliberately never passed to slog: the log buffer is streamed to the admin
+// panel and may be shipped elsewhere, and the token must stay on the console
+// of whoever started the server.
+func printSetupToken(token string) {
+	_, _ = fmt.Fprintf(os.Stderr, `   ─────────────────────────────────────────────
+    First-run setup is open. The setup wizard at /admin asks for
+    this token; it is valid until setup completes or the server
+    restarts.
+
+    Setup token  %s
+   ─────────────────────────────────────────────
+
+`, token)
+}
+
 // wsURL builds the WebSocket URL with the correct scheme.
 func wsURL(httpScheme, ip string, port int) string {
 	ws := "ws"
