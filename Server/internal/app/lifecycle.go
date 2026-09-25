@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	stdlog "log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -145,7 +146,7 @@ func (a *App) start() error {
 // The graceful shutdown that used to follow it inline is now the http stage's
 // close step, so it happens on the error path too.
 func (a *App) serve() error {
-	return serveAndWait(a.serveCtx, a.log, a.deps.Restart, a.srv, a.tlsCfg, a.addr, a.deps.Version)
+	return serveAndWait(a.serveCtx, a.log, a.deps.Restart, a.srv, a.ln, a.tlsCfg, a.addr, a.deps.Version)
 }
 
 // startDataDir creates the configured data directory and warns about the
@@ -403,10 +404,24 @@ func (a *App) startHTTP() error {
 		IdleTimeout:  120 * time.Second,
 		ErrorLog:     stdlog.New(io.Discard, "", 0), // suppress TLS handshake noise
 	}
+	// Shutdown closes only the listeners Serve has taken, so a later stage
+	// failing before serve() would otherwise leave the port bound. Registered
+	// before the http step so the reverse walk runs it after Shutdown.
+	a.onClose("listener", func(context.Context) error {
+		if a.ln != nil {
+			_ = a.ln.Close()
+		}
+		return nil
+	})
 	a.onClose("http", func(ctx context.Context) error {
 		return shutdownServers(ctx, a.log, a.srv, a.acmeSrv, a.hub)
 	})
-	return nil
+	// Bind here, not in serve(): a port that cannot be bound must fail start()
+	// before the previous binary is removed (REL-01).
+	return serveWithBindRetry(a.log, "server", func() (err error) {
+		a.ln, err = net.Listen("tcp", a.addr)
+		return err
+	})
 }
 
 // startSignals arms the shutdown context. The coordinator's context is the
