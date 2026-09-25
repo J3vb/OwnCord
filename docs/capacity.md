@@ -514,8 +514,18 @@ does not compete with the server it measures.
 
 Every number below comes from the **constrained** leg and from nothing else.
 
+> **Provenance note (2026-09-25).** These qualifying runs were dispatched from
+> measurement branches, not from `dev` or `main`: the `commit:` line in each
+> block is that branch's head, which is **not** an ancestor of `dev`/`main` and
+> so does not resolve in a checkout of either. The **workflow run id** in each
+> block is the resolvable handle — it names the branch, the commit and the run
+> logs on GitHub. The B10 release-candidate load run on a `dev`/`main` ancestor
+> (the comparison B10 item 8 asks for) is **pending at R6**; until it exists,
+> these branch runs are the only qualifying evidence, and they are published as
+> that. No unresolvable short SHA is presented as a release-revision citation.
+
 ```
-commit:          593c764b
+commit:          593c764b2d749a9415741211c01216d9d5da2153  (measurement branch feat/b6-9-published-capacity-profile; not on dev/main)
 date (UTC):      2026-09-12
 workflow run:    34701291805  (.github/workflows/load-baseline.yml)
 runner:          ubuntu-latest, 4 CPU / 16 GB host
@@ -589,13 +599,14 @@ movement is a few milliseconds, so the budgets are not sitting on the noise.
 ### The operational profiles
 
 The operational blocks below were re-made on 2026-09-23 from commit `4b2ea56b`
-(run 35856013841), after OC-0445 found that the 2026-09-16 operational figures
-had measured a phase-locked load generator rather than the server — the
-`self_signed` block says how. The restart and ceiling-search blocks are still
-the 2026-09-16 runs from commit `e57335c7`, on the branch that added them. Each
-block is filled from its own **constrained** leg and from nothing else, and the
-`tls off` block publishes as a delta against the `self_signed` one rather than
-on its own.
+(run 35856013841, on branch `fm/oc-0445-fable`), after OC-0445 found that the
+2026-09-16 operational figures had measured a phase-locked load generator rather
+than the server — the `self_signed` block says how. The restart and
+ceiling-search blocks are still the 2026-09-16 runs from commit `e57335c7`, on
+the branch that added them. None of these SHAs is an ancestor of `dev`/`main`;
+the run id is the resolvable handle. Each block is filled from its own
+**constrained** leg and from nothing else, and the `tls off` block publishes as
+a delta against the `self_signed` one rather than on its own.
 
 The budget rows missed under the restart drill are published as missed and are
 findings-ledger entries (OC-0446, OC-0447); neither was re-run on a bigger
@@ -606,7 +617,7 @@ corrected and the server unchanged.
 #### Operational, `tls.mode: self_signed`
 
 ```
-commit:          4b2ea56b
+commit:          4b2ea56bb9777c6a435b8eb6423d1293a7276230  (measurement branch fm/oc-0445-fable; not on dev/main)
 date (UTC):      2026-09-23
 workflow run:    35856013841  (.github/workflows/load-baseline.yml, profile=operational)
 job:             107164548694  (operational, constrained, tls self_signed)
@@ -713,7 +724,7 @@ run.**
 #### Operational, `tls.mode: off`
 
 ```
-commit:          4b2ea56b
+commit:          4b2ea56bb9777c6a435b8eb6423d1293a7276230  (measurement branch fm/oc-0445-fable; not on dev/main)
 date (UTC):      2026-09-23
 workflow run:    35856013841  (.github/workflows/load-baseline.yml, profile=operational)
 job:             107164548275  (operational, constrained, tls off)
@@ -794,7 +805,7 @@ remains `self_signed`.
 #### Restart under load
 
 ```
-commit:          e57335c7
+commit:          e57335c789e19b08b3302a68de1598353cf1578d  (measurement branch feat/b6-10-operational-measurements; not on dev/main)
 date (UTC):      2026-09-16
 workflow run:    35113950011  (.github/workflows/load-baseline.yml, profile=restart)
 job:             104854480908  (restart, constrained, tls self_signed)
@@ -898,7 +909,7 @@ equal-load comparison.
 #### Ceiling search
 
 ```
-commit:          e57335c7
+commit:          e57335c789e19b08b3302a68de1598353cf1578d  (measurement branch feat/b6-10-operational-measurements; not on dev/main)
 date (UTC):      2026-09-16
 workflow run:    35113953670  (.github/workflows/load-baseline.yml, profile=ceiling-search)
 job:             104854495119  (ceiling-search, constrained, tls self_signed)

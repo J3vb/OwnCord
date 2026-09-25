@@ -39,14 +39,17 @@ ownership, dependency automation — gets **at most a short block at the end**,
 and only when it changes something a contributor or fork holder must do
 (a moved directory, a renamed module, a new required command).
 
-## Unreleased
+## v2.0.0-beta.1
 
-User-visible: you can now recover your own account without an email server,
-two-factor sign-in survives a server restart, the operator chooses who may
-register, messages can be set to expire, deleting an account really deletes
-it, and a zoomed desktop window can still reach navigation. Not user-visible:
-the protocol carries a version number, and the server's internals were
-reorganised behind service boundaries.
+User-visible: the first public beta. You can now recover your own account
+without an email server, two-factor sign-in survives a server restart, the
+operator chooses who may register, messages can be set to expire, deleting an
+account really deletes it, first-time DMs arrive as Message Requests, reports
+and appeals flow through a permission-gated Moderation Center, adult content
+and external links wait for your consent, and a zoomed desktop window can still
+reach navigation. Not user-visible: the protocol carries a version number, the
+server's internals were reorganised behind service boundaries, and the desktop
+text was moved behind English catalogs ready for translation.
 
 ### Login & connection
 
@@ -62,9 +65,10 @@ reorganised behind service boundaries.
 - **A server now says what it is before you connect.** `GET /api/v1/server-info`
   returns the server name, the protocol epoch it speaks, and whether the owner
   has switched on browser-client hosting — so a client can tell it is too old
-  for a server without opening a connection and being turned away. No version
-  number is included, on this or any other endpoint that does not require
-  logging in.
+  for a server without opening a connection and being turned away. The hosting
+  switch exists and is off by default; the browser client itself is post-beta.
+  No version number is included, on this or any other endpoint that does not
+  require logging in.
 - A client too old for its server is told "update the client" on the connect
   screen, with the usual Update Now button — instead of failing in confusing
   ways. The saved login is kept, so the updated client signs back in by
@@ -315,6 +319,53 @@ reorganised behind service boundaries.
 - Per-user volume settings and DM notes saved by an older client are now
   carried across to this version instead of being left behind.
 
+### Message Requests
+
+- **First-time DMs arrive as Message Requests.** A stranger's first direct
+  message no longer lands in your inbox: it waits in a Message Requests list as
+  a text-only preview until you accept, ignore, delete or block it. Accepting is
+  what creates the contact — ignoring keeps the sender out of your normal DMs,
+  and blocking also files the request away. Only text is shown before you
+  accept, so an unsolicited attachment is never fetched.
+- You can mark a sender as trusted so their later messages skip the request
+  queue, and the same sender is recognised across your devices.
+
+### Moderation
+
+- **A permission-gated Moderation Center** brings reports, evidence and
+  decisions into one place. Members with the moderator role see the queue and
+  the authorized evidence; everyone else sees nothing, and the server enforces
+  that, not the panel.
+- **Report a message, user or attachment to your own server's moderators.**
+  Reporting is local to the server — nothing is sent anywhere central — and the
+  evidence snapshot is taken at report time so a later edit or delete cannot
+  change what the moderator reviews.
+- **Issue a warning, timeout, kick or ban from a report**, with the role
+  hierarchy enforced: you cannot act on someone at or above your own rank, on
+  yourself, or on the owner. Every action and status change is written to an
+  immutable audit history.
+- **Appeals.** A user who was warned or restricted can file an appeal from their
+  Safety tab, withdraw it, and follow its status; a moderator reviews and decides
+  it, and the decision is recorded.
+
+### Safety & consent
+
+- **NSFW channels wait for your acknowledgement.** An adult channel's content,
+  previews and attachments are not fetched or rendered until you acknowledge
+  them; acknowledging is per user, survives a restart, and can be revoked.
+- **External content is gated on consent before anything is requested.**
+  Link previews, GIF search and embedded media make no third-party request
+  until you consent for that server, and the desktop client fetches through a
+  local broker that confines the destination — so nothing is contacted, and no
+  destination leaked, before you agree.
+
+### Translation-ready text
+
+- **The desktop app's text now lives behind English catalogs**, with a
+  shrink-only scan that fails CI when a user-visible string is written outside
+  them. This is not a second language: it is the seam and the inventory a later
+  translation can build on, plus date, number and plural formatting helpers.
+
 ### Desktop UI
 
 - **A zoomed window can reach the sidebar again.** At 200 % zoom (or any
@@ -381,6 +432,12 @@ reorganised behind service boundaries.
   red fill colour.
 - The in-app **Reduce Motion** toggle now also stops the connect-page background
   pulse and the primary-button shimmer.
+- **Voice and media controls are keyboard-reachable and meet contrast targets.**
+  Mute, deafen, camera, screen-share and disconnect are operable with Tab and
+  Enter, announce their state, and use the accessible text colours.
+- **Message reading, composing and the overlays are keyboard- and
+  screen-reader-friendlier:** the message list and composer expose their roles
+  and labels, and dialogs keep focus inside and hand it back when they close.
 - **Settings > Logs no longer scrolls sideways at 200 % zoom.** Its filter and
   level controls and its Copy All, Clear Logs and Refresh buttons wrap onto
   more than one row, and a log line with a long unbroken URL, token or hash
