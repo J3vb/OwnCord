@@ -237,14 +237,13 @@ its Copy All, Clear Logs and Refresh buttons push `.settings-content` into a
 sideways scroll at 640 CSS px. The spec records it as `test.fail` until the
 row is fixed.
 
-Blocked on navigation: below 800 CSS px `responsive.css` collapses
-`.unified-sidebar` to zero width with no toggle. Channels stay reachable
-through the Ctrl+K quick switcher (`OverlayManagers.ts`), but DMs and the
-sidebar itself do not, and neither does any screen whose only entry point lives
-there. Those screens are `test.fixme`, each naming its entry point, until B8's
-responsive navigation lands: the Message Requests inbox and its Block confirm
-(B9-5, 6), My reports (the second half of B9-10), the Moderation Center
-queue, review, actions and ban confirm (B9-11, 12, 13, 14), the appeal review
-(B9-17), the signed-in Account pane (B9-20, 23; the user-bar Settings
-button), and the sidebar navigation half of B9-18 and B9-21. Their 200 %
-evidence is still open.
+Navigation at 200 %: below 800 CSS px `responsive.css` collapses
+`.unified-sidebar` to zero width, so the header's menu button opens it as the
+drawer above. That restores every entry point that lives only in the sidebar —
+the Message Requests inbox and its Block confirm (B9-5, 6), My reports (the
+second half of B9-10), the Moderation Center queue, review, actions and ban
+confirm (B9-11, 12, 13, 14), the appeal review (B9-17), the signed-in Account
+pane (B9-20, 23; the user-bar Settings button), and the sidebar navigation half
+of B9-18 and B9-21. Their 200 % evidence is the drawer journey in
+`Client/tests/e2e/b9-responsive-nav.spec.ts`; the corresponding screens in
+`b9-zoom.spec.ts` are switched on once the drawer lands.
