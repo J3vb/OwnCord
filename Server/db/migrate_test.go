@@ -23,6 +23,7 @@ package db_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -831,5 +832,49 @@ func TestMigrate_022CreatesMentionSchema(t *testing.T) {
 	}
 	if n != 1 {
 		t.Error("messages.mentions_everyone column not added")
+	}
+}
+
+// TestMigrate_RefusesSchemaAhead is REL-02: a database migrated by a NEWER
+// server records migrations this binary does not carry, and MigrateFS must
+// refuse to run rather than serve on a schema it has never seen.
+func TestMigrate_RefusesSchemaAhead(t *testing.T) {
+	database := openMemory(t)
+	fsys := simpleFS("001_a.sql", "CREATE TABLE a (id INTEGER);")
+	if err := db.MigrateFS(database, fsys); err != nil {
+		t.Fatalf("first MigrateFS: %v", err)
+	}
+	// Simulate a newer server having recorded a migration we do not carry.
+	if _, err := database.ExecContext(context.Background(),
+		"INSERT INTO schema_versions (version) VALUES ('054_from_newer.sql')"); err != nil {
+		t.Fatalf("seed newer version: %v", err)
+	}
+
+	err := db.MigrateFS(database, fsys)
+	if err == nil {
+		t.Fatal("MigrateFS accepted a schema from a newer server")
+	}
+	if !errors.Is(err, db.ErrSchemaAhead) {
+		t.Errorf("err = %v, want ErrSchemaAhead", err)
+	}
+	if !strings.Contains(err.Error(), "054_from_newer.sql") {
+		t.Errorf("err = %q, want it to name the unknown migration", err)
+	}
+}
+
+// TestMigrate_SchemaAheadAllowsRollbackRowsAbsent locks the other half: a
+// database whose schema_versions rows all exist in the binary still migrates
+// (the supported manual rollback deletes its own row, so no false refusal).
+func TestMigrate_SchemaAheadAllowsKnownMigrationsOnly(t *testing.T) {
+	database := openMemory(t)
+	fsys := simpleFS(
+		"001_a.sql", "CREATE TABLE a (id INTEGER);",
+		"002_b.sql", "CREATE TABLE b (id INTEGER);",
+	)
+	if err := db.MigrateFS(database, fsys); err != nil {
+		t.Fatalf("MigrateFS: %v", err)
+	}
+	if err := db.MigrateFS(database, fsys); err != nil {
+		t.Fatalf("re-run with no unknowns: %v", err)
 	}
 }

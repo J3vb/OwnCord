@@ -191,11 +191,11 @@ Beta is **desktop-only**. The Tauri window has a hard minimum size of **940×500
 
 The only `@media` width breakpoints in `Client/src/styles/`:
 
-| Breakpoint          | File                 | Effect                                                              |
-| ------------------- | -------------------- | ------------------------------------------------------------------- |
-| `max-width: 1200px` | `app/responsive.css` | collapses `.member-list` to width 0                                 |
-| `max-width: 800px`  | `app/responsive.css` | collapses `.channel-sidebar`/`.unified-sidebar` to width 0          |
-| `max-width: 700px`  | `login.css`          | narrows `.server-panel` and `.form-container` on the connect screen |
+| Breakpoint          | File                 | Effect                                                                                                                                                                         |
+| ------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `max-width: 1200px` | `app/responsive.css` | zeroes `.member-list` padding and clips overflow; the width stays 100% (a more specific `.sidebar-members-section .member-list` rule wins), so it does not collapse to width 0 |
+| `max-width: 800px`  | `app/responsive.css` | collapses `.channel-sidebar`/`.unified-sidebar` to width 0                                                                                                                     |
+| `max-width: 700px`  | `login.css`          | narrows `.server-panel` and `.form-container` on the connect screen                                                                                                            |
 
 `prefers-reduced-motion: reduce` queries exist in `login.css`, `app/chat-area.css` and `app/profile-popup.css` to zero out specific animations; the app-wide mechanism is the `.reduced-motion` class (see [Accessibility](#accessibility)), not per-file media queries.
 

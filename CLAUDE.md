@@ -13,7 +13,7 @@ CI fails on drift, and the next generator run silently discards your edit.
 
 | Generated                                                                             | Source of truth                                                         | Workflow                                              |
 | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------- |
-| `Server/db/dbgen/`                                                                    | `Server/db/queries/*.sql`, `Server/migrations/`                         | `db-change` skill                                     |
+| `Server/db/dbgen/`                                                                    | `Server/db/queries/sqlite/*.sql`, `Server/migrations/`                  | `db-change` skill                                     |
 | `Server/ws/message_types.go` **and** `Client/src/lib/protocolTypes.ts`                | `protocol/schema.json`                                                  | `protocol-change` skill                               |
 | `gendocs:*` blocks in `docs/api.md`, `docs/schema.md`, `docs/server-configuration.md` | `Server/api/router.go`, `Server/migrations/`, `Server/config/config.go` | `cd Server && go run -tags otel,wazero ./cmd/gendocs` |
 
@@ -39,10 +39,12 @@ scratch and stays local.
 
 Optional command-line tools that make a task cheaper. Install the ones you need
 — none is required to build or test OwnCord. The last four are also CI checks
-(`.github/workflows/ci.yml`), gated by the change selector: `workflow-lint` on a
-`.github/**` change, `supply-chain` on a manifest, lockfile, `osv-scanner.toml`
-or `deny.toml` change. Each fails closed on a new finding, so run the matching
-one locally before pushing that kind of change.
+(`.github/workflows/ci.yml`), and each fails closed on a new finding: actionlint
+runs on every PR (Repository Hygiene); zizmor runs when `.github/**`,
+`scripts/**` or another shared CI input changes; osv-scanner and cargo-deny run
+when a manifest, a lockfile, `osv-scanner.toml` or `Client/src-tauri/deny.toml`
+changes (`scripts/ci-select.mjs`). Run the matching one locally before pushing
+that kind of change.
 
 | Tool                                                       | Reach for it when                                                                       | Install / run                                                                                                                              |
 | ---------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |

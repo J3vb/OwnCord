@@ -521,7 +521,7 @@ jobs:
       - name: Oxlint (fast correctness checks)
         run: npx oxlint --deny-warnings src/
 
-      - name: Import cycles (ceiling 29, B7-10 lowers it)
+      - name: Import cycles (no cycles allowed)
         run: npm run lint:cycles
 
       - name: TypeScript check

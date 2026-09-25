@@ -9,7 +9,7 @@ Production deployment guide for OwnCord server on Windows and Linux.
 - **Go 1.26+** (only if building from source)
 - **LiveKit Server** binary (only if enabling voice/video) -- see [LiveKit Setup](livekit-setup.md)
 - Required port: `8443` (OwnCord HTTPS/WebSocket)
-- Additional ports for voice/video: `7880/TCP`, `7881/TCP`, `50000-60000/UDP`
+- Additional ports for voice/video: `7881/TCP`, `50000-60000/UDP` (`7880/TCP` is LiveKit's own API endpoint and is not needed — remote clients tunnel signalling through `/livekit`)
 - Additional port for ACME TLS: `80/TCP`
 
 ## Building from Source
@@ -66,7 +66,7 @@ replaced by a new container that finds the old data intact.
 
 - Docker Engine 24+ and Docker Compose v2
 - `linux/amd64` or `linux/arm64` host
-- Ports available: `8443` (chat), `7880-7881` TCP, `50000-60000` UDP (LiveKit media)
+- Ports available: `8443` (chat), `7881` TCP, `50000-60000` UDP (LiveKit media)
 
 ### Health and privilege
 
@@ -225,7 +225,13 @@ in its header comments. The important choices it encodes:
   supervisors.
 - `ReadWritePaths=/opt/owncord` under `ProtectSystem=strict` — the install
   directory must stay writable or the admin panel's self-update (which
-  renames the new binary into place) breaks.
+  renames the new binary into place) breaks. `ProtectSystem=strict` mounts
+  the rest of the filesystem read-only, so **every directory the server
+  writes to outside `/opt/owncord` must be added to `ReadWritePaths` as
+  well** — most commonly the off-disk `backup.dir` or `upload.storage_dir`
+  documented below. Without that line, `MkdirAll` and `VACUUM INTO` fail with
+  `EROFS`, so manual, scheduled and pre-restore backups all fail under the
+  shipped unit. Example: `ReadWritePaths=/mnt/backup-disk/owncord`.
 - `AmbientCapabilities=CAP_NET_BIND_SERVICE` — only needed for
   `tls.mode: acme`, which binds :80 for HTTP-01 challenges as a non-root
   user.
@@ -533,6 +539,12 @@ backup:
   dir: "/mnt/backup-disk/owncord"
 ```
 
+Under the shipped systemd unit, add that directory to the unit's
+`ReadWritePaths` too (see
+[Running as a Linux Service](#running-as-a-linux-service-systemd)): with
+`ProtectSystem=strict` the rest of the filesystem is read-only for the
+service, and a backup to a path the unit has not allowed fails.
+
 Every backup is verified with SQLite's `integrity_check` right after it is
 written (a failed backup is removed, never listed), and again before a
 restore is allowed to overwrite the live database.
@@ -616,9 +628,13 @@ Measured, because both halves are easy to assume the wrong way round
 
 ## Storage growth
 
-Everything the server writes lives under `server.data_dir` (default `data/`,
-default `./data` beside the binary). What each path holds, what bounds it and
-what — if anything — ever deletes it:
+Most of what the server writes lives beside the binary under `data/` by
+default, but **`server.data_dir` is not the root of all of it** (REL-04): it
+holds the key files (`totp.key`, `erasure.key`, `push_vapid.key`), the erasure
+marker store and the managed LiveKit binary, while `database.path`,
+`upload.storage_dir`, `backup.dir` and the TLS `cert_file`/`key_file` each have
+their own independent `data/...` default. What each path holds, what bounds it
+and what — if anything — ever deletes it:
 
 | Path                                        | Written by                                                             | Bounded by                                                                                                         | Pruned by                                                                                                                                         |
 | ------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -658,10 +674,14 @@ Four facts the table cannot carry:
 An upgrade swaps the binary (or the image) under an install directory that
 nothing else touches. A **rollback is restore-then-downgrade**: put the
 pre-upgrade copy back, then run the old version on it. Migrations are
-forward-only. There is no down-migration and no supported way to run an older
-binary against a database a newer one has already migrated — doing it anyway
-is how you lose the database, not how you go back. The copy you take before
-upgrading is therefore the only rollback that exists.
+forward-only. A full down-migration is not a supported upgrade path — the
+`Server/rollback/*.down.sql` reversals exist only for rehearsing a rollback of
+a specific migration and are run by hand (see `Server/rollback/README.md`).
+There is no supported way to run an older binary against a database a newer
+one has already migrated; the server refuses to start on such a schema rather
+than risk it, because doing it anyway is how you lose the database, not how you
+go back. The copy you take before upgrading is therefore the only rollback that
+exists.
 
 ### Before upgrading: take the archive
 
@@ -1166,15 +1186,17 @@ Applying an update runs in this order:
    [Server Configuration](server-configuration.md)). Normal teardown and the
    emergency restart backstop share one handoff, so only one replacement is
    launched. The backstop also waits for the managed LiveKit process to exit.
-5. The new process removes `.old`, retrying briefly while Windows finishes
-   releasing the predecessor's executable file.
+5. Once every start-up stage has come up — data dir, TLS, database, migrations,
+   and the rest — the new process removes `.old`, retrying briefly while
+   Windows finishes releasing the predecessor's executable file. A start-up
+   stage that fails before then leaves `.old` in place.
 6. That removal is the only recovery start-up performs. A new process does not
-   put `.old` back if the installed binary turns out to be broken, and it does
-   not delete a stale `.new` left by an interrupted download — staging refuses
-   to write through an existing `.new`, and the next update attempt removes it
-   before downloading. If the server dies between step 2 and step 4, the
-   previous binary is still beside the installation path as `.old` until a
-   successor reaches step 5; restoring it is a manual rename.
+   put `.old` back if the installed binary turns out to be broken after it has
+   started serving, and it does not delete a stale `.new` left by an interrupted
+   download — staging refuses to write through an existing `.new`, and the next
+   update attempt removes it before downloading. If the server dies between
+   step 2 and step 5, the previous binary is still beside the installation path
+   as `.old`; restoring it is a manual rename.
 
 #### If the update fails
 
@@ -1188,8 +1210,11 @@ then `update_applied` or `update_failed` (see
   if it persists compare your version against the release page.
 - **The rotation succeeded and the server died before or during the handoff**
   — the previous binary is still beside the installation path as `.old` until
-  a successor's step 5 removes it. If the new one never boots, put `.old`
-  back by hand (rename it over the broken binary) and start.
+  a successor passes its start-up stages. If the new one never boots, put
+  `.old` back by hand (rename it over the broken binary) and start. This is a
+  rollback of the binary only: if the failed start was a migration, the
+  database has already moved forward, and an older binary refuses to start on
+  it rather than corrupting it (restore the pre-upgrade database first).
 - **Docker refuses the whole flow** — the panel answers `503
 CONTAINER_DEPLOYMENT` because the running binary is image content; the way
   back is the image tag (`docker compose pull && docker compose up -d`).
@@ -1292,9 +1317,12 @@ only the rows their instructions need.
 | ------------- | -------- | ------------------------------------------------- |
 | `8443`        | TCP      | HTTPS server (configurable via `server.port`)     |
 | `80`          | TCP      | ACME HTTP-01 challenge (only if `tls.mode: acme`) |
-| `7880`        | TCP      | LiveKit server (WebSocket signaling)              |
 | `7881`        | TCP      | LiveKit server (RTC/TURN over TCP)                |
 | `50000-60000` | UDP      | LiveKit WebRTC media (ICE candidates)             |
+
+`7880/TCP` (LiveKit's own WebSocket/REST API) is **not** in the required set:
+the server proxies signalling to clients at `:8443/livekit`, so only clients
+that reach LiveKit directly need it.
 
 For remote access, see the [Port Forwarding Guide](port-forwarding.md) or
 [Tailscale Guide](tailscale.md). The port-forwarding guide also covers the

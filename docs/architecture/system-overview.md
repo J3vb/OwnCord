@@ -37,7 +37,7 @@ flowchart LR
     WSP -->|"WSS, fingerprint-pinned"| HUB
     LKP -->|"TLS, fingerprint-pinned"| LK
     WV -->|"admin panel (browser)"| ADM
-    HUB <-->|"webhooks + server SDK"| LK
+    HUB <-->|"server SDK (webhooks: operator opt-in)"| LK
     RTR --> DBF
     HUB --> DBF
     RTR --> UPS
