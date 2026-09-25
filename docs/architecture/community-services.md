@@ -798,10 +798,12 @@ Every **other** gap this document names is one of:
   powers, the client-side preview exposure, push delivery metadata.
 
 Two pre-existing private items touch these services: **SEC-03** (bounded
-per-response and aggregate preview/media reads), which B5-1 **has now closed
-for the server**, and **SEC-04** (durable storage quotas and disk headroom),
-which B5-2 still owes; decision 12 re-tags SEC-04 to B5 and decision 14
-caveats SEC-03's client half. Both have public owners in the register.
+per-response and aggregate preview/media reads), closed in both halves — B5-1
+for the server and the B7-16 desktop broker for the client, per decision 2 —
+and **SEC-04** (durable storage quotas and disk headroom), which B5-2 **built**
+(`user_storage`, `server.min_free_disk_mb` floor, `507` codes) and the owner
+**closed on 2026-09-24 without publishing an advisory**. Both have public owners
+in the register.
 
 **Corrections to other documents, found by verifying against the tree.** None
 is a weakness; each was a document that had drifted.

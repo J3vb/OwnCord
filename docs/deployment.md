@@ -607,19 +607,34 @@ both read-only to any other administrator:
   schedule can never delete your last copy, and it never removes the
   `pre_restore_*` safety copies — delete those by hand.
 
-External scheduling still works if you prefer it — e.g. Linux cron:
+External scheduling still works if you prefer it, but the admin API accepts
+**Bearer tokens only** — there is no cookie session for it — so the job needs an
+API token first. Mint one on the server and keep the raw value, because it is
+printed once and never recoverable:
 
 ```bash
-# Nightly at 03:00 via an admin API token
+# On the server host. Defaults to the owner account, no expiry; --expires 720h
+# or --label for a managed one.
+./chatserver token create --label backup
+# prints the raw token ONCE — store it now, it is never recoverable
+```
+
+Put it in `OWNCORD_TOKEN` and schedule the call. Linux cron:
+
+```bash
+# Nightly at 03:00 via the admin API token
 0 3 * * * curl -sk -X POST -H "Authorization: Bearer $OWNCORD_TOKEN" https://localhost:8443/admin/api/backup
 ```
 
-or Windows Task Scheduler with PowerShell:
+Windows Task Scheduler with PowerShell — same Bearer header, not a cookie:
 
 ```powershell
-$headers = @{ "Cookie" = "session=<admin-session-token>" }
+$headers = @{ "Authorization" = "Bearer $env:OWNCORD_TOKEN" }
 Invoke-RestMethod -Uri "https://localhost:8443/admin/api/backup" -Method POST -Headers $headers -SkipCertificateCheck
 ```
+
+Manage tokens with `./chatserver token list` and
+`./chatserver token revoke <id|label>`.
 
 ### Restore
 
@@ -667,6 +682,37 @@ Measured, because both halves are easy to assume the wrong way round
   start**, naming the reason. That is deliberate: without the key the markers
   cannot name anybody, so a server that booted would be serving a database it
   cannot reconcile with its own deletion history.
+
+### Restoring without a running server
+
+The restore endpoint above needs a running server. When the server will not
+boot — a failed migration, a corrupt database, a lost key file — the admin API
+is unreachable, and the beta has no `chatserver restore <file>` command. The
+offline procedure is the archive rollback: put the whole pre-failure state back,
+then start the same version that wrote it.
+
+1. Stop the server if it is still running (`sudo systemctl stop owncord`, or
+   `docker compose down`).
+2. Take the pre-upgrade archive described under
+   [Before upgrading: take the archive](#before-upgrading-take-the-archive) —
+   `data/` wholesale plus `config.yaml`, and the binary you are restoring to.
+   If the failure _is_ the upgrade, that archive is your rollback.
+3. Replace, do not merge: remove the live `data/` directory and copy the
+   archive's back (the Docker volume has to be emptied rather than copied
+   into). The archive carries `config.yaml`,
+   `data/erasure.key`, `data/erasure/markers.sqlite` and the other key files,
+   which a database-only backup does not — see [Restore](#restore).
+4. Start the server and confirm it serves.
+
+If you have only a database backup file (`POST /admin/api/backup`'s output),
+not a full archive, you can still put it back by hand — stop the server, keep
+the current `data/chatserver.db` aside as your own safety copy, replace it with
+the backup file (the backup is a consistent `VACUUM INTO` snapshot, so it is
+safe to drop in directly, unlike a live file copy under WAL), and start again.
+Do this only with the matching `data/erasure/` files in place: a restore
+without the marker file can serve an account that was erased since the backup
+was taken ([Restore](#restore)). A full archive is the supported path; a
+database file alone is the fallback.
 
 ## Storage growth
 
@@ -1282,6 +1328,23 @@ The Tauri client uses NSIS installer updates:
 - Server exposes client update assets from GitHub Releases
 - Ed25519 signature verification before applying
 
+#### Client support bundle and logs
+
+When a _user_ has a problem, the desktop client can write its own support bundle
+without contacting the server: **Settings → Logs → Export**. It is a local zip
+you choose where to save; like the server bundle it uploads nothing, but unlike
+it the client log lines are copied verbatim (the client logger does not redact),
+so review it before sharing — the Logs tab says so too.
+
+The raw client log lives per user:
+
+- **Windows:** `%LOCALAPPDATA%\com.owncord.client\logs\owncord-client.log`
+- **Linux:** the app log directory, `~/.local/share/com.owncord.client/logs/owncord-client.log`
+  on a default setup (a ten-megabyte rolling file).
+
+Ask for the exported bundle first; it carries the log plus the diagnostic
+sections the client can collect on its own.
+
 ## Verifying a Download
 
 Checksums, signatures, provenance attestations and SBOMs are all on the release
@@ -1376,17 +1439,17 @@ choose one: [TLS Setup](#tls-setup).
 
 ## Hardening Checklist
 
-- [ ] **Change default admin password** -- create a strong Owner password during setup
+- [ ] **Set a strong Owner password at setup** -- there is no default password to change; the first-run wizard creates the Owner account
 - [ ] **Set `admin_allowed_cidrs`** -- restrict admin access to specific IPs if needed
-- [ ] **Enable TLS** -- use `acme` or `manual` mode; avoid `off` in production
-- [ ] **Set `allowed_origins`** -- restrict WebSocket origins to your domain
-- [ ] **Set `trusted_proxies`** -- configure if behind a reverse proxy
+- [ ] **Serve TLS end to end** -- keep the qualified default (`self_signed`) or, for a public domain, front the server with a reverse proxy that owns certificate renewal; built-in `acme` works but is not qualified ([TLS Setup](#tls-setup)). Never expose `tls.mode: off` directly
+- [ ] **Set `trusted_proxies`** -- only if behind a reverse proxy, list the proxy's own addresses so client IPs come from `X-Forwarded-For`
+- [ ] **Leave `allowed_origins` empty unless you know why** -- empty denies cross-origin WebSocket connections, which is what a desktop-only deployment wants; set it only to admit browser clients from your own domain
 - [ ] **Set stable voice credentials** -- set `livekit_api_key` and `livekit_api_secret` to avoid token breakage on restart
 - [ ] **Set `voice.node_ip`** -- required for remote users behind NAT
 - [ ] **Review upload limits** -- adjust `upload.max_size_mb` for your use case
 - [ ] **Configure GitHub token** -- optional, for reliable update checks
-- [ ] **Schedule backups** -- use the admin backup endpoint on a cron schedule
-- [ ] **Monitor health** -- poll `/health` for uptime monitoring
+- [ ] **Schedule backups** -- use the built-in Backup Schedule in the admin panel, or the endpoint from your own cron ([Scheduled Backups](#scheduled-backups))
+- [ ] **Monitor health** -- poll `/health` for uptime monitoring; it is poll-only, the server does not push alerts
 
 ## Background Maintenance
 

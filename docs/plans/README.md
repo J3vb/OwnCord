@@ -88,7 +88,7 @@ Planning documents are not trackers. Do not read a defect count out of one.
 | Security-sensitive defects | Private GitHub Security Advisories                                              |
 | Product scope              | [beta-product-requirements-2026-08-23](beta-product-requirements-2026-08-23.md) |
 | Phase order and gates      | [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md)             |
-| Current measured baseline  | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                             |
+| Current measured baseline  | [b9-entry-baseline-2026-09-23](b9-entry-baseline-2026-09-23.md)                 |
 
 Current ledger summary (updated 2026-09-25): **466 fixed / 6 open / 6 declined / 1 duplicate = 479**
 (The B9 exit audit is filed as `OC-0460`–`OC-0479`: thirteen findings fixed by
