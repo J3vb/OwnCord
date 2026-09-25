@@ -584,10 +584,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     test("the Logs tab opened from the connect page gear fits at 200 % zoom", async ({
       page,
     }, testInfo) => {
-      test.fail(
-        true,
-        "Known 1.4.10 defect: the Logs tab controls row (LogsTab.ts: filter and level selects, Copy All, Clear Logs, Refresh) does not wrap, so .settings-content scrolls sideways at 640 CSS px. Production CSS is out of scope for this change.",
-      );
       const panel = await openConnectSettings(page);
       await expectSettingsTabReflows(page, panel, "Logs", testInfo);
     });

@@ -145,7 +145,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
 
     // Controls row
     const controls = createElement("div", {
-      style: "display: flex; gap: 8px; margin-bottom: 8px; align-items: center;",
+      style: "display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; align-items: center;",
     });
 
     // Filter dropdown
