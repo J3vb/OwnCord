@@ -6,6 +6,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"path"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -36,7 +37,7 @@ func SetLeafFingerprint(fp string) {
 // Routes:
 //
 //	/api/*  — admin REST API (all require a moderation permission; see NewAdminAPI)
-//	/*      — embedded static files (SPA; index.html for unknown paths)
+//	/*      — embedded static files: index.html, admin.css and js/*.js
 func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, svc *service.Services, opts ...SetupOptions) http.Handler {
 	r := chi.NewRouter()
 
@@ -67,11 +68,34 @@ func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.
 		// each thumbnail is fetched with the session token and swapped in as a
 		// blob: URL. blob: is same-origin, opaque and unreadable across
 		// documents — it widens nothing an attacker could aim at.
+		//
+		// script-src is 'self' only: the panel's scripts are the files under
+		// static/js, and its markup carries no inline <script> or on*= handler
+		// (controls name a registered handler in data-action instead), so
+		// injected markup cannot run script. style-src keeps 'unsafe-inline'
+		// because the markup still carries inline style= attributes.
 		w.Header().Set("Content-Security-Policy",
-			"default-src 'self'; img-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+			"default-src 'self'; img-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'")
 		_, _ = w.Write(indexHTML)
 	})
-	r.Handle("/*", http.FileServer(http.FS(staticFS)))
+	// The stylesheet and scripts index.html loads. chi's Mount leaves the
+	// /admin prefix on URL.Path, which http.FileServer resolves against, so
+	// serve the route's wildcard remainder instead. A directory answers 404
+	// rather than a listing.
+	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+		name := chi.URLParam(req, "*")
+		if info, err := fs.Stat(staticFS, name); err != nil || info.IsDir() {
+			http.NotFound(w, req)
+			return
+		}
+		switch path.Ext(name) {
+		case ".css":
+			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		case ".js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		}
+		http.ServeFileFS(w, req, staticFS, name)
+	})
 
 	return r
 }

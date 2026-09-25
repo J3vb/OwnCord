@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// The admin panel is hand-written JS inside static/index.html, so nothing
+// The admin panel is hand-written JS under static/js, so nothing
 // compiles it and nothing else can fail when a shipped route has no caller.
 // These tests pin the wiring the way emoji_section_test.go pins the Emoji
 // section: the reachability of each B4 feature from the only operator

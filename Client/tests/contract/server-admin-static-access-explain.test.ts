@@ -9,11 +9,9 @@
 // preview must never write an override.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { readFileSync } from "node:fs";
-import path from "node:path";
+import { adminPanelHtml } from "../helpers/admin-panel";
 
-const ADMIN_HTML_PATH = path.resolve(__dirname, "../../../Server/admin/static/index.html");
-const ADMIN_HTML_SOURCE = readFileSync(ADMIN_HTML_PATH, "utf8");
+const ADMIN_HTML_SOURCE = adminPanelHtml();
 
 // Classic-script bindings never land on `window`; bridge the ones driven here.
 const BRIDGE = `<script>
@@ -78,7 +76,7 @@ async function openModal(
   return { dom, bridge };
 }
 
-describe("Server/admin/static/index.html — access explanation and preview (RI-06)", () => {
+describe("Server/admin/static — access explanation and preview (RI-06)", () => {
   let dom: JSDOM | undefined;
   afterEach(() => {
     dom?.window?.close();

@@ -2,13 +2,9 @@
 // separate confirmation may export the frozen ID/hash the administrator saw.
 import { afterEach, describe, expect, it } from "vitest";
 import { JSDOM } from "jsdom";
-import { readFileSync } from "node:fs";
-import path from "node:path";
+import { adminPanelHtml } from "../helpers/admin-panel";
 
-const source = readFileSync(
-  path.resolve(__dirname, "../../../Server/admin/static/index.html"),
-  "utf8",
-);
+const source = adminPanelHtml();
 const html = source.replace(
   "</body>",
   `<script>window.bundleTest={state,renderDiagnostics,previewSupportBundle,downloadSupportBundle,doLogout};</script></body>`,

@@ -4,11 +4,9 @@
 // (RI-07) against a stubbed GET /admin/api/attention.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { readFileSync } from "node:fs";
-import path from "node:path";
+import { adminPanelHtml } from "../helpers/admin-panel";
 
-const ADMIN_HTML_PATH = path.resolve(__dirname, "../../../Server/admin/static/index.html");
-const ADMIN_HTML_SOURCE = readFileSync(ADMIN_HTML_PATH, "utf8");
+const ADMIN_HTML_SOURCE = adminPanelHtml();
 const BRIDGE = `<script>
 window.__test = { get state(){return state}, renderDashboard: renderDashboard };
 </script>`;
@@ -103,7 +101,7 @@ const REPORT = {
   ],
 };
 
-describe("Server/admin/static/index.html — attention panel (RI-07)", () => {
+describe("Server/admin/static — attention panel (RI-07)", () => {
   let dom: JSDOM | undefined;
   afterEach(() => {
     dom?.window?.close();
