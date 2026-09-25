@@ -1391,6 +1391,7 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        sidebarToggle: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1429,6 +1430,7 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        sidebarToggle: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1449,6 +1451,7 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        sidebarToggle: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1484,6 +1487,7 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        sidebarToggle: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1525,6 +1529,7 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        sidebarToggle: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1561,6 +1566,7 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        sidebarToggle: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1598,6 +1604,7 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        sidebarToggle: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);

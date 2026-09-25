@@ -50,6 +50,8 @@ export interface ChatAreaResult {
   readonly chatHeaderName: HTMLSpanElement | null;
   /** Full chat header refs (hash, name, topic) for DM mode updates. */
   readonly chatHeaderRefs: ChatHeaderRefs;
+  /** The header's narrow-width sidebar toggle, for the drawer controller. */
+  readonly sidebarToggle: HTMLButtonElement;
   /** The search overlay controller. */
   readonly searchCtrl: SearchOverlayController;
   /** Slot for the DM profile sidebar (right panel, sibling of chat area). */
@@ -189,6 +191,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     videoGrid,
     chatHeaderName,
     chatHeaderRefs: chatHeader.refs,
+    sidebarToggle: chatHeader.refs.sidebarToggle,
     searchCtrl,
     dmProfileSlot,
     children,

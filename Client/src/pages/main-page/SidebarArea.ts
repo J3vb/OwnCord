@@ -158,6 +158,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   const sidebarWrapper = createElement("div", {
     class: "unified-sidebar",
+    id: "unified-sidebar",
     "data-testid": "unified-sidebar",
   });
 
