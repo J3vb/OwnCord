@@ -245,7 +245,8 @@
 
   @media(max-width:900px){.sidebar{width:200px}.content{padding:24px 20px}.stat-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}}
   /* U3: below 600px the nav wraps instead of being clipped to 56px, so every
-     section stays reachable (the full drawer is AO-3). */
+     section stays reachable, and the sidebar caps at 50vh and scrolls so the
+     content keeps room at high zoom (the full drawer is AO-3). */
   @media(max-width:600px){.admin{flex-direction:column}.sidebar{width:100%;height:auto;max-height:50vh;overflow-y:auto}.sidebar-nav{display:flex;flex-wrap:wrap;padding:8px}.sidebar-nav .sidebar-label,.sidebar-nav .sidebar-sep{display:none}.nav-item{width:auto}.content{padding:16px 12px}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{flex-direction:column}.modal{width:95vw;max-height:90vh}}
   @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}}
 </style>

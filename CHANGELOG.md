@@ -319,8 +319,8 @@ server's internals were reorganised behind service boundaries.
 - **Keyboard focus is visible again** on the admin panel: tabbing shows a cyan
   ring on links, buttons and fields instead of nothing.
 - Dialogs take focus when they open, keep Tab inside, hand focus back when they
-  close, and announce their title; login and Settings fields have proper labels;
-  toggles report their on/off state; icon buttons have names.
+  close, and announce their title; form fields, search boxes and file pickers
+  have proper labels; toggles report their on/off state; icon buttons have names.
 - **Error notifications now stay until you dismiss them**, so a failure can be
   read and acted on, and the panel honours your system's reduced-motion
   setting.
