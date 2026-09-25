@@ -3,7 +3,9 @@
 # Quick start:
 #   1. cp .env.example .env  && edit .env (set secrets + public IP)
 #   2. cp livekit.yaml.example livekit.yaml  && edit livekit.yaml (same keys)
-#   3. docker compose up -d
+#   3. cp config.yaml.example config.yaml  && set voice.livekit_url to
+#      ws://livekit:7880 (the service below; the copied default is localhost)
+#   4. docker compose up -d
 #
 # LiveKit runs as a separate container on the same internal network.
 # The OwnCord server reaches it at ws://livekit:7880 (Docker DNS).

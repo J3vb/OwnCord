@@ -108,6 +108,30 @@ func loadBody(t *testing.T, body string) *config.Config {
 	return cfg
 }
 
+// TestConfigExampleMatchesGeneratedTemplate pins Server/config.yaml.example —
+// the file the Docker quick-start copies to config.yaml — against the template
+// the server writes on first boot. They are the same document shipped twice,
+// so a drifted example would document settings the server does not read (or
+// omit the comment for one it does).
+func TestConfigExampleMatchesGeneratedTemplate(t *testing.T) {
+	generatedPath := filepath.Join(t.TempDir(), "config.yaml")
+	// A missing path makes Load write defaultYAML before reading it back.
+	if _, err := config.Load(generatedPath); err != nil {
+		t.Fatalf("Load(missing file): %v", err)
+	}
+	generated, err := os.ReadFile(generatedPath)
+	if err != nil {
+		t.Fatalf("read generated template: %v", err)
+	}
+	example, err := os.ReadFile(filepath.Join("..", "config.yaml.example"))
+	if err != nil {
+		t.Fatalf("read config.yaml.example: %v", err)
+	}
+	if !bytes.Equal(example, generated) {
+		t.Errorf("Server/config.yaml.example has drifted from the first-boot template; regenerate it from config.defaultYAML")
+	}
+}
+
 // TestParityDefaults pins the compiled defaults: a file that names no key must
 // load exactly what the shipped template loads, once the two deliberate
 // differences (the generated LiveKit credentials, and the template's

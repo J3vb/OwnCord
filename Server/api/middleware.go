@@ -390,7 +390,14 @@ func AdminIPRestrict(allowedCIDRs, trustedProxyCIDRs []string) func(http.Handler
 
 			ip := clientIPWithProxies(r, proxyNets)
 			if !ipInNets(ip, allowedNets) {
-				writeErr(w, http.StatusForbidden, "FORBIDDEN", "access denied")
+				// Name the setting so a self-hoster can fix it without reading
+				// the source: the default allowlist is private networks only,
+				// so a remote or VPS operator is refused until they add their
+				// address or reach the panel over an SSH tunnel. The reply
+				// deliberately says nothing about which IP was seen or which
+				// CIDRs are configured (no topology disclosure).
+				writeErr(w, http.StatusForbidden, "FORBIDDEN",
+					"access denied by server.admin_allowed_cidrs — this address is not in the admin allowlist")
 				return
 			}
 			next.ServeHTTP(w, r)

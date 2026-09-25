@@ -926,6 +926,28 @@ func TestAdminIPRestrict_BlockedCIDR(t *testing.T) {
 	}
 }
 
+// TestAdminIPRestrict_BlockedNamesTheSetting pins OP-05: the refusal must name
+// server.admin_allowed_cidrs so a self-hoster on a VPS can fix it without
+// reading the source, and must not disclose the configured CIDRs or the
+// address the server saw. Without the name the operator sees a bare "access
+// denied" and has no way to tell a firewall from this setting.
+func TestAdminIPRestrict_BlockedNamesTheSetting(t *testing.T) {
+	h := api.AdminIPRestrict([]string{"10.0.0.0/8"}, nil)(http.HandlerFunc(ok))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.168.1.1:9999"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "server.admin_allowed_cidrs") {
+		t.Errorf("403 body does not name server.admin_allowed_cidrs: %s", body)
+	}
+	if strings.Contains(body, "192.168.1.1") || strings.Contains(body, "10.0.0.0/8") {
+		t.Errorf("403 body leaks the client address or the configured CIDRs: %s", body)
+	}
+}
+
 func TestAdminIPRestrict_EmptyAllowsAll(t *testing.T) {
 	h := api.AdminIPRestrict(nil, nil)(http.HandlerFunc(ok))
 

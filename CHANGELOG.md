@@ -49,6 +49,12 @@ server's internals were reorganised behind service boundaries.
 
 ### Login & connection
 
+- **The server now shows its certificate fingerprint so you can compare it.**
+  The start-up banner, the admin Dashboard and the setup wizard's finish step
+  print the served certificate's SHA-256 in the same format the desktop client
+  shows before its trust prompt. Publish it out of band and compare — a
+  mismatch is the one warning that means an interception attempt. Previously
+  the disclosure told users to compare a fingerprint nothing printed.
 - The client and server now agree on a protocol version ("epoch") when
   connecting. This release is epoch 1; clients from v1.2.0-alpha.4 and earlier
   still connect.
@@ -199,6 +205,21 @@ server's internals were reorganised behind service boundaries.
   gone.** A plugin directory carrying only a `plugin.toml` no longer loads;
   convert it to `plugin.json`. A directory carrying both could previously leave
   the server honouring a different manifest than the one approved at install.
+- **The Docker quick-start no longer crash-loops.** It now ships a
+  `config.yaml.example` and tells you to copy it before `docker compose up -d`;
+  previously the compose file bind-mounted a config nothing created, so Docker
+  made a _directory_ at that path and the server failed to read its
+  configuration. The same pages now say which files come from the release's
+  source snapshot rather than its assets, and that `voice.livekit_url` must be
+  set to the LiveKit container (`ws://livekit:7880`) because compose injects
+  only the key and secret.
+- **`chatserver --version` and `--help` print and exit.** Asking a build what
+  it was no longer starts a server or writes a `config.yaml` into the working
+  directory.
+- **The Windows installer's SmartScreen warning is now explained.** The
+  quick-start tells you what "Windows protected your PC" means on first install
+  and on Update Now, and how to continue, since the installers are not
+  code-signed.
 - **The desktop app no longer reappears on the old version after starting an
   update.** Once the installer is launching, a launch handed to the still-running
   old process (shortcut, `owncord://` link, autostart) is ignored instead of
@@ -266,6 +287,11 @@ server's internals were reorganised behind service boundaries.
   show up in the audit log. Invite entries name the invite by id, never by
   code.
 - The owner check no longer costs a second database lookup on every request.
+- **A refused `/admin` request now names the setting behind it.** The `403`
+  body points at `server.admin_allowed_cidrs` (private networks by default), so
+  a VPS operator can tell a firewall from the allowlist. The quick-start and
+  deployment pages describe the SSH tunnel (`ssh -L 8443:localhost:8443`) and
+  the allowlist entry for headless installs.
 
 ### Documentation
 
