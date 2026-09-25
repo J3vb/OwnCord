@@ -53,7 +53,8 @@ type setupResponse struct {
 	// the client's pin format, shown on the finish step so the operator can
 	// publish it for users to compare out of band. Omitted when there is no
 	// statically loaded certificate (TLS off, or ACME before its first
-	// handshake).
+	// handshake), and when the wizard changed tls.mode: the restart will serve
+	// a different certificate, which the dashboard shows once it is back.
 	CertificateFingerprint string `json:"certificate_fingerprint,omitempty"`
 }
 
@@ -164,6 +165,12 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 		}
 		setup.RecordSetup(r.Context(), uid, detail)
 
+		fingerprint := leafFingerprint
+		if req.Wizard != nil && req.Wizard.TLSMode != nil &&
+			(opts.RunningCfg == nil || *req.Wizard.TLSMode != opts.RunningCfg.TLS.Mode) {
+			fingerprint = ""
+		}
+
 		writeJSON(w, http.StatusCreated, setupResponse{
 			Token:                  token,
 			UserID:                 uid,
@@ -172,7 +179,7 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 			RestartRequired:        restartRequired,
 			RestartURL:             restartURL,
 			Warnings:               warnings,
-			CertificateFingerprint: leafFingerprint,
+			CertificateFingerprint: fingerprint,
 		})
 
 		if restartRequired {

@@ -43,18 +43,17 @@ func infoOutput(args []string) (string, bool) {
 		return "", false
 	}
 	switch args[0] {
-	case "--version", "-version", "version":
+	case "--version":
 		return version + "\n", true
-	case "--help", "-help", "-h", "help":
+	case "--help":
 		return usageText, true
 	}
 	return "", false
 }
 
 func main() {
-	// `--version`/`--help` (and their single-dash/short forms) print and exit
-	// before any server or logging setup. Without this they were treated as no
-	// argument at all: the server started and config.Load wrote a config.yaml
+	// `--version`/`--help` print and exit before any server or logging setup.
+	// Without this they were treated as no argument at all: the server started and config.Load wrote a config.yaml
 	// into the cwd, so asking a build what it was had a side effect.
 	if out, ok := infoOutput(os.Args[1:]); ok {
 		fmt.Print(out)

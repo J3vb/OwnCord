@@ -238,7 +238,7 @@
     <div id="setupWarnings"></div>
     <div id="setupFingerprint" style="display:none">
       <p style="font-size:13px;color:var(--text-muted);margin:16px 0 8px">Your certificate fingerprint. Users compare it against the prompt their client shows before they accept the connection — publish it out of band. A mismatch is the one warning that means an interception attempt.</p>
-      <div class="code-copy"><code id="certFingerprint"></code><button class="btn btn-ghost" onclick="copyFingerprint()">Copy</button></div>
+      <div class="code-copy"><code id="certFingerprint"></code></div>
     </div>
     <div id="setupRestart" style="display:none">
       <p style="color:var(--text-muted);font-size:14px;margin-bottom:8px"><span class="spinner" style="display:inline-block;width:13px;height:13px;border:2px solid var(--border-strong);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;vertical-align:-2px;margin-right:6px"></span>Applying your settings — the server is restarting…</p>
@@ -695,7 +695,6 @@ function beginRestartWait(url){
 
 document.getElementById('setupContinueBtn').onclick=()=>{enterApp().catch(()=>showOverlay('loginOverlay'))};
 function copyInvite(){navigator.clipboard.writeText(document.getElementById('inviteCode').textContent).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed','error'))}
-function copyFingerprint(){const el=document.getElementById('certFingerprint');if(!el)return;navigator.clipboard.writeText(el.textContent).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed','error'))}
 
 document.getElementById('loginBtn').onclick=async()=>{
   const btn=document.getElementById('loginBtn');

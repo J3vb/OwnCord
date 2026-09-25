@@ -55,7 +55,8 @@ cp livekit.yaml.example livekit.yaml
 cp config.yaml.example config.yaml
 # Edit .env and livekit.yaml before start (set your public IP and matching
 # LiveKit key/secret). In config.yaml, set voice.livekit_url to the compose
-# service address `ws://livekit:7880` — the copied default is localhost.
+# service address `ws://livekit:7880` — the copied default is localhost —
+# and voice.auto_download_livekit to false: LiveKit runs as its own container.
 docker compose up -d
 ```
 

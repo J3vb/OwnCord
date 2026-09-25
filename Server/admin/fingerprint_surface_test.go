@@ -3,6 +3,7 @@ package admin_test
 import (
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -81,5 +82,30 @@ func TestSetup_FinishStepCarriesCertificateFingerprint(t *testing.T) {
 	}
 	if resp.CertificateFingerprint != fp {
 		t.Errorf("setup certificate_fingerprint = %q, want %q", resp.CertificateFingerprint, fp)
+	}
+}
+
+func TestSetup_FinishStepOmitsFingerprintWhenWizardChangesTLSMode(t *testing.T) {
+	admin.SetLeafFingerprint("11:22:33:44")
+	t.Cleanup(func() { admin.SetLeafFingerprint("") })
+
+	database := openAdminTestDB(t)
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	handler := wizardHandler(t, database, cfgPath, make(chan string, 1))
+
+	rr := doRequest(t, handler, http.MethodPost, "/setup", "", map[string]any{
+		"username": "myadmin",
+		"password": "SecurePass123!",
+		"wizard":   map[string]any{"tls_mode": "manual"},
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if fp, present := resp["certificate_fingerprint"]; present {
+		t.Errorf("certificate_fingerprint = %v; the restart serves a different certificate, so it must be omitted", fp)
 	}
 }

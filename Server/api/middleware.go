@@ -366,8 +366,9 @@ func ipInNets(ipStr string, nets []*net.IPNet) bool {
 }
 
 // AdminIPRestrict returns middleware that blocks requests from IPs not in the
-// allowed CIDR list. Returns 403 Forbidden for disallowed IPs. If the CIDR
-// list is empty, all requests are allowed (no restriction).
+// allowed CIDR list. Returns 403 Forbidden for disallowed IPs, naming
+// settingName (the config key the list came from). If the CIDR list is empty,
+// all requests are allowed (no restriction).
 //
 // trustedProxyCIDRs specifies which connecting IPs are trusted reverse proxies.
 // When the connecting IP matches a trusted proxy, the real client IP is read
@@ -377,7 +378,7 @@ func ipInNets(ipStr string, nets []*net.IPNet) bool {
 // skipped with a warning. A non-empty allowedCIDRs list whose entries are all
 // invalid yields zero networks — nothing matches, so access is denied (fail
 // closed), same as before the hoist.
-func AdminIPRestrict(allowedCIDRs, trustedProxyCIDRs []string) func(http.Handler) http.Handler {
+func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []string) func(http.Handler) http.Handler {
 	allowedNets := parseCIDRList(allowedCIDRs)
 	proxyNets := parseCIDRList(trustedProxyCIDRs)
 	restrict := len(allowedCIDRs) > 0
@@ -397,7 +398,7 @@ func AdminIPRestrict(allowedCIDRs, trustedProxyCIDRs []string) func(http.Handler
 				// deliberately says nothing about which IP was seen or which
 				// CIDRs are configured (no topology disclosure).
 				writeErr(w, http.StatusForbidden, "FORBIDDEN",
-					"access denied by server.admin_allowed_cidrs — this address is not in the admin allowlist")
+					"access denied by "+settingName+" — this address is not in its allowlist")
 				return
 			}
 			next.ServeHTTP(w, r)

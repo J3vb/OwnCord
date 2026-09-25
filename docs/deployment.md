@@ -115,6 +115,8 @@ cp config.yaml.example config.yaml
 # Edit it: set voice.livekit_url to "ws://livekit:7880" (the compose service
 # address). The copied default is ws://localhost:7880, which is the server
 # container itself — voice would never reach the LiveKit container.
+# Set voice.auto_download_livekit to false (the copied default is true), or the
+# server downloads and runs a second LiveKit inside its own container.
 # Leave voice.livekit_api_key, voice.livekit_api_secret and voice.livekit_binary
 # unset: compose injects the key and secret from .env, and LiveKit runs as its
 # own container.
@@ -142,7 +144,9 @@ The shipped compose file injects **only the LiveKit key and secret** as
 environment variables from `.env`. It does not set `voice.livekit_url`, so that
 key **must** be set in `config.yaml` — and it must point at the LiveKit
 container, `ws://livekit:7880`, not the copied default `ws://localhost:7880`
-(which is the server container itself). Leave `voice.livekit_binary` unset, and
+(which is the server container itself). Set `voice.auto_download_livekit` to
+`false` (the copied default is `true`, which would download and run a second
+LiveKit inside the server container), leave `voice.livekit_binary` unset, and
 do not set `voice.livekit_api_key` / `voice.livekit_api_secret` in the file
 (the environment values win, and keeping secrets out of `config.yaml` is the
 point of `.env`). Set everything else as normal:
@@ -154,6 +158,7 @@ server:
 
 voice:
   livekit_url: "ws://livekit:7880" # Docker service DNS — do not change
+  auto_download_livekit: false # LiveKit runs as its own container
   quality: "medium"
 
 tls:
@@ -195,7 +200,7 @@ stopped.
 
 ### LiveKit in Docker
 
-LiveKit runs as its own container (`livekit/livekit-server:v1.13.5`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.
+LiveKit runs as its own container (`livekit/livekit-server:v1.13.5`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset and `voice.auto_download_livekit` false. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.
 
 ---
 

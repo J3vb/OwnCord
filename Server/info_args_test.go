@@ -11,7 +11,7 @@ import (
 // true only for the informational forms; everything else (no argument, a real
 // subcommand, an unknown flag) falls through to normal startup.
 func TestInfoOutput(t *testing.T) {
-	for _, arg := range []string{"--version", "-version", "version"} {
+	for _, arg := range []string{"--version"} {
 		out, ok := infoOutput([]string{arg})
 		if !ok {
 			t.Errorf("infoOutput(%q) ok = false, want true", arg)
@@ -21,7 +21,7 @@ func TestInfoOutput(t *testing.T) {
 		}
 	}
 
-	for _, arg := range []string{"--help", "-help", "-h", "help"} {
+	for _, arg := range []string{"--help"} {
 		out, ok := infoOutput([]string{arg})
 		if !ok {
 			t.Errorf("infoOutput(%q) ok = false, want true", arg)
@@ -37,6 +37,9 @@ func TestInfoOutput(t *testing.T) {
 		{"healthcheck"},
 		{"token", "list"},
 		{"--unknown"},
+		{"version"},
+		{"help"},
+		{"-h"},
 	} {
 		if out, ok := infoOutput(args); ok {
 			t.Errorf("infoOutput(%v) = %q, ok = true; want fall-through to server startup", args, out)
