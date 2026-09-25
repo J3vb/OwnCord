@@ -90,8 +90,13 @@ Planning documents are not trackers. Do not read a defect count out of one.
 | Phase order and gates      | [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md)             |
 | Current measured baseline  | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                             |
 
-Current ledger summary (updated 2026-09-23): **453 fixed / 1 open / 4 declined / 1 duplicate = 459**
-(OC-0455 to OC-0457, the product causes of the fullstack media e2e flakes, and
+Current ledger summary (updated 2026-09-25): **466 fixed / 6 open / 6 declined / 1 duplicate = 479**
+(The B9 exit audit is filed as `OC-0460`–`OC-0479`: thirteen findings fixed by
+PRs [#1802](https://github.com/J3vb/OwnCord/pull/1802),
+[#1798](https://github.com/J3vb/OwnCord/pull/1798) and
+[#1800](https://github.com/J3vb/OwnCord/pull/1800), two declined as
+screen-reader-only work, and five left open for after the beta.
+OC-0455 to OC-0457, the product causes of the fullstack media e2e flakes, and
 OC-0458, the soak's single-read DOM node sample, are recorded and fixed;
 the fourth observed failure, CI run 35813785291 on PR #1719 (`long-session.spec.ts:176`, the
 edited message not appearing within 15 s), was the composer's send-debounce edit flake, already
