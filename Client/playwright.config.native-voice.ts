@@ -14,6 +14,10 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
+  // A retry hides a flaky interop run, which is exactly what this proof must
+  // not do: the same gate the other configs carry, so a run that needs its
+  // retry still turns the job red.
+  failOnFlakyTests: !!process.env.CI,
   reporter: [["list"], ["junit", { outputFile: "test-results/native-voice.xml" }]],
   use: {
     ...devices["Desktop Chrome"],

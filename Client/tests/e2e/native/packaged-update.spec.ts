@@ -3,7 +3,7 @@ import { test, expect, chromium } from "@playwright/test";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { promisify } from "node:util";
-import { readFile, mkdtemp, rm, appendFile } from "node:fs/promises";
+import { readFile, writeFile, mkdtemp, rm, appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startNativeApp } from "../support/native-app";
@@ -172,21 +172,29 @@ test("signed NSIS update rejects broken downloads then installs and relaunches t
     });
   } finally {
     await progress("capturing failure diagnostics");
+    // Reporters drop inline text bodies and the list reporter truncates them,
+    // so a `body:` attachment never reaches CI. Write each log to a file and
+    // attach by path, the same rule native-app.ts's withNativeArtifacts follows.
+    const attachText = async (name: string, content: string) => {
+      const path = info.outputPath(`${name}.log`);
+      await writeFile(path, content);
+      await info.attach(name, { path, contentType: "text/plain" });
+    };
     // A crashed WebView can make trace capture fail. Preserve the owned
     // process logs before asking that same WebView for more diagnostics.
-    if (app) await info.attach("native-process", { body: app.log(), contentType: "text/plain" });
+    if (app) await attachText("native-process", app.log());
     // The relaunched process is the installer's child, so its stdout is not
     // ours; the log plugin's file in the app log dir has both processes'
     // startup lines (version and pid), which is what tells a stale relaunch
     // from a slow one.
-    await info.attach("installed-process", {
-      body: await readFile(
+    await attachText(
+      "installed-process",
+      await readFile(
         join(process.env.LOCALAPPDATA ?? "", "com.owncord.e2e", "logs", "owncord-client.log"),
         "utf8",
       ).catch((error) => String(error)),
-      contentType: "text/plain",
-    });
-    await info.attach("native-server", { body: server.log(), contentType: "text/plain" });
+    );
+    await attachText("native-server", server.log());
     if (app && traceActive) {
       const trace = info.outputPath("failed-install.zip");
       try {

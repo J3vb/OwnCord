@@ -47,7 +47,13 @@ export async function startNativeApp(
       startupDeadline - Date.now(),
     );
     const cdpReady = Date.now() - started;
-    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+    // connectOverCDP defaults to a 30 s timeout of its own, which cut into the
+    // same startup budget waitForHttp just spent. Take the timeout from what is
+    // left of the deadline so a slow cold runner fails at the budget, not at a
+    // second, unrelated 30 s.
+    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, {
+      timeout: Math.max(1, startupDeadline - Date.now()),
+    });
     const context = browser.contexts()[0];
     if (!context) throw new Error("WebView2 did not create a context");
     // This context is attached manually, so Playwright's `use` timeouts are
