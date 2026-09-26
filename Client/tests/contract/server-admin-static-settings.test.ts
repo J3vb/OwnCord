@@ -24,6 +24,9 @@ const ADMIN_HTML_SOURCE = adminPanelHtml();
 const BRIDGE = `<script>
 window.__test = {
   state: state,
+  PERM: PERM,
+  navigateTo: navigateTo,
+  closeModal: closeModal,
   renderSettings: renderSettings,
   saveSettings: saveSettings,
   markSettingsChanged: markSettingsChanged,
@@ -84,6 +87,9 @@ function loadAdminPanel(fetchCalls: FetchCall[], respond: Responder): JSDOM {
 
 interface Bridge {
   state: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  PERM: Record<string, number>;
+  navigateTo: (id: string) => void;
+  closeModal: () => void;
   renderSettings: () => Promise<string>;
   saveSettings: () => Promise<void>;
   markSettingsChanged: () => void;
@@ -273,17 +279,41 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     expect(booted.bridge.state.settingsChanged).toBe(false);
   });
 
-  it("keeps an unsaved edit when the page is rendered again, as the nav's unsaved dot promises", async () => {
+  it("discards an unsaved edit when the page is rendered again, showing server values and a clean save bar", async () => {
     const booted = await boot([], respondWith());
     dom = booted.dom;
     const { document } = dom.window;
     await render(booted.bridge, dom.window, booted.bridge.renderSettings);
     (document.getElementById("s-motd") as HTMLInputElement).value = "Draft MOTD";
     booted.bridge.markSettingsChanged();
+    expect(booted.bridge.state.settingsChanged).toBe(true);
 
     await render(booted.bridge, dom.window, booted.bridge.renderSettings);
-    expect((document.getElementById("s-motd") as HTMLInputElement).value).toBe("Draft MOTD");
-    expect((document.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled).toBe(false);
+    expect((document.getElementById("s-motd") as HTMLInputElement).value).toBe(
+      LOADED_SETTINGS.motd,
+    );
+    expect((document.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled).toBe(true);
+    expect((document.getElementById("discardSettingsBtn") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(document.getElementById("settingsSaveBar")?.classList.contains("dirty")).toBe(false);
+    expect(document.getElementById("settingsSaveState")?.textContent).toBe("All changes saved");
+    expect(booted.bridge.state.settingsChanged).toBe(false);
+  });
+
+  it("clears the unsaved state when the operator leaves Settings, so the nav dot does not linger", async () => {
+    const booted = await boot([], respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    booted.bridge.state.section = "settings";
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    (document.getElementById("s-motd") as HTMLInputElement).value = "Draft MOTD";
+    booted.bridge.markSettingsChanged();
+    expect(booted.bridge.state.settingsChanged).toBe(true);
+
+    booted.bridge.navigateTo("backups");
+    expect(booted.bridge.state.settingsChanged).toBe(false);
   });
 });
 
@@ -404,6 +434,17 @@ describe("Server/admin/static — Apply update dialog (AO-6, OP-11)", () => {
     expect(fetchCalls.some((c) => c.path === "/updates/apply")).toBe(false);
     expect(document.getElementById("updateErr")?.textContent).toContain("nothing was updated");
     expect((document.getElementById("updateConfirmBtn") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("does not update when the dialog is closed while the backup runs", async () => {
+    const fetchCalls: FetchCall[] = [];
+    const { bridge, document } = await openDialog(fetchCalls);
+    const pending = bridge.confirmApplyUpdate();
+    bridge.closeModal();
+    await pending;
+    expect(fetchCalls.filter((c) => c.method === "POST").map((c) => c.path)).toEqual(["/backup"]);
+    expect(bridge.state.updateApplying).toBe(false);
+    expect(document.getElementById("restartWait")).toBeNull();
   });
 
   it("skips the backup only when the operator unticks it", async () => {

@@ -32,10 +32,8 @@ async function renderSettings(){
   try{settings=await api('GET','/settings')}catch(e){return'<div class="page-title">Settings</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   try{facts=await api('GET','/config')}catch(e){}
   state._settings={...settings};
-  /* Unsaved edits survive leaving the page: the nav's unsaved dot promises
-     they are still there to save. */
-  const draft=state.settingsDraft||{};
-  const v=k=>k in draft?draft[k]:(settings[k]||'');
+  setSettingsChanged(false);
+  const v=k=>settings[k]||'';
   const on=settingNorm('require_2fa',v('require_2fa'))==='true';
   let html='<div class="page-title">Settings</div><div class="page-desc">How your server presents itself and who can join.'+(isOwner()?' The backup schedule is on <button class="link-btn" data-action="navigateTo" data-args="'+actArgs('backups')+'">Backups &amp; restore</button>.':'')+'</div>';
   html+=settingsCard('General',
@@ -52,9 +50,9 @@ async function renderSettings(){
     .map(([n,val,key])=>'<div class="fact-row"><dt>'+n+'</dt><dd><span class="fact-value">'+esc(val)+'</span><code class="fact-key">'+key+'</code></dd></div>').join('');
   html+=settingsCard('Set in config.yaml','<p class="setting-desc">These values come from the server\'s config file. Change them there and restart the server.</p>'
     +(facts?'<dl class="fact-list">'+factRows+'</dl>':'<p class="setting-desc" style="margin-top:8px">The running configuration could not be read.</p>'));
-  html+='<div class="save-bar'+(state.settingsChanged?' dirty':'')+'" id="settingsSaveBar" role="region" aria-label="Save settings"><span class="save-bar-status" id="settingsSaveState" role="status">'+(state.settingsChanged?'Unsaved changes':'All changes saved')+'</span>'
-    +'<button class="btn btn-ghost" id="discardSettingsBtn" data-action="discardSettings"'+(state.settingsChanged?'':' disabled')+'>Discard</button>'
-    +'<button class="btn btn-accent" id="saveSettingsBtn" data-action="saveSettings"'+(state.settingsChanged?'':' disabled')+'>Save changes</button></div>';
+  html+='<div class="save-bar" id="settingsSaveBar" role="region" aria-label="Save settings"><span class="save-bar-status" id="settingsSaveState" role="status">All changes saved</span>'
+    +'<button class="btn btn-ghost" id="discardSettingsBtn" data-action="discardSettings" disabled>Discard</button>'
+    +'<button class="btn btn-accent" id="saveSettingsBtn" data-action="saveSettings" disabled>Save changes</button></div>';
   return html;
 }
 
@@ -66,22 +64,20 @@ function setSettingsChanged(changed){
 }
 
 function markSettingsChanged(){
-  const diff=settingsDiff(settingsFormValues(SETTINGS_KEYS));
-  state.settingsDraft=Object.keys(diff).length?diff:null;
-  setSettingsChanged(!!state.settingsDraft);
+  setSettingsChanged(Object.keys(settingsDiff(settingsFormValues(SETTINGS_KEYS))).length>0);
 }
 
-function discardSettings(){state.settingsDraft=null;setSettingsChanged(false);renderContent()}
+function discardSettings(){renderContent()}
 
 async function saveSettings(){
   const btn=document.getElementById('saveSettingsBtn');
   if(btn){if(btn.disabled)return;btn.disabled=true}
   const body=settingsDiff(settingsFormValues(SETTINGS_KEYS));
-  if(!Object.keys(body).length){state.settingsDraft=null;setSettingsChanged(false);showToast('Settings saved');return}
+  if(!Object.keys(body).length){setSettingsChanged(false);showToast('Settings saved');return}
   try{
     state._settings=await api('PATCH','/settings',body);
     if('server_name' in body&&state.me){state.me.server_name=body.server_name;renderTopbar()}
-    state.settingsDraft=null;setSettingsChanged(false);showToast('Settings saved');
+    setSettingsChanged(false);showToast('Settings saved');
   }catch(e){
     showToast(e.message,'error');
     if(btn)btn.disabled=false;
@@ -442,6 +438,7 @@ async function confirmApplyUpdate(){
   if(document.getElementById('updateBackupFirst')?.checked){
     if(btn)btn.textContent='Backing up…';
     try{await api('POST','/backup')}catch(e){syncUpdateConfirm();return fail('The backup failed, so nothing was updated: '+e.message)}
+    if(!btn?.isConnected||!document.getElementById('modal').classList.contains('visible')){showToast('Update cancelled. The backup was kept.');return}
   }
   if(btn)btn.textContent='Updating…';
   state.updateApplying=true;
