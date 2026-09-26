@@ -2,6 +2,12 @@
    explanation, Roles, and Emoji. */
 
 /* ═══ Channels ═══ */
+/* The page header: title and summary on the left, the page's primary action
+   on the right (it wraps under the title on a narrow window). */
+function rcHead(title,desc,action){
+  return '<div class="rc-head"><div><h1 class="page-title">'+title+'</h1><div class="page-desc">'+desc+'</div></div>'+action+'</div>';
+}
+
 async function renderChannels(){
   let channels;
   try{channels=await api('GET','/channels')}catch(e){return'<div class="page-title">Channels</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
@@ -10,8 +16,8 @@ async function renderChannels(){
      them. Collect the ones already in use so the create/edit forms can offer
      them as a datalist instead of hardcoding names nobody has to use. */
   const catSet={};
-  let html='<div class="page-title">Channels</div><div class="page-desc">'+channels.length+' channels</div>';
-  html+='<div class="filter-bar"><button class="btn btn-accent" data-action="openChannelModal" data-args="'+actArgs(null)+'">'+I.plus+' Create Channel</button></div>';
+  let html=rcHead('Channels',channels.length+' channel'+(channels.length===1?'':'s')+'. The lock opens who can see and use a channel.',
+    '<button class="btn btn-accent" data-action="openChannelModal" data-args="'+actArgs(null)+'">'+I.plus+' Create Channel</button>');
   html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Channel</th><th>Type</th><th>Category</th><th>Archived</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
   if(!channels.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">No channels</td></tr>';
   channels.forEach(ch=>{
@@ -21,10 +27,10 @@ async function renderChannels(){
     html+='<td><span class="badge '+(type==='voice'?'badge-yellow':type==='announcement'?'badge-accent':'badge-muted')+'">'+esc(type)+'</span></td>';
     html+='<td style="font-size:12px;color:var(--text-muted)">'+esc(cat)+'</td>';
     html+='<td>'+(archived?'<span class="badge badge-muted">Yes</span>':'<span class="badge badge-green">No</span>')+'</td>';
-    const lockBtn=type==='dm'?'':'<button class="act-btn" title="Access (private channel)" aria-label="Access (private channel)" data-action="openChannelPermsModal" data-args="'+actArgs(id,name)+'">'+I.lock+'</button>';
+    const lockBtn=type==='dm'?'':'<button class="act-btn" title="Access" aria-label="Access for #'+esc(name)+'" data-action="openChannelPermsModal" data-args="'+actArgs(id,name)+'">'+I.lock+'</button>';
     state.channelCache[id]=ch;
     if(cat)catSet[cat]=true;
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" aria-label="Edit" data-action="openChannelEditModal" data-args="'+actArgs(id)+'">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" aria-label="Delete" data-action="openDeleteChannel" data-args="'+actArgs(id,name)+'">'+I.trash+'</button></div></td></tr>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" aria-label="Edit #'+esc(name)+'" data-action="openChannelEditModal" data-args="'+actArgs(id)+'">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" aria-label="Delete #'+esc(name)+'" data-action="openDeleteChannel" data-args="'+actArgs(id,name)+'">'+I.trash+'</button></div></td></tr>';
   });
   html+='</tbody></table></div></div>';
   state.channelCategories=Object.keys(catSet).sort();
@@ -114,11 +120,28 @@ async function saveChannelEdit(id){
   try{await api('PATCH','/channels/'+id,body);closeModal();showToast('Channel updated');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
-function openDeleteChannel(id,name){
-  openModal('<div class="modal-header"><h3>Delete Channel</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Permanently delete <strong style="color:var(--text-normal)">#'+esc(name)+'</strong> and all its messages?</p></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" data-action="confirmDeleteChannel" data-args="'+actArgs(id)+'">Delete</button></div>');
+/* Deleting a channel or a role cannot be undone, so it asks for the name to be
+   typed first, the way Erase account does: Delete stays disabled until the
+   field matches, and the confirm handler re-checks it. */
+function typedConfirmField(name){
+  return '<div class="form-group rc-confirm"><label class="form-label" for="typedConfirm">Type <strong>'+esc(name)+'</strong> to confirm</label>'
+    +'<input class="form-input" id="typedConfirm" autocomplete="off" autocapitalize="off" spellcheck="false" data-input-action="syncTypedConfirm" data-args="'+actArgs(name)+'"></div>';
+}
+function typedConfirmed(name){return (document.getElementById('typedConfirm')?.value||'').trim()===name}
+function syncTypedConfirm(name){
+  const b=document.getElementById('typedConfirmBtn');
+  if(b)b.disabled=!typedConfirmed(name);
 }
 
-async function confirmDeleteChannel(id){
+function openDeleteChannel(id,name){
+  openModal('<div class="modal-header"><h3>Delete Channel</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'
+    +'<div class="modal-body"><p style="color:var(--text-muted)">Permanently delete <strong style="color:var(--text-normal)">#'+esc(name)+'</strong> and all its messages? <strong style="color:var(--text-danger)">This cannot be undone.</strong></p>'
+    +typedConfirmField(name)+'</div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" id="typedConfirmBtn" disabled data-action="confirmDeleteChannel" data-args="'+actArgs(id,name)+'">Delete channel</button></div>');
+}
+
+async function confirmDeleteChannel(id,name){
+  if(!typedConfirmed(name)){showToast('Type the channel name exactly to confirm','error');return}
   try{await api('DELETE','/channels/'+id);closeModal();showToast('Channel deleted');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
@@ -160,28 +183,46 @@ function overrideStateOf(allow,deny,bit){
 }
 
 async function openChannelPermsModal(id,name){
-  let data,users;
+  let data,users,roles;
   try{
-    data=await api('GET','/channels/'+id+'/permissions');
-    users=await api('GET','/users?limit=500&offset=0');
+    /* The role list is only for colours: GET /channels/{id}/permissions
+       carries names but not colours, and the seeded fallback would paint a
+       custom-coloured role in a colour it does not have. */
+    [data,users,roles]=await Promise.all([
+      api('GET','/channels/'+id+'/permissions'),
+      api('GET','/users?limit=500&offset=0'),
+      api('GET','/roles').catch(()=>null),
+    ]);
   }catch(e){showToast(e.message,'error');return}
-  state.permChannel={id:id,name:name,roles:data.roles||[],users:data.users||[],allUsers:users||[]};
+  if(Array.isArray(roles))state.roleList=roles;
+  state.permChannel={id:id,name:name,roles:data.roles||[],users:data.users||[],allUsers:users||[],tab:'access'};
   renderChannelPermsModal();
 }
 
+/* Channel access is a drawer with three tabs instead of one stacked dialog:
+   Access (hide the channel from a role), Overrides (the tri-state matrix and
+   its preview) and Explain (why one member can or cannot do something). All
+   three panels stay in the DOM and a tab only shows its own, so switching tabs
+   keeps unsaved edits; Save applies the Access and Overrides edits together,
+   exactly as the single dialog did. */
+const CHANNEL_TABS=[['access','Access'],['overrides','Overrides'],['explain','Explain']];
+
 function renderChannelPermsModal(){
   const pc=state.permChannel;if(!pc)return;
-  let quick='';
+  const tab=pc.tab||'access';
+  let quick='<ul class="access-list">';
   pc.roles.forEach(role=>{
     const isAdmin=(role.permissions&ADMIN_BIT)!==0;
     const canAccess=isAdmin||((role.deny&0x2)===0);
-    quick+='<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bg-active)">'
-      +'<span style="color:'+readableRoleColor(roleColor(role.role_id))+';font-weight:600">'+esc(role.role_name)+'</span>'
+    const nameId='permRoleName'+role.role_id;
+    quick+='<li class="access-row">'
+      +'<span id="'+nameId+'" class="access-role" style="color:'+readableRoleColor(roleColor(role.role_id))+'">'+esc(role.role_name)+'</span>'
       +(isAdmin
-        ?'<span style="font-size:12px;color:var(--text-muted)">always has access</span>'
-        :'<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted);cursor:pointer"><input type="checkbox" id="permRole'+role.role_id+'" '+(canAccess?'checked':'')+'> Can access</label>')
-      +'</div>';
+        ?'<span class="access-note">Administrator, always has access</span>'
+        :'<label class="access-toggle"><input type="checkbox" id="permRole'+role.role_id+'" aria-describedby="'+nameId+'" '+(canAccess?'checked':'')+'> Can access</label>')
+      +'</li>';
   });
+  quick+='</ul>';
 
   let opts='<option value="">— pick a role or member —</option><optgroup label="Roles">';
   pc.roles.forEach(r=>{opts+='<option value="r:'+r.role_id+'">'+esc(r.role_name)+'</option>'});
@@ -202,27 +243,66 @@ function renderChannelPermsModal(){
   let actionOpts='';
   ACCESS_ACTIONS.forEach(a=>{actionOpts+='<option value="'+a[0]+'">'+esc(a[1])+'</option>'});
 
-  openModal('<div class="modal-header"><h3>Channel Permissions — #'+esc(pc.name)+'</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'
-    +'<div class="modal-body">'
-    +'<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Uncheck a role to hide this channel from it (private channel). Changes apply to connected users immediately; users already in the voice channel are not disconnected.</p>'
-    +quick
-    +'<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--bg-active)">'
-    +'<div class="form-group"><label class="form-label" for="permTarget">Override matrix</label>'
-    +'<select class="form-input" id="permTarget" style="appearance:auto" data-change-action="renderPermMatrix">'+opts+'</select></div>'
-    +'<p style="color:var(--text-muted);font-size:12px;margin:0 0 10px">Resolution order: base role permissions → role override → member override. A member deny beats a role allow; Administrator bypasses everything.</p>'
-    +'<div id="permMatrix"></div>'
-    +'<div id="permPreview"></div>'
+  const tabs='<div class="drawer-tabs" role="tablist" aria-label="Channel access">'+CHANNEL_TABS.map(t=>{
+    const on=t[0]===tab;
+    return '<button class="drawer-tab" role="tab" id="chTab-'+t[0]+'" aria-controls="chPanel-'+t[0]+'" aria-selected="'+on+'" tabindex="'+(on?'0':'-1')+'" data-tab="'+t[0]+'" data-action="selectChannelTab" data-args="'+actArgs(t[0])+'">'+t[1]+'</button>';
+  }).join('')+'</div>';
+  const panel=(id,body)=>'<div class="drawer-panel" role="tabpanel" id="chPanel-'+id+'" aria-labelledby="chTab-'+id+'"'+(id===tab?'':' hidden')+'>'+body+'</div>';
+
+  openModal('<div class="drawer">'
+    +'<div class="modal-header"><h3>Access — #'+esc(pc.name)+'</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'
+    +tabs
+    +'<div class="modal-body drawer-body">'
+    +panel('access',
+      '<p class="drawer-intro">Uncheck a role to hide this channel from it (a private channel). Changes apply to connected users immediately; users already in the voice channel are not disconnected.</p>'
+      +quick)
+    +panel('overrides',
+      '<p class="drawer-intro">Set single permissions for one role or member in this channel. Resolution order: base role permissions → role override → member override. A member deny beats a role allow; Administrator bypasses everything.</p>'
+      +'<div class="form-group"><label class="form-label" for="permTarget">Role or member</label>'
+      +'<select class="form-input" id="permTarget" style="appearance:auto" data-change-action="renderPermMatrix">'+opts+'</select></div>'
+      +'<div id="permMatrix"></div>'
+      +'<div id="permPreview"></div>')
+    +panel('explain',
+      '<p class="drawer-intro">Ask the server why a member can or cannot do something here, layer by layer. Nothing is changed.</p>'
+      +'<div class="form-group"><label class="form-label" for="explainUser">Member</label>'
+      +'<select class="form-input" id="explainUser" style="appearance:auto">'+memberOpts+'</select></div>'
+      +'<div class="form-group"><label class="form-label" for="explainAction">Action</label>'
+      +'<select class="form-input" id="explainAction" style="appearance:auto">'+actionOpts+'</select></div>'
+      +'<button class="btn btn-ghost" data-action="explainAccess">Explain</button>'
+      +'<div id="permExplain"></div>')
     +'</div>'
-    +'<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--bg-active)">'
-    +'<div class="form-group"><label class="form-label" for="explainUser">Explain access</label>'
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap"><select class="form-input" id="explainUser" style="appearance:auto;flex:1;min-width:0">'+memberOpts+'</select>'
-    +'<select class="form-input" id="explainAction" aria-label="Action to explain" style="appearance:auto;flex:1;min-width:0">'+actionOpts+'</select>'
-    +'<button class="btn btn-ghost" data-action="explainAccess">Explain</button></div></div>'
-    +'<div id="permExplain"></div>'
-    +'</div></div>'
-    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-ghost" data-action="previewPermChange">Preview matrix change</button><button class="btn btn-accent" data-action="saveChannelPerms">Save</button></div>');
+    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="saveChannelPerms">Save changes</button></div>'
+    +'</div>');
   renderPermMatrix();
 }
+
+/* Shows one tab's panel. The panels are not re-rendered, so edits survive. */
+function selectChannelTab(id){
+  if(state.permChannel)state.permChannel.tab=id;
+  document.querySelectorAll('#modalInner [role="tab"][data-tab]').forEach(t=>{
+    const on=t.getAttribute('data-tab')===id;
+    t.setAttribute('aria-selected',on?'true':'false');
+    t.tabIndex=on?0:-1;
+    const p=document.getElementById(t.getAttribute('aria-controls'));
+    if(p)p.hidden=!on;
+  });
+}
+/* Arrow keys, Home and End move between the tabs (the ARIA tabs pattern with
+   automatic activation); Tab leaves the tab list for the open panel. */
+document.addEventListener('keydown',e=>{
+  const tab=e.target instanceof Element?e.target.closest('#modalInner [role="tab"][data-tab]'):null;
+  if(!tab)return;
+  const tabs=[...tab.parentElement.querySelectorAll('[role="tab"][data-tab]')];
+  let i=tabs.indexOf(tab);
+  if(e.key==='ArrowRight')i=(i+1)%tabs.length;
+  else if(e.key==='ArrowLeft')i=(i-1+tabs.length)%tabs.length;
+  else if(e.key==='Home')i=0;
+  else if(e.key==='End')i=tabs.length-1;
+  else return;
+  e.preventDefault();
+  selectChannelTab(tabs[i].getAttribute('data-tab'));
+  tabs[i].focus();
+});
 
 /* Reads the current masks for the selected target and paints one tri-state row
    per bit. A member with no override row starts all-inherit. */
@@ -232,7 +312,7 @@ function renderPermMatrix(){
   const pv=document.getElementById('permPreview');if(pv)pv.innerHTML='';
   const sel=document.getElementById('permTarget');
   const val=sel?sel.value:'';
-  if(!val){box.innerHTML='<p style="color:var(--text-muted);font-size:12px">Pick a role or member above to edit its per-channel bits.</p>';return}
+  if(!val){box.innerHTML='<p class="drawer-intro">Pick a role or member above to edit its per-channel permissions.</p>';return}
   const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
   let allow=0,deny=0,adminNote='';
   if(kind==='r'){
@@ -244,17 +324,17 @@ function renderPermMatrix(){
   }
   let html='';
   if(adminNote)html+='<p style="color:var(--text-warning);font-size:12px;margin:0 0 8px">'+esc(adminNote)+'</p>';
-  html+='<table class="tbl"><thead><tr><th>Permission</th><th style="text-align:center">Allow</th><th style="text-align:center">Inherit</th><th style="text-align:center">Deny</th></tr></thead><tbody>';
+  html+='<table class="tbl"><thead><tr><th scope="col">Permission</th><th scope="col" style="text-align:center">Allow</th><th scope="col" style="text-align:center">Inherit</th><th scope="col" style="text-align:center">Deny</th></tr></thead><tbody>';
   OVERRIDE_BITS.forEach(b=>{
     const bit=b[0],label=b[1],st=overrideStateOf(allow,deny,bit);
-    html+='<tr><td>'+esc(label)+'</td>';
+    html+='<tr><th scope="row" class="ovr-label">'+esc(label)+'</th>';
     ['allow','inherit','deny'].forEach(k=>{
-      html+='<td style="text-align:center"><input type="radio" name="ovr'+bit+'" data-ovrbit="'+bit+'" value="'+k+'"'+(st===k?' checked':'')+'></td>';
+      html+='<td style="text-align:center"><input type="radio" name="ovr'+bit+'" data-ovrbit="'+bit+'" value="'+k+'" aria-label="'+esc(label)+': '+k+'"'+(st===k?' checked':'')+'></td>';
     });
     html+='</tr>';
   });
   html+='</tbody></table>';
-  html+='<div style="margin-top:10px"><button class="btn btn-ghost" data-action="clearPermOverride">Clear override</button></div>';
+  html+='<div class="drawer-actions"><button class="btn btn-ghost" data-action="previewPermChange">Preview change</button><button class="btn btn-outline" data-action="clearPermOverride">Clear override</button></div>';
   box.innerHTML=html;
 }
 
@@ -422,7 +502,7 @@ const PERM_GROUPS=[
     [0x4000000,'Manage Invites','Create and revoke invite codes'],
     [0x2000000,'Manage Server','Read and change server settings'],
     [0x8000000,'View Audit Log','Read the action history'],
-    [0x400000,'Moderate Members','warn and time out members, work the report queue'],
+    [0x400000,'Moderate Members','Warn and time out members, work the report queue'],
     [0x40000000,'Administrator','Bypasses every permission check'],
   ]},
   {title:'Text',bits:[
@@ -458,47 +538,66 @@ function canGrantBit(bit){
   return (p&bit)===bit;
 }
 
+/* How many of the grid's permissions a mask grants, for the ladder's summary. */
+function rolePermCount(mask){
+  return PERM_GROUPS.reduce((n,g)=>n+g.bits.filter(b=>(mask&b[0])===b[0]).length,0);
+}
+const PERM_TOTAL=PERM_GROUPS.reduce((n,g)=>n+g.bits.length,0);
+
+/* The Roles page is a rank ladder: highest rank first, each rung showing its
+   position, members and how much it grants, with a line marking the caller's
+   own rank — everything below that line is what they may manage. */
 async function renderRoles(){
   let roles;
-  try{roles=await api('GET','/roles')}catch(e){return'<div class="page-title">Roles</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
+  try{roles=await api('GET','/roles')}catch(e){return'<h1 class="page-title">Roles &amp; permissions</h1><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   state.roleList=roles||[];
-  let html='<div class="page-title">Roles</div><div class="page-desc">'+state.roleList.length+' roles, highest rank first. You can only manage roles below your own.</div>';
-  html+='<div class="filter-bar"><button class="btn btn-accent" data-action="openRoleModal" data-args="'+actArgs(null)+'">'+I.plus+' Create Role</button></div>';
-  html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Role</th><th>Members</th><th>Position</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!state.roleList.length)html+='<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px">No roles</td></tr>';
+  let html=rcHead('Roles &amp; permissions',state.roleList.length+' role'+(state.roleList.length===1?'':'s')+', highest rank first. A higher rank manages every role below it, so place new roles with care.',
+    '<button class="btn btn-accent" data-action="openRoleModal" data-args="'+actArgs(null)+'">'+I.plus+' Create Role</button>');
+  if(!state.roleList.length)return html+'<div class="section-card"><div class="section-card-body" style="color:var(--text-muted)">No roles</div></div>';
   /* Only the manageable slice can be reordered — the reorder endpoint takes
      exactly the roles below the caller, so the arrows move within that slice. */
   const movable=state.roleList.filter(canManageRole);
-  state.roleList.forEach(role=>{
+  html+='<ol class="rank-ladder" aria-label="Roles by rank, highest first">';
+  let divided=false;
+  state.roleList.forEach((role,i)=>{
     const mine=canManageRole(role);
+    if(mine&&!divided&&i>0)html+='<li class="rank-divider" aria-hidden="true">Your rank · '+myPosition()+' — you manage the roles below</li>';
+    if(mine)divided=true;
     const mIdx=movable.findIndex(r=>r.id===role.id);
-    const swatch='<span class="role-swatch" style="background:'+(role.color?esc(role.color):'var(--text-muted)')+'"></span>';
-    html+='<tr><td><div style="display:flex;align-items:center;gap:8px">'+swatch+'<strong style="color:'+(role.color?readableRoleColor(role.color):'var(--text-normal)')+'">'+esc(role.name)+'</strong>';
+    const name=esc(role.name);
+    const count=role.member_count||0;
+    const admin=(role.permissions&PERM.ADMINISTRATOR)!==0;
+    const perms=admin?'Administrator: every permission':rolePermCount(role.permissions)+' of '+PERM_TOTAL+' permissions';
+    html+='<li class="rank-rung'+(mine?'':' is-above')+'">';
+    html+='<span class="rank-pos"><span class="sr-only">Position </span>'+role.position+'</span>';
+    html+='<span class="role-swatch" style="background:'+(role.color?esc(role.color):'var(--text-muted)')+'" aria-hidden="true"></span>';
+    html+='<div class="rank-main"><div class="rank-name"><strong style="color:'+(role.color?readableRoleColor(role.color):'var(--text-normal)')+'">'+name+'</strong>';
     if(role.is_default)html+='<span class="badge badge-muted">default</span>';
-    if(!mine)html+='<span class="badge badge-muted">above you</span>';
-    html+='</div></td>';
-    html+='<td style="color:var(--text-muted)">'+(role.member_count||0)+'</td>';
-    html+='<td style="font-size:12px;color:var(--text-muted)">'+role.position+'</td>';
-    html+='<td><div class="act-group" style="justify-content:flex-end">';
+    if(role.position===myPosition())html+='<span class="badge badge-accent">your role</span>';
+    else if(!mine)html+='<span class="badge badge-muted">above you</span>';
+    html+='</div><div class="rank-meta">'+count+' member'+(count===1?'':'s')+' · '+perms+'</div></div>';
+    html+='<div class="act-group rank-actions">';
     if(mine){
-      const upDisabled=mIdx<=0?'disabled style="opacity:.3"':'';
-      const downDisabled=(mIdx<0||mIdx>=movable.length-1)?'disabled style="opacity:.3"':'';
-      html+='<button class="act-btn" title="Move up" aria-label="Move up" '+upDisabled+' data-action="moveRole" data-args="'+actArgs(role.id,-1)+'">'+I.arrowUp+'</button>';
-      html+='<button class="act-btn" title="Move down" aria-label="Move down" '+downDisabled+' data-action="moveRole" data-args="'+actArgs(role.id,1)+'">'+I.arrowDown+'</button>';
-      html+='<button class="act-btn" title="Edit" aria-label="Edit" data-action="openRoleModal" data-args="'+actArgs(role.id)+'">'+I.edit+'</button>';
-      if(role.is_default)html+='<button class="act-btn" title="The default role cannot be deleted" aria-label="The default role cannot be deleted" disabled style="opacity:.3">'+I.trash+'</button>';
-      else html+='<button class="act-btn danger" title="Delete" aria-label="Delete" data-action="openDeleteRole" data-args="'+actArgs(role.id)+'">'+I.trash+'</button>';
+      const upDisabled=mIdx<=0?' disabled':'';
+      const downDisabled=(mIdx<0||mIdx>=movable.length-1)?' disabled':'';
+      html+='<button class="act-btn" title="Move up" aria-label="Move '+name+' up"'+upDisabled+' data-focus="up-'+role.id+'" data-action="moveRole" data-args="'+actArgs(role.id,-1)+'">'+I.arrowUp+'</button>';
+      html+='<button class="act-btn" title="Move down" aria-label="Move '+name+' down"'+downDisabled+' data-focus="down-'+role.id+'" data-action="moveRole" data-args="'+actArgs(role.id,1)+'">'+I.arrowDown+'</button>';
+      html+='<button class="act-btn" title="Edit" aria-label="Edit '+name+'" data-action="openRoleModal" data-args="'+actArgs(role.id)+'">'+I.edit+'</button>';
+      if(role.is_default)html+='<button class="act-btn" title="The default role cannot be deleted" aria-label="The default role cannot be deleted" disabled>'+I.trash+'</button>';
+      else html+='<button class="act-btn danger" title="Delete" aria-label="Delete '+name+'" data-action="openDeleteRole" data-args="'+actArgs(role.id)+'">'+I.trash+'</button>';
     }else{
-      html+='<span style="font-size:12px;color:var(--text-muted)">read-only</span>';
+      html+='<span class="rank-readonly">read-only</span>';
     }
-    html+='</div></td></tr>';
+    html+='</div></li>';
   });
-  html+='</tbody></table></div></div>';
+  html+='</ol>';
   return html;
 }
 
 /* Swap a role with its neighbour and send the whole manageable order. The
-   endpoint normalizes positions, so the client never computes them. */
+   endpoint normalizes positions, so the client never computes them. The
+   ladder is redrawn in place and focus returns to the arrow just used (or its
+   twin, once the role reaches an end), so a keyboard user can keep moving it. */
 async function moveRole(id,delta){
   const movable=state.roleList.filter(canManageRole);
   const i=movable.findIndex(r=>r.id===id);
@@ -506,14 +605,86 @@ async function moveRole(id,delta){
   if(i<0||j<0||j>=movable.length)return;
   const ids=movable.map(r=>r.id);
   ids[i]=movable[j].id;ids[j]=movable[i].id;
-  try{await api('PATCH','/roles/reorder',{role_ids:ids});showToast('Roles reordered');renderContent()}
-  catch(e){showToast(e.message,'error')}
+  try{await api('PATCH','/roles/reorder',{role_ids:ids});showToast('Roles reordered')}
+  catch(e){showToast(e.message,'error');return}
+  const c=document.getElementById('content');
+  if(!c||state.section!=='roles')return;
+  try{c.innerHTML=await renderRoles()}catch(e){renderContent();return}
+  const dir=delta<0?'up':'down',other=delta<0?'down':'up';
+  const btn=[c.querySelector('[data-focus="'+dir+'-'+id+'"]'),c.querySelector('[data-focus="'+other+'-'+id+'"]')].find(b=>b&&!b.disabled);
+  if(btn)btn.focus();
+}
+
+/* Where a role at `pos` lands on the ladder. The role being edited is left
+   out, so it neither collides with nor outranks itself. The default role is
+   not listed as outranked: every other role sits above it by design. */
+function rolePlacement(pos,editId){
+  const others=(state.roleList||[]).filter(r=>r.id!==editId);
+  return {
+    clash:others.find(r=>r.position===pos)||null,
+    outranks:others.filter(r=>r.position<pos&&!r.is_default).sort((a,b)=>b.position-a.position),
+    above:others.filter(r=>r.position>pos).sort((a,b)=>a.position-b.position)[0]||null,
+    below:others.filter(r=>r.position<pos).sort((a,b)=>b.position-a.position)[0]||null,
+  };
+}
+/* The lowest free slot above the default role — where a new everyday role
+   usually belongs. null when nothing between it and the caller is free. */
+function slotAboveDefault(editId){
+  const roles=(state.roleList||[]).filter(r=>r.id!==editId);
+  const def=roles.find(r=>r.is_default);
+  const taken={};roles.forEach(r=>{taken[r.position]=true});
+  let pos=def?def.position+1:1;
+  while(pos<myPosition()&&taken[pos])pos++;
+  return pos<myPosition()?pos:null;
+}
+function listNames(roles){
+  const n=roles.map(r=>esc(r.name));
+  return n.length<2?n.join(''):n.slice(0,-1).join(', ')+' and '+n[n.length-1];
+}
+/* Plain text naming why the position is doomed, or '' when it is usable. */
+function rolePositionError(pos,editId){
+  if(isNaN(pos)||pos<0)return 'Enter a position of 0 or more.';
+  if(pos>=myPosition())return 'Must be below your own rank of '+myPosition()+'.';
+  const p=rolePlacement(pos,editId);
+  if(p.clash)return 'Position '+pos+' is already used by '+p.clash.name+'. Pick a free number.';
+  return '';
+}
+/* The live line under the position field: where the role sits, and a warning
+   (U13) when it would outrank roles such as Admin or Moderator — a new role
+   defaults to the highest free slot below the caller, which for the owner is
+   above every seeded role. */
+function renderRolePlacement(){
+  const el=document.getElementById('rolePlacement');
+  const input=document.getElementById('rolePos');
+  if(!el||!input)return;
+  const pos=parseInt(input.value,10);
+  const editId=state.roleEditId;
+  const err=rolePositionError(pos,editId);
+  if(err){el.className='rank-placement is-error';el.textContent=err;return}
+  const p=rolePlacement(pos,editId);
+  const between=p.above&&p.below?'Sits between '+esc(p.above.name)+' ('+p.above.position+') and '+esc(p.below.name)+' ('+p.below.position+').'
+    :p.above?'Sits below every other role, under '+esc(p.above.name)+' ('+p.above.position+').'
+    :p.below?'Sits above every other role, over '+esc(p.below.name)+' ('+p.below.position+').':'';
+  if(!p.outranks.length){el.className='rank-placement';el.innerHTML=between;return}
+  const slot=slotAboveDefault(editId);
+  const def=(state.roleList||[]).find(r=>r.is_default);
+  el.className='rank-placement is-warn';
+  el.innerHTML='<strong>This role will outrank '+listNames(p.outranks)+'.</strong> '
+    +'With Manage Roles or a moderation permission, its members could act on theirs. '+between
+    +(slot!==null&&slot!==pos&&def?'<div><button type="button" class="btn btn-outline" data-action="placeRoleAboveDefault" data-args="'+actArgs(slot)+'">Place just above '+esc(def.name)+' ('+slot+')</button></div>':'');
+}
+function placeRoleAboveDefault(slot){
+  const input=document.getElementById('rolePos');if(!input)return;
+  input.value=String(slot);
+  renderRolePlacement();
+  input.focus();
 }
 
 /* Shared create/edit modal. id === null creates. */
 function openRoleModal(id){
   const role=id===null?null:state.roleList.find(r=>r.id===id);
   if(id!==null&&!role){showToast('Role not found','error');return}
+  state.roleEditId=role?role.id:null;
   const name=role?role.name:'';
   const color=(role&&role.color)?role.color:'';
   const perms=role?role.permissions:0;
@@ -522,7 +693,8 @@ function openRoleModal(id){
      never a surprise. Prefilling myPosition()-1 unconditionally handed the
      server a slot the previous new role already holds, and CreateRole refuses
      an explicitly requested position that is taken, so every role after the
-     first was rejected on its own default. */
+     first was rejected on its own default. The placement line under the field
+     warns when that default outranks existing roles. */
   let position;
   if(role)position=role.position;
   else{
@@ -531,9 +703,12 @@ function openRoleModal(id){
     while(position>0&&taken[position])position--;
   }
 
+  /* Each permission shows its description under its name (U14), not in a
+     tooltip only a mouse can reach; the checkbox is named by the name and
+     described by the description. */
   let grid='';
   PERM_GROUPS.forEach(g=>{
-    grid+='<div class="perm-group"><div class="perm-group-title">'+esc(g.title)+'</div><div class="perm-grid">';
+    grid+='<fieldset class="perm-group"><legend class="perm-group-title">'+esc(g.title)+'</legend><div class="perm-grid">';
     g.bits.forEach(b=>{
       const bit=b[0],label=b[1],desc=b[2];
       const granted=(perms&bit)===bit;
@@ -542,25 +717,29 @@ function openRoleModal(id){
          server allows, but the panel keeps the rule to one sentence), unchecked
          and locked otherwise. */
       const locked=!canGrantBit(bit);
-      const title=locked?'Your own role does not have this permission':desc;
-      grid+='<label class="perm-item'+(locked?' locked':'')+'" title="'+esc(title)+'">'
-        +'<input type="checkbox" data-permbit="'+bit+'" '+(granted?'checked':'')+' '+(locked?'disabled':'')+'>'
-        +'<span>'+esc(label)+'</span></label>';
+      grid+='<label class="perm-item'+(locked?' locked':'')+'">'
+        +'<input type="checkbox" data-permbit="'+bit+'" aria-labelledby="permName'+bit+'" aria-describedby="permDesc'+bit+'" '+(granted?'checked':'')+' '+(locked?'disabled':'')+'>'
+        +'<span class="perm-text"><span class="perm-name" id="permName'+bit+'">'+esc(label)+'</span>'
+        +'<span class="perm-desc" id="permDesc'+bit+'">'+esc(desc)+(locked?'<span class="perm-lock"> Locked: your own role does not have this permission.</span>':'')+'</span></span></label>';
     });
-    grid+='</div></div>';
+    grid+='</div></fieldset>';
   });
 
   openModal('<div class="modal-header"><h3>'+(role?'Edit Role':'Create Role')+'</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'
-    +'<div class="modal-body">'
+    +'<div class="modal-body role-form">'
     +'<div class="form-group"><label class="form-label" for="roleName">Name <span class="req">*</span></label><input class="form-input" id="roleName" maxlength="32" value="'+esc(name)+'" placeholder="Moderator"></div>'
     +'<div class="form-group"><label class="form-label" for="roleColor">Color</label><div style="display:flex;align-items:center;gap:10px">'
       +'<input type="color" id="roleColor" value="'+esc(color||'#00c8ff')+'" style="width:44px;height:34px;padding:2px;background:var(--bg-input);border:1px solid var(--border-control);border-radius:var(--radius-sm)">'
       +'<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)"><input type="checkbox" id="roleNoColor" '+(color?'':'checked')+'> No color</label>'
     +'</div></div>'
-    +'<div class="form-group"><label class="form-label" for="rolePos">Position (must be below your own rank of '+myPosition()+')</label><input class="form-input" id="rolePos" type="number" min="0" max="'+Math.max(0,myPosition()-1)+'" value="'+position+'"></div>'
-    +'<div class="form-group"><label class="form-label">Permissions</label>'+grid+'</div>'
+    +'<div class="form-group"><label class="form-label" for="rolePos">Rank position</label>'
+      +'<input class="form-input" id="rolePos" type="number" min="0" max="'+Math.max(0,myPosition()-1)+'" value="'+position+'" aria-describedby="rolePosHint rolePlacement" data-input-action="renderRolePlacement">'
+      +'<div class="rc-hint" id="rolePosHint">Higher numbers rank higher. It must be below your own rank of '+myPosition()+'.</div>'
+      +'<div id="rolePlacement" class="rank-placement" aria-live="polite"></div></div>'
+    +'<div class="form-group"><div class="form-label">Permissions</div>'+grid+'</div>'
     +'</div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="saveRole" data-args="'+actArgs(role?role.id:null)+'">'+(role?'Save':'Create')+'</button></div>');
+  renderRolePlacement();
 }
 
 /* Collect the checked bits. Disabled boxes still report their state, so a bit
@@ -576,12 +755,15 @@ function collectRolePerms(){
 async function saveRole(id){
   const name=document.getElementById('roleName').value.trim();
   if(!name){showToast('Name is required','error');return}
+  const position=parseInt(document.getElementById('rolePos').value,10);
+  const posErr=rolePositionError(position,id);
+  if(posErr){showToast(posErr,'error');return}
   const noColor=document.getElementById('roleNoColor').checked;
   const body={
     name:name,
     color:noColor?'':document.getElementById('roleColor').value,
     permissions:collectRolePerms(),
-    position:parseInt(document.getElementById('rolePos').value,10)||0,
+    position:position,
   };
   try{
     if(id===null)await api('POST','/roles',body);
@@ -602,11 +784,14 @@ function openDeleteRole(id){
   openModal('<div class="modal-header"><h3>Delete Role</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'
     +'<div class="modal-body"><p style="color:var(--text-muted)">Delete <strong style="color:'+(role.color?readableRoleColor(role.color):'var(--text-normal)')+'">'+esc(role.name)+'</strong>?</p>'
     +'<p style="color:var(--text-muted);margin-top:8px">'+members+'</p>'
-    +'<p style="color:var(--text-muted);font-size:12px;margin-top:8px">Its channel permission overrides are removed too. This cannot be undone.</p></div>'
-    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" data-action="confirmDeleteRole" data-args="'+actArgs(id)+'">Delete</button></div>');
+    +'<p style="color:var(--text-muted);font-size:12px;margin-top:8px">Its channel permission overrides are removed too. <strong style="color:var(--text-danger)">This cannot be undone.</strong></p>'
+    +typedConfirmField(role.name)+'</div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" id="typedConfirmBtn" disabled data-action="confirmDeleteRole" data-args="'+actArgs(id)+'">Delete role</button></div>');
 }
 
 async function confirmDeleteRole(id){
+  const role=state.roleList.find(r=>r.id===id);
+  if(!role||!typedConfirmed(role.name)){showToast('Type the role name exactly to confirm','error');return}
   try{await api('DELETE','/roles/'+id);closeModal();showToast('Role deleted');renderContent()}
   catch(e){showToast(e.message,'error')}
 }
@@ -705,4 +890,5 @@ async function deleteEmoji(id){
 
 Object.assign(ACTIONS,{clearPermOverride,confirmDeleteChannel,confirmDeleteEmoji,confirmDeleteRole,createChannel,
   deleteEmoji,explainAccess,moveRole,openChannelEditModal,openChannelModal,openChannelPermsModal,openDeleteChannel,
-  openDeleteRole,openRoleModal,previewPermChange,renderPermMatrix,saveChannelEdit,saveChannelPerms,saveRole,uploadEmoji});
+  openDeleteRole,openRoleModal,placeRoleAboveDefault,previewPermChange,renderPermMatrix,renderRolePlacement,
+  saveChannelEdit,saveChannelPerms,saveRole,selectChannelTab,syncTypedConfirm,uploadEmoji});
