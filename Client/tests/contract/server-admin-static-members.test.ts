@@ -44,7 +44,8 @@ async function boot(calls: string[], respond: Responder) {
         const method = String((opts.method as string) || "GET").toUpperCase();
         const p = String(input).replace(/^\/admin\/api/, "");
         calls.push(`${method} ${p}`);
-        const json = p === "/setup/status" ? { needs_setup: false } : ((await respond(p, method)) ?? {});
+        const json =
+          p === "/setup/status" ? { needs_setup: false } : ((await respond(p, method)) ?? {});
         return { ok: true, status: 200, json: async () => json } as Response;
       }) as typeof fetch;
     },
