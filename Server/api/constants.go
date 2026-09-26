@@ -127,6 +127,14 @@ const (
 	// transfer that keeps moving is never cut, while a peer that stalls is.
 	transferProgressTimeout = 30 * time.Second
 
+	// transferMaxLifetime caps a file transfer's total lifetime however
+	// steadily it progresses, restoring the bound the whole-request 30 s
+	// timeouts used to give: without it a peer trickling one byte per
+	// transferProgressTimeout holds its storage reservation, connection and
+	// goroutine indefinitely. 10 minutes matches the client tunnel's 600 s
+	// data-copy bound, so any transfer the client would finish is not cut.
+	transferMaxLifetime = 10 * time.Minute
+
 	// maxAvatarURLLen is the maximum length of a user avatar URL.
 	maxAvatarURLLen = 512
 

@@ -189,17 +189,16 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		// SRV-05: the server's global 30 s ReadTimeout/WriteTimeout bound the
 		// WHOLE request, so a 25 MB upload on a slow uplink is cut mid-body
 		// (and its 201 never lands, because the write deadline elapsed long
-		// before the body finished). The route-scoped wrappers below push the
-		// connection's read and write deadlines out on every chunk that moves,
-		// so a transfer that keeps progressing is never cut while a peer that
-		// stops sending is. The global timeouts are deliberately left alone:
+		// before the body finished). The route-scoped body wrapper below pushes
+		// the connection's read and write deadlines out on every chunk that
+		// moves, so a transfer that keeps progressing is not cut before
+		// transferMaxLifetime while a peer that stops sending is. The global timeouts are deliberately left alone:
 		// they still bound the header phase and slowloris behaviour.
 		deadlines := newTransferDeadline(w)
 		deadlines.touch()
 
 		// Limit request body size to prevent abuse.
 		r.Body = progressReader{r: http.MaxBytesReader(w, r.Body, uploadMaxBodySize), d: deadlines}
-		w = progressWriter{ResponseWriter: w, d: deadlines}
 
 		// Stream the multipart body instead of buffering or spooling it: no
 		// part is read until the bytes it could cost are admitted below.

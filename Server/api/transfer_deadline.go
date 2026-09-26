@@ -19,7 +19,8 @@ import (
 // posture for every route), the two transfer routes wrap their reader/writer so
 // every chunk that actually moves pushes the connection deadline forward. A
 // transfer that keeps progressing is never cut; a peer that stops sending or
-// reading is abandoned after transferProgressTimeout. This mirrors the
+// reading is abandoned after transferProgressTimeout, and no transfer outlives
+// transferMaxLifetime however it progresses. This mirrors the
 // SetWriteDeadline(time.Time{}) override admin/logstream.go already applies to
 // its own long-lived stream.
 //
@@ -32,18 +33,26 @@ import (
 type transferDeadline struct {
 	ctl     *http.ResponseController
 	timeout time.Duration
+	until   time.Time
 }
 
 func newTransferDeadline(w http.ResponseWriter) *transferDeadline {
-	return &transferDeadline{ctl: http.NewResponseController(w), timeout: transferProgressTimeout}
+	return &transferDeadline{
+		ctl:     http.NewResponseController(w),
+		timeout: transferProgressTimeout,
+		until:   time.Now().Add(transferMaxLifetime),
+	}
 }
 
-// touch pushes both deadlines out to now+timeout. Errors are ignored: the only
+// touch pushes both deadlines out to now+timeout, never past until. Errors are ignored: the only
 // realistic one is http.ErrNotSupported on a writer with no connection, where
 // there is no deadline to manage anyway (a real net/http server always
 // supports it).
 func (d *transferDeadline) touch() {
 	deadline := time.Now().Add(d.timeout)
+	if deadline.After(d.until) {
+		deadline = d.until
+	}
 	_ = d.ctl.SetReadDeadline(deadline)
 	_ = d.ctl.SetWriteDeadline(deadline)
 }
