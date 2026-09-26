@@ -65,18 +65,38 @@ func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 
 // ─── User Management ──────────────────────────────────────────────────────────
 
-// ListAllUsers returns users joined with their role name, ordered by ID.
-// limit=0 returns no rows.
-func (d *DB) ListAllUsers(ctx context.Context, limit, offset int) ([]UserWithRole, error) {
+// UserListFilter narrows ListAllUsers for the admin Members page. The zero
+// value lists everyone.
+type UserListFilter struct {
+	// Query is a case-insensitive username substring; empty matches all.
+	Query string
+	// RoleID keeps one role; 0 means any role.
+	RoleID int64
+	// BannedOnly keeps only effectively banned users (a lapsed temporary ban
+	// does not count, as in notBannedClause).
+	BannedOnly bool
+}
+
+// ListAllUsers returns active users matching f, joined with their role name
+// and position, ordered by ID. limit=0 returns no rows.
+func (d *DB) ListAllUsers(ctx context.Context, f UserListFilter, limit, offset int) ([]UserWithRole, error) {
+	var bannedOnly int64
+	if f.BannedOnly {
+		bannedOnly = 1
+	}
 	rows, err := d.q.ListAllUsers(ctx, dbgen.ListAllUsersParams{
-		Limit:  int64(limit),
-		Offset: int64(offset),
+		Query:      f.Query,
+		RoleID:     f.RoleID,
+		BannedOnly: bannedOnly,
+		Limit:      int64(limit),
+		Offset:     int64(offset),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ListAllUsers: %w", err)
 	}
 	result := make([]UserWithRole, 0, len(rows))
-	for _, r := range rows {
+	for i := range rows {
+		r := &rows[i]
 		result = append(result, UserWithRole{
 			User: User{
 				ID:         r.ID,
@@ -90,7 +110,8 @@ func (d *DB) ListAllUsers(ctx context.Context, limit, offset int) ([]UserWithRol
 				BanReason:  r.BanReason,
 				BanExpires: r.BanExpires,
 			},
-			RoleName: r.RoleName,
+			RoleName:     r.RoleName,
+			RolePosition: int(r.RolePosition),
 		})
 	}
 	return result, nil

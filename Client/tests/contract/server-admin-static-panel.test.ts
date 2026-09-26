@@ -339,13 +339,21 @@ describe("Server/admin/static — panel behaviour", () => {
       /<button class="page-btn" disabled data-action="turnUsersPage" data-args="\[1\]"/,
     );
 
-    // OC-0390: erasure is reachable, and not adjacent to Force Logout.
-    const erase = 'data-action="openEraseUser" data-args="[2,';
-    const forceLogout = 'data-action="forceLogout" data-args="[2]"';
-    expect(html).toContain(erase);
-    const row = html.slice(html.indexOf(erase) - 800, html.indexOf(erase));
-    expect(row).toContain(forceLogout);
-    expect(row.slice(row.indexOf(forceLogout))).toContain("<span style=");
+    // OC-0390: erasure is reachable from the row's overflow menu, and a
+    // separator keeps it apart from Force Logout.
+    const doc = booted.dom.window.document;
+    doc.getElementById("content")!.innerHTML = html;
+    (doc.querySelector('[data-action="toggleMemberMenu"][data-args="[2]"]') as HTMLElement).click();
+    const menu = doc.getElementById("memberMenu")!;
+    const items = [...menu.children].map(
+      (el) => el.getAttribute("data-action") ?? el.getAttribute("role"),
+    );
+    expect(items).toContain("openEraseUser");
+    expect(items.indexOf("forceLogout")).toBeLessThan(items.indexOf("separator"));
+    expect(items.indexOf("separator")).toBe(items.indexOf("openEraseUser") - 1);
+    expect(menu.querySelector('[data-action="openEraseUser"]')!.getAttribute("data-args")).toMatch(
+      /^\[2,/,
+    );
   });
 
   it("offers a next page when an overflow row comes back (OC-0361)", async () => {
@@ -482,6 +490,11 @@ describe("Server/admin/static — panel behaviour", () => {
       expect(title, `section ${id}`).toBeTruthy();
       expect(title, `section ${id}`).not.toMatch(/^(Error|Loading\.\.\.)$/);
       scan(`section ${id}`);
+      // Row overflow menus (Members) render their items when opened.
+      for (const more of content.querySelectorAll<HTMLElement>('[aria-haspopup="menu"]')) {
+        more.click();
+        scan(`menu in ${id}`);
+      }
 
       const openers = new Set(
         [...content.querySelectorAll("[data-action]")]

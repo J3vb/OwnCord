@@ -11,14 +11,23 @@ SELECT COUNT(*) FROM channels;
 SELECT COUNT(*) FROM invites WHERE revoked = 0;
 
 -- name: ListAllUsers :many
+-- The admin Members page. query is a case-insensitive username substring
+-- (instr, so no wildcard escaping; empty matches everyone). role_id 0 means any
+-- role. banned_only 1 keeps only effective bans: the negation of
+-- db.notBannedClause, so a lapsed temporary ban is not listed as banned.
 SELECT u.id, u.username, u.avatar, u.role_id,
        u.status, u.created_at, u.last_seen, u.banned, u.ban_reason, u.ban_expires,
-       COALESCE(r.name, '') AS role_name
+       COALESCE(r.name, '') AS role_name, COALESCE(r.position, 0) AS role_position
 FROM users u
 LEFT JOIN roles r ON r.id = u.role_id
 WHERE u.registration_status = 'active'
+  AND instr(lower(u.username), lower(sqlc.arg(query))) > 0
+  AND (CAST(sqlc.arg(role_id) AS INTEGER) = 0 OR u.role_id = sqlc.arg(role_id))
+  AND (CAST(sqlc.arg(banned_only) AS INTEGER) = 0
+       OR (u.banned != 0 AND (u.ban_expires IS NULL
+           OR replace(u.ban_expires, ' ', 'T') > strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))))
 ORDER BY u.id ASC
-LIMIT ? OFFSET ?;
+LIMIT sqlc.arg(limit) OFFSET sqlc.arg(offset);
 
 -- name: UpdateUserRole :exec
 UPDATE users SET role_id = ? WHERE id = ?;

@@ -70,17 +70,20 @@ type PermissionInvalidator interface {
 // adminUserResponse is the safe public shape returned by user-listing and
 // user-patch endpoints. It deliberately excludes PasswordHash and TOTPSecret.
 type adminUserResponse struct {
-	ID         int64   `json:"id"`
-	Username   string  `json:"username"`
-	Avatar     *string `json:"avatar,omitempty"`
-	RoleID     int64   `json:"role_id"`
-	RoleName   string  `json:"role_name"`
-	Status     string  `json:"status"`
-	CreatedAt  string  `json:"created_at"`
-	LastSeen   *string `json:"last_seen,omitempty"`
-	Banned     bool    `json:"banned"`
-	BanReason  *string `json:"ban_reason,omitempty"`
-	BanExpires *string `json:"ban_expires,omitempty"`
+	ID       int64   `json:"id"`
+	Username string  `json:"username"`
+	Avatar   *string `json:"avatar,omitempty"`
+	RoleID   int64   `json:"role_id"`
+	RoleName string  `json:"role_name"`
+	// RolePosition is the role's hierarchy position; only the users list
+	// sets it.
+	RolePosition *int    `json:"role_position,omitempty"`
+	Status       string  `json:"status"`
+	CreatedAt    string  `json:"created_at"`
+	LastSeen     *string `json:"last_seen,omitempty"`
+	Banned       bool    `json:"banned"`
+	BanReason    *string `json:"ban_reason,omitempty"`
+	BanExpires   *string `json:"ban_expires,omitempty"`
 }
 
 // ─── adminMeResponse ────────────────────────────────────────────────────────

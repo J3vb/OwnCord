@@ -421,6 +421,11 @@ text was moved behind English catalogs ready for translation.
 - Channel access opens as a side drawer with Access, Overrides and Explain tabs
   instead of one long dialog.
 - Deleting a channel or a role now asks you to type its name first.
+- **Members has All, Pending and Banned tabs, a username search and a role
+  filter**, and they search the whole server, not just the page on screen. Each
+  row has one Manage button and a ⋮ menu instead of a row of unlabelled icons.
+- Your own row, and anyone at or above your rank, no longer offers Ban or Force
+  logout; the server already refused them.
 - **Who may register is now a choice**: closed, invite only, approval, or open.
   Fresh installs default to invite only. Existing servers keep the behaviour
   they had — a server that required an invite still requires one, and
