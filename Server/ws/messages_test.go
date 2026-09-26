@@ -896,3 +896,34 @@ func TestBuildChannelUpdate_UnflaggedChannelSendsZeroes(t *testing.T) {
 		t.Errorf("payload.voice_max_users = %v, want 0", env.Payload["voice_max_users"])
 	}
 }
+
+// RT-2: direct_url is the server's own dial address. Under docker-compose that
+// is ws://livekit:7880, which does not resolve on the client's host, so only a
+// loopback URL is sent; anything else is omitted and the client tunnels.
+func TestBuildVoiceToken_DirectURLLoopbackOnly(t *testing.T) {
+	cases := map[string]string{
+		"ws://localhost:7880":         "ws://localhost:7880",
+		"ws://127.0.0.1:7880":         "ws://127.0.0.1:7880",
+		"wss://[::1]:7880":            "wss://[::1]:7880",
+		"ws://livekit:7880":           "",
+		"wss://example.livekit.cloud": "",
+		"ws://10.0.0.5:7880":          "",
+		"":                            "",
+	}
+	for in, want := range cases {
+		var env struct {
+			Payload map[string]any `json:"payload"`
+		}
+		if err := json.Unmarshal(buildVoiceToken(1, "t", "/livekit", in, false), &env); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		got, present := env.Payload["direct_url"]
+		if want == "" {
+			if present {
+				t.Errorf("direct_url for %q = %v, want omitted", in, got)
+			}
+		} else if got != want {
+			t.Errorf("direct_url for %q = %v, want %q", in, got, want)
+		}
+	}
+}

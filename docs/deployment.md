@@ -211,13 +211,15 @@ Two limits apply to Linux desktop clients:
   through `/livekit` from 2.0.0-beta.1 on, and a `1.2.0-alpha.*` server drops it
   and refuses the join. Update the server.
 - **A 2.0.0-beta.1 or older client on the Docker host cannot join as
-  `localhost`.** A client that reaches the server as `localhost`, `127.0.0.1`
-  or `::1` uses the `direct_url` it is handed, `ws://livekit:7880`, as-is, and
-  that name does not resolve outside the container network. On the same
-  machine, connect using the host's LAN address or hostname instead: the client
-  then routes voice through the server's `/livekit` tunnel. Failing that, run
-  the client on another machine. The next client release tunnels any
-  non-loopback `direct_url`, and a later server change stops sending one.
+  `localhost` against a 2.0.0-beta.1 or older server.** Those servers hand the
+  client LiveKit's own address, `ws://livekit:7880`, as its `direct_url`; a
+  client that reaches the server as `localhost`, `127.0.0.1` or `::1` uses it
+  as-is, and that name does not resolve outside the container network. Update
+  the server: it now sends a `direct_url` only when it is loopback, so the
+  client routes voice through the server's `/livekit` tunnel. Updating the
+  client also fixes it, since the next client release tunnels any non-loopback
+  `direct_url`. Until then, connect using the host's LAN address or hostname
+  instead, or run the client on another machine.
 
 ---
 
