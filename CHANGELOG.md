@@ -45,6 +45,10 @@ and only when it changes something a contributor or fork holder must do
 
 - Linux desktop voice works against a server on the same Docker host again — the client tried LiveKit's Docker-internal hostname, which does not resolve outside the container network, and now falls back to the `/livekit` tunnel like the other platforms.
 
+### Accounts & admin
+
+- The admin audit log's Export CSV could hand a spreadsheet a formula — a cell such as a username starting with `=`, `+`, `-` or `@` now gets a leading `'` so it opens as text.
+
 ## v2.0.0-beta.1
 
 User-visible: the first public beta. You can now recover your own account
