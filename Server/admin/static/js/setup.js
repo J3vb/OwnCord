@@ -233,7 +233,7 @@ async function wizFinish(){
   }
   try{
     const r=await fetch('/admin/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const resp=await r.json();if(!r.ok)throw new Error(resp.message||'Setup failed');
+    const resp=await r.json();if(!r.ok)throw new Error(authMessage(r.status,resp.message,'Setup failed'));
     state.token=resp.token;localStorage.setItem('admin_token',state.token);
     renderSetupSuccess(resp);
     showOverlay('setupSuccessOverlay');
@@ -257,8 +257,8 @@ function renderSetupSuccess(resp){
   const fp=!!resp.certificate_fingerprint;
   if(fp)document.getElementById('certFingerprint').textContent=resp.certificate_fingerprint;
   document.getElementById('setupFingerprint').classList.toggle('hidden',!fp);
-  const tlsOff=wiz.skip?(wiz.defaults&&wiz.defaults.tls_mode)==='off':wiz.data.tls_mode==='off';
-  document.getElementById('setupFingerprintLater').classList.toggle('hidden',fp||tlsOff);
+  const mode=wiz.skip?wiz.defaults&&wiz.defaults.tls_mode:wiz.data.tls_mode;
+  document.getElementById('setupFingerprintLater').classList.toggle('hidden',fp||mode==='off'||mode==='acme');
 }
 
 /* Poll until the restarted server answers, then follow it. no-cors: an opaque

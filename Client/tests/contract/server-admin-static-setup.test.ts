@@ -262,6 +262,25 @@ describe("Server/admin/static — setup wizard and sign-in", () => {
     expect(doc.getElementById("setupFingerprintLater")!.classList.contains("hidden")).toBe(false);
   });
 
+  it("does not promise a Dashboard fingerprint under Let's Encrypt", async () => {
+    const booted = await boot();
+    dom = booted.dom;
+    const { doc } = booted;
+    await submit(dom);
+    await fillAccount(dom);
+    await submit(dom);
+    const tls = doc.getElementById("wizTLS") as HTMLSelectElement;
+    tls.value = "acme";
+    tls.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    field(doc, "wizDomain").value = "chat.example.com";
+    for (let i = 0; i < 4; i++) await submit(dom);
+
+    expect(doc.getElementById("setupSuccessOverlay")!.classList.contains("visible")).toBe(true);
+    expect(doc.getElementById("setupAddress")!.textContent).toBe("chat.example.com:8443");
+    expect(doc.getElementById("setupFingerprint")!.classList.contains("hidden")).toBe(true);
+    expect(doc.getElementById("setupFingerprintLater")!.classList.contains("hidden")).toBe(true);
+  });
+
   it("keeps the quick path to an account-only payload with the setup token", async () => {
     const booted = await boot();
     dom = booted.dom;
@@ -288,7 +307,7 @@ describe("Server/admin/static — setup wizard and sign-in", () => {
     await fillAccount(dom);
     await submit(dom);
 
-    expect(doc.getElementById("wizErr")!.textContent).toBe("invalid setup token");
+    expect(doc.getElementById("wizErr")!.textContent).toBe("Invalid setup token");
     const btn = doc.getElementById("wizNextBtn") as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
     expect(btn.textContent).toBe("Create Owner Account");
