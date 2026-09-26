@@ -39,25 +39,44 @@ describeLiveKitProxiesSuite(async () => {
 });
 
 // Linux voice is native (Rust), so its LiveKit socket is outside the
-// webview's connect-src: a local server's non-loopback direct URL stays
-// direct there. The tunnel would drop the native SDK's Authorization header.
+// webview's connect-src: on Linux a loopback direct URL is used as-is even
+// for schemes/IPv6 the web path would tunnel. A non-loopback host — notably a
+// docker-compose service name like `ws://livekit:7880` that resolves only
+// inside the compose network — does not resolve on the host, so it must fall
+// back to the /livekit tunnel like every other platform.
 describe("nativeProxies on the Linux desktop (native voice)", () => {
   afterEach(() => {
     vi.doUnmock("../../../src/features/voice/native/platform");
   });
 
-  for (const directUrl of ["ws://my-host:7880", "wss://localhost:7880", "ws://[::1]:7880"]) {
-    test(`keeps a local server's direct URL ${directUrl}`, async () => {
-      vi.resetModules();
-      vi.doMock("../../../src/features/voice/native/platform", () => ({
-        isLinuxDesktop: () => true,
-      }));
-      invoke.mockReset().mockResolvedValue(40123);
-      const { nativeProxies } = await import("../../../src/platform/desktop/nativeProxies");
-      nativeProxies.setLiveKitServerHost("localhost:8443");
-      await expect(nativeProxies.resolveLiveKitUrl("/livekit/rtc", directUrl)).resolves.toBe(
-        directUrl,
-      );
+  async function resolveOnLinux(directUrl: string): Promise<string> {
+    vi.resetModules();
+    vi.doMock("../../../src/features/voice/native/platform", () => ({
+      isLinuxDesktop: () => true,
+    }));
+    invoke.mockReset().mockResolvedValue(40123);
+    const { nativeProxies } = await import("../../../src/platform/desktop/nativeProxies");
+    nativeProxies.setLiveKitServerHost("localhost:8443");
+    return nativeProxies.resolveLiveKitUrl("/livekit/rtc", directUrl);
+  }
+
+  for (const directUrl of [
+    "ws://localhost:7880",
+    "ws://127.0.0.1:7880",
+    "ws://[::1]:7880",
+    "wss://localhost:7880",
+  ]) {
+    test(`keeps a loopback direct URL ${directUrl}`, async () => {
+      await expect(resolveOnLinux(directUrl)).resolves.toBe(directUrl);
+    });
+  }
+
+  // The Docker-host case from the brief: server on localhost, LiveKit's
+  // direct_url points at the compose-internal service name (ws://livekit:7880)
+  // which does not resolve on the host, so the tunnel is the only working path.
+  for (const directUrl of ["ws://livekit:7880", "ws://my-host:7880"]) {
+    test(`tunnels a non-loopback direct URL ${directUrl}`, async () => {
+      await expect(resolveOnLinux(directUrl)).resolves.toBe("ws://127.0.0.1:40123/livekit/rtc");
     });
   }
 });

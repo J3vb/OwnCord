@@ -123,10 +123,25 @@ function isLoopbackDirectUrl(url: string): boolean {
   }
 }
 
+/** True when `url`'s host is loopback and nothing else. Linux voice runs in
+ *  the native backend (Rust), outside the webview's CSP, so any scheme and
+ *  IPv6 literal qualifies — but a non-loopback host such as a docker-compose
+ *  service name (`ws://livekit:7880`) does not resolve on the host and must
+ *  fall back to the /livekit tunnel. */
+function isLoopbackHost(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    // WHATWG URL keeps an IPv6 literal bracketed ("[::1]").
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
 /** Resolve a LiveKit connection URL. Routes through the local Rust TLS
  *  proxy for remote servers (to handle self-signed certs), or returns
- *  the direct URL for a local server whose LiveKit is also on loopback
- *  (or any local server's, on Linux where voice is native). */
+ *  the direct URL for a local server whose LiveKit is also on a loopback
+ *  host (any scheme on Linux, where voice is native). */
 async function resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise<string> {
   if (serverHost !== null) {
     // Extract hostname, handling IPv6 bracket notation (e.g. "[::1]:7880")
@@ -141,12 +156,17 @@ async function resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise
       host = serverHost.split(":")[0] ?? "";
     }
     const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
-    // Only a loopback direct URL the CSP's connect-src admits is used as-is.
-    // Anything else (LiveKit Cloud, a TLS LiveKit on another host) goes
-    // through the tunnel like a remote server's, so the webview never needs
-    // an https:/wss: connect source. Linux voice is native (Rust), outside
-    // the webview's CSP, so it keeps any local server's direct URL.
-    if (isLocal && directUrl && (isLinuxDesktop() || isLoopbackDirectUrl(directUrl))) {
+    // Only a loopback direct URL is used as-is. On Linux the native (Rust)
+    // voice path sits outside the webview's CSP, so any scheme and IPv6
+    // literal counts; on the web path connect-src admits only loopback ws:/
+    // http:, so `isLoopbackDirectUrl` is stricter. Anything else (LiveKit
+    // Cloud, a TLS LiveKit on another host, or a docker-compose service name
+    // like ws://livekit:7880 that does not resolve on the host) goes through
+    // the tunnel like a remote server's.
+    const directUrlUsable = isLinuxDesktop()
+      ? isLoopbackHost(directUrl ?? "")
+      : isLoopbackDirectUrl(directUrl ?? "");
+    if (isLocal && directUrl && directUrlUsable) {
       livekitLog.debug("LiveKit URL resolved via direct (local)", { url: directUrl });
       return directUrl;
     }

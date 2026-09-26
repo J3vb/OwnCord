@@ -41,6 +41,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Voice
+
+- Linux desktop voice works against a server on the same Docker host again — the client tried LiveKit's Docker-internal hostname, which does not resolve outside the container network, and now falls back to the `/livekit` tunnel like the other platforms.
+
 ## v2.0.0-beta.1
 
 User-visible: the first public beta. You can now recover your own account
