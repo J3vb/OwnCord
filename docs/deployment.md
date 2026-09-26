@@ -222,6 +222,8 @@ startup settings are written into `config.yaml` — comments and any hand edits
 in the file are preserved. The wizard also persists the generated LiveKit
 credentials so voice keeps working across restarts. If the port or TLS mode
 changed, the server restarts itself once and the wizard shows the new address.
+The finish screen shows the address members enter in the desktop app, the
+invite code and, for a certificate the server already serves, its fingerprint.
 "Skip" runs the legacy minimal flow: just the Owner account, everything else
 on defaults.
 
