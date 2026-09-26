@@ -3,7 +3,16 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   outputDir: "test-results/mock",
   testDir: "./tests/e2e",
-  testIgnore: ["**/native/**", "**/admin/**", "**/fullstack/**", "**/artifact-smoke/**"],
+  testIgnore: [
+    "**/native/**",
+    "**/admin/**",
+    "**/fullstack/**",
+    "**/artifact-smoke/**",
+    // The native-voice interop spec has its own config and a Linux-only
+    // precondition, so every other run picked it up only to skip it — six
+    // permanent skips in the parity report that were never coverage.
+    "**/native-voice/**",
+  ],
   timeout: 30_000,
   expect: {
     timeout: 5_000,

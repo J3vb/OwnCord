@@ -309,7 +309,20 @@ jobs:
             exit 1
           fi
           echo "upgrading from $tag"
-          gh release download "$tag" --dir "$dir" --pattern "$ASSET" --pattern checksums.sha256
+          # A GitHub release-asset fetch returned HTTP 500 here (run 35753107709)
+          # and cost a whole re-run. Bounded and visible: the checksum check
+          # below still decides, so a retry can never accept a different binary.
+          for attempt in 1 2 3; do
+            if gh release download "$tag" --dir "$dir" --pattern "$ASSET" --pattern checksums.sha256; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::gh release download failed after 3 attempts"
+              exit 1
+            fi
+            echo "gh release download attempt ${attempt}/3 failed; retrying in $((attempt * 5))s"
+            sleep "$((attempt * 5))"
+          done
           # The release's own checksums.sha256 is the whole difference between
           # "we rehearsed the previous release" and "we rehearsed whatever
           # bytes came back". A missing line is as fatal as a mismatch: it
@@ -987,6 +1000,17 @@ jobs:
         working-directory: Client/
         run: npx playwright install --with-deps chromium
 
+      # The pinned livekit-server archive (~60 MB) is the slow, flaky part of
+      # this job. install-livekit.mjs still verifies the pinned sha256 on every
+      # run, so a cache can only ever save the download, never substitute a
+      # different binary. An ordinary PR/branch cache: this job neither is
+      # tag-triggered nor publishes a runtime artifact.
+      - name: Cache livekit-server archive
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: Client/tests/e2e/.bin/livekit-cache
+          key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-1.13.5
+
       - name: Install livekit-server
         working-directory: Client/
         run: node tests/e2e/scripts/install-livekit.mjs
@@ -1036,13 +1060,13 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       # Fast feedback by default. `client-e2e-parity` runs the complete
-      # 292-test suite against the built bundle, and until this split this job
-      # ran those same 292 against the dev server — the two configs share
+      # 688-test suite against the built bundle, and until this split this job
+      # ran those same 688 against the dev server — the two configs share
       # testDir and testIgnore, so the jobs differed only in which server served
       # the app (10.8 and 8.8 minutes for one identical test set).
       #
-      # So this leg runs the 92-test smoke set (Client/playwright.config.smoke.ts)
-      # and widens back to the full 292 when the specs or their fixtures moved —
+      # So this leg runs the 137-test smoke set (Client/playwright.config.smoke.ts)
+      # and widens back to the full 688 when the specs or their fixtures moved —
       # at that point the smoke set is no longer a fair sample of the change.
       # The two steps are complementary rather than a default and an override,
       # so exactly one runs; the full-suite condition doubles as the fail-safe,
@@ -1341,6 +1365,11 @@ jobs:
           cache-dependency-path: Client/package-lock.json
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - name: Cache livekit-server archive
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: Client/tests/e2e/.bin/livekit-cache
+          key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-1.13.5
       - run: node tests/e2e/scripts/install-livekit.mjs
       - name: Test two clients, real server and encrypted decoded media
         env:
@@ -1386,6 +1415,11 @@ jobs:
           cache-on-failure: true
       - run: npm ci
       - run: npm run test:e2e:build-server
+      - name: Cache livekit-server archive
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: Client/tests/e2e/.bin/livekit-cache
+          key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-1.13.5
       - run: node tests/e2e/scripts/install-livekit.mjs
       # Release optimization, separate identity and API-configured WebView2 debugging.
       - run: node tests/e2e/scripts/native-test-config.mjs

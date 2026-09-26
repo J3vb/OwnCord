@@ -178,8 +178,8 @@ no growth across cycles, because the webview counters cannot see Rust memory.
 
 224 test files (~83k LOC — about 2× the source): Vitest unit + integration
 (70% coverage gate, blocking in CI), Playwright E2E (two blocking web jobs —
-`client-e2e-parity` runs the full 292-test suite against the production bundle,
-and `client-e2e` runs a 92-test smoke set against the Vite dev server, widening
+`client-e2e-parity` runs the full 688-test suite against the production bundle,
+and `client-e2e` runs a 137-test smoke set against the Vite dev server, widening
 to the full suite when the specs or fixtures themselves change — plus a native
 Tauri suite that **is** wired to CI: the `client-native` job on `windows-latest`,
 a 100-minute budget, on pull requests to `main` and `dev`, which builds the app,
