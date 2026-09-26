@@ -56,9 +56,20 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
   let app: ArtifactDriver | undefined;
   const relaunch = async () => {
     await app?.close().catch(() => {});
-    await killInstalled(binary);
-    app = await launchArtifact(binary, { preserveProfile: true });
-    return app;
+    // The digest poll sees the new binary as soon as the installer starts
+    // writing it, and Windows refuses to start a file still open for writing
+    // (EBUSY). Retry until the installer has let go of it.
+    const deadline = Date.now() + 60_000;
+    for (;;) {
+      await killInstalled(binary);
+      try {
+        app = await launchArtifact(binary, { preserveProfile: true });
+        return app;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EBUSY" || Date.now() > deadline) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      }
+    }
   };
   try {
     app = await launchArtifact(binary);
