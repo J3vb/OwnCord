@@ -132,7 +132,7 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 // app-level ping — a webview timer a minimised window may throttle. A live
 // peer refreshes its activity every interval; a silent (half-open) one is
 // closed at most 2×pingInterval after it went quiet.
-const pingInterval = 25 * time.Second
+var pingInterval = 25 * time.Second
 
 // pingPump sends a protocol Ping every interval until ctx ends. A Pong
 // refreshes the client's activity for the stale sweep; a missing Pong closes

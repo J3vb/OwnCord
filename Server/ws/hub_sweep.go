@@ -16,7 +16,7 @@ import (
 // disconnected. pingPump refreshes activity on every Pong (25s) and closes a
 // peer that misses one itself, so this sweep is the backstop; the app-level
 // ping (every 30s) keeps old peers covered too.
-const staleClientTimeout = 90 * time.Second
+var staleClientTimeout = 90 * time.Second
 
 // onStaleTick runs the cheap in-memory maintenance driven by the stale ticker.
 func (h *Hub) onStaleTick() {
