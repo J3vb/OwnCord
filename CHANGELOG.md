@@ -41,6 +41,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Login & connection
+
+- **A half-open connection no longer stays "connected" forever.** When the network path drops silently — a firewall change, a lost Wi-Fi hop — the client used to keep showing Connected while sends vanished. It now treats a minute without any server frame as a dead link, shows Reconnecting and dials again. Servers that send the new heartbeat ping keep the connection alive from their side too.
+
 ### Voice
 
 - Linux desktop voice works against a server on the same Docker host again — the client tried LiveKit's Docker-internal hostname, which does not resolve outside the container network, and now falls back to the `/livekit` tunnel like the other platforms.

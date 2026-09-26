@@ -100,6 +100,13 @@ export function setActiveChannelProvider(fn: (() => number | null) | null): void
 const DEFAULT_MAX_RECONNECT_DELAY = 30_000;
 const DEFAULT_MAX_MESSAGE_SIZE = 1_048_576; // 1MB
 const HEARTBEAT_INTERVAL_MS = 30_000;
+// CLI-01: a half-open socket delivers nothing inbound while `transport.send`
+// still resolves against the local buffer, so the state machine would sit on
+// "connected" forever. The server pings about every 25 s (and the Rust proxy
+// closes at 2.5x that); this app-side fallback reconnects when no frame at all
+// arrives for 60 s, which is one missed app-level heartbeat window (30 s) plus
+// margin and stays under the "Reconnecting within about 75 s" acceptance.
+const SERVER_SILENCE_RECONNECT_MS = 60_000;
 
 function uuid(): string {
   return crypto.randomUUID();
@@ -187,6 +194,9 @@ export function createWsClient({
   let reconnectAttempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  // CLI-01: fires when no inbound frame has arrived for
+  // SERVER_SILENCE_RECONNECT_MS while the socket still reports open.
+  let livenessTimer: ReturnType<typeof setTimeout> | null = null;
   let intentionalClose = false;
   let certMismatchBlock = false; // blocks reconnect on TOFU mismatch
   // Mirror of the proxy's own open/closed state, kept here because the
@@ -269,8 +279,39 @@ export function createWsClient({
     }
   }
 
+  // CLI-01: re-arm the silence deadline. Called after auth_ok and on every
+  // inbound frame, so any traffic — pong, chat, presence, a server ping —
+  // proves the socket is still delivering bytes. A half-open socket delivers
+  // nothing, so the timer survives to fire.
+  function armLiveness(): void {
+    if (livenessTimer !== null) clearTimeout(livenessTimer);
+    livenessTimer = setTimeout(() => {
+      livenessTimer = null;
+      if (intentionalClose || !proxyOpen || state !== "connected") return;
+      log.warn("No inbound frame within the liveness deadline; forcing reconnect", {
+        silenceMs: SERVER_SILENCE_RECONNECT_MS,
+        host: config?.host ?? "unknown",
+      });
+      // Tear down like an observed close: the next connect's ws_connect drops
+      // the stale Rust sender (which closes the half-open socket) and dials.
+      proxyOpen = false;
+      stopHeartbeat();
+      scheduleReconnect();
+    }, SERVER_SILENCE_RECONNECT_MS);
+  }
+
+  function stopLiveness(): void {
+    if (livenessTimer !== null) {
+      clearTimeout(livenessTimer);
+      livenessTimer = null;
+    }
+  }
+
   function scheduleReconnect(retryAfterMs?: number): void {
     if (intentionalClose || certMismatchBlock || !config) return;
+    // One timer at a time: the CLI-01 silence deadline and an observed close
+    // can race, and a second timer would redial twice.
+    if (reconnectTimer !== null) return;
     const delay = getReconnectDelay(retryAfterMs);
     log.info("WebSocket reconnecting", {
       delayMs: delay,
@@ -311,6 +352,10 @@ export function createWsClient({
       return;
     }
 
+    // Any parsed inbound frame proves the socket is delivering bytes — refresh
+    // the CLI-01 silence deadline, even for a frame the size guard drops below.
+    armLiveness();
+
     // The size guard runs AFTER parsing (raw is already fully materialized
     // in memory either way, so this costs nothing) and exempts the handshake
     // frames: "ready" is the one server frame with no bound — it embeds every
@@ -335,6 +380,15 @@ export function createWsClient({
     // Heartbeats have no payload and do not belong in the domain dispatcher.
     if (parsed.type === "pong") {
       for (const listener of pongListeners) listener();
+      return;
+    }
+
+    // CLI-01: a server-initiated heartbeat ping (the counterpart the server
+    // lane adds so a minimised webview's throttled setInterval cannot be the
+    // only thing keeping the connection alive). It is liveness, not a domain
+    // frame, so it is never dispatched. The app-level ping is kept for old
+    // servers that only answer pongs.
+    if (parsed.type === "ping") {
       return;
     }
 
@@ -380,6 +434,7 @@ export function createWsClient({
       setState("connected");
       reconnectAttempt = 0;
       startHeartbeat();
+      armLiveness();
     }
 
     dispatch(msg);
@@ -479,6 +534,7 @@ export function createWsClient({
         certBlocked: certMismatchBlock,
       });
       stopHeartbeat();
+      stopLiveness();
       if (!intentionalClose) {
         scheduleReconnect(retryHint?.retryAfterMs);
       } else {
@@ -502,6 +558,7 @@ export function createWsClient({
     // host) must not inherit a stale block from a previous connection.
     certMismatchBlock = false;
     cancelReconnect();
+    stopLiveness();
 
     setState("connecting");
 
@@ -595,6 +652,7 @@ export function createWsClient({
     certMismatchBlock = false;
     cancelReconnect();
     stopHeartbeat();
+    stopLiveness();
     proxyOpen = false;
     void disconnectProxy();
     setState("disconnected");
