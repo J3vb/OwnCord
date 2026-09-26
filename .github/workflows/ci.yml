@@ -11,10 +11,10 @@ on:
     branches: [main, dev]
   workflow_dispatch:
 
-# Cancel in-progress runs for the same branch/PR
+# Cancel in-progress runs for the same branch/PR, never on main
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -313,7 +313,7 @@ jobs:
           # and cost a whole re-run. Bounded and visible: the checksum check
           # below still decides, so a retry can never accept a different binary.
           for attempt in 1 2 3; do
-            if gh release download "$tag" --dir "$dir" --pattern "$ASSET" --pattern checksums.sha256; then
+            if gh release download "$tag" --dir "$dir" --pattern "$ASSET" --pattern checksums.sha256 --clobber; then
               break
             fi
             if [ "$attempt" = 3 ]; then
@@ -1009,7 +1009,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: Client/tests/e2e/.bin/livekit-cache
-          key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-1.13.5
+          key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Client/tests/e2e/scripts/install-livekit.mjs') }}
 
       - name: Install livekit-server
         working-directory: Client/
@@ -1369,7 +1369,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: Client/tests/e2e/.bin/livekit-cache
-          key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-1.13.5
+          key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Client/tests/e2e/scripts/install-livekit.mjs') }}
       - run: node tests/e2e/scripts/install-livekit.mjs
       - name: Test two clients, real server and encrypted decoded media
         env:
@@ -1419,7 +1419,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: Client/tests/e2e/.bin/livekit-cache
-          key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-1.13.5
+          key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Client/tests/e2e/scripts/install-livekit.mjs') }}
       - run: node tests/e2e/scripts/install-livekit.mjs
       # Release optimization, separate identity and API-configured WebView2 debugging.
       - run: node tests/e2e/scripts/native-test-config.mjs
