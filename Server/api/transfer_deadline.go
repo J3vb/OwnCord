@@ -20,9 +20,10 @@ import (
 // Rather than relax the global timeouts (which would weaken the slowloris
 // posture for every route), the two transfer routes wrap their reader/writer so
 // every chunk that actually moves pushes the connection deadline forward. A
-// transfer that keeps progressing is not cut before transferMaxLifetime; a peer that stops sending or
-// reading is abandoned after transferProgressTimeout, and no transfer outlives
-// transferMaxLifetime however it progresses. This mirrors the
+// transfer that keeps progressing is not cut before transferMaxLifetime; a
+// peer that stops sending or reading is abandoned after
+// transferProgressTimeout, and no transfer outlives transferMaxLifetime
+// however it progresses. This mirrors the
 // SetWriteDeadline(time.Time{}) override admin/logstream.go already applies to
 // its own long-lived stream.
 //
@@ -109,10 +110,10 @@ func (d *transferDeadline) cut() {
 	d.set(d.until)
 }
 
-// touch pushes both deadlines out to now+timeout, never past until. Errors are ignored: the only
-// realistic one is http.ErrNotSupported on a writer with no connection, where
-// there is no deadline to manage anyway (a real net/http server always
-// supports it).
+// touch pushes both deadlines out to now+timeout, never past until. Errors
+// are ignored: the only realistic one is http.ErrNotSupported on a writer with
+// no connection, where there is no deadline to manage anyway (a real net/http
+// server always supports it).
 func (d *transferDeadline) touch() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -130,8 +131,8 @@ func (d *transferDeadline) set(deadline time.Time) {
 
 // progressReader re-arms the transfer deadline on every read that returns
 // bytes, so a slow but moving body is not cut by the connection's read
-// deadline before transferMaxLifetime. It wraps an io.ReadCloser (http.MaxBytesReader's result) and
-// preserves Close.
+// deadline before transferMaxLifetime. It wraps an io.ReadCloser
+// (http.MaxBytesReader's result) and preserves Close.
 type progressReader struct {
 	r io.ReadCloser
 	d *transferDeadline

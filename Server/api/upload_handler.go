@@ -192,8 +192,9 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		// before the body finished). The route-scoped body wrapper below pushes
 		// the connection's read and write deadlines out on every chunk that
 		// moves, so a transfer that keeps progressing is not cut before
-		// transferMaxLifetime while a peer that stops sending is. The global timeouts are deliberately left alone:
-		// they still bound the header phase and slowloris behaviour.
+		// transferMaxLifetime while a peer that stops sending is. The global
+		// timeouts are deliberately left alone: they still bound the header
+		// phase and slowloris behaviour.
 		deadlines := newTransferDeadline(w, r)
 		defer deadlines.release()
 		deadlines.touch()
