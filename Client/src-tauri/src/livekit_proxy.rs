@@ -115,6 +115,43 @@ pub(crate) fn rewrite_proxy_headers(request: &str, remote_host: &str) -> String 
     })
 }
 
+/// Move an `Authorization: Bearer` token into the `access_token` query
+/// parameter and drop the header.
+///
+/// The LiveKit Rust SDK (the Linux client's native voice) sends its join token
+/// only as a bearer header, and servers before the RT-1 fix drop every header
+/// when re-dialling LiveKit, so the join fails with 401. The query string
+/// survives on every server version — it is how the JS SDK sends the token —
+/// so the tunnel rewrites the request into that shape. A request with no bearer
+/// header passes through unchanged.
+pub(crate) fn move_bearer_to_query(request: &str) -> String {
+    let mut lines: Vec<&str> = request.split("\r\n").collect();
+    let bearer = lines.iter().enumerate().skip(1).find_map(|(i, line)| {
+        let (name, value) = line.split_once(':')?;
+        if !name.trim().eq_ignore_ascii_case("authorization") {
+            return None;
+        }
+        let value = value.trim();
+        let (scheme, token) = value.split_once(' ')?;
+        let token = token.trim();
+        (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty()).then_some((i, token))
+    });
+    let Some((header_idx, token)) = bearer else {
+        return request.to_string();
+    };
+    let mut parts = lines[0].splitn(3, ' ');
+    let (Some(method), Some(target), Some(version)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return request.to_string();
+    };
+    let encoded: String = url::form_urlencoded::byte_serialize(token.as_bytes()).collect();
+    let sep = if target.contains('?') { '&' } else { '?' };
+    let request_line = format!("{method} {target}{sep}access_token={encoded} {version}");
+    lines[0] = &request_line;
+    lines.remove(header_idx);
+    lines.join("\r\n")
+}
+
 /// Decide whether an already-running proxy can serve a new start request:
 /// only when both the remote host AND the TOFU-pinned fingerprint are
 /// unchanged. The listener bakes its fingerprint in at spawn, so after the
@@ -272,7 +309,8 @@ const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Handle a single proxied connection:
 /// 1. Read the HTTP request headers from the local (plain) side
-/// 2. Rewrite Host/Origin so the remote server accepts the connection
+/// 2. Rewrite Host/Origin so the remote server accepts the connection, and
+///    move a bearer token into the query so an unpatched server keeps it
 /// 3. Open a TLS tunnel to the remote server
 /// 4. Forward the rewritten request, then shovel bytes bidirectionally
 async fn handle_connection(
@@ -291,9 +329,9 @@ async fn handle_connection(
         return Err("remote_host contains CRLF — header injection rejected".into());
     }
 
-    // ── 2. Rewrite Host and Origin headers ───────────────────────────────
+    // ── 2. Rewrite Host and Origin headers, and the bearer token ────────
     let request = String::from_utf8_lossy(&buf);
-    let modified = rewrite_proxy_headers(&request, remote_host);
+    let modified = rewrite_proxy_headers(&move_bearer_to_query(&request), remote_host);
 
     // ── 3. Connect to remote over TLS ────────────────────────────────────
     let tls_config = rustls::ClientConfig::builder()
@@ -515,6 +553,73 @@ mod tests {
         let got = rewrite_proxy_headers(request, "example.com");
 
         assert_eq!(got.matches("Host: example.com").count(), 2);
+    }
+
+    // ── move_bearer_to_query ────────────────────────────────────────────────
+
+    #[test]
+    fn moves_a_bearer_token_into_the_query() {
+        // The shape the LiveKit Rust SDK sends: token only in the header.
+        let request = "GET /livekit/rtc?sdk=rust&auto_subscribe=1 HTTP/1.1\r\n\
+                       Host: 127.0.0.1:1\r\n\
+                       Authorization: Bearer eyJ.abc_-.sig\r\n\
+                       Upgrade: websocket\r\n\r\n";
+
+        let got = move_bearer_to_query(request);
+
+        assert_eq!(
+            got,
+            "GET /livekit/rtc?sdk=rust&auto_subscribe=1&access_token=eyJ.abc_-.sig HTTP/1.1\r\n\
+             Host: 127.0.0.1:1\r\n\
+             Upgrade: websocket\r\n\r\n"
+        );
+    }
+
+    #[test]
+    fn starts_a_query_when_the_target_has_none() {
+        let request = "GET /rtc HTTP/1.1\r\nauthorization: bearer tok\r\n\r\n";
+
+        let got = move_bearer_to_query(request);
+
+        assert_eq!(got, "GET /rtc?access_token=tok HTTP/1.1\r\n\r\n");
+    }
+
+    #[test]
+    fn percent_encodes_the_token() {
+        let request = "GET /rtc HTTP/1.1\r\nAuthorization: Bearer a+b/c=&d\r\n\r\n";
+
+        let got = move_bearer_to_query(request);
+
+        assert!(
+            got.starts_with("GET /rtc?access_token=a%2Bb%2Fc%3D%26d HTTP/1.1\r\n"),
+            "got: {got:?}"
+        );
+    }
+
+    #[test]
+    fn leaves_a_request_without_a_bearer_header_unchanged() {
+        for request in [
+            "GET /rtc?access_token=abc HTTP/1.1\r\nHost: x\r\n\r\n",
+            "GET /rtc HTTP/1.1\r\nAuthorization: Basic dXNlcjpwYXNz\r\n\r\n",
+            "GET /rtc HTTP/1.1\r\nAuthorization: Bearer \r\n\r\n",
+            "GET /rtc HTTP/1.1\r\nX-Authorization: Bearer tok\r\n\r\n",
+        ] {
+            assert_eq!(move_bearer_to_query(request), request);
+        }
+    }
+
+    #[test]
+    fn composes_with_the_host_and_origin_rewrite() {
+        let request = "GET /rtc HTTP/1.1\r\n\
+                       Host: 127.0.0.1:1\r\n\
+                       Authorization: Bearer tok\r\n\r\n";
+
+        let got = rewrite_proxy_headers(&move_bearer_to_query(request), "example.com");
+
+        assert_eq!(
+            got,
+            "GET /rtc?access_token=tok HTTP/1.1\r\nHost: example.com\r\n\r\n"
+        );
     }
 
     // ── resolve_remote_target (shared; full suite in proxy_common.rs) ───────
