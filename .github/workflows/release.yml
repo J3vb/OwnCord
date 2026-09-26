@@ -375,8 +375,10 @@ jobs:
           git clone --quiet --no-checkout .. "$rebuild"
           git -C "$rebuild" checkout --quiet --detach "$(git rev-parse HEAD)"
           (cd "$rebuild/Server" && GOCACHE="$RUNNER_TEMP/gocache-rebuild" build "$RUNNER_TEMP/$OUT")
-          first=$(sha256sum "$OUT" | cut -d' ' -f1)
-          second=$(sha256sum "$RUNNER_TEMP/$OUT" | cut -d' ' -f1)
+          # Hash via stdin: on Windows $RUNNER_TEMP is a backslash path, and
+          # sha256sum prefixes the line of such a filename with `\`.
+          first=$(sha256sum < "$OUT" | cut -d' ' -f1)
+          second=$(sha256sum < "$RUNNER_TEMP/$OUT" | cut -d' ' -f1)
           if [ "$first" != "$second" ]; then
             echo "::error::$OUT is not reproducible: $first here, $second from a clean rebuild at another path"
             exit 1
