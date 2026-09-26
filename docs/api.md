@@ -3997,6 +3997,8 @@ ring buffer (capacity 2000) is replayed as backfill, then new entries stream
 live, with a keepalive every 15 s. The ticket is consumed on connect; the
 `ADMINISTRATOR` bit is re-checked throughout the stream, and revoking the
 underlying session or API token (or banning the user) mid-stream cuts it.
+The server ends every open stream as its shutdown begins, so an open stream
+does not hold up a restart; reconnect with a fresh ticket once it is back.
 
 **Auth:** single-use ticket (from `POST /admin/api/logs/ticket`)
 

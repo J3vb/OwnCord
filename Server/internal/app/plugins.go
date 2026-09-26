@@ -36,9 +36,9 @@ func initPlugins(bgCtx context.Context, log *slog.Logger, cfg *config.Config, da
 }
 
 // closePlugins shuts the plugin runtime down. A nil registry is the disabled
-// case and has nothing to close. ctx is App.Close's shutdown budget: the 5s
-// cap here is this step's own share of it, not a fresh root, so a wedged
-// plugin cannot push teardown past the budget the operator was told about.
+// case and has nothing to close. ctx is the plugins step's App.Close budget:
+// the 5s cap here sits within it, not a fresh root, so a wedged plugin cannot
+// push teardown past the budget the operator was told about.
 func closePlugins(ctx context.Context, registry *plugin.Registry) {
 	if registry == nil {
 		return
