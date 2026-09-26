@@ -403,6 +403,17 @@ text was moved behind English catalogs ready for translation.
 - Below 900 px wide the navigation is a drawer behind a menu button: it takes
   keyboard focus when it opens and closes on Escape, an outside click or a
   chosen page.
+- **Creating a role now warns when it would outrank Admin or Moderator.** A new
+  role still defaults to the highest free rank below yours, which for the owner
+  is above every built-in role; the dialog now says so before you create it,
+  offers a one-click "place just above" the default role, and refuses a rank
+  that is already taken.
+- The Roles page is a rank ladder, highest first, with a line at your own rank,
+  and every permission's description is shown under it instead of in a
+  mouse-only tooltip.
+- Channel access opens as a side drawer with Access, Overrides and Explain tabs
+  instead of one long dialog.
+- Deleting a channel or a role now asks you to type its name first.
 - **The setup wizard's security step now says what each TLS mode means for
   the desktop app**: Let's Encrypt needs port 80 as well as the server port and
   every renewal makes members accept a new fingerprint, and "off" means the
@@ -423,6 +434,17 @@ text was moved behind English catalogs ready for translation.
   and cannot sign in until approved.
 - Retention can be read, set and cleared per channel, with a server-wide
   default and an effect preview.
+- **Settings are grouped** into General, Access & registration and Security,
+  with a save bar that stays in view while there are unsaved changes.
+- The upload limit and voice quality now show the values the server is running
+  with from config.yaml, instead of disabled fields that could disagree with it.
+- The backup schedule moved to Backups & restore, beside the backups it makes.
+- **Restoring a backup asks you to type its file name**, then waits for the
+  server to restart and reloads. It used to be one click and only suggested a
+  restart.
+- **Updating the server backs up the database first** unless you untick it,
+  links the release notes and warns that database migrations only run forward;
+  a failed backup stops the update.
 - Creating or revoking an invite, and installing or uninstalling a plugin, now
   show up in the audit log. Invite entries name the invite by id, never by
   code.

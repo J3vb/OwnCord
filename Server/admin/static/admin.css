@@ -158,13 +158,72 @@ input,select,textarea{font-family:inherit;border:none}
 .form-input::placeholder{color:var(--text-muted)}.form-input:focus{border-color:var(--accent)}
 .form-textarea{resize:vertical;min-height:80px}
 .role-swatch{width:14px;height:14px;border-radius:50%;flex-shrink:0;border:1px solid var(--border-strong)}
-.perm-group{margin-bottom:14px}
+.perm-group{margin-bottom:14px;border:0;min-width:0}
 .perm-group-title{font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px}
-.perm-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px}
-.perm-item{display:flex;align-items:flex-start;gap:7px;font-size:13px;color:var(--text-muted);cursor:pointer}
+.perm-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
+.perm-item{display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer}
 .perm-item input{margin-top:2px;flex-shrink:0}
-.perm-item.locked{opacity:.45;cursor:not-allowed}
+/* A locked bit keeps readable text (its description says why it is locked);
+   only the disabled checkbox itself looks inert. */
+.perm-item.locked{cursor:not-allowed}
+.perm-item.locked .perm-name{color:var(--text-muted)}
 @media(max-width:600px){.perm-grid{grid-template-columns:1fr}}
+
+/* ═══ Roles & Channels (AO-5): page header, rank ladder, placement line,
+   permission descriptions, typed confirm and the channel access drawer ═══ */
+.rc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px 16px;flex-wrap:wrap;margin-bottom:24px}
+.rc-head .page-desc{margin-bottom:0;max-width:64ch}
+.rc-head .btn{flex-shrink:0}
+.rc-hint{font-size:12px;color:var(--text-muted);margin-top:6px;line-height:1.4}
+.rank-ladder{list-style:none;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:20px;overflow:hidden}
+.rank-rung{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:12px 16px;border-bottom:1px solid var(--border)}
+.rank-rung:last-child{border-bottom:none}
+.rank-rung:hover{background:var(--bg-table-hover)}
+.rank-pos{min-width:44px;padding:2px 8px;border-radius:var(--radius-pill);background:var(--bg-input);color:var(--text-normal);font-family:var(--font-mono);font-size:12px;text-align:center;flex-shrink:0}
+.rank-main{flex:1 1 200px;min-width:0}
+.rank-name{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rank-meta{font-size:12px;color:var(--text-muted);margin-top:2px}
+.rank-actions{margin-left:auto;align-items:center}
+.rank-actions .act-btn{width:32px;height:32px}
+.rank-actions .act-btn:disabled{opacity:.35;cursor:not-allowed}
+.rank-readonly{font-size:12px;color:var(--text-muted)}
+.rank-divider{padding:6px 16px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--accent-text);background:var(--accent-glow);border-bottom:1px solid var(--border-strong)}
+.rank-placement{margin-top:8px;font-size:13px;color:var(--text-muted);line-height:1.45}
+.rank-placement:empty{display:none}
+.rank-placement.is-warn{padding:10px 12px;border-radius:var(--radius-sm);background:rgba(242,184,75,.1);border:1px solid rgba(242,184,75,.35);color:var(--text-warning)}
+.rank-placement.is-error{color:var(--text-danger)}
+.rank-placement .btn{margin-top:8px}
+.modal:has(.role-form){width:680px;max-width:calc(100vw - 24px)}
+.perm-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+.perm-name{color:var(--text-normal)}
+.perm-desc{font-size:12px;color:var(--text-muted);line-height:1.4}
+.perm-lock{color:var(--text-warning)}
+.rc-confirm{margin-top:16px;margin-bottom:0}
+.rc-confirm strong{color:var(--text-normal);text-transform:none;letter-spacing:0}
+/* The drawer is the shared #modal dialog (focus trap, Escape, restore)
+   docked to the right edge and full height whenever its content is a
+   .drawer; below 600px it takes the whole width. */
+.modal-overlay:has(.drawer){justify-content:flex-end;align-items:stretch}
+.modal:has(>.drawer){width:min(560px,100vw);height:100%;max-height:none;border-radius:0;overflow:hidden;border-left:1px solid var(--border-strong);animation:drawerIn .25s cubic-bezier(.16,1,.3,1)}
+@keyframes drawerIn{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+.drawer{display:flex;flex-direction:column;height:100%}
+.drawer .modal-header{padding:20px 24px 12px}
+.drawer .modal-footer{border-radius:0}
+.drawer-tabs{display:flex;gap:4px;padding:0 24px;border-bottom:1px solid var(--border-strong);flex-shrink:0}
+.drawer-tab{padding:10px 14px;background:transparent;color:var(--text-muted);font-size:13px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px}
+.drawer-tab:hover{color:var(--text-normal)}
+.drawer-tab[aria-selected="true"]{color:var(--header-primary);border-bottom-color:var(--accent)}
+.drawer-body{flex:1;overflow-y:auto}
+.drawer-intro{color:var(--text-muted);font-size:13px;line-height:1.45;margin-bottom:12px}
+.drawer-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.access-list{list-style:none}
+.access-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)}
+.access-role{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.access-note{font-size:12px;color:var(--text-muted);text-align:right}
+.access-toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-normal);cursor:pointer;flex-shrink:0}
+.tbl th.ovr-label{font-size:13px;font-weight:400;color:var(--text-normal);letter-spacing:0;text-transform:none;border-bottom:1px solid var(--border);padding:10px 16px}
+.tbl td input[type="radio"],.access-toggle input,.perm-item input{width:16px;height:16px}
+#permExplain,#permPreview{margin-top:12px}
 .toggle{width:40px;height:22px;border-radius:11px;background:var(--border-control);cursor:pointer;position:relative;transition:background .2s;flex-shrink:0;padding:0;appearance:none;-webkit-appearance:none;border:none}
 .toggle.on{background:var(--green)}
 .toggle::after{content:'';position:absolute;width:16px;height:16px;border-radius:50%;background:var(--on-fill);top:3px;left:3px;transition:transform .2s}
@@ -173,6 +232,43 @@ input,select,textarea{font-family:inherit;border:none}
 .setting-row:last-child{border-bottom:none}
 .setting-info{flex:1;min-width:0}.setting-name{font-size:14px;color:var(--text-normal);margin-bottom:2px}
 .setting-desc{font-size:12px;color:var(--text-muted)}.setting-ctrl{flex-shrink:0;margin-left:16px}
+/* Server pages (Settings, Backups & restore, Updates). */
+.setting-ctrl .form-input{width:280px;max-width:100%}
+.setting-ctrl .form-input[type=number]{width:120px}
+.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:24px}
+.page-head .page-desc{margin-bottom:0}
+.link-btn{background:none;padding:0;color:var(--text-link);font:inherit;text-decoration:underline;cursor:pointer}
+.text-link{color:var(--text-link)}
+.fact-list{margin-top:8px}
+.fact-row{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:10px 0;border-bottom:1px solid var(--border)}
+.fact-row:last-child{border-bottom:none}
+.fact-row dd{display:flex;align-items:baseline;justify-content:flex-end;gap:12px;flex-wrap:wrap}
+.fact-value{font-weight:600;color:var(--header-primary)}
+.fact-key{font-family:var(--font-mono);font-size:12px;color:var(--text-muted)}
+.card-actions{display:flex;justify-content:flex-end;padding-top:12px}
+/* Save bar: sits after the last section, and while there are unsaved
+   changes (.dirty) it pins to the bottom of the scrolling content, so Save is
+   never a page-height away from the field just edited. */
+.save-bar.dirty{position:sticky;bottom:0}
+.save-bar{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:12px 16px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:var(--radius-md);box-shadow:0 -8px 24px rgba(0,0,0,.45);z-index:5}
+.save-bar-status{margin-right:auto;font-size:13px;color:var(--text-muted)}
+.update-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.callout-warning{background:rgba(242,184,75,.1);border:1px solid rgba(242,184,75,.35);color:var(--text-warning);font-size:13px;padding:10px 12px;border-radius:var(--radius-sm);margin-top:12px;line-height:1.45}
+.check-row{display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer}
+.check-row input{width:16px;height:16px;accent-color:var(--accent);flex-shrink:0}
+.modal-list{margin:12px 0 0 20px;display:grid;gap:6px;color:var(--text-muted)}
+.modal-body code{font-family:var(--font-mono);font-size:12px}
+.restart-wait{display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text-muted)}
+.restart-wait .spinner{width:14px;height:14px;border:2px solid var(--border-strong);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;flex-shrink:0}
+@media(max-width:600px){
+  .setting-row{flex-direction:column;align-items:stretch;gap:8px}
+  .setting-ctrl{margin-left:0}
+  .setting-ctrl .form-input,.setting-ctrl .filter-select{width:100%}
+  .update-grid{grid-template-columns:1fr}
+  .fact-row{flex-direction:column;gap:4px}
+  .fact-row dd{justify-content:flex-start}
+}
 
 .modal-overlay{position:fixed;inset:0;background:var(--bg-overlay);display:none;align-items:center;justify-content:center;z-index:100}
 .modal-overlay.visible{display:flex}

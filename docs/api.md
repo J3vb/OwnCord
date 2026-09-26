@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 166 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 167 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -61,6 +61,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PUT     | `/admin/api/channels/{id}/retention`                                 |
 | DELETE  | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | PUT     | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
+| GET     | `/admin/api/config`                                                  |
 | GET     | `/admin/api/logs/stream`                                             |
 | POST    | `/admin/api/logs/ticket`                                             |
 | GET     | `/admin/api/me`                                                      |
@@ -3014,6 +3015,7 @@ Authorization is two-layered:
 | `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                              | `MANAGE_ROLES`                                                                               |
 | `GET /admin/api/audit-log`                                                                                      | `VIEW_AUDIT_LOG`                                                                             |
 | `GET/PATCH /admin/api/settings`                                                                                 | `MANAGE_SERVER`                                                                              |
+| `GET /admin/api/config`                                                                                         | `MANAGE_SERVER`                                                                              |
 | `GET /admin/api/retention`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
 | `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                      | `MANAGE_SERVER`                                                                              |
 | `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |
@@ -3704,7 +3706,8 @@ Three keys are accepted and stored but have **no runtime effect**:
 `server_icon` (reserved for a future release), `max_upload_bytes` (the real
 limit is `upload.max_size_mb` in config.yaml, applied at startup), and
 `voice_quality` (the real setting is `voice.quality` in config.yaml). The
-admin panel shows them read-only for this reason.
+admin panel does not show them; it reads the values in effect from
+[`GET /admin/api/config`](#get-adminapiconfig).
 
 Enabling `require_2fa` is refused unless registration is closed **and** every
 user has TOTP enabled.
@@ -3716,6 +3719,29 @@ user has TOTP enabled.
 | Status | Code          | Cause                                                                                     |
 | ------ | ------------- | ----------------------------------------------------------------------------------------- |
 | 400    | `BAD_REQUEST` | Unknown key, invalid boolean or registration mode, or `require_2fa` preconditions not met |
+
+---
+
+### GET /admin/api/config
+
+**Auth:** `MANAGE_SERVER`
+
+The config.yaml values the admin panel's Settings page shows as read-only
+facts, taken from the configuration the server booted with — so an edit to
+config.yaml shows here only after a restart, which is also when it takes
+effect.
+
+#### Response 200 OK
+
+```json
+{ "upload_max_size_mb": 100, "voice_quality": "medium" }
+```
+
+#### Errors
+
+| Status | Code                 | Cause                                                     |
+| ------ | -------------------- | --------------------------------------------------------- |
+| 503    | `CONFIG_UNAVAILABLE` | The admin API was built without the running configuration |
 
 ---
 
@@ -4036,12 +4062,12 @@ Roles ordered by position descending, each with its member count.
 }
 ```
 
-| Field         | Type    | Required | Description                                    |
-| ------------- | ------- | -------- | ---------------------------------------------- |
-| `name`        | string  | Yes      | 1–32 characters, unique case-insensitively     |
-| `color`       | string  | No       | `#rgb`/`#rrggbb`, or `""` for none             |
-| `permissions` | integer | No       | Bitfield; defaults to `0`                      |
-| `position`    | integer | No       | Defaults to one below the actor's own position |
+| Field         | Type    | Required | Description                                                           |
+| ------------- | ------- | -------- | --------------------------------------------------------------------- |
+| `name`        | string  | Yes      | 1–32 characters, unique case-insensitively                            |
+| `color`       | string  | No       | `#rgb`/`#rrggbb`, or `""` for none                                    |
+| `permissions` | integer | No       | Bitfield; defaults to `0`                                             |
+| `position`    | integer | No       | Must be free; defaults to the highest free slot below the actor's own |
 
 #### Response 201 Created
 
@@ -4052,7 +4078,7 @@ The created role (`id`, `name`, `color`, `permissions`, `position`,
 
 | Status | Code          | When                                                                                |
 | ------ | ------------- | ----------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | Missing/blank/over-long name, duplicate name, bad color, negative position          |
+| 400    | `BAD_REQUEST` | Missing/blank/over-long name, duplicate name, bad color, negative or taken position |
 | 403    | `FORBIDDEN`   | Missing `MANAGE_ROLES`, position at or above your own, or a permission bit you lack |
 
 ### PATCH /admin/api/roles/{id}
