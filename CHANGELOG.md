@@ -398,8 +398,8 @@ text was moved behind English catalogs ready for translation.
   Moderation, Server, Operations and Integrations, with count badges for
   pending registrations and active warnings and a dot when an update is
   available. Existing `/admin#section` links still open the same pages.
-- A top bar now names the server, shows the signed-in account and role (and
-  the version, for the owner), and holds Sign out in its account menu.
+- A top bar now names the server and its version, shows the signed-in account
+  and role, and holds Sign out in its account menu.
 - Below 900 px wide the navigation is a drawer behind a menu button: it takes
   keyboard focus when it opens and closes on Escape, an outside click or a
   chosen page.

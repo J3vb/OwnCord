@@ -349,8 +349,8 @@ func handleDeleteUser(mod *service.ModerationService, hub HubBroadcaster) http.H
 // handleGetMe describes the calling principal so the admin panel can hide the
 // surfaces its role cannot use. Perimeter-level: every authenticated principal
 // may read its own permissions. It also names the server for the panel's top
-// bar, and reports the build version to the owner only: the owner-only
-// GET /updates already carries it, so this widens nothing.
+// bar with its build version. Only authenticated panel principals reach this
+// route; the unauthenticated health and info responses stay version-free.
 func handleGetMe(settings *service.SettingsService, version string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, userOK := r.Context().Value(adminUserKey).(*db.User)
@@ -367,14 +367,12 @@ func handleGetMe(settings *service.SettingsService, version string) http.Handler
 			RolePosition: role.Position,
 			Permissions:  role.Permissions,
 			IsOwner:      permissions.IsOwner(role.ID, role.Position),
+			Version:      version,
 		}
 		if settings != nil {
 			// Best effort: the name is decoration, so a failed read leaves it
 			// empty rather than failing the permission lookup the panel needs.
 			me.ServerName, _ = settings.Setting(r.Context(), "server_name")
-		}
-		if me.IsOwner {
-			me.Version = version
 		}
 		writeJSON(w, http.StatusOK, me)
 	}

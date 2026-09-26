@@ -30,7 +30,6 @@ const I={
   lock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
   plugins:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v6"/><path d="M18 3v6"/><path d="M4 9h16v4a8 8 0 0 1-16 0z"/><path d="M12 21v-4"/></svg>',
   upload:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
-  shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
   arrowUp:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
   arrowDown:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',
   key:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6"/><path d="M15.5 7.5l3 3L22 7l-3-3"/></svg>',
@@ -335,17 +334,20 @@ function navBadge(n){
 }
 
 function renderNav(){
-  document.getElementById('sidebarNav').innerHTML=visibleNav().map(n=>{
+  const nav=document.getElementById('sidebarNav');
+  const focused=nav.contains(document.activeElement)?document.activeElement.getAttribute('data-args'):null;
+  nav.innerHTML=visibleNav().map(n=>{
     if(n.section)return'<div class="sidebar-label">'+n.section+'</div>';
     const active=state.section===n.id;
     const unsaved=n.unsaved&&n.unsaved()?'<span class="unsaved-dot" aria-hidden="true"></span><span class="sr-only"> (unsaved changes)</span>':'';
     return'<button class="nav-item'+(active?' active':'')+'"'+(active?' aria-current="page"':'')+' data-action="navigateTo" data-args="'+actArgs(n.id)+'">'+n.icon+'<span class="nav-label">'+esc(n.label)+'</span>'+unsaved+navBadge(n)+'</button>';
   }).join('');
+  if(focused!==null)[...nav.querySelectorAll('.nav-item')].find(b=>b.getAttribute('data-args')===focused)?.focus();
 }
 
 /* ═══ Top bar ═══ */
 /* Which server this is and who is signed in: the name comes from the live
-   server_name setting, the version only for the owner (GET /me). */
+   server_name setting and the version from GET /me. */
 function renderTopbar(){
   const me=state.me||{};
   document.getElementById('topbarServer').textContent=me.server_name||'OwnCord';
@@ -355,6 +357,7 @@ function renderTopbar(){
   document.getElementById('userMenuBtn').innerHTML='<span class="avatar" aria-hidden="true" style="background:var(--accent)">'+esc(name.charAt(0).toUpperCase())+'</span>'
     +'<span class="user-menu-who"><span class="user-menu-name">'+esc(name)+'</span><span class="user-menu-role">'+esc(me.role_name||'')+'</span></span>'+I.chevronDown;
   document.getElementById('userMenuBtn').setAttribute('aria-label','Account: '+name+(me.role_name?', '+me.role_name:''));
+  document.getElementById('userMenu').innerHTML='<button class="user-menu-item danger" data-action="doLogout">'+I.logout+'<span>Sign out</span></button>';
 }
 function isUserMenuOpen(){return !document.getElementById('userMenu').classList.contains('hidden')}
 function openUserMenu(){
@@ -408,9 +411,10 @@ function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending
    an available update (Updates). Every GET of a source route refreshes its
    badge, so a page that loads the data keeps the count current for free;
    refreshBadges loads what the principal may read once on sign-in. */
+const REGISTRATIONS_PAGE=50;
 function noteBadgeSource(path,data){
   let v;
-  if(path==='/registrations'&&Array.isArray(data))v=['pending',data.length];
+  if(path==='/registrations'&&Array.isArray(data))v=['pending',data.length>=REGISTRATIONS_PAGE?REGISTRATIONS_PAGE+'+':data.length];
   else if(path==='/attention'&&data&&Array.isArray(data.warnings))v=['warnings',data.warnings.filter(w=>!w.recovered_at).length];
   else if(path==='/updates'&&data&&typeof data==='object')v=['update',!!data.update_available];
   if(!v||state.badges[v[0]]===v[1])return;

@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -564,9 +565,8 @@ func TestGetMe_ReportsCallerPermissions(t *testing.T) {
 	if me.ServerName != "Test Server" {
 		t.Errorf("server_name = %q, want the seeded setting", me.ServerName)
 	}
-	// Build identity stays owner-only, like GET /updates.
-	if me.Version != "" {
-		t.Errorf("version = %q reported to a moderator, want omitted", me.Version)
+	if me.Version != "1.0.0" {
+		t.Errorf("version = %q for a moderator, want the build version", me.Version)
 	}
 	if me.Username != "moduser" || me.RoleName != "Moderator" {
 		t.Errorf("me = %+v, want moduser/Moderator", me)
@@ -576,6 +576,18 @@ func TestGetMe_ReportsCallerPermissions(t *testing.T) {
 	}
 	if me.RolePosition != 60 || me.IsOwner {
 		t.Errorf("role_position = %d, is_owner = %v; want 60/false", me.RolePosition, me.IsOwner)
+	}
+}
+
+func TestGetMe_Unauthenticated(t *testing.T) {
+	handler, _, _ := newModeratorHandler(t)
+
+	w := doRequest(t, handler, http.MethodGet, "/me", "", nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "1.0.0") {
+		t.Errorf("unauthenticated body leaks the build version: %s", w.Body.String())
 	}
 }
 

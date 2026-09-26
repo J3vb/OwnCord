@@ -811,6 +811,7 @@ describe("Server/admin/static — panel behaviour", () => {
   // 900px turns the sidebar into a drawer that takes focus and gives it back.
   it("renders the grouped nav, top bar, badges and drawer (AO-3)", async () => {
     const calls: FetchCall[] = [];
+    let pending = [{ id: 1 }, { id: 2 }];
     const respond: Responder = (p) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/me")
@@ -826,7 +827,7 @@ describe("Server/admin/static — panel behaviour", () => {
             version: "1.2.0",
           },
         };
-      if (p === "/registrations") return { json: [{ id: 1 }, { id: 2 }] };
+      if (p === "/registrations") return { json: pending };
       if (p === "/attention")
         return { json: { warnings: [{ id: "a" }, { id: "b", recovered_at: "x" }] } };
       if (p === "/updates") return { json: { update_available: true } };
@@ -862,7 +863,7 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(item("dashboard").textContent).toBe("Dashboard1 (1 active warnings)");
     expect(item("updates").querySelector(".nav-dot")).not.toBeNull();
 
-    // Top bar: server name as text, owner-only version, the signed-in user.
+    // Top bar: server name as text, the version, the signed-in user.
     expect(doc.getElementById("topbarServer")!.textContent).toBe("Lab <b>");
     expect(doc.getElementById("topbarVersion")!.textContent).toBe("v1.2.0");
     expect(doc.getElementById("userMenuBtn")!.getAttribute("aria-label")).toBe(
@@ -877,6 +878,15 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(shell.classList.contains("nav-open")).toBe(true);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(doc.activeElement).toBe(nav.querySelector('[aria-current="page"]'));
+
+    // A full page of registrations (the route's 50-row default) may be an
+    // undercount, so the badge reads 50+; the nav re-render keeps focus.
+    pending = Array.from({ length: 50 }, (_, i) => ({ id: i + 1 }));
+    await bridge.renderUsers();
+    expect(item("users").textContent).toBe("Members50+ (50+ pending registrations)");
+    expect(doc.activeElement).toBe(nav.querySelector('[aria-current="page"]'));
+    expect(shell.classList.contains("nav-open")).toBe(true);
+
     doc.dispatchEvent(new jsdom.window.KeyboardEvent("keydown", { key: "Escape" }));
     expect(shell.classList.contains("nav-open")).toBe(false);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");

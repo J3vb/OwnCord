@@ -3032,8 +3032,8 @@ admin. Violations return `403 FORBIDDEN`.
 
 Describes the calling principal so a panel can hide what the role cannot use.
 Every route still re-checks its bit server-side. `server_name` is the live
-`server_name` setting, for the panel's top bar. `version` is the build version
-and is present only for the owner, like the owner-only `GET /updates`.
+`server_name` setting and `version` is the build version, both for the
+panel's top bar. Unauthenticated endpoints never report the version.
 
 #### Response 200 OK
 
@@ -3046,7 +3046,8 @@ and is present only for the owner, like the owner-only `GET /updates`.
   "role_position": 60,
   "permissions": 1048575,
   "is_owner": false,
-  "server_name": "OwnCord Server"
+  "server_name": "OwnCord Server",
+  "version": "1.2.0"
 }
 ```
 
