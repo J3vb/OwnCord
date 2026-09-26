@@ -62,28 +62,35 @@ export function handleAuthError(
   clearAuth(epochRefusal ? "protocol_epoch" : "user");
 }
 
+/** Catalog phrase per restart reason the server sends; anything else reads as maintenance. */
+const RESTART_REASON_KEYS = {
+  update: "session.restartReason.update",
+  backup_restore: "session.restartReason.backupRestore",
+  setup: "session.restartReason.setup",
+} as const;
+
 export function handleServerRestart(payload: Payload<"server_restart">): void {
   log.warn("Server restarting", {
     reason: payload.reason,
     delaySeconds: payload.delay_seconds,
   });
-  if (payload.reason === "shutdown") {
-    // GracefulStop broadcast: the server is going down, not briefly
-    // restarting in place. Kick back to the login screen instead of
-    // spinning the reconnect loop against a dead host. clearAuth also
-    // leaves voice — stopping any live camera/screenshare tracks and
-    // resetting their toggles to off. "server_shutdown" keeps the saved
-    // credential (the token is still valid), so auto-login can resume
-    // when the server comes back.
-    setTransientError(connectText("session.serverShutdown"));
-    clearAuth("server_shutdown");
-    return;
+  // A zero delay cancels an earlier announcement (update_aborted): the socket
+  // never drops, so there is nothing to tell the user.
+  if (payload.delay_seconds <= 0) return;
+  // Every announced restart keeps the session (Q4): whether it is an admin
+  // update, a restore, a systemd or Docker restart, or a stop, the token
+  // stays valid, and ws.ts reconnects on its own once the socket drops and
+  // resumes into the same channel. The voice session does not survive —
+  // the server's voice state (and a managed LiveKit) goes with the process —
+  // so end it now rather than leave a call the server will not know about.
+  if (voiceStore.getState().currentChannelId !== null) {
+    void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
+    leaveVoiceChannel();
   }
-  setTransientError(
-    connectText("session.serverRestarting", {
-      reason: payload.reason ?? connectText("session.restartReasonDefault"),
-    }),
-  );
+  const reasonKey = Object.hasOwn(RESTART_REASON_KEYS, payload.reason ?? "")
+    ? RESTART_REASON_KEYS[payload.reason as keyof typeof RESTART_REASON_KEYS]
+    : "session.restartReasonDefault";
+  setTransientError(connectText("session.serverRestarting", { reason: connectText(reasonKey) }));
 }
 
 /**

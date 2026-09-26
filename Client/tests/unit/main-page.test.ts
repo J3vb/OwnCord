@@ -1357,6 +1357,17 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.classList.contains("visible")).toBe(true);
   });
 
+  it("counts down a shutdown notice too: the session survives a restart (Q4)", () => {
+    const ws = fakeWs();
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    ws.emit("server_restart", { reason: "shutdown", delay_seconds: 5 });
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    expect(banner.textContent).toBe("Server restarting in 5 seconds...");
+    expect(banner.classList.contains("visible")).toBe(true);
+  });
+
   it("clears local auth when sign-out-everywhere revoked this device's session (B7-14)", async () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),

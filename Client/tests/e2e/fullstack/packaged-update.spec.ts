@@ -1,7 +1,7 @@
 import { childPids, processIsAlive } from "../support/process";
 import { createHash } from "node:crypto";
 import { readFile, access } from "node:fs/promises";
-import { test as base, expect, login } from "./fixtures";
+import { test as base, expect } from "./fixtures";
 import { preparePackagedServer } from "../support/packaged-server";
 import { startTestServer, TEST_PASSWORD } from "../support/server";
 import { expectDecodedMedia, joinVoice } from "../support/media";
@@ -150,10 +150,19 @@ for (const media of [false, true]) {
             .update(await readFile(release.binary))
             .digest("hex"),
         ).not.toEqual(original);
-        // Restart broadcasts can intentionally sign out clients. Re-authenticate
-        // through the UI, then verify stored data and a new real WS delivery.
-        await login(alice, server, "alice");
-        await login(bob, server, "bob");
+        // ARCH-13 (iii): a planned restart keeps the session (Q4). Neither
+        // client signed in with auto-connect, yet each reconnects on its own
+        // into the channel it was in, never through the login form.
+        for (const page of [alice, bob]) {
+          await expect(page.locator(".reconnecting-banner")).not.toHaveClass(/visible/, {
+            timeout: 60_000,
+          });
+          await expect(page.getByTestId("app-layout")).toBeVisible();
+          await expect(page.locator("#password")).toHaveCount(0);
+          await expect(
+            page.locator(".channel-item.active:not(.voice)").filter({ hasText: "general" }),
+          ).toBeVisible();
+        }
         await expect(bob.locator(".msg-text", { hasText: text })).toHaveCount(1);
         const next = `new-process-${crypto.randomUUID()}`;
         await input.fill(next);

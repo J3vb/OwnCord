@@ -449,8 +449,7 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
     // Quick-switch overlay's flow (SidebarArea.ts:756-760): stash the target
     // host, then log out via a bare clearAuth() (reason defaults to "user").
     // The isAuthenticated subscriber below (main.ts:750-788) turns that into
-    // a stored "owncord:skip-auto-login" flag, since host is set and
-    // logoutReason !== "server_shutdown".
+    // a stored "owncord:skip-auto-login" flag, since host is set.
     sessionStorage.setItem("owncord:quick-switch-target", "server-b.example:8443");
     clearAuth();
 
@@ -469,8 +468,7 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
     // mount. Before the fix, the quick-switch branch returns early (line 669)
     // without ever reaching the skip-auto-login read/remove at line 680-683,
     // so the flag set by the clearAuth() above survives indefinitely — and
-    // would go on to suppress the auto-login that a later, unrelated
-    // clearAuth("server_shutdown") deliberately relies on.
+    // would go on to suppress a later, unrelated auto-login.
     expect(sessionStorage.getItem("owncord:skip-auto-login")).toBeNull();
   });
 });
