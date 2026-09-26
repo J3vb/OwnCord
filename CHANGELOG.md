@@ -39,6 +39,8 @@ ownership, dependency automation — gets **at most a short block at the end**,
 and only when it changes something a contributor or fork holder must do
 (a moved directory, a renamed module, a new required command).
 
+## Unreleased
+
 ## v2.0.0-beta.1
 
 User-visible: the first public beta. You can now recover your own account
@@ -275,6 +277,10 @@ text was moved behind English catalogs ready for translation.
   old process (shortcut, `owncord://` link, autostart) is ignored instead of
   bringing the old window back for the whole install. The update log now records
   the version and PID at startup and the timing around the installer launch.
+- **A silent Windows update no longer relaunches the old version.** The
+  installer could overwrite the app while the old copy was still exiting, skip
+  the locked file and start the old build again. It now waits for the old
+  executable to close before copying the new one.
 
 ### Configuration
 

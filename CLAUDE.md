@@ -1,6 +1,6 @@
 # OwnCord
 
-Self-hosted chat platform (alpha). `Server/` is a Go 1.26 REST + WebSocket
+Self-hosted chat platform (beta). `Server/` is a Go 1.26 REST + WebSocket
 server over SQLite with LiveKit voice/video; `Client/` is a Tauri
 v2 desktop app (TypeScript frontend, thin Rust backend). Per-component detail
 lives in `Server/CLAUDE.md` and `Client/CLAUDE.md`; the protocol

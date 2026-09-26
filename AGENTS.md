@@ -6,7 +6,7 @@ Instructions for AI coding agents (Codex, Cursor and similar) working in this re
 
 ## Project context
 
-OwnCord is a self-hosted chat platform (alpha):
+OwnCord is a self-hosted chat platform (beta):
 
 - `Server/`: Go 1.26 REST + WebSocket server over SQLite, with LiveKit voice/video. Key dependencies: chi (HTTP), a sqlc-generated SQLite layer, the LiveKit server SDK, the Coraza WAF, Prometheus.
 - `Client/`: Tauri v2 desktop app, a TypeScript frontend (Vite, vanilla TS, no React/Vue) plus a deliberately thin Rust backend (`src-tauri/`) for native APIs.

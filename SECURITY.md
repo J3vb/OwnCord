@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-OwnCord is in alpha. Only the **latest release** receives security fixes.
+OwnCord is in beta. Only the **latest release** receives security fixes.
 There are no backports.
 
 | Version                                                                   | Supported |

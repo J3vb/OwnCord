@@ -1,6 +1,6 @@
 [![CI](https://github.com/J3vb/OwnCord/actions/workflows/ci.yml/badge.svg)](https://github.com/J3vb/OwnCord/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/J3vb/OwnCord?include_prereleases&label=release)](https://github.com/J3vb/OwnCord/releases/latest)
-![Status](https://img.shields.io/badge/status-alpha-orange)
+![Status](https://img.shields.io/badge/status-beta-orange)
 ![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)
 ![Tauri](https://img.shields.io/badge/tauri-v2-24C8DB?logo=tauri&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20x64%20%7C%20Linux%20x64%20%7C%20Linux%20ARM64-informational)
@@ -10,7 +10,7 @@
 
 A self-hosted chat app I build for me and my friends — text channels, voice and video, and a server you actually own.
 
-> **Alpha, and a hobby project.**
+> **Beta, and a hobby project.**
 > This is something I build for fun and run for a small group of friends. It isn't a product, it comes with no support commitment, and it isn't production-ready. Expect rough edges, rapid changes, and the occasional breaking change.
 >
 > Don't use it for anything sensitive.
@@ -36,9 +36,9 @@ That keeps iteration fast, and it also means behaviour can change quickly betwee
 
 | Area               | Status                                                                                                                          |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| Core chat flow     | Working in alpha                                                                                                                |
-| Voice/video        | Working in alpha                                                                                                                |
-| Admin panel        | Working in alpha                                                                                                                |
+| Core chat flow     | Working in beta                                                                                                                 |
+| Voice/video        | Working in beta                                                                                                                 |
+| Admin panel        | Working in beta                                                                                                                 |
 | Security hardening | Ongoing review passes; findings and their statuses are tracked in the dated audits in [docs/](docs/) (see the Docs Index below) |
 
 ## Platform Support (Current Releases)

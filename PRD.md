@@ -10,7 +10,7 @@ What OwnCord is, who it is for, and what the public beta must do. Requirement ID
 
 **One-line description:** A self-hosted chat platform (real-time text channels, direct messages, voice/video and file sharing) that its owner runs on a machine they control, a spare box or a VPS, with no OwnCord-operated service of any kind (BPR-012).
 
-**Vision:** "A self-hosted chat app I build for me and my friends — text channels, voice and video, and a server you actually own." ([README.md](README.md)) It is currently an alpha, hobby-scale project: most of the implementation is AI-generated, quality is held up by CI, tests, linting and real use by the author and friends, and behaviour can change quickly between releases. The direction beyond alpha is the beta: a public GitHub release anyone can download (BPR-001), governed by the requirements below.
+**Vision:** "A self-hosted chat app I build for me and my friends — text channels, voice and video, and a server you actually own." ([README.md](README.md)) It is currently a beta, hobby-scale project: most of the implementation is AI-generated, quality is held up by CI, tests, linting and real use by the author and friends, and behaviour can change quickly between releases. The beta is a public GitHub release anyone can download (BPR-001), governed by the requirements below.
 
 ## Problem
 
