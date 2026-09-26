@@ -1798,6 +1798,14 @@ and the ringer's own 30s window already covers it.
 }
 ```
 
+A positive `delay_seconds` announces that the socket is about to drop. The
+desktop client keeps the session for every `reason`: it counts down,
+reconnects with the same token once the server is back and returns to the
+channel it was in. Voice ends only when the server actually stops, on the
+hub's final `shutdown` notice; an earlier admin announcement leaves the call
+alone. A zero `delay_seconds` cancels an earlier announcement
+(`update_aborted`).
+
 ---
 
 ## Error Handling

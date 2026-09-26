@@ -67,23 +67,20 @@ export function handleServerRestart(payload: Payload<"server_restart">): void {
     reason: payload.reason,
     delaySeconds: payload.delay_seconds,
   });
-  if (payload.reason === "shutdown") {
-    // GracefulStop broadcast: the server is going down, not briefly
-    // restarting in place. Kick back to the login screen instead of
-    // spinning the reconnect loop against a dead host. clearAuth also
-    // leaves voice — stopping any live camera/screenshare tracks and
-    // resetting their toggles to off. "server_shutdown" keeps the saved
-    // credential (the token is still valid), so auto-login can resume
-    // when the server comes back.
-    setTransientError(connectText("session.serverShutdown"));
-    clearAuth("server_shutdown");
-    return;
+  // Every announced restart keeps the session (Q4): the token stays valid,
+  // ws.ts reconnects on its own once the socket drops and resumes into the
+  // same channel, and MainPage's banner counts down. Only the hub's final
+  // teardown notice ("shutdown") ends the voice session — the server's voice
+  // state (and a managed LiveKit) goes with the process. An admin's earlier
+  // announcement leaves the call alone: the restart may still be aborted.
+  if (
+    payload.reason === "shutdown" &&
+    payload.delay_seconds > 0 &&
+    voiceStore.getState().currentChannelId !== null
+  ) {
+    void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
+    leaveVoiceChannel();
   }
-  setTransientError(
-    connectText("session.serverRestarting", {
-      reason: payload.reason ?? connectText("session.restartReasonDefault"),
-    }),
-  );
 }
 
 /**
