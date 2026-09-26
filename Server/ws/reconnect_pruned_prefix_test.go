@@ -64,7 +64,7 @@ func TestReconnect_PrunedPrefix_ForcesFullReady(t *testing.T) {
 		}
 	}
 
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	hub.SetEventStore(eventStore)
 	go hub.Run()
 	defer hub.Stop()
@@ -81,7 +81,7 @@ func TestReconnect_PrunedPrefix_ForcesFullReady(t *testing.T) {
 		t.Fatalf("pre-condition: expected oldestSeq=1000, got %d", oldest)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
+	handler := ws.ServeWS(hub, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 

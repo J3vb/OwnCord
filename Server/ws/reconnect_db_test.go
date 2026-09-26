@@ -87,7 +87,7 @@ func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
 	}
 
 	// Build hub, attach the DB event store as the cold-tier read path.
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	hub.SetEventStore(eventStore)
 	go hub.Run()
 	defer hub.Stop()
@@ -106,7 +106,7 @@ func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
 	}
 
 	// Spin up a real HTTP+WS server.
-	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
+	handler := ws.ServeWS(hub, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -208,7 +208,7 @@ func TestReconnect_ColdTierAtRowLimit_ForcesFullReady(t *testing.T) {
 		t.Fatalf("PersistEvents: persisted %d/%d, err=%v", n, len(events), err)
 	}
 
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	hub.SetEventStore(eventStore)
 	go hub.Run()
 	defer hub.Stop()
@@ -224,7 +224,7 @@ func TestReconnect_ColdTierAtRowLimit_ForcesFullReady(t *testing.T) {
 		t.Fatalf("pre-condition: expected oldestSeq=501, got %d", oldest)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
+	handler := ws.ServeWS(hub, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -304,7 +304,7 @@ func TestReconnect_ColdTierMergesRingBufferTail(t *testing.T) {
 		}
 	}
 
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	hub.SetEventStore(eventStore)
 	go hub.Run()
 	defer hub.Stop()
@@ -314,7 +314,7 @@ func TestReconnect_ColdTierMergesRingBufferTail(t *testing.T) {
 		rb.Push(seq, 0, fmt.Appendf(nil, `{"seq":%d,"type":"broadcast"}`, seq))
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
+	handler := ws.ServeWS(hub, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 

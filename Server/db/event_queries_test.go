@@ -15,7 +15,7 @@ import (
 // keeps a replay from leaking events for channels the client cannot see.
 
 func TestPersistEvent_AndGetEventsSince(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	for seq := int64(1); seq <= 3; seq++ {
@@ -54,7 +54,7 @@ func TestPersistEvent_AndGetEventsSince(t *testing.T) {
 }
 
 func TestPersistEvents_BatchInsertsAll(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	batch := []db.PersistedEvent{
@@ -85,7 +85,7 @@ func TestPersistEvents_BatchInsertsAll(t *testing.T) {
 }
 
 func TestPersistEvents_EmptyBatchIsNoop(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 
 	persisted, err := database.PersistEvents(context.Background(), nil)
 	if err != nil {
@@ -100,7 +100,7 @@ func TestPersistEvents_EmptyBatchIsNoop(t *testing.T) {
 // PRIMARY KEY), and the per-row fallback still lands the good rows —
 // best-effort semantics identical to the old per-event loop.
 func TestPersistEvents_FallbackKeepsGoodRowsOnBadBatch(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	if err := database.PersistEvent(ctx, 2, "e", 0, []byte(`{}`)); err != nil {
@@ -134,7 +134,7 @@ func TestPersistEvents_FallbackKeepsGoodRowsOnBadBatch(t *testing.T) {
 }
 
 func TestGetEventsSince_RespectsLimit(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	for seq := int64(1); seq <= 10; seq++ {
@@ -156,7 +156,7 @@ func TestGetEventsSince_RespectsLimit(t *testing.T) {
 }
 
 func TestGetEventsSinceForChannels(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	// seq 1: global; 2: channel 10; 3: channel 20; 4: channel 30.
@@ -218,7 +218,7 @@ func TestGetEventsSinceForChannels(t *testing.T) {
 }
 
 func TestGetMaxEventSeq(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	// On an empty table MAX(seq) is NULL — the hub seeds its counter from this
@@ -247,7 +247,7 @@ func TestGetMaxEventSeq(t *testing.T) {
 }
 
 func TestPruneEventsOlderThan(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	// created_at defaults to CURRENT_TIMESTAMP, so backdate the old rows
@@ -284,7 +284,7 @@ func TestPruneEventsOlderThan(t *testing.T) {
 }
 
 func TestPruneEventsOlderThan_NothingToPrune(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	if err := database.PersistEvent(ctx, 1, "e", 0, []byte(`{}`)); err != nil {
@@ -301,7 +301,7 @@ func TestPruneEventsOlderThan_NothingToPrune(t *testing.T) {
 }
 
 func TestPersistEvent_DuplicateSeqRejected(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	if err := database.PersistEvent(ctx, 1, "e", 0, []byte(`{}`)); err != nil {

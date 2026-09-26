@@ -19,7 +19,8 @@ vi.mock("../../src/lib/httpProxy", () => ({
   stopHttpProxy: () => Promise.resolve(),
 }));
 
-import { createApiClient, ApiClientError, type OnUnauthorized } from "../../src/lib/api";
+import { createApiClient, ApiClientError, errorText, type OnUnauthorized } from "../../src/lib/api";
+import { expectConsole } from "../helpers/console";
 
 function jsonResponse(data: unknown, status = 200): Response {
   return {
@@ -140,21 +141,25 @@ describe("API Client", () => {
     it("throws ApiClientError on non-ok response", async () => {
       mockFetch.mockResolvedValue(errorResponse(403, "FORBIDDEN", "No permission"));
       await expect(api.getMe()).rejects.toThrow(ApiClientError);
+      expectConsole("warn", /\[api\] API error/);
       await expect(api.getMe()).rejects.toMatchObject({
         status: 403,
         code: "FORBIDDEN",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("calls onUnauthorized on 401", async () => {
       mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "Invalid session"));
       await expect(api.getMe()).rejects.toThrow();
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
     it("does not call onUnauthorized on other errors", async () => {
       mockFetch.mockResolvedValue(errorResponse(500, "SERVER_ERROR", "Internal error"));
       await expect(api.getMe()).rejects.toThrow();
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).not.toHaveBeenCalled();
     });
 
@@ -162,16 +167,19 @@ describe("API Client", () => {
       const networkErr = new TypeError("Failed to fetch");
       mockFetch.mockRejectedValue(networkErr);
       await expect(api.getMe()).rejects.toBe(networkErr);
+      expectConsole("error", /\[api\] API fetch failed/);
     });
 
     it("wraps non-Error fetch rejection (string) in a new Error", async () => {
       mockFetch.mockRejectedValue("connection refused");
       await expect(api.getMe()).rejects.toThrow("connection refused");
+      expectConsole("error", /\[api\] API fetch failed/);
     });
 
     it("wraps non-Error non-string fetch rejection in a new Error via String()", async () => {
       mockFetch.mockRejectedValue(42);
       await expect(api.getMe()).rejects.toThrow("42");
+      expectConsole("error", /\[api\] API fetch failed/);
     });
 
     it("parseError falls back to statusText when JSON body is not parseable", async () => {
@@ -181,6 +189,7 @@ describe("API Client", () => {
         code: "UNKNOWN",
         message: "Bad Gateway",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("parseError uses UNKNOWN when error field missing from JSON", async () => {
@@ -196,6 +205,7 @@ describe("API Client", () => {
         code: "UNKNOWN",
         message: "bad input",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("parseError uses statusText when message field missing from JSON", async () => {
@@ -211,6 +221,7 @@ describe("API Client", () => {
         code: "VALIDATION",
         message: "Unprocessable",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("handles 204 No Content response", async () => {
@@ -225,7 +236,8 @@ describe("API Client", () => {
       mockFetch.mockResolvedValue(jsonResponse({}));
       const controller = new AbortController();
       await api.getMe(controller.signal);
-      expect(fetchCallOpts().signal).toBe(controller.signal);
+      // Requests combine caller cancellation with the session lifetime.
+      expect(fetchCallOpts().signal).toBeInstanceOf(AbortSignal);
     });
   });
 
@@ -369,19 +381,21 @@ describe("API Client", () => {
 
       it("still rejects hosts with disallowed characters", () => {
         expect(() => api.setConfig({ host: "evil host name" })).toThrow("Invalid host format");
+        expectConsole("error", /\[api\] setConfig rejected invalid host/);
       });
 
       it("still rejects hosts that could inject headers", () => {
         expect(() => api.setConfig({ host: "evil\r\nhost:8443" })).toThrow("Invalid host format");
+        expectConsole("error", /\[api\] setConfig rejected invalid host/);
       });
     });
   });
 
   describe("user endpoints", () => {
-    it("getMe calls GET /users/me", async () => {
+    it("getMe calls GET /auth/me", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ id: 1, username: "me" }));
       const result = await api.getMe();
-      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/auth/me");
       expect(fetchCallOpts().method).toBe("GET");
       expect(result).toEqual({ id: 1, username: "me" });
     });
@@ -422,6 +436,22 @@ describe("API Client", () => {
       expect(body).toEqual({ old_password: "oldpw", new_password: "newpw" });
     });
 
+    it("changePassword resolves undefined on 204 and hands back the partial-success body on 200", async () => {
+      // Server contract (profile_handler.go): when the password changed but
+      // the other sessions could not be revoked, the answer is 200 with a
+      // warning the user must see — a Promise<void> threw that away (OC-0314).
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await expect(api.changePassword("oldpw", "newpw")).resolves.toBeUndefined();
+
+      const partial = {
+        warning:
+          "password changed, but other sessions could not be revoked; revoke them from the sessions list",
+        sessions_revoked: 0,
+      };
+      mockFetch.mockResolvedValue(jsonResponse(partial));
+      await expect(api.changePassword("oldpw", "newpw")).resolves.toEqual(partial);
+    });
+
     it("getSessions calls correct endpoint", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ sessions: [] }));
       await api.getSessions();
@@ -439,6 +469,7 @@ describe("API Client", () => {
         created_at: "2026-01-01T00:00:00Z",
         last_used: "2026-01-02T00:00:00Z",
         is_current: true,
+        unseen: true,
       };
       mockFetch.mockResolvedValue(jsonResponse({ sessions: [session] }));
       const result = await api.getSessions();
@@ -450,6 +481,78 @@ describe("API Client", () => {
       await api.revokeSession(42);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/sessions/42");
       expect(fetchCallOpts().method).toBe("DELETE");
+    });
+
+    it("revokeAllSessions calls DELETE /users/me/sessions and returns the body", async () => {
+      const body = { sessions_revoked: 3, current_session_revoked: true };
+      mockFetch.mockResolvedValue(jsonResponse(body));
+      await expect(api.revokeAllSessions()).resolves.toEqual(body);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/sessions");
+      expect(fetchCallOpts().method).toBe("DELETE");
+    });
+  });
+
+  describe("account recovery endpoints (B7-15b)", () => {
+    it("recoverAccount POSTs /auth/recover with the secret in kit_secret", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ token: "t", requires_2fa: false }));
+      await expect(api.recoverAccount("alice", "KIT-SECRET", "N3w-Pass!")).resolves.toEqual({
+        token: "t",
+        requires_2fa: false,
+      });
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/auth/recover");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({
+        username: "alice",
+        kit_secret: "KIT-SECRET",
+        new_password: "N3w-Pass!",
+      });
+    });
+
+    it("enrolRecoveryKit POSTs the password only, so the server generates the secret", async () => {
+      const body = { kit_secret: "AAAA-BBBB", created_at: "2026-09-21T00:00:00Z" };
+      mockFetch.mockResolvedValue(jsonResponse(body));
+      await expect(api.enrolRecoveryKit("pw")).resolves.toEqual(body);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/recovery-kit");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ password: "pw" });
+    });
+
+    it("getRecoveryKitStatus GETs /users/me/recovery-kit", async () => {
+      const body = { enrolled: true, created_at: "2026-09-21T00:00:00Z", used_at: null };
+      mockFetch.mockResolvedValue(jsonResponse(body));
+      await expect(api.getRecoveryKitStatus()).resolves.toEqual(body);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/recovery-kit");
+      expect(fetchCallOpts().method).toBe("GET");
+    });
+
+    it("getOwnModeration GETs /users/me/moderation", async () => {
+      const body = [
+        {
+          id: 42,
+          kind: "timeout",
+          reason: "cool off",
+          created_at: "2026-09-23 10:00:00",
+          expires_at: "2026-09-23 11:00:00",
+          lifted_at: null,
+          acknowledged_at: null,
+          appealable: true,
+          appeal: null,
+        },
+      ];
+      mockFetch.mockResolvedValue(jsonResponse(body));
+      await expect(api.getOwnModeration()).resolves.toEqual(body);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/moderation");
+      expect(fetchCallOpts().method).toBe("GET");
+    });
+
+    it("regenerateRecoveryCodes POSTs the password to /users/me/totp/recovery-codes", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ backup_codes: ["AAAAA-BBBBB"] }));
+      await expect(api.regenerateRecoveryCodes("pw")).resolves.toEqual({
+        backup_codes: ["AAAAA-BBBBB"],
+      });
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/totp/recovery-codes");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ password: "pw" });
     });
   });
 
@@ -487,17 +590,37 @@ describe("API Client", () => {
       expect(body).toEqual({ password: "mypassword" });
     });
 
+    it("confirmTotp and disableTotp hand back the partial-success body on 200 (OC-0314)", async () => {
+      // totp_handler.go answers 204 normally and 200 + warning when 2FA was
+      // enabled/disabled but the other sessions could not be revoked.
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await expect(api.confirmTotp("mypassword", "123456")).resolves.toBeUndefined();
+      await expect(api.disableTotp("mypassword")).resolves.toBeUndefined();
+
+      const partial = {
+        warning:
+          "2FA enabled, but other sessions could not be revoked; revoke them from the sessions list",
+        sessions_revoked: 1,
+      };
+      mockFetch.mockResolvedValue(jsonResponse(partial));
+      await expect(api.confirmTotp("mypassword", "123456")).resolves.toEqual(partial);
+      await expect(api.disableTotp("mypassword")).resolves.toEqual(partial);
+    });
+
     it("enableTotp throws ApiClientError on bad password", async () => {
       mockFetch.mockResolvedValue(errorResponse(401, "INVALID_PASSWORD", "Wrong password"));
       await expect(api.enableTotp("wrongpw")).rejects.toThrow(ApiClientError);
+      expectConsole("warn", /\[api\] API error/);
       await expect(api.enableTotp("wrongpw")).rejects.toMatchObject({
         status: 401,
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("confirmTotp throws ApiClientError on invalid code", async () => {
       mockFetch.mockResolvedValue(errorResponse(400, "INVALID_CODE", "Invalid verification code"));
       await expect(api.confirmTotp("pw", "000000")).rejects.toThrow(ApiClientError);
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("confirmTotp does NOT call onUnauthorized on a wrong enrollment code, even though the server answers 401", async () => {
@@ -511,6 +634,7 @@ describe("API Client", () => {
         status: 401,
         code: "UNAUTHORIZED",
       });
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).not.toHaveBeenCalled();
     });
 
@@ -519,9 +643,11 @@ describe("API Client", () => {
         errorResponse(403, "TOTP_REQUIRED", "2FA is required by server policy"),
       );
       await expect(api.disableTotp("pw")).rejects.toThrow(ApiClientError);
+      expectConsole("warn", /\[api\] API error/);
       await expect(api.disableTotp("pw")).rejects.toMatchObject({
         status: 403,
       });
+      expectConsole("warn", /\[api\] API error/);
     });
   });
 
@@ -544,6 +670,7 @@ describe("API Client", () => {
         status: 401,
         code: "INVALID_TOTP",
       });
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
@@ -553,29 +680,34 @@ describe("API Client", () => {
         status: 429,
         code: "RATE_LIMITED",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("re-throws Error when fetch rejects with Error", async () => {
       const networkErr = new TypeError("Network failure");
       mockFetch.mockRejectedValue(networkErr);
       await expect(api.verifyTotp("123456", "pt")).rejects.toBe(networkErr);
+      expectConsole("error", /\[api\] API fetch failed/);
     });
 
     it("wraps non-Error string rejection in new Error", async () => {
       mockFetch.mockRejectedValue("dns lookup failed");
       await expect(api.verifyTotp("123456", "pt")).rejects.toThrow("dns lookup failed");
+      expectConsole("error", /\[api\] API fetch failed/);
     });
 
     it("wraps non-Error non-string rejection via String()", async () => {
       mockFetch.mockRejectedValue(99);
       await expect(api.verifyTotp("123456", "pt")).rejects.toThrow("99");
+      expectConsole("error", /\[api\] API fetch failed/);
     });
 
     it("passes AbortSignal to fetch", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ token: "t", user: { id: 1 } }));
       const controller = new AbortController();
       await api.verifyTotp("123456", "pt", controller.signal);
-      expect(fetchCallOpts().signal).toBe(controller.signal);
+      // Requests combine caller cancellation with the session lifetime.
+      expect(fetchCallOpts().signal).toBeInstanceOf(AbortSignal);
     });
 
     it("never sets danger.acceptInvalidCerts (cert pinning is handled by the Rust proxy)", async () => {
@@ -705,12 +837,14 @@ describe("API Client", () => {
         status: 400,
         code: "BAD_REQUEST",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("uploadAvatar calls onUnauthorized on 401", async () => {
       mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "Invalid session"));
       const file = new File(["x"], "me.png", { type: "image/png" });
       await expect(api.uploadAvatar(file)).rejects.toMatchObject({ status: 401 });
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
@@ -721,12 +855,14 @@ describe("API Client", () => {
         status: 413,
         code: "FILE_TOO_LARGE",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
 
     it("uploadFile calls onUnauthorized on 401 like other REST calls", async () => {
       mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "Invalid session"));
       const file = new File(["x"], "f.txt");
       await expect(api.uploadFile(file)).rejects.toMatchObject({ status: 401 });
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
@@ -734,6 +870,7 @@ describe("API Client", () => {
       mockFetch.mockResolvedValue(errorResponse(500, "SERVER_ERROR", "Internal error"));
       const file = new File(["x"], "f.txt");
       await expect(api.uploadFile(file)).rejects.toThrow();
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).not.toHaveBeenCalled();
     });
 
@@ -750,7 +887,8 @@ describe("API Client", () => {
       mockFetch.mockResolvedValue(jsonResponse({ url: "u", filename: "f" }));
       const controller = new AbortController();
       await api.uploadFile(new File(["x"], "f"), controller.signal);
-      expect(fetchCallOpts().signal).toBe(controller.signal);
+      // Requests combine caller cancellation with the session lifetime.
+      expect(fetchCallOpts().signal).toBeInstanceOf(AbortSignal);
     });
 
     it("uploadFile parseError fallback on non-JSON error body", async () => {
@@ -761,6 +899,7 @@ describe("API Client", () => {
         code: "UNKNOWN",
         message: "Internal Server Error",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
   });
 
@@ -824,6 +963,7 @@ describe("API Client", () => {
       mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "Invalid session"));
       const file = new File(["png"], "wave.png", { type: "image/png" });
       await expect(api.uploadEmoji("wave", file)).rejects.toMatchObject({ status: 401 });
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
@@ -834,6 +974,7 @@ describe("API Client", () => {
         status: 403,
         code: "FORBIDDEN",
       });
+      expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).not.toHaveBeenCalled();
     });
 
@@ -982,6 +1123,63 @@ describe("API Client", () => {
     });
   });
 
+  describe("server-info endpoint", () => {
+    const SERVER_INFO = {
+      name: "Test Server",
+      protocol_epoch: 1,
+      browser_client_enabled: false,
+    };
+
+    it("getServerInfo reads name, protocol_epoch and browser_client_enabled", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(SERVER_INFO));
+      await expect(api.getServerInfo("other-host:9443")).resolves.toEqual(SERVER_INFO);
+      expect(fetchCallUrl()).toBe("https://other-host:9443/api/v1/server-info");
+    });
+
+    it("getServerInfo reads the B7-15a fields and tolerates unknown ones", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          ...SERVER_INFO,
+          registration_mode: "approval",
+          retention: { messages_days: 30 },
+          future_field: "ignored",
+        }),
+      );
+      const info = await api.getServerInfo();
+      expect(info.protocol_epoch).toBe(1);
+      expect(info.name).toBe("Test Server");
+      expect(info.registration_mode).toBe("approval");
+      expect(info.retention).toEqual({ messages_days: 30 });
+    });
+
+    it("getServerInfo throws ApiClientError on non-ok response", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: "Service Unavailable",
+        json: () => Promise.resolve({}),
+        headers: new Headers(),
+      } as unknown as Response);
+      await expect(api.getServerInfo()).rejects.toMatchObject({
+        status: 503,
+        code: "SERVER_INFO_FAILED",
+      });
+    });
+
+    it("getServerInfo rejects when the probe is aborted or times out", async () => {
+      mockFetch.mockRejectedValue(new DOMException("Aborted", "AbortError"));
+      await expect(api.getServerInfo("other-host:9443", 50)).rejects.toThrow(/Aborted/);
+    });
+
+    it("getServerInfo sets abort timeout with provided timeoutMs", async () => {
+      const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+      mockFetch.mockResolvedValue(jsonResponse(SERVER_INFO));
+      await api.getServerInfo(undefined, 5000);
+      expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 5000);
+      setTimeoutSpy.mockRestore();
+    });
+  });
+
   describe("admin channel endpoints", () => {
     it("adminCreateChannel calls POST /admin/api/channels", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ id: 1, name: "general", type: "text" }));
@@ -1059,6 +1257,32 @@ describe("API Client", () => {
       expect(body).toEqual({ banned: true, ban_reason: "" });
     });
 
+    it("adminUnbanMember calls PATCH /admin/api/users/{id} with banned:false", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await api.adminUnbanMember(42);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/admin/api/users/42");
+      expect(fetchCallOpts().method).toBe("PATCH");
+      const body = JSON.parse(fetchCallOpts().body as string);
+      // Only the flag: the ban reason is dropped with the ban itself.
+      expect(body).toEqual({ banned: false });
+    });
+
+    it("adminListUsers pages until a short page, so a user past the first 500 is reachable", async () => {
+      const page = (from: number, count: number) =>
+        Array.from({ length: count }, (_, i) => ({ id: from + i, username: `u${from + i}` }));
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse(page(1, 500)))
+        .mockResolvedValueOnce(jsonResponse(page(501, 2)));
+
+      const users = await api.adminListUsers();
+
+      expect(users).toHaveLength(502);
+      expect(users[501]?.id).toBe(502);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(fetchCallUrl(0)).toBe("https://localhost:8443/admin/api/users?limit=500&offset=0");
+      expect(fetchCallUrl(1)).toBe("https://localhost:8443/admin/api/users?limit=500&offset=500");
+    });
+
     it("adminChangeRole calls PATCH /admin/api/users/{id} with role_id", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.adminChangeRole(42, 3);
@@ -1090,7 +1314,7 @@ describe("API Client", () => {
     it("fetches through the resolved proxy origin", async () => {
       mockFetch.mockResolvedValue(jsonResponse({}));
       await api.getMe();
-      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/auth/me");
     });
   });
 
@@ -1102,6 +1326,7 @@ describe("API Client", () => {
         status: 401,
         code: "UNAUTHORIZED",
       });
+      expectConsole("warn", /\[api\] API error/);
     });
   });
 
@@ -1121,5 +1346,34 @@ describe("API Client", () => {
         password: "p",
       });
     });
+  });
+});
+
+describe("errorText (B9-20, Q7)", () => {
+  it("shows catalog text for a mapped server code, not the server's message", () => {
+    const err = new ApiClientError(
+      429,
+      "RATE_LIMITED",
+      "too many failed attempts, try again later",
+    );
+    expect(errorText(err, "Failed to change password.")).toBe(
+      "Too many requests. Try again later.",
+    );
+  });
+
+  it("shows the caller's catalog text for an internal server failure", () => {
+    const err = new ApiClientError(500, "INTERNAL_ERROR", "failed to delete account");
+    expect(errorText(err, "Failed to delete account.")).toBe("Failed to delete account.");
+  });
+
+  it("shows the server's message only when its code has no mapping", () => {
+    const err = new ApiClientError(400, "INVALID_INPUT", "incorrect password");
+    expect(errorText(err, "Failed to delete account.")).toBe("incorrect password");
+    expect(errorText(new ApiClientError(400, "INVALID_INPUT", ""), "Fallback")).toBe("Fallback");
+  });
+
+  it("keeps a non-server error's own message and falls back for a non-error", () => {
+    expect(errorText(new Error("offline"), "Fallback")).toBe("offline");
+    expect(errorText("nope", "Fallback")).toBe("Fallback");
   });
 });

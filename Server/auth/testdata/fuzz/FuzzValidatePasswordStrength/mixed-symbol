@@ -1,0 +1,2 @@
+go test fuzz v1
+string("Tr0ub4dor&3-owncord")

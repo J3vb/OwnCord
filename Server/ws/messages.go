@@ -67,15 +67,16 @@ type memberJoinPayload struct {
 }
 
 type chatMessagePayload struct {
-	ID          int64             `json:"id"`
-	ChannelID   int64             `json:"channel_id"`
-	User        memberUserPayload `json:"user"`
-	Content     string            `json:"content"`
-	ReplyTo     *int64            `json:"reply_to"`
-	Timestamp   string            `json:"timestamp"`
-	Attachments []map[string]any  `json:"attachments"`
-	Reactions   []any             `json:"reactions"`
-	Pinned      bool              `json:"pinned"`
+	ClientMessageID string            `json:"client_message_id,omitempty"`
+	ID              int64             `json:"id"`
+	ChannelID       int64             `json:"channel_id"`
+	User            memberUserPayload `json:"user"`
+	Content         string            `json:"content"`
+	ReplyTo         *int64            `json:"reply_to"`
+	Timestamp       string            `json:"timestamp"`
+	Attachments     []map[string]any  `json:"attachments"`
+	Reactions       []any             `json:"reactions"`
+	Pinned          bool              `json:"pinned"`
 	// Mentions carries the server-resolved user ids; MentionsEveryone reports
 	// an @everyone/@here that cleared MENTION_EVERYONE. Clients highlight from
 	// these instead of re-parsing the content.
@@ -140,8 +141,10 @@ type emojiUpdatePayload struct {
 }
 
 type chatSendOKPayload struct {
-	MessageID int64  `json:"message_id"`
-	Timestamp string `json:"timestamp"`
+	ClientMessageID string `json:"client_message_id,omitempty"`
+	Deduplicated    bool   `json:"deduplicated,omitempty"`
+	MessageID       int64  `json:"message_id"`
+	Timestamp       string `json:"timestamp"`
 }
 
 type chatEditedPayload struct {
@@ -274,15 +277,19 @@ type channelPayload struct {
 	VoiceMaxVideo int `json:"voice_max_video"`
 	// CanSend is the per-recipient composer affordance, the same value the
 	// ready payload ships per channel. It is per-client, so only the targeted
-	// sends in RefreshChannelVisibility populate it — the shared-buffer
-	// broadcasts (BroadcastChannelCreate/Update) leave it nil, since one
-	// encoded frame is delivered to every recipient and a single value would
-	// be wrong for some of them.
+	// channel_create sends (BroadcastChannelCreate, RefreshChannelVisibility)
+	// populate it — the shared-buffer channel_update broadcast leaves it nil,
+	// since one encoded frame is delivered to every recipient and a single
+	// value would be wrong for some of them.
 	//
 	// Pointer + omitempty so "not stated" stays distinguishable from "false":
 	// a client must keep its existing verdict when the field is absent, and an
 	// older server that never sends it keeps the permissive default.
 	CanSend *bool `json:"can_send,omitempty"`
+	// CanModerateVoice is the per-recipient voice-moderation affordance (B9
+	// Q5), the same value the ready payload ships per channel. Same
+	// per-recipient, targeted-only, absent-means-unchanged rules as CanSend.
+	CanModerateVoice *bool `json:"can_moderate_voice,omitempty"`
 }
 
 // channelPayloadFrom narrows a channel row to the wire shape shared by the
@@ -376,6 +383,40 @@ func buildAuthError(message string) []byte {
 	})
 }
 
+// minClientEpoch is the oldest wire epoch the auth handshake still accepts.
+// It is 0 for epoch 1 only, because clients up to v1.2.0-alpha.4 send no
+// epoch at all and must keep connecting.
+// ponytail: one accepted epoch by policy — set this to ProtocolEpoch on the
+// next bump; widen to ProtocolEpoch-1 only if a compatibility window is ever
+// actually wanted.
+const minClientEpoch = 0
+
+// ErrCodeProtocolEpoch is the auth_error code for a client whose wire epoch
+// this server does not speak.
+const ErrCodeProtocolEpoch = "protocol_epoch_unsupported"
+
+// buildProtocolEpochError is the auth_error for an epoch outside
+// [minClientEpoch, ProtocolEpoch]. The message names which side to update;
+// the numbers let a client decide for itself.
+func buildProtocolEpochError(clientEpoch int) []byte {
+	message := fmt.Sprintf("this client speaks protocol epoch %d but the server needs %d; update the client",
+		clientEpoch, ProtocolEpoch)
+	if clientEpoch > ProtocolEpoch {
+		message = fmt.Sprintf("this client speaks protocol epoch %d but the server only speaks %d; update the server",
+			clientEpoch, ProtocolEpoch)
+	}
+	return buildJSON(map[string]any{
+		"type": MsgTypeAuthError,
+		"payload": map[string]any{
+			"message":      message,
+			"code":         ErrCodeProtocolEpoch,
+			"client_epoch": clientEpoch,
+			"server_epoch": ProtocolEpoch,
+			"min_epoch":    minClientEpoch,
+		},
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Typed message builders.
 // ---------------------------------------------------------------------------
@@ -419,6 +460,7 @@ func buildMemberJoin(user *db.User, roleName string) []byte {
 // chatMessageArgs is the input to buildChatMessage. It is a struct rather than
 // a positional list because the payload has outgrown readable call sites.
 type chatMessageArgs struct {
+	ClientMessageID  string
 	MsgID            int64
 	ChannelID        int64
 	UserID           int64
@@ -449,8 +491,9 @@ func buildChatMessage(a chatMessageArgs) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeChatMessage,
 		Payload: chatMessagePayload{
-			ID:        a.MsgID,
-			ChannelID: a.ChannelID,
+			ClientMessageID: a.ClientMessageID,
+			ID:              a.MsgID,
+			ChannelID:       a.ChannelID,
 			User: memberUserPayload{
 				ID:          a.UserID,
 				Username:    a.Username,
@@ -542,12 +585,12 @@ func buildEmojiUpdate(list []*db.Emoji) []byte {
 	})
 }
 
-// buildChatSendOK constructs a chat_send_ok ack.
-func buildChatSendOK(requestID string, msgID int64, timestamp string) []byte {
+// buildChatSendOK correlates the current request with the original commit.
+func buildChatSendOK(requestID string, msgID int64, timestamp, clientMessageID string, duplicate bool) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChatSendOK,
 		ID:      requestID,
-		Payload: chatSendOKPayload{MessageID: msgID, Timestamp: timestamp},
+		Payload: chatSendOKPayload{MessageID: msgID, Timestamp: timestamp, ClientMessageID: clientMessageID, Deduplicated: duplicate},
 	})
 }
 
@@ -719,23 +762,12 @@ func buildVoiceLeave(channelID, userID int64) []byte {
 	})
 }
 
-// buildChannelCreate constructs a channel_create broadcast.
-func buildChannelCreate(ch *db.Channel) []byte {
-	return buildJSON(wsMsg{
-		Type:    MsgTypeChannelCreate,
-		Payload: channelPayloadFrom(ch),
-	})
-}
-
 // buildChannelCreateFor constructs a channel_create addressed to ONE client,
-// carrying that client's can_send verdict.
-//
-// Separate from buildChannelCreate because can_send is per-recipient: the
-// broadcast form encodes a single frame for a whole audience, so it must leave
-// the field absent rather than assert one client's answer for everyone.
-func buildChannelCreateFor(ch *db.Channel, canSend bool) []byte {
+// carrying that client's can_send and can_moderate_voice verdicts.
+func buildChannelCreateFor(ch *db.Channel, canSend, canModerateVoice bool) []byte {
 	p := channelPayloadFrom(ch)
 	p.CanSend = &canSend
+	p.CanModerateVoice = &canModerateVoice
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChannelCreate,
 		Payload: p,
@@ -801,6 +833,83 @@ func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64) 
 	})
 }
 
+// dmRequestSenderPayload is the sender profile a dm_request frame carries —
+// enough for the recipient's inbox to render a name and avatar without a
+// second fetch. Mirrors what GET /api/v1/dm-requests returns for the same
+// field (docs/protocol.md's dm_request section).
+type dmRequestSenderPayload struct {
+	ID          int64  `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Avatar      string `json:"avatar"`
+}
+
+// dmRequestPreviewPayload is the held message's preview, present only on
+// creation (nil on a transition frame, since the message never changes).
+type dmRequestPreviewPayload struct {
+	MessageID int64  `json:"message_id"`
+	Content   string `json:"content"`
+	Timestamp string `json:"timestamp"`
+}
+
+// dmRequestPayload is the dm_request wire payload (docs/protocol.md).
+type dmRequestPayload struct {
+	ID        int64                    `json:"id"`
+	State     string                   `json:"state"`
+	ChannelID int64                    `json:"channel_id"`
+	Sender    dmRequestSenderPayload   `json:"sender"`
+	Preview   *dmRequestPreviewPayload `json:"preview"`
+	CreatedAt string                   `json:"created_at"`
+	DecidedAt *string                  `json:"decided_at"`
+}
+
+// buildDMRequest constructs a dm_request event (B5-6): sent to the
+// recipient once on creation (Preview set) and again, with a new State, on
+// every transition (Preview nil) — see DMRequestEvent's doc comment for
+// where each caller builds this.
+func buildDMRequest(p dmRequestPayload) []byte {
+	return buildJSON(wsMsg{
+		Type:    MsgTypeDMRequest,
+		Payload: p,
+	})
+}
+
+// buildDMRequestForCreation builds the creation-time dm_request frame for a
+// freshly-staged request: req is one entry of
+// service.SendMessageResult.RequestCreatedFor, sender the message's author
+// (service.SendMessageResult.SenderUser), and preview the held message
+// (service.SendMessageResult.RequestPreview).
+func buildDMRequestForCreation(req *db.MessageRequest, sender *db.User, preview *service.DMRequestPreview) []byte {
+	avatar := ""
+	if sender.Avatar != nil {
+		avatar = *sender.Avatar
+	}
+	displayName := ""
+	if sender.DisplayName != nil {
+		displayName = *sender.DisplayName
+	}
+	var previewPayload *dmRequestPreviewPayload
+	if preview != nil {
+		previewPayload = &dmRequestPreviewPayload{
+			MessageID: preview.MessageID,
+			Content:   preview.Content,
+			Timestamp: preview.Timestamp,
+		}
+	}
+	return buildDMRequest(dmRequestPayload{
+		ID:        req.ID,
+		State:     req.State,
+		ChannelID: req.ChannelID,
+		Sender: dmRequestSenderPayload{
+			ID: sender.ID, Username: sender.Username,
+			DisplayName: displayName, Avatar: avatar,
+		},
+		Preview:   previewPayload,
+		CreatedAt: req.CreatedAt,
+		DecidedAt: req.DecidedAt,
+	})
+}
+
 // buildCallSignal constructs a call_incoming or call_declined frame.
 func buildCallSignal(msgType string, channelID, fromUserID int64, username string) []byte {
 	return buildJSON(wsMsg{
@@ -822,19 +931,4 @@ func buildServerRestartMsg(reason string, delaySeconds int) []byte {
 			DelaySeconds: delaySeconds,
 		},
 	})
-}
-
-// parseChannelID safely extracts channel_id from a raw payload map.
-func parseChannelID(payload json.RawMessage) (int64, error) {
-	var p struct {
-		ChannelID json.Number `json:"channel_id"`
-	}
-	if err := json.Unmarshal(payload, &p); err != nil {
-		return 0, err
-	}
-	id, err := p.ChannelID.Int64()
-	if err != nil {
-		return 0, fmt.Errorf("channel_id must be integer: %w", err)
-	}
-	return id, nil
 }

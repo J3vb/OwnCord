@@ -15,6 +15,8 @@ import { mentionsCurrentUser } from "./mentions";
 import { createLogger } from "./logger";
 import { resolveAuthor } from "@components/message-list/formatting";
 import { resolveDisplayName } from "@lib/avatar";
+import { desktop } from "../platform/desktop";
+import { connectText } from "../i18n/connect";
 
 const log = createLogger("notifications");
 
@@ -37,7 +39,10 @@ function resolveNotificationChannel(channelId: number): { name: string; isDm: bo
   const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
   if (dm !== undefined) return { name: dmDisplayName(dm), isDm: true };
   const channel = channelsStore.getState().channels.get(channelId);
-  return { name: channel?.name ?? `Channel ${channelId}`, isDm: false };
+  return {
+    name: channel?.name ?? connectText("notifications.channelFallback", { id: String(channelId) }),
+    isDm: false,
+  };
 }
 
 /**
@@ -119,8 +124,8 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
 
   const title = sanitizeNotif(
     mentioned
-      ? `${authorName} mentioned you in ${channelLabel}`
-      : `${authorName} in ${channelLabel}`,
+      ? connectText("notifications.mentioned", { author: authorName, channel: channelLabel })
+      : connectText("notifications.inChannel", { author: authorName, channel: channelLabel }),
     80,
   );
   const body = sanitizeNotif(payload.content, 100);
@@ -145,19 +150,16 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
 function fireDesktopNotification(title: string, body: string): void {
   void (async () => {
     try {
-      const { isPermissionGranted, requestPermission, sendNotification } =
-        await import("@tauri-apps/plugin-notification");
-
-      let permitted = await isPermissionGranted();
+      let permitted = await desktop.notifier.permissionGranted();
       if (!permitted) {
-        const result = await requestPermission();
-        permitted = result === "granted";
+        permitted = await desktop.notifier.requestPermission();
       }
 
       if (permitted) {
-        sendNotification({ title, body });
+        await desktop.notifier.show(title, body);
       }
-    } catch {
+    } catch (err) {
+      log.debug("Tauri notification plugin unavailable, falling back to Web API", err);
       // Fallback to Web Notification API (dev mode / non-Tauri)
       try {
         if (Notification.permission === "granted") {
@@ -168,8 +170,8 @@ function fireDesktopNotification(title: string, body: string): void {
             void new Notification(title, { body });
           }
         }
-      } catch {
-        log.debug("Notifications not available");
+      } catch (fallbackErr) {
+        log.debug("Notifications not available", fallbackErr);
       }
     }
   })();
@@ -179,11 +181,9 @@ function fireDesktopNotification(title: string, body: string): void {
 function flashTaskbar(): void {
   void (async () => {
     try {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      const win = getCurrentWindow();
-      await win.requestUserAttention(2); // Informational attention
-    } catch {
-      log.debug("Taskbar flash not available");
+      await desktop.notifier.flashTaskbar();
+    } catch (err) {
+      log.debug("Taskbar flash not available", err);
     }
   })();
 }
@@ -245,7 +245,7 @@ function playNotificationSound(): void {
 
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.2);
-  } catch {
-    log.debug("Notification sound not available");
+  } catch (err) {
+    log.debug("Notification sound not available", err);
   }
 }

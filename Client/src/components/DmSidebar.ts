@@ -12,12 +12,20 @@
  * with you, so a user id no longer identifies a conversation.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
+import { reconcileChildren } from "@lib/reconcile";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon } from "@lib/icons";
-import { showContextMenu } from "@lib/context-menu";
+import { openMenuOnKeyboard, showContextMenu } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
 import { isRenderableAvatar } from "@lib/avatar";
-import { fetchImageAsDataUrl, resolveServerUrl } from "./message-list/attachments";
+import {
+  fetchImageAsDataUrl,
+  recoverEvictedImage,
+  resolveServerUrl,
+} from "./message-list/attachments";
+import { requestsText } from "../i18n/requests";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {
@@ -92,6 +100,7 @@ function paintAvatar(el: HTMLElement, avatar: string | null, label: string): voi
   void fetchImageAsDataUrl(resolved).then((dataUrl) => {
     if (dataUrl === null || !el.isConnected) return;
     const img = createElement("img", { src: dataUrl, alt: label });
+    recoverEvictedImage(img, { url: resolved });
     img.style.width = "100%";
     img.style.height = "100%";
     img.style.borderRadius = "50%";
@@ -145,7 +154,12 @@ function renderDmItem(
   options: DmSidebarOptions,
   signal: AbortSignal,
 ): HTMLDivElement {
-  const item = createElement("div", { class: "dm-item" });
+  const item = createElement("div", {
+    class: "dm-item",
+    // Roving list item: reachable by Tab once, then arrow-stepped (B9-21).
+    role: "button",
+    tabindex: "-1",
+  });
   if (convo.active === true) {
     item.classList.add("active");
   }
@@ -170,14 +184,14 @@ function renderDmItem(
       { class: "dm-member-count", "data-testid": `dm-members-${convo.channelId}` },
       String(count),
     );
-    countEl.title = `${count} members`;
+    countEl.title = requestsText("members.count", { count: String(count) });
     item.appendChild(countEl);
   }
 
   // Close / leave button (hidden by default, shown on hover via CSS)
   const closeBtn = createElement("button", {
     class: "dm-close",
-    title: convo.isGroup === true ? "Leave group" : "Close DM",
+    title: convo.isGroup === true ? requestsText("dm.leaveShort") : requestsText("dm.closeShort"),
   });
   closeBtn.appendChild(createIcon("x", 14));
   closeBtn.addEventListener(
@@ -204,7 +218,7 @@ function renderDmItem(
       { class: "dm-mention-badge", "data-testid": `dm-mentions-${convo.channelId}` },
       String(mentionCount),
     );
-    badge.title = `${mentionCount} mention${mentionCount === 1 ? "" : "s"}`;
+    badge.title = requestsText("mention.count", { count: mentionCount, n: String(mentionCount) });
     item.appendChild(badge);
   } else if (unreadCount > 0) {
     const badge = createElement(
@@ -215,7 +229,7 @@ function renderDmItem(
       },
       String(unreadCount),
     );
-    badge.title = `${unreadCount} unread message${unreadCount === 1 ? "" : "s"}`;
+    badge.title = requestsText("unread.count", { count: unreadCount, n: String(unreadCount) });
     item.appendChild(badge);
   } else if (convo.unread) {
     const unreadDot = createElement("span", { class: "dm-unread" });
@@ -237,48 +251,138 @@ function renderDmItem(
     { signal },
   );
 
+  const openDmMenu = (x: number, y: number): void => {
+    const items = [];
+    if (options.onToggleMute !== undefined) {
+      const toggle = options.onToggleMute;
+      items.push({
+        label: convo.muted === true ? requestsText("dm.unmute") : requestsText("dm.mute"),
+        testId: `dm-mute-${convo.channelId}`,
+        onClick: () => toggle(convo.channelId),
+      });
+    }
+    if (convo.isGroup === true && options.onRenameGroup !== undefined) {
+      const rename = options.onRenameGroup;
+      items.push({
+        label: requestsText("dm.renameGroup"),
+        testId: `dm-rename-${convo.channelId}`,
+        onClick: () => rename(convo.channelId),
+      });
+    }
+    if (options.onCloseDm !== undefined) {
+      const close = options.onCloseDm;
+      items.push({
+        label: convo.isGroup === true ? requestsText("dm.leaveGroup") : requestsText("dm.close"),
+        danger: true,
+        testId: `dm-close-${convo.channelId}`,
+        onClick: () => close(convo.channelId),
+      });
+    }
+    if (items.length === 0) return;
+    showContextMenu({
+      x,
+      y,
+      items,
+      signal,
+      className: "dm-context-menu",
+    });
+  };
   item.addEventListener(
     "contextmenu",
     (e: MouseEvent) => {
       e.preventDefault();
-      const items = [];
-      if (options.onToggleMute !== undefined) {
-        const toggle = options.onToggleMute;
-        items.push({
-          label: convo.muted === true ? "Unmute Conversation" : "Mute Conversation",
-          testId: `dm-mute-${convo.channelId}`,
-          onClick: () => toggle(convo.channelId),
-        });
-      }
-      if (convo.isGroup === true && options.onRenameGroup !== undefined) {
-        const rename = options.onRenameGroup;
-        items.push({
-          label: "Rename Group",
-          testId: `dm-rename-${convo.channelId}`,
-          onClick: () => rename(convo.channelId),
-        });
-      }
-      if (options.onCloseDm !== undefined) {
-        const close = options.onCloseDm;
-        items.push({
-          label: convo.isGroup === true ? "Leave Group" : "Close DM",
-          danger: true,
-          testId: `dm-close-${convo.channelId}`,
-          onClick: () => close(convo.channelId),
-        });
-      }
-      if (items.length === 0) return;
-      showContextMenu({ x: e.clientX, y: e.clientY, items, signal, className: "dm-context-menu" });
+      openDmMenu(e.clientX, e.clientY);
     },
     { signal },
   );
+  // Keyboard entry point (A11Y-01): Shift+F10 / Menu key on the focused row.
+  openMenuOnKeyboard(item, openDmMenu, signal);
 
   return item;
 }
 
-export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
-  const ac = new AbortController();
+/**
+ * SidebarArea refreshes the DM list on every dmStore change (a presence flip,
+ * a message, an unread clear). Rebuilding the whole subtree would lose the
+ * "Find a conversation" filter, its focus and the scroll position; the keyed
+ * list keeps every unchanged row, so those all survive an unrelated update
+ * (B9-21).
+ */
+export interface DmSidebar extends MountableComponent {
+  /** Re-render the conversation rows from a fresh list, in place. */
+  update(conversations: readonly DmConversation[]): void;
+}
+
+/** A row the search filter has not hidden: the only rows the keyboard visits. */
+const VISIBLE_ROW = ".dm-item:not([hidden])";
+
+/** The unread-first order the conversation list renders in. */
+function sortConversations(conversations: readonly DmConversation[]): DmConversation[] {
+  return [...conversations].toSorted((a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0));
+}
+
+/** Everything a row draws. A changed value rebuilds just that row. */
+function convoSignature(convo: DmConversation): string {
+  return [
+    convo.username,
+    convo.avatar ?? "",
+    convo.avatarColor ?? "",
+    convo.status ?? "",
+    convo.isGroup === true ? "g" : "",
+    (convo.participants ?? []).length,
+    convo.active === true ? "a" : "",
+    convo.muted === true ? "m" : "",
+    convo.unread === true ? "u" : "",
+    convo.unreadCount ?? 0,
+    convo.mentionCount ?? 0,
+  ].join("|");
+}
+
+export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
+  const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
+  let list: HTMLDivElement | null = null;
+  let searchInput: HTMLInputElement | null = null;
+  // The sorted list the current filter runs over, kept in sync with the DOM.
+  let rendered: readonly DmConversation[] = [];
+  // Rows the search filter has hidden, so a later update can re-apply it.
+  let query = "";
+  // Each row's listeners die with the row, not with the sidebar (OC-0229).
+  const rowOwners = new Map<Element, Disposable>();
+
+  /** Apply the current search query to the current rows. */
+  function applyFilter(): void {
+    if (list === null) return;
+    const q = query.trim().toLowerCase();
+    const rows = list.children;
+    rendered.forEach((convo, i) => {
+      const el = rows[i] as HTMLElement | undefined;
+      if (el === undefined) return;
+      const match = q === "" || convo.username.toLowerCase().includes(q);
+      el.hidden = !match;
+    });
+    setRovingTabindex(list, VISIBLE_ROW);
+  }
+
+  function update(conversations: readonly DmConversation[]): void {
+    if (list === null) return;
+    rendered = sortConversations(conversations);
+    reconcileChildren(list, rendered, {
+      key: (c) => String(c.channelId),
+      signature: convoSignature,
+      create: (convo) => {
+        const owner = new Disposable();
+        const el = renderDmItem(convo, options, owner.signal);
+        rowOwners.set(el, owner);
+        return el;
+      },
+      dispose: (el) => {
+        rowOwners.get(el)?.destroy();
+        rowOwners.delete(el);
+      },
+    });
+    applyFilter();
+  }
 
   function mount(container: Element): void {
     // Reuse channel-sidebar container class per mockup
@@ -291,69 +395,92 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
         class: "dm-back-header",
         "data-testid": "dm-back-header",
       });
-      const arrow = createElement("span", { class: "dm-back-arrow" }, "←");
+      backHeader.tabIndex = 0;
+      backHeader.setAttribute("role", "button");
+      // Named by the visible title rather than a second copy of its text.
+      const backTitleId = "dm-back-title";
+      backHeader.setAttribute("aria-labelledby", backTitleId);
+      const arrow = createElement("span", { class: "dm-back-arrow", "aria-hidden": "true" }, "←");
       const backInfo = createElement("div", { class: "dm-back-info" });
       const backTitle = createElement(
         "div",
-        { class: "dm-back-title" },
-        `Back to ${options.serverName ?? "Server"}`,
+        { class: "dm-back-title", id: backTitleId },
+        requestsText("dm.backTo", {
+          server: options.serverName ?? requestsText("dm.serverFallback"),
+        }),
       );
-      const backSub = createElement("div", { class: "dm-back-subtitle" }, "Return to channels");
+      const backSub = createElement(
+        "div",
+        { class: "dm-back-subtitle" },
+        requestsText("dm.returnToChannels"),
+      );
       appendChildren(backInfo, backTitle, backSub);
       appendChildren(backHeader, arrow, backInfo);
-      backHeader.addEventListener("click", () => backFn(), { signal: ac.signal });
+      backHeader.addEventListener("click", () => backFn(), { signal: disposable.signal });
+      backHeader.addEventListener(
+        "keydown",
+        (e: KeyboardEvent) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          backFn();
+        },
+        { signal: disposable.signal },
+      );
       root.appendChild(backHeader);
     }
 
     // Search header
     const header = createElement("div", { class: "dm-sidebar-header" });
-    const searchInput = createElement("input", {
+    searchInput = createElement("input", {
       class: "dm-search",
-      placeholder: "Find a conversation",
+      placeholder: requestsText("dm.find"),
     });
     header.appendChild(searchInput);
 
     // Section label with + button
     const sectionLabel = createElement("div", { class: "dm-section-label" });
-    setText(sectionLabel, "Direct Messages");
+    setText(sectionLabel, requestsText("dm.heading"));
     const addBtn = createElement("button", {
       class: "dm-add",
-      title: "New DM",
+      title: requestsText("dm.new"),
     });
     setText(addBtn, "+");
-    addBtn.addEventListener("click", () => options.onNewDm(), { signal: ac.signal });
+    addBtn.addEventListener("click", () => options.onNewDm(), { signal: disposable.signal });
     sectionLabel.appendChild(addBtn);
 
     // Conversation list
-    const sorted = [...options.conversations].toSorted(
-      (a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0),
-    );
-
-    const items = sorted.map((convo) => renderDmItem(convo, options, ac.signal));
+    list = createElement("div", { class: "dm-conversation-list" });
 
     searchInput.addEventListener(
       "input",
       () => {
-        const q = searchInput.value.trim().toLowerCase();
-        items.forEach((el, i) => {
-          const match = q === "" || sorted[i]!.username.toLowerCase().includes(q);
-          el.style.display = match ? "" : "none";
-        });
+        query = searchInput?.value ?? "";
+        applyFilter();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
-    appendChildren(root, header, sectionLabel, ...items);
+    // One Tab stop for the list; ArrowUp/Down step, Enter/Space open.
+    enableRovingNavigation(list, VISIBLE_ROW, disposable.signal, "vertical");
+
+    appendChildren(root, header, sectionLabel, list);
     container.appendChild(root);
+
+    update(options.conversations);
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
+    for (const owner of rowOwners.values()) owner.destroy();
+    rowOwners.clear();
     if (root !== null) {
       root.remove();
       root = null;
     }
+    list = null;
+    searchInput = null;
+    rendered = [];
   }
 
-  return { mount, destroy };
+  return { mount, update, destroy };
 }

@@ -6,6 +6,10 @@
 
 package ws
 
+// ProtocolEpoch is the wire epoch this server speaks. The auth handshake
+// negotiates on it (serve_auth.go); see docs/protocol.md, Compatibility.
+const ProtocolEpoch = 1
+
 // Client → Server message types (received by handlers).
 const (
 	MsgTypeAuth              = "auth"
@@ -56,26 +60,29 @@ const (
 	MsgTypeVoiceState          = "voice_state"
 	MsgTypeVoiceConfig         = "voice_config"
 	MsgTypeVoiceToken          = "voice_token"
-	MsgTypeVoiceSpeakers       = "voice_speakers"
 	MsgTypeVoiceLeaveBC        = "voice_leave" // broadcast (same string as client msg)
 	MsgTypeVoiceMoved          = "voice_moved"
 	MsgTypeVoiceDisconnected   = "voice_disconnected"
 	MsgTypeMemberJoin          = "member_join"
-	MsgTypeMemberLeave         = "member_leave"
 	MsgTypeMemberUpdate        = "member_update"
 	MsgTypeUserUpdate          = "user_update"
 	MsgTypeMemberBan           = "member_ban"
 	MsgTypeRolesUpdate         = "roles_update"
 	MsgTypeEmojiUpdate         = "emoji_update"
 	MsgTypeServerRestart       = "server_restart"
+	MsgTypeModQueue            = "mod_queue"     // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
+	MsgTypeModAction           = "mod_action"    // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
+	MsgTypeAppealStatus        = "appeal_status" // B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed
 	MsgTypeError               = "error"
 	MsgTypePong                = "pong"
 	MsgTypeDMChannelOpen       = "dm_channel_open"
 	MsgTypeDMChannelClose      = "dm_channel_close"
+	MsgTypeDMRequest           = "dm_request"
 	MsgTypeCallIncoming        = "call_incoming"
 	MsgTypeCallDeclined        = "call_declined"
 	MsgTypeVoiceE2EEAnnounceBC = "voice_e2ee_announce" // broadcast (same string as client msg)
 	MsgTypeVoiceE2EEOfferRelay = "voice_e2ee_offer"    // relay (same string as client msg)
 	MsgTypeCommandReply        = "command_reply"       // ephemeral plugin reply, sent only to the invoking client
 	MsgTypePluginBroadcast     = "plugin_broadcast"    // plugin channel broadcast, gated by the sender's SEND_MESSAGES
+	MsgTypeNSFWAck             = "nsfw_ack"            // second-device signal after acknowledge/revoke; unsequenced, not replayed (B5-7)
 )

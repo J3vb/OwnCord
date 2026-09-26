@@ -15,7 +15,7 @@ import (
 // ─── schema used by serve tests ───────────────────────────────────────────────
 
 // serveTestSchema extends hubTestSchema with voice_states so that
-// collectAllVoiceStates can be exercised via buildReady.
+// readyVoiceStates can be exercised via buildReady.
 var serveTestSchema = append(hubTestSchema, []byte(`
 CREATE TABLE IF NOT EXISTS voice_states (
     user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS voice_states (
     camera      INTEGER NOT NULL DEFAULT 0,
     screenshare INTEGER NOT NULL DEFAULT 0,
     server_muted    INTEGER NOT NULL DEFAULT 0,
+    server_muted_by INTEGER,
     server_deafened INTEGER NOT NULL DEFAULT 0,
     joined_at   TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -38,6 +39,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
     target_type TEXT    NOT NULL DEFAULT '',
     target_id   INTEGER NOT NULL DEFAULT 0,
     detail      TEXT    NOT NULL DEFAULT '',
+    subject_token TEXT,
+    actor_token TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 `)...)
@@ -62,7 +65,7 @@ func newServeHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 	return hub, database
@@ -339,9 +342,9 @@ func TestBuildReady_ValidJSON(t *testing.T) {
 	}
 }
 
-// ─── collectAllVoiceStates ────────────────────────────────────────────────────
+// ─── readyVoiceStates ────────────────────────────────────────────────────────
 
-func TestCollectAllVoiceStates_EmptyChannels(t *testing.T) {
+func TestReadyVoiceStates_EmptyChannels(t *testing.T) {
 	hub, database := newServeHub(t)
 	user := seedServeUser(t, database, "collect-empty-user")
 
@@ -363,7 +366,7 @@ func TestCollectAllVoiceStates_EmptyChannels(t *testing.T) {
 	}
 }
 
-func TestCollectAllVoiceStates_SkipsTextChannels(t *testing.T) {
+func TestReadyVoiceStates_SkipsTextChannels(t *testing.T) {
 	hub, database := newServeHub(t)
 	user := seedServeUser(t, database, "collect-text-user")
 
@@ -390,7 +393,7 @@ func TestCollectAllVoiceStates_SkipsTextChannels(t *testing.T) {
 	}
 }
 
-func TestCollectAllVoiceStates_IncludesVoiceParticipants(t *testing.T) {
+func TestReadyVoiceStates_IncludesVoiceParticipants(t *testing.T) {
 	hub, database := newServeHub(t)
 	role := ownerRole(t, database)
 
@@ -860,44 +863,6 @@ func TestGetCachedSettings_CacheMiss_DoubleCheck(t *testing.T) {
 	}
 }
 
-// ─── parseChannelID error paths ───────────────────────────────────────────────
-
-func TestParseChannelID_ValidPayload(t *testing.T) {
-	raw := json.RawMessage(`{"channel_id": 42}`)
-	id, err := ws.ParseChannelIDForTest(raw)
-	if err != nil {
-		t.Fatalf("ParseChannelIDForTest: %v", err)
-	}
-	if id != 42 {
-		t.Errorf("channel_id = %d, want 42", id)
-	}
-}
-
-func TestParseChannelID_InvalidJSON(t *testing.T) {
-	raw := json.RawMessage(`NOT JSON`)
-	_, err := ws.ParseChannelIDForTest(raw)
-	if err == nil {
-		t.Error("expected error for invalid JSON, got nil")
-	}
-}
-
-func TestParseChannelID_NonIntegerChannelID(t *testing.T) {
-	raw := json.RawMessage(`{"channel_id": "not-a-number"}`)
-	_, err := ws.ParseChannelIDForTest(raw)
-	if err == nil {
-		t.Error("expected error for non-integer channel_id, got nil")
-	}
-}
-
-func TestParseChannelID_MissingField(t *testing.T) {
-	// Missing channel_id field — json.Number.Int64 on zero value returns 0, no error.
-	raw := json.RawMessage(`{}`)
-	id, err := ws.ParseChannelIDForTest(raw)
-	if err == nil && id != 0 {
-		t.Errorf("expected id=0 for missing channel_id, got %d", id)
-	}
-}
-
 // ─── buildJSON error fallback path ────────────────────────────────────────────
 
 func TestBuildJSON_ValidValue_ReturnsJSON(t *testing.T) {
@@ -932,7 +897,7 @@ func TestBuildReady_NoVoiceChannels_EmptyVoiceStates(t *testing.T) {
 	if err := json.Unmarshal(msg, &env); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	// collectAllVoiceStates returns []db.VoiceState{} (not nil) when no voice channels exist.
+	// readyVoiceStates returns []db.VoiceState{} (not nil) when no voice channels exist.
 	if env.Payload.VoiceStates == nil {
 		t.Error("voice_states must be a non-null JSON array even when empty")
 	}

@@ -1,5 +1,7 @@
 // Offline harness for bughunt.js - mimics the workflow runtime: wraps the script
 // body in an AsyncFunction with stubbed agent/parallel/pipeline/phase/log/args/budget.
+// runScript is exported so a sibling harness (bughunt-fix.harness.mjs) reuses the
+// stub instead of re-declaring it; `file` is the workflow script to run.
 // Run: node .claude/workflows/bughunt.harness.mjs [nameFilter]
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -9,8 +11,8 @@ import assert from "node:assert/strict";
 const here = dirname(fileURLToPath(import.meta.url));
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
-export async function run({ agentStub, args = undefined, budget = undefined }) {
-  const src = readFileSync(join(here, "bughunt.js"), "utf8");
+export async function runScript(file, { agentStub, args = undefined, budget = undefined }) {
+  const src = readFileSync(join(here, file), "utf8");
   const body = src.replace("export const meta", "const meta");
   const calls = [];
   const logs = [];
@@ -56,6 +58,9 @@ export async function run({ agentStub, args = undefined, budget = undefined }) {
   const result = await fn(agent, parallel, pipeline, phase, log, args, budgetImpl);
   return { result, calls, logs };
 }
+
+// This harness is the entry point for bughunt.js.
+const run = (o) => runScript("bughunt.js", o);
 
 // ---------- stub kit (used from Task 2 onward; harmless now) ----------
 export function makeStub({ hunt, verify, recon = defaultRecon }) {
@@ -1412,15 +1417,19 @@ scenarios.s_stall_deferred_while_productive = async () => {
 };
 
 // ---------- runner ----------
-const only = process.argv[2];
-for (const [name, fn] of Object.entries(scenarios)) {
-  if (only && !name.includes(only)) continue;
-  try {
-    await fn();
-  } catch (e) {
-    console.error(`FAIL ${name}`);
-    throw e;
+// Only as the entry point: bughunt-fix.harness.mjs imports runScript from this
+// file, and importing must not re-run bughunt.js's scenarios alongside its own.
+if (fileURLToPath(import.meta.url) === process.argv[1]) {
+  const only = process.argv[2];
+  for (const [name, fn] of Object.entries(scenarios)) {
+    if (only && !name.includes(only)) continue;
+    try {
+      await fn();
+    } catch (e) {
+      console.error(`FAIL ${name}`);
+      throw e;
+    }
+    console.log(`PASS ${name}`);
   }
-  console.log(`PASS ${name}`);
+  console.log("all scenarios pass");
 }
-console.log("all scenarios pass");

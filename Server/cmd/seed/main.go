@@ -129,6 +129,9 @@ var seedDMMessages = []struct {
 func main() {
 	dbPath := flag.String("db", "data/chatserver.db", "path to the SQLite database file")
 	confirmDev := flag.Bool("confirm-dev", false, "confirm this is a development database (required)")
+	profile := flag.String("profile", "dev", `seed profile: "dev" (small, idempotent) or "alpha" (deterministic alpha-shaped dataset; empty database only)`)
+	snapshotPath := flag.String("snapshot", "", "alpha profile only: scrub and VACUUM INTO this path after seeding")
+	scrubPath := flag.String("scrub", "", "alpha profile only: SQL scrub script applied before -snapshot (testdata/snapshots/scrub.sql)")
 	flag.Parse()
 
 	if !*confirmDev {
@@ -153,7 +156,16 @@ func main() {
 		log.Fatalf("failed to open database at %s: %v", *dbPath, err)
 	}
 
-	exitCode := run(database)
+	var exitCode int
+	switch *profile {
+	case "dev":
+		exitCode = run(database)
+	case "alpha":
+		exitCode = runAlpha(database, *snapshotPath, *scrubPath)
+	default:
+		log.Printf("unknown -profile %q (want dev or alpha)", *profile)
+		exitCode = 2
+	}
 	_ = database.Close()
 	os.Exit(exitCode)
 }

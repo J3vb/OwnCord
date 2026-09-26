@@ -7,19 +7,27 @@ import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
 
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
-import { createRouter } from "@lib/router";
-import { createApiClient } from "@lib/api";
-import { createWsClient, normalizeHostForCertCompare } from "@lib/ws";
+import { createApiClient, ApiClientError } from "@lib/api";
+import { SessionScope } from "@lib/sessionScope";
+
+import { deactivatePendingMessages } from "@lib/pendingMessages";
+import { cleanupNotificationAudio } from "@lib/notifications";
+import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
-import { authStore, clearAuth } from "@stores/auth.store";
-import { setTransientError } from "@stores/ui.store";
+import { authStore, clearAuth, onAuthCleared } from "@stores/auth.store";
+import { resetSafetyStore } from "./features/safety/store";
+import {
+  setTransientError,
+  uiStore,
+  setUpdateRequiredHost,
+  type UpdateRequired,
+} from "@stores/ui.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectPage } from "@pages/ConnectPage";
 import { applyStoredAppearance } from "@lib/appearance";
-import { restoreTheme } from "@lib/themes";
-import { initPtt } from "@lib/ptt";
-import { createNavigationGuard } from "@lib/navigation-guard";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
+import { createUpdateNotifier } from "@components/UpdateNotifier";
+import type { MountableComponent } from "@lib/safe-render";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
@@ -28,19 +36,29 @@ import {
   loadCredential,
   deleteCredential,
   createUserUpdateCredentialSaver,
+  loginWithSavedPassword,
+  parseRelayedLogin,
 } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
-import { initDeepLinks } from "@lib/deep-link";
 import { jumpToMessage } from "@lib/message-navigation";
 import { createCertMismatchModal, createCertFirstUseModal } from "@components/CertMismatchModal";
 import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
-import { createProfileManager, createTauriBackend } from "@lib/profiles";
+import {
+  createProfileManager,
+  createTauriBackend,
+  deriveCompatibility,
+  type Compatibility,
+} from "@lib/profiles";
+import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
+import { parseRegistrationMode, retentionNotice } from "@lib/types";
+import type { ServerInfoResponse } from "@lib/types";
 import type { CertTofuEvent } from "@lib/ws";
+import type { AuthResponse } from "@lib/types";
 import { saveUserStatus } from "@lib/userStatus";
 import { getActivePresenceSender } from "@lib/presence";
 
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { listen } from "@tauri-apps/api/event";
+import { desktop } from "./platform/desktop";
+import { connectText } from "./i18n/connect";
 
 // Gate the log level before anything logs: debug entries are serialized and
 // persisted to disk, so in production the level must filter real work, not
@@ -78,9 +96,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (import.meta.env.DEV && (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I"))) {
     e.preventDefault();
-    void import("@tauri-apps/api/core").then(({ invoke }) => {
-      void invoke("open_devtools");
-    });
+    void desktop.devTools.open();
   }
 });
 
@@ -91,7 +107,7 @@ document.addEventListener("click", (e) => {
   e.preventDefault();
   const href = (link as HTMLAnchorElement).href;
   if (href && (href.startsWith("http://") || href.startsWith("https://"))) {
-    void openUrl(href);
+    void desktop.urlOpener.open(href);
   }
 });
 
@@ -101,34 +117,66 @@ installGlobalErrorHandlers();
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
 
-// Restore saved theme (body class) before first render
-restoreTheme();
-
 // Start push-to-talk listener (Rust-side polling, non-consuming)
-void initPtt();
+void desktop.pushToTalk.init();
 
 const appEl = document.getElementById("app");
 if (!appEl) {
-  throw new Error("Missing #app element");
+  throw new Error("Missing #app element"); // i18n-exempt: developer error, index.html always ships #app
+}
+
+// The active page. `currentPage` further down holds the mounted page
+// *component*, so the page id needs its own name.
+let activePage: "connect" | "main" = "connect";
+
+/** Switch pages, re-rendering only when the page actually changed. */
+function navigate(page: "connect" | "main"): void {
+  if (page === activePage) return;
+  activePage = page;
+  void renderPage(page);
 }
 
 // Create core services
-const router = createRouter("connect");
 // REST traffic is tunneled through the Rust HTTP TOFU proxy (src/lib/httpProxy.ts
 // → src-tauri/src/http_proxy.rs), which pins the server certificate to the same
 // trust-on-first-use fingerprint as the WS proxy. No cert is ever blindly
 // accepted; the bearer token never rides an unpinned TLS connection.
-const api = createApiClient({ host: "" }, () => {
+/** Shared 401 handling, named so the saved-password relay path can run the
+ *  same side effect `api.ts` runs for an ordinary request. */
+function handleUnauthorized(): void {
   log.warn("Session expired (401), clearing auth");
   // A 401 on a request made before any session existed (e.g. a failed login
   // attempt) is not a session "expiring" — the login form's own catch block
   // already surfaces that failure. Only warn about a session that was live.
   if (authStore.getState().isAuthenticated) {
-    setTransientError("Your session expired — sign in again.");
+    setTransientError(connectText("session.expired"));
   }
   clearAuth();
-});
+}
+const api = createApiClient({ host: "" }, handleUnauthorized);
 const ws = createWsClient();
+// Diagnostics back the lazily loaded Settings > Logs panel, so their engine and
+// text stay out of the startup chunk (B9-20). The import resolves long before
+// the panel can be opened, and the panel's own module imports the same chunk.
+void import("@lib/connectionDiagnostics").then(({ configureConnectionDiagnostics }) => {
+  configureConnectionDiagnostics(api, ws);
+});
+// Registered here rather than imported by auth.store: notifications imports
+// auth.store, so that import was a cycle.
+onAuthCleared(cleanupNotificationAudio);
+// A profile switch or sign-out must not carry one account's moderation notices into the next.
+onAuthCleared(resetSafetyStore);
+onAuthCleared((reason) => {
+  // Server switches retain their account-scoped drafts. Explicit logout and
+  // invalid credentials discard pending sends.
+  try {
+    deactivatePendingMessages({
+      discard: reason === "user" && sessionStorage.getItem("owncord:quick-switch-target") === null,
+    });
+  } finally {
+    api.endSession();
+  }
+});
 // Single writer for the UX-facing connection status (docs/architecture/ux §3):
 // live controls read ui.store.connectionStatus reactively instead of wiring
 // their own ws.onStateChange. Lifecycle plumbing that needs the exact internal
@@ -204,7 +252,7 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
 
   const modal = createCertMismatchModal({
     host: evt.host,
-    storedFingerprint: evt.storedFingerprint ?? "Unknown",
+    storedFingerprint: evt.storedFingerprint ?? connectText("common.unknown"),
     newFingerprint: evt.fingerprint,
     onAccept: () => {
       modal.destroy?.();
@@ -217,7 +265,12 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
             lastConnectToken &&
             evt.host === normalizeHostForCertCompare(lastConnectHost)
           ) {
-            reconnectAfterCertAccept(ws, router, lastConnectHost, lastConnectToken);
+            reconnectAfterCertAccept(
+              ws,
+              { getCurrentPage: () => activePage, navigate },
+              lastConnectHost,
+              lastConnectToken,
+            );
           }
         } catch (err) {
           log.error("Failed to accept cert fingerprint", err);
@@ -233,7 +286,7 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
       if (evt.host === normalizeHostForCertCompare(lastConnectHost)) {
         ws.disconnect();
         clearAuth();
-        router.navigate("connect");
+        navigate("connect");
       }
     },
   });
@@ -260,8 +313,7 @@ void ws.startCertListener();
 // session is mounted the optional call is a no-op, matching the old raw
 // ws.send's "safe no-op when disconnected" behavior, so no auth guard is
 // needed here.
-void listen<string>("status-change", (e) => {
-  const status = e.payload;
+desktop.trayStatus.onStatusChange((status) => {
   if (status === "online" || status === "idle" || status === "dnd" || status === "offline") {
     // The tray's legacy "offline" spelling maps to "invisible" the same way
     // userStatus.ts migrates an old client's stored "offline" value (see its
@@ -275,6 +327,13 @@ void listen<string>("status-change", (e) => {
 // Current page component reference for cleanup
 let currentPage: { destroy?(): void } | null = null;
 
+/**
+ * Last `server-info` snapshot per host, fed by `runHealthChecks`. B7-12 reads
+ * it for the advisory epoch badge and the incompatible notice; B7-15 reads the
+ * same snapshot for `registration_mode` and the retention notice.
+ */
+const serverInfoByHost = new Map<string, ServerInfoResponse>();
+
 /** Run health checks for a list of profiles and update the connect page. */
 function runHealthChecks(
   connectPage: {
@@ -287,12 +346,19 @@ function runHealthChecks(
         onlineUsers: number | null;
       },
     ): void;
+    updateCompatibility(
+      host: string,
+      compatibility: Compatibility,
+      serverEpoch: number | null,
+    ): void;
   },
   profiles: readonly { host: string }[],
+  owner: SessionScope,
 ): void {
   for (const profile of profiles) {
     void (async () => {
       try {
+        owner.assertCurrent();
         connectPage.updateHealthStatus(profile.host, {
           status: "checking",
           latencyMs: null,
@@ -300,7 +366,8 @@ function runHealthChecks(
           onlineUsers: null,
         });
         const start = performance.now();
-        const health = await api.getHealth(profile.host, 3000);
+        const health = await api.getHealth(profile.host, 3000, owner.signal);
+        owner.assertCurrent();
         const elapsed = Math.round(performance.now() - start);
         connectPage.updateHealthStatus(profile.host, {
           status: elapsed > 1500 ? "slow" : "online",
@@ -308,7 +375,30 @@ function runHealthChecks(
           version: health.version ?? null,
           onlineUsers: health.online_users ?? null,
         });
+
+        // Advisory epoch preflight, beside the health probe and sharing its
+        // timeout/dispose shape. A failed probe is `unreachable` — no badge,
+        // never an error banner (the WebSocket refusal stays authoritative).
+        let serverEpoch: number | null = null;
+        let compatibility: Compatibility = "unreachable";
+        try {
+          const info = await api.getServerInfo(profile.host, 3000, owner.signal);
+          owner.assertCurrent();
+          serverInfoByHost.set(profile.host, info);
+          serverEpoch = info.protocol_epoch;
+          compatibility = deriveCompatibility(serverEpoch, PROTOCOL_EPOCH);
+        } catch (infoErr) {
+          if (!owner.isCurrent()) return;
+          serverInfoByHost.delete(profile.host);
+          log.debug("server-info preflight failed", {
+            host: profile.host,
+            error: String(infoErr),
+          });
+        }
+        connectPage.updateCompatibility(profile.host, compatibility, serverEpoch);
       } catch (err) {
+        if (!owner.isCurrent()) return;
+        serverInfoByHost.delete(profile.host);
         // Record why the check failed (TLS/cert-pin/network) — otherwise a
         // "can't connect" report has no logged cause to diagnose.
         log.warn("health check failed", { host: profile.host, error: String(err) });
@@ -318,6 +408,7 @@ function runHealthChecks(
           version: null,
           onlineUsers: null,
         });
+        connectPage.updateCompatibility(profile.host, "unreachable", null);
       }
     })();
   }
@@ -325,11 +416,12 @@ function runHealthChecks(
 
 // Guards the async MainPage mount below against the destroy-before-mount race:
 // a stale mount is discarded when a newer navigation supersedes it.
-const navGuard = createNavigationGuard();
+let navGeneration = 0;
 
 // Render the appropriate page based on router state
 async function renderPage(pageId: "connect" | "main"): Promise<void> {
-  const isCurrentNavigation = navGuard.begin();
+  const thisNavigation = ++navGeneration;
+  const isCurrentNavigation = (): boolean => thisNavigation === navGeneration;
   log.info("Navigating to page", { pageId });
   // Destroy previous page
   currentPage?.destroy?.();
@@ -346,6 +438,12 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     username: string,
     password?: string,
     rememberPassword = true,
+    // Whether this login is the user's own explicit choice about being
+    // remembered. Only then may declining it delete an existing credential —
+    // the auto-login path passes false, because it is replaying a stored
+    // credential rather than expressing a preference, and deleting there would
+    // destroy the very credential it just used.
+    rememberIsUserChoice = false,
   ): void {
     log.info("Post-auth wiring", { host, username });
     // Tear down any prior session wiring so listeners and the connected
@@ -357,26 +455,57 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     dispatcherCleanup = null;
     connectedOverlay?.destroy();
     connectedOverlay = null;
-    api.setConfig({ token });
+    api.setConfig({ host, token });
+    const owner = api.getSession();
     // Store token in authStore so the dispatcher's auth_ok handler has it
     authStore.setState((prev) => ({ ...prev, token }));
     lastConnectHost = host;
     lastConnectToken = token;
     ws.connect({ host, token });
     dispatcherCleanup = wireDispatcher(ws, api);
+    owner.addCleanup(dispatcherCleanup);
     log.info("Dispatcher wired, connecting WS");
 
     // Session-scoped WS listeners — collected so they're all removed together
     // on logout/disconnect (or the next wirePostAuth).
     const sessionUnsubs: Array<() => void> = [];
 
-    // BUG-135: Only persist credentials when the user opted in.
+    // BUG-135: Only persist credentials when the user opted in. Declining is
+    // an active instruction, not just an absence of one (OCV-022): a password
+    // stored under an earlier opt-in must not outlive the opt-out, so the whole
+    // credential goes. The username survives in the profile, so the form still
+    // prefills it; the token is worthless here because auto-connect forces
+    // remember on.
+    if (!rememberPassword && rememberIsUserChoice) {
+      void (async () => {
+        // The store holds one credential per host (`login_account(host) =
+        // host`), and `save_credential` already overwrites it with no
+        // username check — a remembered login by a second account on this
+        // host would have clobbered it anyway. The stored username is a
+        // stale copy, not an account identity, so guarding the delete on it
+        // can't protect a second account; it can only leave the password the
+        // user just declined sitting on disk. Delete unconditionally for the
+        // host. Cost: if two accounts share a host, opting out as one
+        // removes the credential the other saved.
+        //
+        // A failed delete leaves that password on disk. Silence there would
+        // tell the user the opt-out took effect when it did not, so it is
+        // surfaced the same way a failed save is.
+        const removed = await deleteCredential(host);
+        if (!removed && owner.isCurrent()) {
+          log.warn("Credential delete failed — the saved password is still stored", {
+            host,
+          });
+          setTransientError(connectText("session.passwordRemoveFailed"));
+        }
+      })();
+    }
     if (rememberPassword) {
       saveCredential(host, username, token, password)
         .then((ok) => {
-          if (!ok) {
+          if (!ok && owner.isCurrent()) {
             log.warn("Credential save failed — auto-login will not work for this server");
-            setTransientError("Could not save credentials — auto-login won't work");
+            setTransientError(connectText("session.credentialsSaveFailed"));
           }
         })
         .catch(() => {
@@ -385,11 +514,12 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     }
 
     // Update saved credentials when the current user changes their username.
-    // Guarded by the same remember-password opt-out as the initial save
-    // above (BUG-135), and passes the session's password through so a later
-    // save doesn't wipe out the one saved at login for an opted-in user.
+    // Guarded by the same remember-password opt-out as the initial save above
+    // (BUG-135). No password is passed: save_credential preserves the stored
+    // one when none is supplied, which is why the plaintext no longer has to
+    // make a round trip through JavaScript.
     sessionUnsubs.push(
-      ws.on("user_update", createUserUpdateCredentialSaver(host, rememberPassword, password)),
+      ws.on("user_update", createUserUpdateCredentialSaver(host, rememberPassword)),
     );
 
     const unsubState = ws.onStateChange((wsState) => {
@@ -427,10 +557,16 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         username: payload.user.username ?? username,
         motd: payload.motd ?? "",
         onReady: () => {
+          if (!owner.isCurrent()) return;
           connectedOverlay?.destroy();
           connectedOverlay = null;
-          router.navigate("main");
+          navigate("main");
         },
+      });
+      const ownedOverlay = connectedOverlay;
+      owner.addCleanup(() => {
+        ownedOverlay.destroy();
+        if (connectedOverlay === ownedOverlay) connectedOverlay = null;
       });
       appEl!.appendChild(connectedOverlay.element);
       connectedOverlay.show();
@@ -447,6 +583,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       for (const unsub of sessionUnsubs) unsub();
       sessionUnsubs.length = 0;
     };
+    owner.addCleanup(sessionCleanup);
   }
 
   // Track partial auth state for TOTP flow
@@ -455,6 +592,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
   let pendingTotpUsername = "";
 
   if (pageId === "connect") {
+    const pageOwner = new SessionScope({ host: "", generation: 0 });
     // Helper to get the profile list for the ConnectPage
     function getProfileList(): readonly {
       name: string;
@@ -465,7 +603,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       const saved = profileManager.getAll();
       if (saved.length > 0) return saved;
       // Fallback: show a default local server entry
-      return [{ name: "Local Server", host: "localhost:8443" }];
+      return [{ name: connectText("profiles.defaultName"), host: "localhost:8443" }];
     }
 
     // Persist a profile mutation, surfacing a failure instead of letting it
@@ -475,7 +613,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // the in-memory store as the only record of the change.
     function persistProfiles(): void {
       void profileManager.saveProfiles().catch(() => {
-        setTransientError("Could not save server profiles");
+        setTransientError(connectText("profiles.saveFailed"));
       });
     }
 
@@ -517,39 +655,116 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       persistProfiles();
     }
 
+    // Shared tail of both login paths: branch to the 2FA challenge, or wire the
+    // session. Structural rather than duplicated, so the saved-password path
+    // cannot drift from the typed-password one. `password` is undefined on the
+    // saved-password path — the plaintext never leaves the credential store,
+    // and save_credential preserves it when none is supplied.
+    function completeLogin(
+      host: string,
+      username: string,
+      result: AuthResponse,
+      password?: string,
+    ): void {
+      if (result.requires_2fa) {
+        pendingTotpHost = host;
+        pendingTotpPartialToken = result.partial_token ?? "";
+        pendingTotpUsername = username;
+        connectPage.showTotp();
+        return;
+      }
+      if (!result.token) return;
+      const remember = connectPage.getRememberPassword();
+      ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
+      wirePostAuth(host, result.token, username, remember ? password : undefined, remember, true);
+    }
+
     const connectPage = createConnectPage(
       {
+        // The mode is read from the per-host snapshot `runHealthChecks` fills
+        // beside the health probe. Unknown (no snapshot / unrecognised value)
+        // returns null, which LoginForm treats as invite-required.
+        getRegistrationMode(host) {
+          const info = serverInfoByHost.get(host);
+          return parseRegistrationMode(info?.registration_mode);
+        },
+        getRetentionNotice: (host) => retentionNotice(serverInfoByHost.get(host)),
         async onLogin(host, username, password) {
+          api.endSession();
           api.setConfig({ host });
+          const attempt = api.getSession();
           const result = await api.login(username, password);
-          if (result.requires_2fa) {
-            pendingTotpHost = host;
-            pendingTotpPartialToken = result.partial_token ?? "";
-            pendingTotpUsername = username;
-            connectPage.showTotp();
-            return;
+          attempt.assertCurrent();
+          pageOwner.assertCurrent();
+          completeLogin(host, username, result, password);
+        },
+        async onLoginWithSavedPassword(host, username) {
+          api.endSession();
+          api.setConfig({ host });
+          const attempt = api.getSession();
+          // loginWithSavedPassword's own IPC await isn't cancellable, so a
+          // cancelled login would otherwise hang until the backend's own
+          // SAVED_LOGIN_TIMEOUT — route it through the scope so it rejects
+          // promptly instead.
+          const relayed = await attempt.run(loginWithSavedPassword(host, username));
+          attempt.assertCurrent();
+          pageOwner.assertCurrent();
+          if (!relayed) {
+            throw new Error(connectText("session.savedLoginUnavailable"));
           }
-          if (result.token) {
-            const remember = connectPage.getRememberPassword();
-            const savedPassword = remember ? password : undefined;
-            ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
-            wirePostAuth(host, result.token, username, savedPassword, remember);
+          // The relayed body is the same AuthResponse shape api.login returns,
+          // so from here the flow is literally the typed-password one.
+          let result;
+          try {
+            result = parseRelayedLogin(relayed);
+          } catch (err) {
+            // Run the same side effect `api.ts` runs for a 401 on any other
+            // request, so the two login paths cannot diverge on session state.
+            if (err instanceof ApiClientError && err.status === 401) {
+              handleUnauthorized();
+            }
+            throw err;
           }
+          completeLogin(host, username, result);
         },
         async onRegister(host, username, password, inviteCode) {
+          api.endSession();
           api.setConfig({ host });
+          const attempt = api.getSession();
           const result = await api.register(username, password, inviteCode);
+          attempt.assertCurrent();
+          pageOwner.assertCurrent();
+          if (result.status === "pending_approval" || result.token === undefined) {
+            // Approval mode (B4-1): no session yet — an admin decides. The
+            // dedicated notice is B9's; until then the form's message line
+            // carries it.
+            connectPage.showError(connectText("registration.pendingApproval"));
+            return;
+          }
           const remember = connectPage.getRememberPassword();
           const savedPassword = remember ? password : undefined;
           ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
-          wirePostAuth(host, result.token, username, savedPassword, remember);
+          wirePostAuth(host, result.token, username, savedPassword, remember, true);
+        },
+        async onRecover(host, username, secret, newPassword) {
+          api.endSession();
+          api.setConfig({ host });
+          const attempt = api.getSession();
+          const result = await api.recoverAccount(username, secret, newPassword);
+          attempt.assertCurrent();
+          pageOwner.assertCurrent();
+          // The login shape: sign the session in exactly as a login does.
+          completeLogin(host, username, result, newPassword);
         },
         async onTotpSubmit(code) {
           if (!pendingTotpPartialToken) {
             log.error("TOTP submit without pending partial token");
             return;
           }
+          const attempt = api.getSession();
           const result = await api.verifyTotp(code, pendingTotpPartialToken);
+          attempt.assertCurrent();
+          pageOwner.assertCurrent();
           if (result.token) {
             // Clear the sensitive partial token now that it has been
             // exchanged for a real session token. A rejected code must NOT
@@ -561,7 +776,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             // every retry hit the guard above and silently do nothing.
             pendingTotpPartialToken = "";
             const remember = connectPage.getRememberPassword();
-            const savedPassword = remember ? connectPage.getPassword() : undefined;
+            // "" when the saved-password placeholder was used — save_credential
+            // then keeps the stored password rather than clearing it.
+            const savedPassword = remember ? connectPage.getPassword() || undefined : undefined;
             ensureProfileExists(
               pendingTotpHost,
               pendingTotpUsername,
@@ -574,6 +791,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
               pendingTotpUsername,
               savedPassword,
               remember,
+              true,
             );
           }
         },
@@ -589,7 +807,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           persistProfiles();
           connectPage.refreshProfiles(getProfileList());
           // Check health for the new profile
-          runHealthChecks(connectPage, getProfileList());
+          runHealthChecks(connectPage, getProfileList(), pageOwner);
         },
         onDeleteProfile(profileId) {
           profileManager.removeProfile(profileId);
@@ -603,6 +821,8 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         },
         onAutoLoginCancel() {
           autoLoginCancelled = true;
+          deactivatePendingMessages();
+          api.endSession();
           // Every read of this flag below runs before the overlay carrying
           // this Cancel button is ever painted, so by the time a click
           // reaches here the session is already in flight (wirePostAuth has
@@ -618,30 +838,124 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           lastConnectHost = "";
           lastConnectToken = "";
         },
+        onUpdateClient(host) {
+          mountUpdateNotifier(host);
+        },
       },
       getProfileList(),
     );
 
     let autoLoginCancelled = false;
 
+    // Resume a profile's session from its stored token — startup auto-login
+    // and a quick switch back to a server share this path. No-op when the
+    // host has no stored token.
+    async function resumeStoredSession(profile: {
+      readonly name: string;
+      readonly host: string;
+      readonly autoConnect: boolean;
+      readonly rememberPassword: boolean;
+    }): Promise<void> {
+      const attempt = api.getSession();
+      try {
+        const cred = await loadCredential(profile.host);
+        if (!pageOwner.isCurrent() || !attempt.isCurrent()) return;
+        if (cred?.username && cred?.token && !autoLoginCancelled) {
+          // Pass autoConnect so the checkbox still reads correctly if the
+          // user cancels and lands back on the form.
+          connectPage.selectServer(profile.host, cred.username, profile.autoConnect);
+          connectPage.showAutoConnecting(profile.name);
+
+          if (autoLoginCancelled) return;
+
+          // Use stored token directly for reconnection, preserving the
+          // profile's existing rememberPassword (autoConnect profiles always
+          // have it true — see setAutoLogin).
+          //
+          // The credential re-save no longer has to be suppressed here.
+          // save_credential used to treat an absent password as "erase it",
+          // so re-saving without one destroyed the password the user opted
+          // to remember; it now preserves the stored password unless asked
+          // to clear it, so this path can refresh the token normally.
+          api.setConfig({ host: profile.host });
+          ensureProfileExists(
+            profile.host,
+            cred.username,
+            profile.rememberPassword,
+            profile.autoConnect,
+          );
+          wirePostAuth(
+            profile.host,
+            cred.token,
+            cred.username,
+            undefined,
+            profile.rememberPassword,
+          );
+        }
+      } catch (err) {
+        // A superseded attempt (e.g. a manual login started while this
+        // credential read was still pending) must not paint an error over
+        // the login that superseded it.
+        if (!autoLoginCancelled && pageOwner.isCurrent() && attempt.isCurrent()) {
+          const message =
+            err instanceof Error ? err.message : connectText("session.autoLoginFailed");
+          log.warn("Auto-login failed", { host: profile.host, error: message });
+          connectPage.showError(connectText("session.autoLoginFailedDetail", { message }));
+        }
+      }
+    }
+
     safeMount(connectPage, appEl!);
+
+    // A server refused this client's protocol epoch as too old: state the
+    // requirement on the connect page itself and offer the update there. The
+    // main page's notifier never mounts on a refusal, so without this the user
+    // would have to fetch the installer by hand. Subscribed, not read once:
+    // on a first login or a startup auto-login this page is already mounted
+    // when the refusal arrives and nothing re-renders it (no overlay exists
+    // before auth_ok, so the isAuthenticated subscriber below does not
+    // navigate).
+    let updateNotifier: MountableComponent | null = null;
+    const mountUpdateNotifier = (host: string): void => {
+      // A later refusal (another server tried from this same page) replaces
+      // the banner rather than being ignored.
+      updateNotifier?.destroy?.();
+      const notifier = createUpdateNotifier({ serverUrl: `https://${bracketBareIPv6Host(host)}` });
+      notifier.mount(appEl!);
+      updateNotifier = notifier;
+    };
+    const offerUpdate = (required: UpdateRequired | null): void => {
+      if (!required) return;
+      // Consume the fact: the next connect page must not re-offer it.
+      setUpdateRequiredHost(null);
+      connectPage.showIncompatible(required.host, required.serverEpoch, required.clientEpoch);
+      if (required.serverEpoch !== null && required.serverEpoch > required.clientEpoch) {
+        mountUpdateNotifier(required.host);
+      }
+    };
+    const unsubUpdateRequired = uiStore.subscribeSelector((s) => s.updateRequiredHost, offerUpdate);
+    offerUpdate(uiStore.getState().updateRequiredHost);
 
     // Periodic health check — re-run every 15s so offline servers update when they come back
     const healthCheckInterval = setInterval(() => {
-      runHealthChecks(connectPage, getProfileList());
+      runHealthChecks(connectPage, getProfileList(), pageOwner);
     }, 15_000);
 
+    pageOwner.addCleanup(() => clearInterval(healthCheckInterval));
+    pageOwner.addCleanup(unsubUpdateRequired);
+    // Page-owned checks and listeners cannot update a later connect screen.
     // Wrap destroy to clear the interval
     currentPage = {
       destroy() {
-        clearInterval(healthCheckInterval);
+        pageOwner.dispose();
+        updateNotifier?.destroy?.();
         connectPage.destroy?.();
       },
     };
 
     // Expose a health-refresh hook so trusting a first-use certificate can
     // re-check the now-reachable server without a full page navigation.
-    rerunConnectHealth = () => runHealthChecks(connectPage, getProfileList());
+    rerunConnectHealth = () => runHealthChecks(connectPage, getProfileList(), pageOwner);
 
     // Route deep-link invites into this connect page. Apply any that arrived
     // before it mounted.
@@ -651,16 +965,21 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       pendingInviteLink = null;
     }
 
+    // Profile loading must not later start auto-login over a manual attempt.
+    // Capture ownership before its first await, not after credentials arrive.
+    const startupAttempt = api.getSession();
     // Load saved profiles and kick off health checks
     void (async () => {
       try {
         await profileManager.loadProfiles();
+        if (!pageOwner.isCurrent()) return;
         const profiles = getProfileList();
         connectPage.refreshProfiles(profiles);
-        runHealthChecks(connectPage, profiles);
+        runHealthChecks(connectPage, profiles, pageOwner);
       } catch (err) {
+        if (!pageOwner.isCurrent()) return;
         log.warn("Failed to load profiles, using defaults", err);
-        runHealthChecks(connectPage, getProfileList());
+        runHealthChecks(connectPage, getProfileList(), pageOwner);
       }
 
       // Consume any pending skip-auto-login flag on THIS mount regardless of
@@ -685,6 +1004,10 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           targetProfile?.username ?? undefined,
           targetProfile?.autoConnect === true,
         );
+        // A quick switch keeps each server's saved sign-in (B7-13), so
+        // switching back resumes with the stored token exactly as auto-login
+        // does. Without a stored credential the prefilled form stays up.
+        if (targetProfile !== undefined) await resumeStoredSession(targetProfile);
         return; // Skip auto-login when switching servers
       }
 
@@ -696,7 +1019,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       // Suppressing the attempt removes the race instead of relying on the
       // delete being dispatched early enough to win it — and an auto-login
       // immediately after an explicit logout is wrong regardless of timing.
-      if (skipAutoLogin) {
+      if (skipAutoLogin || !startupAttempt.isCurrent()) {
         return;
       }
 
@@ -704,45 +1027,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       // using the stored token (password is no longer returned from the
       // credential store over IPC for security).
       const autoProfile = profileManager.getAutoConnectProfile();
-      if (autoProfile) {
-        try {
-          const cred = await loadCredential(autoProfile.host);
-          if (cred?.username && cred?.token && !autoLoginCancelled) {
-            // Pass autoConnect so the checkbox still reads correctly if the
-            // user cancels and lands back on the form.
-            connectPage.selectServer(autoProfile.host, cred.username, autoProfile.autoConnect);
-            connectPage.showAutoConnecting(autoProfile.name);
-
-            if (autoLoginCancelled) return;
-
-            // Use stored token directly for reconnection. Preserve the
-            // profile's existing rememberPassword rather than forcing it to
-            // false (autoConnect profiles always have it true — see
-            // setAutoLogin), and skip wirePostAuth's credential re-save: the
-            // password is never returned over IPC here, so saving with
-            // rememberPassword defaulted to true would call saveCredential
-            // with password undefined, which rewrites the whole stored
-            // blob and silently destroys any password the user opted to
-            // remember (save_credential only carries the password key
-            // `if let Some(...)`, so a None wipes it — see credentials.rs).
-            api.setConfig({ host: autoProfile.host });
-            ensureProfileExists(
-              autoProfile.host,
-              cred.username,
-              autoProfile.rememberPassword,
-              autoProfile.autoConnect,
-            );
-            wirePostAuth(autoProfile.host, cred.token, cred.username, undefined, false);
-            return;
-          }
-        } catch (err) {
-          if (!autoLoginCancelled) {
-            const message = err instanceof Error ? err.message : "Auto-login failed";
-            log.warn("Auto-login failed", { host: autoProfile.host, error: message });
-            connectPage.showError(`Auto-login failed: ${message}`);
-          }
-        }
-      }
+      if (autoProfile) await resumeStoredSession(autoProfile);
     })();
   } else {
     // MainPage (and the LiveKit voice stack it statically imports) loads
@@ -753,16 +1038,15 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // A newer navigation may have superseded this one while the chunk loaded;
     // mounting now would fight the page that navigation rendered.
     if (!isCurrentNavigation()) return;
-    const mainPage = createMainPage({ ws, api });
+    const mainPage = createMainPage({
+      ws,
+      api,
+      getRetentionNotice: () => retentionNotice(serverInfoByHost.get(api.getConfig().host ?? "")),
+    });
     safeMount(mainPage, appEl!);
     currentPage = mainPage;
   }
 }
-
-// Listen for navigation changes
-router.onNavigate((pageId) => {
-  void renderPage(pageId);
-});
 
 // Handle logout / disconnect
 authStore.subscribeSelector(
@@ -772,14 +1056,15 @@ authStore.subscribeSelector(
     // onReady, 800ms after `ready` arrives — so a session that ends between
     // auth_ok and ready (a ban, an auth_error on an intervening reconnect,
     // a server_restart shutdown) flips isAuthenticated false while the
-    // router is still "connect". Gate on connectedOverlay too so that case
-    // still tears down: otherwise the overlay (position:fixed, opaque,
+    // router is still "connect". The synchronous session cleanup has already
+    // destroyed its overlay; lastConnectHost retains the transport ownership
+    // needed to finish teardown here. Otherwise the overlay (position:fixed, opaque,
     // z-index 200, appended straight to #app in wirePostAuth's auth_ok
     // handler) is orphaned over the connect page with no remaining owner —
     // its only other teardown paths are its own onReady timer (never armed
     // without `ready`), the next wirePostAuth, onAutoLoginCancel, and the
     // invite deep-link handler, none of which this path takes (OC-0157).
-    if (!isAuthenticated && (router.getCurrentPage() === "main" || connectedOverlay !== null)) {
+    if (!isAuthenticated && (activePage === "main" || lastConnectHost !== "")) {
       // Leave voice channel before disconnecting so other clients see it
       // immediately. Gated on clearAuth's logoutWasInVoice snapshot rather
       // than the live voiceStore: clearAuth applies state (including this
@@ -805,15 +1090,22 @@ authStore.subscribeSelector(
       // kicked us by shutting down: the token is still valid, and deleting
       // the credential would break auto-login every time the server restarts.
       const host = api.getConfig().host;
-      if (host && authStore.getState().logoutReason !== "server_shutdown") {
-        void deleteCredential(host);
-        // Same condition on purpose: whenever the credential is being removed,
-        // the connect page must not turn around and auto-login with it. A
-        // server_shutdown keeps the credential precisely so auto-login still
-        // works on restart, so it deliberately does not set this.
+      const reason = authStore.getState().logoutReason;
+      if (host && reason !== "server_shutdown") {
+        // A protocol-epoch refusal keeps the credential too: the token is
+        // still valid, and the update the connect page offers relaunches
+        // straight into auto-login with it (sessionStorage — and so the
+        // skip flag below — does not survive that relaunch).
+        // A quick switch keeps it as well: switching back resumes with it
+        // (B7-13), and the departed session is left for that return.
+        if (reason !== "protocol_epoch" && reason !== "server_switch") void deleteCredential(host);
+        // Whenever this session must not turn around and auto-login with the
+        // credential (removed, or just refused), say so. A server_shutdown
+        // keeps the credential precisely so auto-login still works on
+        // restart, so it deliberately does not set this.
         sessionStorage.setItem("owncord:skip-auto-login", "1");
       }
-      router.navigate("connect");
+      navigate("connect");
     }
   },
 );
@@ -825,13 +1117,15 @@ window.addEventListener("beforeunload", () => {
     voiceSessionLeave(false); // false: we send voice_leave below
     ws.send({ type: "voice_leave", payload: {} });
   }
+  deactivatePendingMessages();
+  api.endSession();
   // Flush any buffered log entries to disk before the window closes.
   void flushLogs();
 });
 
 // Initial render (fire-and-forget — the initial page is "connect", whose
 // render branch is synchronous)
-void renderPage(router.getCurrentPage());
+void renderPage(activePage);
 
 // Initialize window state persistence (fire-and-forget)
 void initWindowState();
@@ -841,7 +1135,7 @@ void initWindowState();
 // form — it can't complete a join by itself.
 function handleInviteDeepLink(code: string, host?: string): void {
   pendingInviteLink = { code, host };
-  if (router.getCurrentPage() === "main") {
+  if (activePage === "main") {
     // Let the logout path do the teardown instead of navigating behind a
     // live session: clearAuth() fires while the router is still on "main",
     // so the authStore subscriber above runs its full teardown (voice leave,
@@ -850,13 +1144,15 @@ function handleInviteDeepLink(code: string, host?: string): void {
     clearAuth();
     return;
   }
+  deactivatePendingMessages();
+  api.endSession();
   if (lastConnectHost !== "") {
     // wirePostAuth already ran — a login/auto-login/register is connecting,
     // or reached auth_ok (isAuthenticated flipped true) but the connected
-    // overlay's ready countdown hasn't called router.navigate("main") yet, so
+    // overlay's ready countdown hasn't called navigate("main") yet, so
     // the branch above never triggered. The authStore subscriber only tears
-    // down once the router IS "main", so it won't fire for this window
-    // either: left alone, the overlay's timer fires router.navigate("main")
+    // down once the active page IS "main", so it won't fire for this window
+    // either: left alone, the overlay's timer fires navigate("main")
     // regardless, mounting MainPage on top of whatever this handler does to
     // authStore below. Tear the in-flight session down directly, the same
     // way onAutoLoginCancel does, before applying the invite below.
@@ -873,7 +1169,7 @@ function handleInviteDeepLink(code: string, host?: string): void {
       clearAuth();
     }
   }
-  router.navigate("connect");
+  navigate("connect");
   // If the connect page was already mounted, navigate() may not re-render it —
   // apply directly. Otherwise the connect render branch consumes the pending link.
   if (pendingInviteLink !== null && applyInviteToConnectPage !== null) {
@@ -888,7 +1184,7 @@ function handleInviteDeepLink(code: string, host?: string): void {
 function handleMessageDeepLink(channelId: number, messageId: number): void {
   jumpToMessage(channelId, messageId);
 }
-void initDeepLinks(handleInviteDeepLink, handleMessageDeepLink);
+void desktop.deepLinks.init(handleInviteDeepLink, handleMessageDeepLink);
 
 // Initialize log persistence to disk (fire-and-forget)
 void initLogPersistence();

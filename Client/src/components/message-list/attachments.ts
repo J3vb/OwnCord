@@ -3,21 +3,28 @@
  * Also owns the server host state and URL resolution used by other modules.
  */
 
-import { createElement, appendChildren } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
+import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
+import { formatByteSize } from "@lib/connectionStats";
 import { ensureHttpProxy } from "@lib/httpProxy";
 import { getToken } from "@stores/auth.store";
 import { bracketBareIPv6Host } from "@lib/ws";
-import { save } from "@tauri-apps/plugin-dialog";
+import { desktop } from "../../platform/desktop";
+import type {
+  ExternalContentResult,
+  ExternalImageSource,
+  ExternalPreview,
+} from "../../platform/contracts/externalContent";
 
 const log = createLogger("attachments");
-import { writeFile } from "@tauri-apps/plugin-fs";
 import type { Attachment } from "@lib/types";
-import { openImageLightbox } from "./media";
+import { externalAllowed, setExternalConsentScope } from "../../features/content-consent/external";
+import { mediaControlsText } from "../../i18n/mediaControls";
+import { messageStatusText } from "../../i18n/messageStatus";
 
 /** Cached value of the animateGifs preference. Invalidated on pref change
  *  (same pattern as roleColors in formatting.ts). */
@@ -31,7 +38,7 @@ window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>
 // -- Server host state --------------------------------------------------------
 
 /** Module-level server host for resolving relative attachment URLs. */
-let _serverHost: string | null = null;
+let serverHost: string | null = null;
 
 /** Set the server host (called once from MainPage on connect).
  *  Strips a trailing default-HTTPS ":443" and lowercases, mirroring
@@ -48,7 +55,7 @@ let _serverHost: string | null = null;
  *  same guard as tofu.rs::cert_store_key (OC-0215).
  *
  *  A bare (unbracketed) IPv6 literal is then wrapped in brackets so it forms
- *  a parseable authority: resolveServerUrl interpolates _serverHost directly
+ *  a parseable authority: resolveServerUrl interpolates serverHost directly
  *  into a URL, and WHATWG's URL.host is always the bracketed form for IPv6,
  *  so isServerUrl's comparison also needs the bracketed form to ever match
  *  (OC-0241). */
@@ -57,7 +64,8 @@ export function setServerHost(host: string): void {
     host.endsWith(":443") && (!host.slice(0, -4).includes(":") || host.slice(0, -4).endsWith("]"))
       ? host.slice(0, -4)
       : host;
-  _serverHost = bracketBareIPv6Host(withoutPort).toLowerCase();
+  serverHost = bracketBareIPv6Host(withoutPort).toLowerCase();
+  setExternalConsentScope(serverHost);
 }
 
 /** Resolve a potentially relative URL to a full URL using the server host. */
@@ -65,8 +73,8 @@ export function resolveServerUrl(url: string): string {
   if (url.startsWith("http://") || url.startsWith("https://")) {
     return url;
   }
-  if (_serverHost !== null) {
-    return `https://${_serverHost}${url}`;
+  if (serverHost !== null) {
+    return `https://${serverHost}${url}`;
   }
   return url;
 }
@@ -74,9 +82,7 @@ export function resolveServerUrl(url: string): string {
 // -- Helpers ------------------------------------------------------------------
 
 export function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return formatByteSize(bytes, 1024, "KB", 1);
 }
 
 /** Strip any `; codecs=…` parameters and normalise case before matching. */
@@ -141,6 +147,38 @@ const memoryCache = new Map<string, string>();
 const CACHE_MAX = 200;
 let attachmentCacheGeneration = 0;
 
+/** `host#userId` of the account whose server content these caches hold
+ *  (B7-13). null while signed out: the durable store is neither read nor
+ *  written, so nothing crosses from one profile or account to the next. */
+let cacheScope: string | null = null;
+
+/**
+ * Point the server-content caches at the signed-in account. A change drops
+ * the in-memory caches and prunes every durable entry outside the new scope,
+ * so a switch leaves no previous server's or account's bytes on disk while
+ * the same account keeps its entries across restarts.
+ */
+export function setAttachmentCacheScope(scope: string | null): void {
+  if (scope === cacheScope) return;
+  cacheScope = scope;
+  clearAttachmentCaches();
+  if (scope !== null) void idbPrune(scope, true);
+}
+
+/**
+ * Delete every durable entry of `scope` — a self-deleted account's images
+ * (B7-15c). Call it after auth has cleared, so the scope is no longer armed
+ * and no late write can land behind the prune.
+ */
+export function pruneAttachmentCacheScope(scope: string): Promise<void> {
+  return idbPrune(scope, false);
+}
+
+/** Durable-store key: the scope, then the URL. */
+function idbKey(scope: string, url: string): string {
+  return `${scope}|${url}`;
+}
+
 export function clearAttachmentCaches(): void {
   attachmentCacheGeneration += 1;
   memoryCache.clear();
@@ -179,10 +217,22 @@ function sanitizeContentType(raw: string): string {
 
 /** Check if a URL points to the configured OwnCord server. */
 function isServerUrl(url: string): boolean {
-  if (_serverHost === null) return false;
+  if (serverHost === null) return false;
   try {
     const parsed = new URL(url);
-    return parsed.host === _serverHost;
+    return parsed.host === serverHost;
+  } catch {
+    return false;
+  }
+}
+
+/** An absolute http(s) URL on some host other than the configured server —
+ *  content the external-content broker, not the TOFU proxy, fetches. */
+function isExternalUrl(url: string): boolean {
+  if (isServerUrl(url)) return false;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "https:" || protocol === "http:";
   } catch {
     return false;
   }
@@ -194,23 +244,27 @@ export function isTrustedServerUrl(url: string): boolean {
 }
 
 /**
- * Fetch `url`, routing OwnCord-server URLs through the Rust HTTP TOFU proxy's
+ * Fetch a file from the OwnCord server through the Rust HTTP TOFU proxy's
  * loopback origin (cert-pinned) with the session bearer token attached —
  * /api/v1/files/{id} enforces channel ACLs, so an unauthenticated request
- * would 401. The token is only ever sent to the configured server host;
- * non-server URLs (external images) get a normal validated HTTPS fetch with
- * no credentials.
+ * would 401. The token is only ever sent to the configured server host.
+ *
+ * Server URLs only. An external URL is never fetched directly (B7-16): images
+ * go through the external-content broker (`fetchExternalImage`), and anything
+ * else is refused here rather than handed to a general-purpose client.
  */
 async function fetchServerFile(url: string): Promise<Response> {
-  if (!isServerUrl(url)) return tauriFetch(url);
+  // i18n-exempt: internal guard, logged by the caller, never rendered
+  if (!isServerUrl(url)) throw new Error("external URLs are fetched only through the broker");
   const parsed = new URL(url);
   const origin = await ensureHttpProxy(parsed.host);
   const headers: Record<string, string> = {};
   const token = getToken();
   if (token !== null) {
+    // i18n-exempt: HTTP wire header value, never rendered
     headers["Authorization"] = `Bearer ${token}`;
   }
-  return tauriFetch(`${origin}${parsed.pathname}${parsed.search}`, { headers });
+  return desktop.http.fetch(`${origin}${parsed.pathname}${parsed.search}`, { headers });
 }
 
 /** In-flight fetch promises to prevent duplicate concurrent requests. */
@@ -252,8 +306,31 @@ function closeDbAfterTransaction(tx: IDBTransaction, db: IDBDatabase): void {
   tx.onerror = close;
 }
 
-/** Read a cached data URL from IndexedDB. */
-async function idbGet(url: string): Promise<string | null> {
+/** Delete every durable entry outside `scope` (including pre-B7-13 keys) when
+ *  `keep` is true, or every entry inside it when false. */
+async function idbPrune(scope: string, keep: boolean): Promise<void> {
+  const db = await openCacheDb();
+  if (db === null) return;
+  try {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    closeDbAfterTransaction(tx, db);
+    const store = tx.objectStore(IDB_STORE);
+    const req = store.getAllKeys();
+    const prefix = idbKey(scope, "");
+    // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
+    req.onsuccess = () => {
+      for (const key of req.result) {
+        const inside = typeof key === "string" && key.startsWith(prefix);
+        if (inside !== keep) store.delete(key);
+      }
+    };
+  } catch {
+    db.close();
+  }
+}
+
+/** Read a cached data URL from IndexedDB by its scoped key. */
+async function idbGet(key: string): Promise<string | null> {
   const db = await openCacheDb();
   if (db === null) return null;
   return new Promise((resolve) => {
@@ -261,7 +338,7 @@ async function idbGet(url: string): Promise<string | null> {
       const tx = db.transaction(IDB_STORE, "readonly");
       closeDbAfterTransaction(tx, db);
       const store = tx.objectStore(IDB_STORE);
-      const req = store.get(url);
+      const req = store.get(key);
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onsuccess = () => resolve(typeof req.result === "string" ? req.result : null);
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
@@ -273,14 +350,19 @@ async function idbGet(url: string): Promise<string | null> {
   });
 }
 
-/** Write a data URL to IndexedDB. */
-async function idbPut(url: string, dataUrl: string): Promise<void> {
+/** Write a data URL to IndexedDB under `scope`, unless the scope moved on
+ *  while the database opened — a late write would outlive the prune. */
+async function idbPut(scope: string, url: string, dataUrl: string): Promise<void> {
   const db = await openCacheDb();
   if (db === null) return;
+  if (scope !== cacheScope) {
+    db.close();
+    return;
+  }
   try {
     const tx = db.transaction(IDB_STORE, "readwrite");
     closeDbAfterTransaction(tx, db);
-    tx.objectStore(IDB_STORE).put(dataUrl, url);
+    tx.objectStore(IDB_STORE).put(dataUrl, idbKey(scope, url));
   } catch {
     db.close();
     // IndexedDB full or unavailable — ignore
@@ -299,9 +381,14 @@ export function uint8ToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/** Fetch an image and return a data: URI. Uses memory → IndexedDB → network. */
+/** Fetch an image and return a URL an `<img>` can show. Server images come
+ *  back as a data: URI through memory → IndexedDB → the TOFU proxy; an
+ *  external image comes back as a `blob:` URL from the broker and never
+ *  enters those two caches, which hold server content only (B7-16). */
 export function fetchImageAsDataUrl(url: string): Promise<string | null> {
+  if (isExternalUrl(url)) return fetchExternalImage({ url });
   const generation = attachmentCacheGeneration;
+  const scope = cacheScope;
 
   // 1. Memory cache (instant)
   const cached = memoryCache.get(url);
@@ -313,7 +400,7 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
 
   const promise = (async (): Promise<string | null> => {
     // 3. IndexedDB cache (persists across restarts)
-    const idbCached = await idbGet(url);
+    const idbCached = scope === null ? null : await idbGet(idbKey(scope, url));
     if (idbCached !== null) {
       if (generation !== attachmentCacheGeneration) return null;
       if (memoryCache.size >= CACHE_MAX) {
@@ -324,10 +411,9 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
       return idbCached;
     }
 
-    // 4. Network fetch. Server-hosted images go through the Rust HTTP TOFU
-    // proxy (cert-pinned, same trust store as the WS proxy); external images
-    // use a normal validated HTTPS fetch. isSafeUrl restricts to http/https and
-    // responses are only used as image data, never executed.
+    // 4. Network fetch through the Rust HTTP TOFU proxy (cert-pinned, same
+    // trust store as the WS proxy). Responses are only used as image data,
+    // never executed.
     try {
       const res = await fetchServerFile(url);
       if (!res.ok) return null;
@@ -336,7 +422,7 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
       const contentType = sanitizeContentType(rawCt);
       const buffer = await res.arrayBuffer();
       const base64 = uint8ToBase64(new Uint8Array(buffer));
-      const dataUrl = `data:${contentType};base64,${base64}`;
+      const dataUrl = `data:${contentType};base64,${base64}`; // i18n-exempt: data-URI scheme, not copy
 
       if (generation !== attachmentCacheGeneration) {
         return null;
@@ -348,7 +434,7 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
         if (firstKey !== undefined) memoryCache.delete(firstKey);
       }
       memoryCache.set(url, dataUrl);
-      void idbPut(url, dataUrl);
+      if (scope !== null) void idbPut(scope, url, dataUrl);
 
       return dataUrl;
     } catch (err) {
@@ -453,6 +539,176 @@ export function fetchMediaAsObjectUrl(url: string): Promise<string | null> {
   return promise;
 }
 
+// ---------------------------------------------------------------------------
+// External images (B7-16): the broker's bytes as blob: URLs
+// ---------------------------------------------------------------------------
+
+/** Bumped by `clearExternalImageCache`. The broker partition names the server
+ *  and this epoch, so after a teardown every request lands in a fresh
+ *  partition and the native cache drops the previous one. */
+let externalEpoch = 0;
+
+/** The broker cache partition for content shown on the current server. */
+export function externalPartition(): string {
+  return `${serverHost ?? ""}#${externalEpoch}`;
+}
+
+/** blob: URLs for broker-fetched images, keyed by handle or URL. */
+const externalObjectUrls = new Map<string, string>();
+/** The subset of those URLs whose bytes are a GIF — the ones that get the
+ *  freeze/play control. */
+const externalGifUrls = new Set<string>();
+const externalInFlight = new Map<string, Promise<ExternalContentResult<string>>>();
+/** FIFO cap: these copies live in the webview, outside the broker's byte
+ *  budget, so nothing else bounds them. Mirrors MEDIA_CACHE_MAX; higher
+ *  because an image is far smaller than a clip. */
+export const EXTERNAL_IMAGE_CACHE_MAX = 100;
+
+/** Drop every broker-fetched image and move to a fresh broker partition.
+ *  Called on page teardown and from the manual "clear cache" action. */
+export function clearExternalImageCache(): void {
+  externalEpoch += 1;
+  // Name the fresh partition now rather than at the next preview: the broker
+  // drops a partition's cache the moment another one is named, and an empty
+  // URL is refused before any network work, so this costs one IPC call.
+  void desktop.externalContent?.preview(externalPartition(), "");
+  for (const objectUrl of externalObjectUrls.values()) {
+    revokeObjectUrl(objectUrl);
+  }
+  externalObjectUrls.clear();
+  externalGifUrls.clear();
+  externalInFlight.clear();
+}
+
+/** The broker cache and consent admission key for an image source. */
+export function externalKey(source: ExternalImageSource): string {
+  return "handle" in source ? `handle:${source.handle}` : `url:${source.url}`;
+}
+
+/** A link preview (or oEmbed title) through the broker, refused before any
+ *  network work unless the viewer consented to `url` (B9-8). */
+export function previewExternal(url: string): Promise<ExternalContentResult<ExternalPreview>> {
+  if (!externalAllowed(externalKey({ url }))) {
+    return Promise.resolve({ ok: false, failure: "unavailable" });
+  }
+  return desktop.externalContent.preview(externalPartition(), url);
+}
+
+/** Whether a URL from `fetchExternalImage` holds a GIF. */
+export function isExternalGif(objectUrl: string): boolean {
+  return externalGifUrls.has(objectUrl);
+}
+
+/** Re-request `img`'s image through the broker when the blob: URL it shows
+ *  was revoked — by the FIFO cap or a cache clear — and a GIF unfreeze or a
+ *  lazy load after scrolling back reloads the stale URL. Register it before any other
+ *  error listener: a recovered load stops the error from reaching them. */
+export function recoverEvictedImage(
+  img: HTMLImageElement,
+  source: ExternalImageSource,
+  onExpired?: () => void,
+): void {
+  const recover = (event: Event): void => {
+    if (!img.src.startsWith("blob:") || [...externalObjectUrls.values()].includes(img.src)) {
+      return;
+    }
+    event.stopImmediatePropagation();
+    void loadExternalImage(source).then((result) => {
+      if (result.ok) {
+        img.src = result.value;
+        return;
+      }
+      img.removeEventListener("error", recover);
+      if (result.failure === "expired-handle" && onExpired !== undefined) {
+        onExpired();
+        return;
+      }
+      img.dispatchEvent(new Event("error"));
+    });
+  };
+  img.addEventListener("error", recover);
+}
+
+/** An external image, fetched by the broker and handed back as a same-origin
+ *  `blob:` URL (so the GIF-freeze canvas stays untainted), or null when the
+ *  broker refused it or could not fetch it. */
+export function fetchExternalImage(source: ExternalImageSource): Promise<string | null> {
+  return loadExternalImage(source).then((result) => (result.ok ? result.value : null));
+}
+
+/** `fetchExternalImage`, keeping the broker's failure class. */
+export function loadExternalImage(
+  source: ExternalImageSource,
+): Promise<ExternalContentResult<string>> {
+  const key = externalKey(source);
+  // B9-8: nothing is fetched for an item the viewer has not consented to.
+  if (!externalAllowed(key)) return Promise.resolve({ ok: false, failure: "unavailable" });
+  const cached = externalObjectUrls.get(key);
+  if (cached !== undefined) return Promise.resolve({ ok: true, value: cached });
+  const existing = externalInFlight.get(key);
+  if (existing !== undefined) return existing;
+
+  const epoch = externalEpoch;
+  const promise = (async (): Promise<ExternalContentResult<string>> => {
+    const result = await desktop.externalContent.image(externalPartition(), source);
+    if (!result.ok) {
+      log.debug("External image refused", { failure: result.failure });
+      return result;
+    }
+    const objectUrl = createObjectUrl(result.value);
+    if (objectUrl === null) return { ok: false, failure: "unavailable" };
+    if (epoch !== externalEpoch) {
+      revokeObjectUrl(objectUrl);
+      return { ok: false, failure: "unavailable" };
+    }
+    if (externalObjectUrls.size >= EXTERNAL_IMAGE_CACHE_MAX) {
+      const firstKey = externalObjectUrls.keys().next().value;
+      if (firstKey !== undefined) {
+        const evicted = externalObjectUrls.get(firstKey);
+        externalObjectUrls.delete(firstKey);
+        if (evicted !== undefined) {
+          externalGifUrls.delete(evicted);
+          revokeObjectUrl(evicted);
+        }
+      }
+    }
+    externalObjectUrls.set(key, objectUrl);
+    if (result.value.type === "image/gif") externalGifUrls.add(objectUrl);
+    return { ok: true, value: objectUrl };
+  })();
+
+  externalInFlight.set(key, promise);
+  void promise.finally(() => {
+    if (externalInFlight.get(key) === promise) externalInFlight.delete(key);
+  });
+  return promise;
+}
+
+// -- Failure + retry ----------------------------------------------------------
+
+/** The typed failure line shared by the embed, image and picker renderers
+ *  (B9-9): a status message plus a bounded, explicitly labelled retry. The
+ *  caller owns what retry does, so a retry always rechecks the current consent
+ *  and partition rather than replaying a stale answer. */
+export function renderFailureStatus(
+  message: string,
+  retryLabel: string,
+  onRetry: () => void,
+): HTMLDivElement {
+  const wrap = createElement("div", { class: "msg-media-fallback" });
+  const status = createElement("span", { class: "msg-media-fallback-text", role: "status" });
+  setText(status, message);
+  const retry = createElement("button", {
+    class: "messages-retry-btn msg-media-retry",
+    type: "button",
+    "aria-label": retryLabel,
+  });
+  setText(retry, retryLabel);
+  retry.addEventListener("click", onRetry);
+  appendChildren(wrap, status, retry);
+  return wrap;
+}
+
 // -- Attachment rendering -----------------------------------------------------
 
 /** The filename + size + download row shared by the audio player and the
@@ -472,8 +728,8 @@ function buildFileMeta(att: Attachment, resolvedUrl: string): HTMLDivElement {
 function buildDownloadButton(att: Attachment, resolvedUrl: string): HTMLButtonElement {
   const btn = createElement("button", {
     class: "msg-file-download",
-    title: "Download",
-    "aria-label": `Download ${att.filename}`,
+    title: messageStatusText("file.download"),
+    "aria-label": messageStatusText("file.downloadNamed", { filename: att.filename }),
   });
   btn.appendChild(createIcon("download", 16));
   btn.addEventListener("click", () => {
@@ -501,6 +757,7 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
     if (objectUrl !== null) {
       video.src = objectUrl;
     } else {
+      // The download chip stays; the player is dimmed, never shown as loading.
       wrap.classList.add("msg-media-failed");
     }
   });
@@ -562,7 +819,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
 
     function attachLightbox(img: HTMLImageElement): void {
       img.addEventListener("click", () => {
-        openImageLightbox(img.src, att.filename);
+        openImageLightbox(img.src, att.filename, { url: resolvedUrl });
       });
     }
 
@@ -609,6 +866,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
             src: dataUrl,
             alt: att.filename,
           });
+          recoverEvictedImage(img, { url: resolvedUrl });
           attachLightbox(img);
           img.addEventListener(
             "load",
@@ -648,7 +906,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
 async function downloadFile(url: string, filename: string): Promise<void> {
   try {
     // Show native save dialog with suggested filename
-    const filePath = await save({ defaultPath: filename });
+    const filePath = await desktop.fileSaver.pickSaveLocation(filename);
     if (filePath === null) return; // User cancelled
 
     // Fetch file data — server downloads go through the cert-pinned HTTP proxy
@@ -656,14 +914,198 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     const res = await fetchServerFile(url);
     if (!res.ok) {
       log.error("Download failed", { filename, status: res.status });
-      alert(`Download failed: server returned ${res.status}`);
+      alert(messageStatusText("file.downloadHttpFailed", { status: res.status }));
       return;
     }
 
     const buffer = await res.arrayBuffer();
-    await writeFile(filePath, new Uint8Array(buffer));
+    await desktop.fileSaver.writeFile(filePath, new Uint8Array(buffer));
   } catch (err) {
     log.error("Download failed", { filename, error: String(err) });
-    alert(`Download failed for ${filename} — check logs for details`);
+    alert(messageStatusText("file.downloadFailed", { filename }));
   }
+}
+
+// -- Lightbox -----------------------------------------------------------------
+
+// Store the cleanup function for the active lightbox so rapid reopens
+// properly remove document-level listeners from the previous instance.
+let activeLightboxClose: (() => void) | null = null;
+
+/** Close the active lightbox, if any. Called on page teardown (logout, page
+ *  swap) so an open overlay doesn't survive onto the next page with live
+ *  document listeners and a revoked blob URL. */
+export function closeActiveLightbox(): void {
+  activeLightboxClose?.();
+}
+
+/** Open a full-screen lightbox overlay with zoom and pan. */
+export function openImageLightbox(src: string, alt: string, external?: ExternalImageSource): void {
+  // Close any existing lightbox (including its document listeners)
+  if (activeLightboxClose !== null) {
+    activeLightboxClose();
+    activeLightboxClose = null;
+  }
+
+  // Focus moves into the lightbox on open and back to the opener on close
+  // (B9-9); captured before the overlay takes focus.
+  const opener = document.activeElement;
+  const overlay = createElement("div", { class: "image-lightbox" });
+  // A modal surface: named so a screen reader announces it, and tabbable
+  // itself so the Tab cycle never escapes to the page behind it.
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", alt);
+  overlay.tabIndex = -1;
+
+  const imgWrap = createElement("div", { class: "image-lightbox-wrap" });
+  const img = createElement("img", { src, alt });
+  if (external !== undefined) recoverEvictedImage(img, external);
+  imgWrap.appendChild(img);
+  overlay.appendChild(imgWrap);
+
+  const closeBtn = createElement("button", {
+    class: "image-lightbox-close",
+    "aria-label": mediaControlsText("lightbox.close"),
+  });
+  closeBtn.appendChild(createIcon("x", 20));
+  overlay.appendChild(closeBtn);
+
+  // Zoom & pan state
+  let scale = 1;
+  let panX = 0;
+  let panY = 0;
+  let isDragging = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let panStartX = 0;
+  let panStartY = 0;
+
+  function applyTransform(): void {
+    img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+  }
+
+  function resetZoom(): void {
+    scale = 1;
+    panX = 0;
+    panY = 0;
+    applyTransform();
+  }
+
+  function onMove(e: MouseEvent): void {
+    if (!isDragging) return;
+    panX = panStartX + (e.clientX - dragStartX);
+    panY = panStartY + (e.clientY - dragStartY);
+    applyTransform();
+  }
+
+  function onUp(): void {
+    if (isDragging) {
+      isDragging = false;
+      overlay.classList.remove("dragging");
+    }
+  }
+
+  function close(): void {
+    overlay.remove();
+    disposable.destroy();
+    if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    if (activeLightboxClose === close) activeLightboxClose = null;
+  }
+
+  // Mouse wheel zoom
+  imgWrap.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.15 : 0.15;
+    const newScale = Math.max(0.5, Math.min(10, scale + delta * scale));
+    // Zoom towards cursor position
+    const rect = img.getBoundingClientRect();
+    const cx = e.clientX - rect.left - rect.width / 2;
+    const cy = e.clientY - rect.top - rect.height / 2;
+    const factor = newScale / scale;
+    panX = panX - cx * (factor - 1);
+    panY = panY - cy * (factor - 1);
+    scale = newScale;
+    applyTransform();
+  });
+
+  // Single click to toggle zoom, with drag detection to avoid zoom on pan
+  let clickStartX = 0;
+  let clickStartY = 0;
+
+  img.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    clickStartX = e.clientX;
+    clickStartY = e.clientY;
+
+    if (scale > 1.1) {
+      // Zoomed in — start panning
+      isDragging = true;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      panStartX = panX;
+      panStartY = panY;
+      overlay.classList.add("dragging");
+    }
+  });
+
+  img.addEventListener("click", (e) => {
+    e.stopPropagation();
+    // Only toggle zoom if mouse didn't move (not a pan gesture)
+    const dx = Math.abs(e.clientX - clickStartX);
+    const dy = Math.abs(e.clientY - clickStartY);
+    if (dx > 5 || dy > 5) return;
+
+    if (scale > 1.1) {
+      resetZoom();
+    } else {
+      // Zoom to 3x towards click position
+      const rect = img.getBoundingClientRect();
+      const cx = e.clientX - rect.left - rect.width / 2;
+      const cy = e.clientY - rect.top - rect.height / 2;
+      scale = 3;
+      panX = -cx * 2;
+      panY = -cy * 2;
+      applyTransform();
+    }
+  });
+
+  // Use a Disposable for cleanup of document-level listeners to prevent leaks
+  const disposable = new Disposable();
+  document.addEventListener("mousemove", onMove, { signal: disposable.signal });
+  document.addEventListener("mouseup", onUp, { signal: disposable.signal });
+
+  closeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    close();
+  });
+
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+
+  function onKey(e: KeyboardEvent): void {
+    if (e.key === "Escape") close();
+    if (e.key === "Tab") {
+      // Contain focus in the dialog: its close button is the only Tab stop.
+      e.preventDefault();
+      closeBtn.focus();
+    }
+    if (e.key === "+" || e.key === "=") {
+      scale = Math.min(10, scale * 1.3);
+      applyTransform();
+    }
+    if (e.key === "-") {
+      scale = Math.max(0.5, scale / 1.3);
+      applyTransform();
+    }
+    if (e.key === "0") resetZoom();
+  }
+  document.addEventListener("keydown", onKey, { signal: disposable.signal });
+
+  activeLightboxClose = close;
+  document.body.appendChild(overlay);
+  // The close button is the one Tab stop, so the lightbox holds a single
+  // focusable control whose Escape/Tab behaviour never leaks behind it.
+  closeBtn.focus();
 }

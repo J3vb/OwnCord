@@ -108,7 +108,7 @@ func TestCleanup_StoreErrorIsLogged(t *testing.T) {
 	rl := auth.NewPersistentRateLimiter(failingWriteLockoutStore{})
 
 	out := captureLogs(t, func() {
-		rl.Cleanup(time.Minute)
+		rl.Cleanup()
 	})
 
 	if !strings.Contains(out, "cleanup: disk I/O error") {

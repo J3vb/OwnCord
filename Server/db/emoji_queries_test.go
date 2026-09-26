@@ -28,7 +28,7 @@ func seedEmojiUploader(t *testing.T, database *db.DB) int64 {
 // would not carry it.
 
 func TestEmojiCRUDRoundTrip(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uploader := seedEmojiUploader(t, database)
 
@@ -80,7 +80,7 @@ func TestEmojiCRUDRoundTrip(t *testing.T) {
 }
 
 func TestEmojiMissingRowsAreNilNotError(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 
 	e, err := database.GetEmoji(ctx, 999)
@@ -101,7 +101,7 @@ func TestEmojiMissingRowsAreNilNotError(t *testing.T) {
 }
 
 func TestListEmojiIsOrderedAndEmptySliceWhenNone(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uploader := seedEmojiUploader(t, database)
 
@@ -134,7 +134,7 @@ func TestListEmojiIsOrderedAndEmptySliceWhenNone(t *testing.T) {
 }
 
 func TestCreateEmojiRejectsDuplicateShortcode(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uploader := seedEmojiUploader(t, database)
 

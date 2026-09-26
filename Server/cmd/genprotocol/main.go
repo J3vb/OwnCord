@@ -33,6 +33,7 @@ type message struct {
 type schema struct {
 	Comment        string    `json:"$comment"`
 	Version        int       `json:"version"`
+	ProtocolEpoch  int       `json:"protocol_epoch"`
 	ClientToServer []message `json:"client_to_server"`
 	ServerToClient []message `json:"server_to_client"`
 }
@@ -74,6 +75,9 @@ func main() {
 // validate rejects duplicate identifiers and empty fields early so a bad
 // schema edit fails the generator instead of producing broken output.
 func validate(s schema) error {
+	if s.ProtocolEpoch < 1 {
+		return fmt.Errorf("protocol_epoch must be >= 1, got %d", s.ProtocolEpoch)
+	}
 	goNames := map[string]bool{}
 	for _, list := range [][]message{s.ClientToServer, s.ServerToClient} {
 		tsNames := map[string]bool{}
@@ -105,6 +109,9 @@ func renderGo(s schema) ([]byte, error) {
 		"// both Server (Go) and Client (TypeScript). Edit protocol/schema.json\n" +
 		"// and run `make protocol-generate` (see Server/Makefile)."))
 	b.WriteString("\npackage ws\n\n")
+	b.WriteString("// ProtocolEpoch is the wire epoch this server speaks. The auth handshake\n")
+	b.WriteString("// negotiates on it (serve_auth.go); see docs/protocol.md, Compatibility.\n")
+	fmt.Fprintf(&b, "const ProtocolEpoch = %d\n\n", s.ProtocolEpoch)
 
 	writeBlock := func(title string, msgs []message) {
 		b.WriteString("// " + title + "\nconst (\n")
@@ -152,6 +159,9 @@ func renderTS(s schema) string {
 		b.WriteString("export type " + name + "Value = (typeof " + name + ")[keyof typeof " + name + "];\n")
 	}
 
+	b.WriteString("\n// The wire epoch this client speaks; sent in the auth frame and checked by\n")
+	b.WriteString("// the server. See docs/protocol.md, Compatibility.\n")
+	fmt.Fprintf(&b, "export const PROTOCOL_EPOCH = %d;\n", s.ProtocolEpoch)
 	writeBlock("Server → Client message types", "ServerMessageType", s.ServerToClient)
 	writeBlock("Client → Server message types", "ClientMessageType", s.ClientToServer)
 

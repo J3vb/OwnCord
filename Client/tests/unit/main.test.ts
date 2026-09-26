@@ -5,8 +5,8 @@
  * test below the e2e level; covered by tests/e2e." This file creates one:
  * every direct dependency of main.ts that is not needed to observe the two
  * behaviors below is stubbed out (mirroring the pattern main-page.test.ts
- * uses for MainPage.ts), while ws.ts, authStore, router.ts, safe-render.ts,
- * navigation-guard.ts and ConnectedOverlay.ts run for real — so the actual
+ * uses for MainPage.ts), while ws.ts, authStore, safe-render.ts,
+ * and ConnectedOverlay.ts run for real — so the actual
  * event-ordering bug (OC-0063) is exercised, not simulated, and the tray
  * listener (OC-0037) is driven through the same Tauri event mock ws.ts's own
  * tests use.
@@ -40,8 +40,11 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
 vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/themes", () => ({ restoreTheme: vi.fn() }));
-vi.mock("@lib/ptt", () => ({ initPtt: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
+vi.mock("../../src/platform/desktop/pushToTalk", () => ({
+  pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
+}));
 vi.mock("@lib/logPersistence", () => ({
   initLogPersistence: vi.fn().mockResolvedValue(undefined),
   flushLogs: vi.fn().mockResolvedValue(undefined),
@@ -53,14 +56,19 @@ vi.mock("@lib/credentials", () => ({
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
 vi.mock("@lib/window-state", () => ({ initWindowState: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@lib/deep-link", () => ({ initDeepLinks: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@tauri-apps/plugin-deep-link", () => ({
+  register: vi.fn().mockResolvedValue(undefined),
+  getCurrent: vi.fn().mockResolvedValue(null),
+  onOpenUrl: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
 vi.mock("@lib/cert-reconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/profiles", async (importOriginal) => ({
+  deriveCompatibility: (await importOriginal<typeof import("@lib/profiles")>()).deriveCompatibility,
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => ({
     loadProfiles: vi.fn().mockResolvedValue(undefined),
@@ -81,23 +89,67 @@ vi.mock("@lib/profiles", () => ({
 // `api.getConfig().host` read (main.ts:776) after a login sets it via
 // `api.setConfig({ host })` (main.ts:515).
 const mockLogin = vi.fn();
-const mockApiState = { host: "" };
-vi.mock("@lib/api", () => ({
-  createApiClient: vi.fn(() => ({
-    setConfig: vi.fn((cfg: { host?: string; token?: string }) => {
-      if (cfg.host !== undefined) mockApiState.host = cfg.host;
-    }),
-    getConfig: vi.fn(() => ({ host: mockApiState.host })),
-    login: (...args: unknown[]) => mockLogin(...args),
-    getHealth: vi.fn().mockResolvedValue({ version: null, online_users: null }),
-  })),
+const mockRecoverAccount = vi.fn();
+const mockVerifyTotp = vi.fn();
+// UpdateNotifier (mounted on the connect page after a protocol-epoch refusal)
+// calls checkForUpdate; stub the Tauri-backed updater so the test observes the
+// call instead of an invoke() into nothing.
+const mockCheckForUpdate = vi.fn();
+vi.mock("@lib/updater", () => ({
+  checkForUpdate: (...args: unknown[]) => mockCheckForUpdate(...args),
+  downloadAndInstallUpdate: vi.fn(),
+  subscribeToUpdateInstall: vi.fn((listener: (state: { status: "idle" }) => void) => {
+    listener({ status: "idle" });
+    return vi.fn();
+  }),
 }));
+const mockApiState = { host: "" };
+// server-info payload returned by the mocked client, so a test can drive the
+// registration-mode snapshot `runHealthChecks` stores per host (B7-15a).
+const mockServerInfo: { value: unknown } = {
+  value: { name: "Test Server", protocol_epoch: 1, browser_client_enabled: false },
+};
+const mockHealthFails = { value: false };
+vi.mock("@lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/api")>();
+  return {
+    ...actual,
+    createApiClient: vi.fn(() => {
+      const api = actual.createApiClient({ host: "" });
+      return {
+        ...api,
+        setConfig: vi.fn((cfg: { host?: string; token?: string }) => {
+          if (cfg.host !== undefined) mockApiState.host = cfg.host;
+          api.setConfig(cfg);
+        }),
+        login: (...args: unknown[]) => mockLogin(...args),
+        recoverAccount: (...args: unknown[]) => mockRecoverAccount(...args),
+        verifyTotp: (...args: unknown[]) => mockVerifyTotp(...args),
+        getHealth: vi.fn(() =>
+          mockHealthFails.value
+            ? Promise.reject(new Error("offline"))
+            : Promise.resolve({ version: null, online_users: null }),
+        ),
+        getServerInfo: vi.fn(() => Promise.resolve(mockServerInfo.value)),
+      };
+    }),
+  };
+});
 
 // ConnectPage — captures the real onLogin callback main.ts wires up so the
 // test can drive wirePostAuth exactly the way a real login does, without
 // building the actual login form DOM.
 const capturedConnectCallbacks: {
   onLogin?: (host: string, username: string, password: string) => Promise<void>;
+  onRecover?: (
+    host: string,
+    username: string,
+    secret: string,
+    newPassword: string,
+  ) => Promise<void>;
+  onTotpSubmit?: (code: string) => Promise<void>;
+  getRegistrationMode?: (host: string) => string | null;
+  getRetentionNotice?: (host: string) => string | null;
 } = {};
 vi.mock("@pages/ConnectPage", () => ({
   createConnectPage: vi.fn((callbacks: typeof capturedConnectCallbacks) => {
@@ -111,6 +163,8 @@ vi.mock("@pages/ConnectPage", () => ({
       showError: vi.fn(),
       resetToIdle: vi.fn(),
       updateHealthStatus: vi.fn(),
+      updateCompatibility: vi.fn(),
+      showIncompatible: vi.fn(),
       getRememberPassword: vi.fn(() => false),
       getAutoConnect: vi.fn(() => false),
       getPassword: vi.fn(() => ""),
@@ -150,9 +204,15 @@ vi.mock("@lib/dispatcher", async () => {
 });
 
 import { mockInvoke, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
-import { clearAuth } from "@stores/auth.store";
+import { expectConsole } from "../helpers/console";
+import { authStore, clearAuth } from "@stores/auth.store";
+import { createApiClient } from "@lib/api";
+import { deactivatePendingMessages } from "@lib/pendingMessages";
+import { deleteCredential, loadCredential } from "@lib/credentials";
+import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
 import { createMainPage } from "@pages/MainPage";
+import { createConnectPage } from "@pages/ConnectPage";
 import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
 
 // ---------------------------------------------------------------------------
@@ -249,6 +309,7 @@ describe("main.ts connected overlay (OC-0063)", () => {
       server_name: "My Guild",
       motd: "Welcome to My Guild!",
     });
+    expectConsole("warn", /\[main\] Credential delete failed/);
 
     const overlay = document.querySelector('[data-testid="connected-overlay"]');
     expect(overlay).not.toBeNull();
@@ -266,6 +327,37 @@ describe("main.ts connected overlay (OC-0063)", () => {
   });
 });
 
+describe("main.ts remember-password opt-out delete (OCV-001/OCV-022)", () => {
+  afterEach(() => {
+    vi.mocked(loadCredential).mockReset().mockResolvedValue(null);
+    vi.mocked(deleteCredential).mockReset().mockResolvedValue(false);
+  });
+
+  it("deletes the stored credential unconditionally, regardless of what the stored username was", async () => {
+    // The store is keyed by host alone (one credential per host), and
+    // save_credential already overwrites it with no username check. The
+    // stored username is a stale copy, not an account identity, so the
+    // delete must not depend on comparing it to the login username — this
+    // stubs loadCredential to return a DIFFERENT username than the one
+    // logging in, the case that used to make the delete skip.
+    vi.mocked(loadCredential).mockResolvedValue({
+      username: "Bob",
+      token: "tok",
+      hasPassword: true,
+    });
+    vi.mocked(deleteCredential).mockResolvedValue(true);
+
+    await loginAndReachAuthOk("case-fold.example:8443", "alice", {
+      user: { id: 9, username: "alice", avatar: null, role: "member" },
+      server_name: "Case Fold Co",
+      motd: "",
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(deleteCredential).toHaveBeenCalledWith("case-fold.example:8443");
+  });
+});
+
 describe("main.ts connected overlay teardown on mid-handshake session end (OC-0157)", () => {
   it('destroys the connected overlay when auth clears before the router leaves "connect"', async () => {
     await loginAndReachAuthOk("mid-handshake.example:8443", "casey", {
@@ -273,6 +365,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
       server_name: "Mid Handshake Co",
       motd: "",
     });
+    expectConsole("warn", /\[main\] Credential delete failed/);
 
     // auth_ok landed: the overlay is mounted over #app while the router is
     // still "connect" — it only moves to "main" from the overlay's own
@@ -304,6 +397,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
       server_name: "Wide Window Co",
       motd: "",
     });
+    expectConsole("warn", /\[main\] Credential delete failed/);
 
     // `ready` arrives and arms the overlay's 800ms onReady timer (which
     // would otherwise call router.navigate("main") on its own).
@@ -344,6 +438,7 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
       server_name: "Server A",
       motd: "",
     });
+    expectConsole("warn", /\[main\] Credential delete failed/);
     emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
     // ConnectedOverlay.markReady() fires onReady after READY_DELAY_MS (800ms),
     // which calls router.navigate("main") — main.ts's only route away from
@@ -377,5 +472,272 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
     // would go on to suppress the auto-login that a later, unrelated
     // clearAuth("server_shutdown") deliberately relies on.
     expect(sessionStorage.getItem("owncord:skip-auto-login")).toBeNull();
+  });
+});
+
+describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
+  it("mounts the update notifier on the connect page so a refused client can update in place", async () => {
+    await loginAndReachAuthOk("server-a.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Server A",
+      motd: "",
+    });
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+
+    // The real dispatcher's auth_error handler records the host when the
+    // server says this client's epoch is too old (dispatcher.test.ts covers
+    // that); the dispatcher is stubbed here, so set what it would have set,
+    // then end the session the way auth_error does.
+    mockCheckForUpdate.mockResolvedValue({ available: false, version: null, body: null });
+    setUpdateRequiredHost({ host: "server-a.example:8443", serverEpoch: 2, clientEpoch: 1 });
+    clearAuth();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The notifier checks 3 s after mount (UpdateNotifier.ts mount()).
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(mockCheckForUpdate).toHaveBeenCalledWith("https://server-a.example:8443");
+    // Consumed on mount: the next connect page must not re-check.
+    expect(uiStore.getState().updateRequiredHost).toBeNull();
+  });
+
+  it("offers the update when the refusal lands on an already-mounted connect page (first login / startup auto-login)", async () => {
+    // No session, no overlay: the connect page rendered at startup is the
+    // one the refusal arrives on, and nothing re-renders it (Codex P1). The
+    // dispatcher is stubbed here; set what its auth_error handler sets.
+    mockCheckForUpdate.mockClear();
+    mockCheckForUpdate.mockResolvedValue({ available: false, version: null, body: null });
+    setUpdateRequiredHost({ host: "server-c.example:8443", serverEpoch: 2, clientEpoch: 1 });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(mockCheckForUpdate).toHaveBeenCalledWith("https://server-c.example:8443");
+    expect(uiStore.getState().updateRequiredHost).toBeNull();
+  });
+
+  it("shows the server-older notice without offering a client update when the refused server is older", async () => {
+    mockCheckForUpdate.mockClear();
+    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      showIncompatible: ReturnType<typeof vi.fn>;
+    };
+    page.showIncompatible.mockClear();
+    setUpdateRequiredHost({ host: "old.example:8443", serverEpoch: 1, clientEpoch: 2 });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(page.showIncompatible).toHaveBeenCalledWith("old.example:8443", 1, 2);
+    expect(mockCheckForUpdate).not.toHaveBeenCalled();
+    expect(uiStore.getState().updateRequiredHost).toBeNull();
+  });
+
+  it.each([
+    ["2001:db8::1", "https://[2001:db8::1]"],
+    ["::1", "https://[::1]"],
+    ["[2001:db8::1]:8443", "https://[2001:db8::1]:8443"],
+  ])("offers a usable update URL after a protocol refusal from %s", async (host, expectedUrl) => {
+    mockCheckForUpdate.mockClear();
+    mockCheckForUpdate.mockResolvedValue({ available: false, version: null, body: null });
+    setUpdateRequiredHost({ host, serverEpoch: 2, clientEpoch: 1 });
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(mockCheckForUpdate).toHaveBeenCalledWith(expectedUrl);
+    expect(new URL(expectedUrl).protocol).toBe("https:");
+    expect(uiStore.getState().updateRequiredHost).toBeNull();
+  });
+
+  it("keeps the stored credential on a protocol-epoch refusal, unlike an ordinary auth_error", async () => {
+    await loginAndReachAuthOk("server-d.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Server D",
+      motd: "",
+    });
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+
+    vi.mocked(deleteCredential).mockClear();
+    // What the dispatcher does on protocol_epoch_unsupported (Codex P2).
+    clearAuth("protocol_epoch");
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The token is still valid: the credential stays so the update can
+    // relaunch into auto-login. (The skip-auto-login flag is set on the same
+    // path, but the connect page consumes it on mount, so it cannot be read
+    // back here — the quick-switch test above covers that consumption.)
+    expect(deleteCredential).not.toHaveBeenCalled();
+
+    // Contrast: the same logout for an ordinary reason removes it.
+    await loginAndReachAuthOk("server-d.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Server D",
+      motd: "",
+    });
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+    clearAuth("user");
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(deleteCredential).toHaveBeenCalledWith("server-d.example:8443");
+  });
+});
+
+describe("main.ts session ownership", () => {
+  it("invalidates API work synchronously on logout before deferred store notifications", () => {
+    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
+      typeof createApiClient
+    >;
+    const owner = api.getSession();
+    const cleanup = vi.fn();
+    owner.addCleanup(cleanup);
+    clearAuth();
+    // No await: a queued HTTP completion must already be unable to publish.
+    expect(owner.signal.aborted).toBe(true);
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(api.getConfig().token).toBeUndefined();
+    expect(deactivatePendingMessages).toHaveBeenLastCalledWith({ discard: true });
+  });
+
+  it("retains pending messages on a deliberate server switch", () => {
+    sessionStorage.setItem("owncord:quick-switch-target", "next.example");
+    try {
+      clearAuth();
+      expect(deactivatePendingMessages).toHaveBeenLastCalledWith({ discard: false });
+    } finally {
+      sessionStorage.removeItem("owncord:quick-switch-target");
+    }
+  });
+
+  it("reads the registration mode from the per-host server-info snapshot (B7-15a)", async () => {
+    // The startup health/health-check path fills serverInfoByHost; the connect
+    // page's getRegistrationMode callback reads it. An unavailable snapshot
+    // (fetch failed / older server) must yield null, never a widened mode.
+    expect(capturedConnectCallbacks.getRegistrationMode).toBeTypeOf("function");
+    expect(capturedConnectCallbacks.getRegistrationMode!("never-probed.example")).toBeNull();
+
+    // Reach the main page so a later clearAuth() is a real transition back to
+    // the connect page, which re-runs the health probe on mount.
+    mockServerInfo.value = {
+      name: "Test Server",
+      protocol_epoch: 1,
+      browser_client_enabled: false,
+      registration_mode: "approval",
+      retention: { messages_days: 30 },
+    };
+    await loginAndReachAuthOk("snapshot.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Snapshot Co",
+      motd: "",
+    });
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+    clearAuth();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(capturedConnectCallbacks.getRegistrationMode!("localhost:8443")).toBe("approval");
+    // B7-15c: the same snapshot feeds the retention sentence at sign-up, and
+    // the main page reads it for the signed-in host — null when unprobed.
+    expect(capturedConnectCallbacks.getRetentionNotice!("localhost:8443")).toContain(
+      "deletes messages after 30 days",
+    );
+    expect(capturedConnectCallbacks.getRetentionNotice!("never-probed.example")).toBeNull();
+    const mainPageOptions = vi.mocked(createMainPage).mock.calls.at(-1)![0];
+    expect(mainPageOptions.getRetentionNotice!()).toBeNull();
+
+    // A failed health probe drops the snapshot and refreshes the form through
+    // updateCompatibility, so the stale "approval" form cannot outlive it.
+    const connectPage = vi.mocked(createConnectPage).mock.results.at(-1)!.value;
+    connectPage.updateCompatibility.mockClear();
+    mockHealthFails.value = true;
+    await vi.advanceTimersByTimeAsync(15_000);
+    mockHealthFails.value = false;
+    expectConsole("warn", /health check failed/);
+    expect(capturedConnectCallbacks.getRegistrationMode!("localhost:8443")).toBeNull();
+    expect(connectPage.updateCompatibility).toHaveBeenCalledWith(
+      "localhost:8443",
+      "unreachable",
+      null,
+    );
+
+    // An unrecognised mode string is unavailable, not "open".
+    mockServerInfo.value = {
+      name: "Test Server",
+      protocol_epoch: 1,
+      browser_client_enabled: false,
+      registration_mode: "banana",
+    };
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(capturedConnectCallbacks.getRegistrationMode!("localhost:8443")).toBeNull();
+  });
+
+  it("signs a recovered session in exactly as a login does (B7-15b)", async () => {
+    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
+      typeof createApiClient
+    >;
+    const secret = "K7QF-3M2X-9PLA-ZB5A-QW2E-TT7Y-AAAA-BBBB";
+    mockRecoverAccount.mockResolvedValueOnce({ token: "recovered-token", requires_2fa: false });
+    await capturedConnectCallbacks.onRecover!("recover.example", "alice", secret, "N3w-Str0ng!");
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    expect(mockRecoverAccount).toHaveBeenCalledWith("alice", secret, "N3w-Str0ng!");
+    // The same wirePostAuth tail a login reaches: the session is live.
+    expect(api.getConfig().host).toBe("recover.example");
+    expect(authStore.getState().token).toBe("recovered-token");
+    clearAuth();
+  });
+
+  it("keeps the partial token across a wrong emergency recovery code (B7-15b)", async () => {
+    mockLogin.mockResolvedValueOnce({ partial_token: "partial-1", requires_2fa: true });
+    await capturedConnectCallbacks.onLogin!("totp.example", "alice", "hunter22");
+    mockVerifyTotp
+      .mockRejectedValueOnce(new Error("invalid two-factor code"))
+      .mockResolvedValueOnce({ token: "full-token", requires_2fa: false });
+    await expect(capturedConnectCallbacks.onTotpSubmit!("ABCDE-FGHJK")).rejects.toThrow(
+      "invalid two-factor code",
+    );
+    await capturedConnectCallbacks.onTotpSubmit!("abcde-fghjm");
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    expect(mockVerifyTotp).toHaveBeenNthCalledWith(1, "ABCDE-FGHJK", "partial-1");
+    expect(mockVerifyTotp).toHaveBeenNthCalledWith(2, "abcde-fghjm", "partial-1");
+    clearAuth();
+  });
+
+  it("does not let an older same-host login overwrite the newer attempt", async () => {
+    await Promise.resolve();
+    let resolveOld!: (value: unknown) => void;
+    mockLogin.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve;
+        }),
+    );
+    mockLogin.mockResolvedValueOnce({ token: "new-account-token", requires_2fa: false });
+    const old = capturedConnectCallbacks.onLogin!("same.example", "alice", "first-password");
+    const rejected = expect(old).rejects.toMatchObject({ name: "AbortError" });
+    await capturedConnectCallbacks.onLogin!("same.example", "bob", "second-password");
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
+      typeof createApiClient
+    >;
+    const current = api.getSession();
+    resolveOld({ token: "old-account-token", requires_2fa: false });
+    await rejected;
+    expect(api.getSession()).toBe(current);
+    expect(current.isCurrent()).toBe(true);
   });
 });

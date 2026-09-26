@@ -72,15 +72,14 @@ export function unreadChannelIds(): readonly number[] {
 }
 
 /**
- * The server's `mark_read` handler shares a 5-per-second-per-user budget with
- * `channel_focus` (Server/ws/handlers_presence.go) and silently drops frames
- * over that budget — no error reaches the client. A burst of `mark_read`
- * sends larger than the budget would still clear every local badge (see
- * `markChannelRead`), so the excess channels' badges would resurrect on the
- * next `ready` once the server re-asserts its own unread counts. Pacing the
- * burst to below the budget, with headroom for a `channel_focus` that may
- * have already spent a slot, keeps every send inside a window the server
- * actually honours.
+ * The server's `mark_read` handler has its own 5-per-second-per-user budget,
+ * separate from `channel_focus` (#1331, Server/ws/handlers_presence.go), and
+ * silently drops frames over that budget — no error reaches the client. A
+ * burst of `mark_read` sends larger than the budget would still clear every
+ * local badge (see `markChannelRead`), so the excess channels' badges would
+ * resurrect on the next `ready` once the server re-asserts its own unread
+ * counts. Pacing the burst to below the budget keeps every send inside a
+ * window the server actually honours.
  */
 const MARK_ALL_READ_BURST_SIZE = 4;
 const MARK_ALL_READ_BURST_INTERVAL_MS = 1100;

@@ -1,4 +1,5 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
+import base from "./playwright.config";
 
 /**
  * Playwright config for testing against the PRODUCTION build.
@@ -6,49 +7,40 @@ import { defineConfig, devices } from "@playwright/test";
  * HTML/CSS/JS that Tauri bundles into the exe.
  *
  * Usage:  npm run test:e2e:prod
+ *
+ * Inherits testDir/testIgnore/timeouts/workers/projects from the base config;
+ * only the output location, the report paths, the preview port and the server
+ * command differ.
  */
 export default defineConfig({
-  testDir: "./tests/e2e",
-  testIgnore: ["**/native/**", "**/admin/**"],
-  timeout: 30_000,
-  expect: {
-    timeout: 5_000,
-  },
-  fullyParallel: true,
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 1,
-  workers: process.env.CI ? 1 : undefined,
+  ...base,
+  outputDir: "test-results/prod",
+  // Cleared, not merely absent: the base config's CI fail-fast, its
+  // self-terminate timeout and its globalTeardown all belong to the dev-server
+  // run. The teardown in particular kills the listener the base config started,
+  // which is not the `vite preview` server spawned below.
+  maxFailures: undefined,
+  globalTimeout: undefined,
+  globalTeardown: undefined,
   reporter: process.env.CI
     ? [
-        ["html", { open: "never" }],
-        ["junit", { outputFile: "test-results/junit.xml" }],
+        ["html", { open: "never", outputFolder: "playwright-report/prod" }],
+        ["junit", { outputFile: "test-results/prod-junit.xml" }],
       ]
-    : "html",
+    : [["list"], ["html", { open: "never", outputFolder: "playwright-report/prod" }]],
 
   use: {
+    ...base.use,
     baseURL: "http://localhost:4173",
-    actionTimeout: 10_000,
-    navigationTimeout: 15_000,
-    screenshot: "only-on-failure",
-    trace: "on-first-retry",
-    video: "on-first-retry",
-    contextOptions: { reducedMotion: "reduce" },
   },
-
-  projects: [
-    {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
-    },
-  ],
 
   webServer: {
     // Spawn Vite directly rather than through npm — see the note in
     // playwright.config.ts: an `npm run` wrapper leaves vite alive as an
     // orphaned grandchild on teardown and the runner never exits.
-    command: "npx vite preview",
+    command: "node node_modules/vite/bin/vite.js preview --port 4173 --strictPort",
     url: "http://localhost:4173",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 60_000,
   },
 });

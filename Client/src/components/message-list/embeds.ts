@@ -5,149 +5,69 @@
 
 import { createElement, setText } from "@lib/dom";
 import { observeMedia } from "@lib/media-visibility";
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { createLogger } from "@lib/logger";
-import { isSafeUrl, isTrustedServerUrl } from "./attachments";
+import {
+  isExternalGif,
+  loadExternalImage,
+  previewExternal,
+  recoverEvictedImage,
+} from "./attachments";
+import { admitDerived } from "../../features/content-consent/external";
+import { contentText as t } from "../../i18n/content";
+import type {
+  ExternalContentFailure,
+  ExternalImageHandle,
+} from "../../platform/contracts/externalContent";
 
 const log = createLogger("embeds");
 
 // -- OG metadata types --------------------------------------------------------
 
-/** Open Graph metadata extracted from a page. */
+/** Open Graph metadata for a page, as the external-content broker reduced it.
+ *  The image is an opaque broker handle, never a URL the renderer could load. */
 export interface OgMeta {
   readonly title: string | null;
   readonly description: string | null;
-  readonly image: string | null;
+  readonly image: ExternalImageHandle | null;
   readonly siteName: string | null;
 }
 
 // -- Caches -------------------------------------------------------------------
 
-/** Cache for OG metadata to avoid re-fetching on re-render. */
-const ogCache = new Map<string, OgMeta>();
+/** A typed preview view state: the meta when the broker answered, or the
+ *  refusal class that replaced it. Nothing collapses a refusal into an empty
+ *  success (B9-9). */
+type OgLoad =
+  | { readonly ok: true; readonly meta: OgMeta }
+  | { readonly ok: false; readonly failure: ExternalContentFailure };
+
+/** Cache for OG metadata to avoid re-fetching on re-render. Cleared on page
+ *  teardown (MainPage) as well as by the manual "clear cache" action, so one
+ *  server's previews are never shown on the next. */
+const ogCache = new Map<string, OgLoad>();
 /** In-flight fetch promises keyed by URL — concurrent callers share the same promise. */
-const ogInFlight = new Map<string, Promise<OgMeta>>();
+const ogInFlight = new Map<string, Promise<OgLoad>>();
+/** Previews re-asked for after the broker forgot their image handle — at most
+ *  once per URL until the next cache clear, shared by every embed of it. */
+const ogReasked = new Map<string, Promise<OgLoad>>();
 let embedCacheGeneration = 0;
 
 export function clearEmbedCaches(): void {
   embedCacheGeneration += 1;
   ogCache.clear();
   ogInFlight.clear();
-}
-
-// -- OG tag parsing -----------------------------------------------------------
-
-/**
- * Extract Open Graph meta tags from raw HTML.
- *
- * F7: parse with the platform HTML tokenizer (DOMParser) instead of backtracking
- * regexes. Untrusted preview HTML previously ran through patterns with two
- * `[^>]*` quantifiers around a required literal, which backtrack polynomially and
- * froze the UI thread on crafted input (ReDoS). A real tokenizer is linear and
- * additionally ignores meta-like strings inside comments/scripts.
- *
- * The 50 KB slice at the call site (fetchOgMeta) is kept as a plain memory bound.
- */
-export function parseOgTags(html: string): OgMeta {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-
-  // First matching element wins (document order), mirroring the old first-match
-  // behaviour. Returns "" for an empty content attribute but null when the
-  // attribute (or element) is absent, so the title→host fallback still fires.
-  function metaContent(...ogNames: readonly string[]): string | null {
-    for (const name of ogNames) {
-      const el =
-        doc.querySelector(`meta[property="${name}"]`) ?? doc.querySelector(`meta[name="${name}"]`);
-      const content = el?.getAttribute("content");
-      if (content != null) return content;
-    }
-    return null;
-  }
-
-  return {
-    title: metaContent("og:title") ?? doc.querySelector("title")?.textContent?.trim() ?? null,
-    description: metaContent("og:description", "description"),
-    image: metaContent("og:image"),
-    siteName: metaContent("og:site_name"),
-  };
-}
-
-// -- SSRF protection ----------------------------------------------------------
-
-/** Block link previews to private/internal IP ranges to prevent SSRF.
- *  The connected OwnCord server host is NOT blocked (it's trusted). */
-function parseIPv4Literal(hostname: string): readonly [number, number, number, number] | null {
-  const parts = hostname.split(".");
-  if (parts.length !== 4) return null;
-
-  const octets = parts.map((part) => {
-    if (!/^\d+$/.test(part)) return NaN;
-    return Number(part);
-  });
-  if (octets.some((octet) => Number.isNaN(octet) || octet < 0 || octet > 255)) {
-    return null;
-  }
-
-  return [octets[0]!, octets[1]!, octets[2]!, octets[3]!];
-}
-
-function isPrivateHost(hostname: string): boolean {
-  const h = hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  const isIPv6Literal = h.includes(":");
-  const ipv4 = parseIPv4Literal(h);
-
-  // Block localhost variants and unspecified address
-  if (h === "localhost") return true;
-
-  if (isIPv6Literal) {
-    if (h === "::" || h === "::1") return true;
-    // IPv6 private ranges: fc00::/7 (fc.. and fd..), link-local fe80::/10.
-    if (h.startsWith("fc") || h.startsWith("fd") || /^fe[89ab]/.test(h)) return true;
-    if (h.startsWith("ff")) return true;
-    if (h.startsWith("2001:db8")) return true;
-    // IPv4-mapped IPv6 addresses (::ffff:x.x.x.x).
-    if (h.startsWith("::ffff:")) return true;
-    return false;
-  }
-
-  if (ipv4 !== null) {
-    const [first, second] = ipv4;
-    // Block loopback, unspecified, RFC1918, link-local, CGNAT, and benchmarking ranges.
-    if (first === 0 || first === 10 || first === 127) return true;
-    if (first === 169 && second === 254) return true;
-    if (first === 172 && second >= 16 && second <= 31) return true;
-    if (first === 192 && second === 168) return true;
-    if (first === 192 && second === 0) return true;
-    if (first === 192 && second === 0 && ipv4[2] === 2) return true;
-    if (first === 100 && second >= 64 && second <= 127) return true;
-    if (first === 198 && (second === 18 || second === 19)) return true;
-    if (first === 198 && second === 51 && ipv4[2] === 100) return true;
-    if (first === 203 && second === 0 && ipv4[2] === 113) return true;
-    if (first >= 224) return true;
-  }
-
-  return false;
-}
-
-function isBlockedForPreview(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    if (isTrustedServerUrl(parsed.toString())) {
-      return false;
-    }
-    return isPrivateHost(parsed.hostname);
-  } catch {
-    return true; // Malformed URLs are blocked
-  }
+  ogReasked.clear();
 }
 
 // -- OG fetch -----------------------------------------------------------------
 
-const EMPTY_OG: OgMeta = { title: null, description: null, image: null, siteName: null };
-
-/** Fetch OG metadata for a URL using the Tauri native HTTP client (no CORS).
- *  Concurrent requests for the same URL share the same in-flight promise. */
-function fetchOgMeta(url: string): Promise<OgMeta> {
+/** Fetch OG metadata for a URL through the external-content broker, which
+ *  owns the whole destination policy (resolved-address classification,
+ *  redirects, time/byte/type ceilings) and parses the page natively — the
+ *  renderer never sees the body. Concurrent requests for the same URL share
+ *  the same in-flight promise. A refusal is kept as its failure class, never
+ *  flattened into an empty success (B9-9). */
+function fetchOgMeta(url: string): Promise<OgLoad> {
   const generation = embedCacheGeneration;
   const cached = ogCache.get(url);
   if (cached !== undefined) return Promise.resolve(cached);
@@ -156,68 +76,32 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
   const existing = ogInFlight.get(url);
   if (existing !== undefined) return existing;
 
-  // Block link previews to internal/private hosts to prevent SSRF
-  if (isBlockedForPreview(url)) {
-    log.debug("fetchOgMeta blocked (private host)", url.slice(0, 100));
-    ogCache.set(url, EMPTY_OG);
-    return Promise.resolve(EMPTY_OG);
-  }
-
   log.debug("fetchOgMeta START", url.slice(0, 100));
-  const promise = (async (): Promise<OgMeta> => {
-    // The abort timer stays armed until the body is fully read (cleared in the
-    // finally below), so the 5 s timeout bounds the body download as well as
-    // the header phase — an unbounded stream is aborted, not buffered.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    try {
-      const fetchOpts: RequestInit = {
-        signal: controller.signal,
-        headers: {
-          "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+  const promise = (async (): Promise<OgLoad> => {
+    const result = await previewExternal(url);
+    let load: OgLoad;
+    if (result.ok) {
+      // The preview image belongs to the same consented item as its page.
+      if (result.value.image !== null) {
+        admitDerived(`url:${url}`, `handle:${result.value.image}`);
+      }
+      load = {
+        ok: true,
+        meta: {
+          title: result.value.title,
+          description: result.value.description,
+          image: result.value.image,
+          siteName: result.value.siteName,
         },
       };
-      // M-8: Removed acceptInvalidCerts for OG fetches. Even for trusted server
-      // URLs, TLS validation should not be bypassed as it enables MITM attacks.
-      // Self-signed servers are handled by the Rust TLS proxy for WebSocket;
-      // OG preview fetches should respect standard certificate validation.
-      const res = await tauriFetch(url, fetchOpts);
-
-      if (!res.ok) {
-        if (generation !== embedCacheGeneration) {
-          return EMPTY_OG;
-        }
-        ogCache.set(url, EMPTY_OG);
-        return EMPTY_OG;
-      }
-
-      // Only parse HTML responses (skip binary, JSON, etc.)
-      const contentType = res.headers.get("content-type") ?? "";
-      if (!contentType.includes("text/html")) {
-        if (generation !== embedCacheGeneration) {
-          return EMPTY_OG;
-        }
-        ogCache.set(url, EMPTY_OG);
-        return EMPTY_OG;
-      }
-
-      const html = await res.text();
-      // Only parse the first 50KB to avoid parsing huge pages
-      const meta = parseOgTags(html.slice(0, 50_000));
-      if (generation !== embedCacheGeneration) {
-        return EMPTY_OG;
-      }
-      ogCache.set(url, meta);
-      return meta;
-    } catch {
-      if (generation !== embedCacheGeneration) {
-        return EMPTY_OG;
-      }
-      ogCache.set(url, EMPTY_OG);
-      return EMPTY_OG;
-    } finally {
-      clearTimeout(timer);
+    } else {
+      log.debug("fetchOgMeta refused", { failure: result.failure });
+      load = { ok: false, failure: result.failure };
     }
+    // A cache clear while this was in flight means the answer belongs to a
+    // session that is gone: hand it to this caller, but never cache it.
+    if (generation === embedCacheGeneration) ogCache.set(url, load);
+    return load;
   })();
 
   ogInFlight.set(url, promise);
@@ -230,6 +114,13 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
 }
 
 // -- Link preview rendering ---------------------------------------------------
+
+/** Drop a URL's cached preview (and in-flight answer) so an explicit retry
+ *  re-asks the broker rather than replaying the refusal. */
+function clearOgEntry(url: string): void {
+  ogCache.delete(url);
+  ogInFlight.delete(url);
+}
 
 /** Render a link preview card with OG metadata (title, description, image). */
 export function renderGenericLinkPreview(url: string): HTMLDivElement {
@@ -265,17 +156,66 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   imageWrap.style.display = "none";
   wrap.appendChild(imageWrap);
 
+  // The failure line + bounded retry live outside the description element so a
+  // refusal never reads as a loaded description (B9-9).
+  const statusEl = createElement("div", { class: "msg-embed-status", role: "status" });
+  statusEl.hidden = true;
+  const retryEl = createElement("button", {
+    type: "button",
+    class: "messages-retry-btn msg-embed-retry",
+  });
+  setText(retryEl, t("preview.retry"));
+  retryEl.setAttribute("aria-label", t("preview.retry"));
+  retryEl.hidden = true;
+  content.appendChild(statusEl);
+  content.appendChild(retryEl);
+  wrap.dataset.embedState = "loading";
+  wrap.setAttribute("aria-busy", "true");
+
+  const apply = (load: OgLoad): void => {
+    wrap.removeAttribute("aria-busy");
+    delete wrap.dataset.embedFailure;
+    retryEl.removeAttribute("aria-disabled");
+    // A refusal is not retryable by policy or type; only a transient
+    // "unavailable" answer is worth re-asking (B9-9). A retry that goes away
+    // while focused hands focus to the card's link, never to <body>.
+    const retryable = !load.ok && load.failure === "unavailable";
+    if (!retryable && document.activeElement === retryEl) titleEl.focus();
+    retryEl.hidden = !retryable;
+    if (load.ok) {
+      wrap.dataset.embedState = "loaded";
+      statusEl.hidden = true;
+      applyOgMeta(load.meta, titleEl, descEl, hostEl, imageWrap, url, displayHost);
+      return;
+    }
+    wrap.dataset.embedState = "failed";
+    wrap.dataset.embedFailure = load.failure;
+    setText(titleEl, displayHost);
+    descEl.style.display = "none";
+    setText(statusEl, t("preview.failed"));
+    statusEl.hidden = false;
+  };
+
   // Check cache first for instant render
   const cached = ogCache.get(url);
   if (cached !== undefined) {
-    applyOgMeta(cached, titleEl, descEl, hostEl, imageWrap, url, displayHost);
+    apply(cached);
   } else {
     // Show URL as fallback title while loading
     setText(titleEl, displayHost);
-    void fetchOgMeta(url).then((meta) => {
-      applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, url, displayHost);
-    });
+    void fetchOgMeta(url).then(apply);
   }
+
+  retryEl.addEventListener("click", () => {
+    if (wrap.dataset.embedState === "loading") return;
+    // The retry stays mounted (and focused) while it re-asks.
+    statusEl.hidden = true;
+    retryEl.setAttribute("aria-disabled", "true");
+    wrap.dataset.embedState = "loading";
+    wrap.setAttribute("aria-busy", "true");
+    clearOgEntry(url);
+    void fetchOgMeta(url).then(apply);
+  });
 
   return wrap;
 }
@@ -302,43 +242,69 @@ export function applyOgMeta(
   } else {
     descEl.style.display = "none";
   }
-  if (meta.image !== null && meta.image.length > 0) {
-    // Resolve relative image URLs
-    let imgSrc = meta.image;
-    if (imgSrc.startsWith("/")) {
-      try {
-        const base = new URL(url);
-        imgSrc = `${base.origin}${imgSrc}`;
-      } catch {
-        /* keep as-is */
-      }
-    }
-    if (isSafeUrl(imgSrc) && !isBlockedForPreview(imgSrc)) {
-      const isGif = imgSrc.toLowerCase().endsWith(".gif");
-      const attrs: Record<string, string> = {
-        class: "msg-embed-link-img",
-        src: imgSrc,
-        alt: meta.title ?? "",
-        loading: "lazy",
-      };
-      if (isGif) {
-        attrs.crossorigin = "anonymous";
-      }
-      const img = createElement("img", attrs);
-      img.addEventListener("error", () => {
-        imageWrap.style.display = "none";
-      });
-      if (isGif) {
-        img.addEventListener(
-          "load",
-          () => {
-            observeMedia(img, imgSrc, imageWrap);
-          },
-          { once: true },
-        );
-      }
-      imageWrap.appendChild(img);
-      imageWrap.style.display = "";
-    }
+  if (meta.image !== null) {
+    showOgImage(meta, meta.image, imageWrap, url);
   }
+}
+
+/** Show a preview's image. The broker forgets old handles, so when one has
+ *  expired the preview is asked for again — once per URL — for a fresh one. */
+function showOgImage(
+  meta: OgMeta,
+  handle: ExternalImageHandle,
+  imageWrap: HTMLElement,
+  url: string,
+  reask = true,
+): void {
+  const reaskPreview = (): void => {
+    if (!reask) return;
+    let fresh = ogReasked.get(url);
+    if (fresh === undefined) {
+      clearOgEntry(url);
+      fresh = fetchOgMeta(url);
+      ogReasked.set(url, fresh);
+    }
+    void fresh.then((next) => {
+      if (next.ok && next.meta.image !== null) {
+        showOgImage(next.meta, next.meta.image, imageWrap, url, false);
+      }
+    });
+  };
+  // The image arrives as broker-fetched bytes (a same-origin blob: URL),
+  // never as an og:image URL the webview would load behind the broker.
+  const source = { handle };
+  void loadExternalImage(source).then((result) => {
+    if (!result.ok) {
+      if (result.failure === "expired-handle") reaskPreview();
+      return;
+    }
+    const src = result.value;
+    const img = createElement("img", {
+      class: "msg-embed-link-img",
+      src,
+      alt: meta.title ?? "",
+      loading: "lazy",
+    });
+    recoverEvictedImage(img, source, () => {
+      img.remove();
+      imageWrap.style.display = "none";
+      reaskPreview();
+    });
+    img.addEventListener("error", () => {
+      imageWrap.style.display = "none";
+    });
+    // A GIF gets the freeze/play control; its blob: source is same-origin,
+    // so the freeze canvas stays untainted.
+    if (isExternalGif(src)) {
+      img.addEventListener(
+        "load",
+        () => {
+          observeMedia(img, src, imageWrap);
+        },
+        { once: true },
+      );
+    }
+    imageWrap.appendChild(img);
+    imageWrap.style.display = "";
+  });
 }

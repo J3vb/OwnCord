@@ -67,16 +67,18 @@ func TestHandleVoiceTokenRefresh_InVoice_ReturnsToken(t *testing.T) {
 func TestHandleVoiceTokenRefresh_NilUser(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	// The client deliberately carries no *db.User — that is what this test
-	// covers — but the row must exist so the CONNECT_VOICE re-check can resolve
-	// a role. Without it the handler stops at FORBIDDEN and never reaches the
-	// missing-voice-state branch under test.
+	// covers — but the user row and the channel row must exist so the join
+	// gate the refresh re-runs (permissions.CanJoinVoice) can resolve a role
+	// and a channel. Without them the handler stops at FORBIDDEN and never
+	// reaches the missing-voice-state branch under test.
 	user := seedCoverageOwner(t, database, "vtr-nil-user")
+	chID := seedVoiceChannel(t, database, "vtr-nil-user-chan")
 	send := make(chan []byte, 16)
 	c := ws.NewTestClient(hub, user.ID, send)
 	hub.Register(c)
 	waitRegistered(t, hub, c)
 
-	ws.SetVoiceChIDForTest(c, 42)
+	ws.SetVoiceChIDForTest(c, chID)
 
 	hub.HandleMessageForTest(c, voiceTokenRefreshMsg())
 

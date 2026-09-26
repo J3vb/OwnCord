@@ -20,6 +20,7 @@ vi.mock("../../src/components/SettingsOverlay", () => ({
 function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPageCallbacks {
   return {
     onLogin: vi.fn().mockResolvedValue(undefined),
+    onLoginWithSavedPassword: vi.fn().mockResolvedValue(undefined),
     onRegister: vi.fn().mockResolvedValue(undefined),
     onTotpSubmit: vi.fn().mockResolvedValue(undefined),
     ...overrides,

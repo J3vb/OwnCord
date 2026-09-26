@@ -27,6 +27,15 @@ describe("isValidHost", () => {
     expect(isValidHost("chat.example.com:8443")).toBe(true);
   });
 
+  it("rejects a host containing an underscore (OC-0322: Rust proxies reject it)", () => {
+    // http_proxy::validate_remote_host and livekit_proxy::validate_remote_host
+    // only allow is_ascii_alphanumeric() || '.' | '-' | ':' | '[' | ']' -- JS
+    // `\w` wrongly includes '_', which would let the client save/accept a
+    // host neither Rust proxy can ever connect to.
+    expect(isValidHost("chat_example.com")).toBe(false);
+    expect(isValidHost("my_server.lan:8443")).toBe(false);
+  });
+
   it("accepts an IPv4 literal, optionally with a port", () => {
     expect(isValidHost("192.168.1.1")).toBe(true);
     expect(isValidHost("192.168.1.1:8443")).toBe(true);

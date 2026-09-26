@@ -40,7 +40,7 @@ func openPluginTestDB(t *testing.T) *db.DB {
 }
 
 func TestPluginsHandlerListEmptyWhenRegistryNil(t *testing.T) {
-	h := NewPluginAdminHandler(nil, nil)
+	h := NewPluginAdminHandler(nil, nil, nil)
 	req := httptest.NewRequest("GET", "/", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -53,7 +53,7 @@ func TestPluginsHandlerListEmptyWhenRegistryNil(t *testing.T) {
 }
 
 func TestPluginsHandlerInstallRejectsWhenRegistryNil(t *testing.T) {
-	h := NewPluginAdminHandler(nil, nil)
+	h := NewPluginAdminHandler(nil, nil, nil)
 	body, contentType := buildZipUpload(t, validPluginZip(t))
 	req := httptest.NewRequest("POST", "/install", body)
 	req.Header.Set("Content-Type", contentType)
@@ -66,7 +66,7 @@ func TestPluginsHandlerInstallRejectsWhenRegistryNil(t *testing.T) {
 
 func TestPluginsHandlerInstallRejectsNonZipContentType(t *testing.T) {
 	reg := newTestPluginRegistry(t)
-	h := NewPluginAdminHandler(reg, nil)
+	h := NewPluginAdminHandler(reg, nil, nil)
 
 	// Build a multipart body whose file part is labelled as text/plain.
 	var buf bytes.Buffer
@@ -94,7 +94,7 @@ func TestPluginsHandlerInstallRejectsNonZipContentType(t *testing.T) {
 
 func TestPluginsHandlerInstallRejectsNonZipMagic(t *testing.T) {
 	reg := newTestPluginRegistry(t)
-	h := NewPluginAdminHandler(reg, nil)
+	h := NewPluginAdminHandler(reg, nil, nil)
 
 	body, contentType := buildZipUpload(t, []byte("this is definitely not a zip"))
 	req := httptest.NewRequest("POST", "/install", body)
@@ -111,7 +111,7 @@ func TestPluginsHandlerInstallHappyPath(t *testing.T) {
 	mem := openPluginTestDB(t)
 	// Wire the store into the handler so /list can show the new row. The
 	// registry already writes via its own PluginStore.
-	h := NewPluginAdminHandler(reg, mem)
+	h := NewPluginAdminHandler(reg, mem, nil)
 	body, contentType := buildZipUpload(t, validPluginZip(t))
 	req := httptest.NewRequest("POST", "/install", body)
 	req.Header.Set("Content-Type", contentType)
@@ -128,14 +128,14 @@ func TestPluginsHandlerInstallHappyPath(t *testing.T) {
 // The admin panel's empty state distinguishes "no plugins installed" from
 // "the runtime is off", which it can only do from this header.
 func TestPluginsHandlerListReportsRuntimeState(t *testing.T) {
-	off := NewPluginAdminHandler(nil, nil)
+	off := NewPluginAdminHandler(nil, nil, nil)
 	rec := httptest.NewRecorder()
 	off.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	if got := rec.Header().Get("X-Plugin-Runtime"); got != "disabled" {
 		t.Fatalf("nil registry: X-Plugin-Runtime = %q, want %q", got, "disabled")
 	}
 
-	on := NewPluginAdminHandler(newTestPluginRegistry(t), openPluginTestDB(t))
+	on := NewPluginAdminHandler(newTestPluginRegistry(t), openPluginTestDB(t), nil)
 	rec = httptest.NewRecorder()
 	on.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	if got := rec.Header().Get("X-Plugin-Runtime"); got != "enabled" {
@@ -147,7 +147,7 @@ func TestPluginsHandlerListReportsRuntimeState(t *testing.T) {
 // Go field names and every column renders empty.
 func TestPluginsHandlerListUsesSnakeCaseJSON(t *testing.T) {
 	reg, mem := newTestPluginRegistryWithStore(t)
-	h := NewPluginAdminHandler(reg, mem)
+	h := NewPluginAdminHandler(reg, mem, nil)
 
 	body, contentType := buildZipUpload(t, validPluginZip(t))
 	req := httptest.NewRequest("POST", "/install", body)
@@ -178,7 +178,7 @@ func TestPluginsHandlerListUsesSnakeCaseJSON(t *testing.T) {
 }
 
 func TestPluginsHandlerEnableDisableUninstallReturn503WhenRegistryNil(t *testing.T) {
-	h := NewPluginAdminHandler(nil, nil)
+	h := NewPluginAdminHandler(nil, nil, nil)
 	for _, tc := range []struct{ method, path string }{
 		{"POST", "/1/enable"},
 		{"POST", "/1/disable"},
@@ -195,7 +195,7 @@ func TestPluginsHandlerEnableDisableUninstallReturn503WhenRegistryNil(t *testing
 
 func TestPluginsHandlerLifecycleInvalidID(t *testing.T) {
 	reg := newTestPluginRegistry(t)
-	h := NewPluginAdminHandler(reg, nil)
+	h := NewPluginAdminHandler(reg, nil, nil)
 	req := httptest.NewRequest("POST", "/not-an-int/enable", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

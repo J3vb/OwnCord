@@ -66,10 +66,7 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 		// Block sensitive LiveKit endpoints (exact segment match).
 		for seg := range strings.SplitSeq(strings.ToLower(r.URL.Path), "/") {
 			if blockedSegments[seg] {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "access denied",
-				})
+				writeErr(w, http.StatusForbidden, "FORBIDDEN", "access denied")
 				return
 			}
 		}
@@ -78,10 +75,7 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 		if !isOriginAllowed(r, allowedOrigins) {
 			slog.Warn("livekit proxy: origin rejected",
 				"origin", r.Header.Get("Origin"), "path", r.URL.Path, "remote", r.RemoteAddr)
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "access denied",
-			})
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", "access denied")
 			return
 		}
 
@@ -130,6 +124,22 @@ var firstPartyClientOrigins = []string{
 // non-browser) and the first-party desktop client's webview origins are
 // always permitted. Beyond those, an empty allowedOrigins list denies all
 // cross-origin requests (require explicit "*" wildcard to allow all).
+// stripDefaultPort removes a trailing ":443" (https) or ":80" (http) from
+// host, so an explicit default port and its implicit RFC 6454 equivalent
+// compare equal. A reverse proxy in front of the server may normalize one
+// side (nginx's $host strips the port) but not the other (a client-set
+// Origin keeps it), so both sides of an origin/host comparison need this.
+func stripDefaultPort(scheme, host string) string {
+	switch scheme {
+	case "https":
+		return strings.TrimSuffix(host, ":443")
+	case "http":
+		return strings.TrimSuffix(host, ":80")
+	default:
+		return host
+	}
+}
+
 func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
@@ -142,7 +152,7 @@ func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
 	// policy, which the chat WS endpoint already applies; web content on
 	// another origin can never present it (the browser pins Origin), so it
 	// does not widen the CSRF surface.
-	if u, err := url.Parse(origin); err == nil && u.Host != "" && strings.EqualFold(u.Host, r.Host) {
+	if u, err := url.Parse(origin); err == nil && u.Host != "" && strings.EqualFold(stripDefaultPort(u.Scheme, u.Host), stripDefaultPort(u.Scheme, r.Host)) {
 		return true
 	}
 	for _, firstParty := range firstPartyClientOrigins {
@@ -172,8 +182,18 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, all
 	backendURL.Path = r.URL.Path
 	backendURL.RawQuery = r.URL.RawQuery
 
+	// Forward the Authorization header: the LiveKit Rust SDK (the Linux
+	// client's native voice) sends its room-join token as a Bearer header
+	// rather than the access_token query parameter. Nothing else is forwarded.
+	var backendHeader http.Header
+	authz := r.Header.Get("Authorization")
+	if authz != "" {
+		backendHeader = http.Header{"Authorization": {authz}}
+	}
+
 	// Connect to LiveKit backend.
 	backConn, dialResp, err := websocket.Dial(r.Context(), backendURL.String(), &websocket.DialOptions{
+		HTTPHeader:   backendHeader,
 		Subprotocols: r.Header.Values("Sec-WebSocket-Protocol"),
 	})
 	if dialResp != nil && dialResp.Body != nil {
@@ -187,14 +207,17 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, all
 		// configured stdout level) could replay it inside its 5-minute TTL as
 		// the victim's participant identity. Strip the credential before the
 		// error reaches slog: the raw query blob first, so an encoded form is
-		// caught too, then the decoded token.
+		// caught too, then the decoded token. The Authorization header carries
+		// the same JWT for the native client. coder/websocket's dial errors do
+		// not include request headers today, so scrubbing it is future-proofing
+		// against a library change that starts echoing them.
 		safeErr := redactKey(err.Error(), backendURL.RawQuery)
 		safeErr = redactKey(safeErr, backendURL.Query().Get("access_token"))
+		safeErr = redactKey(safeErr, authz)
+		_, bearer, _ := strings.Cut(authz, " ")
+		safeErr = redactKey(safeErr, strings.TrimSpace(bearer))
 		slog.Warn("livekit proxy: backend dial failed", "host", backendURL.Host, "path", backendURL.Path, "err", safeErr)
-		writeJSON(w, http.StatusBadGateway, errorResponse{
-			Error:   "BAD_GATEWAY",
-			Message: "backend unavailable",
-		})
+		writeErr(w, http.StatusBadGateway, "BAD_GATEWAY", "backend unavailable")
 		return
 	}
 	defer backConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort close on defer

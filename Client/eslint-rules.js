@@ -8,17 +8,21 @@
 //
 // Plain JS, ESM, no build step — eslint.config.js imports this directly.
 
-/** True when `node` is a `this.<methodName>(...)` call. */
-function isThisMethodCall(node, methodName) {
-  return (
-    node !== null &&
-    node.type === "CallExpression" &&
-    node.callee.type === "MemberExpression" &&
-    node.callee.object.type === "ThisExpression" &&
-    !node.callee.computed &&
-    node.callee.property.type === "Identifier" &&
-    node.callee.property.name === methodName
-  );
+/** True when `node` calls `<methodName>(...)` through any of the receivers the
+ *  reconnect code uses: `this.<methodName>()` (the class form in
+ *  livekitSession.ts), a bare `<methodName>()` local closure, or
+ *  `<object>.<methodName>()` (the `deps.*` form in livekitReconnect.ts).
+ *
+ *  The extraction of attemptAutoReconnect into livekitReconnect.ts turned
+ *  `this.reconnectSuperseded(...)` into a local `superseded()` closure and
+ *  `this.leaveVoice()` into `deps.leaveVoice()`. Matching only `this.*` left
+ *  the rule blind inside the very file that owns the reconnect loop. */
+function isNamedCall(node, methodName) {
+  if (node === null || node.type !== "CallExpression") return false;
+  const callee = node.callee;
+  if (callee.type === "Identifier") return callee.name === methodName;
+  if (callee.type !== "MemberExpression" || callee.computed) return false;
+  return callee.property.type === "Identifier" && callee.property.name === methodName;
 }
 
 /** True when `node` is a `this.<propertyName>` member access. */
@@ -68,9 +72,12 @@ function testSignalsSuperseded(test) {
   if (test.type === "LogicalExpression") {
     return testSignalsSuperseded(test.left) || testSignalsSuperseded(test.right);
   }
-  if (isThisMethodCall(test, "reconnectSuperseded")) return true;
+  if (isNamedCall(test, "reconnectSuperseded")) return true;
+  // livekitReconnect.ts wraps reconnectSuperseded in a local `superseded()`
+  // closure that captures signal/channelId/owner — same predicate, no receiver.
+  if (isNamedCall(test, "superseded")) return true;
   if (test.type === "UnaryExpression" && test.operator === "!") {
-    return isThisMethodCall(test.argument, "isStateConnected");
+    return isNamedCall(test.argument, "isStateConnected");
   }
   return false;
 }
@@ -80,15 +87,16 @@ const noLeaveVoiceWhenSuperseded = {
     type: "problem",
     docs: {
       description:
-        "Disallow this.leaveVoice() inside a branch that already confirmed this connect/reconnect " +
+        "Disallow leaveVoice() inside a branch that already confirmed this connect/reconnect " +
         "attempt was superseded. Voice sessions are superseded, not cancelled — once reconnectSuperseded() " +
-        "or !isStateConnected() is true, `_state` may already belong to a newer, live attempt, and " +
-        "leaveVoice() there tears that live session down instead of the aborted one.",
+        "(or its extracted `superseded()` alias) or !isStateConnected() is true, `_state` may already " +
+        "belong to a newer, live attempt, and leaveVoice() there tears that live session down instead " +
+        "of the aborted one. Matches the call through any receiver: `this.`, `deps.`, or bare.",
     },
     schema: [],
     messages: {
       unsafeLeaveVoice:
-        "this.leaveVoice() must not run once this attempt is known to be superseded — it acts on " +
+        "leaveVoice() must not run once this attempt is known to be superseded — it acts on " +
         "whichever session currently owns `_state`, which may now be a newer, live attempt. Disconnect " +
         "only this attempt's own room instead (e.g. disconnectSupersededLocalRoom(localRoom) / " +
         "localRoom.disconnect()), or simply return without calling it.",
@@ -97,7 +105,7 @@ const noLeaveVoiceWhenSuperseded = {
   create(context) {
     return {
       CallExpression(node) {
-        if (!isThisMethodCall(node, "leaveVoice")) return;
+        if (!isNamedCall(node, "leaveVoice")) return;
         let child = node;
         let parent = node.parent;
         while (parent) {

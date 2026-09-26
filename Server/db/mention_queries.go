@@ -21,8 +21,8 @@ const maxMentionsPerMessage = 20
 // notBannedClause is the mention resolution's "is this user reachable" test.
 // A raw `banned = 0` reads a temp-banned user as unreachable forever: nothing
 // clears the column when ban_expires lapses (that happens lazily, at login,
-// via auth.IsEffectivelyBanned — see db/account.go's anonymiseUser comment on
-// the same split), so a reinstated user could log in and post yet never
+// via auth.IsEffectivelyBanned — see db/account_test.go's lapsed-temp-ban
+// row on the same split), so a reinstated user could log in and post yet never
 // resolve as an @mention target or appear in an @everyone/@here fan-out. This
 // mirrors IsEffectivelyBanned's own rule (permanent when ban_expires is NULL,
 // lapsed once ban_expires is in the past) so the two never disagree.
@@ -52,7 +52,8 @@ type MentionTarget struct {
 // CreateMessageWithMentions inserts a message and its resolved mentions in one
 // writer transaction, so a reader can never observe a message whose mention set
 // is still half-written. mentionedUserIDs is truncated to
-// maxMentionsPerMessage and duplicates are ignored.
+// maxMentionsPerMessage and duplicates are ignored. The same transaction
+// advances the author's read state past the message (advanceAuthorReadState).
 func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*Message, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -79,6 +80,7 @@ func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID in
 	if err := insertMentionRows(ctx, tx, m.ID, mentionedUserIDs); err != nil {
 		return nil, err
 	}
+	advanceAuthorReadState(ctx, d.q.WithTx(tx), userID, channelID, m.ID)
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("CreateMessageWithMentions commit: %w", err)
 	}

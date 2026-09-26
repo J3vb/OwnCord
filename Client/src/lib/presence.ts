@@ -24,6 +24,7 @@ import type { UserStatus } from "./types";
 import { updatePresence } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { loadUserStatus } from "./userStatus";
+import { ServerMessageType as S } from "./protocolTypes";
 
 export interface PresenceSender {
   /**
@@ -36,6 +37,19 @@ export interface PresenceSender {
   /** Cancel any pending retry. Call on teardown of the owning session. */
   destroy(): void;
 }
+
+/**
+ * Slack added past the client limiter's own remaining time before a queued
+ * presence_update is retried. The server's one-update-per-10s budget is
+ * measured from *receipt* (service/channel.go), milliseconds after this
+ * client's send, while the client limiter measures from its own send — so a
+ * retry scheduled at exactly `getRemainingMs()` lands just before the
+ * server's window reopens, is answered RATE_LIMITED and, without the
+ * rejection handler below, is never retried (OC-0451): the client shows and
+ * saves the new status while users.status and every other member keep the
+ * old one.
+ */
+const RETRY_MARGIN_MS = 1_000;
 
 /**
  * Build a `PresenceSender` bound to one `ws` and one `RateLimiter`. Callers
@@ -51,6 +65,23 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
   // mention it — so send() below falls back to this instead of dropping it
   // (OC-0156).
   let pendingCustom: string | undefined;
+  // The envelope id and custom_status of the frame most recently handed to
+  // the transport, so a RATE_LIMITED reply can be correlated back to *this*
+  // sender's presence_update — never another producer's rate limit.
+  let lastSentId: string | null = null;
+  let lastSentCustom: string | undefined;
+
+  /** Arm (or replace) the single coalescing retry the window can have. */
+  function armRetry(delayMs: number, custom: string | undefined): void {
+    if (retry !== null) {
+      clearTimeout(retry);
+    }
+    pendingCustom = custom;
+    retry = setTimeout(() => {
+      retry = null;
+      send(loadUserStatus(), pendingCustom);
+    }, delayMs);
+  }
 
   function send(status: UserStatus, customStatus?: string): void {
     // A plain call inherits whatever custom_status is still queued behind
@@ -67,23 +98,40 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
     }
     if (limiter.tryConsume()) {
       pendingCustom = undefined;
-      if (effectiveCustom === undefined) {
-        ws.send({ type: "presence_update", payload: { status } });
-      } else {
-        ws.send({ type: "presence_update", payload: { status, custom_status: effectiveCustom } });
-      }
+      lastSentCustom = effectiveCustom;
+      lastSentId =
+        effectiveCustom === undefined
+          ? ws.send({ type: "presence_update", payload: { status } })
+          : ws.send({
+              type: "presence_update",
+              payload: { status, custom_status: effectiveCustom },
+            });
     } else {
       // The window is still closed from an earlier send (any producer's) —
-      // retry once it reopens instead of dropping this one silently.
-      // Re-reads loadUserStatus() at fire time so a burst of calls in
-      // between coalesces onto a single retry carrying the latest value.
-      pendingCustom = effectiveCustom;
-      retry = setTimeout(() => {
-        retry = null;
-        send(loadUserStatus(), effectiveCustom);
-      }, limiter.getRemainingMs());
+      // retry once it reopens instead of dropping this one silently, with a
+      // margin past the end so the server's receipt-measured window has
+      // reopened too. Re-reads loadUserStatus() at fire time so a burst of
+      // calls in between coalesces onto a single retry carrying the latest
+      // value.
+      armRetry(limiter.getRemainingMs() + RETRY_MARGIN_MS, effectiveCustom);
     }
   }
+
+  // Backstop for the receipt-vs-send skew the margin above only estimates: the
+  // server refused the frame we just sent as RATE_LIMITED. Re-arm one more
+  // retry a full server window out — never a busy loop — coalescing onto
+  // whatever status the user has chosen by then, so the last requested status
+  // always reaches the server. Registered here (a fire-and-forget frame owned
+  // by this sender), so the write it eventually causes stays out of the
+  // ws.on callback itself (local/no-store-write-in-ws-on).
+  const unsubError = ws.on(S.ERROR, (payload, id) => {
+    if (payload.code !== "RATE_LIMITED") return;
+    // A newer change already queued its own retry, which carries the latest
+    // status — do not clobber it, and do not double-send.
+    if (retry !== null) return;
+    if (id === undefined || id !== lastSentId) return; // not our frame
+    armRetry(limiter.getRemainingMs() + RETRY_MARGIN_MS, lastSentCustom);
+  });
 
   function destroy(): void {
     if (retry !== null) {
@@ -91,6 +139,7 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
       retry = null;
     }
     pendingCustom = undefined;
+    unsubError();
   }
 
   return { send, destroy };

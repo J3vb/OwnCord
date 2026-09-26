@@ -19,12 +19,19 @@ import (
 // running with interval=5s would wait longer than its own tick).
 const maxStartupDelay = time.Minute
 
+// eventPruneStore is the single EventStore method the pruner calls. The
+// pruner only trims by age, so it takes the narrow interface rather than the
+// seven-method EventStore the persister and replay paths need.
+type eventPruneStore interface {
+	PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
+}
+
 // StartEventPruner launches a goroutine that wakes every interval and deletes
 // events older than retention. The goroutine exits when ctx is cancelled; the
 // returned channel closes when it has fully exited (i.e. no prune can still
 // be touching the store) — the same join contract EventPersister.Stop gives,
 // so shutdown can order "background work done" before "database closed".
-func StartEventPruner(ctx context.Context, s EventStore, retention, interval time.Duration) <-chan struct{} {
+func StartEventPruner(ctx context.Context, s eventPruneStore, retention, interval time.Duration) <-chan struct{} {
 	done := make(chan struct{})
 	if s == nil {
 		close(done)
@@ -65,7 +72,7 @@ func StartEventPruner(ctx context.Context, s EventStore, retention, interval tim
 	return done
 }
 
-func runPrune(ctx context.Context, s EventStore, retention time.Duration) {
+func runPrune(ctx context.Context, s eventPruneStore, retention time.Duration) {
 	cutoff := time.Now().Add(-retention)
 	deleted, err := s.PruneEventsOlderThan(ctx, cutoff)
 	if err != nil {

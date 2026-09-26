@@ -1,0 +1,400 @@
+#!/usr/bin/env node
+// Decide which CI jobs a change needs, from the set of paths it changes.
+//
+//   node scripts/ci-select.mjs --paths-file <file> [--out <file>]
+//   node scripts/ci-select.mjs --all [--reason <text>] [--out <file>]
+//
+// Emits one `key=true|false` line per capability. The workflow turns those into
+// job conditions, so a capability that is false SKIPS a job and a capability
+// that is true RUNS it.
+//
+// ─── Why a hand-written classifier rather than a paths-filter action ────────
+// Every gate in this repository is self-tested on every PR (check-doc-counts,
+// check-migrations, npm-audit-gate, verify-gate-evidence), because a gate whose
+// own logic is never exercised rots silently. The selection rules ARE a gate —
+// a wrong `false` here stops tests from running — so they live in a pure
+// function with a unit suite next to them (scripts/ci-select.test.mjs) rather
+// than in an action's configuration.
+//
+// ─── The safety rule ────────────────────────────────────────────────────────
+// Selection may only ever be wrong in the direction of running MORE jobs.
+// Anything unrecognised, and any failure to obtain a diff at all, selects every
+// capability. A false `false` is a test that silently did not run; a false
+// `true` is a few wasted minutes.
+//
+// ─── Traced cross-boundary dependencies ─────────────────────────────────────
+// These are files that a test in ANOTHER component reads, so the component that
+// owns the test must run even though nothing under it moved. Each entry was
+// read off the source, not guessed:
+//
+//   Server reads outside Server/:
+//     protocol/schema.json                     api/absence_contract_test.go
+//     docs/schema.md                           permissions/schema_doc_test.go
+//     docs/api.md                              cmd/gendocs (gendocs blocks)
+//     docs/server-configuration.md             cmd/gendocs (gendocs blocks)
+//     docs/architecture/server-boundaries.md   cmd/dbinventory/doc_test.go
+//     docs/architecture/community-services.md  migrations/community_services_doc_test.go
+//     Client/src/lib/types.ts                  permissions/schema_doc_test.go
+//     Client/src-tauri/tauri.conf.json         updater/tauri_key_contract_test.go
+//     .superpowers/findings-ledger.json        cmd/smoke/drills.go (go run ./cmd/smoke)
+//
+//   Client reads outside Client/:
+//     docs/api.md                              tests/contract/api-profile-route.test.ts
+//     docs/architecture/platform-contracts.md  tests/unit/platform-contracts-counts.test.ts
+//     Server/admin/static/ (all of it)         tests/contract/server-admin-*.test.ts
+//     protocol/schema.json                     src/lib/protocolTypes.ts is generated from it
+//
+//   Rust reads outside Client/src-tauri/:
+//     Server/safefetch/testdata/classify_vectors.json  external_content.rs's tests
+//     Client/scripts/linux-webrtc-toolchain.sh         rust-tests / tauri-build run it
+//     Client/scripts/check-glibc-floor.sh              rust-tests runs its --selftest
+//
+// The two architecture docs are the trap this table exists for: they are
+// Markdown, so a docs-only rule would skip them, and the Go tests that read
+// them run with -count=1 precisely because Go's test cache cannot see an input
+// outside the module.
+
+import { readFileSync, appendFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+/** Every capability the workflow can gate a job on. */
+export const CAPABILITIES = [
+  "server", // Server Build & Test (both OS legs)
+  "client", // Client Static Checks, Client Unit Tests, Node policy
+  "rust", // Rust Unit Tests
+  "browser", // Client E2E (Playwright) + Client E2E (parity subset)
+  "integration", // Client E2E (real server and media) + Admin Panel E2E
+  "native", // Client E2E (Windows native)
+  "harness", // widen the development browser run from smoke to full
+  "workflows", // Workflow Security Lint (zizmor over .github/workflows/)
+  "deps", // Supply-chain Scan (osv-scanner + cargo-deny over the lockfiles)
+];
+
+/** Server paths outside the Client/Server pair that a Server test reads. */
+const SERVER_READS_OUTSIDE = new Set([
+  "protocol/schema.json",
+  // The three documents `make docs-verify` regenerates and compares. Leaving
+  // any one out means a hand-edit to it merges without cmd/gendocs ever
+  // running, which is the drift the gate exists to catch.
+  "docs/schema.md",
+  "docs/api.md",
+  "docs/server-configuration.md",
+  "docs/architecture/server-boundaries.md",
+  "docs/architecture/community-services.md",
+  "Client/src/lib/types.ts",
+  "Client/src-tauri/tauri.conf.json",
+  ".superpowers/findings-ledger.json",
+  // GENERATED from protocol/schema.json, but asserted from the Server side:
+  // `make protocol-verify` regenerates BOTH Server/ws/message_types.go and this
+  // file and fails on drift, so editing, deleting or renaming this path has to
+  // run the server job. The Go half needs no entry — it lives under Server/,
+  // which already selects the job.
+  "Client/src/lib/protocolTypes.ts",
+]);
+
+/** Client paths outside Client/ that a Client test reads. */
+const CLIENT_READS_OUTSIDE = new Set([
+  "protocol/schema.json",
+  "docs/api.md",
+  "docs/architecture/platform-contracts.md",
+  "Server/admin/static/index.html",
+]);
+
+/** Paths outside Client/src-tauri/ that a Rust test reads or runs. */
+const RUST_READS_OUTSIDE = new Set([
+  // The C-09 classifier corpus: Server/safefetch's Go tests and the desktop
+  // broker's Rust tests (external_content.rs) both read it at run time. A
+  // vector added in a server-only PR must still run the Rust suite, or the
+  // corpus looks like a shared gate and only one side is ever checked.
+  "Server/safefetch/testdata/classify_vectors.json",
+  // The Linux native-voice build scripts. `Client/` selects client/browser/
+  // integration/native, but NOT rust — so editing the toolchain installer, whose
+  // only consumer is the rust-tests job (`bash ../scripts/linux-webrtc-toolchain.sh`)
+  // and the tauri-build Linux legs, could merge with the Rust suite never
+  // running against it. Same class as the corpus above: a shared input that
+  // only one component actually exercises.
+  "Client/scripts/linux-webrtc-toolchain.sh",
+  "Client/scripts/check-glibc-floor.sh",
+]);
+
+/**
+ * Dependency manifests and lockfiles, and the two policy files the scanners
+ * read. A change to any of these can add, remove or re-pin a dependency, so it
+ * is the set that selects the Supply-chain Scan job. Source-only changes under
+ * the same components are deliberately absent: they cannot move a version.
+ *
+ * Kept explicit rather than "any *.lock" because a new lockfile in a new
+ * component must not be scanned silently — the scanner's file list is written
+ * in ci.yml, and this table is where a fifth one has to be added.
+ */
+const DEPS_FILES = new Set([
+  "Server/go.mod",
+  "Server/go.sum",
+  "Client/package.json",
+  "Client/package-lock.json",
+  "Client/src-tauri/Cargo.toml",
+  "Client/src-tauri/Cargo.lock",
+  "tools/mcp-introspect/package.json",
+  "tools/mcp-introspect/package-lock.json",
+  "osv-scanner.toml", // the scan's ignore baseline
+  "Client/src-tauri/deny.toml", // cargo-deny's policy
+]);
+
+/**
+ * Paths that change the browser suite's own machinery: the Playwright specs and
+ * their fixtures. A change here is the one case where the fast development run
+ * stops being a fair sample of the full suite, so it widens back to full.
+ * The Playwright configs are deliberately NOT here — a config change is
+ * covered by running the production suite in full on every browser PR, and
+ * widening on the configs would make the smoke/full split unusable.
+ */
+const HARNESS_PREFIXES = ["Client/tests/e2e/", "Client/tests/browser/"];
+
+/**
+ * The client's own manifests. A dependency bump can move the dev server, the
+ * Playwright version or the vitest version under the smoke run, so it is a
+ * harness change as well as a client change — but only for the components that
+ * consume the client's npm tree, not for the Go server or the Rust crate.
+ */
+const HARNESS_FILES = new Set(["Client/package.json", "Client/package-lock.json"]);
+
+/**
+ * The k6 load harness and its offline contract test. Both live under `Server/`,
+ * so the prefix branch below already selects `server` — this set pins the
+ * dependency explicitly, so narrowing that prefix later cannot silently stop a
+ * change to the harness from running the job whose offline test executes it.
+ * `docs-consistency` runs the test unconditionally today; this entry is what
+ * keeps `server` selected with the change once that stops being true.
+ */
+const K6_HARNESS_PATHS = new Set([
+  "Server/scripts/k6/ws-load.js",
+  "Server/scripts/k6/ws-load.test.mjs",
+]);
+export { K6_HARNESS_PATHS };
+
+/** Root files that change how every component is built or installed. */
+const ROOT_BUILD_FILES = new Set([
+  "package.json",
+  "package-lock.json",
+  ".npmrc",
+  ".editorconfig",
+  ".gitattributes",
+]);
+
+/**
+ * Directories holding this repository's own tooling and note-keeping: agent
+ * configuration, skills, and the planning documents under `.claude/plans/`.
+ * Nothing is built or tested from them — the only references from tracked code
+ * are three comments and a string in a failure message — so a change confined
+ * to them selects no capability. Without this, a plan-only PR (a common shape
+ * here) reached the "never been taught about" fallback and selected every job,
+ * which is the exact case the selection exists to make cheap.
+ */
+const TOOLING_PREFIXES = [".claude/", ".codex/", ".agents/", ".remember/"];
+
+/** Everything, for the paths whose blast radius cannot be bounded. */
+const EVERYTHING = [...CAPABILITIES];
+
+/**
+ * Classify a set of changed paths into the capabilities they require.
+ *
+ * Pure: no filesystem, no environment. The CLI below is the only I/O.
+ *
+ * @param {string[]} paths repository-relative, POSIX separators
+ * @returns {Record<string, boolean>}
+ */
+export function classify(paths) {
+  const caps = new Set();
+  const add = (...names) => names.forEach((n) => caps.add(n));
+
+  if (!Array.isArray(paths) || paths.length === 0) {
+    // No paths at all is not "nothing changed": it is a diff we did not get.
+    return allCapabilities();
+  }
+
+  for (const raw of paths) {
+    const path = normalise(raw);
+    if (path === null) return allCapabilities(); // unparseable entry: be safe
+
+    // A shared CI input: the workflow files themselves, the scripts every job
+    // runs, and the repository-root build files. The blast radius of a change
+    // here is not knowable from the path, so it selects every capability.
+    if (
+      path.startsWith(".github/") ||
+      path.startsWith("scripts/") ||
+      path.startsWith(".githooks/") ||
+      ROOT_BUILD_FILES.has(path)
+    ) {
+      add(...EVERYTHING);
+      continue;
+    }
+
+    // Traced dependencies, checked before the generic prefixes below so a
+    // specific file can pull in a component its generic prefix would not.
+    if (SERVER_READS_OUTSIDE.has(path)) add("server", "integration");
+    if (CLIENT_READS_OUTSIDE.has(path)) add("client", "browser");
+    if (RUST_READS_OUTSIDE.has(path)) add("rust");
+    if (K6_HARNESS_PATHS.has(path)) add("server");
+    if (DEPS_FILES.has(path)) add("deps");
+    if (HARNESS_FILES.has(path) || HARNESS_PREFIXES.some((p) => path.startsWith(p))) {
+      add("harness");
+    }
+
+    if (path.startsWith("Server/")) {
+      // `integration` because the real-server suites drive this server, and
+      // `native` because the Windows job builds it (`npm run test:e2e:build-server`)
+      // and then tests it through the actual Rust/WebView2 transport — including
+      // packaged-update.spec.ts against Server/updater. A server change that
+      // breaks only that path would otherwise merge with the required native
+      // check reported as skipped.
+      add("server", "integration", "native");
+      // The admin panel (index.html, admin.css, js/) is run by the client's
+      // contract specs, so a Server change to it is also a client-unit-test
+      // change.
+      if (path.startsWith("Server/admin/static/")) add("client");
+      continue;
+    }
+
+    if (path.startsWith("Client/src-tauri/")) {
+      // The Rust shell: rust-tests compiles it and the native job builds it.
+      // It is NOT a browser-suite input — the mocked suite runs the TS app
+      // under Chromium against a vite server and never loads the crate — so a
+      // Rust-only change must not spend the two browser jobs. `client` does run:
+      // the unit suite reads src-tauri (check-tauri-versions.mjs compares the
+      // npm and Cargo pins).
+      add("client", "rust", "native");
+      continue;
+    }
+
+    if (path.startsWith("Client/")) {
+      // The native job builds the whole client bundle and then drives the UI
+      // through Playwright, so every client change is a native-job input —
+      // not only a change to the Rust shell.
+      add("client", "browser", "integration", "native");
+      continue;
+    }
+
+    if (path.startsWith("protocol/")) {
+      // Schema changes regenerate both the Go constants and the TS types, and
+      // both `make protocol-verify` legs assert the pair has not drifted.
+      add("server", "client", "browser", "integration", "native");
+      continue;
+    }
+
+    if (path.startsWith("tools/")) {
+      // tools/mcp-introspect is a Node package with its own lockfile, and the
+      // node-policy job installs it.
+      add("client");
+      continue;
+    }
+
+    if (path.startsWith("deploy/")) {
+      add("server");
+      continue;
+    }
+
+    if (path.startsWith("docs/") || path.startsWith(".superpowers/")) {
+      // Prose and the findings ledger. Any tracked dependency these have is
+      // handled by the traced tables above; everything else here is read by
+      // humans and by the always-on documentation jobs.
+      continue;
+    }
+
+    if (TOOLING_PREFIXES.some((p) => path.startsWith(p))) continue;
+
+    // A dependency or scanner-policy file that matched no component prefix
+    // above (osv-scanner.toml, the root manifests). `deps` was already added;
+    // there is nothing else to select and it must not reach the fallback, which
+    // would run every job for a one-line ignore-list edit.
+    if (DEPS_FILES.has(path)) continue;
+
+    // Documentation at the repository root, and any path this classifier has
+    // never been taught about.
+    if (path.endsWith(".md") && !path.includes("/")) continue;
+    return allCapabilities();
+  }
+
+  return Object.fromEntries(CAPABILITIES.map((c) => [c, caps.has(c)]));
+}
+
+function allCapabilities() {
+  return Object.fromEntries(CAPABILITIES.map((c) => [c, true]));
+}
+
+/** Fold a git path to the form the tables above are written in. */
+function normalise(raw) {
+  if (typeof raw !== "string") return null;
+  const path = raw.trim().replaceAll("\\", "/").replace(/^\.\//, "");
+  if (path === "" || path.startsWith("/") || path.includes("..")) return null;
+  return path;
+}
+
+/**
+ * Parse `git diff --name-status -M` output into the list of paths touched.
+ *
+ * Rename and copy rows name TWO paths, and both matter: a rename out of
+ * Server/ into Client/ has to select both components, or the component that
+ * lost the file is never re-tested.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function parseNameStatus(text) {
+  const paths = [];
+  for (const line of text.split("\n")) {
+    const fields = line.split("\t").map((f) => f.trim());
+    if (fields.length < 2 || !/^[A-Z]\d*$/.test(fields[0])) continue;
+    // R/C rows are `status<TAB>old<TAB>new`; everything else is `status<TAB>path`.
+    for (const p of fields.slice(1)) if (p !== "") paths.push(p);
+  }
+  return paths;
+}
+
+function main() {
+  const argv = process.argv.slice(2);
+  const flag = (name) => argv.includes(name);
+  const value = (name) => {
+    const i = argv.indexOf(name);
+    return i >= 0 && i + 1 < argv.length ? argv[i + 1] : null;
+  };
+
+  // --all is the explicit "run everything" answer. The workflow uses it for the
+  // two cases where no path list exists to reason about: an event that is not a
+  // pull request into dev (see the job's comment in ci.yml), and a diff that
+  // could not be obtained. Naming the state rather than passing an empty file
+  // keeps a truncated download from looking like a genuine no-op diff.
+  let paths;
+  if (flag("--all")) {
+    paths = null;
+  } else {
+    const file = value("--paths-file");
+    if (file === null) {
+      process.stderr.write(
+        "usage: ci-select.mjs --paths-file <file> [--out <file>]\n" +
+          "       ci-select.mjs --all [--reason <text>] [--out <file>]\n",
+      );
+      process.exit(2);
+    }
+    paths = parseNameStatus(readFileSync(file, "utf8"));
+  }
+
+  const selected = paths === null ? allCapabilities() : classify(paths);
+  const lines = CAPABILITIES.map((c) => `${c}=${selected[c]}`).join("\n") + "\n";
+
+  const out = value("--out");
+  if (out !== null) appendFileSync(out, lines);
+  else process.stdout.write(lines);
+
+  // A selection always succeeds: it is the conservative default, not a check.
+  // Exiting non-zero would skip every job that needs these outputs, which is
+  // the one outcome this script exists to prevent.
+  const reason = value("--reason");
+  process.stderr.write(
+    `ci-select: ${paths === null ? "all capabilities" : `${paths.length} path(s)`}` +
+      `${reason ? ` (${reason})` : ""} -> ${JSON.stringify(selected)}\n`,
+  );
+}
+
+// Only run the CLI when this file is the entry point; the unit suite imports
+// classify() and parseNameStatus() and must not trigger a read of argv.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

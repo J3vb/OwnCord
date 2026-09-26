@@ -750,7 +750,7 @@ func buildCombinedRouter(t *testing.T) (http.Handler, *auth.RateLimiter, string)
 
 	r := chi.NewRouter()
 	svc := service.New(database, limiter)
-	api.MountAuthRoutes(r, database, limiter, nil, testTOTPKey)
+	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(service.NewSessionService(database)), limiter, nil)
 	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, nil)
 	api.MountInviteRoutes(r, database, svc)
 
@@ -1148,7 +1148,7 @@ func TestSearch_NegativeChannelID_Push(t *testing.T) {
 	}
 }
 
-// ─── searchRateLimitMiddleware: coverage via multiple rapid requests ─────────
+// ─── RateLimitMiddleware "search:" bucket: coverage via multiple rapid requests ─
 
 func TestSearch_RateLimit(t *testing.T) {
 	database := newChannelTestDB(t)

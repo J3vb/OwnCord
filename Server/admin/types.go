@@ -1,8 +1,6 @@
 package admin
 
 import (
-	"context"
-
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
@@ -25,22 +23,6 @@ const (
 	// token. Unlike adminSessionKey it is set for both principal kinds.
 	adminTokenHashKey
 )
-
-// ─── Allowed settings keys ────────────────────────────────────────────────────
-
-// allowedSettingKeys is the whitelist of keys that may be written via
-// PATCH /admin/api/settings. Derived from the settings table in SCHEMA.md.
-var allowedSettingKeys = map[string]struct{}{
-	"server_name":       {},
-	"server_icon":       {},
-	"motd":              {},
-	"max_upload_bytes":  {},
-	"voice_quality":     {},
-	"require_2fa":       {},
-	"registration_open": {},
-	"backup_schedule":   {},
-	"backup_retention":  {},
-}
 
 // ─── HubBroadcaster ──────────────────────────────────────────────────────────
 
@@ -88,17 +70,20 @@ type PermissionInvalidator interface {
 // adminUserResponse is the safe public shape returned by user-listing and
 // user-patch endpoints. It deliberately excludes PasswordHash and TOTPSecret.
 type adminUserResponse struct {
-	ID         int64   `json:"id"`
-	Username   string  `json:"username"`
-	Avatar     *string `json:"avatar,omitempty"`
-	RoleID     int64   `json:"role_id"`
-	RoleName   string  `json:"role_name"`
-	Status     string  `json:"status"`
-	CreatedAt  string  `json:"created_at"`
-	LastSeen   *string `json:"last_seen,omitempty"`
-	Banned     bool    `json:"banned"`
-	BanReason  *string `json:"ban_reason,omitempty"`
-	BanExpires *string `json:"ban_expires,omitempty"`
+	ID       int64   `json:"id"`
+	Username string  `json:"username"`
+	Avatar   *string `json:"avatar,omitempty"`
+	RoleID   int64   `json:"role_id"`
+	RoleName string  `json:"role_name"`
+	// RolePosition is the role's hierarchy position; only the users list
+	// sets it.
+	RolePosition *int    `json:"role_position,omitempty"`
+	Status       string  `json:"status"`
+	CreatedAt    string  `json:"created_at"`
+	LastSeen     *string `json:"last_seen,omitempty"`
+	Banned       bool    `json:"banned"`
+	BanReason    *string `json:"ban_reason,omitempty"`
+	BanExpires   *string `json:"ban_expires,omitempty"`
 }
 
 // ─── adminMeResponse ────────────────────────────────────────────────────────
@@ -116,32 +101,15 @@ type adminMeResponse struct {
 	// IsOwner mirrors ownerOnlyMiddleware: owner-only routes gate on position,
 	// not on a permission bit, so the panel cannot derive this from the mask.
 	IsOwner bool `json:"is_owner"`
+	// ServerName and Version fill the panel's top bar. Only authenticated
+	// panel principals see Version; unauthenticated endpoints never carry it.
+	ServerName string `json:"server_name"`
+	Version    string `json:"version,omitempty"`
 }
 
-// toAdminUserResponse converts a db.UserWithRole to the safe response shape.
-func toAdminUserResponse(u db.UserWithRole) adminUserResponse {
-	return adminUserResponse{
-		ID:         u.ID,
-		Username:   u.Username,
-		Avatar:     u.Avatar,
-		RoleID:     u.RoleID,
-		RoleName:   u.RoleName,
-		Status:     u.Status,
-		CreatedAt:  u.CreatedAt,
-		LastSeen:   u.LastSeen,
-		Banned:     u.Banned,
-		BanReason:  u.BanReason,
-		BanExpires: u.BanExpires,
-	}
-}
-
-// toAdminUserResponseFromUser converts a plain db.User to the safe response
-// shape, resolving the role name via the database.
-func toAdminUserResponseFromUser(ctx context.Context, database *db.DB, u *db.User) adminUserResponse {
-	roleName := ""
-	if role, err := database.GetRoleByID(ctx, u.RoleID); err == nil && role != nil {
-		roleName = role.Name
-	}
+// toAdminUserResponse converts a db.User and its resolved role name to the
+// safe response shape.
+func toAdminUserResponse(u *db.User, roleName string) adminUserResponse {
 	return adminUserResponse{
 		ID:         u.ID,
 		Username:   u.Username,

@@ -30,7 +30,7 @@ func TestParseLevel(t *testing.T) {
 }
 
 // TestLoggingLevelFromEnv verifies the end-to-end wiring: OWNCORD_LOGGING_LEVEL
-// overrides config.yaml via koanf's existing env layer.
+// overrides config.yaml via the OWNCORD_* environment layer.
 func TestLoggingLevelFromEnv(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("OWNCORD_LOGGING_LEVEL", "debug")

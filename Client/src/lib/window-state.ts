@@ -10,6 +10,7 @@
  */
 
 import { createLogger } from "./logger";
+import { desktop } from "../platform/desktop";
 
 const log = createLogger("window-state");
 
@@ -55,21 +56,14 @@ export function isRectOnScreen(monitors: readonly MonitorRect[], rect: WindowRec
  * monitors can't be queried the plugin's placement is left untouched.
  */
 export async function initWindowState(): Promise<void> {
-  let tauriWindow: typeof import("@tauri-apps/api/window");
-  try {
-    tauriWindow = await import("@tauri-apps/api/window");
-  } catch {
-    return;
-  }
-
-  const win = tauriWindow.getCurrentWindow();
+  const win = desktop.window;
   try {
     // A maximized window fills a monitor by definition — nothing to correct.
     if (await win.isMaximized()) return;
 
-    let monitors: MonitorRect[];
+    let monitors: readonly MonitorRect[];
     try {
-      monitors = await tauriWindow.availableMonitors();
+      monitors = await win.availableMonitors();
     } catch (err) {
       log.warn("Could not query monitors; leaving restored window as-is", {
         error: String(err),

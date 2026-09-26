@@ -29,13 +29,13 @@ func TestRegisterNow_ReconnectTransfersPendingModFlags(t *testing.T) {
 	// target's server_muted/server_deafened state onto their live *Client
 	// right before DisconnectFromVoiceInChannel deletes the voice_states row
 	// those flags normally live in).
-	old.setPendingModFlags(true, false)
+	old.setPendingModFlags(true, false, nil)
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
 	replacement.lastSeq = 1 // network reconnect, not a fresh connect
 	h.registerNow(replacement, nil)
 
-	gotMuted, gotDeafened := replacement.takePendingModFlags()
+	gotMuted, gotDeafened, _ := replacement.takePendingModFlags()
 	if !gotMuted || gotDeafened {
 		t.Fatalf("registerNow did not transfer pending mod flags across reconnect: "+
 			"replacement.takePendingModFlags() = (%v, %v), want (true, false) "+

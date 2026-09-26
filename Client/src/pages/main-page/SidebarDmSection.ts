@@ -4,11 +4,17 @@
  * a "View all messages" button, and collapse toggle.
  */
 
-import { createElement, setText, clearChildren, appendChildren } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
+import { createElement, setText, appendChildren } from "@lib/dom";
+import { reconcileChildren } from "@lib/reconcile";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { setSidebarMode } from "@stores/ui.store";
 import { isChannelMuted } from "@lib/channel-mutes";
+import type { CountSource } from "../../features/navigation/destinations";
+import { navigationText } from "../../i18n/navigation";
+import { shellText } from "../../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -19,6 +25,8 @@ export interface SidebarDmSectionOptions {
   readonly onSelectDm: (dmChannel: DmChannel) => void;
   /** Called when the user clicks the "+" button to create a new DM. */
   readonly onNewDm: () => void;
+  /** Pending Message Requests (B9-4, Q2). Badged apart from unread, never added to it. */
+  readonly pendingRequests?: CountSource;
 }
 
 export interface SidebarDmSectionResult {
@@ -34,6 +42,18 @@ export interface SidebarDmSectionResult {
 // Factory
 // ---------------------------------------------------------------------------
 
+/** Everything a preview row draws. A changed value rebuilds just that row. */
+function dmRowSignature(dm: DmChannel): string {
+  return [
+    dmDisplayName(dm),
+    dm.isGroup ? "g" : "1",
+    dm.recipient.status,
+    isChannelMuted(dm.channelId) ? "m" : "",
+    dm.mentionCount,
+    dm.unreadCount,
+  ].join("|");
+}
+
 export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDmSectionResult {
   const unsubs: Array<() => void> = [];
 
@@ -41,13 +61,64 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   const dmSection = createElement("div", { class: "sidebar-dm-section" });
 
   // --- Header ---
+  // The header contains its own buttons (the "+" and the requests badge), so it
+  // stays a plain div with a mouse click handler; the arrow is the keyboard
+  // collapse control, a real <button> named by the heading, as on the channel
+  // categories (B9-21).
   const dmHeader = createElement("div", { class: "category" });
-  const dmArrow = createElement("span", { class: "category-arrow" }, "\u25BC");
-  const dmLabelEl = createElement("span", { class: "category-name" }, "DIRECT MESSAGES");
+  const dmLabelEl = createElement(
+    "span",
+    { class: "category-name", id: "sidebar-dm-heading" },
+    shellText("dm.heading"),
+  );
+  const dmArrow = createElement(
+    "button",
+    {
+      type: "button",
+      class: "category-arrow",
+      "aria-expanded": "true",
+      "aria-labelledby": "sidebar-dm-heading",
+    },
+    "\u25BC",
+  );
   const dmUnreadBadge = createElement("span", { class: "dm-header-unread-badge" });
-  const dmAddBtn = createElement("button", { class: "category-add-btn", title: "New DM" }, "+");
+  const dmAddBtn = createElement(
+    "button",
+    { class: "category-add-btn", title: shellText("dm.new") },
+    "+",
+  );
   dmAddBtn.style.opacity = "1";
-  appendChildren(dmHeader, dmArrow, dmLabelEl, dmUnreadBadge, dmAddBtn);
+  appendChildren(dmHeader, dmArrow, dmLabelEl, dmUnreadBadge);
+
+  // Its own badge, not a share of the unread one: a request is not a message
+  // the reader has, and it never raises the unread or mention totals. It is a
+  // button into DM mode, where "Message Requests (N)" sits: with no DM rows
+  // and no "View all", it is a first-contact reader's only way in.
+  const pending = opts.pendingRequests;
+  if (pending !== undefined) {
+    const requestsBadge = createElement("button", {
+      type: "button",
+      class: "dm-header-requests-badge",
+      "data-testid": "dm-requests-badge",
+    });
+    requestsBadge.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setSidebarMode("dms");
+    });
+    const requestsCount = createElement("span", { "aria-hidden": "true" });
+    const requestsLabel = createElement("span", { class: "sr-only" });
+    appendChildren(requestsBadge, requestsCount, requestsLabel);
+    const renderRequests = (): void => {
+      const count = pending.get();
+      setText(requestsCount, String(count));
+      setText(requestsLabel, navigationText("requests.badge", { count }));
+      requestsBadge.style.display = count > 0 ? "" : "none";
+    };
+    renderRequests();
+    unsubs.push(pending.subscribe(renderRequests));
+    dmHeader.appendChild(requestsBadge);
+  }
+  dmHeader.appendChild(dmAddBtn);
   dmSection.appendChild(dmHeader);
 
   // --- DM list ---
@@ -60,7 +131,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     {
       class: "sidebar-dm-view-all",
     },
-    "View all messages",
+    shellText("dm.viewAll"),
   );
 
   viewAllBtn.addEventListener("click", () => {
@@ -68,68 +139,81 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   });
 
   // --- Render logic ---
+
+  function buildDmRow(dm: DmChannel): HTMLDivElement {
+    const muted = isChannelMuted(dm.channelId);
+    const dmItem = createElement("div", {
+      class: muted ? "channel-item muted" : "channel-item",
+      "data-testid": "dm-entry",
+      // Roving list item: reachable by Tab once, then arrow-stepped (B9-21).
+      role: "button",
+      tabindex: "-1",
+    });
+    dmItem.dataset.channelId = String(dm.channelId);
+    // A group has no presence of its own, so it gets a neutral marker rather
+    // than the first member's dot dressed up as the conversation's state.
+    const statusColor = dm.isGroup
+      ? "var(--text-micro)"
+      : dm.recipient.status === "online"
+        ? "var(--green)"
+        : dm.recipient.status === "idle"
+          ? "var(--yellow)"
+          : dm.recipient.status === "dnd"
+            ? "var(--red)"
+            : "var(--text-micro)";
+    const statusDot = createElement("span", {
+      style: `display:inline-block;width:8px;height:8px;border-radius:${dm.isGroup ? "2px" : "50%"};background:${statusColor};flex-shrink:0;`,
+      "aria-hidden": "true",
+    });
+    const name = createElement("span", { class: "ch-name" }, dmDisplayName(dm));
+    const parts: Element[] = [statusDot, name];
+    // A mention badge outranks the plain unread badge, and a mute never
+    // dims or suppresses it: a mute silences chatter, never something
+    // addressed to the reader directly (see lib/channel-mutes.ts).
+    if (dm.mentionCount > 0) {
+      const mentionBadge = createElement(
+        "span",
+        {
+          class: "dm-mention-badge",
+          style: `margin-left:auto;background:var(--danger-fill);color:var(--on-fill);border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
+        },
+        String(dm.mentionCount),
+      );
+      parts.push(mentionBadge);
+    } else if (dm.unreadCount > 0) {
+      // Muted: the count still increments (it is a fact about the channel),
+      // it just stops shouting. Only the colour changes.
+      const badge = createElement(
+        "span",
+        {
+          class: muted ? "dm-unread-badge muted" : "dm-unread-badge",
+          style: `margin-left:auto;background:${muted ? "var(--text-micro)" : "var(--danger-fill)"};color:var(--on-fill);border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
+        },
+        String(dm.unreadCount),
+      );
+      parts.push(badge);
+    }
+    appendChildren(dmItem, ...parts);
+    dmItem.addEventListener("click", () => {
+      opts.onSelectDm(dmStore.getState().channels.find((c) => c.channelId === dm.channelId) ?? dm);
+    });
+    return dmItem;
+  }
+
   function renderDmListItems(): void {
-    clearChildren(dmList);
     const dmChannels = dmStore.getState().channels;
     const displayChannels = dmChannels.slice(0, 3);
-    for (const dm of displayChannels) {
-      const muted = isChannelMuted(dm.channelId);
-      const dmItem = createElement("div", {
-        class: muted ? "channel-item muted" : "channel-item",
-        "data-testid": "dm-entry",
-      });
-      // A group has no presence of its own, so it gets a neutral marker rather
-      // than the first member's dot dressed up as the conversation's state.
-      const statusColor = dm.isGroup
-        ? "var(--text-micro)"
-        : dm.recipient.status === "online"
-          ? "var(--green)"
-          : dm.recipient.status === "idle"
-            ? "var(--yellow)"
-            : dm.recipient.status === "dnd"
-              ? "var(--red)"
-              : "var(--text-micro)";
-      const statusDot = createElement("span", {
-        style: `display:inline-block;width:8px;height:8px;border-radius:${dm.isGroup ? "2px" : "50%"};background:${statusColor};flex-shrink:0;`,
-      });
-      const name = createElement("span", { class: "ch-name" }, dmDisplayName(dm));
-      const parts: Element[] = [statusDot, name];
-      // A mention badge outranks the plain unread badge, and a mute never
-      // dims or suppresses it: a mute silences chatter, never something
-      // addressed to the reader directly (see lib/channel-mutes.ts).
-      if (dm.mentionCount > 0) {
-        const mentionBadge = createElement(
-          "span",
-          {
-            class: "dm-mention-badge",
-            style: `margin-left:auto;background:var(--red);color:white;border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
-          },
-          String(dm.mentionCount),
-        );
-        parts.push(mentionBadge);
-      } else if (dm.unreadCount > 0) {
-        // Muted: the count still increments (it is a fact about the channel),
-        // it just stops shouting. Only the colour changes.
-        const badge = createElement(
-          "span",
-          {
-            class: muted ? "dm-unread-badge muted" : "dm-unread-badge",
-            style: `margin-left:auto;background:${muted ? "var(--text-micro)" : "var(--red)"};color:white;border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
-          },
-          String(dm.unreadCount),
-        );
-        parts.push(badge);
-      }
-      appendChildren(dmItem, ...parts);
-      dmItem.addEventListener("click", () => {
-        opts.onSelectDm(dm);
-      });
-      dmList.appendChild(dmItem);
-    }
+    reconcileChildren(dmList, displayChannels, {
+      key: (dm) => String(dm.channelId),
+      signature: dmRowSignature,
+      create: buildDmRow,
+    });
+    // One Tab stop; arrows/Home/End step within the preview list.
+    setRovingTabindex(dmList, "[data-testid='dm-entry']");
 
     // Show/hide "View All" button based on DM count (respect collapsed state)
     if (dmChannels.length > 3) {
-      setText(viewAllBtn, `View all messages (${dmChannels.length})`);
+      setText(viewAllBtn, shellText("dm.viewAllCount", { count: dmChannels.length }));
       viewAllBtn.style.display = dmCollapsed ? "none" : "";
     } else {
       viewAllBtn.style.display = "none";
@@ -156,6 +240,12 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   dmSection.appendChild(dmList);
   dmSection.appendChild(viewAllBtn);
 
+  // One Tab stop for the preview list; ArrowUp/Down step through the rows and
+  // Enter/Space open one (B9-21: nothing is hover-only). The listener lives on
+  // the list, which survives every keyed re-render.
+  const listLifecycle = new Disposable();
+  enableRovingNavigation(dmList, "[data-testid='dm-entry']", listLifecycle.signal, "vertical");
+
   // --- Store subscription ---
   const unsubDmSection = dmStore.subscribeSelector(
     (s) => s.channels,
@@ -170,6 +260,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     dmCollapsed = !dmCollapsed;
     dmHeader.classList.toggle("collapsed", dmCollapsed);
     dmArrow.textContent = dmCollapsed ? "\u25B6" : "\u25BC";
+    dmArrow.setAttribute("aria-expanded", String(!dmCollapsed));
     dmList.style.display = dmCollapsed ? "none" : "";
     viewAllBtn.style.display = dmCollapsed
       ? "none"

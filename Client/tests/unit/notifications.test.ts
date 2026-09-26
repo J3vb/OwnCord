@@ -7,6 +7,13 @@ import type { DmChannel } from "../../src/stores/dm.store";
 import { membersStore } from "../../src/stores/members.store";
 import { messagesStore } from "../../src/stores/messages.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
+import { setLogLevel } from "../../src/lib/logger";
+
+// The three tests that assert on the logger's debug lines raise the level the
+// global setup lowered (C-04) for themselves; this puts it back.
+afterEach(() => {
+  setLogLevel("warn");
+});
 
 // vi.hoisted ensures testPrefs is available when vi.mock factory runs
 const { testPrefs } = vi.hoisted(() => ({
@@ -466,6 +473,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    setLogLevel("debug");
 
     testPrefs.set("flashTaskbar", true);
     // Disable other notification types to isolate
@@ -482,7 +490,10 @@ describe("notifyIncomingMessage", () => {
     expect(debugSpy).toHaveBeenCalledWith(
       expect.stringContaining("[notifications]"),
       "Taskbar flash not available",
-      "",
+      // The catch now logs the cause. serializeData() turns an Error into
+      // { error, stack }, so asserting on it proves the reason reached the
+      // log rather than being swallowed — which is the point of the change.
+      expect.objectContaining({ error: expect.any(String) }),
     );
 
     debugSpy.mockRestore();
@@ -496,6 +507,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    setLogLevel("debug");
 
     testPrefs.set("notificationSounds", true);
     testPrefs.set("desktopNotifications", false);
@@ -509,7 +521,10 @@ describe("notifyIncomingMessage", () => {
     expect(debugSpy).toHaveBeenCalledWith(
       expect.stringContaining("[notifications]"),
       "Notification sound not available",
-      "",
+      // The catch now logs the cause. serializeData() turns an Error into
+      // { error, stack }, so asserting on it proves the reason reached the
+      // log rather than being swallowed — which is the point of the change.
+      expect.objectContaining({ error: expect.any(String) }),
     );
 
     debugSpy.mockRestore();
@@ -608,6 +623,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    setLogLevel("debug");
 
     testPrefs.set("desktopNotifications", true);
     testPrefs.set("flashTaskbar", false);
@@ -622,7 +638,10 @@ describe("notifyIncomingMessage", () => {
     expect(debugSpy).toHaveBeenCalledWith(
       expect.stringContaining("[notifications]"),
       "Notifications not available",
-      "",
+      // The catch now logs the cause. serializeData() turns an Error into
+      // { error, stack }, so asserting on it proves the reason reached the
+      // log rather than being swallowed — which is the point of the change.
+      expect.objectContaining({ error: expect.any(String) }),
     );
 
     debugSpy.mockRestore();
@@ -1218,7 +1237,8 @@ describe("notifyIncomingMessage", () => {
   describe("notification toggles independently control each action", () => {
     it("fires ONLY desktop notification when other toggles are off", async () => {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      // Imported for its module-load effect only; this test never uses the binding.
+      await import("@tauri-apps/api/window");
       (sendNotification as ReturnType<typeof vi.fn>).mockClear();
 
       testPrefs.set("desktopNotifications", true);

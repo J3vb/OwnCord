@@ -28,12 +28,19 @@ func messageFromGen(m dbgen.Message) *Message {
 }
 
 // sanitizeFTSQuery strips FTS5 operator characters from user input to prevent
-// query injection. Only allows letters, digits, and spaces through unchanged;
-// '-' is folded to a space rather than kept, because in FTS5's MATCH grammar
-// '-' is not a bareword character -- it introduces a column filter
-// ("-col: expr"), so keeping it turns "well-known" into a filter on a
-// nonexistent column "known" and SQLite errors instead of matching. Folding
-// to a space (rather than dropping it) still matches the indexed tokens.
+// query injection. Letters, digits and spaces pass through unchanged; every
+// other rune is folded to a space rather than dropped.
+//
+// Folding, not dropping, is what makes punctuation searchable at all
+// (OC-0357). messages_fts uses FTS5's default unicode61 tokenizer, in which
+// every non-alphanumeric rune is a token separator: "user_id" is INDEXED as
+// the two tokens `user` and `id`. Dropping the underscore asks for the single
+// term `userid`, which exists nowhere in the index, so the search returned
+// nothing at all — silently, for any query containing '_', '.', '@', '/', an
+// apostrophe or a colon. Folding it to a space asks for `user id`, which is
+// exactly how the row was indexed. '-' was folded from the start, for the
+// narrower reason that it introduces a column filter ("-col: expr") and would
+// otherwise make SQLite error; its comment already named the general rule.
 //
 // Filtering characters alone is not enough: FTS5's MATCH grammar also
 // recognizes bareword keywords -- AND, OR, NOT (uppercase only) -- as
@@ -47,12 +54,15 @@ func sanitizeFTSQuery(q string) string {
 	var sb strings.Builder
 	sb.Grow(len(q))
 	for _, r := range q {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ':
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			sb.WriteRune(r)
-		case r == '-':
-			sb.WriteRune(' ')
+			continue
 		}
+		// Everything else -- the separators unicode61 tokenizes on, and every
+		// character of FTS5's own grammar (quotes, parens, '*', '^', ':') --
+		// becomes a separator here too, which is both what the index expects
+		// and what keeps the operator syntax inert.
+		sb.WriteRune(' ')
 	}
 	result := strings.TrimSpace(sb.String())
 	// Enforce a maximum query length to bound FTS processing.
@@ -111,6 +121,27 @@ func (d *DB) GetMessage(ctx context.Context, id int64) (*Message, error) {
 	return messageFromGen(m), nil
 }
 
+// IsMessageDeleted reports the soft-delete flag of one message, and whether the
+// row exists at all. found=false is not an error: the attachment-access path
+// that asks this treats a missing message as "no tombstone to enforce" and
+// leaves the decision to its own ACL.
+//
+// Deliberately not GetMessage: that wrapper's SELECT list carries every message
+// column, and `deleted` is the only one this question needs. Hand-written for
+// the same reason the file's other narrow reads are — one column, one row, no
+// generated struct to map.
+func (d *DB) IsMessageDeleted(ctx context.Context, id int64) (deleted, found bool, err error) {
+	var flag bool
+	scanErr := d.reader.QueryRowContext(ctx, `SELECT deleted FROM messages WHERE id = ?`, id).Scan(&flag)
+	if errors.Is(scanErr, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if scanErr != nil {
+		return false, false, fmt.Errorf("IsMessageDeleted: %w", scanErr)
+	}
+	return flag, true, nil
+}
+
 // GetMessages returns up to limit messages in a channel, ordered newest-first.
 // When before > 0 only messages with id < before are returned (pagination).
 func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int) ([]MessageWithUser, error) {
@@ -164,6 +195,14 @@ func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int
 // EditMessage updates the content and sets edited_at on the message, and
 // returns the updated row via RETURNING so callers don't re-read it.
 // Returns an error if the message does not exist or userID does not match the owner.
+//
+// OC-0358: the ownership read above is taken before the write, so a delete
+// committing in that window would otherwise have its tombstone rewritten and
+// reported as a successful edit — the caller then broadcasts chat_edited for a
+// message every client has already replaced with "message deleted". The UPDATE
+// carries `AND deleted = 0` (the guard SoftDeleteMessage and SetMessagePinned
+// were given in OC-0284), so the losing edit matches no row and surfaces here
+// as ErrNotFound, the same answer an already-deleted message gets.
 func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) (*Message, error) {
 	msg, err := d.GetMessage(ctx, id)
 	if err != nil {
@@ -180,6 +219,9 @@ func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) 
 		Content: content,
 		ID:      id,
 	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("EditMessage: message %d: %w", id, ErrNotFound)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("EditMessage: %w", err)
 	}
@@ -237,6 +279,58 @@ func (d *DB) PurgeChannelMessages(ctx context.Context, channelID, before int64, 
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	ids, err := purgeChannelMessagesTx(ctx, tx, channelID, before, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("PurgeChannelMessages commit: %w", err)
+	}
+	return ids, nil
+}
+
+// PurgeChannelMessagesWithAction is PurgeChannelMessages plus one removal
+// ledger row per purge — not one per message (B5-9, plan item 6) — in the
+// same transaction: a failure recording the row rolls the purge back too.
+// reportID links a report-linked removal.
+func (d *DB) PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error) {
+	if limit < 1 {
+		return []int64{}, nil
+	}
+
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("PurgeChannelMessagesWithAction begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	ids, err := purgeChannelMessagesTx(ctx, tx, channelID, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) > 0 {
+		// The ledger row's target is the acting moderator: a purge is a
+		// bulk, channel-scoped action that can span many authors, and
+		// moderation_actions.target_id must reference exactly one user
+		// (schema FK) — see the B5-9 report's "deviation from the draft"
+		// note for the fuller rationale.
+		reason := fmt.Sprintf("%d messages purged", len(ids))
+		if err := recordLedgerRow(ctx, tx, "removal", actorID, actorID, reportID, reason); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("PurgeChannelMessagesWithAction commit: %w", err)
+	}
+	return ids, nil
+}
+
+// purgeChannelMessagesTx is PurgeChannelMessages' body, taking an
+// already-open tx so callers can extend the same transaction (the ledger
+// row PurgeChannelMessagesWithAction adds).
+func purgeChannelMessagesTx(ctx context.Context, tx *sql.Tx, channelID, before int64, limit int) ([]int64, error) {
 	sel := `SELECT id FROM messages WHERE channel_id = ? AND deleted = 0 ORDER BY id DESC LIMIT ?`
 	args := []any{channelID, limit}
 	if before > 0 {
@@ -278,11 +372,46 @@ func (d *DB) PurgeChannelMessages(ctx context.Context, channelID, before int64, 
 	); err != nil {
 		return nil, fmt.Errorf("PurgeChannelMessages update: %w", err)
 	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("PurgeChannelMessages commit: %w", err)
-	}
 	return ids, nil
+}
+
+// DeleteMessageWithRemoval is DeleteMessage plus a removal ledger row, in
+// one transaction, when the deleter is not the message's author (B5-9,
+// plan item 6): a self-delete or a non-moderator delete writes no row,
+// exactly as DeleteMessage always has. authorID is the message's author,
+// already resolved by the caller. reportID links a report-linked removal.
+// reason is the ledger row's text; empty falls back to the fixed phrase
+// "message removed" (every caller but the report-linked one, P2-10 Codex
+// review: a direct moderator delete carries no reason of its own to store).
+func (d *DB) DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64, reason string) error {
+	if !isMod || deleterID == authorID {
+		return d.DeleteMessage(ctx, msgID, deleterID, isMod)
+	}
+	if reason == "" {
+		reason = "message removed"
+	}
+
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("DeleteMessageWithRemoval begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	q := dbgen.New(tx)
+	res, err := q.SoftDeleteMessage(ctx, msgID)
+	if err != nil {
+		return fmt.Errorf("DeleteMessageWithRemoval: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("DeleteMessageWithRemoval: message %d: %w", msgID, ErrNotFound)
+	}
+	if err := recordLedgerRow(ctx, tx, "removal", authorID, deleterID, reportID, reason); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("DeleteMessageWithRemoval commit: %w", err)
+	}
+	return nil
 }
 
 // AddReaction inserts a reaction. Returns an error on duplicate (same user+emoji+message).
@@ -611,8 +740,41 @@ func (d *DB) GetReadState(ctx context.Context, userID, channelID int64) (lastMes
 	return row.LastMessageID, row.MentionCount, true, nil
 }
 
-// UpdateReadState upserts the read state for a user in a channel and clears
-// its mention badge — marking a channel read consumes its mentions.
+// MarkChannelReadAtLatest marks the channel read at whatever its newest
+// message is when the statement runs, rather than at an id the caller read
+// moments earlier.
+//
+// Use it for "mark this channel read" (channel_focus, mark_read).
+// UpdateReadState stays for the caller that already holds the exact id it
+// means — the send path advancing the sender's own read state past their own
+// message (advanceAuthorReadState) — where there is no snapshot to go stale.
+//
+// OC-0323: a mark-read computed from a stale snapshot cleared mention_count
+// while last_message_id still pointed behind a message that had just raised a
+// mention, so the badge vanished with nothing to recompute it. Both halves of
+// the pair are single-writer statements, so computing the watermark here makes
+// the read and the clear atomic with respect to IncrementMentionCounts.
+func (d *DB) MarkChannelReadAtLatest(ctx context.Context, userID, channelID int64) error {
+	if err := d.q.MarkChannelReadAtLatest(ctx, dbgen.MarkChannelReadAtLatestParams{
+		UserID:      userID,
+		ChannelID:   channelID,
+		ChannelID_2: channelID,
+	}); err != nil {
+		return fmt.Errorf("MarkChannelReadAtLatest: %w", err)
+	}
+	return nil
+}
+
+// UpdateReadState upserts the read state for a user in a channel at the id the
+// caller names, and clears its mention badge — marking a channel read consumes
+// its mentions.
+//
+// It is for a caller that already holds the exact id it means, which since
+// OC-0323 means the send path advancing the sender past their own message;
+// that path runs the statement inside its own transaction through
+// advanceAuthorReadState. A "mark this channel read" caller must use MarkChannelReadAtLatest instead:
+// the id it would pass here is a snapshot, and clearing mentions against a
+// stale one destroys any raised in the meantime.
 func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error {
 	if err := d.q.UpdateReadState(ctx, dbgen.UpdateReadStateParams{
 		UserID:        userID,

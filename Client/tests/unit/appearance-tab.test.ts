@@ -1,30 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildAppearanceTab } from "@components/settings/AppearanceTab";
 
-const { mockGetActiveThemeName, mockLoadCustomTheme, mockRestoreTheme, mockApplyThemeByName } =
-  vi.hoisted(() => ({
-    mockGetActiveThemeName: vi.fn(() => "neon-glow"),
-    mockLoadCustomTheme: vi.fn(
-      (): {
-        name: string;
-        author: string;
-        version: string;
-        colors: Record<string, string>;
-      } | null => null,
-    ),
-    mockRestoreTheme: vi.fn(),
-    mockApplyThemeByName: vi.fn(),
-  }));
+const { mockGetActiveThemeName, mockRestoreTheme, mockApplyThemeByName } = vi.hoisted(() => ({
+  mockGetActiveThemeName: vi.fn(() => "neon-glow"),
+  mockRestoreTheme: vi.fn(),
+  mockApplyThemeByName: vi.fn(),
+}));
 
 vi.mock("@stores/ui.store", () => ({
   setTheme: vi.fn(),
 }));
 
-vi.mock("@lib/themes", () => ({
+vi.mock("@lib/themes", async (importOriginal) => ({
   getActiveThemeName: mockGetActiveThemeName,
-  loadCustomTheme: mockLoadCustomTheme,
   restoreTheme: mockRestoreTheme,
   applyThemeByName: mockApplyThemeByName,
+  // The real single writer of the accent tokens (B9-2).
+  applyAccent: (await importOriginal<typeof import("@lib/themes")>()).applyAccent,
 }));
 
 describe("AppearanceTab — Accessibility", () => {
@@ -39,7 +31,6 @@ describe("AppearanceTab — Accessibility", () => {
     document.body.removeAttribute("style");
     vi.clearAllMocks();
     mockGetActiveThemeName.mockReturnValue("neon-glow");
-    mockLoadCustomTheme.mockReturnValue(null);
   });
 
   afterEach(() => {
@@ -66,6 +57,28 @@ describe("AppearanceTab — Accessibility", () => {
 
     const themeRow = container.querySelector(".theme-options");
     expect(themeRow?.getAttribute("role")).toBe("radiogroup");
+  });
+
+  it("theme and accent groups are one Tab stop with arrow-key movement (A11Y-09)", () => {
+    const section = buildAppearanceTab(ac.signal);
+    container.appendChild(section);
+
+    for (const group of [".theme-options", ".accent-swatches"]) {
+      const row = container.querySelector(group)!;
+      // Exactly one cell in the group is tabbable.
+      expect(row.querySelectorAll("[role='radio'][tabindex='0']").length).toBe(1);
+
+      const first = row.querySelector("[tabindex='0']") as HTMLElement;
+      first.focus();
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      const next = row.querySelector("[tabindex='0']") as HTMLElement;
+      expect(next).not.toBe(first);
+      expect(document.activeElement).toBe(next);
+
+      // Enter activates the focused cell through its own click handler.
+      next.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(next.getAttribute("aria-checked")).toBe("true");
+    }
   });
 
   it("theme tiles have role=radio and aria-checked", () => {
@@ -132,26 +145,6 @@ describe("AppearanceTab — Accessibility", () => {
     expect(activeSwatch).not.toBeNull();
     expect(activeSwatch.title).toBe("#5865f2");
     expect(hexInput.placeholder).toBe("5865f2");
-  });
-
-  it("reflects a custom theme accent when no override has been saved", () => {
-    mockGetActiveThemeName.mockReturnValue("custom-sunrise");
-    mockLoadCustomTheme.mockReturnValue({
-      name: "custom-sunrise",
-      author: "test",
-      version: "1.0.0",
-      colors: { "--accent": "#123456" },
-    });
-
-    const section = buildAppearanceTab(ac.signal);
-    container.appendChild(section);
-
-    const activeSwatch = container.querySelector(".accent-swatch.active");
-    const hexInput = container.querySelector(".accent-hex-row input") as HTMLInputElement;
-
-    expect(activeSwatch).toBeNull();
-    expect(hexInput.value).toBe("123456");
-    expect(hexInput.placeholder).toBe("123456");
   });
 
   it("updates the displayed default accent when switching built-in themes without an override", () => {
@@ -406,43 +399,7 @@ describe("AppearanceTab — Accessibility", () => {
     light.click();
 
     expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#ffffff");
-    expect(document.documentElement.style.getPropertyValue("--text-normal")).toBe("#313338");
-  });
-
-  // --- Custom theme with invalid accent falls back to blurple ---
-
-  it("falls back to blurple for custom theme with invalid accent color", () => {
-    mockGetActiveThemeName.mockReturnValue("custom-bad");
-    mockLoadCustomTheme.mockReturnValue({
-      name: "custom-bad",
-      author: "test",
-      version: "1.0.0",
-      colors: { "--accent": "not-a-color" },
-    });
-
-    const section = buildAppearanceTab(ac.signal);
-    container.appendChild(section);
-
-    const hexInput = container.querySelector(".accent-hex-row input") as HTMLInputElement;
-    expect(hexInput.value).toBe("5865f2");
-  });
-
-  // --- Custom theme with null colors falls back to blurple ---
-
-  it("falls back to blurple for custom theme without accent color", () => {
-    mockGetActiveThemeName.mockReturnValue("custom-noaccent");
-    mockLoadCustomTheme.mockReturnValue({
-      name: "custom-noaccent",
-      author: "test",
-      version: "1.0.0",
-      colors: {},
-    });
-
-    const section = buildAppearanceTab(ac.signal);
-    container.appendChild(section);
-
-    const hexInput = container.querySelector(".accent-hex-row input") as HTMLInputElement;
-    expect(hexInput.value).toBe("5865f2");
+    expect(document.documentElement.style.getPropertyValue("--text-normal")).toBe("#2a2c31");
   });
 
   // --- Hex input truncates to 6 chars ---
@@ -469,15 +426,22 @@ describe("AppearanceTab — Accessibility", () => {
     hexInput.dispatchEvent(new Event("input", { bubbles: true }));
 
     // The green swatch should now be active
-    const swatches = container.querySelectorAll(".accent-swatch");
-    const greenSwatch = swatches[1] as HTMLElement;
-    // Note: matching depends on RGB comparison in hexToRgb
-    // The swatch style.backgroundColor is set to "#57f287" which browsers report as rgb()
-    // In jsdom this comparison may or may not work exactly, but the sync function runs
     expect(hexInput.value).toBe("57f287");
   });
 
   // --- Renders all 10 accent swatches ---
+
+  it("names the custom accent input and describes the Q8 readability fallback (B9-2)", () => {
+    const section = buildAppearanceTab(ac.signal);
+    container.appendChild(section);
+
+    const hexInput = container.querySelector(".accent-hex-row input") as HTMLInputElement;
+    expect(hexInput.getAttribute("aria-label")).toBe("Custom accent color (hex)");
+    const note = document.getElementById(hexInput.getAttribute("aria-describedby") ?? "");
+    expect(note?.textContent).toBe(
+      "Custom colours may reduce readability; text and focus indicators fall back to a readable colour when needed, and High Contrast restores tested colours.",
+    );
+  });
 
   it("renders all 10 accent color swatches", () => {
     const section = buildAppearanceTab(ac.signal);

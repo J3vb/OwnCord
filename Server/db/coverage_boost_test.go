@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -52,7 +53,7 @@ func TestVoice_JoinVoiceChannelIfCapacity_AtLimit(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected ErrChannelFull, got nil")
 	}
-	if err != db.ErrChannelFull {
+	if !errors.Is(err, db.ErrChannelFull) {
 		t.Errorf("error = %v, want ErrChannelFull", err)
 	}
 }
@@ -756,7 +757,7 @@ func TestCreateUserWithInvite_Success(t *testing.T) {
 		t.Fatalf("CreateInvite: %v", err)
 	}
 
-	uid, err := database.CreateUserWithInvite(context.Background(), "newuser", "hash", 4, code)
+	uid, err := database.CreateUserWithInvite(context.Background(), "newuser", "hash", 4, code, "sess-newuser", "test", "127.0.0.1")
 	if err != nil {
 		t.Fatalf("CreateUserWithInvite: %v", err)
 	}
@@ -769,12 +770,22 @@ func TestCreateUserWithInvite_Success(t *testing.T) {
 	if inv == nil || inv.Uses != 1 {
 		t.Errorf("invite uses = %v, want 1", inv)
 	}
+	// The first session commits with the account (OC-0376).
+	sess, err := database.GetSessionByTokenHash(context.Background(), "sess-newuser")
+	if err != nil || sess == nil || sess.UserID != uid {
+		t.Errorf("session = %+v, %v; want a session for user %d", sess, err, uid)
+	}
+	// A registration's first session is not a new login to signal (B4-7):
+	// no other device exists to tell.
+	if sess != nil && sess.Unseen {
+		t.Error("registration's first session should not be flagged unseen")
+	}
 }
 
 func TestCreateUserWithInvite_InvalidCode(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	_, err := database.CreateUserWithInvite(context.Background(), "baduser", "hash", 4, "nonexistent-code")
+	_, err := database.CreateUserWithInvite(context.Background(), "baduser", "hash", 4, "nonexistent-code", "sess-bad", "test", "127.0.0.1")
 	if err == nil {
 		t.Error("expected error for invalid invite code")
 	}
@@ -787,7 +798,7 @@ func TestCreateUserWithInvite_RevokedInvite(t *testing.T) {
 	code, _ := database.CreateInvite(context.Background(), creatorID, 0, nil)
 	_ = database.RevokeInvite(context.Background(), code)
 
-	_, err := database.CreateUserWithInvite(context.Background(), "revokeduser", "hash", 4, code)
+	_, err := database.CreateUserWithInvite(context.Background(), "revokeduser", "hash", 4, code, "sess-revoked", "test", "127.0.0.1")
 	if err == nil {
 		t.Error("expected error for revoked invite")
 	}
@@ -801,7 +812,7 @@ func TestCreateUserWithInvite_ExpiredInvite(t *testing.T) {
 	pastTime := time.Now().Add(-1 * time.Hour)
 	code, _ := database.CreateInvite(context.Background(), creatorID, 0, &pastTime)
 
-	_, err := database.CreateUserWithInvite(context.Background(), "expireduser", "hash", 4, code)
+	_, err := database.CreateUserWithInvite(context.Background(), "expireduser", "hash", 4, code, "sess-expired", "test", "127.0.0.1")
 	if err == nil {
 		t.Error("expected error for expired invite")
 	}

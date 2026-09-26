@@ -357,6 +357,36 @@ describe("dmStore", () => {
       const ch = dmStore.getState().channels[0]!;
       expect(ch.unreadCount).toBe(2);
     });
+
+    // OC-0317: a replayed/stale id must not regress the lastMessageId
+    // watermark either — its sibling updateDmLastMessagePreview already
+    // returns `prev` untouched on replay (OC-0301); this function must do
+    // the same so a later, genuinely-new frame in the same burst is still
+    // correctly recognized as new instead of looking like another replay.
+    it("does not regress lastMessageId, lastMessage, or lastMessageAt on a replay", () => {
+      setDmChannels([
+        makeDm({
+          channelId: 5,
+          unreadCount: 1,
+          lastMessageId: 102,
+          lastMessage: "second",
+          lastMessageAt: "2026-03-28T12:00:02Z",
+        }),
+      ]);
+      updateDmLastMessage(5, 101, "stale-replay", "2026-03-28T12:00:01Z");
+      const ch = dmStore.getState().channels[0]!;
+      expect(ch.lastMessageId).toBe(102);
+      expect(ch.lastMessage).toBe("second");
+      expect(ch.lastMessageAt).toBe("2026-03-28T12:00:02Z");
+      expect(ch.unreadCount).toBe(1);
+
+      // The next genuinely-new frame must still be counted as new, not
+      // treated as a second replay because the watermark got rolled back.
+      updateDmLastMessage(5, 103, "third", "2026-03-28T12:00:03Z");
+      const after = dmStore.getState().channels[0]!;
+      expect(after.lastMessageId).toBe(103);
+      expect(after.unreadCount).toBe(2);
+    });
   });
 
   // ── updateDmLastMessagePreview ──────────────────────────

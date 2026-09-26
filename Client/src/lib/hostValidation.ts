@@ -29,6 +29,8 @@ export function isValidHost(host: string): boolean {
   // one colon means the whole string is the address — a single colon is
   // reserved for the host:port separator below.
   if ((host.match(/:/g) ?? []).length > 1 && /^[0-9A-Fa-f:.]+$/.test(host)) return true;
-  // DNS name or IPv4 literal, optionally with a port.
-  return /^[\w.-]+(:\d+)?$/.test(host);
+  // DNS name or IPv4 literal, optionally with a port. Explicit ASCII class
+  // (not `\w`, which wrongly includes '_') to match the Rust proxies'
+  // charset exactly.
+  return /^[A-Za-z0-9.-]+(:\d+)?$/.test(host);
 }

@@ -18,22 +18,33 @@ import (
 func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (*SendMessageResult, error) {
 	// Phase B Step 8 — wrap the public service entrypoint in a tracing span
 	// and a duration histogram. Both are no-ops in the default build.
-	ctx, span := telemetry.GlobalTracer("service/message").Start(ctx, "MessageService.SendMessage",
+	ctx, done := traceCall(ctx, "service/message", "MessageService.SendMessage",
 		telemetry.Int64("user_id", p.UserID),
 		telemetry.Int64("channel_id", p.ChannelID),
 	)
-	start := time.Now()
-	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
-			telemetry.String("method", "SendMessage"))
-		span.End()
-	}()
+	defer done()
 
 	ch, content, err := s.sendMessagePrecheck(ctx, p)
 	if err != nil {
 		return nil, err
 	}
 	isDM := ch.Type == "dm"
+	delivery, err := messageDeliveryParams(p, content, s.st.MessageDeliveryFloorMS())
+	if err != nil {
+		return nil, err
+	}
+	if delivery != nil {
+		previous, lookupErr := s.st.FindMessageDelivery(ctx, *delivery)
+		if lookupErr != nil {
+			return nil, messageDeliveryError(lookupErr)
+		}
+		if previous != nil {
+			return &SendMessageResult{MessageID: previous.Message.ID, Timestamp: previous.Message.Timestamp, Duplicate: true}, nil
+		}
+	}
+	if err := s.checkMessageSlowMode(ctx, p, ch); err != nil {
+		return nil, err
+	}
 
 	// Resolve mentions against the sanitized content, before the insert, so the
 	// row and its mention set are written together. Unknown @words and an
@@ -42,37 +53,14 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 	// Persist message. RETURNING hands back the inserted row, so the DB-assigned
 	// timestamp the fan-out needs arrives with the insert instead of a re-read.
-	msg, err := s.st.CreateMessageWithMentions(ctx, p.ChannelID, p.UserID, content, p.ReplyTo,
-		mentions.UserIDs, mentions.Everyone)
-	if err != nil {
-		slog.Error("MessageService.SendMessage CreateMessage", "err", err)
-		return nil, fmt.Errorf("%w: failed to save message", ErrInternal)
-	}
-	msgID := msg.ID
-
-	attachments, err := s.sendMessageLinkAttachments(ctx, p, msgID, content)
+	msg, attachments, duplicate, err := s.persistMessage(ctx, p, content, mentions, delivery)
 	if err != nil {
 		return nil, err
 	}
-
-	// Advance the author's own read state past the message they just sent.
-	// Both unread queries count "messages with id > my read_states row" and
-	// neither filters by author, so without this an author's own message
-	// counts as unread to themselves: post in a channel, navigate away, and
-	// the next `ready` restates it as an unread badge that never clears until
-	// something else marks the channel read.
-	//
-	// Done here rather than by adding an author filter to the two queries so
-	// the stored read state stays truthful — you have, in fact, seen your own
-	// message — and so the fix covers DMs and text channels through one path.
-	//
-	// Best-effort: the message is already committed and broadcast-bound, so a
-	// failure here must not fail the send. The worst case is the pre-existing
-	// stale-badge behaviour, which the next mark_read corrects.
-	if err := s.st.UpdateReadState(ctx, p.UserID, p.ChannelID, msgID); err != nil {
-		slog.Warn("MessageService.SendMessage: could not advance author read state",
-			"err", err, "user_id", p.UserID, "channel_id", p.ChannelID, "msg_id", msgID)
+	if duplicate {
+		return &SendMessageResult{MessageID: msg.ID, Timestamp: msg.Timestamp, Duplicate: true}, nil
 	}
+	msgID := msg.ID
 
 	result := &SendMessageResult{
 		MessageID:        msgID,
@@ -102,7 +90,20 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	// resurrecting it — the badge does not reappear.
 	channelID, authorID, participantIDs := p.ChannelID, p.UserID, result.ParticipantIDs
 	s.bg(func() {
-		s.applyMentionCounts(context.WithoutCancel(ctx), channelID, msgID, authorID, mentions, isDM, participantIDs)
+		bgCtx := context.WithoutCancel(ctx)
+		s.applyMentionCounts(bgCtx, channelID, msgID, authorID, mentions, isDM, participantIDs)
+		// Web Push dispatch (B5-11, behind HP-5): nil when dispatch is off.
+		// The candidate audience is the message's direct @mentions for a
+		// guild channel, or the DM's participants for a DM -- Notify applies
+		// every remaining filter (author, online, permission, coalescing)
+		// itself.
+		if s.pushNotifier != nil {
+			candidates := mentions.UserIDs
+			if isDM {
+				candidates = participantIDs
+			}
+			s.pushNotifier.Notify(bgCtx, channelID, authorID, candidates)
+		}
 	})
 
 	slog.Debug("message sent", "user", p.Username, "channel_id", p.ChannelID, "msg_id", msgID)
@@ -111,7 +112,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 // sendMessagePrecheck runs every gate a send must clear before anything is
 // written: rate limit, channel lookup, send permission, content sanitization,
-// attachment permission and slow mode. It returns the resolved channel and the
+// and attachment permission. It returns the resolved channel and the
 // sanitized content for the caller to persist.
 func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageParams) (*db.Channel, string, error) {
 	// Rate limit.
@@ -148,19 +149,6 @@ func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageP
 	if !isDM && len(p.AttachmentIDs) > 0 {
 		if !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.AttachFiles) {
 			return nil, "", fmt.Errorf("%w: missing ATTACH_FILES permission", ErrForbidden)
-		}
-	}
-
-	// Slow mode (non-DM only). Deliberately checked last, after content and
-	// attachment validation: Allow() below records the cooldown timestamp the
-	// instant it returns true, so a send that fails validation after this
-	// point must not have already spent the once-per-window token — that
-	// would lock the composer for up to ch.SlowMode seconds for a send that
-	// never actually posted anything.
-	if !isDM && ch.SlowMode > 0 && !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.ManageMessages) {
-		slowKey := auth.Key(auth.Key("slow", p.UserID), p.ChannelID)
-		if s.limiter != nil && !s.limiter.Allow(slowKey, 1, time.Duration(ch.SlowMode)*time.Second) {
-			return nil, "", fmt.Errorf("%w: channel has %ds slow mode", ErrSlowMode, ch.SlowMode)
 		}
 	}
 
@@ -224,8 +212,10 @@ func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendM
 	return attachments, nil
 }
 
-// sendMessageDMSideEffects fills in the DM-specific fields of result and
-// (re)opens the DM for every other participant. It reports false when the
+// sendMessageDMSideEffects fills in the DM-specific fields of result,
+// (re)opens the DM for every trusted (or group) participant, and — for a
+// one-to-one DM whose recipient does not yet trust the sender — stages a
+// message request instead (B5-6 decision 4). It reports false when the
 // participant lookup failed, which is the one case where the caller returns
 // the already-saved message without the remaining side effects.
 func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMessageParams, result *SendMessageResult) bool {
@@ -244,7 +234,6 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 		slog.Error("MessageService.SendMessage GetDMParticipantIDs", "err", pErr, "channel_id", p.ChannelID)
 		return false
 	}
-	result.ParticipantIDs = participantIDs
 
 	sender, _ := s.st.GetUserByID(bgCtx, p.UserID)
 	result.SenderUser = sender
@@ -258,12 +247,35 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 	} else {
 		slog.Warn("MessageService.SendMessage GetDMParticipants", "err", partErr, "channel_id", p.ChannelID)
 	}
-	if isGroup, gErr := s.st.IsGroupDM(bgCtx, p.ChannelID); gErr == nil {
-		result.DMIsGroup = isGroup
+	// OC-0419: a failed lookup must not fall through with isGroup at its
+	// false zero value — that misclassifies a group DM as one-to-one, and
+	// the loop below then runs every other member through
+	// dmFirstContactGate (staging a message_requests row and a
+	// trusted_senders "sent_first" edge instead of delivering, since group
+	// DMs never populate trusted_senders) while skipping OpenDM for all of
+	// them. Nor may it fail closed to isGroup=true, the sibling lookups'
+	// posture (ws/voice_broadcast.go filterDMAudience, service/dm.go
+	// RingTargets, service/push_dispatch.go Notify): that would skip the
+	// first-contact gate and OpenDM/deliver to an untrusted 1:1 recipient,
+	// the opposite privacy regression. This is the one "cannot decide" case
+	// the caller already handles — bail out the same way the
+	// participant-lookup failure above does: message stays saved, the
+	// remaining DM side effects are skipped entirely.
+	isGroup, gErr := s.st.IsGroupDM(bgCtx, p.ChannelID)
+	if gErr != nil {
+		slog.Error("MessageService.SendMessage IsGroupDM", "err", gErr, "channel_id", p.ChannelID)
+		return false
 	}
+	result.DMIsGroup = isGroup
 
 	for _, pid := range participantIDs {
 		if pid == p.UserID {
+			continue
+		}
+		if !isGroup && s.messageRequests != nil && s.dmFirstContactGate(bgCtx, p, pid, result) {
+			// Staged as a request (or refused outright — banned recipient):
+			// never OpenDM an untrusted recipient. dmFirstContactGate has
+			// already done everything this send owes them.
 			continue
 		}
 		// OpenDM is INSERT OR IGNORE and idempotent: opened reports whether
@@ -282,7 +294,105 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 			result.OpenedDMFor = append(result.OpenedDMFor, pid)
 		}
 	}
+
+	// The live-delivery audience: the sender plus every other participant who
+	// trusts them (one-to-one) or every participant (group) — see
+	// DMAudience. Computed last, after the loop above has written any new
+	// trust/request rows, so a recipient this very send just staged a
+	// request for is correctly excluded.
+	if audience, aErr := s.DMAudience(bgCtx, p.ChannelID, p.UserID); aErr != nil {
+		slog.Error("MessageService.SendMessage DMAudience", "err", aErr, "channel_id", p.ChannelID)
+		// Fail closed toward every other participant, but still let the
+		// sender see their own message live — the same best-effort posture
+		// as the rest of this function's error handling.
+		result.ParticipantIDs = []int64{p.UserID}
+	} else {
+		result.ParticipantIDs = audience
+	}
 	return true
+}
+
+// dmFirstContactGate runs the B5-6 gate for one non-sender participant
+// (recipientID) of a one-to-one DM p.UserID just sent into. It reports true
+// when the send effect for this recipient is already fully handled (a
+// request was staged, or the recipient is banned and gets nothing) — the
+// caller's cue to skip OpenDM entirely for them. False means the recipient
+// already trusts the sender and today's OpenDM path applies.
+func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessageParams, recipientID int64, result *SendMessageResult) bool {
+	recipient, rErr := s.st.GetUserByID(ctx, recipientID)
+	if rErr != nil {
+		slog.Error("MessageService.SendMessage: recipient lookup for the first-contact gate failed",
+			"err", rErr, "recipient_id", recipientID)
+		return true // nothing more can be decided for them; do not OpenDM
+	}
+	// "Cannot receive DMs" (community-services.md S1): no finer predicate
+	// exists today than the ban state, so a banned recipient gets no request
+	// row and no frame. The send itself still succeeds for the sender
+	// (decision 5).
+	if recipient == nil || auth.IsEffectivelyBanned(recipient) {
+		return true
+	}
+	trusted, tErr := s.st.IsTrustedSender(ctx, recipientID, p.UserID)
+	if tErr != nil {
+		slog.Error("MessageService.SendMessage: trust lookup failed",
+			"err", tErr, "recipient_id", recipientID, "sender_id", p.UserID)
+		return true
+	}
+	if trusted {
+		return false // today's OpenDM path
+	}
+	if hook := s.afterFirstContactTrustCheck; hook != nil {
+		hook()
+	}
+
+	req, fcErr := s.messageRequests.firstContact(ctx, p.UserID, recipientID, p.ChannelID, result.MessageID)
+	if fcErr != nil {
+		slog.Error("MessageService.SendMessage: first-contact gate failed",
+			"err", fcErr, "recipient_id", recipientID, "sender_id", p.UserID)
+		return true
+	}
+	if req != nil {
+		result.RequestCreatedFor = append(result.RequestCreatedFor, req)
+		if result.RequestPreview == nil {
+			if hook := s.beforeRequestPreviewLookup; hook != nil {
+				hook(result.MessageID)
+			}
+			result.RequestPreview = s.canonicalRequestPreview(ctx, result.MessageID)
+		}
+	}
+	return true
+}
+
+// canonicalRequestPreview reads messageID fresh rather than trusting the
+// send's own cached content (Codex review round 2, P1): the WS dm_request
+// frame's preview must never disagree with the REST inbox's
+// (db.DB.ListPendingMessageRequests joins first_message_id with
+// deleted = 0) — building it from cached content let a delete racing the
+// frame leave a stale, since-deleted preview on the wire while REST already
+// reported preview: null for the very same request. nil (no preview on the
+// frame) when the message cannot be read or has since been deleted —
+// exactly ListPendingMessageRequests' own condition.
+func (s *MessageService) canonicalRequestPreview(ctx context.Context, messageID int64) *DMRequestPreview {
+	msg, err := s.st.GetMessage(ctx, messageID)
+	if err != nil || msg == nil || msg.Deleted {
+		return nil
+	}
+	return &DMRequestPreview{MessageID: msg.ID, Content: msg.Content, Timestamp: msg.Timestamp}
+}
+
+// DMAudience is the live-delivery audience for a DM frame senderID's action
+// in channelID just produced: MessageRequestService.DMDeliveryAudience when
+// the gate is wired, or every participant when it is not — s.messageRequests
+// == nil means every test and any caller built via NewMessageService
+// directly instead of service.New(), which keeps their behaviour exactly as
+// it was before B5-6. Exported for the ws layer's typing path
+// (PresenceDeps.MessageSvc, ws/handlers_presence.go) — the one DM frame path
+// outside package service.
+func (s *MessageService) DMAudience(ctx context.Context, channelID, senderID int64) ([]int64, error) {
+	if s.messageRequests == nil {
+		return s.st.GetDMParticipantIDs(ctx, channelID)
+	}
+	return s.messageRequests.DMDeliveryAudience(ctx, channelID, senderID)
 }
 
 // EditMessage validates and persists a message edit.
@@ -315,7 +425,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	// not fall through with chanType="", which routes into the non-DM
 	// permission branch below. That branch passes on the base role mask alone
 	// (SEND_MESSAGES|READ_MESSAGES, no per-channel override exists for a DM),
-	// skipping both the DM-participant check and requireDMNotBlocked entirely.
+	// skipping both the DM-participant check and RequireDMNotBlocked entirely.
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
 	if chErr != nil || ch == nil {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
@@ -323,7 +433,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	chanType := ch.Type
 	isDM := chanType == "dm"
 
-	if accessErr := s.editMessageCheckAccess(ctx, userID, msg.ChannelID, ch, isDM); accessErr != nil {
+	if accessErr := s.editMessageCheckAccess(ctx, userID, ch); accessErr != nil {
 		return nil, accessErr
 	}
 
@@ -365,9 +475,17 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		// Detached from ctx for the same reason as the SendMessage post-commit
 		// lookup: the edit already committed, so an editor whose connection
 		// drops right after must not silently drop the chat_edited fan-out.
-		participantIDs, pErr := s.st.GetDMParticipantIDs(context.WithoutCancel(ctx), msg.ChannelID)
+		participantIDs, pErr := s.DMAudience(context.WithoutCancel(ctx), msg.ChannelID, userID)
 		if pErr != nil {
-			slog.Error("MessageService.EditMessage GetDMParticipantIDs", "err", pErr, "channel_id", msg.ChannelID)
+			slog.Error("MessageService.EditMessage DMAudience", "err", pErr, "channel_id", msg.ChannelID)
+			// Codex P2-5: leaving ParticipantIDs nil here made
+			// dmEventOrFallback (ws/handlers_chat.go) treat the empty slice
+			// as "no explicit audience" and fall back to the plain
+			// per-channel-topic broadcast — reaching anyone subscribed to
+			// the DM's topic (channel_focus is participant-gated, not
+			// trust-gated) regardless of the first-contact gate. Fail closed
+			// to the editor only instead.
+			result.ParticipantIDs = []int64{userID}
 		} else {
 			result.ParticipantIDs = participantIDs
 		}
@@ -377,29 +495,27 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	return result, nil
 }
 
-// editMessageCheckAccess gates an edit on the channel the message lives in:
-// participation plus the block check for a DM, the shared send gate for
-// everything else. isDM is the caller's already-computed ch.Type == "dm".
-func (s *MessageService) editMessageCheckAccess(ctx context.Context, userID, channelID int64, ch *db.Channel, isDM bool) error {
-	if isDM {
-		ok, dmErr := s.st.IsDMParticipant(ctx, userID, channelID)
-		if dmErr != nil || !ok {
-			return fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+// editMessageCheckAccess gates an edit through the same predicate a send
+// uses (permissions.CanSendMessage, via channelSubject/denial) instead of a
+// second, DM-only copy of participation/block — a timed-out user must not
+// be able to broadcast new text into a channel or a DM by editing an old
+// message (P1-2, Codex review). isDM is the caller's already-computed
+// ch.Type == "dm".
+//
+// Most of the verdict is still collapsed into one opaque "cannot edit this
+// message" (ErrForbidden) so the reply stays an ownership/permission
+// non-oracle — but ErrTimedOut, and a DM's ErrBlocked (the prior DM branch's
+// own behavior), pass through distinctly: TIMED_OUT and "blocked" are
+// signals the client already surfaces elsewhere and are not oracles here.
+func (s *MessageService) editMessageCheckAccess(ctx context.Context, userID int64, ch *db.Channel) error {
+	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, true)
+	if err != nil {
+		return fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	}
+	if verdict := denial(permissions.CanSendMessage(sub)); verdict != nil {
+		if errors.Is(verdict, ErrTimedOut) || (ch.Type == "dm" && errors.Is(verdict, ErrBlocked)) {
+			return verdict
 		}
-		if blkErr := requireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
-			return blkErr
-		}
-	} else if permErr := s.checkSendPermission(ctx, userID, ch); permErr != nil {
-		// An edit injects new text into the channel and is fanned out to every
-		// reader, so it must clear the same gate as a send rather than
-		// SEND_MESSAGES alone: READ_MESSAGES so a role locked out of a private
-		// channel (the panel's "Can access" toggle denies
-		// READ_MESSAGES|CONNECT_VOICE and leaves SEND_MESSAGES intact) cannot
-		// rewrite its old posts, and the announcement rule so a demoted
-		// moderator cannot rewrite a trusted broadcast. Mirrors DeleteMessage,
-		// SetMessagePinned and handleReaction, which already require
-		// READ_MESSAGES. The reason is collapsed into this sink's single opaque
-		// error so the reply stays an ownership/permission non-oracle.
 		return fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
 	return nil
@@ -433,6 +549,24 @@ func (s *MessageService) deleteAuthz(ctx context.Context, userID int64, msg *db.
 
 // DeleteMessage validates and soft-deletes a message.
 func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64) (*DeleteMessageResult, error) {
+	return s.deleteMessage(ctx, userID, msgID, nil, "")
+}
+
+// DeleteMessageForReport is DeleteMessage with a report link (B5-9's
+// report-linked removal entry point, plan item 7): same authorization and
+// effect, plus report_id on the removal ledger row. reason is the
+// moderator's submitted reason for the removal, stored on the ledger row
+// (P2-10, Codex review: this used to be silently discarded in favor of the
+// fixed phrase every other delete path uses) — empty falls back to that
+// same fixed phrase.
+func (s *MessageService) DeleteMessageForReport(ctx context.Context, userID, msgID, reportID int64, reason string) (*DeleteMessageResult, error) {
+	return s.deleteMessage(ctx, userID, msgID, &reportID, reason)
+}
+
+func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64, reportID *int64, reason string) (*DeleteMessageResult, error) {
+	if err := validateActionReason(reason); err != nil {
+		return nil, err
+	}
 	// Rate limit.
 	ratKey := auth.Key("chat_delete", userID)
 	if s.limiter != nil && !s.limiter.Allow(ratKey, 10, time.Second) {
@@ -478,7 +612,7 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 		return nil, err
 	}
 
-	if err := s.st.DeleteMessage(ctx, msgID, userID, isMod); err != nil {
+	if err := s.st.DeleteMessageWithRemoval(ctx, msgID, userID, isMod, msg.UserID, reportID, reason); err != nil {
 		// db.DeleteMessage's UPDATE now excludes already-deleted rows (OC-0284),
 		// so a message that raced this request to the writer between the
 		// msg.Deleted check above and this write surfaces here as
@@ -518,9 +652,15 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 		// Detached from ctx for the same reason as the send/edit paths: the
 		// soft-delete already committed, so a deleter whose connection drops
 		// right after must not silently drop the chat_deleted fan-out.
-		participantIDs, pErr := s.st.GetDMParticipantIDs(context.WithoutCancel(ctx), msg.ChannelID)
+		participantIDs, pErr := s.DMAudience(context.WithoutCancel(ctx), msg.ChannelID, userID)
 		if pErr != nil {
-			slog.Error("MessageService.DeleteMessage GetDMParticipantIDs", "err", pErr, "channel_id", msg.ChannelID)
+			slog.Error("MessageService.DeleteMessage DMAudience", "err", pErr, "channel_id", msg.ChannelID)
+			// Codex P2-5: see EditMessage's identical comment — an empty
+			// ParticipantIDs here would make dmEventOrFallback broadcast the
+			// chat_deleted over the plain channel topic instead, reaching an
+			// untrusted recipient subscribed to it. Fail closed to the
+			// deleter only.
+			result.ParticipantIDs = []int64{userID}
 		} else {
 			result.ParticipantIDs = participantIDs
 		}

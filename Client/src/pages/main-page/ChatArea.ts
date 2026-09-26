@@ -17,6 +17,8 @@ import type { SearchOverlayController } from "./OverlayManagers";
 import type { ChannelController } from "./ChannelController";
 import { createMessageJumper } from "./MessageJump";
 import { setMessageJumpHandler } from "@lib/message-navigation";
+import { channelsStore } from "@stores/channels.store";
+import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,8 +50,12 @@ export interface ChatAreaResult {
   readonly chatHeaderName: HTMLSpanElement | null;
   /** Full chat header refs (hash, name, topic) for DM mode updates. */
   readonly chatHeaderRefs: ChatHeaderRefs;
+  /** The header's narrow-width sidebar toggle, for the drawer controller. */
+  readonly sidebarToggle: HTMLButtonElement;
   /** The search overlay controller. */
   readonly searchCtrl: SearchOverlayController;
+  /** Close the pinned-messages panel if it is open. */
+  readonly closePinnedPanel: () => void;
   /** Slot for the DM profile sidebar (right panel, sibling of chat area). */
   readonly dmProfileSlot: HTMLDivElement;
   /** All child MountableComponents for cleanup. */
@@ -107,6 +113,27 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   unsubscribers.push(() => {
     searchCtrl.cleanup();
   });
+
+  // A channel that becomes gated takes its content out of the overlays
+  // (B9-7), mounted or not: the pins panel outlives a channel switch and a
+  // server-wide search spans every channel.
+  let knownChannels = channelsStore.getState().channels;
+  unsubscribers.push(
+    channelsStore.subscribeSelector(
+      (s) => s.channels,
+      (channels) => {
+        const previous = knownChannels;
+        knownChannels = channels;
+        for (const [id, channel] of channels) {
+          const before = previous.get(id);
+          if (before === undefined || nsfwConsentRequired(before)) continue;
+          if (!nsfwConsentRequired(channel)) continue;
+          pinnedCtrl.closeFor(id);
+          searchCtrl.cleanup();
+        }
+      },
+    ),
+  );
 
   // --- Chat header ---
   const chatHeader = buildChatHeader({
@@ -166,7 +193,9 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     videoGrid,
     chatHeaderName,
     chatHeaderRefs: chatHeader.refs,
+    sidebarToggle: chatHeader.refs.sidebarToggle,
     searchCtrl,
+    closePinnedPanel: pinnedCtrl.cleanup,
     dmProfileSlot,
     children,
     unsubscribers,

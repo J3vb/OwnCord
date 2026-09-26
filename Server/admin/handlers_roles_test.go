@@ -25,7 +25,7 @@ func newRolesHandler(t *testing.T, database *db.DB) (http.Handler, *mockHub, *mo
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv,
-		newTestModService(database), newTestRoleService(database))
+		newTestServices(database))
 	return handler, hub, inv, createAdminUser(t, database)
 }
 
@@ -154,8 +154,9 @@ func TestAdminAPI_Roles_ServiceUnavailableFailsClosed(t *testing.T) {
 	database := openAdminTestDB(t)
 	// nil RoleService: the routes must refuse rather than fall through to an
 	// unchecked write.
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil,
-		newTestModService(database), nil)
+	svc := newTestServices(database)
+	svc.Roles = nil
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, svc)
 	token := createAdminUser(t, database)
 
 	for _, tc := range []struct {
@@ -386,8 +387,12 @@ func TestAdminAPI_ReorderRoles_NormalizesAndBroadcasts(t *testing.T) {
 	for _, r := range list {
 		positions[r.ID] = r.Position
 	}
-	if positions[3] != 2 || positions[2] != 1 {
-		t.Errorf("positions = %v, want role 3 above role 2 (2 and 1)", positions)
+	// Two roles below the owner's 100 take a stride of 33: role 3 above role 2,
+	// with room left below each for a manager to create in. The pair used to be
+	// compacted to 2 and 1, which left none (OC-0374 — the service-side pins are
+	// in service/role_reorder_spacing_test.go).
+	if positions[3] != 66 || positions[2] != 33 {
+		t.Errorf("positions = %v, want role 3 above role 2 (66 and 33)", positions)
 	}
 	if positions[1] != 100 {
 		t.Errorf("owner position = %d, want it untouched at 100", positions[1])
@@ -422,7 +427,7 @@ func TestBroadcastRoles_SurvivesCanceledRequestContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // the request was already aborted by the time the commit lands
 
-	admin.BroadcastRolesForTest(ctx, database, hub)
+	admin.BroadcastRolesForTest(ctx, newTestRoleService(database), hub)
 
 	if len(hub.rolesUpdates) != 1 {
 		t.Fatalf("roles_update broadcasts = %d, want 1 (fan-out must survive a canceled request context)", len(hub.rolesUpdates))

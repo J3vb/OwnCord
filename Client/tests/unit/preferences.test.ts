@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { loadPref, savePref, STORAGE_PREFIX } from "../../src/lib/preferences";
+import { expectConsole } from "../helpers/console";
 
 /**
  * Tests for src/lib/preferences.ts — localStorage preference helpers.
@@ -130,6 +131,7 @@ describe("preferences", () => {
 
       // Should not throw — silently swallows the error
       expect(() => savePref("big", "data")).not.toThrow();
+      expectConsole("warn", /\[preferences\] Failed to save preference/);
       spy.mockRestore();
     });
 

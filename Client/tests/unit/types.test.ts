@@ -9,6 +9,7 @@ import type {
   Permission,
 } from "../../src/lib/types";
 import { Permission as P } from "../../src/lib/types";
+import { parseRegistrationMode, retentionNotice } from "../../src/lib/types";
 
 // Sample docs/protocol.md JSON payloads for parsing validation
 const sampleAuthOk = {
@@ -88,13 +89,12 @@ const sampleVoiceConfig = {
   },
 };
 
-const sampleVoiceSpeakers = {
-  type: "voice_speakers" as const,
-  payload: {
-    channel_id: 10,
-    speakers: [1, 5, 12],
-    threshold_mode: "forwarding" as const,
-  },
+// Not a wire message — VoiceSpeakersPayload is the argument shape for
+// voice.store's setSpeakers, fed by LiveKit's ActiveSpeakersChanged.
+const sampleVoiceSpeakers: VoiceSpeakersPayload = {
+  channel_id: 10,
+  speakers: [1, 5, 12],
+  threshold_mode: "forwarding" as const,
 };
 
 describe("ServerMessage discriminated union", () => {
@@ -142,7 +142,7 @@ describe("AUDIT Critical: threshold_mode (CRIT-2, CRIT-3)", () => {
   });
 
   it("VoiceSpeakersPayload uses threshold_mode NOT mode", () => {
-    const speakers: VoiceSpeakersPayload = sampleVoiceSpeakers.payload;
+    const speakers: VoiceSpeakersPayload = sampleVoiceSpeakers;
     expect(speakers.threshold_mode).toBe("forwarding");
     // @ts-expect-error — mode is not a valid field
     expect(speakers.mode).toBeUndefined();
@@ -153,13 +153,6 @@ describe("AUDIT Critical: threshold_mode (CRIT-2, CRIT-3)", () => {
     if (msg.type === "voice_config") {
       expect(msg.payload.threshold_mode).toBeDefined();
       expect(["forwarding", "selective"]).toContain(msg.payload.threshold_mode);
-    }
-  });
-
-  it("voice_speakers ServerMessage carries threshold_mode", () => {
-    const msg: ServerMessage = sampleVoiceSpeakers;
-    if (msg.type === "voice_speakers") {
-      expect(msg.payload.threshold_mode).toBeDefined();
     }
   });
 });
@@ -185,12 +178,10 @@ describe("AUDIT Critical: no channel_focus message type", () => {
       "voice_state",
       "voice_leave",
       "voice_config",
-      "voice_speakers",
       "voice_offer",
       "voice_answer",
       "voice_ice",
       "member_join",
-      "member_leave",
       "member_update",
       "member_ban",
       "server_restart",
@@ -265,5 +256,54 @@ describe("Permission bitfield", () => {
     expect(memberPerms & P.SPEAK_VOICE).toBeTruthy();
     expect(memberPerms & P.MANAGE_MESSAGES).toBeFalsy();
     expect(memberPerms & P.ADMINISTRATOR).toBeFalsy();
+  });
+});
+
+describe("parseRegistrationMode", () => {
+  it.each(["closed", "invite", "approval", "open"] as const)(
+    "accepts the known mode %s",
+    (mode) => {
+      expect(parseRegistrationMode(mode)).toBe(mode);
+    },
+  );
+
+  it.each([
+    ["null", null],
+    ["undefined", undefined],
+    ["an unknown string", "closed-ish"],
+    ["the wrong case", "OPEN"],
+    ["a non-string", 1],
+  ])("treats %s as unavailable (null), never as open", (_label, value) => {
+    expect(parseRegistrationMode(value)).toBeNull();
+  });
+});
+
+describe("retentionNotice (B7-15c)", () => {
+  const info = (retention: unknown) =>
+    ({ name: "s", protocol_epoch: 1, browser_client_enabled: false, retention }) as never;
+
+  it("states a day window and that attachments go with their messages", () => {
+    expect(retentionNotice(info({ messages_days: 30 }))).toBe(
+      "By default this server deletes messages after 30 days; attachments are removed with their messages.",
+    );
+    expect(retentionNotice(info({ messages_days: 1 }))).toContain("after 1 day;");
+    expect(retentionNotice(info({ messages_days: 1095 }))).toContain("after 1095 days;");
+  });
+
+  it("states that 0 keeps messages until they are deleted", () => {
+    expect(retentionNotice(info({ messages_days: 0 }))).toContain(
+      "keeps messages until they are deleted",
+    );
+  });
+
+  it.each([
+    ["no snapshot", undefined],
+    ["no retention field", info(undefined)],
+    ["a negative window", info({ messages_days: -1 })],
+    ["a fractional window", info({ messages_days: 1.5 })],
+    ["a string window", info({ messages_days: "30" })],
+    ["a non-object retention", info(30)],
+  ])("says nothing for %s rather than guessing", (_label, value) => {
+    expect(retentionNotice(value)).toBeNull();
   });
 });

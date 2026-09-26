@@ -31,16 +31,10 @@ func NewChannelService(st Store, perms *PermissionService) *ChannelService {
 // DM channels are excluded (they are accessed via DMService).
 func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) ([]db.Channel, error) {
 	// Phase B Step 8 — span the public service entrypoint.
-	ctx, span := telemetry.GlobalTracer("service/channel").Start(ctx,
-		"ChannelService.ListVisibleChannels",
+	ctx, done := traceCall(ctx, "service/channel", "ChannelService.ListVisibleChannels",
 		telemetry.Int64("user_id", userID),
 	)
-	start := time.Now()
-	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
-			telemetry.String("method", "ListVisibleChannels"))
-		span.End()
-	}()
+	defer done()
 	all, err := s.st.ListChannels(ctx)
 	if err != nil {
 		slog.Error("ChannelService.ListVisibleChannels", "err", err)
@@ -118,19 +112,14 @@ func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int
 		return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
 	}
 
-	if ch.Type == "dm" {
-		ok, dmErr := s.st.IsDMParticipant(ctx, userID, channelID)
-		if dmErr != nil || !ok {
-			return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
-		}
-		// A blocked user must not be able to keep poking the blocker with
-		// typing indicators. Same gate as the other DM sinks; silently dropped
-		// here because typing is best-effort.
-		if blkErr := requireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
-			return nil, nil //nolint:nilerr // best-effort: a blocked or unreadable DM emits nothing
-		}
-	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages) {
-		return nil, nil // silent drop
+	// A typing indicator announces a post, so it answers to the post policy
+	// (permissions.CanType is CanSendMessage — S-01): a read-only member, an
+	// announcement reader without MANAGE_MESSAGES, an archived channel, a
+	// blocked or non-participant DM user all emit nothing. Silent, because
+	// typing is best-effort.
+	sub, subErr := channelSubject(ctx, s.st, s.perms, userID, ch, true)
+	if subErr != nil || permissions.CanType(sub) != nil {
+		return nil, nil //nolint:nilerr // best-effort: a denial or a DM lookup failure emits nothing
 	}
 
 	// Per-user-per-channel rate limit. Built only now that the channel is
@@ -247,24 +236,18 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 
-	switch {
-	case ch.Type == "dm":
-		ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
-		if err != nil || !ok {
-			return nil, fmt.Errorf("%w: access denied", ErrForbidden)
-		}
-	case !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages):
+	// Session admission is permissions.CanAdmitSession — visibility, the same
+	// predicate behind ListVisibleChannels, the ready payload and reconnect
+	// replay — so a socket that still holds an id it can no longer see (or
+	// an archived channel, OC-0070) cannot resubscribe to the live topic or
+	// advance its read state. channel_focus and mark_read share this one
+	// service call, so the gate closes both at once.
+	sub, subErr := channelSubject(ctx, s.st, s.perms, userID, ch, false)
+	if subErr != nil {
 		return nil, fmt.Errorf("%w: access denied", ErrForbidden)
-	case ch.Archived:
-		// Archived channels are hidden from every other client surface
-		// (ListVisibleChannels, ready payload, reconnect replay, voice join —
-		// see permissions.Checker.VisibleChannelIDs and ws/voice_join.go).
-		// HasChannelPerm alone doesn't know about the archive flag, so without
-		// this a socket that still held the id could resubscribe to the live
-		// topic and advance its own read state on a channel reconnect replay
-		// then filters back out. channel_focus and mark_read share this one
-		// service call, so the guard closes both at once (OC-0070).
-		return nil, fmt.Errorf("%w: channel is archived", ErrForbidden)
+	}
+	if err := permissions.CanAdmitSession(sub); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrForbidden, err)
 	}
 
 	// Mark channel as read. latestID == 0 (no undeleted messages) still
@@ -276,8 +259,7 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 	// every refocus at up to 10/s/user, and even a no-op write occupies the
 	// single writer connection and opens a transaction. The extra read runs on
 	// the reader pool, which doesn't serialize. Same problem-shape as the
-	// session-touch throttle (api/middleware.go). A read failure falls through
-	// to the write — the write is the load-bearing half.
+	// session-touch throttle (api/middleware.go).
 	latestID, err := s.st.GetLatestMessageID(ctx, channelID)
 	if err == nil {
 		lastRead, mentions, found, rsErr := s.st.GetReadState(ctx, userID, channelID)
@@ -286,12 +268,21 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 				"user_id", userID, "channel_id", channelID)
 			return ch, nil
 		}
-		if wErr := s.st.UpdateReadState(ctx, userID, channelID, latestID); wErr != nil {
-			// Self-heals on the next focus, but a persistently failing write
-			// means unread badges never clear — it must not be invisible.
-			slog.Warn("channel_focus: read-state write failed",
-				"user_id", userID, "channel_id", channelID, "err", wErr)
-		}
+	}
+	// The write recomputes the watermark itself rather than taking latestID:
+	// that snapshot is two round trips old by now, and a mention raised for a
+	// newer message in the meantime would be cleared while last_message_id
+	// still pointed behind it — a badge that vanishes with nothing to
+	// recompute it (OC-0323). latestID is only ever used for the skip
+	// decision above, which is a read, not a write — so a failed
+	// GetLatestMessageID (or GetReadState) must fall through to this write
+	// rather than skip it (OC-0436): the write is the load-bearing half, and
+	// only the optimisation above it is allowed to depend on a successful read.
+	if wErr := s.st.MarkChannelReadAtLatest(ctx, userID, channelID); wErr != nil {
+		// Self-heals on the next focus, but a persistently failing write
+		// means unread badges never clear — it must not be invisible.
+		slog.Warn("channel_focus: read-state write failed",
+			"user_id", userID, "channel_id", channelID, "err", wErr)
 	}
 
 	slog.Debug("channel_focus", "user_id", userID, "channel_id", channelID)

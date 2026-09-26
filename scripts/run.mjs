@@ -66,6 +66,25 @@ const PROTOCOL_VERIFY = [
     "Server",
   ),
 ];
+// The route, table and config-key indexes in docs/. Same shape again: the
+// generator rewrites the marked blocks, git reports any drift. cmd/gendocs
+// also exits non-zero on its own when a config key is documented nowhere, or
+// when it was built without -tags otel,wazero -- the superset build the route
+// index is generated from, since /metrics mounts only under otel.
+const DOCS_VERIFY = [
+  step("go", ["run", "-tags", "otel,wazero", "./cmd/gendocs"], "Server"),
+  step(
+    "git",
+    [
+      "diff",
+      "--exit-code",
+      "../docs/api.md",
+      "../docs/schema.md",
+      "../docs/server-configuration.md",
+    ],
+    "Server",
+  ),
+];
 const SQLC_VERIFY = [
   optional(
     "sqlc",
@@ -84,7 +103,23 @@ const CHECK_SERVER = [
   step("go", ["build", "-tags", "otel,wazero", "./..."], "Server"),
   step("go", ["vet", "./..."], "Server"),
   step("go", ["test", "-race", "./..."], "Server"),
-  step("go", ["test", "-tags", "deadlock", "-count=1", "./ws/"], "Server"),
+  // The whole tree, as ci.yml runs it. This step said `./ws/` ("where lock
+  // order varies") until a branch that touched no Server/admin file went red
+  // on the CI deadlock leg on an admin test the narrower command never ran.
+  step("go", ["test", "-tags", "deadlock", "-count=1", "./..."], "Server"),
+  // -count=1 is load-bearing: TestServerBoundariesDocIsCurrent compares a
+  // document that lives outside the Server module, so Go's test cache does not
+  // record it as an input and `go test -race ./...` above answers a doc-only
+  // change from cache. No `-run` filter: `go test -run` exits 0 when the name
+  // matches nothing, so a rename would green this forever.
+  step("go", ["test", "-count=1", "./cmd/dbinventory/"], "Server"),
+  // Same rule, same reason: TestCommunityServicesDocIsCurrent (B5-0) reads
+  // docs/architecture/community-services.md, which is outside this module, so
+  // the -race run above answers a doc-only edit from cache.
+  step("go", ["test", "-count=1", "./migrations/"], "Server"),
+  // Same rule, same reason: TestSchemaDocBitMapCoversEveryPermissionBit
+  // (B5-8) reads docs/schema.md's permission bit map, outside this module.
+  step("go", ["test", "-count=1", "./permissions/"], "Server"),
   optional(
     "golangci-lint",
     "golangci-lint",
@@ -94,12 +129,21 @@ const CHECK_SERVER = [
   ),
   ...PROTOCOL_VERIFY,
   ...SQLC_VERIFY,
+  ...DOCS_VERIFY,
 ];
 
 const CHECK_CLIENT = [
+  step("node", ["--test", "scripts/check-tauri-versions.test.mjs"]),
+  step("node", ["scripts/check-tauri-versions.mjs"]),
   step("npm", ["run", "typecheck"], "Client"),
   step("npm", ["run", "lint"], "Client"),
-  step("npm", ["test"], "Client"),
+  step("npm", ["run", "knip"], "Client"),
+  step("npm", ["run", "test:coverage"], "Client"),
+  // B7-7 bundle budgets: scratch --manifest build (dist-budget/, never the
+  // shipped dist/) then the gate. Node zlib, not the gzip CLI, so it runs
+  // identically on every platform — no optional() probe needed.
+  step("npm", ["run", "build:budget"], "Client"),
+  step("npm", ["run", "check:budgets"], "Client"),
 ];
 
 // Matches ci.yml's Rust Unit Tests job exactly: --lib for tests, --all-targets
@@ -122,7 +166,25 @@ const LEDGER_VERIFY = [step("node", [".superpowers/render-ledger.mjs"], ".")];
 
 // Fast and dependency-free, so it goes first: a contradicted count should not
 // wait behind ten minutes of -race.
-const CHECK_DOCS = [step("node", ["scripts/check-doc-counts.mjs"], "."), ...LEDGER_VERIFY];
+const CHECK_DOCS = [
+  step("node", ["scripts/check-doc-counts.mjs"], "."),
+  // A reference document that cites a path which no longer exists reads fine
+  // and proves nothing. This ran inside Server/migrations' doc gate until the
+  // change selector landed: the paths cited are mostly under Client/ and docs/,
+  // and a diff confined to those selects no server job, so the gate was skipped
+  // by exactly the pull requests most likely to break it. Self-tested first,
+  // for the same reason the count and migration matchers are.
+  step("node", ["--test", "scripts/check-doc-citations.test.mjs"], "."),
+  step("node", ["scripts/check-doc-citations.mjs"], "."),
+  // OC-0395. A shipped migration is immutable: migrate.go tracks one by
+  // filename and keeps no content hash, so editing it changes nothing for any
+  // installation that already applied it. Nothing else can see that — a fresh
+  // database applies the new text and every test passes. `step`, not
+  // `optional`: it is Node, and this file is Node.
+  step("node", ["--test", "scripts/check-migrations.test.mjs"], "."),
+  step("node", ["scripts/check-migrations.mjs"], "."),
+  ...LEDGER_VERIFY,
+];
 
 // Repository-wide formatting and script/workflow lint (RL-19 / L-13, S-05).
 //
@@ -151,8 +213,43 @@ const CHECK_HYGIENE = [
   // the guards on workflows that spend. `step`, not `optional`: it is Node, and
   // this file is Node. It lives in check:hygiene so it runs inside the pinned
   // Repository Hygiene job rather than needing a new required check.
-  step("node", ["scripts/check-workflow-guards.mjs", "--selftest"], "."),
+  step("node", ["--test", "scripts/check-workflow-guards.test.mjs"], "."),
   step("node", ["scripts/check-workflow-guards.mjs"], "."),
+  // OC-0397 / R-09. A job in release.yml that pushes an image or cuts a
+  // GitHub Release must carry `environment: release`, or it publishes with
+  // no required-reviewer approval. Same rationale as the guard check above:
+  // Node checking Node, run here so it rides the pinned Repository Hygiene
+  // job instead of a new required check.
+  step("node", ["--test", "scripts/check-release-environment.test.mjs"], "."),
+  step("node", ["scripts/check-release-environment.mjs"], "."),
+  // OC-0448. Execute the release verification/promotion shell with a fake
+  // registry and assert that no release tag moves before verification passes.
+  step("node", ["--test", "scripts/check-release-docker.test.mjs"], "."),
+  // B7-2 / RL-17. `engine-strict=true` makes `engines` a hard failure but does
+  // not narrow it: `>=24` admitted the owner's Node 26 while CI ran 24 and
+  // nothing failed. `Client/.nvmrc` is the source of truth and this asserts
+  // every other statement of the version agrees with it. Same rationale as the
+  // two checks above: Node checking Node, run here so it rides the pinned
+  // Repository Hygiene job instead of a new required check.
+  step("node", ["--test", "scripts/check-node-policy.test.mjs"], "."),
+  step("node", ["scripts/check-node-policy.mjs"], "."),
+  // The change selector decides which of the OTHER jobs run at all, so a wrong
+  // rule here is a test that silently did not execute — the same shape of
+  // failure as the two guards above, and for the same reason it is self-tested
+  // on every PR rather than only at release. `ci-select.mjs` cannot check
+  // itself: its own path selects every capability, so this step always runs.
+  step("node", ["--test", "scripts/ci-select.test.mjs"], "."),
+];
+
+// Every check, in the order `check` has always run them. release:preflight
+// reuses this instead of respelling the same five spreads, so the two lists
+// cannot silently drift apart.
+const CHECK_ALL = [
+  ...CHECK_DOCS,
+  ...CHECK_HYGIENE,
+  ...CHECK_SERVER,
+  ...CHECK_CLIENT,
+  ...CHECK_RUST,
 ];
 
 const TASKS = {
@@ -166,7 +263,7 @@ const TASKS = {
   "check:rust": CHECK_RUST,
   "check:docs": CHECK_DOCS,
   "check:hygiene": CHECK_HYGIENE,
-  check: [...CHECK_DOCS, ...CHECK_HYGIENE, ...CHECK_SERVER, ...CHECK_CLIENT, ...CHECK_RUST],
+  check: CHECK_ALL,
   generate: [
     step("go", ["run", "./cmd/genprotocol"], "Server"),
     optional(
@@ -176,20 +273,15 @@ const TASKS = {
       "Server",
       "sqlc not on PATH — install the version in Server/sqlc.version",
     ),
+    // After sqlc: gendocs compiles the api package, which imports db/dbgen.
+    step("go", ["run", "-tags", "otel,wazero", "./cmd/gendocs"], "Server"),
   ],
   format: [
     step("npx", ["prettier", "--write", "."], "."),
     optional("gofmt", "gofmt", ["-w", "."], "Server", "gofmt not on PATH"),
     step("cargo", ["fmt", "--all"], "Client/src-tauri"),
   ],
-  "release:preflight": [
-    ...CHECK_DOCS,
-    ...CHECK_HYGIENE,
-    ...CHECK_SERVER,
-    ...CHECK_CLIENT,
-    ...CHECK_RUST,
-    step("npm", ["run", "build"], "Client"),
-  ],
+  "release:preflight": [...CHECK_ALL, step("npm", ["run", "build"], "Client")],
 };
 
 // Resolve against PATH directly instead of shelling out to `where`/`command`.

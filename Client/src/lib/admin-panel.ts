@@ -16,6 +16,7 @@
  */
 
 import { bracketBareIPv6Host } from "./ws";
+import { desktop } from "../platform/desktop";
 
 /** The admin-panel URL for `host`, deep-linked to `section` when given. */
 export function adminPanelUrl(host: string, section?: string): string {
@@ -32,10 +33,8 @@ export function adminPanelUrl(host: string, section?: string): string {
 /**
  * Open the admin panel in the user's default browser.
  *
- * The opener plugin is imported lazily so this module can be loaded (and the
- * URL builder tested) in an environment with no Tauri runtime.
+ * The native shell opener is `platform/desktop`'s `urlOpener` (B7-5).
  */
 export async function openAdminPanel(host: string, section?: string): Promise<void> {
-  const { openUrl } = await import("@tauri-apps/plugin-opener");
-  await openUrl(adminPanelUrl(host, section));
+  await desktop.urlOpener.open(adminPanelUrl(host, section));
 }

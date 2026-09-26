@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
+    registration_status TEXT NOT NULL DEFAULT 'active',
     identity_public_key TEXT,
     display_name TEXT,
     about TEXT,
@@ -60,7 +61,22 @@ CREATE TABLE IF NOT EXISTS sessions (
     ip_address TEXT,
     created_at TEXT    NOT NULL DEFAULT (datetime('now')),
     last_used  TEXT    NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT    NOT NULL
+    expires_at TEXT    NOT NULL,
+    unseen     INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS recovery_kits (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    verifier   TEXT    NOT NULL,
+    created_at TEXT    NOT NULL,
+    used_at    TEXT
+);
+CREATE TABLE IF NOT EXISTS recovery_assists (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    verifier TEXT NOT NULL,
+    issued_by INTEGER NOT NULL,
+    verification TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 
@@ -191,6 +207,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
     target_type TEXT    NOT NULL DEFAULT '',
     target_id   INTEGER NOT NULL DEFAULT 0,
     detail      TEXT    NOT NULL DEFAULT '',
+    subject_token TEXT,
+    actor_token TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -199,6 +217,24 @@ CREATE TABLE IF NOT EXISTS dm_open_state (
     channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
     opened_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (user_id, channel_id)
+);
+
+-- B5-9: PurgeMessages/DeleteMessage write a removal row here in the same
+-- transaction as their effect (PurgeChannelMessagesWithAction/
+-- DeleteMessageWithRemoval).
+CREATE TABLE IF NOT EXISTS moderation_actions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT    NOT NULL CHECK (kind IN ('warning', 'timeout', 'removal', 'kick', 'ban')),
+    target_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_id        INTEGER NOT NULL DEFAULT 0,
+    actor_token     TEXT,
+    report_id       INTEGER,
+    reason          TEXT    NOT NULL DEFAULT '',
+    expires_at      TEXT,
+    acknowledged_at TEXT,
+    lifted_at       TEXT,
+    lifted_by       INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 `)
 

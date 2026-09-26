@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 // OwnCord introspection MCP server (dev tool for Claude Code).
 //
-// Exposes three tools over stdio:
+// Exposes two tools over stdio:
 //   api_request  — full read-write passthrough to any OwnCord REST endpoint
 //   server_logs  — the admin ring-buffer log stream (SSE ticket -> stream)
-//   client_logs  — tail the desktop client's on-disk log file
+//
+// The desktop client's log file is an ordinary file at
+// %LOCALAPPDATA%\com.owncord.client\logs\owncord-client.log — read it with
+// Read/Grep rather than through a tool that duplicates them.
 //
 // Auth: a long-lived OwnCord API token in OWNCORD_API_TOKEN, sent as a bearer
 // header (mint one with `server token create --label mcp-introspect`).
@@ -25,9 +28,6 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const TOKEN = process.env.OWNCORD_API_TOKEN || "";
 const CERT_PATH = process.env.OWNCORD_CERT_PATH || join(REPO_ROOT, "Server", "data", "cert.pem");
-const CLIENT_LOG =
-  process.env.OWNCORD_CLIENT_LOG ||
-  join(process.env.LOCALAPPDATA || "", "com.owncord.client", "logs", "owncord-client.log");
 
 // Base URL: explicit override, else https://127.0.0.1:<server.port from config.yaml>.
 function readServerPort() {
@@ -43,8 +43,9 @@ function readServerPort() {
 }
 const BASE_URL = process.env.OWNCORD_BASE_URL || `https://127.0.0.1:${readServerPort()}`;
 
-// Lazily built so client_logs works even when the cert/server is absent. Only
-// https bases need the pinned agent; an http override (rare) uses none.
+// Lazily built: a missing cert throws on the first request that needs it, not
+// at import. Only https bases need the pinned agent; an http override (rare)
+// uses none.
 let _agent;
 function httpsAgent() {
   if (!BASE_URL.startsWith("https:")) return undefined;
@@ -186,23 +187,6 @@ function safeParse(s) {
   }
 }
 
-function clientLogs({ lines = 200, level, grep } = {}) {
-  let text;
-  try {
-    text = readFileSync(CLIENT_LOG, "utf8");
-  } catch (e) {
-    return {
-      path: CLIENT_LOG,
-      found: false,
-      note: `client log not found (client may not have run yet): ${e.code}`,
-    };
-  }
-  let rows = text.split(/\r?\n/).filter(Boolean);
-  if (level) rows = rows.filter((l) => l.toUpperCase().includes(`[${level.toUpperCase()}]`));
-  if (grep) rows = rows.filter((l) => l.includes(grep));
-  return { path: CLIENT_LOG, found: true, lines: rows.slice(-lines) };
-}
-
 // ─── MCP wiring ─────────────────────────────────────────────────────────────
 const server = new McpServer({ name: "owncord-introspect", version: "0.1.0" });
 const ok = (obj) => ({ content: [{ type: "text", text: JSON.stringify(obj, null, 2) }] });
@@ -257,31 +241,6 @@ server.registerTool(
     try {
       requireToken();
       return ok(await collectLogs(a));
-    } catch (e) {
-      return fail(e);
-    }
-  },
-);
-
-server.registerTool(
-  "client_logs",
-  {
-    description:
-      "Tail the desktop client's log file directly (no server needed). Optional level filter / substring grep.",
-    inputSchema: {
-      lines: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe("How many trailing lines (default 200)"),
-      level: z.string().optional().describe("Filter to lines tagged with this level, e.g. ERROR"),
-      grep: z.string().optional().describe("Keep only lines containing this substring"),
-    },
-  },
-  async (a) => {
-    try {
-      return ok(clientLogs(a));
     } catch (e) {
       return fail(e);
     }

@@ -2,6 +2,7 @@ package updater
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/base64"
@@ -35,6 +36,10 @@ type releaseManifest struct {
 	SHA256 string `json:"sha256"`
 	// Assets binds every server artifact the release ships (one per OS).
 	Assets []releaseManifestAsset `json:"assets,omitempty"`
+	// ProtocolEpoch is the wire epoch the release's client speaks
+	// (protocol/schema.json protocol_epoch). Absent on releases up to
+	// v1.2.0-alpha.4, which is epoch 0.
+	ProtocolEpoch int `json:"protocol_epoch,omitempty"`
 }
 
 // releaseManifestAsset is one artifact binding in a multi-OS release manifest.
@@ -44,13 +49,23 @@ type releaseManifestAsset struct {
 }
 
 // checksumEntryNamesForGOOS returns sha256sum line suffixes to look up in
-// checksums.sha256 (matches GitHub Actions release layout).
-func checksumEntryNamesForGOOS(goos string) []string {
-	switch goos {
-	case "windows":
-		return []string{"windows/chatserver.exe", "chatserver.exe"}
-	case "linux":
-		return []string{"linux/chatserver-linux-amd64.tar.gz", "chatserver-linux-amd64.tar.gz"}
+// checksums.sha256 (matches GitHub Actions release layout) for one target.
+// The pairs are matched whole — never by architecture or OS alone — so adding
+// an asset can never widen an unrelated one. The first entry of a pair is the
+// "dir/name" form older releases used; the second is the bare filename the
+// release workflow's in-directory `sha256sum -- *` emits, and must therefore
+// stay equal to serverDownloadAssetName's result for the same target: the
+// hash looked up has to be the hash of the file actually downloaded.
+func checksumEntryNamesForGOOS(goos, goarch string) []string {
+	switch {
+	case goos == "windows" && goarch == "amd64":
+		return []string{"windows/chatserver.exe", windowsServerBinary}
+	case goos == "windows" && goarch == "arm64":
+		return []string{"windows/chatserver-windows-arm64.exe", windowsServerArm64Binary}
+	case goos == "linux" && goarch == "amd64":
+		return []string{"linux/chatserver-linux-amd64.tar.gz", linuxServerArchive}
+	case goos == "linux" && goarch == "arm64":
+		return []string{"linux/chatserver-linux-arm64.tar.gz", linuxServerArm64Archive}
 	default:
 		return nil
 	}
@@ -299,4 +314,31 @@ func (u *Updater) ParseChecksumFile(data []byte, filename string) (string, error
 		}
 	}
 	return "", fmt.Errorf("file %q not found in checksum data", filename)
+}
+
+// ReleaseProtocolEpoch returns the protocol epoch a release's signed
+// server-update manifest declares. A release with no manifest predates the
+// epoch and is 0; a manifest whose signature does not verify is an error,
+// never a guess. Both fetches go through the text-asset cache, so the
+// unauthenticated client-update endpoint costs no outbound request per call.
+func (u *Updater) ReleaseProtocolEpoch(ctx context.Context, info UpdateInfo) (int, error) {
+	if info.ManifestURL == "" || info.ManifestSignatureURL == "" {
+		return 0, nil
+	}
+	manifestText, err := u.FetchTextAssetCached(ctx, info.ManifestURL)
+	if err != nil {
+		return 0, fmt.Errorf("fetching release manifest: %w", err)
+	}
+	sigText, err := u.FetchTextAssetCached(ctx, info.ManifestSignatureURL)
+	if err != nil {
+		return 0, fmt.Errorf("fetching release manifest signature: %w", err)
+	}
+	if err := u.verifySignatureReader(strings.NewReader(manifestText), []byte(sigText), manifestAsset); err != nil {
+		return 0, fmt.Errorf("verifying release manifest signature: %w", err)
+	}
+	var manifest releaseManifest
+	if err := json.Unmarshal([]byte(manifestText), &manifest); err != nil {
+		return 0, fmt.Errorf("parsing release manifest: %w", err)
+	}
+	return manifest.ProtocolEpoch, nil
 }

@@ -42,6 +42,7 @@ type emojiHarness struct {
 	router      http.Handler
 	database    *db.DB
 	store       *storage.Storage
+	svc         *service.Services
 	broadcaster *recordingEmojiBroadcaster
 	// Tokens for the three principals the gate tests need.
 	ownerToken  string // ADMINISTRATOR
@@ -85,6 +86,7 @@ func newEmojiHarness(t *testing.T) *emojiHarness {
 		broadcaster: &recordingEmojiBroadcaster{},
 	}
 	svc := service.New(database, auth.NewRateLimiter())
+	h.svc = svc
 	r := chi.NewRouter()
 	api.MountEmojiRoutes(r, database, svc, store, auth.NewRateLimiter(), h.broadcaster)
 	h.router = r

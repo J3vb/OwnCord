@@ -32,11 +32,12 @@ func TestServiceErrorToResult_InternalErrorDoesNotLeakAndIsLogged(t *testing.T) 
 	// driver error text via %v, exactly what handlers_call.go's RingTargets
 	// call produces when GetDMParticipantIDs fails.
 	driverErr := errors.New("GetDMParticipantIDs: database is locked")
-	svcErr := fmt.Errorf("%w: failed to read DM participants: %v", service.ErrInternal, driverErr)
+	svcErr := fmt.Errorf("%w: failed to read DM participants: %w", service.ErrInternal, driverErr)
 
 	result := serviceErrorToResult(svcErr)
 
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("serviceErrorToResult(ErrInternal wrapper) did not return a ClientError, got %T", result.Error)
 	}

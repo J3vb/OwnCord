@@ -5,13 +5,10 @@
 
 import { createStore } from "@lib/store";
 import type { UserWithRole } from "@lib/types";
-import { resetVoiceStore, voiceStore } from "@stores/voice.store";
 import { resetMessagesStore } from "@stores/messages.store";
 import { resetChannelsStore } from "@stores/channels.store";
 import { resetBlocksStore } from "@stores/blocks.store";
 import { setSidebarMode } from "@stores/ui.store";
-import { cleanupNotificationAudio } from "@lib/notifications";
-import { clearNsfwAcknowledgements } from "@lib/nsfw-gate";
 import { createLogger } from "@lib/logger";
 
 const log = createLogger("auth.store");
@@ -21,7 +18,14 @@ const log = createLogger("auth.store");
  *  server-initiated kick whose token is still valid — the logout wiring keeps
  *  the saved credential in that case so auto-login works when the server
  *  comes back. */
-export type LogoutReason = "user" | "server_shutdown";
+/**
+ * Why the session ended. "protocol_epoch": the server refused this client's
+ * wire epoch — the token is still valid, so main.ts keeps the stored
+ * credential and the update it offers relaunches into auto-login.
+ * "server_switch": the user quick-switched to another server — main.ts keeps
+ * the departed server's credential so switching back resumes it (B7-13).
+ */
+export type LogoutReason = "user" | "server_shutdown" | "protocol_epoch" | "server_switch";
 
 export interface AuthState {
   readonly token: string | null;
@@ -52,11 +56,48 @@ const INITIAL_STATE: AuthState = {
 
 export const authStore = createStore<AuthState>(INITIAL_STATE);
 
+// Store notifications are deferred; cancellation cannot wait until after a
+// pending request has a chance to repopulate stores that clearAuth just reset.
+const authCleanupListeners = new Set<(reason: LogoutReason) => void>();
+
+/** Register application session cleanup that must run synchronously on logout. */
+export function onAuthCleared(listener: (reason: LogoutReason) => void): () => void {
+  authCleanupListeners.add(listener);
+  return () => authCleanupListeners.delete(listener);
+}
+
+// voice.store.ts registers its logout teardown here at module load instead of
+// this store importing it: voice.store imports this store, so the direct import
+// was a cycle. main.ts imports voice.store statically, so it is registered
+// before any clearAuth can run; a store that never loaded holds nothing to reset.
+interface VoiceLogoutTeardown {
+  /** Read before `reset` — the last moment the pre-logout state is knowable. */
+  readonly snapshot: () => {
+    readonly currentChannelId: number | null;
+    readonly voiceStatus: string;
+  };
+  readonly reset: () => void;
+}
+let voiceLogoutTeardown: VoiceLogoutTeardown | null = null;
+
+/** Called once by voice.store.ts at module load. */
+export function registerVoiceLogoutTeardown(teardown: VoiceLogoutTeardown): void {
+  voiceLogoutTeardown = teardown;
+}
+
 /** Populate auth state after a successful auth_ok message. */
 export function setAuth(token: string, user: UserWithRole, serverName: string, motd: string): void {
-  authStore.setState(() => ({
+  authStore.setState((prev) => ({
     token,
-    user,
+    // auth_ok's user never carries totp_enabled — only GET /auth/me does —
+    // so a reconnect must not wipe the value the profile fetch established
+    // for the same account (OC-0354).
+    user:
+      user.totp_enabled === undefined &&
+      prev.user?.id === user.id &&
+      prev.user.totp_enabled !== undefined
+        ? { ...user, totp_enabled: prev.user.totp_enabled }
+        : user,
     serverName,
     motd,
     isAuthenticated: true,
@@ -84,32 +125,34 @@ export function setAuth(token: string, user: UserWithRole, serverName: string, m
  *  logout as module-global state and mount the DM sidebar (with the old
  *  server's DM peer id) on whatever server is signed into next. */
 export function clearAuth(reason: LogoutReason = "user"): void {
+  const cleanups = [...authCleanupListeners];
+  for (const cleanup of cleanups) {
+    try {
+      cleanup(reason);
+    } catch {
+      log.warn("Session cleanup failed during logout");
+    }
+  }
   // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is loaded
   // lazily so it stays out of the startup path. Only import it when there is
   // actually a voice session to leave — otherwise a text-only user who never
   // joined voice would pull in the whole LiveKit SDK on every logout/401.
   // When a voice session exists the module is necessarily already loaded, so
   // this import resolves from the module cache in a microtask.
-  const voice = voiceStore.getState();
-  // Snapshot BEFORE resetVoiceStore() below clears it — this is the last
+  const voice = voiceLogoutTeardown?.snapshot();
+  // Snapshot BEFORE the voice reset below clears it — this is the last
   // moment the pre-logout voice state is knowable.
-  const wasInVoice = voice.currentChannelId !== null;
-  if (voice.currentChannelId !== null && voice.voiceStatus !== "idle") {
+  const wasInVoice = voice !== undefined && voice.currentChannelId !== null;
+  if (voice !== undefined && voice.currentChannelId !== null && voice.voiceStatus !== "idle") {
     void import("@lib/livekitSession")
       .then(({ leaveVoice }) => leaveVoice(false))
       .catch((e) => log.warn("Failed to leave voice session during clearAuth", e));
   }
-  resetVoiceStore();
+  voiceLogoutTeardown?.reset();
   resetMessagesStore();
   resetChannelsStore();
   resetBlocksStore();
   setSidebarMode("channels");
-  // NSFW acknowledgements are per-viewer consent, not per-device: without this
-  // the next account signed into the same server inherits the previous user's
-  // acks and the age gate silently never appears for them. Host-scoping the
-  // keys cannot cover that case — only clearing on logout can.
-  clearNsfwAcknowledgements();
-  cleanupNotificationAudio();
   authStore.setState(() => ({
     ...INITIAL_STATE,
     logoutReason: reason,

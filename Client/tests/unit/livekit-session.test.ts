@@ -17,6 +17,10 @@ const mockVoiceState = vi.hoisted(() => ({
   // each need to restate it; tests that exercise a different channel (or the
   // "already left" guard itself) set this explicitly.
   currentChannelId: 1 as number | null,
+  // OC-0438: per-channel voice_config (quality bitrate etc.) as delivered by
+  // the server's voice_config event. Empty by default; tests exercising the
+  // audio-bitrate publish path populate an entry for the channel under test.
+  voiceConfigs: new Map<number, { bitrate: number }>(),
 }));
 
 /** Backing cell for the mocked voice.store PTT-poller-live flag. Boxed so the
@@ -27,7 +31,7 @@ const mockRoom = vi.hoisted(() => ({
   connect: vi.fn().mockResolvedValue(undefined),
   disconnect: vi.fn().mockResolvedValue(undefined),
   on: vi.fn().mockReturnThis(),
-  removeAllListeners: vi.fn(),
+  off: vi.fn(),
   setE2EEEnabled: vi.fn().mockResolvedValue(undefined),
   localParticipant: {
     setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
@@ -59,8 +63,10 @@ vi.mock("livekit-client", () => ({
     AudioPlaybackStatusChanged: "audioPlaybackStatusChanged",
     EncryptionError: "encryptionError",
     LocalTrackPublished: "localTrackPublished",
+    ParticipantPermissionsChanged: "participantPermissionsChanged",
   },
   Track: {
+    sourceToProto: (source: string) => (source === "microphone" ? 2 : 0),
     Source: {
       Microphone: "microphone",
       Camera: "camera",
@@ -205,7 +211,7 @@ globalThis.Worker = vi.fn(function (this: { terminate: () => void }) {
 }) as unknown as typeof Worker;
 
 // Now import
-import { createLocalVideoTrack } from "livekit-client";
+import { createLocalVideoTrack, Room } from "livekit-client";
 import {
   parseUserId,
   LiveKitSession,
@@ -222,7 +228,6 @@ import {
   leaveVoiceChannel,
   setVoiceStatus,
   setPeerVerification,
-  clearPeerVerifications,
   setEncryptionDegraded,
 } from "@stores/voice.store";
 import { getIdentityPin, storeIdentityPin } from "@lib/identity";
@@ -230,8 +235,8 @@ import { verifyEphemeralKeySignature } from "@lib/e2eeCrypto";
 import { setMembers } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import type { ReadyMember } from "../../src/lib/types";
+import { ensureLiveKitProxy, getLiveKitProxyPort } from "../../src/platform/desktop/nativeProxies";
 import {
-  isVoiceConnected,
   leaveVoice as boundLeaveVoice,
   setMuted as boundSetMuted,
   setDeafened as boundSetDeafened,
@@ -334,6 +339,7 @@ describe("LiveKitSession", () => {
     mockVoiceState.localScreenshare = false;
     mockVoiceState.pttGated = false;
     mockVoiceState.currentChannelId = 1;
+    mockVoiceState.voiceConfigs = new Map();
     session = new LiveKitSession();
     // Reset mockRoom state
     mockRoom.state = "connected";
@@ -349,6 +355,277 @@ describe("LiveKitSession", () => {
     vi.useRealTimers();
   });
 
+  describe("async room ownership", () => {
+    function makeRoom() {
+      return {
+        ...mockRoom,
+        connect: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+        off: vi.fn(),
+        localParticipant: {
+          ...mockRoom.localParticipant,
+          setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
+        },
+      };
+    }
+
+    function installRoom(room: ReturnType<typeof makeRoom>, channelId = 1): void {
+      (session as any)._state = {
+        type: "connected",
+        room,
+        channelId,
+        latestToken: "current-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: undefined,
+      };
+      (session as any).syncModuleRooms();
+    }
+
+    it.each(["resolve", "reject"] as const)(
+      "ignores a stale microphone restore %s before changing listen-only state",
+      async (outcome) => {
+        const roomA = makeRoom();
+        const mic = createDeferred<void>();
+        roomA.localParticipant.setMicrophoneEnabled.mockImplementationOnce(() => mic.promise);
+        installRoom(roomA);
+        const restoring = (session as any).restoreLocalVoiceState("join");
+        const roomB = makeRoom();
+        installRoom(roomB, 2);
+        vi.mocked(setListenOnly).mockClear();
+        if (outcome === "resolve") mic.resolve(undefined);
+        else mic.reject(new DOMException("Denied", "NotAllowedError"));
+        await restoring;
+        expect(setListenOnly).not.toHaveBeenCalled();
+        expect(roomB.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+      },
+    );
+
+    it("does not apply a stale permission retry to the replacement room", async () => {
+      const roomA = makeRoom();
+      const mic = createDeferred<void>();
+      roomA.localParticipant.setMicrophoneEnabled.mockImplementationOnce(() => mic.promise);
+      installRoom(roomA);
+      const retry = session.retryMicPermission();
+      const roomB = makeRoom();
+      installRoom(roomB, 2);
+      mockVoiceState.localMuted = true;
+      vi.mocked(setListenOnly).mockClear();
+      mic.resolve(undefined);
+      await retry;
+      expect(roomB.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+      expect(setListenOnly).not.toHaveBeenCalled();
+    });
+
+    it("does not mark the new session muted when an old room's unmute fails", async () => {
+      const roomA = makeRoom();
+      const mic = createDeferred<void>();
+      roomA.localParticipant.setMicrophoneEnabled.mockImplementationOnce(() => mic.promise);
+      installRoom(roomA);
+      const unmuting = (session as any).applyMicMuteState(false);
+      installRoom(makeRoom(), 2);
+      vi.mocked(setListenOnly).mockClear();
+      vi.mocked(setLocalMuted).mockClear();
+      mic.reject(new DOMException("Old device unavailable", "NotFoundError"));
+      await unmuting;
+      expect(setListenOnly).not.toHaveBeenCalled();
+      expect(setLocalMuted).not.toHaveBeenCalled();
+    });
+
+    it("does not replace current module wiring when stale room creation finishes", async () => {
+      session.setServerHost("localhost:7880");
+      const roomA = makeRoom();
+      const roomReady = createDeferred<any>();
+      vi.spyOn(session as any, "createRoom").mockImplementationOnce(() => roomReady.promise);
+      const connecting = (session as any).connectAndSetup("old-token", "/livekit", 1);
+      const roomB = makeRoom();
+      installRoom(roomB, 2);
+      roomReady.resolve(roomA);
+      expect(await connecting).toBe("superseded");
+      expect((session as any)._audioPipeline.room).toBe(roomB);
+      expect((session as any)._deviceManager.room).toBe(roomB);
+      expect(roomA.connect).not.toHaveBeenCalled();
+    });
+
+    it.each(["join", "reconnect"] as const)(
+      "recognizes a replacement room in the same channel after %s microphone setup",
+      async (mode) => {
+        session.setServerHost("localhost:7880");
+        const roomA = makeRoom();
+        const mic = createDeferred<void>();
+        roomA.localParticipant.setMicrophoneEnabled.mockImplementationOnce(() => mic.promise);
+        vi.spyOn(session as any, "createRoom").mockResolvedValueOnce(roomA);
+        vi.spyOn((session as any)._e2ee, "setupKeyExchange").mockResolvedValueOnce(true);
+        let connecting: Promise<unknown>;
+        if (mode === "join") {
+          connecting = (session as any).connectAndSetup("old-token", "/livekit", 1);
+        } else {
+          const ac = new AbortController();
+          (session as any)._state = {
+            type: "reconnecting",
+            channelId: 1,
+            latestToken: "old-token",
+            lastUrl: "/livekit",
+            lastDirectUrl: undefined,
+            ac,
+          };
+          vi.spyOn((session as any)._e2ee, "reannounceForReconnect").mockResolvedValueOnce(
+            undefined,
+          );
+          connecting = (session as any).attemptAutoReconnect(
+            "old-token",
+            "/livekit",
+            1,
+            undefined,
+            ac.signal,
+          );
+        }
+        await vi.advanceTimersByTimeAsync(mode === "join" ? 0 : 3000);
+        expect(roomA.localParticipant.setMicrophoneEnabled).toHaveBeenCalled();
+        installRoom(makeRoom(), 1);
+        const setup = vi.spyOn((session as any)._audioPipeline, "setupAudioPipeline");
+        mic.resolve(undefined);
+        expect(await connecting).toBe(mode === "join" ? "superseded" : undefined);
+        expect(setup).not.toHaveBeenCalled();
+        // Timer lives on VoiceTokenManager since the refactor. A superseded
+        // attempt must not have armed it.
+        expect((session as any)._tokenManager._refreshTimer).toBeNull();
+      },
+    );
+
+    it("does not connect a stale retry room after its creation await", async () => {
+      session.setServerHost("localhost:7880");
+      const roomA = makeRoom();
+      roomA.connect.mockRejectedValueOnce(new Error("initial connection failed"));
+      const retryRoom = makeRoom();
+      const retryReady = createDeferred<any>();
+      vi.spyOn(session as any, "createRoom")
+        .mockResolvedValueOnce(roomA)
+        .mockImplementationOnce(() => retryReady.promise);
+      vi.spyOn((session as any)._e2ee, "setupKeyExchange").mockResolvedValueOnce(true);
+      const connecting = (session as any).connectAndSetup("old-token", "/livekit", 1);
+      await vi.advanceTimersByTimeAsync(2000);
+      const roomB = makeRoom();
+      installRoom(roomB, 2);
+      retryReady.resolve(retryRoom);
+      expect(await connecting).toBe("superseded");
+      expect(retryRoom.connect).not.toHaveBeenCalled();
+      expect((session as any)._deviceManager.room).toBe(roomB);
+    });
+
+    it.each(["connecting", "reconnecting"] as const)(
+      "preserves a newer %s room when stale reconnect creation completes",
+      async (replacement) => {
+        session.setServerHost("localhost:7880");
+        const ac = new AbortController();
+        (session as any)._state = {
+          type: "reconnecting",
+          channelId: 1,
+          latestToken: "old-token",
+          lastUrl: "/livekit",
+          lastDirectUrl: undefined,
+          ac,
+        };
+        const roomReady = createDeferred<any>();
+        vi.spyOn(session as any, "createRoom").mockImplementationOnce(() => roomReady.promise);
+        const reconnect = (session as any).attemptAutoReconnect(
+          "old-token",
+          "/livekit",
+          1,
+          undefined,
+          ac.signal,
+        );
+        await vi.advanceTimersByTimeAsync(3000);
+        const roomB = makeRoom();
+        installRoom(roomB, 2);
+        (session as any)._state =
+          replacement === "connecting"
+            ? { type: "connecting", joinGeneration: 2, pendingJoin: null }
+            : {
+                type: "reconnecting",
+                channelId: 1,
+                latestToken: "new-token",
+                lastUrl: "/livekit",
+                lastDirectUrl: undefined,
+                ac: new AbortController(),
+              };
+        const staleRoom = makeRoom();
+        roomReady.resolve(staleRoom);
+        await reconnect;
+        expect(staleRoom.connect).not.toHaveBeenCalled();
+        expect((session as any)._audioPipeline.room).toBe(roomB);
+        expect((session as any)._deviceManager.room).toBe(roomB);
+      },
+    );
+  });
+
+  describe("microphone grant restoration", () => {
+    let permissions: { canPublish: boolean; canPublishSources: number[] };
+    let onPermissions: (previous: unknown, participant: unknown) => void;
+
+    beforeEach(async () => {
+      permissions = { canPublish: true, canPublishSources: [1] };
+      (mockRoom.localParticipant as any).permissions = permissions;
+      await (session as any).createRoom();
+      onPermissions =
+        mockRoom.on.mock.calls.find(([event]) => event === "participantPermissionsChanged")?.[1] ??
+        (() => {});
+      (session as any)._state = {
+        type: "connected",
+        room: mockRoom,
+        channelId: 1,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: undefined,
+      };
+      (session as any).syncModuleRooms();
+      vi.mocked(setListenOnly).mockClear();
+    });
+
+    afterEach(() => {
+      delete (mockRoom.localParticipant as any).permissions;
+    });
+
+    it("waits for the SFU grant when moderator unmute arrives on chat first", async () => {
+      const setup = vi.spyOn((session as any)._audioPipeline, "setupAudioPipeline");
+      await (session as any).applyMicMuteState(false);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+      expect(setListenOnly).not.toHaveBeenCalled();
+
+      permissions.canPublishSources = [1, 2];
+      onPermissions(undefined, mockRoom.localParticipant);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+      expect(setup).toHaveBeenCalled();
+    });
+
+    it.each(["localMuted", "localDeafened", "localServerMuted", "pttGated"] as const)(
+      "does not restore a pending microphone over %s",
+      async (gate) => {
+        await (session as any).applyMicMuteState(false);
+        mockRoom.localParticipant.setMicrophoneEnabled.mockClear();
+        mockVoiceState[gate] = true;
+        permissions.canPublishSources = [1, 2];
+        onPermissions(undefined, mockRoom.localParticipant);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+      },
+    );
+
+    it("does not capture on unrelated permission events or after leaving", async () => {
+      permissions.canPublishSources = [1, 2];
+      onPermissions(undefined, mockRoom.localParticipant);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+
+      permissions.canPublishSources = [1];
+      await (session as any).applyMicMuteState(false);
+      session.leaveVoice(false);
+      permissions.canPublishSources = [1, 2];
+      onPermissions(undefined, mockRoom.localParticipant);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+    });
+  });
+
   describe("setters and getters", () => {
     it("setWsClient stores the client used by leaveVoice", () => {
       const mockWs = { send: vi.fn() } as any;
@@ -362,7 +639,6 @@ describe("LiveKitSession", () => {
       // Overwriting with a new host should succeed
       session.setServerHost("another:8080");
       // Verify the session is still in a valid disconnected state after setting host
-      expect(isVoiceConnected()).toBe(false);
       // leaveVoice should still work (no room to disconnect from)
       session.leaveVoice(false);
       expect(setLocalCamera).toHaveBeenCalledWith(false);
@@ -377,8 +653,6 @@ describe("LiveKitSession", () => {
       // After clear, leaveVoice (which touches error paths) should not invoke cb
       session.leaveVoice(false);
       expect(cb).not.toHaveBeenCalled();
-      // Verify the session is still usable after clearing error callback
-      expect(isVoiceConnected()).toBe(false);
     });
 
     it("setOnRemoteVideo stores callbacks and clearOnRemoteVideo removes them", () => {
@@ -391,8 +665,6 @@ describe("LiveKitSession", () => {
       session.leaveVoice(false);
       expect(videoCb).not.toHaveBeenCalled();
       expect(removedCb).not.toHaveBeenCalled();
-      // Verify the session state is consistent after clearing callbacks
-      expect(isVoiceConnected()).toBe(false);
     });
   });
 
@@ -433,8 +705,6 @@ describe("LiveKitSession", () => {
 
       session.cleanupAll();
 
-      // After cleanup, voice should be disconnected
-      expect(isVoiceConnected()).toBe(false);
       // Camera and screenshare state should be reset
       expect(setLocalCamera).toHaveBeenCalledWith(false);
       expect(setLocalScreenshare).toHaveBeenCalledWith(false);
@@ -603,6 +873,17 @@ describe("LiveKitSession", () => {
       expect(info.hasRoom).toBe(false);
       expect(info.hasRNNoiseProcessor).toBe(false);
       expect(info.currentChannelId).toBeNull();
+    });
+
+    it("[OC-0360] reflects a setOutputVolume change instead of the app-startup value", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+
+      session.setOutputVolume(40);
+
+      const info = session.getSessionDebugInfo();
+      expect(info.outputVolumeMultiplier).toBe(0.4);
     });
   });
 
@@ -1146,6 +1427,46 @@ describe("LiveKitSession", () => {
 
       expect(setSubscribed).toHaveBeenCalledWith(false);
     });
+
+    // Pre-refactor parity: the reconnect success path re-installed both
+    // DeviceManager callbacks right after setVoiceStatus("connected"). The
+    // extraction's mid-attempt wiring set only room + audio pipeline, so the
+    // device-error and toast routes were never re-established on the path that
+    // replaces the room.
+    it("re-installs the device-manager error and toast callbacks on a successful reconnect", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 11,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      const errorCb = vi.fn();
+      session.setOnError(errorCb);
+
+      // Spy AFTER setOnError, which installs the callback itself — we want only
+      // the calls the reconnect makes.
+      const deviceManager = (session as any)._deviceManager;
+      const setOnErrorSpy = vi.spyOn(deviceManager, "setOnError");
+      const setOnToastSpy = vi.spyOn(deviceManager, "setOnToast");
+
+      const ac = new AbortController();
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        11,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(setOnErrorSpy).toHaveBeenCalledWith(errorCb);
+      expect(setOnToastSpy).toHaveBeenCalledWith(errorCb);
+    });
   });
 
   describe("teardownForReconnect video track cleanup (BUG-098)", () => {
@@ -1532,14 +1853,17 @@ describe("LiveKitSession", () => {
     });
 
     it("clears the token refresh timer so it does not fire after leave", () => {
-      // Set up a timer that would fail if it fires
-      (session as any).tokenRefreshTimer = setTimeout(() => {
+      // The timer moved onto VoiceTokenManager; leaveVoice must still clear it
+      // through clearTimers(), or a token refresh fires against a session the
+      // user has already left.
+      const tokenManager = (session as any)._tokenManager;
+      tokenManager._refreshTimer = setTimeout(() => {
         throw new Error("Timer should have been cleared");
       }, 100);
 
       session.leaveVoice(false);
 
-      expect((session as any).tokenRefreshTimer).toBeNull();
+      expect(tokenManager._refreshTimer).toBeNull();
       // Advance past when it would have fired — should not throw
       vi.advanceTimersByTime(200);
     });
@@ -1574,19 +1898,23 @@ describe("LiveKitSession", () => {
       cleanupSpy.mockRestore();
     });
 
-    it("calls room.removeAllListeners before disconnect when room exists", async () => {
+    it("detaches the app's room listeners before disconnect when room exists", async () => {
       // Set up a room via handleVoiceToken
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
       await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
 
       expect((session as any)._state.type).toBe("connected");
-      const room = (session as any)._state.room;
 
+      const onDisconnected = mockRoom.on.mock.calls.findLast(([e]) => e === "disconnected")![1];
       session.leaveVoice(false);
 
-      expect(mockRoom.removeAllListeners).toHaveBeenCalled();
-      expect(mockRoom.disconnect).toHaveBeenCalled();
+      // Only the app's own listeners: livekit's once(Disconnected) cleanups
+      // must still run when disconnect() fires the event.
+      expect(mockRoom.off).toHaveBeenCalledWith("disconnected", onDisconnected);
+      expect(mockRoom.off.mock.invocationCallOrder.at(-1)).toBeLessThan(
+        mockRoom.disconnect.mock.invocationCallOrder.at(-1)!,
+      );
     });
 
     it("sets currentChannelId to null after leave", async () => {
@@ -1656,12 +1984,18 @@ describe("LiveKitSession", () => {
       expect((session as any).onRemoteVideoRemovedCallback).toBeNull();
     });
 
-    it("nulls liveKitProxyPort", () => {
-      (session as any).liveKitProxyPort = 7881;
+    it("nulls the LiveKit proxy port", async () => {
+      // The port moved with the rest of proxy handling, onto LiveKitUrlResolver
+      // and then (B7-5) into platform/desktop's nativeProxies; cleanupAll must
+      // still clear it, or a logout leaves a port recorded for a proxy that is
+      // no longer running.
+      session.setServerHost("example.com:443");
+      await (session as any)._urlResolver.resolve("/livekit");
+      expect(getLiveKitProxyPort()).toBe(7881);
 
       session.cleanupAll();
 
-      expect((session as any).liveKitProxyPort).toBeNull();
+      expect(getLiveKitProxyPort()).toBeNull();
     });
   });
 
@@ -2124,14 +2458,14 @@ describe("LiveKitSession", () => {
               }),
           ),
         },
-        removeAllListeners: vi.fn(),
+        off: vi.fn(),
         disconnect: vi.fn().mockResolvedValue(undefined),
       } as any;
       const roomB = {
         localParticipant: {
           setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
         },
-        removeAllListeners: vi.fn(),
+        off: vi.fn(),
         disconnect: vi.fn().mockResolvedValue(undefined),
       } as any;
 
@@ -2227,10 +2561,6 @@ describe("LiveKitSession", () => {
   // -----------------------------------------------------------------------
 
   describe("singleton exports", () => {
-    it("isVoiceConnected returns false when no session is active", () => {
-      expect(isVoiceConnected()).toBe(false);
-    });
-
     it("bound leaveVoice is callable without throwing", () => {
       expect(() => boundLeaveVoice(false)).not.toThrow();
     });
@@ -2278,18 +2608,21 @@ describe("LiveKitSession", () => {
       expect(url).toBe("ws://127.0.0.1:7880/livekit");
     });
 
-    it("returns directUrl when serverHost is bare ::1", async () => {
+    it("tunnels an IPv6 loopback directUrl when serverHost is bare ::1", async () => {
       session.setServerHost("::1");
       const url = await (session as any).resolveLiveKitUrl("/livekit", "ws://[::1]:7880/livekit");
-      // Bare IPv6 with multiple colons — detected as local, returns directUrl
-      expect(url).toBe("ws://[::1]:7880/livekit");
+      // Detected as local, but CSP host-sources cannot name an IPv6 literal,
+      // so connect-src has no ws://[::1] entry: the direct URL would be
+      // refused, and it goes through the loopback tunnel instead.
+      expect(url).toBe("ws://127.0.0.1:7881/livekit");
     });
 
-    it("returns directUrl when serverHost is bracketed [::1]:7880", async () => {
+    it("tunnels an IPv6 loopback directUrl when serverHost is bracketed [::1]:7880", async () => {
       session.setServerHost("[::1]:7880");
       const url = await (session as any).resolveLiveKitUrl("/livekit", "ws://[::1]:7880/livekit");
-      // Bracketed IPv6 — host extracted as "::1", detected as local
-      expect(url).toBe("ws://[::1]:7880/livekit");
+      // Bracketed IPv6 — host extracted as "::1", detected as local, and
+      // tunnelled for the same connect-src reason as the bare form.
+      expect(url).toBe("ws://127.0.0.1:7881/livekit");
     });
 
     it("calls ensureLiveKitProxy and returns proxy URL for remote host with slash path", async () => {
@@ -2325,10 +2658,15 @@ describe("LiveKitSession", () => {
     });
   });
 
+  // ensureLiveKitProxy moved into LiveKitUrlResolver, and then (B7-5) into
+  // platform/desktop's nativeProxies, which LiveKitSession reaches through its
+  // _urlResolver. These call it directly rather than through resolve(), because
+  // the null-host guard is unreachable from resolve(): a null host takes the
+  // passthrough branch and never calls the proxy at all.
   describe("ensureLiveKitProxy", () => {
     it("invokes start_livekit_proxy on every call so a re-pinned cert is picked up", async () => {
       session.setServerHost("example.com:443");
-      const port1 = await (session as any).ensureLiveKitProxy();
+      const port1 = await ensureLiveKitProxy();
       expect(port1).toBe(7881);
       expect(mockInvoke).toHaveBeenCalledTimes(1);
       expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", {
@@ -2341,27 +2679,57 @@ describe("LiveKitSession", () => {
       // into the stale pin until logout. The Rust reuse branch dedups, so the
       // repeat call is cheap.
       mockInvoke.mockClear();
-      const port2 = await (session as any).ensureLiveKitProxy();
+      const port2 = await ensureLiveKitProxy();
       expect(port2).toBe(7881);
       expect(mockInvoke).toHaveBeenCalledTimes(1);
     });
 
     it("appends :443 when serverHost has no port", async () => {
       session.setServerHost("example.com");
-      await (session as any).ensureLiveKitProxy();
+      await ensureLiveKitProxy();
       expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", {
         remoteHost: "example.com:443",
       });
     });
 
     it("throws when serverHost is null", async () => {
-      await expect((session as any).ensureLiveKitProxy()).rejects.toThrow(
-        "no server host for LiveKit proxy",
-      );
+      await expect(ensureLiveKitProxy()).rejects.toThrow("no server host for LiveKit proxy");
     });
   });
 
   describe("connectAndSetup retry logic", () => {
+    it("stays joining through two peer timeouts and connects on the final attempt", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      // The native fixture's signaling is local, but the SDK may spend its
+      // full 15s peer-connection timeout on each attempt. A 30s UI assertion
+      // would interrupt the second attempt before production gives up.
+      const peerTimeout = () =>
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("peer connection timed out")), 15_000),
+        );
+      mockRoom.connect
+        .mockImplementationOnce(peerTimeout)
+        .mockImplementationOnce(peerTimeout)
+        .mockImplementationOnce(() => new Promise<void>((resolve) => setTimeout(resolve, 15_000)));
+
+      const resultPromise = (session as any).connectAndSetup(
+        "token",
+        "/livekit",
+        1,
+        "ws://localhost:7880",
+        true,
+      );
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(mockRoom.connect).toHaveBeenCalledTimes(2);
+      expect((session as any)._state.type).toBe("connecting");
+      await vi.advanceTimersByTimeAsync(19_000);
+      expect(await resultPromise).toBe(true);
+      expect(mockRoom.connect).toHaveBeenCalledTimes(3);
+      expect((session as any)._state.type).toBe("connected");
+    });
+
     it("retries on first failure and succeeds on second attempt", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -2700,6 +3068,120 @@ describe("LiveKitSession", () => {
     });
   });
 
+  describe("voice_config audio bitrate applied to publishDefaults (OC-0438)", () => {
+    // OC-0438: the server computes an audio bitrate from the channel's voice
+    // quality (qualityBitrate) and delivers it via voice_config, stored in
+    // voiceStore.voiceConfigs. The Room's publishDefaults must apply it to
+    // the published mic track — otherwise the quality preset changes nothing
+    // a user hears.
+    it("applies the channel's voice_config bitrate to the room's audio publishDefaults", async () => {
+      mockVoiceState.voiceConfigs = new Map([[1, { bitrate: 32000 }]]);
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      const RoomMock = Room as unknown as ReturnType<typeof vi.fn>;
+      const lastOptions = RoomMock.mock.calls.at(-1)![0] as {
+        publishDefaults: { audioPreset?: { maxBitrate: number } };
+      };
+      expect(lastOptions.publishDefaults.audioPreset).toEqual({ maxBitrate: 32000 });
+    });
+
+    it("omits audioPreset (LiveKit default applies) when no voice_config has arrived yet for the channel", async () => {
+      mockVoiceState.voiceConfigs = new Map();
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      const RoomMock = Room as unknown as ReturnType<typeof vi.fn>;
+      const lastOptions = RoomMock.mock.calls.at(-1)![0] as {
+        publishDefaults: { audioPreset?: { maxBitrate: number } };
+      };
+      expect(lastOptions.publishDefaults.audioPreset).toBeUndefined();
+    });
+
+    // OC-0441: publishDefaults alone is not enough on a channel's FIRST join.
+    // The server sends voice_token before voice_config (an ordering frozen by
+    // the epoch-1 golden transcripts), and createRoom runs synchronously from
+    // the voice_token handler — so voiceConfigs is still empty when the Room
+    // is built and the configured bitrate is silently lost until a rejoin.
+    // The mic is published much later, after the LiveKit connect round-trip,
+    // by which point voice_config has arrived: read the bitrate there and
+    // pass it as explicit publish options.
+    it("applies a voice_config that arrives after the Room is built to the mic publish", async () => {
+      mockVoiceState.voiceConfigs = new Map();
+      session.setServerHost("localhost:7880");
+      // voice_config is processed while the LiveKit connect is in flight —
+      // after createRoom read an empty map, before the mic is published.
+      mockRoom.connect.mockImplementation(async () => {
+        mockVoiceState.voiceConfigs = new Map([[1, { bitrate: 128000 }]]);
+      });
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      const RoomMock = Room as unknown as ReturnType<typeof vi.fn>;
+      const lastOptions = RoomMock.mock.calls.at(-1)![0] as {
+        publishDefaults: { audioPreset?: { maxBitrate: number } };
+      };
+      // The Room really was built without it — this is the first join.
+      expect(lastOptions.publishDefaults.audioPreset).toBeUndefined();
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true, undefined, {
+        audioPreset: { maxBitrate: 128000 },
+      });
+    });
+
+    it("publishes the mic with no explicit encoding when no voice_config exists for the channel", async () => {
+      mockVoiceState.voiceConfigs = new Map();
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe("mic mute stops the capture track, not just the publication", () => {
+    // Muting has to stop the OS capture rather than only mute the LiveKit
+    // publication, or the microphone stays open and the OS in-use indicator
+    // stays lit for as long as the client is muted. LiveKit honours
+    // stopMicTrackOnMute only through TrackPublishDefaults, so the Room has to
+    // carry it in publishDefaults; a top-level RoomOptions key is silently
+    // ignored, which would leave the capture running and nothing failing.
+    it("builds the Room with publishDefaults.stopMicTrackOnMute", async () => {
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      const RoomMock = Room as unknown as ReturnType<typeof vi.fn>;
+      const lastOptions = RoomMock.mock.calls.at(-1)![0] as {
+        publishDefaults: { stopMicTrackOnMute?: boolean };
+      };
+      expect(lastOptions.publishDefaults.stopMicTrackOnMute).toBe(true);
+    });
+  });
+
+  describe("remote video is not paused by adaptiveStream", () => {
+    // The video grid plays each remote camera from its own MediaStream and
+    // never attach()es the track, so adaptiveStream sees no visible element.
+    // LiveKit re-checks on every server stream-state update (an SFU bandwidth
+    // pause and resume) and then pauses the camera for good: in CI a peer
+    // decoded one frame of a rejoined camera and nothing after it.
+    it("builds the Room with adaptiveStream off at the default quality", async () => {
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      const RoomMock = Room as unknown as ReturnType<typeof vi.fn>;
+      const lastOptions = RoomMock.mock.calls.at(-1)![0] as { adaptiveStream?: unknown };
+      expect(lastOptions.adaptiveStream).toBe(false);
+    });
+  });
+
   describe("attemptAutoReconnect (lifecycle)", () => {
     it("returns without reconnecting when signal is aborted during delay", async () => {
       (session as any)._state = {
@@ -2816,7 +3298,8 @@ describe("LiveKitSession", () => {
       // state this._room is null, so the cleanup must target the attempt's
       // own room. A leaked room keeps its listeners and its synchronous
       // Disconnected event spawns a second, uncancellable reconnect loop.
-      expect(mockRoom.removeAllListeners).toHaveBeenCalled();
+      const onDisconnected = mockRoom.on.mock.calls.findLast(([e]) => e === "disconnected")![1];
+      expect(mockRoom.off).toHaveBeenCalledWith("disconnected", onDisconnected);
       expect(mockRoom.disconnect).toHaveBeenCalledTimes(1);
     });
 
@@ -2830,8 +3313,11 @@ describe("LiveKitSession", () => {
         ac: new AbortController(),
       };
       session.setServerHost("localhost:7880");
+      const sendSpy = vi.fn();
+      session.setWsClient({ send: sendSpy } as any);
       const errorCb = vi.fn();
       session.setOnError(errorCb);
+      const leaveVoiceSpy = vi.spyOn(session, "leaveVoice");
       const ac = new AbortController();
 
       mockRoom.connect.mockRejectedValue(new Error("always fails"));
@@ -2850,6 +3336,17 @@ describe("LiveKitSession", () => {
 
       expect(leaveVoiceChannel).toHaveBeenCalled();
       expect(errorCb).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+      // The non-superseded give-up path must route through the session's FULL
+      // leave cleanup, not just a voice_leave frame. Sending the frame alone
+      // leaves the session internally "reconnecting" with the E2EE worker and
+      // its room key still resident, and only the reconnect-flavoured audio
+      // cleanup having run — so per-call screenshare mute/volume state survives
+      // until some later explicit leave or join.
+      expect(leaveVoiceSpy).toHaveBeenCalledWith(true);
+      expect((session as any)._state.type).toBe("idle");
+      // ...and exactly one voice_leave reaches the server: leaveVoice(true)
+      // sends it, so the give-up path must not send its own as well.
+      expect(sendSpy.mock.calls.filter(([m]) => m.type === "voice_leave")).toHaveLength(1);
     });
 
     // v004 regression: if the user leaves/switches channels while the FINAL
@@ -3205,7 +3702,10 @@ describe("LiveKitSession", () => {
       };
       session.handleVoiceTokenRefresh("fresh-token");
       expect((session as any)._state.latestToken).toBe("fresh-token");
-      expect((session as any).tokenRefreshTimer).not.toBeNull();
+      // Timer lives on VoiceTokenManager since the refactor. Asserting on the
+      // old `session.tokenRefreshTimer` read `undefined` and passed vacuously,
+      // so the "restarts timer" half of this test guarded nothing.
+      expect((session as any)._tokenManager._refreshTimer).not.toBeNull();
     });
 
     it("clearTokenRefreshTimer prevents pending refresh from firing", async () => {
@@ -3224,6 +3724,42 @@ describe("LiveKitSession", () => {
       expect(mockWs.send).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: "voice_token_refresh" }),
       );
+    });
+
+    // OC-0429: a single unanswered voice_token_refresh must not re-arm the
+    // full 4-minute periodic interval — that leaves _state.latestToken
+    // expired (server TTL is 5 minutes; the refresh fired at minute 4) for
+    // up to another 4 minutes, so any LiveKit disconnect in that window
+    // hands attemptAutoReconnect a dead token and every reconnect attempt
+    // fails (the exact OC-0014 failure mode the 4-minute cadence exists to
+    // avoid). The post-timeout retry must use the server's rate-limit
+    // cadence (60s), not the periodic one (240s).
+    it("re-arms at the 60s retry cadence, not the full 4-minute interval, after an unanswered refresh (OC-0429)", async () => {
+      const mockWs = { send: vi.fn() } as any;
+      session.setWsClient(mockWs);
+      session.setServerHost("localhost:7880");
+
+      mockRoom.connect.mockResolvedValue(undefined);
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      mockWs.send.mockClear();
+
+      // t=240s: the periodic timer fires the first refresh attempt. No
+      // response is ever delivered (handleVoiceTokenRefresh is never called),
+      // simulating a dropped frame / silently-closed WS proxy.
+      await vi.advanceTimersByTimeAsync(4 * 60 * 1000);
+      expect(mockWs.send).toHaveBeenCalledWith({ type: "voice_token_refresh", payload: {} });
+      mockWs.send.mockClear();
+
+      // t=300s: the 60s response-deadline timer fires (BUG-146) and
+      // reschedules the next attempt. Nothing sent exactly at this instant.
+      await vi.advanceTimersByTimeAsync(60 * 1000);
+      expect(mockWs.send).not.toHaveBeenCalled();
+
+      // t=360s: the retry must fire 60s after the timeout (the server's
+      // rate-limit budget), not a further 240s later at t=540s.
+      await vi.advanceTimersByTimeAsync(60 * 1000);
+      expect(mockWs.send).toHaveBeenCalledWith({ type: "voice_token_refresh", payload: {} });
     });
   });
 

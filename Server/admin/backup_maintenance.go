@@ -12,13 +12,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
-)
-
-// Scheduled-backup intervals for the backup_schedule setting values the admin
-// UI offers. "off" (or anything unrecognised) disables scheduling.
-const (
-	backupIntervalDaily  = 24 * time.Hour
-	backupIntervalWeekly = 7 * 24 * time.Hour
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // MaintainBackups implements the backup_schedule / backup_retention settings
@@ -35,8 +29,8 @@ const (
 //
 // The returned error feeds the maintenance loop's circuit breaker; settings
 // simply not existing (fresh DB mid-migration) is not an error.
-func MaintainBackups(ctx context.Context, database *db.DB) error {
-	schedule, err := database.GetSetting(ctx, "backup_schedule")
+func MaintainBackups(ctx context.Context, database *db.DB, settings *service.SettingsService) error {
+	schedule, err := settings.Setting(ctx, "backup_schedule")
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			return nil
@@ -44,14 +38,7 @@ func MaintainBackups(ctx context.Context, database *db.DB) error {
 		return fmt.Errorf("MaintainBackups: reading backup_schedule: %w", err)
 	}
 
-	var interval time.Duration
-	switch strings.ToLower(strings.TrimSpace(schedule)) {
-	case "daily":
-		interval = backupIntervalDaily
-	case "weekly":
-		interval = backupIntervalWeekly
-	}
-
+	interval := service.BackupScheduleInterval(schedule)
 	var firstErr error
 	if interval > 0 {
 		if err := runScheduledBackup(ctx, database, interval); err != nil {
@@ -60,7 +47,7 @@ func MaintainBackups(ctx context.Context, database *db.DB) error {
 		}
 	}
 
-	if err := pruneExpiredBackups(ctx, database); err != nil {
+	if err := pruneExpiredBackups(ctx, database, settings); err != nil {
 		slog.Warn("backup retention pruning failed", "error", err)
 		if firstErr == nil {
 			firstErr = err
@@ -116,20 +103,34 @@ func runScheduledBackup(ctx context.Context, database *db.DB, interval time.Dura
 	return nil
 }
 
+// preRestoreBackupPrefix names the safety copy handleRestoreBackup writes
+// immediately before it overwrites the live database. Those copies are not
+// retention history: an operator needs the pre-restore state precisely when
+// they are recovering from a bad restore, which may be long after the
+// retention window, so pruning never removes them.
+const preRestoreBackupPrefix = "pre_restore_"
+
 // pruneExpiredBackups deletes *.db backups whose mtime is older than the
-// backup_retention window (in days), always keeping the newest one.
-func pruneExpiredBackups(ctx context.Context, database *db.DB) error {
-	retStr, err := database.GetSetting(ctx, "backup_retention")
+// backup_retention window (in days), always keeping the newest one and never
+// touching the pre_restore_* safety copies.
+func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service.SettingsService) error {
+	retStr, err := settings.Setting(ctx, "backup_retention")
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			return nil
 		}
 		return fmt.Errorf("reading backup_retention: %w", err)
 	}
-	// Malformed values parse to 0; zero-or-below means retention is off, so a
-	// typo disables pruning rather than failing the maintenance tick.
+	// Malformed values parse to 0; zero-or-below or above db.RetentionMaxDays
+	// means retention is off. The write path now validates the value, but the
+	// check stays as defence in depth (a value hand-edited into the settings
+	// table, or written by a future path) so it disables pruning rather than
+	// failing the maintenance tick or, worse, overflowing the cutoff below
+	// into the future and unlinking every backup but the newest (OC-0393; the
+	// message-retention window fails the same way over the identical
+	// -days*24h arithmetic).
 	days, _ := strconv.Atoi(strings.TrimSpace(retStr))
-	if days <= 0 {
+	if days <= 0 || days > db.RetentionMaxDays {
 		return nil
 	}
 
@@ -140,6 +141,9 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB) error {
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 	pruned := 0
 	for _, e := range entries {
+		if strings.HasPrefix(filepath.Base(e.path), preRestoreBackupPrefix) {
+			continue
+		}
 		if e.mtime.Before(cutoff) && !e.mtime.Equal(newest) {
 			if rmErr := os.Remove(e.path); rmErr != nil {
 				slog.Warn("backup retention: failed to remove expired backup", "path", e.path, "error", rmErr)
@@ -154,6 +158,14 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB) error {
 			fmt.Sprintf("retention pruned %d backup(s) older than %d days", pruned, days))
 	}
 	return nil
+}
+
+// NewestBackup returns the newest backup's mtime — the last successful
+// backup, since a failed one never leaves a file behind — or the zero time
+// when there is none. The admin attention panel reads it.
+func NewestBackup() (time.Time, error) {
+	newest, _, err := scanBackups()
+	return newest, err
 }
 
 type backupFile struct {

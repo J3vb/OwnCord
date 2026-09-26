@@ -9,16 +9,19 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// countingReadStateStore wraps a real *db.DB and counts UpdateReadState calls
-// so the test can observe whether channel focus hit the writer.
+// countingReadStateStore wraps a real *db.DB and counts the focus path's
+// read-state writes so the test can observe whether channel focus hit the
+// writer. It counts MarkChannelReadAtLatest, which is what that path calls
+// since OC-0323 moved the watermark computation into the write itself;
+// UpdateReadState is now the send path's, and is deliberately not counted.
 type countingReadStateStore struct {
 	*db.DB
 	writes atomic.Int64
 }
 
-func (s *countingReadStateStore) UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error {
+func (s *countingReadStateStore) MarkChannelReadAtLatest(ctx context.Context, userID, channelID int64) error {
 	s.writes.Add(1)
-	return s.DB.UpdateReadState(ctx, userID, channelID, lastReadMessageID)
+	return s.DB.MarkChannelReadAtLatest(ctx, userID, channelID)
 }
 
 // TestHandleChannelFocus_SkipsNoOpReadStateWrite locks the write-skip:

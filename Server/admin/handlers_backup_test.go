@@ -46,7 +46,7 @@ func chdirTemp(t *testing.T) string {
 func TestHandleBackup_Success(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", token, nil)
@@ -81,7 +81,7 @@ func TestHandleBackup_Success(t *testing.T) {
 func TestHandleBackup_RequiresOwner(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 
 	adminUID, _ := database.CreateUser(context.Background(), "backupadmin", "hash", 2)
 	token := "backup-admin-token"
@@ -101,7 +101,7 @@ func TestHandleBackup_RequiresOwner(t *testing.T) {
 func TestHandleListBackups_EmptyWhenNoDirExists(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/backups", token, nil)
@@ -124,7 +124,7 @@ func TestHandleListBackups_EmptyWhenNoDirExists(t *testing.T) {
 func TestHandleListBackups_ReturnsCreatedBackup(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	// Create a backup first.
@@ -166,7 +166,7 @@ func TestHandleListBackups_ReturnsCreatedBackup(t *testing.T) {
 func TestHandleDeleteBackup_Success(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	// Create a real backup file to delete.
@@ -197,7 +197,7 @@ func TestHandleDeleteBackup_Success(t *testing.T) {
 func TestHandleDeleteBackup_NotFound(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodDelete, "/backups/nonexistent.db", token, nil)
@@ -212,7 +212,7 @@ func TestHandleDeleteBackup_NotFound(t *testing.T) {
 func TestHandleDeleteBackup_InvalidNameTraversal(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	// The chi router URL-decodes the path parameter, so ".." arrives decoded.
@@ -230,7 +230,7 @@ func TestHandleDeleteBackup_InvalidNameTraversal(t *testing.T) {
 func TestHandleDeleteBackup_RequiresOwner(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 
 	adminUID, _ := database.CreateUser(context.Background(), "deladmin", "hash", 2)
 	token := "del-admin-token"
@@ -255,7 +255,7 @@ func TestHandleDeleteBackup_RequiresOwner(t *testing.T) {
 func TestHandleRestoreBackup_Success(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	// Set up backup and data directories.
@@ -347,6 +347,161 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 	}
 }
 
+// TestHandleRestoreBackup_RefusesNewerSchema is REL-02: a backup whose
+// schema_versions names migrations the running server does not have must be
+// refused with 409 SCHEMA_TOO_NEW before the live database is touched.
+func TestHandleRestoreBackup_RefusesNewerSchema(t *testing.T) {
+	tmpDir := chdirTemp(t)
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+
+	backupDir := filepath.Join(tmpDir, "data", "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll backups: %v", err)
+	}
+	// A real SQLite backup carrying a migration row the live server lacks.
+	backupName := "scheduled_99991231_235959.db"
+	backupPath := filepath.Join(backupDir, backupName)
+	newer, err := db.Open(backupPath)
+	if err != nil {
+		t.Fatalf("db.Open backup fixture: %v", err)
+	}
+	if _, err := newer.ExecContext(context.Background(),
+		`CREATE TABLE schema_versions (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))`); err != nil {
+		t.Fatalf("create schema_versions in backup fixture: %v", err)
+	}
+	if _, err := newer.ExecContext(context.Background(),
+		"INSERT INTO schema_versions (version) VALUES ('999_from_newer.sql')"); err != nil {
+		t.Fatalf("seed newer migration: %v", err)
+	}
+	if err := newer.Close(); err != nil {
+		t.Fatalf("close backup fixture: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("restore of a newer-schema backup = %d, want 409; body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "SCHEMA_TOO_NEW") {
+		t.Errorf("body = %s, want SCHEMA_TOO_NEW", w.Body.String())
+	}
+	// No pre-restore safety copy may have been taken: the refusal precedes it.
+	if entries, err := os.ReadDir(backupDir); err == nil {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), "pre_restore_") {
+				t.Errorf("a pre-restore copy was taken despite the refusal: %s", e.Name())
+			}
+		}
+	}
+}
+
+// Restore must drain accepted sends before advancing the durable retry floor,
+// then persist that floor before the first byte of the database is replaced.
+func TestHandleRestoreBackup_PreservesRetryFloorBeforeCopy(t *testing.T) {
+	tmpDir := chdirTemp(t)
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+	backupDir := filepath.Join(tmpDir, "data", "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	backupName := "chatserver_retry_floor.db"
+	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, backupName), backupDir); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(tmpDir, "data", "chatserver.db")
+	admin.SetDatabasePath(dbPath)
+	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
+	started := time.Now()
+	var floorBeforeCopy int64
+	restoreCopy := admin.StubCopyBackup(func(src, dst string) error {
+		if err := database.SQLDb().Ping(); err == nil {
+			t.Error("copy ran before the live database drained and closed")
+		}
+		// Reopen proves the on-disk cutoff is readable by the replacement
+		// process before the handler has copied any backed-up bytes.
+		probe, err := db.Open(dst)
+		if err != nil {
+			return err
+		}
+		floorBeforeCopy = probe.MessageDeliveryFloorMS()
+		if err := probe.Close(); err != nil {
+			return err
+		}
+		return admin.CopyBackupForTest(src, dst)
+	})
+	defer restoreCopy()
+	restarted, restoreRestart := admin.StubRestart()
+	defer restoreRestart()
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("restore status = %d: %s", w.Code, w.Body.String())
+	}
+	if floorBeforeCopy <= started.Add(db.MessageDeliveryClockSkew).UnixMilli() {
+		t.Fatalf("copy began with cutoff %d, which does not reject every pre-restore id", floorBeforeCopy)
+	}
+	reopened, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close() //nolint:errcheck
+	if reopened.MessageDeliveryFloorMS() != floorBeforeCopy {
+		t.Fatal("restoring database bytes lost the durable retry cutoff")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !restarted() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !restarted() {
+		t.Fatal("restore did not request a process restart")
+	}
+}
+
+func TestHandleRestoreBackup_AbortsCopyWhenRetryFloorCannotPersist(t *testing.T) {
+	tmpDir := chdirTemp(t)
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+	backupDir := filepath.Join(tmpDir, "data", "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	backupName := "chatserver_retry_floor_failure.db"
+	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, backupName), backupDir); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(tmpDir, "data", "chatserver.db")
+	admin.SetDatabasePath(dbPath)
+	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
+	const original = "original database bytes"
+	if err := os.WriteFile(dbPath, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Portable even when tests run as root: the cutoff cannot be a directory.
+	if err := os.Mkdir(dbPath+".message-retry-floor", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restarted, restoreRestart := admin.StubRestart()
+	defer restoreRestart()
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("restore status = %d: %s", w.Code, w.Body.String())
+	}
+	data, err := os.ReadFile(dbPath)
+	if err != nil || string(data) != original {
+		t.Fatalf("failed cutoff write changed the live database: %q, %v", data, err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !restarted() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !restarted() {
+		t.Fatal("failed restore left a running process with closed database pools")
+	}
+}
+
 // TestHandleRestoreBackup_RollsBackWhenCopyFails verifies the live database file
 // is not left destroyed when the copy fails partway. copyFile truncates the live
 // DB with os.Create before it can know whether the read will succeed, so a
@@ -359,7 +514,7 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 func TestHandleRestoreBackup_RollsBackWhenCopyFails(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	backupDir := filepath.Join(tmpDir, "data", "backups")
@@ -453,7 +608,7 @@ func TestHandleRestoreBackup_RollsBackWhenCopyFails(t *testing.T) {
 func TestHandleRestoreBackup_RestartsWhenCloseFails(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	backupDir := filepath.Join(tmpDir, "data", "backups")
@@ -500,7 +655,7 @@ func TestHandleRestoreBackup_RestartsWhenCloseFails(t *testing.T) {
 func TestHandleRestoreBackup_AbortsWithoutSafetyBackup(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	backupDir := filepath.Join(tmpDir, "data", "backups")
@@ -556,7 +711,7 @@ func TestHandleRestoreBackup_AbortsWithoutSafetyBackup(t *testing.T) {
 func TestHandleRestoreBackup_UsesConfiguredDatabasePath(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	backupDir := filepath.Join(tmpDir, "data", "backups")
@@ -622,7 +777,7 @@ func TestHandleRestoreBackup_UsesConfiguredDatabasePath(t *testing.T) {
 func TestHandleRestoreBackup_NotFound(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/missing.db/restore", token, nil)
@@ -637,7 +792,7 @@ func TestHandleRestoreBackup_NotFound(t *testing.T) {
 func TestHandleRestoreBackup_InvalidName(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/..evil.db/restore", token, nil)
@@ -653,7 +808,7 @@ func TestHandleRestoreBackup_InvalidName(t *testing.T) {
 func TestHandleListBackups_ErrorReadingDir(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	// Create data/ directory but make "backups" a file instead of a directory.
@@ -681,7 +836,7 @@ func TestHandleListBackups_ErrorReadingDir(t *testing.T) {
 func TestHandleRestoreBackup_RequiresOwner(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 
 	adminUID, _ := database.CreateUser(context.Background(), "restoreadmin", "hash", 2)
 	token := "restore-admin-token"

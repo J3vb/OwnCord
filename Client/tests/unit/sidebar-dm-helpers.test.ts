@@ -34,11 +34,16 @@ function resetStores(): void {
     activeModal: null,
     theme: "dark" as const,
     connectionStatus: "disconnected" as const,
+    connectionDialFailed: false,
     transientError: null,
+    sessionReplaced: false,
     persistentError: null,
+    updateRequiredHost: null,
     collapsedCategories: new Set<string>(),
     sidebarMode: "channels" as const,
     activeDmUserId: null,
+    activeView: null,
+    settingsTab: null,
   }));
 }
 

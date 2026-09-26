@@ -10,8 +10,23 @@ import (
 )
 
 // entry records individual request timestamps for sliding-window limiting.
+// window is the caller's OWN window for this key (item 6, B5-10 round 3
+// review): Cleanup used to take one server-wide horizon for every key,
+// which forced an impossible choice — short enough to reclaim a 1-minute
+// login-attempt key promptly, or long enough to cover service/appeal.go's
+// 24h-per-user cap, never both. Recording each key's own window (set by
+// every Allow call, which already knows it) lets one sweep retire a
+// short-window key within its own few minutes while a 24h key's history
+// survives until it is genuinely 24h stale, with no shared constant to keep
+// in sync with the longest caller. window only ever grows for a given key
+// (round 4 review, P3) — Allow ratchets it up to the largest window it has
+// ever seen for that key, never down, so a key whose configured window
+// shrinks and later grows again (message_crud.go's per-channel slow mode)
+// cannot have its history evicted by Cleanup using a since-superseded
+// smaller horizon.
 type entry struct {
 	timestamps []time.Time
+	window     time.Duration
 }
 
 // lockoutEntry records when a lockout expires.
@@ -57,11 +72,15 @@ type rateLimiterShard struct {
 type RateLimiter struct {
 	shards [rateLimiterShards]rateLimiterShard
 	store  LockoutPersister // nil = pure in-memory (tests, non-login limiters)
+	// admission is the one budget for expensive authentication work (B4-4).
+	// It lives here because the limiter is already the single instance the
+	// auth routes, the profile routes and the hub share.
+	admission *AdmissionBudget
 }
 
 // newRateLimiter allocates the per-shard maps shared by both constructors.
 func newRateLimiter(store LockoutPersister) *RateLimiter {
-	rl := &RateLimiter{store: store}
+	rl := &RateLimiter{store: store, admission: NewAdmissionBudget(0)}
 	for i := range rl.shards {
 		rl.shards[i].windows = make(map[string]*entry)
 		rl.shards[i].lockouts = make(map[string]*lockoutEntry)
@@ -89,6 +108,18 @@ func NewPersistentRateLimiter(store LockoutPersister) *RateLimiter {
 	}
 	return rl
 }
+
+// Admission is the process-wide budget for expensive authentication work
+// (B4-4, SEC-01): every password compare or hash on an auth route, and the
+// recovery-code match at verify, is admitted through it, so the single
+// server-owned admission decision lives with the single shared limiter.
+func (r *RateLimiter) Admission() *AdmissionBudget { return r.admission }
+
+// SetAdmissionBudget replaces the budget with one of size concurrent
+// computations (security.expensive_auth_concurrency; zero means the
+// default). Startup wiring calls it before any route mounts; it is not for
+// use with requests in flight.
+func (r *RateLimiter) SetAdmissionBudget(size int) { r.admission = NewAdmissionBudget(size) }
 
 // shardFor maps key to its bucket via FNV-1a (inlined so hashing allocates
 // nothing, unlike hash/fnv's digest).
@@ -138,6 +169,23 @@ func (r *RateLimiter) Allow(key string, limit int, window time.Duration) bool {
 	if !ok {
 		e = &entry{}
 		s.windows[key] = e
+	}
+	// Cleanup's own per-key horizon (see entry's doc comment), ratcheted to
+	// the LARGEST window ever observed for this key rather than overwritten
+	// by whichever call happens to run last (round 4 review, P3: a
+	// channel's slow-mode window, message_crud.go, is admin-configurable —
+	// the same key can be checked under a short window at one point and a
+	// much longer one later). Overwriting unconditionally let a transient
+	// call with a smaller window than one already recorded downgrade the
+	// horizon Cleanup uses to decide the WHOLE entry is stale, discarding a
+	// timestamp a since-restored longer window still needed to enforce
+	// against — a key rate-limited under a loosened-then-retightened
+	// window could lose its history to a Cleanup sweep landing in that
+	// gap. Only ever growing costs a few keys' entries a slightly longer
+	// stay in memory (until stale under the largest window they were ever
+	// checked against); it never discards enforcement history early.
+	if window > e.window {
+		e.window = window
 	}
 
 	// Prune timestamps outside the current window.
@@ -244,24 +292,25 @@ func (r *RateLimiter) Reset(ctx context.Context, key string) {
 // Cleanup evicts stale map entries to prevent unbounded memory growth.
 //
 // A windows entry is removed when every recorded timestamp is older than
-// maxWindow — meaning the entry could not affect any future Allow call that
-// uses a window equal to or shorter than maxWindow.
+// the entry's OWN window (item 6 review) — meaning the entry could not
+// affect any future Allow call for that key, whatever its window is. A
+// key with no window recorded yet (only reachable via SeedTimestampForTest
+// with no window argument, never in production) is treated as already
+// stale, so it is swept rather than lingering forever.
 //
 // A lockouts entry is removed when its expiry has passed.
 //
 // Shards are swept one at a time, so the periodic cleanup never stalls the
 // whole limiter at once.
-//
-// Pass defaultCleanupMaxWindow (15 minutes) for normal server operation, or
-// a shorter duration in tests.
-func (r *RateLimiter) Cleanup(maxWindow time.Duration) {
-	cutoff := time.Now().Add(-maxWindow)
+func (r *RateLimiter) Cleanup() {
+	now := time.Now()
 
 	for i := range r.shards {
 		s := &r.shards[i]
 		s.mu.Lock()
 
 		for key, e := range s.windows {
+			cutoff := now.Add(-e.window)
 			allStale := true
 			for _, ts := range e.timestamps {
 				if ts.After(cutoff) {
@@ -274,7 +323,6 @@ func (r *RateLimiter) Cleanup(maxWindow time.Duration) {
 			}
 		}
 
-		now := time.Now()
 		for key, lo := range s.lockouts {
 			if now.After(lo.expiresAt) {
 				delete(s.lockouts, key)
@@ -296,17 +344,17 @@ func (r *RateLimiter) Cleanup(maxWindow time.Duration) {
 // stop channel is closed. It is intended to be called in a goroutine:
 //
 //	stop := make(chan struct{})
-//	go rl.StartCleanup(5*time.Minute, 15*time.Minute, stop)
+//	go rl.StartCleanup(5*time.Minute, stop)
 //
 // Closing stop causes the goroutine to exit promptly.
-func (r *RateLimiter) StartCleanup(interval, maxWindow time.Duration, stop <-chan struct{}) {
+func (r *RateLimiter) StartCleanup(interval time.Duration, stop <-chan struct{}) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			r.Cleanup(maxWindow)
+			r.Cleanup()
 		case <-stop:
 			return
 		}

@@ -4,8 +4,10 @@
  * Matches login-mockup.html connected overlay structure.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { connectText } from "../i18n/connect";
 
 export interface ConnectedOverlayOptions {
   readonly serverName: string;
@@ -45,7 +47,7 @@ function serverIconColor(name: string): string {
 
 export function createConnectedOverlay(options: ConnectedOverlayOptions): ConnectedOverlayControl {
   const { serverName, username, motd, onReady } = options;
-  const ac = new AbortController();
+  const disposable = new Disposable();
 
   // Root overlay (hidden by default, .visible to show)
   const overlay = createElement("div", {
@@ -61,19 +63,9 @@ export function createConnectedOverlay(options: ConnectedOverlayOptions): Connec
   });
   setText(srvIcon, serverName.charAt(0).toUpperCase());
 
-  // SVG checkmark badge (matches mockup)
+  // Checkmark badge (matches mockup)
   const checkBadge = createElement("div", { class: "connected-check-badge" });
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "3");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  const polyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-  polyline.setAttribute("points", "20 6 9 17 4 12");
-  svg.appendChild(polyline);
-  checkBadge.appendChild(svg);
+  checkBadge.appendChild(createIcon("check"));
   appendChildren(iconWrap, srvIcon, checkBadge);
 
   // Text elements
@@ -82,7 +74,7 @@ export function createConnectedOverlay(options: ConnectedOverlayOptions): Connec
     {
       class: "connected-text",
     },
-    "Connected!",
+    connectText("connected.title"),
   );
 
   const userText = createElement(
@@ -90,7 +82,7 @@ export function createConnectedOverlay(options: ConnectedOverlayOptions): Connec
     {
       class: "connected-user",
     },
-    `Logged in as ${username}`,
+    connectText("connected.loggedInAs", { username }),
   );
 
   const motdEl = createElement("div", { class: "connected-motd" });
@@ -101,7 +93,7 @@ export function createConnectedOverlay(options: ConnectedOverlayOptions): Connec
   // Loader with spinner
   const loader = createElement("div", { class: "connected-loader" });
   const spinner = createElement("div", { class: "spinner" });
-  const loaderText = createElement("span", {}, "Loading server data...");
+  const loaderText = createElement("span", {}, connectText("connected.loading"));
   appendChildren(loader, spinner, loaderText);
 
   appendChildren(overlay, iconWrap, connectedText, userText, motdEl, loader);
@@ -111,24 +103,24 @@ export function createConnectedOverlay(options: ConnectedOverlayOptions): Connec
   }
 
   function markReady(): void {
-    if (ac.signal.aborted) return;
+    if (disposable.signal.aborted) return;
 
     spinner.style.display = "none";
     loaderText.textContent = "";
     loaderText.appendChild(createIcon("check", 16));
-    loaderText.appendChild(document.createTextNode(" Ready!"));
+    loaderText.appendChild(document.createTextNode(` ${connectText("connected.ready")}`));
 
     const timer = setTimeout(() => {
-      if (!ac.signal.aborted) {
+      if (!disposable.signal.aborted) {
         onReady();
       }
     }, READY_DELAY_MS);
 
-    ac.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+    disposable.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     overlay.remove();
   }
 

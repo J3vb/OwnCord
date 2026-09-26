@@ -41,6 +41,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Dismiss a menu a test left open with an outside click, releasing its
+  // document mousedown listener before the DOM is cleared.
+  document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
   vi.useRealTimers();
   document.body.innerHTML = "";
 });

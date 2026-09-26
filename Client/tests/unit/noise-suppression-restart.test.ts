@@ -24,8 +24,12 @@ vi.mock("@lib/logger", () => ({
 // The ScriptProcessorNode fallback path is what jsdom actually exercises
 // here (AudioWorkletNode/AudioContext are not defined in jsdom, so
 // supportsAudioWorklet() is false) — mock the WASM module it depends on.
-vi.mock("@jitsi/rnnoise-wasm", () => ({
-  createRNNWasmModule: vi.fn(() => ({
+// B7-7 switched noise-suppression.ts to the deep module
+// (@jitsi/rnnoise-wasm/dist/rnnoise) so the barrel's unused sync variant stops
+// shipping 1.9 MB of embedded WASM in the livekitSession chunk; the mock
+// follows the specifier under test.
+vi.mock("@jitsi/rnnoise-wasm/dist/rnnoise", () => ({
+  default: vi.fn(() => ({
     ready: Promise.resolve(),
     _rnnoise_create: vi.fn(() => 1),
     _rnnoise_destroy: vi.fn(),

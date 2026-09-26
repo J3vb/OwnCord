@@ -7,6 +7,10 @@
 // Usage:  import { MessageType } from "@lib/protocolTypes";
 //         ws.send({ type: MessageType.CHAT_SEND, payload: { ... } });
 
+// The wire epoch this client speaks; sent in the auth frame and checked by
+// the server. See docs/protocol.md, Compatibility.
+export const PROTOCOL_EPOCH = 1;
+
 // ---------------------------------------------------------------------------
 // Server → Client message types
 // ---------------------------------------------------------------------------
@@ -29,28 +33,31 @@ export const ServerMessageType = {
   VOICE_STATE: "voice_state",
   VOICE_CONFIG: "voice_config",
   VOICE_TOKEN: "voice_token",
-  VOICE_SPEAKERS: "voice_speakers",
   VOICE_LEAVE: "voice_leave", // broadcast (same string as client msg)
   VOICE_MOVED: "voice_moved",
   VOICE_DISCONNECTED: "voice_disconnected",
   MEMBER_JOIN: "member_join",
-  MEMBER_LEAVE: "member_leave",
   MEMBER_UPDATE: "member_update",
   USER_UPDATE: "user_update",
   MEMBER_BAN: "member_ban",
   ROLES_UPDATE: "roles_update",
   EMOJI_UPDATE: "emoji_update",
   SERVER_RESTART: "server_restart",
+  MOD_QUEUE: "mod_queue", // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
+  MOD_ACTION: "mod_action", // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
+  APPEAL_STATUS: "appeal_status", // B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed
   ERROR: "error",
   PONG: "pong",
   DM_CHANNEL_OPEN: "dm_channel_open",
   DM_CHANNEL_CLOSE: "dm_channel_close",
+  DM_REQUEST: "dm_request",
   CALL_INCOMING: "call_incoming",
   CALL_DECLINED: "call_declined",
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce", // broadcast (same string as client msg)
   VOICE_E2EE_OFFER: "voice_e2ee_offer", // relay (same string as client msg)
   COMMAND_REPLY: "command_reply", // ephemeral plugin reply, sent only to the invoking client
   PLUGIN_BROADCAST: "plugin_broadcast", // plugin channel broadcast, gated by the sender's SEND_MESSAGES
+  NSFW_ACK: "nsfw_ack", // second-device signal after acknowledge/revoke; unsequenced, not replayed (B5-7)
 } as const;
 
 export type ServerMessageTypeValue = (typeof ServerMessageType)[keyof typeof ServerMessageType];

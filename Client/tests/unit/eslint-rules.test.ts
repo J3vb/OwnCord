@@ -81,6 +81,19 @@ describe("eslint-rules", () => {
               }
             }
           }`,
+          // The extracted livekitReconnect.ts shape: attemptAutoReconnect is a
+          // free function, supersession is a local `superseded()` closure, and
+          // teardown goes through `deps.leaveVoice()`. The give-up call is a
+          // sibling statement after the early return, so this must stay clean.
+          `async function attemptAutoReconnect(deps, signal, channelId, owner) {
+            const superseded = () => reconnectSuperseded(signal, channelId, owner, deps.getState());
+            if (superseded()) {
+              log.info("Auto-reconnect give-up skipped — superseded");
+              return;
+            }
+            deps.leaveVoice();
+            leaveVoiceChannel();
+          }`,
         ],
         invalid: [
           // The historical bug shape: leaveVoice() called directly inside a
@@ -107,6 +120,30 @@ describe("eslint-rules", () => {
                   this.leaveVoice(false);
                   return "superseded";
                 }
+              }
+            }`,
+            errors: [{ messageId: "unsafeLeaveVoice" }],
+          },
+          // Same bug in the extracted livekitReconnect.ts vocabulary: the
+          // local `superseded()` closure plus `deps.leaveVoice()`. Before the
+          // matcher was widened, neither receiver was recognised and the rule
+          // was blind inside the file that owns the reconnect loop.
+          {
+            code: `async function attemptAutoReconnect(deps, signal, channelId, owner) {
+              const superseded = () => reconnectSuperseded(signal, channelId, owner, deps.getState());
+              if (superseded()) {
+                deps.leaveVoice();
+                return;
+              }
+            }`,
+            errors: [{ messageId: "unsafeLeaveVoice" }],
+          },
+          // And via the negated isStateConnected() checkpoint on `deps`.
+          {
+            code: `async function attemptAutoReconnect(deps, channelId, newRoom) {
+              if (!deps.isStateConnected(channelId, newRoom)) {
+                deps.leaveVoice();
+                return;
               }
             }`,
             errors: [{ messageId: "unsafeLeaveVoice" }],

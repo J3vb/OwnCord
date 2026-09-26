@@ -44,7 +44,8 @@ var _ dmVisibilityMarker = (*ws.Hub)(nil)
 // never gets it redelivered by the ordinary seq-replay path — mirroring why
 // the WS emitter of the same event (ws/emit.go DMChannelOpenEvent) forces
 // this bump unconditionally, regardless of whether the send itself
-// succeeded.
+// succeeded. Also called by nsfw_handler.go (P2-8): nsfw_ack is the same
+// shape of unsequenced, targeted event.
 func markDMVisibilityChanged(broadcaster DMBroadcaster) {
 	if vm, ok := broadcaster.(dmVisibilityMarker); ok {
 		vm.MarkVisibilityChanged()
@@ -71,7 +72,7 @@ var _ dmVoiceEvictor = (*ws.Hub)(nil)
 // hub is used to send real-time WebSocket events on DM close.
 func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadcaster DMBroadcaster) {
 	r.Route("/api/v1/dms", func(r chi.Router) {
-		r.Use(AuthMiddleware(database))
+		r.Use(AuthMiddleware(svc.Sessions))
 		r.Post("/", handleCreateDM(svc, broadcaster))
 		r.Post("/group", handleCreateGroupDM(svc, broadcaster))
 		r.Get("/", handleListDMs(svc))
@@ -81,7 +82,7 @@ func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadca
 
 	// User blocking routes — prevent DM creation and messaging.
 	r.Route("/api/v1/blocks", func(r chi.Router) {
-		r.Use(AuthMiddleware(database))
+		r.Use(AuthMiddleware(svc.Sessions))
 		r.Get("/", handleListBlocks(svc))
 		r.Put("/{userId}", handleBlockUser(svc, broadcaster))
 		r.Delete("/{userId}", handleUnblockUser(svc))
@@ -119,19 +120,14 @@ type listDMsResponse struct {
 // handleCreateDM creates or retrieves a DM channel with a recipient.
 func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
 		var req createDMRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "invalid request body",
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 			return
 		}
 
@@ -150,7 +146,12 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 		// creation path needs this — CreateDM re-opening an existing DM for
 		// the caller only touches the caller's own dm_open_state row, which
 		// the caller obviously already knows about.
-		if result.Created {
+		// RecipientOpened is false when the recipient does not yet trust the
+		// caller (B5-6): GetOrCreateDMChannelGated decides the recipient's
+		// side inside its own transaction and opens only the caller's, so no
+		// dm_channel_open goes out — the request frame from the first
+		// message is their only signal until they accept.
+		if result.Created && result.RecipientOpened {
 			broadcastDMOpen(r.Context(), svc, broadcaster, result.Channel.ID, []int64{result.Recipient.ID})
 		}
 
@@ -190,11 +191,8 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 // handleListDMs returns all open DM channels for the authenticated user.
 func handleListDMs(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -210,11 +208,8 @@ func handleListDMs(svc *service.Services) http.HandlerFunc {
 // handleCloseDM removes a DM channel from the authenticated user's open list.
 func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -231,13 +226,17 @@ func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.Handle
 
 		// Notify via WebSocket so sidebar updates immediately.
 		if broadcaster != nil {
+			// dm_channel_close is unsequenced and targeted like
+			// dm_channel_open — see markDMVisibilityChanged. Bump BEFORE the
+			// send, same ordering broadcastDMOpen and the NSFW handlers use: a
+			// socket that warm-reconnects in the gap between these two calls
+			// must already observe the bumped watermark, since the close frame
+			// itself can never be redelivered by seq replay.
+			markDMVisibilityChanged(broadcaster)
 			closeMsg := fmt.Appendf(nil, `{"type":%q,"payload":{"channel_id":%d}}`, ws.MsgTypeDMChannelClose, channelID)
 			if ok := broadcaster.SendToUser(user.ID, closeMsg); !ok {
 				slog.Debug("handleCloseDM: user not connected", "user_id", user.ID, "channel_id", channelID)
 			}
-			// dm_channel_close is unsequenced and targeted like
-			// dm_channel_open — see markDMVisibilityChanged.
-			markDMVisibilityChanged(broadcaster)
 			// A group leave changes the membership everyone else renders, so
 			// the survivors get a refreshed dm_channel_open rather than being
 			// left showing a member who has gone.
@@ -312,19 +311,14 @@ func broadcastDMOpen(ctx context.Context, svc *service.Services, broadcaster DMB
 // handleCreateGroupDM creates a group DM between the caller and 2..8 others.
 func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
 		var req createGroupDMRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "invalid request body",
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 			return
 		}
 
@@ -348,11 +342,8 @@ func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 // there is no owner, so every member holds the same authority over it.
 func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "authentication required",
-			})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -363,9 +354,7 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 
 		var req renameDMRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "invalid request body",
-			})
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 			return
 		}
 
@@ -401,9 +390,8 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 // handleBlockUser blocks a user.
 func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "authentication required"})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -417,40 +405,47 @@ func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.Hand
 			return
 		}
 
-		// The block has already committed at this point, so the rest of this
-		// handler must survive the caller's request context being cancelled
-		// right after that commit (client disconnect mid-handler) — same
-		// reasoning as handleRenameGroupDM's own bgCtx. Without this, a
-		// canceled request context makes the shared-DM lookup below fail and
-		// get skipped, silently defeating the eviction it gates.
-		bgCtx := context.WithoutCancel(r.Context())
-
-		// Revocation must evict a live session, not merely block the next
-		// join (the same invariant the voice sweep states): without this, a
-		// blocked user already in the pair's 1:1 DM voice call stays in it
-		// indefinitely — the block gate otherwise runs only on voice_join and
-		// voluntary voice_token_refresh, both of which the blocked client
-		// controls. Group DM calls are deliberately untouched, matching
-		// requireDMNotBlocked's group exemption.
-		if ve, evictable := broadcaster.(dmVoiceEvictor); evictable {
-			if chID, exists, err := svc.DMs.SharedOneToOneDM(bgCtx, user.ID, targetID); err != nil {
-				slog.Warn("block: shared-DM lookup for voice eviction failed",
-					"blocker_id", user.ID, "target_id", targetID, "err", err)
-			} else if exists {
-				ve.DisconnectFromVoiceInChannel(bgCtx, targetID, chID)
-			}
-		}
+		evictBlockedUserFromVoice(context.WithoutCancel(r.Context()), svc, broadcaster, user.ID, targetID)
 
 		writeJSON(w, http.StatusOK, map[string]string{"message": "user blocked"})
+	}
+}
+
+// evictBlockedUserFromVoice evicts targetID from the pair's shared 1:1 DM
+// voice call, if any — the post-block step both PUT /api/v1/blocks/{id} and
+// POST /api/v1/dm-requests/{id}/block (B5-6, Codex P1-3) owe once BlockUser
+// itself has committed. Callers pass a context detached from the request
+// (context.WithoutCancel): the block has already committed by the time this
+// runs, so a client disconnecting mid-handler must not silently skip it.
+//
+// Revocation must evict a live session, not merely block the next join (the
+// same invariant the voice sweep states): without this, a blocked user
+// already in the pair's 1:1 DM voice call stays in it indefinitely — the
+// block gate otherwise runs only on voice_join and voluntary
+// voice_token_refresh, both of which the blocked client controls. Group DM
+// calls are deliberately untouched, matching requireDMNotBlocked's group
+// exemption.
+func evictBlockedUserFromVoice(ctx context.Context, svc *service.Services, broadcaster DMBroadcaster, blockerID, targetID int64) {
+	ve, evictable := broadcaster.(dmVoiceEvictor)
+	if !evictable {
+		return
+	}
+	chID, exists, err := svc.DMs.SharedOneToOneDM(ctx, blockerID, targetID)
+	if err != nil {
+		slog.Warn("block: shared-DM lookup for voice eviction failed",
+			"blocker_id", blockerID, "target_id", targetID, "err", err)
+		return
+	}
+	if exists {
+		ve.DisconnectFromVoiceInChannel(ctx, targetID, chID)
 	}
 }
 
 // handleUnblockUser unblocks a user.
 func handleUnblockUser(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "authentication required"})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 
@@ -470,9 +465,8 @@ func handleUnblockUser(svc *service.Services) http.HandlerFunc {
 // handleListBlocks returns all blocked user IDs.
 func handleListBlocks(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "authentication required"})
+		user, ok := requireUser(w, r)
+		if !ok {
 			return
 		}
 

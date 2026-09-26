@@ -1,14 +1,19 @@
-// Pass 4 — host HTTP allowlist + IP guard tests.
+// Host HTTP allowlist tests.
 //
-// Locks in the SSRF defenses added in Pass 2 (dot-bounded host suffix
-// matching, empty-entry rejection) and Pass 3 (RFC6598 CGN rejection).
+// Locks in the dot-bounded host suffix matching and empty-entry rejection,
+// and — since B5-1 moved the destination policy into Server/safefetch — that
+// HTTPDo actually applies that policy, on the first hop and on redirects
+// alike. The address classifier's own cases live in Server/safefetch, which
+// is where the classifier now lives.
 package plugin
 
 import (
 	"context"
 	"errors"
-	"net"
+	"net/http"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/safefetch"
 )
 
 func newTestRegistry(allowlist []string) *Registry {
@@ -68,120 +73,116 @@ func TestHostAllowedTrailingDot(t *testing.T) {
 	}
 }
 
-func TestIPAllowedRejectsAllRanges(t *testing.T) {
-	cases := []string{
-		"127.0.0.1",       // loopback
-		"127.5.6.7",       // loopback range
-		"10.0.0.1",        // RFC1918
-		"172.16.5.5",      // RFC1918
-		"172.31.255.255",  // RFC1918 high
-		"192.168.1.1",     // RFC1918
-		"169.254.169.254", // AWS metadata / link-local
-		"100.64.5.5",      // RFC6598 CGN
-		"100.127.255.255", // RFC6598 CGN high
-		"::1",             // IPv6 loopback
-		"fc00::1",         // RFC4193 ULA
-		"fe80::1",         // IPv6 link-local
-		"0.0.0.0",         // unspecified
-		"::",              // IPv6 unspecified
-		"224.0.0.1",       // multicast
-		"ff00::1",         // IPv6 multicast
-	}
-	for _, addr := range cases {
-		ip := net.ParseIP(addr)
-		if ip == nil {
-			t.Fatalf("ParseIP(%q) failed", addr)
+// An allowlisted host that resolves somewhere non-global is still refused,
+// and the refusal is ErrHTTPHostDenied — the sentinel this package's callers
+// test for — rather than safefetch's own error leaking through.
+func TestHTTPDo_AllowlistedHostResolvingPrivateIsDenied(t *testing.T) {
+	r := newTestRegistry([]string{"127.0.0.1", "169.254.169.254", "10.0.0.5", "metadata.invalid"})
+	inst := &Instance{Manifest: &Manifest{Permissions: []string{string(CapHTTP)}}}
+	for _, target := range []string{
+		"http://127.0.0.1/",
+		"http://169.254.169.254/latest/meta-data/",
+		"https://10.0.0.5/",
+	} {
+		_, err := r.HTTPDo(context.Background(), inst, HTTPRequest{Method: http.MethodGet, URL: target})
+		if !errors.Is(err, ErrHTTPHostDenied) {
+			t.Errorf("%s: want ErrHTTPHostDenied, got %v", target, err)
 		}
-		if err := ipAllowed(ip); err == nil {
-			t.Errorf("ipAllowed(%s) should have returned error", addr)
+		if !errors.Is(err, safefetch.ErrBlockedAddress) {
+			t.Errorf("%s: the refusal should carry safefetch's reason, got %v", target, err)
 		}
 	}
 }
 
-func TestIPAllowedAcceptsPublic(t *testing.T) {
-	cases := []string{
-		"8.8.8.8",
-		"1.1.1.1",
-		"203.0.113.5", // RFC5737 documentation but not in any reject set
-		"2606:4700:4700::1111",
-	}
-	for _, addr := range cases {
-		ip := net.ParseIP(addr)
-		if ip == nil {
-			t.Fatalf("ParseIP(%q) failed", addr)
-		}
-		if err := ipAllowed(ip); err != nil {
-			t.Errorf("ipAllowed(%s) should have been allowed, got %v", addr, err)
-		}
-	}
-}
-
-// TestGuardedDial_FallsBackAcrossVettedIPs locks the W2-6 fix: an allowlisted
-// dual-stack/round-robin host whose first record is unreachable must connect
-// via the next vetted record instead of hard-failing.
-func TestGuardedDial_FallsBackAcrossVettedIPs(t *testing.T) {
-	origLookup, origDial := lookupIPAddr, dialContext
-	t.Cleanup(func() { lookupIPAddr, dialContext = origLookup, origDial })
-
-	lookupIPAddr = func(_ context.Context, _ string) ([]net.IPAddr, error) {
-		return []net.IPAddr{
-			{IP: net.ParseIP("192.0.2.1")}, // TEST-NET, "down"
-			{IP: net.ParseIP("192.0.2.2")}, // "reachable"
-		}, nil
-	}
-	var attempts []string
-	c1, c2 := net.Pipe()
-	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
-	dialContext = func(_ context.Context, _ string, addr string) (net.Conn, error) {
-		attempts = append(attempts, addr)
-		if addr == "192.0.2.1:443" {
-			return nil, errors.New("connection refused")
-		}
-		return c1, nil
-	}
-
-	conn, err := GuardedDialContext()(context.Background(), "tcp", "api.example.com:443")
-	if err != nil {
-		t.Fatalf("guarded dial should fall back to the next vetted IP: %v", err)
-	}
-	if conn != c1 {
-		t.Fatal("expected the fallback connection")
-	}
-	want := []string{"192.0.2.1:443", "192.0.2.2:443"}
-	if len(attempts) != 2 || attempts[0] != want[0] || attempts[1] != want[1] {
-		t.Fatalf("dial attempts = %v, want %v", attempts, want)
-	}
-}
-
-// TestGuardedDial_PrivateRecordRefusesBeforeAnyDial: one private record among
-// the resolved set refuses the whole request before a single dial happens.
-func TestGuardedDial_PrivateRecordRefusesBeforeAnyDial(t *testing.T) {
-	origLookup, origDial := lookupIPAddr, dialContext
-	t.Cleanup(func() { lookupIPAddr, dialContext = origLookup, origDial })
-
-	lookupIPAddr = func(_ context.Context, _ string) ([]net.IPAddr, error) {
-		return []net.IPAddr{
-			{IP: net.ParseIP("192.0.2.1")},
-			{IP: net.ParseIP("10.0.0.5")}, // poisoned private record
-		}, nil
-	}
-	dialed := false
-	dialContext = func(_ context.Context, _ string, _ string) (net.Conn, error) {
-		dialed = true
-		return nil, errors.New("must not be reached")
-	}
-
-	_, err := GuardedDialContext()(context.Background(), "tcp", "api.example.com:443")
+// A host the allowlist does not name never leaves the process — and is
+// refused by the allowlist rather than by failing to resolve, which is what
+// makes this the test that fails if Request.AllowHost stops being wired.
+// .invalid never resolves (RFC 6761), so an unwired allowlist shows up as a
+// DNS error instead of a denial.
+func TestHTTPDo_UnlistedHostIsDenied(t *testing.T) {
+	r := newTestRegistry([]string{"api.example.com"})
+	inst := &Instance{Manifest: &Manifest{Permissions: []string{string(CapHTTP)}}}
+	_, err := r.HTTPDo(context.Background(), inst, HTTPRequest{URL: "https://evil.invalid/"})
 	if !errors.Is(err, ErrHTTPHostDenied) {
 		t.Fatalf("want ErrHTTPHostDenied, got %v", err)
 	}
-	if dialed {
-		t.Fatal("no dial may happen when any resolved record is private")
+	if !errors.Is(err, safefetch.ErrHostNotAllowed) {
+		t.Fatalf("the refusal must come from the allowlist, not from anything downstream: %v", err)
+	}
+	if errors.Is(err, safefetch.ErrResolve) {
+		t.Fatal("the host was resolved — the allowlist is no longer wired into the fetch")
 	}
 }
 
-func TestIPAllowedNilRejected(t *testing.T) {
-	if err := ipAllowed(nil); err == nil {
-		t.Fatal("nil IP should be rejected")
+// Schemes outside http and https are refused before anything is resolved.
+func TestHTTPDo_NonHTTPSchemeIsDenied(t *testing.T) {
+	r := newTestRegistry([]string{"example.com"})
+	inst := &Instance{Manifest: &Manifest{Permissions: []string{string(CapHTTP)}}}
+	for _, target := range []string{"file:///etc/passwd", "gopher://example.com:70/", "ftp://example.com/x"} {
+		if _, err := r.HTTPDo(context.Background(), inst, HTTPRequest{URL: target}); !errors.Is(err, ErrHTTPHostDenied) {
+			t.Errorf("%s: want ErrHTTPHostDenied, got %v", target, err)
+		}
+	}
+}
+
+// The capability gate still comes first: no manifest grant, no request.
+func TestHTTPDo_RequiresTheCapability(t *testing.T) {
+	r := newTestRegistry([]string{"example.com"})
+	inst := &Instance{Manifest: &Manifest{}}
+	_, err := r.HTTPDo(context.Background(), inst, HTTPRequest{URL: "https://example.com/"})
+	if !errors.Is(err, ErrCapabilityNotGranted) {
+		t.Fatalf("want ErrCapabilityNotGranted, got %v", err)
+	}
+}
+
+// The allowlist is applied per hop, not only to the URL the plugin supplied.
+//
+// This cannot be driven through a real redirect from here: the production
+// policy's port allowlist is [80, 443], so no httptest stub is reachable at
+// all, and HTTPDo's own pre-check refuses a loopback host before safefetch is
+// even called. What this asserts is the wiring — that the function HTTPDo
+// hands to safefetch as Request.AllowHost is the allowlist, applied to a
+// "host:port" with the port stripped. That safefetch then consults it on
+// every hop is safefetch.TestFetch_AllowHostAppliesToEveryHop's job, and the
+// earlier version of this test claimed to do both and did neither.
+func TestAllowHostPortAppliesTheAllowlist(t *testing.T) {
+	r := newTestRegistry([]string{"api.example.com", "example.org"})
+	cases := []struct {
+		hostport string
+		ok       bool
+	}{
+		{"api.example.com:443", true},
+		{"api.example.com:80", true},
+		{"api.example.com", true},
+		{"v1.api.example.com:443", true},
+		{"sub.example.org:443", true},
+		{"evil-api.example.com:443", false},
+		{"api.example.com.evil.com:443", false},
+		{"127.0.0.1:8080", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := r.allowHostPort(c.hostport); got != c.ok {
+			t.Errorf("allowHostPort(%q) = %v, want %v", c.hostport, got, c.ok)
+		}
+	}
+}
+
+// HTTPDo actually passes that function through, rather than leaving
+// Request.AllowHost nil and losing the per-hop check. An allowlisted host
+// that resolves nowhere reaches safefetch, so the refusal that comes back
+// proves the request was built and handed over.
+func TestHTTPDo_PassesTheAllowlistToSafefetch(t *testing.T) {
+	r := newTestRegistry([]string{"example.com"})
+	inst := &Instance{Manifest: &Manifest{Permissions: []string{string(CapHTTP)}}}
+
+	// A host the allowlist names, on a port the policy does not: safefetch
+	// refuses it, which it could only do having been called.
+	_, err := r.HTTPDo(context.Background(), inst, HTTPRequest{URL: "https://example.com:8443/"})
+	if !errors.Is(err, safefetch.ErrBlockedPort) {
+		t.Fatalf("want safefetch.ErrBlockedPort, got %v", err)
+	}
+	if !errors.Is(err, ErrHTTPHostDenied) {
+		t.Fatalf("a destination refusal must still carry ErrHTTPHostDenied, got %v", err)
 	}
 }

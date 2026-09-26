@@ -1,0 +1,7 @@
+{
+  "_doc": "Test files the lifecycle guard allows to leak. This list only shrinks: the guard fails a listed file that runs clean. 11a pinned 14 files at its base (plus two Linux voice 1b files that arrived after it); 11b added each file's missing teardown and removed its entry. What remains leaks through production code the test cannot release. Keys are paths relative to Client/; `reasons` names why each entry is listed.",
+  "files": ["tests/unit/media-visibility.test.ts"],
+  "reasons": {
+    "tests/unit/media-visibility.test.ts": "App-lifetime singleton under test: lib/media-visibility.ts's once-guarded ensureVisibilityListener installs document visibilitychange and window blur/focus listeners on the first observeMedia call and exposes no way to release them, so the file's first test always ends with them live."
+  }
+}

@@ -372,7 +372,7 @@ func TestAuditWriter_ConcurrentEnqueue(t *testing.T) {
 // ─── PersistAudits (batch insert + per-row fallback) ─────────────────────────
 
 func TestPersistAudits_SingleTransaction(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 	uid := seedUser(t, database, "batchactor")
 
 	entries := []db.AuditEntry{
@@ -405,7 +405,7 @@ func TestPersistAudits_SingleTransaction(t *testing.T) {
 }
 
 func TestPersistAudits_PoisonRowFallsBackPerRow(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 	uid := seedUser(t, database, "poisonactor")
 
 	// The admin test schema declares actor_id REFERENCES users(id) and Open
@@ -436,7 +436,7 @@ func TestPersistAudits_PoisonRowFallsBackPerRow(t *testing.T) {
 }
 
 func TestPersistAudits_EmptyBatch(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 	persisted, err := database.PersistAudits(context.Background(), nil)
 	if err != nil || persisted != 0 {
 		t.Errorf("PersistAudits(nil) = (%d, %v), want (0, nil)", persisted, err)
@@ -449,7 +449,7 @@ func TestPersistAudits_EmptyBatch(t *testing.T) {
 // *DB with no writer installed writes audit entries synchronously, so the
 // entry is visible the moment WriteAudit returns.
 func TestWriteAudit_SynchronousWithoutWriter(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 	uid := seedUser(t, database, "syncactor")
 
 	db.WriteAudit(context.Background(), database, uid, "cli_action", "api_token", 5, "label")
@@ -467,7 +467,7 @@ func TestWriteAudit_SynchronousWithoutWriter(t *testing.T) {
 // installs a writer on the *DB, WriteAudit enqueues instead of inserting —
 // the row only lands when the writer flushes (here forced via Stop's drain).
 func TestWriteAudit_AsyncWithInstalledWriter(t *testing.T) {
-	database := newAdminTestDB(t)
+	database := newSchemaTestDB(t, adminTestSchema)
 	uid := seedUser(t, database, "asyncactor")
 
 	// Neither flush trigger can fire before Stop, making "not yet written"

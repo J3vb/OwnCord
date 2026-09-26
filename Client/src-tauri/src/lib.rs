@@ -1,16 +1,25 @@
 mod commands;
+// Test-only: gates over tauri.conf.json and the source text itself.
+#[cfg(test)]
+mod config_gates;
 mod constants;
 mod credentials;
 #[cfg(windows)]
 mod dpapi;
+mod external_content;
 #[cfg(not(windows))]
 mod fallback_crypto;
 mod http_proxy;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod livekit_proxy;
+// Public: `examples/native_voice_interop.rs` drives the same session code.
+#[cfg(target_os = "linux")]
+pub mod native_voice;
+mod proxy_common;
 mod ptt;
 mod secret_store;
+mod text;
 mod tofu;
 mod tray;
 mod update_commands;
@@ -36,9 +45,33 @@ fn log_level_from_env() -> log::LevelFilter {
     }
 }
 
-// Only used by the desktop-only single-instance closure below.
-#[cfg(desktop)]
+#[cfg(target_os = "linux")]
+fn native_voice_state() -> native_voice::NativeVoiceState {
+    native_voice::NativeVoiceState::new()
+}
+/// Off Linux the webview's own WebRTC handles voice; an empty placeholder keeps
+/// the builder chain identical on every platform. A unit struct, not `()`:
+/// clippy rejects both `-> ()` and passing a unit value to `.manage`.
+#[cfg(not(target_os = "linux"))]
+struct NoNativeVoice;
+#[cfg(not(target_os = "linux"))]
+fn native_voice_state() -> NoNativeVoice {
+    NoNativeVoice
+}
+
+// Used by the single-instance closure and the startup log below.
 use tauri::Manager;
+
+/// Whether a forwarded single-instance launch should restore the main window.
+///
+/// Once an installer is launching the old process must not take handoffs: the
+/// plugin has already hidden the window and is blocked in `ShellExecuteW`, so
+/// re-showing it puts the old version on screen for the whole install gap
+/// (the reported "old version stays up for ~90 s" symptom).
+#[cfg(desktop)]
+fn should_restore_on_second_launch(installer_launching: bool) -> bool {
+    !installer_launching
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -50,10 +83,17 @@ pub fn run() {
     // "deep-link" feature this also routes an owncord:// link to the running app.
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_focus();
+        let launching = update_commands::installer_launching();
+        log::info!(
+            "[update] second-instance launch forwarded (update in progress: {}, installer launching: {launching})",
+            update_commands::update_in_progress()
+        );
+        if should_restore_on_second_launch(launching) {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
         }
     }));
 
@@ -101,10 +141,11 @@ pub fn run() {
         .manage(ws_proxy::WsState::new())
         .manage(livekit_proxy::LiveKitProxyState::new())
         .manage(http_proxy::HttpProxyState::new())
+        .manage(external_content::ExternalContentState::new())
+        .manage(native_voice_state())
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::save_settings,
-            commands::store_cert_fingerprint,
             commands::get_cert_fingerprint,
             commands::store_identity_pin,
             commands::get_identity_pin,
@@ -114,28 +155,76 @@ pub fn run() {
             ws_proxy::accept_cert_fingerprint,
             credentials::save_credential,
             credentials::load_credential,
+            credentials::login_with_saved_password,
             credentials::delete_credential,
             credentials::save_identity_key,
             credentials::load_identity_key,
             credentials::delete_identity_key,
-            credentials::probe_credential_store,
+            credentials::save_pending_messages,
+            credentials::load_pending_messages,
+            credentials::delete_pending_messages,
             update_commands::check_client_update,
             update_commands::download_and_install_update,
             ptt::ptt_start,
             ptt::ptt_stop,
             ptt::ptt_set_key,
-            ptt::ptt_get_key,
             ptt::ptt_polling_supported,
             ptt::ptt_listen_for_key,
             livekit_proxy::start_livekit_proxy,
             livekit_proxy::stop_livekit_proxy,
             http_proxy::start_http_proxy,
             http_proxy::stop_http_proxy,
+            external_content::external_preview,
+            external_content::external_image,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_build_info,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_key,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_clear_key,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_connect,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_disconnect,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_microphone,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_subscribed,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_volume,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_screenshare_volume,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_debug_info,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_list_devices,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_device,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_publish_camera,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_unpublish_camera,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_screen_sources,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_start_screen,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_publish_screen,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_stop_screen,
             #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])
         .setup(|app| {
             // Rust logging is initialized by tauri_plugin_log (registered above).
+            // Record the version and PID first: paired with the "[update]
+            // installer launching" line, they bound the install gap a report
+            // describes (time from that line to this startup line).
+            log::info!(
+                "[startup] OwnCord {} starting (pid {})",
+                app.package_info().version,
+                std::process::id()
+            );
             // Record the credential backend first: if this build has no
             // persistent store, every later credential symptom follows from it.
             secret_store::log_compiled_backend();
@@ -162,13 +251,25 @@ pub fn run() {
             eprintln!("Fatal startup error: {e}");
             #[cfg(not(target_os = "linux"))]
             rfd::MessageDialog::new()
-                .set_title("OwnCord failed to start")
-                .set_description(format!(
-                    "The application encountered a startup error and cannot continue.\n\n{e}"
-                ))
+                .set_title(text::STARTUP_DIALOG_TITLE)
+                .set_description(text::startup_dialog_body(&e.to_string()))
                 .set_level(rfd::MessageLevel::Error)
                 .show();
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(all(test, desktop))]
+mod tests {
+    use super::should_restore_on_second_launch;
+
+    #[test]
+    fn forwarded_launch_restores_window_unless_installer_is_launching() {
+        // Normal forwarded launch: the running instance should come forward.
+        assert!(should_restore_on_second_launch(false));
+        // Installer launching: the window is hidden and the old version must
+        // not come back for the launch to hand off to it.
+        assert!(!should_restore_on_second_launch(true));
     }
 }

@@ -1,13 +1,20 @@
 // ConnectPage — login/register page component.
 // Thin composition shell that wires ServerPanel and LoginForm together.
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
+import { createLogger } from "@lib/logger";
 import { openSettings, closeSettings, uiStore, setTransientError } from "@stores/ui.store";
-import type { HealthStatus } from "@lib/profiles";
+import type { Compatibility, HealthStatus } from "@lib/profiles";
+import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
+import type { RegistrationMode } from "@lib/types";
 import { createServerPanel } from "./connect-page/ServerPanel";
 import { createLoginForm } from "./connect-page/LoginForm";
+import { createIncompatibleNotice } from "./connect-page/IncompatibleNotice";
 import { loadCredential } from "@lib/credentials";
+
+const log = createLogger("ConnectPage");
 
 // ---------------------------------------------------------------------------
 // Re-exports (public API must not change)
@@ -16,24 +23,39 @@ import { loadCredential } from "@lib/credentials";
 export type { SimpleProfile } from "./connect-page/ServerPanel";
 
 import type { SimpleProfile } from "./connect-page/ServerPanel";
+import { connectText } from "../i18n/connect";
 
 /** Callbacks for external wiring (API integration added later). */
 export interface ConnectPageCallbacks {
   onLogin(host: string, username: string, password: string): Promise<void>;
+  /** Log in using the password kept in the OS credential store. */
+  onLoginWithSavedPassword(host: string, username: string): Promise<void>;
   onRegister(host: string, username: string, password: string, inviteCode: string): Promise<void>;
   onTotpSubmit(code: string): Promise<void>;
+  /** Recover with a recovery kit secret or an owner-issued credential. */
+  onRecover?(host: string, username: string, secret: string, newPassword: string): Promise<void>;
   onAddProfile?(name: string, host: string): void;
   onDeleteProfile?(profileId: string): void;
   onToggleAutoLogin?(profileId: string, enabled: boolean): void;
   onAutoLoginCancel?(): void;
+  /** Mount the client-update banner for a refused/older host (client-older). */
+  onUpdateClient?(host: string): void;
+  /** The registration mode `server-info` reported for a host, if known. */
+  getRegistrationMode?(host: string): RegistrationMode | null;
+  /** The retention sentence `server-info` reported for a host, if known. */
+  getRetentionNotice?(host: string): string | null;
 }
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_PROFILES: readonly SimpleProfile[] = [
-  { name: "Local Server", host: "localhost:8443" },
+/** Account actions offered by the settings overlay before sign-in. */
+const notAuthenticated = (): Promise<never> =>
+  Promise.reject(new Error(connectText("settings.notAuthenticated")));
+
+const defaultProfiles = (): readonly SimpleProfile[] => [
+  { name: connectText("profiles.defaultName"), host: "localhost:8443" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -42,7 +64,7 @@ const DEFAULT_PROFILES: readonly SimpleProfile[] = [
 
 export function createConnectPage(
   callbacks: ConnectPageCallbacks,
-  initialProfiles: readonly SimpleProfile[] = DEFAULT_PROFILES,
+  initialProfiles: readonly SimpleProfile[] = defaultProfiles(),
 ): MountableComponent & {
   showTotp(): void;
   showConnecting(): void;
@@ -50,10 +72,16 @@ export function createConnectPage(
   showError(message: string): void;
   resetToIdle(): void;
   updateHealthStatus(host: string, status: HealthStatus): void;
+  /** Advisory per-row epoch badge; never disables Connect. */
+  updateCompatibility(host: string, compatibility: Compatibility, serverEpoch: number | null): void;
+  /** Show the incompatible state for a refused host (WS refusal or selection). */
+  showIncompatible(host: string, serverEpoch: number | null, clientEpoch?: number): void;
   getRememberPassword(): boolean;
   /** Whether the auto-connect checkbox is ticked. */
   getAutoConnect(): boolean;
   getPassword(): string;
+  /** Whether the password box holds the saved-password placeholder. */
+  isUsingSavedPassword(): boolean;
   /** Re-render the server profile list with updated data. */
   refreshProfiles(profiles: readonly SimpleProfile[]): void;
   /** Pre-select a server by host — fills the login form and loads saved credentials. */
@@ -65,19 +93,47 @@ export function createConnectPage(
   let root: HTMLDivElement;
 
   // Cleanup tracking
-  const abortController = new AbortController();
-  const { signal } = abortController;
+  const disposable = new Disposable();
+  const { signal } = disposable;
 
   // --- Create sub-components ---
 
   const loginForm = createLoginForm({
     signal,
     onLogin: callbacks.onLogin,
+    onLoginWithSavedPassword: callbacks.onLoginWithSavedPassword,
     onRegister: callbacks.onRegister,
     onTotpSubmit: callbacks.onTotpSubmit,
+    onRecover: callbacks.onRecover,
     onSettingsOpen: () => openSettings(),
     onAutoLoginCancel: callbacks.onAutoLoginCancel,
+    getRegistrationMode: callbacks.getRegistrationMode,
+    getRetentionNotice: callbacks.getRetentionNotice,
   });
+
+  // Per-host compatibility from the advisory preflight. The notice reads it
+  // when the user selects a server; the 15 s probe only writes badges.
+  const compatibilityByHost = new Map<
+    string,
+    { readonly compatibility: Compatibility; readonly serverEpoch: number | null }
+  >();
+
+  const incompatibleNotice = createIncompatibleNotice({
+    onUpdate: (host) => callbacks.onUpdateClient?.(host),
+    onLeave: () => incompatibleNotice.hide(),
+  });
+
+  function selectHost(host: string): void {
+    const known = compatibilityByHost.get(host);
+    if (
+      known &&
+      (known.compatibility === "client-older" || known.compatibility === "server-older")
+    ) {
+      incompatibleNotice.show(host, known.serverEpoch, PROTOCOL_EPOCH);
+    } else {
+      incompatibleNotice.hide();
+    }
+  }
 
   const serverPanel = createServerPanel(
     {
@@ -88,11 +144,14 @@ export function createConnectPage(
           loginForm.setCredentials(username);
         }
         loginForm.setAutoConnect(autoConnect === true);
+        // The notice appears only for the host the user selects — never for a
+        // background-probe profile (Decision 2).
+        selectHost(host);
       },
-      onCredentialLoaded(host: string, username: string, password?: string) {
+      onCredentialLoaded(host: string, username: string, hasPassword?: boolean) {
         // Guard: user may have clicked a different profile while loading
         if (loginForm.getHost() === host) {
-          loginForm.setCredentials(username, password);
+          loginForm.setCredentials(username, hasPassword);
         }
       },
       onAddProfile: callbacks.onAddProfile,
@@ -164,7 +223,7 @@ export function createConnectPage(
     glowText.setAttribute("opacity", "0.4");
     glowText.setAttribute("filter", "url(#oc-glow)");
     glowText.setAttribute("class", "oc-glow-layer");
-    glowText.textContent = "OC";
+    glowText.textContent = "OC"; // i18n-exempt: logo monogram, not copy
     logoSvg.appendChild(glowText);
 
     const sharpText = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -176,22 +235,26 @@ export function createConnectPage(
     sharpText.setAttribute("font-weight", "900");
     sharpText.setAttribute("fill", "url(#oc-grad)");
     sharpText.setAttribute("letter-spacing", "-4");
-    sharpText.textContent = "OC";
+    sharpText.textContent = "OC"; // i18n-exempt: logo monogram, not copy
     logoSvg.appendChild(sharpText);
 
     branding.appendChild(logoSvg);
 
+    // i18n-exempt: product name, never translated
     const brandName = createElement("div", { class: "brand-name" }, "OwnCord");
-    const brandTag = createElement(
-      "div",
-      { class: "brand-tagline" },
-      "Self-hosted chat \u2014 Your server, your rules",
-    );
+    const brandTag = createElement("div", { class: "brand-tagline" }, connectText("brand.tagline"));
     appendChildren(branding, brandName, brandTag);
 
     serverPanel.element.insertBefore(branding, serverPanel.element.firstChild);
 
     appendChildren(root, serverPanel.element, loginForm.element);
+
+    // The incompatible-epoch notice sits above the form so it is seen before
+    // another attempt; hidden until a mismatch is selected or refused. It goes
+    // inside the form panel: .connect-page is a flex row, so a direct child
+    // would claim its own column and squeeze the form.
+    const connectForm = loginForm.element.querySelector(".connect-form")!;
+    connectForm.parentElement!.insertBefore(incompatibleNotice.element, connectForm);
 
     // Status bar at bottom
     root.appendChild(loginForm.statusBarElement);
@@ -230,15 +293,22 @@ export function createConnectPage(
       settingsOverlay = createSettingsOverlay({
         isAuthenticated: false,
         onClose: () => closeSettings(),
-        onChangePassword: () => Promise.resolve(),
+        onChangePassword: () => Promise.resolve(undefined),
         onUpdateProfile: () => Promise.resolve(),
-        onUploadAvatar: () => Promise.reject(new Error("Not authenticated")),
+        onUploadAvatar: notAuthenticated,
         onLogout: () => {},
         onDeleteAccount: () => Promise.resolve(),
         onStatusChange: () => {},
-        onEnableTotp: () => Promise.reject(new Error("Not authenticated")),
-        onConfirmTotp: () => Promise.reject(new Error("Not authenticated")),
-        onDisableTotp: () => Promise.reject(new Error("Not authenticated")),
+        onEnableTotp: notAuthenticated,
+        onConfirmTotp: notAuthenticated,
+        onDisableTotp: notAuthenticated,
+        onRefreshTotpStatus: () => Promise.resolve(),
+        onRegenerateRecoveryCodes: notAuthenticated,
+        onEnrolRecoveryKit: notAuthenticated,
+        onGetRecoveryKitStatus: notAuthenticated,
+        onListSessions: () => Promise.resolve([]),
+        onRevokeSession: notAuthenticated,
+        onRevokeAllSessions: notAuthenticated,
       });
       settingsOverlay.mount(root);
     });
@@ -285,7 +355,7 @@ export function createConnectPage(
 
   function destroy(): void {
     // Abort all event listeners registered with the signal
-    abortController.abort();
+    disposable.destroy();
     unsubSettingsOpen?.();
     unsubSettingsOpen = null;
     unsubTransientError?.();
@@ -320,9 +390,26 @@ export function createConnectPage(
     resetToIdle: () => loginForm.resetToIdle(),
     updateHealthStatus: (host: string, status: HealthStatus) =>
       serverPanel.updateHealthStatus(host, status),
+    updateCompatibility: (
+      host: string,
+      compatibility: Compatibility,
+      serverEpoch: number | null,
+    ) => {
+      compatibilityByHost.set(host, { compatibility, serverEpoch });
+      serverPanel.updateCompatibility(host, compatibility);
+      // A fresh server-info snapshot may change the host's registration mode;
+      // re-derive the register affordances if it is the selected host.
+      if (loginForm.getHost().trim() === host) {
+        loginForm.refreshRegistrationMode();
+      }
+    },
+    showIncompatible(host: string, serverEpoch: number | null, clientEpoch = PROTOCOL_EPOCH): void {
+      incompatibleNotice.show(host, serverEpoch, clientEpoch);
+    },
     getRememberPassword: () => loginForm.getRememberPassword(),
     getAutoConnect: () => loginForm.getAutoConnect(),
     getPassword: () => loginForm.getPassword(),
+    isUsingSavedPassword: () => loginForm.isUsingSavedPassword(),
     refreshProfiles(profiles: readonly SimpleProfile[]): void {
       serverPanel.renderProfiles(profiles);
     },
@@ -337,11 +424,16 @@ export function createConnectPage(
         try {
           const cred = await loadCredential(host);
           if (cred && loginForm.getHost() === host) {
-            // Prefill the saved password so the user isn't retyping it.
-            loginForm.setCredentials(cred.username, cred.password);
+            // Show the password box as filled when one is saved, so the
+            // "Remember password" tick keeps its promise. The plaintext stays
+            // in the Rust backend; submitting uses onLoginWithSavedPassword.
+            loginForm.setCredentials(cred.username, cred.hasPassword);
           }
-        } catch {
-          // Credential loading is best-effort; user can type manually
+        } catch (err) {
+          log.debug("Credential auto-fill failed (best-effort, user can type manually)", {
+            host,
+            err,
+          });
         }
       })();
     },

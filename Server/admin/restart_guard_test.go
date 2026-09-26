@@ -80,7 +80,7 @@ func TestApplyAndRestart_Success_RequestsRestartAndMarksPending(t *testing.T) {
 	defer admin.SetApplyRestartDelay(time.Millisecond)()
 
 	hub := &mockHub{}
-	admin.ApplyAndRestart(hub, exePath, oldPath, newPath, stagedHash)
+	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, oldPath, newPath, stagedHash)
 
 	if len(hub.restartCalls) != 1 || hub.restartCalls[0].reason != "update" {
 		t.Fatalf("restartCalls = %+v, want exactly the update countdown", hub.restartCalls)
@@ -109,7 +109,7 @@ func TestApplyAndRestart_Abort_ReleasesGuard(t *testing.T) {
 	defer admin.SetApplyRestartDelay(time.Millisecond)()
 
 	hub := &mockHub{}
-	admin.ApplyAndRestart(hub, exePath, oldPath, newPath,
+	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, oldPath, newPath,
 		"0000000000000000000000000000000000000000000000000000000000000000")
 
 	if got := reasons(); len(got) != 0 {
@@ -131,7 +131,7 @@ func TestApplyUpdate_Conflict409(t *testing.T) {
 	t.Setenv("OWNCORD_CONTAINER", "0")
 	database := openAdminTestDB(t)
 	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	cases := []struct {
@@ -165,7 +165,7 @@ func TestApplyUpdate_Conflict409(t *testing.T) {
 // POST /backups/{name}/restore refuses the same way — before any disk I/O.
 func TestRestoreBackup_Conflict409(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	admin.ForceRestartState(false) // restart pending
@@ -190,7 +190,7 @@ func TestRestoreBackup_Conflict409(t *testing.T) {
 func TestRestore_CloseFailure_StillMarksPendingAndRequestsRestart(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	backupDir := filepath.Join(tmpDir, "data", "backups")

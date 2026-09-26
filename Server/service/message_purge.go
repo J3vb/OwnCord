@@ -63,7 +63,7 @@ func (s *MessageService) PurgeMessages(ctx context.Context, userID, channelID in
 		return nil, fmt.Errorf("%w: missing MANAGE_MESSAGES permission", ErrForbidden)
 	}
 
-	ids, err := s.st.PurgeChannelMessages(ctx, channelID, before, limit)
+	ids, err := s.st.PurgeChannelMessagesWithAction(ctx, channelID, before, limit, userID, nil)
 	if err != nil {
 		slog.Error("MessageService.PurgeMessages", "err", err, "channel_id", channelID)
 		return nil, fmt.Errorf("%w: failed to purge messages", ErrInternal)

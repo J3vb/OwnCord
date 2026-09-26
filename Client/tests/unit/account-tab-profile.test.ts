@@ -32,6 +32,15 @@ function makeOptions(overrides?: Partial<SettingsOverlayOptions>): SettingsOverl
     onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "", backup_codes: [] }),
     onConfirmTotp: vi.fn().mockResolvedValue(undefined),
     onDisableTotp: vi.fn().mockResolvedValue(undefined),
+    onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
+    onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
+    onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
+    onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
+    onListSessions: vi.fn().mockResolvedValue([]),
+    onRevokeSession: vi.fn().mockResolvedValue(undefined),
+    onRevokeAllSessions: vi
+      .fn()
+      .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
     ...overrides,
   };
 }
@@ -53,7 +62,9 @@ describe("validateAvatarFile", () => {
   });
 
   it("rejects a file over 1 MB", () => {
-    expect(validateAvatarFile({ size: 1024 * 1024 + 1, type: "image/png" }, ok)).toMatch(/KB/);
+    expect(validateAvatarFile({ size: 1024 * 1024 + 1, type: "image/png" }, ok)).toBe(
+      "Avatar must be at most 1024 KB.",
+    );
     // Exactly at the cap is fine.
     expect(validateAvatarFile({ size: 1024 * 1024, type: "image/png" }, ok)).toBeNull();
   });
@@ -61,7 +72,7 @@ describe("validateAvatarFile", () => {
   it("rejects an image bigger than any surface renders", () => {
     expect(
       validateAvatarFile({ size: 1000, type: "image/png" }, { width: 2000, height: 100 }),
-    ).toMatch(/pixels/);
+    ).toBe("Avatar must be at most 1024x1024 pixels.");
     expect(
       validateAvatarFile({ size: 1000, type: "image/png" }, { width: 1024, height: 1024 }),
     ).toBeNull();
@@ -148,6 +159,48 @@ describe("Account tab profile fields", () => {
       );
     });
     expect(name.value).toBe("Ada");
+  });
+
+  it("leaves focus where the user moved it while the save was in flight", async () => {
+    setUser({});
+    let settle!: () => void;
+    const options = makeOptions({
+      onUpdateProfile: vi.fn(() => new Promise<void>((resolve) => (settle = resolve))),
+    });
+    container.appendChild(buildAccountTab(options, ac.signal));
+
+    const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
+    const about = container.querySelector<HTMLTextAreaElement>('[data-testid="about-input"]')!;
+    save.focus();
+    save.click();
+    about.focus();
+    settle();
+
+    await vi.waitFor(() => {
+      expect(save.disabled).toBe(false);
+    });
+    expect(document.activeElement).toBe(about);
+  });
+
+  it("puts focus back on Save when it fell to the page during the save", async () => {
+    setUser({});
+    let settle!: () => void;
+    const options = makeOptions({
+      onUpdateProfile: vi.fn(() => new Promise<void>((resolve) => (settle = resolve))),
+    });
+    container.appendChild(buildAccountTab(options, ac.signal));
+
+    const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
+    save.focus();
+    save.click();
+    // What Chromium does to a focused control once it is disabled.
+    save.blur();
+    settle();
+
+    await vi.waitFor(() => {
+      expect(save.disabled).toBe(false);
+    });
+    expect(document.activeElement).toBe(save);
   });
 
   it("bounds the inputs at the server's caps", () => {

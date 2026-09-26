@@ -11,7 +11,7 @@ import (
 // handshake, and the rejection is counted.
 func TestServeWS_ConnectionCap(t *testing.T) {
 	h := &Hub{clients: map[int64]*Client{1: {}, 2: {}}}
-	handler := ServeWS(h, nil, nil, 2)
+	handler := ServeWS(h, nil, 2)
 
 	rec := httptest.NewRecorder()
 	handler(rec, httptest.NewRequest(http.MethodGet, "/api/v1/ws", nil))
@@ -30,7 +30,7 @@ func TestServeWS_ConnectionCap(t *testing.T) {
 	// WebSocket headers — but NOT with the capacity 503).
 	h2 := &Hub{clients: map[int64]*Client{1: {}}}
 	rec2 := httptest.NewRecorder()
-	ServeWS(h2, nil, nil, 2)(rec2, httptest.NewRequest(http.MethodGet, "/api/v1/ws", nil))
+	ServeWS(h2, nil, 2)(rec2, httptest.NewRequest(http.MethodGet, "/api/v1/ws", nil))
 	if rec2.Code == http.StatusServiceUnavailable {
 		t.Fatalf("below-cap request was refused with 503")
 	}
@@ -40,7 +40,7 @@ func TestServeWS_ConnectionCap(t *testing.T) {
 
 	// Cap 0 = unlimited: never the capacity 503.
 	rec3 := httptest.NewRecorder()
-	ServeWS(h, nil, nil, 0)(rec3, httptest.NewRequest(http.MethodGet, "/api/v1/ws", nil))
+	ServeWS(h, nil, 0)(rec3, httptest.NewRequest(http.MethodGet, "/api/v1/ws", nil))
 	if rec3.Code == http.StatusServiceUnavailable {
 		t.Fatalf("cap=0 request was refused with 503")
 	}

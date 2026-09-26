@@ -1,12 +1,17 @@
 package admin
 
 import (
+	"cmp"
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -27,6 +32,25 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, errorResponse{Error: code, Message: msg})
+}
+
+// writeSvcErr maps a service-layer sentinel error onto an admin API response.
+// notFound overrides the 404 body text (empty keeps the error's own message);
+// badReqCode overrides the 400 error code (empty keeps "BAD_REQUEST"); fallback
+// is the 500 body text for anything else, including ErrForbidden's absence —
+// every mapper answers ErrForbidden with 403 (previously two call sites
+// (channel, retention) fell through to 500 instead).
+func writeSvcErr(w http.ResponseWriter, err error, notFound, badReqCode, fallback string) {
+	switch {
+	case errors.Is(err, service.ErrForbidden):
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+	case errors.Is(err, service.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", cmp.Or(notFound, err.Error()))
+	case errors.Is(err, service.ErrBadRequest):
+		writeErr(w, http.StatusBadRequest, cmp.Or(badReqCode, "BAD_REQUEST"), err.Error())
+	default:
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", fallback)
+	}
 }
 
 func pathInt64(r *http.Request, param string) (int64, error) { //nolint:unparam // kept generic for future URL params
@@ -58,7 +82,15 @@ func queryInt(r *http.Request, key string, defaultVal, minVal, maxVal int) int {
 // context by adminAuthMiddleware. Returns 0 if called outside that middleware
 // (should not happen in production).
 func actorFromContext(r *http.Request) int64 {
-	user, ok := r.Context().Value(adminUserKey).(*db.User)
+	return ActorIDFromContext(r.Context())
+}
+
+// ActorIDFromContext returns the admin principal's user ID that
+// RequireAdminAuth stored in ctx, or 0 outside that middleware. Exported for
+// handlers mounted behind RequireAdminAuth from other packages (the plugin
+// admin surface in api) so their audit rows name the real actor.
+func ActorIDFromContext(ctx context.Context) int64 {
+	user, ok := ctx.Value(adminUserKey).(*db.User)
 	if !ok || user == nil {
 		return 0
 	}
@@ -75,4 +107,24 @@ func actorRoleFromContext(r *http.Request) *db.Role {
 		return nil
 	}
 	return role
+}
+
+// isOwnerFromContext reports whether the authenticated principal holds the
+// Owner role, using the same predicate as ownerOnlyMiddleware. A missing role
+// fails closed (false). It exists for handlers that gate individual keys or
+// fields rather than a whole route.
+func isOwnerFromContext(r *http.Request) bool {
+	role := actorRoleFromContext(r)
+	return role != nil && permissions.IsOwner(role.ID, role.Position)
+}
+
+// supportSession refuses API-token principals and binds previews to the exact
+// login credential already authenticated by the middleware on every request.
+func supportSession(r *http.Request) (string, bool) {
+	sess, ok := r.Context().Value(adminSessionKey).(*db.Session)
+	if !ok || sess == nil {
+		return "", false
+	}
+	hash, ok := r.Context().Value(adminTokenHashKey).(string)
+	return hash, ok && hash != ""
 }

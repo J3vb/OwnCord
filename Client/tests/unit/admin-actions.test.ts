@@ -191,6 +191,8 @@ describe("AdminActions", () => {
         "[data-testid='ban-duration-select']",
       ) as HTMLSelectElement;
       expect(durationSelect).not.toBeNull();
+      // No visible label sits next to it, so screen readers need this name.
+      expect(durationSelect.getAttribute("aria-label")).toBe("Ban duration");
       durationSelect.value = "24";
 
       (result.element.querySelector("[data-testid='ban-confirm']") as HTMLDivElement).click();

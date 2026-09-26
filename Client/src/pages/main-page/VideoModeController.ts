@@ -8,6 +8,7 @@ import { membersStore, memberDisplayName } from "@stores/members.store";
 import { getLocalCameraStream, getLocalScreenshareStream } from "@lib/livekitSession";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import type { VideoGridComponent } from "@components/VideoGrid";
+import { shellText } from "../../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -181,11 +182,16 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
       if (!localTileAdded) {
         const localStream = getLocalCameraStream();
         if (localStream !== null) {
-          videoGrid.addStream(currentUserId, myName ? `${myName} (You)` : "You", localStream, {
-            isSelf: true,
-            audioUserId: currentUserId,
-            isScreenshare: false,
-          });
+          videoGrid.addStream(
+            currentUserId,
+            myName ? shellText("tile.nameYou", { name: myName }) : shellText("tile.you"),
+            localStream,
+            {
+              isSelf: true,
+              audioUserId: currentUserId,
+              isScreenshare: false,
+            },
+          );
           localTileAdded = true;
         }
       }
@@ -202,7 +208,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
         if (localStream !== null) {
           videoGrid.addStream(
             screenshareUserId,
-            myName ? `${myName} (Screen)` : "Your Screen",
+            myName ? shellText("tile.nameScreen", { name: myName }) : shellText("tile.yourScreen"),
             localStream,
             { isSelf: true, audioUserId: currentUserId, isScreenshare: true },
           );

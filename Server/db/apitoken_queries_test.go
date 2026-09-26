@@ -8,17 +8,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// newTokenTestDB opens an in-memory DB and applies the real embedded migrations
-// (which create api_tokens and seed the default roles).
-func newTokenTestDB(t *testing.T) *db.DB {
-	t.Helper()
-	database := openMemory(t)
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	return database
-}
-
 // seedTokenUser creates a user with the given role and returns its ID.
 func seedTokenUser(t *testing.T, database *db.DB, name string, roleID int) int64 {
 	t.Helper()
@@ -31,7 +20,7 @@ func seedTokenUser(t *testing.T, database *db.DB, name string, roleID int) int64
 
 func TestAPIToken_CreateGetRevoke(t *testing.T) {
 	ctx := context.Background()
-	database := newTokenTestDB(t)
+	database := openMigratedMemory(t)
 	uid := seedTokenUser(t, database, "owner", 1)
 
 	id, err := database.CreateAPIToken(ctx, uid, "hash_active", "ci-bot", nil)
@@ -75,7 +64,7 @@ func TestAPIToken_CreateGetRevoke(t *testing.T) {
 
 func TestAPIToken_Expiry(t *testing.T) {
 	ctx := context.Background()
-	database := newTokenTestDB(t)
+	database := openMigratedMemory(t)
 	uid := seedTokenUser(t, database, "owner", 1)
 
 	pastT := time.Now().Add(-time.Hour)
@@ -113,7 +102,7 @@ func TestAPIToken_Expiry(t *testing.T) {
 
 func TestAPIToken_TouchAndList(t *testing.T) {
 	ctx := context.Background()
-	database := newTokenTestDB(t)
+	database := openMigratedMemory(t)
 	uid := seedTokenUser(t, database, "owner", 1)
 	if _, err := database.CreateAPIToken(ctx, uid, "hash_touch", "bot", nil); err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
@@ -141,7 +130,7 @@ func TestAPIToken_TouchAndList(t *testing.T) {
 
 func TestAPIToken_RevokeByLabel(t *testing.T) {
 	ctx := context.Background()
-	database := newTokenTestDB(t)
+	database := openMigratedMemory(t)
 	uid := seedTokenUser(t, database, "owner", 1)
 	if _, err := database.CreateAPIToken(ctx, uid, "hash_lbl", "mcp", nil); err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
@@ -162,7 +151,7 @@ func TestAPIToken_RevokeByLabel(t *testing.T) {
 
 func TestGetOwnerUser(t *testing.T) {
 	ctx := context.Background()
-	database := newTokenTestDB(t)
+	database := openMigratedMemory(t)
 
 	// No users yet → nil, nil.
 	u, err := database.GetOwnerUser(ctx)
@@ -192,7 +181,7 @@ func TestGetOwnerUser(t *testing.T) {
 // minting tokens the auth layer then rejects on every use.
 func TestGetOwnerUser_SkipsBannedOwner(t *testing.T) {
 	ctx := context.Background()
-	database := newTokenTestDB(t)
+	database := openMigratedMemory(t)
 
 	bannedOwnerID := seedTokenUser(t, database, "deleted-owner", 1)
 	adminID := seedTokenUser(t, database, "live-admin", 2)
@@ -234,7 +223,7 @@ func TestGetOwnerUser_LapsedTempBanStaysEligible(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			database := newTokenTestDB(t)
+			database := openMigratedMemory(t)
 			ownerID := seedTokenUser(t, database, "owner", 1)
 			adminID := seedTokenUser(t, database, "live-admin", 2)
 

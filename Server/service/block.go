@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
@@ -22,16 +21,11 @@ func NewBlockService(st Store) *BlockService {
 // BlockUser blocks a target user. Validates the target exists and
 // prevents self-blocking.
 func (s *BlockService) BlockUser(ctx context.Context, blockerID, targetID int64) error {
-	ctx, span := telemetry.GlobalTracer("service/block").Start(ctx, "BlockService.BlockUser",
+	ctx, done := traceCall(ctx, "service/block", "BlockService.BlockUser",
 		telemetry.Int64("blocker_id", blockerID),
 		telemetry.Int64("target_id", targetID),
 	)
-	start := time.Now()
-	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
-			telemetry.String("method", "BlockUser"))
-		span.End()
-	}()
+	defer done()
 
 	if targetID <= 0 {
 		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
@@ -46,7 +40,7 @@ func (s *BlockService) BlockUser(ctx context.Context, blockerID, targetID int64)
 	}
 
 	if err := s.st.BlockUser(ctx, blockerID, targetID); err != nil {
-		return fmt.Errorf("%w: failed to block user: %v", ErrInternal, err)
+		return fmt.Errorf("%w: failed to block user: %w", ErrInternal, err)
 	}
 
 	slog.Info("user blocked", "blocker_id", blockerID, "target_id", targetID)
@@ -59,7 +53,7 @@ func (s *BlockService) UnblockUser(ctx context.Context, blockerID, targetID int6
 		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
 	}
 	if err := s.st.UnblockUser(ctx, blockerID, targetID); err != nil {
-		return fmt.Errorf("%w: failed to unblock user: %v", ErrInternal, err)
+		return fmt.Errorf("%w: failed to unblock user: %w", ErrInternal, err)
 	}
 	slog.Info("user unblocked", "blocker_id", blockerID, "target_id", targetID)
 	return nil
@@ -69,7 +63,7 @@ func (s *BlockService) UnblockUser(ctx context.Context, blockerID, targetID int6
 func (s *BlockService) ListBlocked(ctx context.Context, blockerID int64) ([]int64, error) {
 	ids, err := s.st.ListBlockedUsers(ctx, blockerID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list blocked users: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to list blocked users: %w", ErrInternal, err)
 	}
 	if ids == nil {
 		ids = []int64{}

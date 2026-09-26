@@ -88,19 +88,28 @@ test.describe("Settings Overlay", () => {
     await expect(accountTab).toHaveClass(/active/);
   });
 
-  test("voice/audio tab exists", async ({ nativePage }) => {
+  test("voice/audio tab opens its real controls", async ({ nativePage }) => {
     await openSettings(nativePage);
 
+    // The Voice & Audio tab is part of every build (SettingsOverlay's appTabs
+    // list), so an absent tab is a regression, not a skippable build variant.
     const voiceTab = nativePage.locator(".settings-sidebar button.settings-nav-item", {
       hasText: /voice|audio/i,
     });
-    const exists = await voiceTab.isVisible().catch(() => false);
+    await expect(voiceTab).toBeVisible();
 
-    if (exists) {
-      await voiceTab.click();
-      await expect(voiceTab).toHaveClass(/active/);
-    }
-    // Voice tab may not exist in all builds
+    await voiceTab.click();
+    await expect(voiceTab).toHaveClass(/active/);
+
+    // Behaviour, not mere existence: the active pane must be the Voice & Audio
+    // pane, with its input-device selector and live mic meter mounted.
+    const pane = nativePage.locator(".settings-content .settings-pane.active");
+    await expect(pane.getByRole("heading", { name: "Input Device" })).toBeVisible();
+    // The pane has several device selects (input, output, quality, ...); the
+    // Input Device heading above scoped the section, so assert the first
+    // select rather than a bare `select.form-input` that matches all of them.
+    await expect(pane.locator("select.form-input").first()).toBeVisible();
+    await expect(pane.locator(".mic-meter-wrap .mic-meter-bar")).toBeVisible();
   });
 
   test("settings can be closed with close button or escape", async ({ nativePage }) => {

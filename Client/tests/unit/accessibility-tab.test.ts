@@ -10,6 +10,7 @@ const { mockSyncOsMotionListener } = vi.hoisted(() => ({
 }));
 
 vi.mock("@lib/os-motion", () => ({
+  SYNC_OS_MOTION_DEFAULT: true,
   syncOsMotionListener: mockSyncOsMotionListener,
 }));
 
@@ -141,7 +142,16 @@ describe("AccessibilityTab", () => {
       expect(getToggle(container, 2).classList.contains("on")).toBe(true);
     });
 
-    it("syncOsMotion defaults to off", () => {
+    it("syncOsMotion defaults to on, so the OS setting is honoured (B9-2, Q1)", () => {
+      const section = buildAccessibilityTab(ac.signal);
+      container.appendChild(section);
+
+      expect(getToggle(container, 3).classList.contains("on")).toBe(true);
+    });
+
+    it("restores syncOsMotion off from localStorage", () => {
+      localStorage.setItem("owncord:settings:syncOsMotion", "false");
+
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
@@ -241,6 +251,7 @@ describe("AccessibilityTab", () => {
     });
 
     it("persists syncOsMotion to localStorage on toggle", () => {
+      localStorage.setItem("owncord:settings:syncOsMotion", "false");
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
@@ -271,11 +282,12 @@ describe("AccessibilityTab", () => {
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
+      // No stored syncOsMotion, so the default (on) is what gets passed.
       clickToggle(container, 0);
-      expect(mockSyncOsMotionListener).toHaveBeenLastCalledWith(false);
+      expect(mockSyncOsMotionListener).toHaveBeenLastCalledWith(true);
 
       clickToggle(container, 0);
-      expect(mockSyncOsMotionListener).toHaveBeenLastCalledWith(false);
+      expect(mockSyncOsMotionListener).toHaveBeenLastCalledWith(true);
     });
 
     it("toggles high-contrast class on documentElement for highContrast", () => {
@@ -301,6 +313,7 @@ describe("AccessibilityTab", () => {
     });
 
     it("calls syncOsMotionListener(true) when syncOsMotion is toggled on", () => {
+      localStorage.setItem("owncord:settings:syncOsMotion", "false");
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
@@ -342,6 +355,19 @@ describe("AccessibilityTab", () => {
       const toggles = container.querySelectorAll(".toggle");
       for (const toggle of toggles) {
         expect(toggle.getAttribute("role")).toBe("switch");
+      }
+    });
+
+    it("each toggle is named by the visible label beside it (B9-2)", () => {
+      const section = buildAccessibilityTab(ac.signal);
+      container.appendChild(section);
+
+      const rows = container.querySelectorAll(".setting-row");
+      expect(rows.length).toBe(5);
+      for (const row of rows) {
+        const label = row.querySelector(".setting-label")?.textContent;
+        expect(label).toBeTruthy();
+        expect(row.querySelector('[role="switch"]')?.getAttribute("aria-label")).toBe(label);
       }
     });
 

@@ -1,0 +1,261 @@
+import { createHash } from "node:crypto";
+import { test, expect, chromium } from "@playwright/test";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
+import { promisify } from "node:util";
+import { readFile, mkdtemp, rm, appendFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { startNativeApp } from "../support/native-app";
+import { startTestServer } from "../support/server";
+import { startNativeUpdateServer } from "../support/native-update-server";
+import { configureNativeServer, nativeLogin } from "./helpers";
+const exec = promisify(execFile);
+
+/**
+ * Hold the installed executable open with writers denied until `seconds` after
+ * process `oldPid` has exited, the way the exiting old process (its image stays
+ * mapped until Windows has torn it down) or an on-access scanner does while the
+ * update installer runs. Anchoring on the exit, not on the click, keeps the
+ * hold in place however long the updater takes to launch the installer.
+ * Resolves once the handle is held. Tries pwsh first, like the cleanup below.
+ */
+async function holdExecutable(exe: string, oldPid: number, seconds: number) {
+  const script = `$ErrorActionPreference = 'Stop'; $f = [System.IO.File]::Open($env:OWNCORD_E2E_INSTALLED_EXE, 'Open', 'Read', 'Read'); [Console]::Out.WriteLine('held'); Wait-Process -Id ${oldPid} -Timeout 120 -ErrorAction SilentlyContinue; Start-Sleep -Seconds ${seconds}; $f.Close()`;
+  for (const shell of ["pwsh", "powershell"]) {
+    const holder = spawn(shell, ["-NoProfile", "-NonInteractive", "-Command", script], {
+      env: { ...process.env, OWNCORD_E2E_INSTALLED_EXE: exe },
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    try {
+      await Promise.race([
+        once(holder.stdout, "data"),
+        once(holder, "error").then(([error]) => {
+          throw error;
+        }),
+        once(holder, "exit").then(([code]) => {
+          throw new Error(`${shell} exited with ${code} before holding the executable`);
+        }),
+      ]);
+      return holder;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  throw new Error("No PowerShell found to hold the executable");
+}
+
+// eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
+test("signed NSIS update rejects broken downloads then installs and relaunches the new version", async ({}, info) => {
+  test.setTimeout(240_000);
+  const progress = async (stage: string) => {
+    const line = `${new Date().toISOString()} ${stage}`;
+    console.log(`[native-updater] ${line}`);
+    await appendFile(info.outputPath("installer-progress.log"), `${line}\n`);
+  };
+  await progress("starting server");
+  const packages = resolve("tests/e2e/.bin/native-updates");
+  const installation = await mkdtemp(join(tmpdir(), "owncord-installed-e2e-"));
+  const exe = join(installation, "owncord-client.exe");
+  const server = await startTestServer({ tls: true });
+  const gateway = await startNativeUpdateServer(server, packages);
+  const errors: string[] = [];
+  let app: Awaited<ReturnType<typeof startNativeApp>> | undefined;
+  let traceActive = false;
+  let replacement: Awaited<ReturnType<typeof chromium.connectOverCDP>> | undefined;
+  let lock: Awaited<ReturnType<typeof holdExecutable>> | undefined;
+  try {
+    await progress("installing old NSIS package");
+    await exec(join(packages, "old/installer.exe"), ["/S", `/D=${installation}`], {
+      timeout: 60_000,
+    });
+    await progress("starting installed app");
+    app = await startNativeApp(exe);
+    const page = app.page;
+    await app.context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+    traceActive = true;
+    page.on("pageerror", (error) => errors.push(error.message));
+    configureNativeServer(gateway.origin);
+    await progress("logging in");
+    await page.locator("#auto-connect").check();
+    await nativeLogin(page);
+    const version = () =>
+      page.evaluate(() => (window as any).__TAURI_INTERNALS__.invoke("plugin:app|version"));
+    expect(await version()).toBe("1.2.0-alpha.4");
+    const original = createHash("sha256")
+      .update(await readFile(exe))
+      .digest("hex");
+    const text = `desktop-update-${crypto.randomUUID()}`;
+    await page.locator("[data-testid='message-input'] textarea").fill(text);
+    await page.locator("[data-testid='message-input'] textarea").press("Enter");
+    await expect(page.locator(".msg-text", { hasText: text })).toHaveCount(1);
+    for (const fault of ["corrupt", "interrupted"] as const) {
+      await progress(`testing ${fault} download`);
+      const previous = gateway.downloads();
+      gateway.fault(fault);
+      await page
+        .getByRole("button", { name: fault === "corrupt" ? "Update Now" : "Retry", exact: true })
+        .click();
+      await expect(page.locator(".update-banner")).toContainText("Update failed", {
+        timeout: 45_000,
+      });
+      expect(gateway.downloads()).toBe(previous + 1);
+      expect(
+        createHash("sha256")
+          .update(await readFile(exe))
+          .digest("hex"),
+      ).toEqual(original);
+      expect(await version()).toBe("1.2.0-alpha.4");
+      await expect(page.getByTestId("app-layout")).toBeVisible();
+    }
+    // The installer closes the original WebView. Save that trace first, then
+    // attach to the successor at the inherited CDP port and record its state.
+    const trace = info.outputPath("before-install.zip");
+    await progress("saving trace before valid update");
+    await app.context.tracing.stop({ path: trace });
+    traceActive = false;
+    await info.attach("before-install", { path: trace, contentType: "application/zip" });
+    gateway.fault("none");
+    // A first update after install races the installer against the old
+    // process's teardown, which keeps owncord-client.exe locked for a moment.
+    // Tauri's NSIS template only sleeps 500 ms before overwriting it; a silent
+    // installer skips a file it cannot open and /R then relaunches the OLD
+    // binary. Force that race every run: the installer must wait for the lock
+    // (src-tauri/nsis/hooks.nsh) and still relaunch the new version.
+    lock = await holdExecutable(exe, app.process.pid!, 5);
+    await progress("installing valid update");
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect.poll(() => page.isClosed(), { timeout: 90_000 }).toBe(true);
+    await progress("waiting for successor version");
+    await expect
+      .poll(
+        async () => {
+          try {
+            replacement = await chromium.connectOverCDP(app!.cdpURL, { timeout: 1000 });
+            const next = replacement.contexts()[0]?.pages()[0];
+            if (!next) {
+              await replacement.close();
+              replacement = undefined;
+              return "starting";
+            }
+            const current = await next.evaluate(() =>
+              (window as any).__TAURI_INTERNALS__.invoke("plugin:app|version"),
+            );
+            if (current !== "1.2.0-alpha.5") {
+              await replacement.close();
+              replacement = undefined;
+            }
+            return current;
+          } catch {
+            await replacement?.close().catch(() => {});
+            replacement = undefined;
+            return "starting";
+          }
+        },
+        { timeout: 90_000 },
+      )
+      .toBe("1.2.0-alpha.5");
+    const next = replacement!.contexts()[0]!.pages()[0]!;
+    next.context().setDefaultTimeout(30_000);
+    await progress("checking persisted session and messages");
+    next.on("pageerror", (error) => errors.push(error.message));
+    await expect(next.getByTestId("app-layout")).toBeVisible({ timeout: 30_000 });
+    await expect(next.locator(".msg-text", { hasText: text })).toHaveCount(1);
+    expect(
+      createHash("sha256")
+        .update(await readFile(exe))
+        .digest("hex"),
+    ).not.toEqual(original);
+    await info.attach("updated-desktop", {
+      body: await next.screenshot(),
+      contentType: "image/png",
+    });
+  } finally {
+    await progress("capturing failure diagnostics");
+    // A crashed WebView can make trace capture fail. Preserve the owned
+    // process logs before asking that same WebView for more diagnostics.
+    if (app) await info.attach("native-process", { body: app.log(), contentType: "text/plain" });
+    // The relaunched process is the installer's child, so its stdout is not
+    // ours; the log plugin's file in the app log dir has both processes'
+    // startup lines (version and pid), which is what tells a stale relaunch
+    // from a slow one.
+    await info.attach("installed-process", {
+      body: await readFile(
+        join(process.env.LOCALAPPDATA ?? "", "com.owncord.e2e", "logs", "owncord-client.log"),
+        "utf8",
+      ).catch((error) => String(error)),
+      contentType: "text/plain",
+    });
+    await info.attach("native-server", { body: server.log(), contentType: "text/plain" });
+    if (app && traceActive) {
+      const trace = info.outputPath("failed-install.zip");
+      try {
+        await app.context.tracing.stop({ path: trace });
+        await info.attach("failed-install", { path: trace, contentType: "application/zip" });
+        if (!app.page.isClosed())
+          await info.attach("failed-install-screenshot", {
+            body: await app.page.screenshot(),
+            contentType: "image/png",
+          });
+      } catch (error) {
+        await info.attach("trace-capture-error", {
+          body: String(error),
+          contentType: "text/plain",
+        });
+      }
+    }
+    await progress("disconnecting successor CDP");
+    await replacement?.close();
+    lock?.kill();
+    // The installer owns the replacement process. Select ONLY the executable
+    // in this test's unique installation directory, then terminate its tree
+    // and wait for it to exit. pwsh, not Windows PowerShell: every Actions
+    // step already runs pwsh, while this job's only powershell.exe start is
+    // cold and took up to 30s on loaded runners. The name check runs before
+    // reading paths; a Win32_Process scan reads every process's path. Not
+    // `Get-Process -Name`: with no match it exits 1 and this finally throws.
+    // A local machine without PowerShell 7 falls back to Windows PowerShell,
+    // whose .NET Framework Process has no tree Kill, so taskkill /t does it.
+    await progress("terminating installed successor");
+    const eachInstalled =
+      "$path=$env:OWNCORD_E2E_INSTALLED_EXE; if (-not $path) { throw 'OWNCORD_E2E_INSTALLED_EXE is empty' }; Get-Process | Where-Object { $_.ProcessName -eq 'owncord-client' -and $_.Path -eq $path } | ForEach-Object";
+    const killOptions = {
+      env: { ...process.env, OWNCORD_E2E_INSTALLED_EXE: exe },
+      timeout: 30_000,
+    };
+    try {
+      await exec(
+        "pwsh",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `${eachInstalled} { try { $_.Kill($true) } catch [InvalidOperationException] {}; $_.WaitForExit() }`,
+        ],
+        killOptions,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await exec(
+        "powershell",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `${eachInstalled} { taskkill /pid $_.Id /t /f | Out-Null; $_.WaitForExit() }`,
+        ],
+        killOptions,
+      );
+    }
+    await progress("closing original app and profile");
+    await app?.close();
+    await progress("closing gateway");
+    await gateway.close();
+    await progress("closing server");
+    await server.close();
+    await progress("removing installation directory");
+    await rm(installation, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
+    expect(errors, "Unhandled desktop updater errors").toEqual([]);
+    await progress("finished");
+  }
+});

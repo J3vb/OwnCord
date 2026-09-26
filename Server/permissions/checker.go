@@ -3,7 +3,6 @@ package permissions
 import (
 	"context"
 	"errors"
-	"fmt"
 )
 
 // ─── Errors ─────────────────────────────────────────────────────────────────
@@ -35,6 +34,9 @@ type ChannelRef struct {
 	ID       int64
 	Type     string
 	Archived bool
+	// NSFW is consulted only by CanReadContent (B5-7); every other predicate
+	// ignores it. Always false for a DM — DMs cannot be labelled.
+	NSFW bool
 }
 
 // DB is the minimal database interface the Checker needs.
@@ -42,7 +44,9 @@ type ChannelRef struct {
 type DB interface {
 	GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error)
 	GetUserChannelPermissions(ctx context.Context, channelID, userID int64) (allow, deny int64, err error)
-	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
+	// HasActiveTimeout is B5-9's live, uncached lookup: Subject.TimedOut is
+	// filled from it on every Subject call, never from a cache.
+	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
 }
 
 // ─── Checker ────────────────────────────────────────────────────────────────
@@ -67,22 +71,45 @@ func NewChecker(db DB) *Checker {
 // userID may be 0 for a check that is genuinely role-only (no member in hand);
 // the per-user layer is then skipped rather than queried for a nonexistent id.
 func (ck *Checker) HasChannelPerm(ctx context.Context, rolePerms int64, roleID, userID, channelID, perm int64) bool {
-	if HasAdmin(rolePerms) {
-		return true
-	}
-	allow, deny, err := ck.db.GetChannelPermissions(ctx, channelID, roleID)
+	s, err := ck.Subject(ctx, rolePerms, roleID, userID, channelID)
 	if err != nil {
 		return false
 	}
-	o := ChannelOverride{Allow: allow, Deny: deny}
+	return s.Has(perm)
+}
+
+// Subject resolves both override layers for the member in channelID, live
+// from the database, and returns them with the role bits as a Subject for the
+// value-taking predicates (CanViewChannel and friends). The channel's flags
+// and any DM state are the caller's to fill in. Administrator skips the fetch
+// — overrides never change its verdict. A lookup failure is returned, not
+// collapsed, so error-aware callers (the voice sweep) can tell a transient
+// read failure from a denial; HasChannelPerm collapses it to false.
+func (ck *Checker) Subject(ctx context.Context, rolePerms int64, roleID, userID, channelID int64) (Subject, error) {
+	s := Subject{RolePerms: rolePerms}
+	if HasAdmin(rolePerms) {
+		return s, nil
+	}
+	if userID != 0 {
+		timedOut, err := ck.db.HasActiveTimeout(ctx, userID)
+		if err != nil {
+			return Subject{}, err
+		}
+		s.TimedOut = timedOut
+	}
+	allow, deny, err := ck.db.GetChannelPermissions(ctx, channelID, roleID)
+	if err != nil {
+		return Subject{}, err
+	}
+	s.Override = ChannelOverride{Allow: allow, Deny: deny}
 	if userID != 0 {
 		uAllow, uDeny, uErr := ck.db.GetUserChannelPermissions(ctx, channelID, userID)
 		if uErr != nil {
-			return false
+			return Subject{}, uErr
 		}
-		o.UserAllow, o.UserDeny = uAllow, uDeny
+		s.Override.UserAllow, s.Override.UserDeny = uAllow, uDeny
 	}
-	return EffectiveChannelPerms(rolePerms, o)&perm == perm
+	return s, nil
 }
 
 // HasChannelPermBatch reports whether the member has the given permission on
@@ -91,11 +118,7 @@ func (ck *Checker) HasChannelPerm(ctx context.Context, rolePerms int64, roleID, 
 // channels in bulk. The zero-value ChannelOverride (no entry in map) is correct
 // -- it means no override exists at either layer.
 func (ck *Checker) HasChannelPermBatch(rolePerms int64, overrides map[int64]ChannelOverride, channelID, perm int64) bool {
-	if HasAdmin(rolePerms) {
-		return true
-	}
-	o := overrides[channelID] // zero value when no override exists
-	return EffectiveChannelPerms(rolePerms, o)&perm == perm
+	return Subject{RolePerms: rolePerms, Override: overrides[channelID]}.Has(perm)
 }
 
 // VisibleChannelIDs returns the set of non-DM channel IDs the member
@@ -113,39 +136,12 @@ func (ck *Checker) VisibleChannelIDs(rolePerms int64, channels []ChannelRef, ove
 		if ch.Type == "dm" {
 			continue
 		}
-		// Archived channels are hidden from every client surface (admins
-		// included) — they stay manageable from the admin panel, which lists
-		// channels without this predicate.
-		if ch.Archived {
-			continue
-		}
-		if ck.HasChannelPermBatch(rolePerms, overrides, ch.ID, ReadMessages) {
+		// CanViewChannel hides archived channels from every client surface
+		// (admins included) — they stay manageable from the admin panel,
+		// which lists channels without this predicate.
+		if CanViewChannel(Subject{RolePerms: rolePerms, Override: overrides[ch.ID], Channel: ch}) == nil {
 			visible[ch.ID] = true
 		}
 	}
 	return visible
-}
-
-// RequireChannelAccess checks whether the user can access the channel with the
-// given permission. For DM channels (channelType == "dm"), it verifies
-// participant membership via IsDMParticipant. For regular channels, it checks
-// role-based permissions via HasChannelPerm.
-//
-// Returns nil on success, or a descriptive error on failure.
-func (ck *Checker) RequireChannelAccess(ctx context.Context, userID, rolePerms, roleID int64, channelType string, channelID, perm int64) error {
-	if channelType == "dm" {
-		ok, err := ck.db.IsDMParticipant(ctx, userID, channelID)
-		if err != nil {
-			return fmt.Errorf("checking DM participation: %w", err)
-		}
-		if !ok {
-			return ErrNotDMParticipant
-		}
-		return nil
-	}
-
-	if !ck.HasChannelPerm(ctx, rolePerms, roleID, userID, channelID, perm) {
-		return ErrPermissionDenied
-	}
-	return nil
 }

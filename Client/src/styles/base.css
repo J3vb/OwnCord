@@ -3,6 +3,18 @@
    Extracted from ui-mockup.html
    ═══════════════════════════════════════════ */
 
+/* Inter Variable (SIL OFL 1.1, assets/fonts/Inter-OFL.txt), bundled so the
+   Linux builds get a designed UI font. It is only a fallback after Segoe UI
+   in --font-body/--font-display, so Windows never loads it; font-src is
+   'self', and it is never fetched from a CDN. */
+@font-face {
+  font-family: "Inter Variable";
+  src: url("../assets/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 *,
 *::before,
 *::after {
@@ -40,12 +52,17 @@ button {
   color: inherit;
 }
 
-/* Restore focus ring for keyboard nav; mouse clicks stay clean */
+/* Restore focus ring for keyboard nav; mouse clicks stay clean. Links and
+   script-focusable widgets (role="switch" toggles, radio swatches, roving
+   cells) get the same ring; tabindex="-1" containers such as a dialog taking
+   initial focus do not. --focus-ring is >= 3:1 on every theme (B9-2). */
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--accent);
+select:focus-visible,
+a[href]:focus-visible,
+:where([tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -85,11 +102,11 @@ a {
 
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-auto-thumb);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #232428;
+  background: var(--interactive-muted);
 }
 
 /* Thin scrollbar for sidebars */

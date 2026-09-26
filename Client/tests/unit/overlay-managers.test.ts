@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Mock } from "vitest";
+import { setMembers } from "@stores/members.store";
 
 // ---------------------------------------------------------------------------
 // Mocks (vi.hoisted so they're available in vi.mock factories)
@@ -70,8 +71,10 @@ vi.mock("@components/SearchOverlay", () => ({
   })),
 }));
 
+// B9-7: channel 99 is labelled NSFW and not acknowledged.
 vi.mock("@stores/channels.store", () => ({
   setActiveChannel: mockSetActiveChannel,
+  channelsStore: { getState: () => ({ channels: new Map([[99, { nsfw: true }]]) }) },
 }));
 
 vi.mock("@stores/messages.store", () => ({
@@ -287,6 +290,38 @@ describe("createPinnedPanelController", () => {
 
     expect(createPinnedMessages).toHaveBeenCalledOnce();
     expect(mockPinnedMessagesMount).toHaveBeenCalledWith(root);
+  });
+
+  it("does not open, fetch or toast behind an NSFW consent gate", async () => {
+    const api = makeMockApi();
+    const controller = createPinnedPanelController({
+      api: api as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 99,
+    });
+
+    await controller.toggle();
+
+    expect(api.getPins).not.toHaveBeenCalled();
+    expect(createPinnedMessages).not.toHaveBeenCalled();
+    expect(mockShowToast).not.toHaveBeenCalled();
+  });
+
+  it("closeFor closes the panel only for the channel it was opened for", async () => {
+    let current = 42;
+    const controller = createPinnedPanelController({
+      api: makeMockApi() as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => current,
+    });
+
+    await controller.toggle();
+    current = 7;
+    controller.closeFor(7);
+    expect(mockPinnedMessagesDestroy).not.toHaveBeenCalled();
+
+    controller.closeFor(42);
+    expect(mockPinnedMessagesDestroy).toHaveBeenCalledOnce();
   });
 
   it("onUnpin catches API error, shows toast, and does NOT close the panel", async () => {
@@ -513,6 +548,33 @@ describe("createPinnedPanelController", () => {
     expect(api.getPins).toHaveBeenCalledOnce();
   });
 
+  it("a cleanup while getPins is in flight cancels the open, and a later toggle still opens", async () => {
+    let resolvePins: (value: { messages: unknown[] }) => void;
+    const pending = new Promise<{ messages: unknown[] }>((resolve) => {
+      resolvePins = resolve;
+    });
+    const api = makeMockApi({
+      getPins: vi.fn().mockReturnValueOnce(pending).mockResolvedValue({ messages: [] }),
+    });
+
+    const controller = createPinnedPanelController({
+      api: api as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 42,
+    });
+
+    const opening = controller.toggle();
+    controller.cleanup(); // e.g. the narrow-width drawer opening over it
+    resolvePins!({ messages: [] });
+    await opening;
+
+    expect(createPinnedMessages).not.toHaveBeenCalled();
+    expect(mockPinnedMessagesMount).not.toHaveBeenCalled();
+
+    await controller.toggle();
+    expect(mockPinnedMessagesMount).toHaveBeenCalledOnce();
+  });
+
   it("re-checks getRoot after the getPins() await and does not mount on a torn-down page", async () => {
     // Same teardown-during-fetch race as InviteManagerController.open (OC-0055):
     // toggle() must not mount on the pre-await root once the page has torn
@@ -690,10 +752,14 @@ describe("mapInviteResponse", () => {
 // ---------------------------------------------------------------------------
 
 describe("mapToPinnedMessage", () => {
+  afterEach(() => {
+    setMembers([]);
+  });
+
   it("maps a pinned message with created_at", () => {
     const result = mapToPinnedMessage({
       id: 1,
-      user: { username: "Alice" },
+      user: { id: 101, username: "Alice", avatar: null },
       content: "Hello",
       created_at: "2024-01-01",
     });
@@ -708,7 +774,7 @@ describe("mapToPinnedMessage", () => {
   it("falls back to timestamp when created_at is undefined", () => {
     const result = mapToPinnedMessage({
       id: 2,
-      user: { username: "Bob" },
+      user: { id: 102, username: "Bob", avatar: null },
       content: "World",
       timestamp: "2024-02-15",
     });
@@ -719,7 +785,7 @@ describe("mapToPinnedMessage", () => {
   it("falls back to empty string when neither created_at nor timestamp is set", () => {
     const result = mapToPinnedMessage({
       id: 3,
-      user: { username: "Charlie" },
+      user: { id: 103, username: "Charlie", avatar: null },
       content: "No timestamp",
     });
 
@@ -727,18 +793,63 @@ describe("mapToPinnedMessage", () => {
   });
 
   it("generates deterministic avatar color for same username", () => {
-    const a = mapToPinnedMessage({ id: 1, user: { username: "Alice" }, content: "" });
-    const b = mapToPinnedMessage({ id: 2, user: { username: "Alice" }, content: "" });
+    const a = mapToPinnedMessage({
+      id: 1,
+      user: { id: 101, username: "Alice", avatar: null },
+      content: "",
+    });
+    const b = mapToPinnedMessage({
+      id: 2,
+      user: { id: 101, username: "Alice", avatar: null },
+      content: "",
+    });
 
     expect(a.avatarColor).toBe(b.avatarColor);
   });
 
   it("generates different colors for different usernames", () => {
-    const a = mapToPinnedMessage({ id: 1, user: { username: "Alice" }, content: "" });
-    const b = mapToPinnedMessage({ id: 2, user: { username: "Bob" }, content: "" });
+    const a = mapToPinnedMessage({
+      id: 1,
+      user: { id: 101, username: "Alice", avatar: null },
+      content: "",
+    });
+    const b = mapToPinnedMessage({
+      id: 2,
+      user: { id: 102, username: "Bob", avatar: null },
+      content: "",
+    });
 
     // Not guaranteed to be different in theory, but these specific names will differ
     expect(a.avatarColor).not.toBe(b.avatarColor);
+  });
+
+  it("renders the live membersStore nickname, not the raw payload username (OC-0330)", () => {
+    setMembers([
+      {
+        id: 101,
+        username: "bob",
+        avatar: null,
+        role: "member",
+        status: "online",
+        display_name: "Bobby",
+      },
+    ]);
+
+    const result = mapToPinnedMessage({
+      id: 1,
+      user: { id: 101, username: "bob", avatar: null },
+      content: "Hello",
+    });
+
+    expect(result.author).toBe("Bobby");
+    // Avatar hue stays keyed off the raw username, stable across renames.
+    expect(result.avatarColor).toBe(
+      mapToPinnedMessage({
+        id: 2,
+        user: { id: 999, username: "bob", avatar: null },
+        content: "",
+      }).avatarColor,
+    );
   });
 });
 
@@ -1004,6 +1115,26 @@ describe("createInviteManagerController (additional)", () => {
     expect(api.getInvites).toHaveBeenCalledOnce();
   });
 
+  it("a cleanup while getInvites is in flight leaves the manager unmounted", async () => {
+    let resolveInvites: (value: unknown[]) => void;
+    const pending = new Promise<unknown[]>((resolve) => {
+      resolveInvites = resolve;
+    });
+    const api = makeMockApi({ getInvites: vi.fn().mockReturnValue(pending) });
+
+    const controller = createInviteManagerController({
+      api: api as never,
+      getRoot: () => root,
+    });
+
+    const opening = controller.open();
+    controller.cleanup();
+    resolveInvites!([makeInviteResponse()]);
+    await opening;
+
+    expect(createInviteManager).not.toHaveBeenCalled();
+  });
+
   it("cleanup destroys instance when open", async () => {
     const api = makeMockApi();
 
@@ -1187,6 +1318,18 @@ describe("createSearchOverlayController", () => {
 
     expect(createSearchOverlay).toHaveBeenCalledOnce();
     expect(mockSearchOverlayMount).toHaveBeenCalledWith(root);
+  });
+
+  it("offers only a server-wide search behind an NSFW consent gate", () => {
+    const controller = createSearchOverlayController({
+      api: makeMockApi() as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 99,
+    });
+
+    controller.open();
+
+    expect(vi.mocked(createSearchOverlay).mock.calls[0]![0].currentChannelId).toBeUndefined();
   });
 
   it("does nothing when root is null", () => {

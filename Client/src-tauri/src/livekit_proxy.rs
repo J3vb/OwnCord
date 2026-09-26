@@ -27,15 +27,13 @@
 //   port in JS becomes stale until the next voice join resets it.
 // - The accept loop exits after 5 consecutive errors to prevent CPU spin.
 
-use log::{debug, error, info, warn};
-use rustls::pki_types::ServerName;
-use std::net::IpAddr;
+use log::{debug, info, warn};
 use std::sync::Arc;
 use tauri::{Manager, Runtime};
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{self, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use tokio::time::{timeout, Duration};
+use tokio::time::Duration;
 
 /// Tauri-managed state for the LiveKit TLS proxy.
 pub struct LiveKitProxyState {
@@ -67,7 +65,7 @@ impl LiveKitProxyState {
     }
 
     /// Clear the running-proxy state, but only if it still points at `port`.
-    /// Mirrors HttpProxyState::remove_if_port_matches; used by run_proxy_loop's
+    /// Mirrors HttpProxyState::remove_if_port_matches; used by run_accept_loop's
     /// accept-error exit path so a dead listener doesn't keep being handed
     /// back by start_livekit_proxy's reuse branch, and doesn't race a newer
     /// proxy that may have already replaced it.
@@ -98,24 +96,6 @@ use crate::tofu;
 // runtime or a live socket.
 // ---------------------------------------------------------------------------
 
-/// Reject `remote_host` values that could inject headers or are not plausible
-/// host:port strings.
-pub(crate) fn validate_remote_host(remote_host: &str) -> Result<(), String> {
-    // CRLF or NUL would let a caller append arbitrary headers in the rewriting
-    // logic below.
-    if remote_host.contains('\r') || remote_host.contains('\n') || remote_host.contains('\0') {
-        return Err("remote_host contains invalid characters".into());
-    }
-    // Basic hostname format: alphanumeric, dots, hyphens, colons (port), brackets (IPv6)
-    if !remote_host
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
-    {
-        return Err("remote_host contains unexpected characters".into());
-    }
-    Ok(())
-}
-
 /// Rewrite the `Host` and `Origin` headers of a proxied HTTP request so the
 /// remote server's WebSocket origin check accepts a connection that the
 /// LiveKit SDK opened against `127.0.0.1`.
@@ -123,23 +103,16 @@ pub(crate) fn validate_remote_host(remote_host: &str) -> Result<(), String> {
 /// Every other line is passed through byte-for-byte, including the request
 /// line and the trailing blank line that terminates the header block.
 pub(crate) fn rewrite_proxy_headers(request: &str, remote_host: &str) -> String {
-    let mut modified = String::with_capacity(request.len() + 128);
-    for (i, line) in request.split("\r\n").enumerate() {
-        if i > 0 {
-            modified.push_str("\r\n");
-        }
+    rewrite_headers(request, |line| {
         let lower = line.to_lowercase();
         if lower.starts_with("host:") {
-            modified.push_str("Host: ");
-            modified.push_str(remote_host);
+            Some(format!("Host: {remote_host}"))
         } else if lower.starts_with("origin:") {
-            modified.push_str("Origin: https://");
-            modified.push_str(remote_host);
+            Some(format!("Origin: https://{remote_host}"))
         } else {
-            modified.push_str(line);
+            None
         }
-    }
-    modified
+    })
 }
 
 /// Decide whether an already-running proxy can serve a new start request:
@@ -157,24 +130,10 @@ pub(crate) fn can_reuse_proxy(
     running_host == requested_host && running_fingerprint == stored_fingerprint
 }
 
-/// Extract the TLS server name from a `host[:port]` string.
-///
-/// IPv6 literals arrive bracketed (`[::1]:8443`); the brackets are stripped and
-/// an IP literal becomes `ServerName::IpAddress` rather than a DNS name, since
-/// rustls will not accept an address as a DNS name.
-pub(crate) fn parse_server_name(remote_host: &str) -> Result<ServerName<'static>, String> {
-    // Default to port 443 (standard HTTPS) when no port is specified — the
-    // server is typically behind a reverse proxy (nginx) on the standard port.
-    let (raw_hostname, _port) = remote_host.rsplit_once(':').unwrap_or((remote_host, "443"));
-    let hostname = raw_hostname.trim_start_matches('[').trim_end_matches(']');
-
-    if let Ok(ip) = hostname.parse::<IpAddr>() {
-        Ok(ServerName::IpAddress(ip.into()))
-    } else {
-        ServerName::try_from(hostname.to_string())
-            .map_err(|e| format!("invalid server name '{hostname}': {e}"))
-    }
-}
+use crate::proxy_common::{
+    connect_tls, read_request_headers, resolve_remote_target, rewrite_headers, run_accept_loop,
+    spawn_watched, validate_remote_host,
+};
 
 // ---------------------------------------------------------------------------
 // Tauri commands
@@ -247,23 +206,36 @@ pub async fn start_livekit_proxy<R: Runtime>(
         .port();
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    let host = remote_host.clone();
-    let loop_handle = tokio::spawn(run_proxy_loop(
-        app.clone(),
-        listener,
-        host,
-        port,
-        fingerprint.clone(),
-        shutdown_rx,
-    ));
-    // Watch the loop so a panic is logged instead of vanishing silently.
-    tokio::spawn(async move {
-        match loop_handle.await {
-            Ok(()) => info!("[livekit_proxy] proxy loop exited"),
-            Err(e) if e.is_panic() => error!("[livekit_proxy] proxy loop panicked: {e:?}"),
-            Err(e) => warn!("[livekit_proxy] proxy loop join error: {e:?}"),
-        }
-    });
+    let conn_host = remote_host.clone();
+    let conn_fp = fingerprint.clone();
+    let dead_host = remote_host.clone();
+    spawn_watched(
+        "livekit_proxy",
+        tokio::spawn(run_accept_loop(
+            listener,
+            shutdown_rx,
+            "livekit_proxy",
+            move |stream| {
+                let host = conn_host.clone();
+                let fp = conn_fp.clone();
+                async move {
+                    if let Err(e) = handle_connection(stream, &host, &fp).await {
+                        warn!("[livekit_proxy] connection to {} failed: {}", host, e);
+                    }
+                }
+            },
+            move || async move {
+                if let Some(state) = app.try_state::<LiveKitProxyState>() {
+                    state.clear_if_port_matches(port).await;
+                } else {
+                    warn!(
+                        "[livekit_proxy] state unmanaged; cannot deregister dead proxy for {}",
+                        dead_host
+                    );
+                }
+            },
+        )),
+    );
 
     info!(
         "[livekit_proxy] proxy started on 127.0.0.1:{} → {}",
@@ -295,102 +267,8 @@ pub async fn stop_livekit_proxy(state: tauri::State<'_, LiveKitProxyState>) -> R
 // Proxy internals
 // ---------------------------------------------------------------------------
 
-/// Maximum consecutive accept errors before the proxy loop exits.
-const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 5;
-
-async fn run_proxy_loop<R: Runtime>(
-    app: tauri::AppHandle<R>,
-    listener: TcpListener,
-    remote_host: String,
-    port: u16,
-    pinned_fingerprint: String,
-    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
-) {
-    let mut consecutive_errors: u32 = 0;
-
-    loop {
-        tokio::select! {
-            result = listener.accept() => {
-                match result {
-                    Ok((stream, addr)) => {
-                        consecutive_errors = 0;
-                        let host = remote_host.clone();
-                        let fp = pinned_fingerprint.clone();
-                        debug!("[livekit_proxy] accepted connection from {}", addr);
-                        tokio::spawn(async move {
-                            if let Err(e) = handle_connection(stream, &host, &fp).await {
-                                warn!("[livekit_proxy] connection to {} failed: {}", host, e);
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        consecutive_errors += 1;
-                        error!(
-                            "[livekit_proxy] accept error ({}/{}): {}",
-                            consecutive_errors, MAX_CONSECUTIVE_ACCEPT_ERRORS, e
-                        );
-                        if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {
-                            error!(
-                                "[livekit_proxy] {} consecutive accept errors, stopping proxy loop",
-                                MAX_CONSECUTIVE_ACCEPT_ERRORS
-                            );
-                            // Deregister the dead proxy BEFORE the break drops
-                            // `listener`, so a future start_livekit_proxy
-                            // rebinds a fresh port instead of handing back
-                            // this closed one forever (the reuse branch keys
-                            // only on host+pin, not liveness). Mirrors
-                            // http_proxy.rs's identical fix.
-                            if let Some(state) = app.try_state::<LiveKitProxyState>() {
-                                state.clear_if_port_matches(port).await;
-                            } else {
-                                warn!(
-                                    "[livekit_proxy] state unmanaged; cannot deregister dead proxy for {}",
-                                    remote_host
-                                );
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-            _ = &mut shutdown_rx => break,
-        }
-    }
-}
-
 /// Bound on the outbound dial and TLS handshake, matching http_proxy.rs.
 const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Dial `remote_host` and complete the TLS handshake, bounding each step by
-/// `limit`.
-///
-/// Both steps must be bounded. A peer that accepts the TCP connection and then
-/// never answers the ClientHello blocks the handshake forever, and the calling
-/// task holds `local` without polling it — so the LiveKit SDK closing its side
-/// never cancels it. Those tasks and their sockets accumulate on every SDK
-/// retry and survive stop_livekit_proxy, whose shutdown oneshot only stops the
-/// accept loop; the per-connection tasks are detached.
-async fn connect_tls(
-    connector: &tokio_rustls::TlsConnector,
-    server_name: ServerName<'static>,
-    remote_host: &str,
-    limit: Duration,
-) -> Result<tokio_rustls::client::TlsStream<TcpStream>, Box<dyn std::error::Error + Send + Sync>> {
-    debug!("[livekit_proxy] connecting TCP to {}", remote_host);
-    let tcp = timeout(limit, TcpStream::connect(remote_host))
-        .await
-        .map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("TCP connect timed out"))??;
-    debug!(
-        "[livekit_proxy] starting TLS handshake with {}",
-        remote_host
-    );
-    let tls = timeout(limit, connector.connect(server_name, tcp))
-        .await
-        .map_err(|_| {
-            Box::<dyn std::error::Error + Send + Sync>::from("TLS handshake timed out")
-        })??;
-    Ok(tls)
-}
 
 /// Handle a single proxied connection:
 /// 1. Read the HTTP request headers from the local (plain) side
@@ -405,32 +283,7 @@ async fn handle_connection(
     // ── 1. Read HTTP request headers (up to \r\n\r\n) ────────────────────
     // Guarded by a 10-second timeout so a slow or stalled client cannot
     // hold the Tokio task open indefinitely (BUG-151).
-    let mut buf = Vec::with_capacity(4096);
-    timeout(Duration::from_secs(10), async {
-        let mut trailer = [0u8; 4];
-        loop {
-            let mut byte = [0u8; 1];
-            local.read_exact(&mut byte).await?;
-            buf.push(byte[0]);
-            trailer[0] = trailer[1];
-            trailer[1] = trailer[2];
-            trailer[2] = trailer[3];
-            trailer[3] = byte[0];
-            if trailer == *b"\r\n\r\n" {
-                break;
-            }
-            if buf.len() > 16_384 {
-                return Err(Box::<dyn std::error::Error + Send + Sync>::from(
-                    "HTTP request headers too large",
-                ));
-            }
-        }
-        Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
-    })
-    .await
-    .map_err(|_| {
-        Box::<dyn std::error::Error + Send + Sync>::from("upstream header read timed out")
-    })??;
+    let buf = read_request_headers(&mut local).await?;
 
     // Reject CRLF in remote_host before header insertion (defense-in-depth;
     // primary validation is in start_livekit_proxy).
@@ -452,9 +305,9 @@ async fn handle_connection(
 
     let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
 
-    let server_name = parse_server_name(remote_host)?;
+    let (server_name, dial_target) = resolve_remote_target(remote_host)?;
 
-    let mut tls = connect_tls(&connector, server_name, remote_host, PROXY_CONNECT_TIMEOUT).await?;
+    let mut tls = connect_tls(&connector, server_name, &dial_target, PROXY_CONNECT_TIMEOUT).await?;
     debug!("[livekit_proxy] TLS handshake complete, forwarding traffic");
 
     // ── 4. Forward request + bidirectional copy ──────────────────────────
@@ -484,6 +337,7 @@ async fn handle_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rustls::pki_types::ServerName;
 
     // ── validate_remote_host ────────────────────────────────────────────────
 
@@ -538,13 +392,6 @@ mod tests {
                 "should reject {host:?}"
             );
         }
-    }
-
-    #[test]
-    fn accepts_empty_host() {
-        // Empty passes the character checks; the subsequent TCP connect is what
-        // fails. Pinned so a future tightening is a deliberate change.
-        assert!(validate_remote_host("").is_ok());
     }
 
     // ── can_reuse_proxy ─────────────────────────────────────────────────────
@@ -670,45 +517,32 @@ mod tests {
         assert_eq!(got.matches("Host: example.com").count(), 2);
     }
 
-    // ── parse_server_name ───────────────────────────────────────────────────
+    // ── resolve_remote_target (shared; full suite in proxy_common.rs) ───────
 
     #[test]
     fn parses_a_dns_name_without_a_port() {
-        let got = parse_server_name("example.com").expect("should parse");
+        let (got, dial_target) = resolve_remote_target("example.com").expect("should parse");
         assert!(matches!(got, ServerName::DnsName(_)));
-    }
-
-    #[test]
-    fn parses_a_dns_name_with_a_port() {
-        let got = parse_server_name("example.com:8443").expect("should parse");
-        match got {
-            ServerName::DnsName(d) => assert_eq!(d.as_ref(), "example.com"),
-            other => panic!("expected DnsName, got {other:?}"),
-        }
+        assert_eq!(dial_target, "example.com:443");
     }
 
     #[test]
     fn parses_an_ipv4_literal_as_an_address() {
         // rustls rejects an IP supplied as a DNS name, so the branch matters.
-        let got = parse_server_name("127.0.0.1:8443").expect("should parse");
+        let (got, dial_target) = resolve_remote_target("127.0.0.1:8443").expect("should parse");
         assert!(matches!(got, ServerName::IpAddress(_)));
-    }
-
-    #[test]
-    fn parses_a_bracketed_ipv6_literal_as_an_address() {
-        let got = parse_server_name("[::1]:8443").expect("should parse");
-        assert!(matches!(got, ServerName::IpAddress(_)));
+        assert_eq!(dial_target, "127.0.0.1:8443");
     }
 
     #[test]
     fn parses_a_bare_ipv4_literal() {
-        let got = parse_server_name("10.0.0.5").expect("should parse");
-        assert!(matches!(got, ServerName::IpAddress(_)));
+        let got = resolve_remote_target("10.0.0.5").expect("should parse");
+        assert!(matches!(got.0, ServerName::IpAddress(_)));
     }
 
     #[test]
     fn rejects_an_invalid_dns_name() {
-        assert!(parse_server_name("not a hostname").is_err());
+        assert!(resolve_remote_target("not a hostname").is_err());
     }
 
     // A peer that accepts the TCP connection and then answers nothing must not
@@ -734,7 +568,7 @@ mod tests {
 
         // The outer bound exists only so a regression fails fast instead of
         // hanging the suite; the assertion is that the inner limit fired.
-        let outcome = timeout(
+        let outcome = tokio::time::timeout(
             Duration::from_secs(5),
             connect_tls(
                 &connector,
@@ -757,7 +591,7 @@ mod tests {
 
     // ── LiveKitProxyState::clear_if_port_matches ────────────────────────────
     //
-    // B4_conn_ipc-7: run_proxy_loop's accept-error exit path drops the
+    // B4_conn_ipc-7: run_accept_loop's accept-error exit path drops the
     // listener without deregistering it, so ProxyInner.port stays set and
     // start_livekit_proxy's reuse branch (unchanged host+pin) hands the dead
     // port back forever. Mirrors http_proxy.rs's

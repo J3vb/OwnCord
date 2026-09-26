@@ -1,61 +1,10 @@
-// Offline harness for bughunt-fix.js - mirrors bughunt.harness.mjs: wraps the script body in an
-// AsyncFunction with stubbed agent/parallel/pipeline/phase/log/args/budget.
+// Offline harness for bughunt-fix.js. The workflow-runtime stub lives in
+// bughunt.harness.mjs, which exports runScript for any sibling harness.
 // Run: node .claude/workflows/bughunt-fix.harness.mjs [nameFilter]
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
+import { runScript } from "./bughunt.harness.mjs";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-
-export async function run({ agentStub, args = undefined, budget = undefined }) {
-  const src = readFileSync(join(here, "bughunt-fix.js"), "utf8");
-  const body = src.replace("export const meta", "const meta");
-  const calls = [];
-  const logs = [];
-  const agent = async (prompt, opts = {}) => {
-    calls.push({ prompt, opts });
-    return agentStub(prompt, opts);
-  };
-  const parallel = (thunks) =>
-    Promise.all(
-      thunks.map((t) =>
-        Promise.resolve()
-          .then(t)
-          .catch(() => null),
-      ),
-    );
-  const pipeline = (items, ...stages) =>
-    Promise.all(
-      items.map(async (item, i) => {
-        let v = item;
-        for (const stage of stages) {
-          try {
-            v = await stage(v, item, i);
-          } catch {
-            return null;
-          }
-        }
-        return v;
-      }),
-    );
-  const log = (m) => logs.push(String(m));
-  const phase = () => {};
-  const budgetImpl = budget || { total: null, spent: () => 0, remaining: () => Infinity };
-  const fn = new AsyncFunction(
-    "agent",
-    "parallel",
-    "pipeline",
-    "phase",
-    "log",
-    "args",
-    "budget",
-    body,
-  );
-  const result = await fn(agent, parallel, pipeline, phase, log, args, budgetImpl);
-  return { result, calls, logs };
-}
+const run = (o) => runScript("bughunt-fix.js", o);
 
 // ---------- fixtures ----------
 export const rec = (id, over = {}) => ({

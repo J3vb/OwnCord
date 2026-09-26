@@ -80,31 +80,51 @@ func (q *Queries) GetAllSettings(ctx context.Context) ([]Setting, error) {
 
 const getAuditLog = `-- name: GetAuditLog :many
 SELECT a.id, a.actor_id, COALESCE(u.username, '') AS actor_name, a.action,
-       a.target_type, a.target_id, a.detail, a.created_at
+       a.target_type, a.target_id, a.detail, COALESCE(a.subject_token, '') AS subject_token,
+       COALESCE(a.actor_token, '') AS actor_token, a.created_at
 FROM audit_log a
 LEFT JOIN users u ON u.id = a.actor_id
+WHERE (CAST(?1 AS TEXT) = '' OR a.action = ?1)
+  AND (CAST(?2 AS TEXT) = ''
+       OR instr(lower(COALESCE(u.username, '')), lower(?2)) > 0
+       OR instr(lower(a.action), lower(?2)) > 0
+       OR instr(lower(a.target_type), lower(?2)) > 0
+       OR instr(lower(a.detail), lower(?2)) > 0)
 ORDER BY a.id DESC
-LIMIT ? OFFSET ?
+LIMIT ?4 OFFSET ?3
 `
 
 type GetAuditLogParams struct {
-	Limit  int64 `json:"limit"`
-	Offset int64 `json:"offset"`
+	Action    string `json:"action"`
+	Query     string `json:"query"`
+	RowOffset int64  `json:"rowOffset"`
+	RowLimit  int64  `json:"rowLimit"`
 }
 
 type GetAuditLogRow struct {
-	ID         int64  `json:"id"`
-	ActorID    int64  `json:"actorId"`
-	ActorName  string `json:"actorName"`
-	Action     string `json:"action"`
-	TargetType string `json:"targetType"`
-	TargetID   int64  `json:"targetId"`
-	Detail     string `json:"detail"`
-	CreatedAt  string `json:"createdAt"`
+	ID           int64  `json:"id"`
+	ActorID      int64  `json:"actorId"`
+	ActorName    string `json:"actorName"`
+	Action       string `json:"action"`
+	TargetType   string `json:"targetType"`
+	TargetID     int64  `json:"targetId"`
+	Detail       string `json:"detail"`
+	SubjectToken string `json:"subjectToken"`
+	ActorToken   string `json:"actorToken"`
+	CreatedAt    string `json:"createdAt"`
 }
 
+// An empty action or query matches every row. action is an exact match;
+// query is a case-insensitive (ASCII) substring of the actor name, action,
+// target type or detail. instr, not LIKE, so the caller's text carries no
+// wildcards to escape.
 func (q *Queries) GetAuditLog(ctx context.Context, arg GetAuditLogParams) ([]GetAuditLogRow, error) {
-	rows, err := q.db.QueryContext(ctx, getAuditLog, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, getAuditLog,
+		arg.Action,
+		arg.Query,
+		arg.RowOffset,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -120,6 +140,8 @@ func (q *Queries) GetAuditLog(ctx context.Context, arg GetAuditLogParams) ([]Get
 			&i.TargetType,
 			&i.TargetID,
 			&i.Detail,
+			&i.SubjectToken,
+			&i.ActorToken,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -147,7 +169,7 @@ func (q *Queries) GetSetting(ctx context.Context, key string) (string, error) {
 }
 
 const getUserSessions = `-- name: GetUserSessions :many
-SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at
+SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at, unseen
 FROM sessions WHERE user_id = ?
 ORDER BY created_at DESC
 `
@@ -170,6 +192,7 @@ func (q *Queries) GetUserSessions(ctx context.Context, userID int64) ([]Session,
 			&i.CreatedAt,
 			&i.LastUsed,
 			&i.ExpiresAt,
+			&i.Unseen,
 		); err != nil {
 			return nil, err
 		}
@@ -187,34 +210,54 @@ func (q *Queries) GetUserSessions(ctx context.Context, userID int64) ([]Session,
 const listAllUsers = `-- name: ListAllUsers :many
 SELECT u.id, u.username, u.avatar, u.role_id,
        u.status, u.created_at, u.last_seen, u.banned, u.ban_reason, u.ban_expires,
-       COALESCE(r.name, '') AS role_name
+       COALESCE(r.name, '') AS role_name, COALESCE(r.position, 0) AS role_position
 FROM users u
 LEFT JOIN roles r ON r.id = u.role_id
+WHERE u.registration_status = 'active'
+  AND instr(lower(u.username), lower(?1)) > 0
+  AND (CAST(?2 AS INTEGER) = 0 OR u.role_id = ?2)
+  AND (CAST(?3 AS INTEGER) = 0
+       OR (u.banned != 0 AND (u.ban_expires IS NULL
+           OR replace(u.ban_expires, ' ', 'T') > strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))))
 ORDER BY u.id ASC
-LIMIT ? OFFSET ?
+LIMIT ?5 OFFSET ?4
 `
 
 type ListAllUsersParams struct {
-	Limit  int64 `json:"limit"`
-	Offset int64 `json:"offset"`
+	Query      string `json:"query"`
+	RoleID     int64  `json:"roleId"`
+	BannedOnly int64  `json:"bannedOnly"`
+	Offset     int64  `json:"offset"`
+	Limit      int64  `json:"limit"`
 }
 
 type ListAllUsersRow struct {
-	ID         int64   `json:"id"`
-	Username   string  `json:"username"`
-	Avatar     *string `json:"avatar"`
-	RoleID     int64   `json:"roleId"`
-	Status     string  `json:"status"`
-	CreatedAt  string  `json:"createdAt"`
-	LastSeen   *string `json:"lastSeen"`
-	Banned     int64   `json:"banned"`
-	BanReason  *string `json:"banReason"`
-	BanExpires *string `json:"banExpires"`
-	RoleName   string  `json:"roleName"`
+	ID           int64   `json:"id"`
+	Username     string  `json:"username"`
+	Avatar       *string `json:"avatar"`
+	RoleID       int64   `json:"roleId"`
+	Status       string  `json:"status"`
+	CreatedAt    string  `json:"createdAt"`
+	LastSeen     *string `json:"lastSeen"`
+	Banned       int64   `json:"banned"`
+	BanReason    *string `json:"banReason"`
+	BanExpires   *string `json:"banExpires"`
+	RoleName     string  `json:"roleName"`
+	RolePosition int64   `json:"rolePosition"`
 }
 
+// The admin Members page. query is a case-insensitive username substring
+// (instr, so no wildcard escaping; empty matches everyone). role_id 0 means any
+// role. banned_only 1 keeps only effective bans: the negation of
+// db.notBannedClause, so a lapsed temporary ban is not listed as banned.
 func (q *Queries) ListAllUsers(ctx context.Context, arg ListAllUsersParams) ([]ListAllUsersRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAllUsers, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listAllUsers,
+		arg.Query,
+		arg.RoleID,
+		arg.BannedOnly,
+		arg.Offset,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -234,10 +277,39 @@ func (q *Queries) ListAllUsers(ctx context.Context, arg ListAllUsersParams) ([]L
 			&i.BanReason,
 			&i.BanExpires,
 			&i.RoleName,
+			&i.RolePosition,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditActions = `-- name: ListAuditActions :many
+SELECT DISTINCT action FROM audit_log ORDER BY action LIMIT ?
+`
+
+// Every distinct action in the whole log, for the panel's action filter.
+func (q *Queries) ListAuditActions(ctx context.Context, limit int64) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listAuditActions, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var action string
+		if err := rows.Scan(&action); err != nil {
+			return nil, err
+		}
+		items = append(items, action)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -268,6 +340,34 @@ func (q *Queries) LogAudit(ctx context.Context, arg LogAuditParams) error {
 		arg.TargetType,
 		arg.TargetID,
 		arg.Detail,
+	)
+	return err
+}
+
+const logAuditEntry = `-- name: LogAuditEntry :exec
+INSERT INTO audit_log (actor_id, action, target_type, target_id, detail, subject_token, actor_token)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`
+
+type LogAuditEntryParams struct {
+	ActorID      int64   `json:"actorId"`
+	Action       string  `json:"action"`
+	TargetType   string  `json:"targetType"`
+	TargetID     int64   `json:"targetId"`
+	Detail       string  `json:"detail"`
+	SubjectToken *string `json:"subjectToken"`
+	ActorToken   *string `json:"actorToken"`
+}
+
+func (q *Queries) LogAuditEntry(ctx context.Context, arg LogAuditEntryParams) error {
+	_, err := q.db.ExecContext(ctx, logAuditEntry,
+		arg.ActorID,
+		arg.Action,
+		arg.TargetType,
+		arg.TargetID,
+		arg.Detail,
+		arg.SubjectToken,
+		arg.ActorToken,
 	)
 	return err
 }

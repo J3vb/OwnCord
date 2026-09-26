@@ -15,7 +15,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -152,6 +155,53 @@ func TestLiveKitProxy_WebSocket_PreservesQueryString(t *testing.T) {
 	}
 }
 
+// TestLiveKitProxy_WebSocket_ForwardsAuthorization covers the Linux client's
+// native voice: the LiveKit Rust SDK sends its room-join token as an
+// Authorization header, not the access_token query parameter. Dropping the
+// header left LiveKit with no token, so every remote join was rejected.
+func TestLiveKitProxy_WebSocket_ForwardsAuthorization(t *testing.T) {
+	const authz = "Bearer eyJhbGciOiJIUzI1NiJ9.native.sig"
+	var gotAuthz, gotCookie string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthz = r.Header.Get("Authorization")
+		gotCookie = r.Header.Get("Cookie")
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			return
+		}
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte("ok"))
+		conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+	}))
+	t.Cleanup(srv.Close)
+
+	proxy := httptest.NewServer(api.NewLiveKitProxy("ws://"+srv.Listener.Addr().String(), []string{"*"}))
+	t.Cleanup(proxy.Close)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	conn, dialResp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": {authz}, "Cookie": {"session=secret"}},
+	})
+	if dialResp != nil && dialResp.Body != nil {
+		defer dialResp.Body.Close() //nolint:errcheck // best-effort close in test
+	}
+	if err != nil {
+		t.Fatalf("dial through proxy: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if gotAuthz != authz {
+		t.Errorf("backend saw Authorization %q, want %q", gotAuthz, authz)
+	}
+	if gotCookie != "" {
+		t.Errorf("backend saw Cookie %q; only Authorization may be forwarded", gotCookie)
+	}
+}
+
 func TestLiveKitProxy_WebSocket_BackendUnavailable(t *testing.T) {
 	// Nothing is listening on this port, so the backend dial must fail.
 	proxy := httptest.NewServer(api.NewLiveKitProxy("ws://127.0.0.1:1", []string{"*"}))
@@ -238,7 +288,6 @@ func hubWithLiveKit(t *testing.T, status int) *ws.Hub {
 	}))
 	t.Cleanup(srv.Close)
 
-	hub := ws.NewHub(nil, nil, nil)
 	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
 		LiveKitAPIKey:    "testkeytestkeytest",
 		LiveKitAPISecret: "testsecrettestsecrettestsecret",
@@ -247,7 +296,26 @@ func hubWithLiveKit(t *testing.T, status int) *ws.Hub {
 	if err != nil {
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
-	hub.SetLiveKit(lk)
+	hub := newBareHub(t, lk)
+	return hub
+}
+
+// newBareHub builds the smallest hub NewHub now accepts: B3-4 made DB and
+// Limiter required, so the pre-B3-4 ws.NewHub(nil, nil, nil) fixture — the
+// poster child of construction succeeding with nothing wired — is illegal by
+// design. An unmigrated in-memory database is enough: construction only
+// best-effort-reads the settings cache.
+func newBareHub(t *testing.T, lk *ws.LiveKitClient) *ws.Hub {
+	t.Helper()
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	hub, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), LiveKit: lk, Settings: service.NewSettingsService(database), Readers: ws.DBReaders(database), Voice: service.NewVoiceService(database), Presence: service.NewUserService(database), Auth: service.NewSessionService(database)})
+	if err != nil {
+		t.Fatalf("ws.NewHub: %v", err)
+	}
 	return hub
 }
 
@@ -303,7 +371,7 @@ func TestHandleLiveKitHealth_Degraded(t *testing.T) {
 
 func TestHandleLiveKitHealth_NotConfigured(t *testing.T) {
 	// A hub with no LiveKit client at all — the common case when voice is off.
-	handler := api.LiveKitHealthHandlerForTest(ws.NewHub(nil, nil, nil))
+	handler := api.LiveKitHealthHandlerForTest(newBareHub(t, nil))
 
 	rr := httptest.NewRecorder()
 	handler(rr, httptest.NewRequest(http.MethodGet, "/api/v1/livekit/health", nil))

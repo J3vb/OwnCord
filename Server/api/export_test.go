@@ -2,8 +2,15 @@ package api
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
+	"net/netip"
+	"net/url"
+	"strconv"
+	"testing"
 
+	"github.com/J3vb/OwnCord/Server/safefetch"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
@@ -11,6 +18,15 @@ import (
 // BroadcastDMOpenForTest exposes broadcastDMOpen for external tests.
 func BroadcastDMOpenForTest(ctx context.Context, svc *service.Services, broadcaster DMBroadcaster, channelID int64, targetIDs []int64) {
 	broadcastDMOpen(ctx, svc, broadcaster, channelID, targetIDs)
+}
+
+// UploadStoreFileForTest exposes uploadStoreFile for external tests, which
+// need to drive the MIME-sniffing path directly — e.g. with a reader that
+// hands back short reads like a *multipart.Part does — without assembling a
+// full HTTP multipart upload.
+func UploadStoreFileForTest(ctx context.Context, w http.ResponseWriter, file io.Reader, res *service.StorageReservation, store FileStore) (mimeType string, size int64, width, height *int, ok bool) {
+	stored, ok := uploadStoreFile(ctx, w, file, res, store)
+	return stored.mime, stored.size, stored.width, stored.height, ok
 }
 
 // HandleMetricsForTest exposes handleMetrics for use in external tests.
@@ -66,16 +82,100 @@ func BroadcastEmojiSetForTest(ctx context.Context, svc *service.Services, broadc
 }
 
 // SetGIFUpstreamForTest points the GIF proxy at a stub upstream and returns a
-// restore func. The production transport uses the SSRF-guarded dialer, which
-// refuses loopback addresses, so tests must supply their own client too.
-func SetGIFUpstreamForTest(baseURL string, client *http.Client) func() {
-	prevBase, prevClient := gifAPIBase, gifClient
-	gifAPIBase, gifClient = baseURL, client
-	return func() { gifAPIBase, gifClient = prevBase, prevClient }
+// restore func.
+//
+// The stub is an httptest server on loopback over plain http, and the
+// production policy refuses both, so the test fetcher relaxes exactly two
+// things — the scheme/port pair and the loopback classification — and keeps
+// every ceiling, the redirect budget and the content-type allowlist as
+// production has them. Nothing outside a _test.go file may set
+// safefetch.Policy.Classify; TestNoProductionOverrideOfSeams enforces that.
+func SetGIFUpstreamForTest(baseURL string) (func(), error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		return nil, fmt.Errorf("stub upstream %q has no port: %w", baseURL, err)
+	}
+	policy := safefetch.Policy{
+		Schemes:              []string{u.Scheme},
+		Ports:                []int{port},
+		ContentTypes:         []string{"application/json", "text/plain"},
+		MaxRedirects:         0,
+		Deadline:             gifUpstreamTimeout,
+		MaxBytes:             gifMaxResponseBytes,
+		MaxDecompressedBytes: gifMaxResponseBytes,
+		MaxConcurrent:        gifMaxConcurrentUpstream,
+		Classify: func(addr netip.Addr) error {
+			if addr.Unmap().IsLoopback() {
+				return nil
+			}
+			return safefetch.ClassifyAddr(addr)
+		},
+	}
+	stub, err := safefetch.New(policy)
+	if err != nil {
+		return nil, err
+	}
+	prevBase, prevFetcher := gifAPIBase, gifFetcher
+	gifAPIBase, gifFetcher = baseURL, stub
+	return func() { gifAPIBase, gifFetcher = prevBase, prevFetcher }, nil
+}
+
+// SetGIFBaseURLForTest points the GIF proxy at a stub upstream while leaving
+// the production Fetcher in place, so a test can show that the real policy
+// refuses what the relaxed one reaches.
+func SetGIFBaseURLForTest(baseURL string) func() {
+	prev := gifAPIBase
+	gifAPIBase = baseURL
+	return func() { gifAPIBase = prev }
+}
+
+// SetGIFResolveForTest swaps only the GIF Fetcher's Resolve seam, keeping
+// every ceiling — scheme, port, deadline, byte limits, content types,
+// concurrency — identical to production, and gifAPIBase untouched (a request
+// whose Resolve fails never dials, so there is no need of a stub upstream
+// URL). For tests that want a deterministic resolve failure without touching
+// real DNS, which a DNS-impaired runner can retry for several seconds.
+// Nothing outside a _test.go file may set safefetch.Policy.Resolve;
+// TestProductionPolicyShape (safefetch/seams_test.go) enforces that.
+func SetGIFResolveForTest(resolve func(ctx context.Context, host string) ([]netip.Addr, error)) (func(), error) {
+	stub, err := safefetch.New(safefetch.Policy{
+		Schemes:              []string{"https"},
+		Ports:                []int{443},
+		ContentTypes:         []string{"application/json", "text/plain"},
+		MaxRedirects:         0,
+		Deadline:             gifUpstreamTimeout,
+		MaxBytes:             gifMaxResponseBytes,
+		MaxDecompressedBytes: gifMaxResponseBytes,
+		MaxConcurrent:        gifMaxConcurrentUpstream,
+		Resolve:              resolve,
+	})
+	if err != nil {
+		return nil, err
+	}
+	prev := gifFetcher
+	gifFetcher = stub
+	return func() { gifFetcher = prev }, nil
 }
 
 // SecurityHeaders is SecurityHeadersWithTLS with TLS disabled (no HSTS).
 // Test-only convenience — production always goes through SecurityHeadersWithTLS.
 func SecurityHeaders(next http.Handler) http.Handler {
 	return SecurityHeadersWithTLS("")(next)
+}
+
+// WarnOnServerConfigForTest exposes warnOnServerConfig so B6-6's node_ip
+// warning can be asserted without standing up a whole router.
+var WarnOnServerConfigForTest = warnOnServerConfig
+
+// SetRouteTablePathForTest points the container bridge-gateway lookup at a
+// fixture route table for the duration of the test.
+func SetRouteTablePathForTest(t *testing.T, path string) {
+	t.Helper()
+	prev := routeTablePath
+	routeTablePath = path
+	t.Cleanup(func() { routeTablePath = prev })
 }

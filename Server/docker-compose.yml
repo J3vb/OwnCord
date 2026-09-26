@@ -3,12 +3,15 @@
 # Quick start:
 #   1. cp .env.example .env  && edit .env (set secrets + public IP)
 #   2. cp livekit.yaml.example livekit.yaml  && edit livekit.yaml (same keys)
-#   3. docker compose up -d
+#   3. cp config.yaml.example config.yaml  && set voice.livekit_url to
+#      ws://livekit:7880 (the service below; the copied default is localhost)
+#      and voice.auto_download_livekit to false (LiveKit is its own container)
+#   4. docker compose up -d
 #
 # LiveKit runs as a separate container on the same internal network.
-# The OwnCord server reaches it at ws://livekit:7880 (Docker DNS).
-# Browser clients reach LiveKit directly via the ports published below,
-# so your firewall must allow TCP 7880-7881 and UDP 50000-60000.
+# The OwnCord server reaches it at ws://livekit:7880 (Docker DNS), and it
+# proxies signalling to clients at :8443/livekit — so 7880 need not be
+# published or forwarded. Firewall TCP 7881 and UDP 50000-60000 for media.
 
 # Log rotation shared by both services: without a cap the default json-file
 # driver grows unbounded on the host disk.
@@ -22,6 +25,9 @@ services:
   owncord:
     image: ghcr.io/j3vb/owncord-server:latest
     restart: unless-stopped
+    # The server's own drain budget is 30s with a ≈55s worst case; Compose's
+    # default 10s would SIGKILL an ordinary `docker compose down` mid-flush.
+    stop_grace_period: 60s
     ports:
       - "8443:8443"
     environment:
@@ -34,16 +40,24 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       # Persistent data (SQLite DB + uploaded files)
       - owncord-data:/app/data
-    # The binary is its own probe (`healthcheck` subcommand) — the distroless
-    # image has no shell or curl. Plain docker compose only SURFACES unhealthy
-    # (docker ps, events); pair with an external watchdog (or an autoheal
-    # container) if you want automatic restarts on hang.
-    healthcheck:
-      test: ["CMD", "/chatserver", "healthcheck"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+    # No `healthcheck:` here on purpose. The image declares its own (see
+    # Server/Dockerfile) and compose inherits it, so the probe cannot drift
+    # between "run the image" and "run the compose file". The binary is its own
+    # probe — the distroless image has no shell or curl. Plain docker compose
+    # only SURFACES unhealthy (docker ps, events); pair with an external
+    # watchdog (or an autoheal container) if you want automatic restarts on hang.
+    #
+    # Minimal privilege. The image already runs as uid 65532 on distroless (no
+    # shell, no package manager); these two drop what is left. The server binds
+    # 8443, above the privileged-port range, so it needs no capability at all.
+    # `read_only: true` is deliberately NOT set: the server writes its default
+    # config.yaml into /app on first boot, and a read-only root filesystem turns
+    # that documented behaviour into a boot failure for anyone who has not yet
+    # mounted a config.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     # Uncomment and size to your host to keep a runaway process from starving
     # the machine (values are a starting point for a small community):
@@ -55,12 +69,19 @@ services:
       - owncord-net
 
   livekit:
-    image: livekit/livekit-server:v1
+    # Must move together with DefaultLiveKitVersion in Server/ws/livekit_download.go:
+    # this file is what an operator runs without the server's own pin, so a
+    # version skew here is invisible until voice fails.
+    image: livekit/livekit-server:v1.13.5
     restart: unless-stopped
     # LiveKit config file — copy livekit.yaml.example → livekit.yaml and fill in
     command: --config /etc/livekit/livekit.yaml
     ports:
-      - "7880:7880" # WebSocket API (OwnCord server + browser signalling)
+      # 7880 is LiveKit's own API/signalling endpoint and is deliberately NOT
+      # published: clients tunnel signalling through the OwnCord server's
+      # /livekit proxy on :8443. Publishing it would expose LiveKit's API to
+      # the host network for no benefit — and would let anyone who knows the
+      # credentials in your .env mint room tokens directly.
       - "7881:7881" # TCP fallback for WebRTC (clients behind strict NAT)
       - "50000-60000:50000-60000/udp" # WebRTC UDP media streams
     volumes:

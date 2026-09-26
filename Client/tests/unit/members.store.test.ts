@@ -328,6 +328,14 @@ describe("members store", () => {
     it("returns empty array when no members exist", () => {
       expect(getOnlineMembers()).toHaveLength(0);
     });
+
+    it("excludes invisible members, matching MemberList's offline grouping (OC-0348)", () => {
+      const invisibleSelf: ReadyMember = { ...MEMBER_BOB, status: "invisible" };
+      setMembers([MEMBER_ALICE, invisibleSelf]);
+      const online = getOnlineMembers();
+      expect(online).toHaveLength(1);
+      expect(online.map((m) => m.id)).toEqual([1]);
+    });
   });
 
   describe("getTypingUsers", () => {

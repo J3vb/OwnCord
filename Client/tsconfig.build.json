@@ -6,5 +6,7 @@
     "types": []
   },
   "include": ["src"],
-  "exclude": []
+  // Colocated src/**/*.test.ts files are test code: typecheck (tsconfig.json)
+  // covers them with Node types, and they never ship.
+  "exclude": ["src/**/*.test.ts"]
 }

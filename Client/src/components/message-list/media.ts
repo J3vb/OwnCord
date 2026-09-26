@@ -9,8 +9,27 @@ import klipyWatermark from "../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
-import { isSafeUrl } from "./attachments";
+import {
+  clearExternalImageCache,
+  fetchExternalImage,
+  isSafeUrl,
+  loadExternalImage,
+  openImageLightbox,
+  previewExternal,
+  recoverEvictedImage,
+  renderFailureStatus,
+} from "./attachments";
+import {
+  admitDerived,
+  EXTERNAL_CONSENT_PREF,
+  externalAllowed,
+  externalConsentChoice,
+  requestExternalItem,
+  resetExternalConsent,
+} from "../../features/content-consent/external";
+import { renderConcealedItem } from "../../features/content-consent/concealed";
+import { externalConsentText } from "../../i18n/externalConsent";
+import { contentText } from "../../i18n/content";
 import {
   CODE_BLOCK_REGEX,
   INLINE_CODE_REGEX,
@@ -18,7 +37,13 @@ import {
   stripUrlTrailingPunctuation,
   URL_REGEX,
 } from "./content-parser";
-import { renderGenericLinkPreview } from "./embeds";
+import { clearEmbedCaches, renderGenericLinkPreview } from "./embeds";
+import type { ExternalContentFailure } from "../../platform/contracts/externalContent";
+
+// The lightbox lives in attachments.ts, which renders attachment images and
+// must not import this module (that import was a cycle); re-exported here for
+// existing importers.
+export { closeActiveLightbox, openImageLightbox } from "./attachments";
 
 const log = createLogger("media");
 
@@ -33,15 +58,28 @@ window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>
   switch (e.detail.key) {
     case "showEmbeds":
       showEmbedsPref = loadPref<boolean>("showEmbeds", true);
+      if (!showEmbedsPref) resetExternalConsent();
       break;
     case "inlineMedia":
       inlineMediaPref = loadPref<boolean>("inlineMedia", true);
+      if (!inlineMediaPref) resetExternalConsent();
       break;
     case "showLinkPreviews":
       showLinkPreviewsPref = loadPref<boolean>("showLinkPreviews", true);
+      if (!showLinkPreviewsPref) resetExternalConsent();
       break;
     case "animateGifs":
       animateGifsPref = loadPref<boolean>("animateGifs", true);
+      break;
+    case EXTERNAL_CONSENT_PREF:
+      // Revoked (Q3: a Text & Images toggle turned off, or the reset): drop
+      // every fetched byte and late answer before re-concealing.
+      if (externalConsentChoice() === null) {
+        clearEmbedCaches();
+        clearMediaCaches();
+        clearExternalImageCache();
+      }
+      refreshExternalItems();
       break;
   }
 }) as EventListener);
@@ -125,6 +163,8 @@ export function extractYouTubeId(url: string): string | null {
   return null;
 }
 
+let ytNoteSeq = 0;
+
 /** Cache for YouTube video titles to avoid re-fetching on every re-render (LRU at 200). */
 const ytTitleCache = new Map<string, string>();
 const YT_TITLE_CACHE_MAX = 200;
@@ -156,6 +196,7 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
 
   // Header: channel name + video title
   const header = createElement("div", { class: "msg-embed-yt-header" });
+  // i18n-exempt: provider name, attribution not translated (B9-9 rule)
   const channelLabel = createElement("div", { class: "msg-embed-host" }, "YouTube");
   const titleLink = createElement("a", {
     class: "msg-embed-yt-title",
@@ -168,38 +209,26 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
   if (cached !== undefined) {
     setText(titleLink, cached);
   } else {
-    setText(titleLink, "Loading...");
+    setText(titleLink, contentText("youtube.title.loading"));
     const generation = mediaCacheGeneration;
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&format=json`;
-    tauriFetch(oembedUrl, {
-      signal: AbortSignal.timeout(5000),
-    })
-      .then((res) => (res.ok ? (res.json() as Promise<{ title?: string } | null>) : null))
-      .then((data) => {
-        if (generation !== mediaCacheGeneration) {
-          setText(titleLink, "YouTube Video");
-          return;
-        }
-        const title = data?.title ?? "YouTube Video";
-        if (ytTitleCache.size >= YT_TITLE_CACHE_MAX) {
-          const firstKey = ytTitleCache.keys().next().value;
-          if (firstKey !== undefined) ytTitleCache.delete(firstKey);
-        }
-        ytTitleCache.set(videoId, title);
-        setText(titleLink, title);
-      })
-      .catch(() => {
-        if (generation !== mediaCacheGeneration) {
-          setText(titleLink, "YouTube Video");
-          return;
-        }
-        if (ytTitleCache.size >= YT_TITLE_CACHE_MAX) {
-          const firstKey = ytTitleCache.keys().next().value;
-          if (firstKey !== undefined) ytTitleCache.delete(firstKey);
-        }
-        ytTitleCache.set(videoId, "YouTube Video");
-        setText(titleLink, "YouTube Video");
-      });
+    admitDerived(`url:${originalUrl}`, `url:${oembedUrl}`);
+    // The broker fetches and parses the oEmbed document and hands back only
+    // its title — the renderer never reads the JSON.
+    void previewExternal(oembedUrl).then((result) => {
+      if (generation !== mediaCacheGeneration) {
+        setText(titleLink, contentText("youtube.title.fallback"));
+        return;
+      }
+      const title =
+        (result.ok ? result.value.title : null) ?? contentText("youtube.title.fallback");
+      if (ytTitleCache.size >= YT_TITLE_CACHE_MAX) {
+        const firstKey = ytTitleCache.keys().next().value;
+        if (firstKey !== undefined) ytTitleCache.delete(firstKey);
+      }
+      ytTitleCache.set(videoId, title);
+      setText(titleLink, title);
+    });
   }
 
   appendChildren(header, channelLabel, titleLink);
@@ -210,18 +239,35 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
   const thumbUrl = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
   const thumb = createElement("img", {
     class: "msg-embed-thumb",
-    src: thumbUrl,
-    alt: "YouTube video",
+    alt: contentText("youtube.thumbAlt"),
     loading: "lazy",
   });
+  admitDerived(`url:${originalUrl}`, `url:${thumbUrl}`);
+  recoverEvictedImage(thumb, { url: thumbUrl });
+  void fetchExternalImage({ url: thumbUrl }).then((src) => {
+    if (src !== null) thumb.src = src;
+  });
 
-  const playBtn = createElement("div", { class: "msg-embed-play" });
+  // Playback is a separate deliberate act (B9-8): the frame talks to YouTube
+  // itself, outside the broker's byte-fetch boundary, and the note says so.
+  const note = createElement(
+    "div",
+    { class: "msg-embed-link-desc", id: `yt-note-${videoId}-${++ytNoteSeq}` },
+    externalConsentText("youtube.note"),
+  );
+  header.appendChild(note);
+  const playBtn = createElement("button", {
+    type: "button",
+    class: "msg-embed-play",
+    "aria-label": externalConsentText("youtube.play"),
+    "aria-describedby": note.id,
+  });
   playBtn.appendChild(createIcon("play", 24));
 
   appendChildren(thumbWrap, thumb, playBtn);
   wrap.appendChild(thumbWrap);
 
-  // On click thumbnail, replace with iframe player
+  // On click (or Enter/Space on the play button), replace with the player
   thumbWrap.addEventListener(
     "click",
     () => {
@@ -234,7 +280,10 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
         "allow-scripts allow-same-origin allow-presentation allow-popups",
       );
       iframe.className = "msg-embed-iframe";
+      iframe.title = externalConsentText("youtube.frame");
+      const hadFocus = thumbWrap.contains(document.activeElement);
       thumbWrap.replaceChildren(iframe);
+      if (hadFocus) iframe.focus();
     },
     { once: true },
   );
@@ -254,78 +303,37 @@ export function isDirectImageUrl(url: string): boolean {
   }
 }
 
+/** Host shown in an external image's accessible name and alt text. */
+function displayHost(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
 /** Render a direct image/GIF URL as an inline image with lightbox. */
 export function renderInlineImage(url: string): HTMLDivElement {
   // Use cached height from a previous render if available, otherwise 200px.
   // This prevents height oscillation when virtual scroll rebuilds DOM.
   const cachedH = imageHeightCache.get(url);
   const minH = cachedH ?? 200;
+  const host = displayHost(url);
 
   const wrap = createElement("div", {
     class: "msg-image",
     style: `max-width: 400px; min-height: ${minH}px;`,
   });
 
-  const attrs: Record<string, string> = {
-    src: url,
-    alt: "Image",
-    style:
-      "max-width: 100%; max-height: 350px; display: block; border-radius: 4px; cursor: pointer;",
-  };
-  // Enable CORS for GIFs so canvas capture works for freeze/unfreeze
-  if (isGifUrl(url)) {
-    attrs.crossorigin = "anonymous";
-  }
-  const img = createElement("img", attrs);
-
-  // On load: clear min-height reservation and cache the natural rendered
-  // height so future virtual-scroll rebuilds start at the correct size.
-  // Measure synchronously — deferring to rAF loses the race with
-  // ResizeObserver which can rebuild the DOM before the rAF fires.
-  img.addEventListener(
-    "load",
-    () => {
-      log.debug("Image loaded", {
-        url: url.slice(0, 80),
-        naturalW: img.naturalWidth,
-        naturalH: img.naturalHeight,
-      });
-      wrap.style.minHeight = "";
-      const h = wrap.offsetHeight;
-      if (h > 0) cacheImageHeight(url, h);
-      log.debug("Image height cached", { url: url.slice(0, 80), h });
-    },
-    { once: true },
-  );
-
-  // On error: clear min-height so the wrapper collapses instead of
-  // holding a 200px empty reservation that can oscillate with virtual scroll.
-  img.addEventListener(
-    "error",
-    () => {
-      log.error("Image failed to load", { url });
-      wrap.style.minHeight = "";
-    },
-    { once: true },
-  );
-
-  // Observe GIFs for visibility-based freeze/unfreeze + play/pause button.
-  // When the animateGifs pref is disabled, start frozen so the first frame is
-  // shown by default; the user can still click the play button to animate.
-  if (isGifUrl(url)) {
-    img.addEventListener(
-      "load",
-      () => {
-        observeMedia(img, url, wrap, !animateGifsPref);
-      },
-      { once: true },
-    );
-  }
-
-  img.addEventListener("click", () => {
-    openImageLightbox(url, "Image");
+  // No src yet: the bytes come from the external-content broker as a
+  // same-origin blob: URL, never from the webview loading `url` itself.
+  const img = createElement("img", {
+    alt: contentText("image.alt", { host }),
+    style: "max-width: 100%; max-height: 350px; border-radius: 4px; cursor: pointer;",
   });
-
+  // Hidden until its bytes load: a loading or refused image is neither shown
+  // nor reachable as a control, so it can never open an empty lightbox.
+  img.hidden = true;
   wrap.appendChild(img);
 
   if (isKlipyUrl(url)) {
@@ -338,169 +346,103 @@ export function renderInlineImage(url: string): HTMLDivElement {
     wrap.appendChild(watermark);
   }
 
+  // The failure line and its bounded retry sit beside the image; the image is
+  // hidden, not discarded, so retry can reuse it and tests keep one element.
+  const failure = renderFailureStatus(
+    contentText("image.failed"),
+    contentText("image.retry"),
+    () => {
+      if (wrap.dataset.mediaState !== "loading") load();
+    },
+  );
+  failure.hidden = true;
+  wrap.appendChild(failure);
+  const retry = failure.querySelector("button")!;
+
+  // On failure: clear min-height so the wrapper collapses instead of
+  // holding a 200px empty reservation that can oscillate with virtual scroll.
+  const showFailure = (kind: ExternalContentFailure): void => {
+    log.error("Image failed to load", { url, failure: kind });
+    wrap.style.minHeight = "";
+    // A refusal (blocked destination, wrong type, oversized, expired) is kept
+    // distinct from a loaded image; the failure line never reads as success.
+    wrap.dataset.mediaState = "failed";
+    img.hidden = true;
+    // Only a transient "unavailable" answer is worth re-asking.
+    retry.hidden = kind !== "unavailable";
+    retry.removeAttribute("aria-disabled");
+    failure.hidden = false;
+  };
+  recoverEvictedImage(img, { url });
+  // Bytes that fail to decode, or an evicted image the broker can no longer
+  // re-fetch, land in the same typed failed state.
+  img.addEventListener("error", () => showFailure("unavailable"));
+
+  // On load: clear min-height reservation and cache the natural rendered
+  // height so future virtual-scroll rebuilds start at the correct size.
+  // Measure synchronously — deferring to rAF loses the race with
+  // ResizeObserver which can rebuild the DOM before the rAF fires.
+  img.addEventListener("load", () => {
+    log.debug("Image loaded", { url: url.slice(0, 80), naturalH: img.naturalHeight });
+    // A retry that succeeds hands keyboard focus from the retry to the image.
+    const refocus = failure.contains(document.activeElement);
+    wrap.style.minHeight = "";
+    wrap.dataset.mediaState = "loaded";
+    img.hidden = false;
+    failure.hidden = true;
+    const h = wrap.offsetHeight;
+    if (h > 0) cacheImageHeight(url, h);
+    if (refocus) img.focus();
+  });
+
+  // Observe GIFs for visibility-based freeze/unfreeze + play/pause button.
+  // When the animateGifs pref is disabled, start frozen so the first frame is
+  // shown by default; the user can still click the play button to animate.
+  // The blob: source is same-origin, so the freeze canvas stays untainted.
+  if (isGifUrl(url)) {
+    img.addEventListener(
+      "load",
+      () => {
+        observeMedia(img, img.src, wrap, !animateGifsPref);
+      },
+      { once: true },
+    );
+  }
+
+  // The image is a keyboard-operable control, not pointer-only (B9-9): focus
+  // it and Enter/Space open the same lightbox a click does.
+  img.tabIndex = 0;
+  img.setAttribute("role", "button");
+  img.setAttribute("aria-label", contentText("image.open", { host }));
+  img.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    img.click();
+  });
+  img.addEventListener("click", () => {
+    openImageLightbox(img.src, contentText("image.alt", { host }), { url });
+  });
+
+  function load(): void {
+    // A retry rechecks consent and the current partition: a revoked grant
+    // makes loadExternalImage refuse again with nothing fetched.
+    // A visible retry stays mounted (and focused) while it re-asks.
+    wrap.dataset.mediaState = "loading";
+    wrap.style.minHeight = `${cachedH ?? 200}px`;
+    retry.setAttribute("aria-disabled", "true");
+    if (img.hasAttribute("src")) img.removeAttribute("src");
+    void loadExternalImage({ url }).then((result) => {
+      if (!result.ok) {
+        showFailure(result.failure);
+        return;
+      }
+      img.src = result.value;
+    });
+  }
+
+  load();
+
   return wrap;
-}
-
-// -- Lightbox -----------------------------------------------------------------
-
-// Store the cleanup function for the active lightbox so rapid reopens
-// properly remove document-level listeners from the previous instance.
-let activeLightboxClose: (() => void) | null = null;
-
-/** Close the active lightbox, if any. Called on page teardown (logout, page
- *  swap) so an open overlay doesn't survive onto the next page with live
- *  document listeners and a revoked blob URL. */
-export function closeActiveLightbox(): void {
-  activeLightboxClose?.();
-}
-
-/** Open a full-screen lightbox overlay with zoom and pan. */
-export function openImageLightbox(src: string, alt: string): void {
-  // Close any existing lightbox (including its document listeners)
-  if (activeLightboxClose !== null) {
-    activeLightboxClose();
-    activeLightboxClose = null;
-  }
-
-  const overlay = createElement("div", { class: "image-lightbox" });
-
-  const imgWrap = createElement("div", { class: "image-lightbox-wrap" });
-  const img = createElement("img", { src, alt });
-  imgWrap.appendChild(img);
-  overlay.appendChild(imgWrap);
-
-  const closeBtn = createElement("button", { class: "image-lightbox-close" });
-  closeBtn.appendChild(createIcon("x", 20));
-  overlay.appendChild(closeBtn);
-
-  // Zoom & pan state
-  let scale = 1;
-  let panX = 0;
-  let panY = 0;
-  let isDragging = false;
-  let dragStartX = 0;
-  let dragStartY = 0;
-  let panStartX = 0;
-  let panStartY = 0;
-
-  function applyTransform(): void {
-    img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
-  }
-
-  function resetZoom(): void {
-    scale = 1;
-    panX = 0;
-    panY = 0;
-    applyTransform();
-  }
-
-  function onMove(e: MouseEvent): void {
-    if (!isDragging) return;
-    panX = panStartX + (e.clientX - dragStartX);
-    panY = panStartY + (e.clientY - dragStartY);
-    applyTransform();
-  }
-
-  function onUp(): void {
-    if (isDragging) {
-      isDragging = false;
-      overlay.classList.remove("dragging");
-    }
-  }
-
-  function close(): void {
-    overlay.remove();
-    ac.abort();
-    if (activeLightboxClose === close) activeLightboxClose = null;
-  }
-
-  // Mouse wheel zoom
-  imgWrap.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.15 : 0.15;
-    const newScale = Math.max(0.5, Math.min(10, scale + delta * scale));
-    // Zoom towards cursor position
-    const rect = img.getBoundingClientRect();
-    const cx = e.clientX - rect.left - rect.width / 2;
-    const cy = e.clientY - rect.top - rect.height / 2;
-    const factor = newScale / scale;
-    panX = panX - cx * (factor - 1);
-    panY = panY - cy * (factor - 1);
-    scale = newScale;
-    applyTransform();
-  });
-
-  // Single click to toggle zoom, with drag detection to avoid zoom on pan
-  let clickStartX = 0;
-  let clickStartY = 0;
-
-  img.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    clickStartX = e.clientX;
-    clickStartY = e.clientY;
-
-    if (scale > 1.1) {
-      // Zoomed in — start panning
-      isDragging = true;
-      dragStartX = e.clientX;
-      dragStartY = e.clientY;
-      panStartX = panX;
-      panStartY = panY;
-      overlay.classList.add("dragging");
-    }
-  });
-
-  img.addEventListener("click", (e) => {
-    e.stopPropagation();
-    // Only toggle zoom if mouse didn't move (not a pan gesture)
-    const dx = Math.abs(e.clientX - clickStartX);
-    const dy = Math.abs(e.clientY - clickStartY);
-    if (dx > 5 || dy > 5) return;
-
-    if (scale > 1.1) {
-      resetZoom();
-    } else {
-      // Zoom to 3x towards click position
-      const rect = img.getBoundingClientRect();
-      const cx = e.clientX - rect.left - rect.width / 2;
-      const cy = e.clientY - rect.top - rect.height / 2;
-      scale = 3;
-      panX = -cx * 2;
-      panY = -cy * 2;
-      applyTransform();
-    }
-  });
-
-  // Use AbortController for cleanup of document-level listeners to prevent leaks
-  const ac = new AbortController();
-  document.addEventListener("mousemove", onMove, { signal: ac.signal });
-  document.addEventListener("mouseup", onUp, { signal: ac.signal });
-
-  closeBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    close();
-  });
-
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close();
-  });
-
-  function onKey(e: KeyboardEvent): void {
-    if (e.key === "Escape") close();
-    if (e.key === "+" || e.key === "=") {
-      scale = Math.min(10, scale * 1.3);
-      applyTransform();
-    }
-    if (e.key === "-") {
-      scale = Math.max(0.5, scale / 1.3);
-      applyTransform();
-    }
-    if (e.key === "0") resetZoom();
-  }
-  document.addEventListener("keydown", onKey, { signal: ac.signal });
-
-  activeLightboxClose = close;
-  document.body.appendChild(overlay);
 }
 
 // -- URL extraction and embed orchestration -----------------------------------
@@ -520,39 +462,64 @@ export function extractUrls(content: string): string[] {
   return (matches ?? []).map(stripUrlTrailingPunctuation);
 }
 
+/** One URL's embed (YouTube player, inline image, link card), or null when
+ *  it gets none. Concealed until the viewer consented to it (B9-8). */
+function renderUrlEmbed(url: string): HTMLElement | null {
+  const ytId = extractYouTubeId(url);
+  const isSafe = isSafeUrl(url);
+  let render: () => HTMLElement;
+  if (ytId !== null) {
+    if (!showEmbedsPref) return null;
+    render = () => renderYouTubeEmbed(ytId, url);
+  } else if (isDirectImageUrl(url) && isSafe) {
+    if (!inlineMediaPref) return null;
+    render = () => renderInlineImage(url);
+  } else if (isSafe) {
+    if (!showLinkPreviewsPref) return null;
+    render = () => renderGenericLinkPreview(url);
+  } else {
+    return null;
+  }
+  const loaded = externalAllowed(`url:${url}`);
+  const el = loaded
+    ? render()
+    : renderConcealedItem(url, () => {
+        void requestExternalItem(`url:${url}`).then((ok) => {
+          if (ok) refreshExternalItems();
+        });
+      });
+  el.dataset.externalUrl = url;
+  el.dataset.externalLoaded = String(loaded);
+  return el;
+}
+
+/** Re-render every embed whose consent changed: load the newly admitted ones
+ *  and conceal the revoked ones, keeping focus on the item it was in. */
+function refreshExternalItems(): void {
+  for (const el of document.querySelectorAll<HTMLElement>("[data-external-url]")) {
+    const url = el.dataset.externalUrl ?? "";
+    if (String(externalAllowed(`url:${url}`)) === el.dataset.externalLoaded) continue;
+    const hadFocus = el.contains(document.activeElement);
+    const next = renderUrlEmbed(url);
+    if (next === null) {
+      el.remove();
+      continue;
+    }
+    el.replaceWith(next);
+    if (hadFocus) {
+      const target = next.querySelector<HTMLElement>("a, button") ?? next;
+      if (target === next) next.tabIndex = -1;
+      target.focus();
+    }
+  }
+}
+
 /** Render URL embeds (YouTube players, generic link previews). */
 export function renderUrlEmbeds(content: string): DocumentFragment {
   const fragment = document.createDocumentFragment();
-  const urls = extractUrls(content);
-  const seen = new Set<string>();
-
-  for (const url of urls) {
-    if (seen.has(url)) continue;
-    seen.add(url);
-
-    // YouTube embed
-    const ytId = extractYouTubeId(url);
-    if (ytId !== null) {
-      if (!showEmbedsPref) continue;
-      fragment.appendChild(renderYouTubeEmbed(ytId, url));
-      continue;
-    }
-
-    // Direct image/GIF URL — render inline
-    const isDirect = isDirectImageUrl(url);
-    const isSafe = isSafeUrl(url);
-    if (isDirect && isSafe) {
-      if (!inlineMediaPref) continue;
-      fragment.appendChild(renderInlineImage(url));
-      continue;
-    }
-
-    // Generic URL preview (compact link card)
-    if (isSafe) {
-      if (!showLinkPreviewsPref) continue;
-      fragment.appendChild(renderGenericLinkPreview(url));
-    }
+  for (const url of new Set(extractUrls(content))) {
+    const el = renderUrlEmbed(url);
+    if (el !== null) fragment.appendChild(el);
   }
-
   return fragment;
 }

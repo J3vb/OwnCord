@@ -12,12 +12,14 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── test helpers ─────────────────────────────────────────────────────────────
 
-func openTestDB(t *testing.T) *db.DB {
+func openTestDB(t testing.TB) *db.DB {
 	t.Helper()
 	database, err := db.Open(":memory:")
 	if err != nil {
@@ -34,16 +36,16 @@ func openTestDB(t *testing.T) *db.DB {
 	return database
 }
 
-func newTestHub(t *testing.T) (*ws.Hub, *db.DB) {
+func newTestHub(t testing.TB) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	return hub, database
 }
 
 // seedTestUser inserts a Member-role user and returns its ID.
-func seedTestUser(t *testing.T, database *db.DB, username string) int64 {
+func seedTestUser(t testing.TB, database *db.DB, username string) int64 {
 	t.Helper()
 	id, err := database.CreateUser(context.Background(), username, "hash", 4)
 	if err != nil {
@@ -54,7 +56,7 @@ func seedTestUser(t *testing.T, database *db.DB, username string) int64 {
 
 // seedOwnerUser inserts an Owner-role user and returns the full *db.User.
 // Owner role (id=1) has all permissions (0x7FFFFFFF), so it passes all checks.
-func seedOwnerUser(t *testing.T, database *db.DB, username string) *db.User {
+func seedOwnerUser(t testing.TB, database *db.DB, username string) *db.User {
 	t.Helper()
 	_, err := database.CreateUser(context.Background(), username, "hash", 1) // roleID=1 → Owner
 	if err != nil {
@@ -68,7 +70,7 @@ func seedOwnerUser(t *testing.T, database *db.DB, username string) *db.User {
 }
 
 // seedTestChannel inserts a channel and returns its ID.
-func seedTestChannel(t *testing.T, database *db.DB, name string) int64 {
+func seedTestChannel(t testing.TB, database *db.DB, name string) int64 {
 	t.Helper()
 	id, err := database.CreateChannel(context.Background(), name, "text", "", "", 0)
 	if err != nil {
@@ -522,8 +524,13 @@ func TestHub_HandleMessage_InvalidJSON(t *testing.T) {
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
 
+// The hub is wired with a real MessageService: the chat rate limit lives in
+// SendMessage, so without one every send would be a recovered nil dereference
+// and the "error" replies counted below would say nothing about rate limiting.
 func TestHub_ChatSend_RateLimit(t *testing.T) {
-	hub, database := newTestHub(t)
+	database := openTestDB(t)
+	limiter := auth.NewRateLimiter()
+	hub := newTestHubDeps(t, database, limiter, service.New(database, limiter))
 	go hub.Run()
 	defer hub.Stop()
 
@@ -543,30 +550,44 @@ func TestHub_ChatSend_RateLimit(t *testing.T) {
 		"payload": payload,
 	})
 
-	// Send 12 messages rapidly — 11th and beyond should be rate-limited.
-	for range 12 {
-		hub.HandleMessageForTest(c, raw)
+	// One real send, then exhaust the user's chat window (10 per second) so
+	// the next two are refused however slowly the runner goes.
+	hub.HandleMessageForTest(c, raw)
+	for range 10 {
+		limiter.Allow(auth.Key("chat", user.ID), 10, time.Second)
 	}
+	hub.HandleMessageForTest(c, raw)
+	hub.HandleMessageForTest(c, raw)
 
-	// Drain all messages, count errors — error replies are sent synchronously
-	// by handleMessage, so they are already buffered on the send channel.
-	errCount := 0
+	// handleMessage sends its replies synchronously, so they are already
+	// buffered on the send channel.
+	sendOK, rateLimited, otherErr := 0, 0, 0
 drainLoop:
 	for {
 		select {
 		case got := <-send:
 			var resp map[string]any
-			if err := json.Unmarshal(got, &resp); err == nil {
-				if resp["type"] == "error" {
-					errCount++
+			if err := json.Unmarshal(got, &resp); err != nil {
+				continue
+			}
+			switch resp["type"] {
+			case "chat_send_ok":
+				sendOK++
+			case "error":
+				payload, _ := resp["payload"].(map[string]any)
+				if payload["code"] == "RATE_LIMITED" {
+					rateLimited++
+				} else {
+					otherErr++
 				}
 			}
 		default:
 			break drainLoop
 		}
 	}
-	if errCount == 0 {
-		t.Error("expected at least one rate-limit error response")
+	if sendOK != 1 || rateLimited != 2 || otherErr != 0 {
+		t.Errorf("3 sends around an exhausted window: got %d chat_send_ok, %d RATE_LIMITED, %d other errors; want 1, 2, 0",
+			sendOK, rateLimited, otherErr)
 	}
 }
 
@@ -669,10 +690,111 @@ func assertNotReceived(t *testing.T, ch <-chan []byte, label string) {
 
 // ─── LiveKit lifecycle ────────────────────────────────────────────────────────
 
-func TestHub_SetLiveKit_NilSafe(t *testing.T) {
+// TestHub_NilLiveKitOption: a hub built without LiveKit (voice not
+// configured) constructs fine and refuses token generation. Replaces the
+// pre-B3-4 SetLiveKit nil-safety test — the setter no longer exists.
+func TestHub_NilLiveKitOption(t *testing.T) {
 	hub, _ := newTestHub(t)
-	// Setting a nil LiveKit client must not panic.
-	hub.SetLiveKit(nil)
+	if _, err := hub.GenerateToken(1, "u", 1, "", false, false, false); err == nil {
+		t.Fatal("GenerateToken on a voiceless hub must error")
+	}
+}
+
+// TestNewHub_RequiredCollaborators pins B3-4's validation: before it,
+// construction always succeeded (api tests built ws.NewHub(nil, nil, nil)
+// hubs) and a missing collaborator surfaced as a later panic.
+func TestNewHub_RequiredCollaborators(t *testing.T) {
+	if _, err := ws.NewHub(ws.HubOptions{}); err == nil {
+		t.Fatal("NewHub without DB must error")
+	}
+	database := openTestDB(t)
+	if _, err := ws.NewHub(ws.HubOptions{DB: database}); err == nil {
+		t.Fatal("NewHub without Limiter must error")
+	}
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter()}); err == nil {
+		t.Fatal("NewHub without a Settings reader must error")
+	}
+	settings := service.NewSettingsService(database)
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings}); err == nil {
+		t.Fatal("NewHub without the reader seams must error")
+	}
+	// A PARTIAL seam set is refused too, not just an absent one: the bundle is
+	// validated seam by seam, so a family that adds a seam cannot leave an
+	// older construction site silently handing the hub a nil it will
+	// dereference on the first connection that needs it.
+	partial := ws.DBReaders(database)
+	partial.Dispatch = nil
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, Readers: partial}); err == nil {
+		t.Fatal("NewHub with an incomplete reader bundle must error")
+	}
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, Readers: ws.DBReaders(database)}); err == nil {
+		t.Fatal("NewHub without the voice store must error")
+	}
+	voice := service.NewVoiceService(database)
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, Readers: ws.DBReaders(database), Voice: voice}); err == nil {
+		t.Fatal("NewHub without the presence stamper must error")
+	}
+	presence := service.NewUserService(database)
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, Readers: ws.DBReaders(database), Voice: voice, Presence: presence}); err == nil {
+		t.Fatal("NewHub without the socket authenticator must error")
+	}
+}
+
+// completeHubOptions is every required collaborator present and valid — the
+// baseline a test asserting on ONE bad field starts from.
+//
+// It exists because the negative-replay-budget case used to live at the tail
+// of TestNewHub_RequiredCollaborators, where it was vacuous: that test's
+// options are deliberately incomplete, so validateHubOptions returned a
+// missing-collaborator error before ever reaching the budget check, and the
+// assertion passed on the wrong error. Deleting the budget check outright did
+// not fail it. A review bot caught it on the B3 exit scorecard, which had
+// cited it as evidence.
+//
+// The shape is the fix: an assertion about field X must start from options
+// that are valid in every OTHER field, or a later-added check upstream of X
+// silently takes the assertion over.
+func completeHubOptions(t *testing.T, database *db.DB) ws.HubOptions {
+	t.Helper()
+	return ws.HubOptions{
+		DB:       database,
+		Limiter:  auth.NewRateLimiter(),
+		Settings: service.NewSettingsService(database),
+		Readers:  ws.DBReaders(database),
+		Voice:    service.NewVoiceService(database),
+		Presence: service.NewUserService(database),
+		Auth:     service.NewSessionService(database),
+	}
+}
+
+// TestNewHub_RejectsNegativeReplayBudget pins the budget check on its own,
+// from a fully valid option set, so nothing upstream can answer for it.
+func TestNewHub_RejectsNegativeReplayBudget(t *testing.T) {
+	database := openTestDB(t)
+
+	// The baseline must actually construct, or every case below is vacuous
+	// for the same reason the old one was.
+	if _, err := ws.NewHub(completeHubOptions(t, database)); err != nil {
+		t.Fatalf("the complete option set must construct, or these assertions prove nothing: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		ring, cold int
+	}{
+		{"negative ring", -1, 0},
+		{"negative cold limit", 0, -1},
+		{"both negative", -1, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := completeHubOptions(t, database)
+			opts.ReplayRingSize = tc.ring
+			opts.ReplayColdLimit = tc.cold
+			if _, err := ws.NewHub(opts); err == nil {
+				t.Fatalf("NewHub with ring=%d cold=%d must error", tc.ring, tc.cold)
+			}
+		})
+	}
 }
 
 // ─── GracefulStop ─────────────────────────────────────────────────────────────
@@ -944,13 +1066,21 @@ func TestHub_LiveKitHealthCheck_NilReturnsError(t *testing.T) {
 	}
 }
 
-// ─── SetLiveKitProcess ──────────────────────────────────────────────────────
+// ─── LiveKitProcess option ──────────────────────────────────────────────────
 
-func TestHub_SetLiveKitProcess(t *testing.T) {
-	hub, _ := newTestHub(t)
-	hub.SetLiveKitProcess(nil)
-	go hub.Run()
-	hub.GracefulStop()
+// TestHub_LiveKitProcessRequiresClient pins B3-4's coherence rule: a
+// supervised process without a client is refused at construction — it used
+// to be a silently accepted setter call on a hub that could sign no tokens.
+func TestHub_LiveKitProcessRequiresClient(t *testing.T) {
+	database := openTestDB(t)
+	_, err := ws.NewHub(ws.HubOptions{
+		DB:             database,
+		Limiter:        auth.NewRateLimiter(),
+		LiveKitProcess: &ws.LiveKitProcess{},
+	})
+	if err == nil {
+		t.Fatal("NewHub must refuse LiveKitProcess without LiveKit")
+	}
 }
 
 // ─── VoiceSessionCount ─────────────────────────────────────────────────────
@@ -1157,6 +1287,172 @@ func TestRefreshChannelVisibility_TargetedCreateCarriesPerClientCanSend(t *testi
 	}
 }
 
+// can_moderate_voice (B9 Q5) rides the same targeted channel_create as
+// can_send, so an override edit on either layer converges a connected
+// moderator's voice controls without a reconnect — and the member, who never
+// held MUTE_MEMBERS, is told false throughout.
+func TestRefreshChannelVisibility_TargetedCreateCarriesCanModerateVoice(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+	ctx := context.Background()
+
+	chID, err := database.CreateChannel(ctx, "modvoice-room", "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	ch, err := database.GetChannel(ctx, chID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+
+	// Pin the Moderator role's MUTE_MEMBERS rather than lean on migration
+	// history for the default mask.
+	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = permissions | ? WHERE id = 3`, permissions.MuteMembers); err != nil {
+		t.Fatalf("grant MUTE_MEMBERS: %v", err)
+	}
+	modID, err := database.CreateUser(ctx, "modvoice-mod", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	mod, err := database.GetUserByID(ctx, modID)
+	if err != nil || mod == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	memberID := seedTestUser(t, database, "modvoice-member")
+	member, err := database.GetUserByID(ctx, memberID)
+	if err != nil || member == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+
+	modSend := make(chan []byte, 16)
+	memberSend := make(chan []byte, 16)
+	modClient := ws.NewTestClientWithUser(hub, mod, 0, modSend)
+	memberClient := ws.NewTestClientWithUser(hub, member, 0, memberSend)
+	hub.Register(modClient)
+	hub.Register(memberClient)
+	waitRegistered(t, hub, memberClient)
+
+	canModerateVoice := func(send chan []byte) any {
+		t.Helper()
+		msg := drainForMsgType(t, send, "channel_create")
+		payload, ok := msg["payload"].(map[string]any)
+		if !ok {
+			t.Fatalf("channel_create payload not an object: %#v", msg["payload"])
+		}
+		v, present := payload["can_moderate_voice"]
+		if !present {
+			t.Fatal("targeted channel_create omitted can_moderate_voice")
+		}
+		return v
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := database.ExecContext(ctx, q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	mute := permissions.MuteMembers
+
+	steps := []struct {
+		name          string
+		sql           string
+		args          []any
+		wantMod       bool
+		wantMemberMod bool
+	}{
+		{"no override", "", nil, true, false},
+		{"role deny MUTE", `INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 3, 0, ?)`, []any{chID, mute}, false, false},
+		{"role deny lifted", `DELETE FROM channel_overrides WHERE channel_id = ? AND role_id = 3`, []any{chID}, true, false},
+		{"user deny MUTE", `INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, 0, ?)`, []any{chID, modID, mute}, false, false},
+		// A channel allow cannot manufacture authority the base role lacks.
+		{"member user allow MUTE", `INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, ?, 0)`, []any{chID, memberID, mute}, false, false},
+	}
+	for _, s := range steps {
+		if s.sql != "" {
+			exec(s.sql, s.args...)
+		}
+		hub.RefreshChannelVisibility(ch)
+		if got := canModerateVoice(modSend); got != s.wantMod {
+			t.Errorf("%s: moderator can_moderate_voice = %v, want %v", s.name, got, s.wantMod)
+		}
+		if got := canModerateVoice(memberSend); got != s.wantMemberMod {
+			t.Errorf("%s: member can_moderate_voice = %v, want %v", s.name, got, s.wantMemberMod)
+		}
+	}
+}
+
+// A newly created channel has no earlier verdict for an absent field to keep,
+// so the creation fan-out must carry each recipient's own can_moderate_voice.
+func TestBroadcastChannelCreate_CarriesPerRecipientCanModerateVoice(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+	ctx := context.Background()
+
+	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = permissions | ? WHERE id = 3`, permissions.MuteMembers); err != nil {
+		t.Fatalf("grant MUTE_MEMBERS: %v", err)
+	}
+	modID, err := database.CreateUser(ctx, "newvoice-mod", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	mod, err := database.GetUserByID(ctx, modID)
+	if err != nil || mod == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	memberID := seedTestUser(t, database, "newvoice-member")
+	member, err := database.GetUserByID(ctx, memberID)
+	if err != nil || member == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+
+	modSend := make(chan []byte, 16)
+	memberSend := make(chan []byte, 16)
+	hub.Register(ws.NewTestClientWithUser(hub, mod, 0, modSend))
+	memberClient := ws.NewTestClientWithUser(hub, member, 0, memberSend)
+	hub.Register(memberClient)
+	waitRegistered(t, hub, memberClient)
+
+	chID, err := database.CreateChannel(ctx, "newvoice-room", "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	ch, err := database.GetChannel(ctx, chID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+	hub.BroadcastChannelCreate(ch)
+
+	for _, tc := range []struct {
+		name string
+		send chan []byte
+		want bool
+	}{
+		{"moderator", modSend, true},
+		{"member", memberSend, false},
+	} {
+		msg := drainForMsgType(t, tc.send, "channel_create")
+		payload, ok := msg["payload"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s: channel_create payload not an object: %#v", tc.name, msg["payload"])
+		}
+		if id, _ := payload["id"].(float64); int64(id) != chID {
+			t.Fatalf("%s: channel_create id = %v, want %d", tc.name, payload["id"], chID)
+		}
+		v, present := payload["can_moderate_voice"]
+		if !present {
+			t.Fatalf("%s: channel_create for a new channel omitted can_moderate_voice", tc.name)
+		}
+		if v != tc.want {
+			t.Errorf("%s: can_moderate_voice = %v, want %v", tc.name, v, tc.want)
+		}
+		if v, present := payload["can_send"]; !present || v != true {
+			t.Errorf("%s: can_send = %v (present %v), want true", tc.name, v, present)
+		}
+	}
+}
+
 func TestRefreshChannelVisibility_ForcesFullResyncForStaleResumes(t *testing.T) {
 	hub, database := newTestHub(t)
 
@@ -1330,6 +1626,7 @@ CREATE TABLE IF NOT EXISTS users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
+    registration_status TEXT NOT NULL DEFAULT 'active',
     identity_public_key TEXT,
     display_name TEXT,
     about TEXT,
@@ -1344,7 +1641,22 @@ CREATE TABLE IF NOT EXISTS sessions (
     ip_address TEXT,
     created_at TEXT    NOT NULL DEFAULT (datetime('now')),
     last_used  TEXT    NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT    NOT NULL
+    expires_at TEXT    NOT NULL,
+    unseen     INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS recovery_kits (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    verifier   TEXT    NOT NULL,
+    created_at TEXT    NOT NULL,
+    used_at    TEXT
+);
+CREATE TABLE IF NOT EXISTS recovery_assists (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    verifier TEXT NOT NULL,
+    issued_by INTEGER NOT NULL,
+    verification TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS channels (
@@ -1464,5 +1776,57 @@ CREATE TABLE IF NOT EXISTS user_blocks (
     created_at TEXT    NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (blocker_id, blocked_id),
     CHECK (blocker_id != blocked_id)
+);
+
+-- Message requests and trusted senders (migration 046, B5-6). No
+-- grandfathering backfill here — this synthetic schema is applied to an
+-- empty database before any test seeds a DM, so there is nothing yet to
+-- backfill.
+CREATE TABLE IF NOT EXISTS trusted_senders (
+    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source       TEXT    NOT NULL CHECK (source IN ('accepted', 'sent_first', 'grandfathered')),
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (recipient_id, sender_id)
+);
+
+CREATE TABLE IF NOT EXISTS message_requests (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id       INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    first_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    state            TEXT    NOT NULL DEFAULT 'pending'
+                     CHECK (state IN ('pending', 'accepted', 'ignored', 'deleted', 'blocked')),
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    decided_at       TEXT,
+    UNIQUE (sender_id, recipient_id)
+);
+CREATE INDEX IF NOT EXISTS idx_message_requests_recipient_state
+    ON message_requests(recipient_id, state);
+
+-- Per-user NSFW acknowledgement (migration 047, B5-7).
+CREATE TABLE IF NOT EXISTS nsfw_acknowledgements (
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id      INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    acknowledged_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, channel_id)
+);
+
+-- B5-9: buildReady's notices slot (ListUnacknowledgedWarnings) and every
+-- moderator action need this table, not only the full migration set.
+CREATE TABLE IF NOT EXISTS moderation_actions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT    NOT NULL CHECK (kind IN ('warning', 'timeout', 'removal', 'kick', 'ban')),
+    target_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_id        INTEGER NOT NULL DEFAULT 0,
+    actor_token     TEXT,
+    report_id       INTEGER,
+    reason          TEXT    NOT NULL DEFAULT '',
+    expires_at      TEXT,
+    acknowledged_at TEXT,
+    lifted_at       TEXT,
+    lifted_by       INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 `)

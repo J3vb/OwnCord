@@ -2,10 +2,13 @@ package ws
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sort"
-	"strings"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // fullV2Registry registers the same handler set NewHub wires, so the
@@ -62,7 +65,8 @@ func TestDispatchV2_PanicIsRecovered(t *testing.T) {
 	if !ok {
 		t.Fatal("DispatchV2 must return ok=true even after a panic (handler was found)")
 	}
-	ce, isCE := result.Error.(ClientError)
+	var ce ClientError
+	isCE := errors.As(result.Error, &ce)
 	if !isCE {
 		t.Fatalf("expected ClientError after panic recovery, got %T", result.Error)
 	}
@@ -173,38 +177,53 @@ func TestMigrationComplete_ConstructorHandlerParity(t *testing.T) {
 }
 
 // TestAllV2Types_SmokeDispatch verifies that dispatching a minimal command
-// for every V2-registered type does not panic (validates deps wiring).
+// for every V2-registered type does not panic (validates deps wiring). It runs
+// the registry NewHub wires over a migrated DB and real services, so any
+// panic is a failure: a deps type assertion that no longer matches, or a
+// handler dereferencing a dependency the hub leaves nil. Zero-value deps would
+// make the handlers nil-dereference instead, and on Windows a recovered nil
+// dereference is a hardware exception whose frame can land below a small
+// goroutine stack and corrupt the heap (golang/go#81238).
 func TestAllV2Types_SmokeDispatch(t *testing.T) {
-	r := fullV2Registry()
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	limiter := auth.NewRateLimiter()
+	r := newTestHub(t, database, limiter, service.New(database, limiter)).registry
 
 	// Minimal command for each V2 type — just needs Type() and UserID().
 	cmds := map[string]Command{
 		MsgTypePing:              PingCmd{userID: 1},
-		MsgTypeChatSend:          ChatSendCmd{userID: 1, channelID: 1},
-		MsgTypeChatEdit:          ChatEditCmd{userID: 1, messageID: 1},
-		MsgTypeChatDelete:        ChatDeleteCmd{userID: 1, messageID: 1},
-		MsgTypeChatCommand:       ChatCommandCmd{userID: 1, channelID: 1, command: "/x"},
-		MsgTypeTypingStart:       TypingStartCmd{userID: 1, channelID: 1},
-		MsgTypePresenceUpdate:    PresenceUpdateCmd{userID: 1, status: "online"},
-		MsgTypeChannelFocus:      ChannelFocusCmd{userID: 1, channelID: 1},
-		MsgTypeMarkRead:          MarkReadCmd{userID: 1, channelID: 1},
-		MsgTypeReactionAdd:       ReactionAddCmd{userID: 1, messageID: 1, emoji: "👍"},
-		MsgTypeReactionRemove:    ReactionRemoveCmd{userID: 1, messageID: 1, emoji: "👍"},
-		MsgTypeVoiceJoin:         VoiceJoinCmd{userID: 1, channelID: 1},
+		MsgTypeChatSend:          ChatSendCmd{userID: 1, ChannelID: 1},
+		MsgTypeChatEdit:          ChatEditCmd{userID: 1, MessageID: 1},
+		MsgTypeChatDelete:        ChatDeleteCmd{userID: 1, MessageID: 1},
+		MsgTypeChatCommand:       ChatCommandCmd{userID: 1, ChannelID: 1, Command: "/x"},
+		MsgTypeTypingStart:       TypingStartCmd{userID: 1, ChannelID: 1},
+		MsgTypePresenceUpdate:    PresenceUpdateCmd{userID: 1, Status: "online"},
+		MsgTypeChannelFocus:      ChannelFocusCmd{userID: 1, ChannelID: 1},
+		MsgTypeMarkRead:          MarkReadCmd{userID: 1, ChannelID: 1},
+		MsgTypeReactionAdd:       ReactionAddCmd{userID: 1, MessageID: 1, Emoji: "👍"},
+		MsgTypeReactionRemove:    ReactionRemoveCmd{userID: 1, MessageID: 1, Emoji: "👍"},
+		MsgTypeVoiceJoin:         VoiceJoinCmd{userID: 1, ChannelID: 1},
 		MsgTypeVoiceLeave:        VoiceLeaveCmd{userID: 1},
 		MsgTypeVoiceMute:         VoiceMuteCmd{userID: 1},
 		MsgTypeVoiceDeafen:       VoiceDeafenCmd{userID: 1},
 		MsgTypeVoiceCamera:       VoiceCameraCmd{userID: 1},
 		MsgTypeVoiceScreenshare:  VoiceScreenshareCmd{userID: 1},
-		MsgTypeVoiceModMute:      VoiceModMuteCmd{userID: 1, channelID: 1, targetID: 2},
-		MsgTypeVoiceModDeafen:    VoiceModDeafenCmd{userID: 1, channelID: 1, targetID: 2},
-		MsgTypeVoiceModMove:      VoiceModMoveCmd{userID: 1, targetID: 2, toChannelID: 2},
-		MsgTypeVoiceModKick:      VoiceModKickCmd{userID: 1, targetID: 2},
+		MsgTypeVoiceModMute:      VoiceModMuteCmd{userID: 1, ChannelID: 1, TargetID: 2},
+		MsgTypeVoiceModDeafen:    VoiceModDeafenCmd{userID: 1, ChannelID: 1, TargetID: 2},
+		MsgTypeVoiceModMove:      VoiceModMoveCmd{userID: 1, TargetID: 2, ToChannelID: 2},
+		MsgTypeVoiceModKick:      VoiceModKickCmd{userID: 1, TargetID: 2},
 		MsgTypeVoiceE2EEAnnounce: VoiceE2EEAnnounceCmd{userID: 1},
 		MsgTypeVoiceE2EEOffer:    VoiceE2EEOfferCmd{userID: 1},
 		MsgTypeVoiceTokenRefresh: VoiceTokenRefreshCmd{userID: 1},
-		MsgTypeCallRing:          CallRingCmd{userID: 1, channelID: 1},
-		MsgTypeCallDecline:       CallDeclineCmd{userID: 1, channelID: 1},
+		MsgTypeCallRing:          CallRingCmd{userID: 1, ChannelID: 1},
+		MsgTypeCallDecline:       CallDeclineCmd{userID: 1, ChannelID: 1},
 	}
 
 	for _, typ := range r.RegisteredV2Types() {
@@ -213,17 +232,10 @@ func TestAllV2Types_SmokeDispatch(t *testing.T) {
 			t.Errorf("no smoke command defined for V2 type %q", typ)
 			continue
 		}
-		// We only care that the deps type assertion succeeds (no "interface
-		// conversion" panic). Nil-pointer panics from zero-value DB/Limiter
-		// fields are expected and harmless for this smoke test.
 		func() {
 			defer func() {
 				if rec := recover(); rec != nil {
-					msg := fmt.Sprintf("%v", rec)
-					if strings.Contains(msg, "interface conversion") {
-						t.Errorf("V2 type %q: deps type assertion failed: %v", typ, rec)
-					}
-					// nil-pointer panics are expected with zero-value deps
+					t.Errorf("V2 type %q panicked: %v", typ, rec)
 				}
 			}()
 			// Bypass DispatchV2's own recover so we can inspect the panic value.

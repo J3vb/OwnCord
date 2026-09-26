@@ -96,24 +96,34 @@ func (s *PermissionService) HasChannelPermChecked(ctx context.Context, userID, c
 	return s.checker.HasChannelPermBatch(cp.rolePerms, cp.overrides, channelID, perm), nil
 }
 
-// RequireChannelAccess checks whether the user can access the channel with
-// the given permission. For DM channels it verifies participant membership.
-// For regular channels it uses cached role-based permission checks.
-func (s *PermissionService) RequireChannelAccess(ctx context.Context, userID int64, channelType string, channelID, perm int64) error {
-	if channelType == "dm" {
-		ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return permissions.ErrNotDMParticipant
-		}
-		return nil
+// Subject resolves the user's role bits and both override layers for
+// channelID from the per-user cache, as a permissions.Subject for the
+// value-taking predicates (CanSendMessage and friends). Channel flags and DM
+// state are the caller's to fill in. A missing role row yields the zero
+// Subject (no bits — every predicate refuses it) with a nil error; a store
+// failure is returned so callers choose between failing closed and
+// reporting it.
+func (s *PermissionService) Subject(ctx context.Context, userID, channelID int64) (permissions.Subject, error) {
+	cp, err := s.getOrPopulate(ctx, userID)
+	if err != nil {
+		return permissions.Subject{}, err
 	}
-	if !s.HasChannelPerm(ctx, userID, channelID, perm) {
-		return permissions.ErrPermissionDenied
+	if cp == nil {
+		return permissions.Subject{}, nil
 	}
-	return nil
+	sub := permissions.Subject{RolePerms: cp.rolePerms, Override: cp.overrides[channelID]}
+	// TimedOut is a live, uncached lookup on every call (B5-9): a 30s-stale
+	// answer here would let a just-lifted timeout keep refusing, or a
+	// just-issued one keep landing. Administrator is exempt, mirroring
+	// permissions.Checker.Subject's own short-circuit.
+	if !permissions.HasAdmin(cp.rolePerms) {
+		timedOut, toErr := s.st.HasActiveTimeout(ctx, userID)
+		if toErr != nil {
+			return permissions.Subject{}, toErr
+		}
+		sub.TimedOut = timedOut
+	}
+	return sub, nil
 }
 
 // GetRoleForUser returns the user's role, using the cache when available.

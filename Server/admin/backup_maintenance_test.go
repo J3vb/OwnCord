@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 func listBackupFiles(t *testing.T, dir string) []string {
@@ -49,7 +50,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 	ctx := context.Background()
 
 	// Settings absent → no-op, no error.
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups with no settings: %v", err)
 	}
 	if got := listBackupFiles(t, dir); len(got) != 0 {
@@ -59,7 +60,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 	// Schedule off → still a no-op.
 	mustSetSetting(t, database, "backup_schedule", "off")
 	mustSetSetting(t, database, "backup_retention", "7")
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups with schedule=off: %v", err)
 	}
 	if got := listBackupFiles(t, dir); len(got) != 0 {
@@ -68,7 +69,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 
 	// Daily → first tick creates exactly one scheduled backup.
 	mustSetSetting(t, database, "backup_schedule", "daily")
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups daily #1: %v", err)
 	}
 	files := listBackupFiles(t, dir)
@@ -78,7 +79,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 	first := filepath.Join(dir, files[0])
 
 	// Fresh backup on disk → next tick is a no-op.
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups daily #2: %v", err)
 	}
 	if got := listBackupFiles(t, dir); len(got) != 1 {
@@ -88,7 +89,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 	// Backup older than a day (but inside retention) → a new one is taken and
 	// the old one is kept.
 	backdate(t, first, 25*time.Hour)
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups daily #3: %v", err)
 	}
 	if got := listBackupFiles(t, dir); len(got) != 2 {
@@ -97,7 +98,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 
 	// Old backup past the 7-day retention window → pruned; the fresh one stays.
 	backdate(t, first, 8*24*time.Hour)
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups daily #4: %v", err)
 	}
 	got := listBackupFiles(t, dir)
@@ -132,12 +133,89 @@ func TestMaintainBackups_RetentionNeverDeletesNewest(t *testing.T) {
 	backdate(t, older, 30*24*time.Hour)
 	backdate(t, newer, 20*24*time.Hour)
 
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups: %v", err)
 	}
 	got := listBackupFiles(t, dir)
 	if len(got) != 1 || got[0] != "chatserver_b.db" {
 		t.Fatalf("files = %v, want only chatserver_b.db (newest kept)", got)
+	}
+}
+
+// TestMaintainBackups_RetentionKeepsPreRestoreCopies locks the safety rule:
+// the pre_restore_* copies written before an admin restore are not retention
+// history and survive pruning even when they are older than the window.
+func TestMaintainBackups_RetentionKeepsPreRestoreCopies(t *testing.T) {
+	database := openAdminTestDB(t)
+	dir := t.TempDir()
+	admin.SetBackupBaseDir(dir)
+	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
+	ctx := context.Background()
+
+	mustSetSetting(t, database, "backup_schedule", "off")
+	mustSetSetting(t, database, "backup_retention", "7")
+
+	ancientManual := filepath.Join(dir, "chatserver_a.db")
+	ancientSafety := filepath.Join(dir, "pre_restore_20200101_000000.db")
+	newest := filepath.Join(dir, "chatserver_b.db")
+	for _, p := range []string{ancientManual, ancientSafety, newest} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backdate(t, ancientManual, 400*24*time.Hour)
+	backdate(t, ancientSafety, 400*24*time.Hour)
+	backdate(t, newest, time.Hour)
+
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+		t.Fatalf("MaintainBackups: %v", err)
+	}
+	got := listBackupFiles(t, dir)
+	want := map[string]bool{"pre_restore_20200101_000000.db": true, "chatserver_b.db": true}
+	if len(got) != len(want) {
+		t.Fatalf("files = %v, want exactly %v (expired manual pruned, safety copy kept)", got, want)
+	}
+	for _, name := range got {
+		if !want[name] {
+			t.Errorf("unexpected surviving file %q", name)
+		}
+	}
+}
+
+// TestMaintainBackups_OutOfRangeRetentionPrunesNothing is OC-0393's second
+// instance: pruneExpiredBackups builds its cutoff with the identical
+// now.Add(-days*24h) arithmetic as the message-retention sweep, and
+// backup_retention is on the admin PATCH whitelist with no numeric
+// validation at all — unlike retention_days, this one is reachable today by
+// an admin typing an extra digit. Past the overflow boundary the cutoff
+// lands in the future and every backup but the newest would be unlinked;
+// it must instead disable pruning, the same as the existing days<=0 case.
+func TestMaintainBackups_OutOfRangeRetentionPrunesNothing(t *testing.T) {
+	database := openAdminTestDB(t)
+	dir := t.TempDir()
+	admin.SetBackupBaseDir(dir)
+	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
+	ctx := context.Background()
+
+	mustSetSetting(t, database, "backup_schedule", "off")
+	mustSetSetting(t, database, "backup_retention", "106752")
+
+	older := filepath.Join(dir, "chatserver_a.db")
+	newer := filepath.Join(dir, "chatserver_b.db")
+	for _, p := range []string{older, newer} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backdate(t, older, 400*24*time.Hour)
+	backdate(t, newer, 200*24*time.Hour)
+
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+		t.Fatalf("MaintainBackups: %v", err)
+	}
+	got := listBackupFiles(t, dir)
+	if len(got) != 2 {
+		t.Fatalf("files = %v, want both kept (an out-of-range retention window must disable pruning, not overflow into the future)", got)
 	}
 }
 

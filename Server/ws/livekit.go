@@ -93,18 +93,22 @@ func (c *LiveKitClient) GenerateToken(
 	channelID int64,
 	voiceJoinToken string,
 	canPublish bool,
-	canSubscribe bool,
 	canVideo bool,
 	canScreenShare bool,
 ) (string, error) {
 	roomName := RoomName(channelID)
 	identity := participantIdentity(userID, voiceJoinToken)
 
+	// Every OwnCord voice token grants CanSubscribe: a server-deafened or
+	// non-speaking participant must still receive other people's audio and
+	// streams, so subscription is never derived from the publish permissions.
+	canSubscribeAlways := true
+
 	at := auth.NewAccessToken(c.apiKey, c.apiSecret)
 	grant := &auth.VideoGrant{
 		RoomJoin:     true,
 		Room:         roomName,
-		CanSubscribe: &canSubscribe,
+		CanSubscribe: &canSubscribeAlways,
 	}
 
 	// Use CanPublishSources to restrict which track types the user may
@@ -117,18 +121,9 @@ func (c *LiveKitClient) GenerateToken(
 	// is only used as a hard deny when none of them grant anything, since
 	// LiveKit's GetCanPublishSource treats CanPublish=false as an override
 	// that blocks every source regardless of CanPublishSources.
-	var sources []string
-	if canPublish {
-		sources = append(sources, "microphone")
-	}
-	if canVideo {
-		sources = append(sources, "camera")
-	}
-	if canScreenShare {
-		sources = append(sources, "screen_share", "screen_share_audio")
-	}
+	sources := liveKitPublishSources(canPublish, canVideo, canScreenShare)
 	if len(sources) > 0 {
-		grant.CanPublishSources = sources
+		grant.SetCanPublishSources(sources)
 	} else {
 		grant.CanPublish = &canPublish
 	}
@@ -152,6 +147,44 @@ func (c *LiveKitClient) GenerateToken(
 		"can_screen_share", canScreenShare)
 
 	return token, nil
+}
+
+// liveKitPublishSources is shared by fresh tokens and active permissions.
+// Audio, camera and screenshare are independent grants.
+func liveKitPublishSources(microphone, camera, screenshare bool) []livekit.TrackSource {
+	var sources []livekit.TrackSource
+	if microphone {
+		sources = append(sources, livekit.TrackSource_MICROPHONE)
+	}
+	if camera {
+		sources = append(sources, livekit.TrackSource_CAMERA)
+	}
+	if screenshare {
+		sources = append(sources, livekit.TrackSource_SCREEN_SHARE, livekit.TrackSource_SCREEN_SHARE_AUDIO)
+	}
+	return sources
+}
+
+// updateParticipantPublishing applies current grants to an exact live join.
+// Updating permission also withdraws tracks whose source is no longer allowed.
+func (c *LiveKitClient) updateParticipantPublishing(ctx context.Context, channelID, userID int64, joinToken string, microphone, camera, screenshare bool) error {
+	sources := liveKitPublishSources(microphone, camera, screenshare)
+	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
+	defer cancel()
+	_, err := c.roomSvc.UpdateParticipant(ctx, &livekit.UpdateParticipantRequest{
+		Room:     RoomName(channelID),
+		Identity: participantIdentity(userID, joinToken),
+		Permission: &livekit.ParticipantPermission{
+			CanSubscribe:      true,
+			CanPublish:        len(sources) > 0,
+			CanPublishData:    microphone,
+			CanPublishSources: sources,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("livekit: updating participant publishing: %w", err)
+	}
+	return nil
 }
 
 // URL returns the LiveKit WebSocket URL for client connections.
@@ -181,81 +214,6 @@ func (c *LiveKitClient) RemoveParticipant(ctx context.Context, channelID int64, 
 		"identity", identity,
 		"room", roomName)
 	return nil
-}
-
-// MuteParticipantAudio mutes or unmutes every microphone track the participant
-// publishes, so a moderator's server mute holds at the SFU instead of relying
-// on the target's client to honor it. A participant with no published audio
-// track yet is not an error: the room join grant is re-derived on the next
-// token mint, and the client refuses its own unmute while server_muted.
-func (c *LiveKitClient) MuteParticipantAudio(ctx context.Context, channelID, userID int64, voiceJoinToken string, muted bool) error {
-	roomName := RoomName(channelID)
-	identity := participantIdentity(userID, voiceJoinToken)
-
-	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
-	defer cancel()
-	p, err := c.roomSvc.GetParticipant(ctx, &livekit.RoomParticipantIdentity{
-		Room:     roomName,
-		Identity: identity,
-	})
-	if err != nil {
-		return fmt.Errorf("livekit: getting participant %s in %s: %w", identity, roomName, err)
-	}
-
-	for _, t := range p.Tracks {
-		if t.Type != livekit.TrackType_AUDIO {
-			continue
-		}
-		if _, mErr := c.roomSvc.MutePublishedTrack(ctx, &livekit.MuteRoomTrackRequest{
-			Room:     roomName,
-			Identity: identity,
-			TrackSid: t.Sid,
-			Muted:    muted,
-		}); mErr != nil {
-			return fmt.Errorf("livekit: muting track %s of %s: %w", t.Sid, identity, mErr)
-		}
-	}
-
-	slog.Info("livekit: server mute applied",
-		"identity", identity,
-		"room", roomName,
-		"muted", muted)
-	return nil
-}
-
-// ListParticipants returns all participants in a channel's voice room.
-func (c *LiveKitClient) ListParticipants(channelID int64) ([]*livekit.ParticipantInfo, error) {
-	roomName := RoomName(channelID)
-
-	ctx, cancel := context.WithTimeout(context.Background(), lkTimeout)
-	defer cancel()
-	resp, err := c.roomSvc.ListParticipants(ctx, &livekit.ListParticipantsRequest{
-		Room: roomName,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("livekit: listing participants in %s: %w", roomName, err)
-	}
-
-	return resp.Participants, nil
-}
-
-// CountVideoTracks returns the number of video tracks published in a room.
-// Used for MaxVideo enforcement.
-func (c *LiveKitClient) CountVideoTracks(channelID int64) (int, error) {
-	participants, err := c.ListParticipants(channelID)
-	if err != nil {
-		return 0, err
-	}
-
-	count := 0
-	for _, p := range participants {
-		for _, t := range p.Tracks {
-			if t.Type == livekit.TrackType_VIDEO {
-				count++
-			}
-		}
-	}
-	return count, nil
 }
 
 // HealthCheck verifies connectivity to the LiveKit server by listing rooms.

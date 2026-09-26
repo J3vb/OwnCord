@@ -1,0 +1,97 @@
+# cargo-deny policy for the desktop client's Rust dependency graph.
+#
+#   cargo deny --manifest-path Client/src-tauri/Cargo.toml check
+#
+# CI runs exactly that (ci.yml, Supply-chain scan job). Three audits: advisories,
+# licences and sources. Every exception below names the crate, the advisory and
+# why it is accepted, so the check fails on anything NEW rather than on this
+# baseline. An exception that stops matching is itself a failure
+# (unused-ignored-advisory / unused-allowed-license), so this list cannot rot
+# silently.
+
+[advisories]
+# `all`: an unmaintained/unsound advisory anywhere in the graph fails, not only
+# on a direct dependency. That is the point of the check.
+unmaintained = "all"
+unsound = "workspace"
+# A stale ignore is an error, not a warning: it means the exception list has
+# drifted from the graph and is no longer reviewed.
+unused-ignored-advisory = "deny"
+# A yanked crate is a warning only. cargo-audit's own `yanked` handling matches,
+# and a yank is usually a version-resolution hazard rather than a vulnerability.
+yanked = "warn"
+ignore = [
+  # The rust-unic family (unic-char-property/-range/-common/-ucd-ident/
+  # -ucd-version) is unmaintained upstream. It arrives only through urlpattern
+  # 0.3.0, a tauri-utils dependency; no replacement version is in range.
+  { id = "RUSTSEC-2025-0075", reason = "unmaintained, reached only via urlpattern -> tauri-utils" },
+  { id = "RUSTSEC-2025-0080", reason = "unmaintained, reached only via urlpattern -> tauri-utils" },
+  { id = "RUSTSEC-2025-0081", reason = "unmaintained, reached only via urlpattern -> tauri-utils" },
+  { id = "RUSTSEC-2025-0098", reason = "unmaintained, reached only via urlpattern -> tauri-utils" },
+  { id = "RUSTSEC-2025-0100", reason = "unmaintained, reached only via urlpattern -> tauri-utils" },
+
+  # proc-macro-error is unmaintained. It arrives only through the same Linux
+  # GTK stack that pins glib, and ships no code into the client.
+  { id = "RUSTSEC-2024-0370", reason = "unmaintained; Linux GTK build chain only" },
+]
+# --- Linux native voice (livekit), added with the phase-0 build plumbing ---
+#
+# No new ignore is needed. The whole Linux-only tree — livekit 0.9.1 and its
+# livekit-* crates, webrtc-sys, libwebrtc — is Apache-2.0, already allowed
+# above; prost/pbjson/zip/scratch and the rest are Apache-2.0 or MIT. The
+# scanner is clean on them, so an exception here would be an unused entry that
+# only rots.
+#
+# What cargo-deny CANNOT see, and why no allow entry exists for it: webrtc-sys
+# statically links a prebuilt libwebrtc.a that bundles third-party C/C++
+# libraries — BoringSSL (OpenSSL-derived), ffmpeg (its archive reproduces both
+# its GPL and LGPL terms; `ffmpeg_branding="Chrome"` adds the H.264 codec),
+# openh264 (BSD-2-Clause), dav1d (BSD-2-Clause), opus (BSD-3-Clause), libvpx
+# (BSD-3-Clause), zlib, libjpeg-turbo, libyuv, libsrtp and others. The
+# authoritative texts ship inside the archive at lib/LICENSE.md. They are not
+# crates, so they never enter this graph and there is nothing for the `allow`
+# list to admit.
+#
+# LGPL stays OFF the allow list, per the phase-0 brief. No crate needs it (the
+# one LGPL term reachable in the graph, r-efi's LGPL-2.1-or-later, is an OR
+# satisfied by MIT). The bundled components above reach the binary only through
+# the owner-accepted prebuilt artifact ("ship the prebuilt libwebrtc as-is for
+# now, including its H.264 codec"), not as cargo crates the policy can gate. If
+# a future CRATE requires LGPL on its own, stop and escalate rather than adding
+# it here.
+
+[licenses]
+# Explicitly allowed SPDX terms, read off the resolved graph with `cargo deny
+# list`. A crate behind an OR expression passes on any one of these, so the
+# transitive LGPL term on r-efi (MIT OR Apache-2.0 OR LGPL-2.1-or-later) is
+# satisfied by MIT and LGPL is deliberately NOT allowed here.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+# Warn (not fail) if an allow entry stops being used: keep the list tight
+# without making a dependency removal a red build on its own.
+unused-allowed-license = "warn"
+# owncord-client is this repository's own crate. It is `publish = false` in
+# Cargo.toml, so its absent `license` field is not an unlicensed-crate finding.
+private = { ignore = true }
+
+[sources]
+# Dependencies must come from crates.io or a registered replacement; an
+# unknown registry or a git source is an error, which is how a typo-squatted
+# or a surprise git dependency is caught.
+unknown-registry = "deny"
+unknown-git = "deny"

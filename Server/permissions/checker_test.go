@@ -10,26 +10,24 @@ import (
 // ─── Mock DB ────────────────────────────────────────────────────────────────
 
 type mockDB struct {
-	channelPerms   map[chanRoleKey]chanPerm
-	userPerms      map[chanUserKey]chanPerm
-	dmParticipants map[dmKey]bool
-	chanErr        error
-	userErr        error
-	dmErr          error
+	channelPerms  map[chanRoleKey]chanPerm
+	userPerms     map[chanUserKey]chanPerm
+	timedOutUsers map[int64]bool
+	chanErr       error
+	userErr       error
+	timedOutErr   error
 }
 
 type (
 	chanRoleKey struct{ channelID, roleID int64 }
 	chanUserKey struct{ channelID, userID int64 }
 	chanPerm    struct{ allow, deny int64 }
-	dmKey       struct{ userID, channelID int64 }
 )
 
 func newMockDB() *mockDB {
 	return &mockDB{
-		channelPerms:   make(map[chanRoleKey]chanPerm),
-		userPerms:      make(map[chanUserKey]chanPerm),
-		dmParticipants: make(map[dmKey]bool),
+		channelPerms: make(map[chanRoleKey]chanPerm),
+		userPerms:    make(map[chanUserKey]chanPerm),
 	}
 }
 
@@ -56,11 +54,11 @@ func (m *mockDB) GetUserChannelPermissions(_ context.Context, channelID, userID 
 	return p.allow, p.deny, nil
 }
 
-func (m *mockDB) IsDMParticipant(_ context.Context, userID, channelID int64) (bool, error) {
-	if m.dmErr != nil {
-		return false, m.dmErr
+func (m *mockDB) HasActiveTimeout(_ context.Context, userID int64) (bool, error) {
+	if m.timedOutErr != nil {
+		return false, m.timedOutErr
 	}
-	return m.dmParticipants[dmKey{userID, channelID}], nil
+	return m.timedOutUsers[userID], nil
 }
 
 // ─── HasChannelPerm tests ───────────────────────────────────────────────────
@@ -145,6 +143,58 @@ func TestHasChannelPerm(t *testing.T) {
 				t.Errorf("HasChannelPerm() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestChecker_Subject_TimedOut pins B5-9's wiring: the live, uncached
+// HasActiveTimeout lookup fills Subject.TimedOut for a real (non-zero)
+// userID, is skipped for the role-only form (userID == 0, no member in
+// hand), is skipped for an Administrator (mirroring the existing HasAdmin
+// short-circuit), and a lookup failure is returned rather than swallowed.
+func TestChecker_Subject_TimedOut(t *testing.T) {
+	db := newMockDB()
+	db.timedOutUsers = map[int64]bool{7: true}
+	ck := NewChecker(db)
+
+	sub, err := ck.Subject(context.Background(), ReadMessages, 4, 7, 10)
+	if err != nil {
+		t.Fatalf("Subject: %v", err)
+	}
+	if !sub.TimedOut {
+		t.Fatal("TimedOut = false, want true for a user with an active timeout")
+	}
+
+	sub, err = ck.Subject(context.Background(), ReadMessages, 4, 8, 10)
+	if err != nil {
+		t.Fatalf("Subject: %v", err)
+	}
+	if sub.TimedOut {
+		t.Fatal("TimedOut = true for a user with no active timeout")
+	}
+
+	// userID == 0 (role-only, no member in hand): skipped entirely.
+	sub, err = ck.Subject(context.Background(), ReadMessages, 4, 0, 10)
+	if err != nil {
+		t.Fatalf("Subject(userID=0): %v", err)
+	}
+	if sub.TimedOut {
+		t.Fatal("TimedOut = true for a role-only Subject (userID 0)")
+	}
+
+	// Administrator short-circuits before the lookup, mirroring HasAdmin.
+	db.timedOutUsers[7] = true
+	sub, err = ck.Subject(context.Background(), Administrator, 1, 7, 10)
+	if err != nil {
+		t.Fatalf("Subject(admin): %v", err)
+	}
+	if sub.TimedOut {
+		t.Fatal("TimedOut = true for an Administrator")
+	}
+
+	// A lookup failure is returned, not collapsed to false.
+	db.timedOutErr = errors.New("db error")
+	if _, err := ck.Subject(context.Background(), ReadMessages, 4, 7, 10); err == nil {
+		t.Fatal("Subject: want an error when HasActiveTimeout fails")
 	}
 }
 
@@ -274,155 +324,6 @@ func TestVisibleChannelIDs(t *testing.T) {
 				if !got[id] {
 					t.Errorf("VisibleChannelIDs() missing channel %d; got %v", id, got)
 				}
-			}
-		})
-	}
-}
-
-// ─── RequireChannelAccess tests ─────────────────────────────────────────────
-
-func TestRequireChannelAccess(t *testing.T) {
-	tests := []struct {
-		name        string
-		userID      int64
-		rolePerms   int64
-		roleID      int64
-		channelType string
-		channelID   int64
-		perm        int64
-		dmOK        bool
-		dmErr       error
-		wantErr     error
-	}{
-		{
-			name:        "DM channel - participant allowed",
-			userID:      1,
-			channelType: "dm",
-			channelID:   100,
-			dmOK:        true,
-			wantErr:     nil,
-		},
-		{
-			name:        "DM channel - non-participant denied",
-			userID:      1,
-			channelType: "dm",
-			channelID:   100,
-			dmOK:        false,
-			wantErr:     ErrNotDMParticipant,
-		},
-		{
-			name:        "DM channel - db error",
-			userID:      1,
-			channelType: "dm",
-			channelID:   100,
-			dmErr:       errors.New("connection lost"),
-		},
-		{
-			name:        "regular channel - has perm",
-			userID:      1,
-			rolePerms:   ReadMessages | SendMessages,
-			roleID:      4,
-			channelType: "text",
-			channelID:   10,
-			perm:        SendMessages,
-			wantErr:     nil,
-		},
-		{
-			name:        "regular channel - lacks perm",
-			userID:      1,
-			rolePerms:   ReadMessages,
-			roleID:      4,
-			channelType: "text",
-			channelID:   10,
-			perm:        SendMessages,
-			wantErr:     ErrPermissionDenied,
-		},
-		{
-			name:        "DM checks participant not role",
-			userID:      1,
-			rolePerms:   0, // no permissions at all
-			roleID:      0, // no role
-			channelType: "dm",
-			channelID:   100,
-			dmOK:        true,
-			wantErr:     nil,
-		},
-		{
-			name:        "admin bypasses regular channel check",
-			userID:      1,
-			rolePerms:   Administrator,
-			roleID:      1,
-			channelType: "text",
-			channelID:   10,
-			perm:        ManageChannels | ManageRoles, // multi-bit
-			wantErr:     nil,
-		},
-		{
-			name:        "admin does NOT bypass DM participant check",
-			userID:      1,
-			rolePerms:   Administrator,
-			roleID:      1,
-			channelType: "dm",
-			channelID:   100,
-			dmOK:        false,
-			wantErr:     ErrNotDMParticipant,
-		},
-		{
-			name:        "voice channel uses role perms",
-			userID:      1,
-			rolePerms:   ReadMessages | ConnectVoice | SpeakVoice,
-			roleID:      4,
-			channelType: "voice",
-			channelID:   20,
-			perm:        ConnectVoice,
-			wantErr:     nil,
-		},
-		{
-			name:        "voice channel denied without perm",
-			userID:      1,
-			rolePerms:   ReadMessages | SendMessages,
-			roleID:      4,
-			channelType: "voice",
-			channelID:   20,
-			perm:        ConnectVoice,
-			wantErr:     ErrPermissionDenied,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			db := newMockDB()
-			db.dmErr = tt.dmErr
-			if tt.dmOK {
-				db.dmParticipants[dmKey{tt.userID, tt.channelID}] = true
-			}
-			ck := NewChecker(db)
-
-			err := ck.RequireChannelAccess(context.Background(), tt.userID, tt.rolePerms, tt.roleID, tt.channelType, tt.channelID, tt.perm)
-
-			if tt.dmErr != nil {
-				// Expect wrapped error.
-				if err == nil {
-					t.Fatal("RequireChannelAccess() = nil, want error")
-				}
-				if !errors.Is(err, tt.dmErr) {
-					t.Errorf("RequireChannelAccess() error does not wrap dmErr: got %v", err)
-				}
-				return
-			}
-
-			if tt.wantErr == nil {
-				if err != nil {
-					t.Errorf("RequireChannelAccess() unexpected error: %v", err)
-				}
-				return
-			}
-			if err == nil {
-				t.Errorf("RequireChannelAccess() = nil, want %v", tt.wantErr)
-				return
-			}
-			if !errors.Is(err, tt.wantErr) {
-				t.Errorf("RequireChannelAccess() error = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}

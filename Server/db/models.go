@@ -24,6 +24,11 @@ type User struct {
 	// unset, and every renderer falls back to Username. Mentions still resolve
 	// against Username alone — it is the unique key.
 	DisplayName *string
+	// RegistrationStatus is 'active', 'pending' (an approval-mode
+	// application holding its username until an admin approves it — B4-1)
+	// or 'denied' (anonymised and locked for good, since audit rows keep
+	// the id).
+	RegistrationStatus string
 	// About is the optional profile bio shown in the profile popup. Nil = unset.
 	About *string
 	// CustomStatus is the optional free-text status line shown under the name.
@@ -54,6 +59,9 @@ type Session struct {
 	CreatedAt string
 	LastUsed  string
 	ExpiresAt string
+	// Unseen is the new-login signal (B4-7): true from the login that created
+	// the session until the account lists its sessions from another device.
+	Unseen bool
 }
 
 // APIToken represents a row in the api_tokens table — a long-lived, revocable
@@ -243,6 +251,14 @@ type VoiceState struct {
 	ServerMuted    bool   `json:"server_muted"`
 	ServerDeafened bool   `json:"server_deafened"`
 	JoinedAt       string `json:"-"`
+	// ServerMutedBy is the owning moderation_actions id when ServerMuted was
+	// set by a timeout (round 5, Codex review P2) — nil for a manual
+	// moderator mute or when unmuted. Server-side only: never marshaled
+	// into a client-facing payload (GetVoiceState/GetUserVoiceState is the
+	// one read that populates it, for RestoreModFlags' own use; the bulk
+	// reads behind voice_state/ready leave it unset). No json tag needed
+	// since ChannelVoiceStates/AllVoiceStates never populate it.
+	ServerMutedBy *int64
 }
 
 // ChannelUnread holds per-user unread data for a single channel.
@@ -265,10 +281,12 @@ type ServerStats struct {
 	OnlineCount  int   `json:"online_count"`
 }
 
-// UserWithRole extends User with the name of the user's role.
+// UserWithRole extends User with the name and hierarchy position of the
+// user's role.
 type UserWithRole struct {
 	User
-	RoleName string `json:"role_name"`
+	RoleName     string `json:"role_name"`
+	RolePosition int    `json:"role_position"`
 }
 
 // AuditEntry represents a single row from the audit_log table joined with the
@@ -281,7 +299,14 @@ type AuditEntry struct {
 	TargetType string `json:"target_type"`
 	TargetID   int64  `json:"target_id"`
 	Detail     string `json:"detail"`
-	CreatedAt  string `json:"created_at"`
+	// SubjectToken is the deletion-marker token of an erased subject the row
+	// targeted (B4-10): set by the erasure on rows that lost their target id,
+	// and on the erasure's own rows. ActorToken is the same for an erased
+	// subject who acted, so a row naming two erased subjects keeps both.
+	// Both are empty on every other row.
+	SubjectToken string `json:"subject_token,omitempty"`
+	ActorToken   string `json:"actor_token,omitempty"`
+	CreatedAt    string `json:"created_at"`
 }
 
 // Emoji represents a row in the emoji table: one server-wide custom emoji.
@@ -308,3 +333,14 @@ const sessionTTL = 30 * 24 * time.Hour
 // plain text against an index, so every writer and the sweep's cutoff must
 // use exactly this layout.
 const sessionTimeLayout = "2006-01-02T15:04:05Z"
+
+// Registration statuses of a users row (B4-1).
+const (
+	RegistrationActive  = "active"
+	RegistrationPending = "pending"
+	RegistrationDenied  = "denied"
+)
+
+// PendingApproval reports an approval-mode application that no admin has
+// decided yet.
+func (u *User) PendingApproval() bool { return u.RegistrationStatus == RegistrationPending }

@@ -15,6 +15,11 @@ export default tseslint.config(
     rules: {
       // --- Key rules from T-191 ---
       "@typescript-eslint/no-floating-promises": "error",
+      // A switch over a union that misses a member is a silent drop, not a type error.
+      "@typescript-eslint/switch-exhaustiveness-check": [
+        "error",
+        { considerDefaultExhaustiveForUnions: true },
+      ],
       "@typescript-eslint/no-unused-vars": [
         "error",
         {
@@ -70,14 +75,33 @@ export default tseslint.config(
   // shape it catches. Each is scoped to only the module(s) its invariant
   // governs.
   {
-    files: ["src/lib/livekitSession.ts"],
+    // livekitReconnect.ts owns the reconnect loop and joinOrchestration.ts the
+    // connect/supersession checkpoints, both extracted out of
+    // livekitSession.ts — the supersession invariant travelled with them, so
+    // the rule must cover every file or those paths go unguarded.
+    files: [
+      "src/lib/livekitSession.ts",
+      "src/lib/livekitReconnect.ts",
+      "src/features/voice/joinOrchestration.ts",
+    ],
     plugins: { local: localRules },
     rules: {
       "local/no-leave-voice-when-superseded": "error",
     },
   },
   {
-    files: ["src/lib/livekitE2EE.ts"],
+    // E2EEManager (livekitE2EE.ts) delegates to ownership modules extracted
+    // under src/features/voice/ — the epoch/keypair, verified-status and
+    // identity-scope invariants travelled with that code, so every one of
+    // those files is listed or the moved guards go unchecked.
+    files: [
+      "src/lib/livekitE2EE.ts",
+      "src/features/voice/e2eeIdentity.ts",
+      "src/features/voice/e2eeEpoch.ts",
+      "src/features/voice/e2eePeerState.ts",
+      "src/features/voice/e2eeWorker.ts",
+      "src/features/voice/e2eeOffer.ts",
+    ],
     plugins: { local: localRules },
     rules: {
       "local/e2ee-epoch-needs-keypair-check": "error",
@@ -99,6 +123,40 @@ export default tseslint.config(
     plugins: { local: localRules },
     rules: {
       "local/no-store-write-in-ws-on": "error",
+    },
+  },
+  // --- Native imports stay behind the desktop seam (B7-1) ---
+  // B7-5 moved the last call site behind src/platform/, so the seam is the only
+  // exemption. no-restricted-imports covers static imports and
+  // no-restricted-syntax covers a dynamic `import()`.
+  {
+    files: ["src/**/*.ts"],
+    ignores: [
+      // The seam itself: the desktop implementations are the only place a
+      // native import belongs.
+      "src/platform/desktop/**",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@tauri-apps/*"],
+              message:
+                "Native imports belong in src/platform/desktop (B7-4/B7-5). See docs/architecture/platform-contracts.md.",
+            },
+          ],
+        },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "ImportExpression[source.value=/^@tauri-apps\\//]",
+          message:
+            "Native imports belong in src/platform/desktop (B7-4/B7-5). See docs/architecture/platform-contracts.md.",
+        },
+      ],
     },
   },
   {

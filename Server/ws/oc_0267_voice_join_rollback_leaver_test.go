@@ -23,7 +23,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -51,8 +50,7 @@ func TestRollbackVoiceJoin_BroadcastReachesLeaverWithoutReadAccess(t *testing.T)
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
-	h.SetLiveKit(lk)
+	h := newTestHubWith(t, HubOptions{DB: database, LiveKit: lk})
 
 	send := make(chan []byte, 8)
 	c := NewTestClient(h, uid, send)

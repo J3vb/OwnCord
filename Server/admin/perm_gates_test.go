@@ -9,12 +9,18 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // moderatorMask is migration 001's seeded Moderator role: MANAGE_MESSAGES,
@@ -49,7 +55,7 @@ func createRoleUser(t *testing.T, database *db.DB, roleID int64, name string, pe
 func newModeratorHandler(t *testing.T) (http.Handler, *db.DB, string) {
 	t.Helper()
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	_, token := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
 	return handler, database, token
 }
@@ -69,7 +75,7 @@ func TestPerimeter_ModeratorAdmitted(t *testing.T) {
 
 func TestPerimeter_NoModerationBitsRejected(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	// MANAGE_MESSAGES alone is not a perimeter bit — it has no admin route.
 	_, token := createRoleUser(t, database, 11, "Helper", permissions.ManageMessages, 50, "helperuser")
 
@@ -129,7 +135,7 @@ func TestPatchUserBan_ModeratorAllowed(t *testing.T) {
 
 func TestChannelRoutes_WithoutManageChannelsForbidden(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	_, token := createRoleUser(t, database, 12, "Auditor", permissions.ViewAuditLog, 50, "auditoruser")
 
 	for _, tc := range []struct {
@@ -160,6 +166,7 @@ func TestAuditAndSettings_ModeratorForbidden(t *testing.T) {
 		{http.MethodGet, "/audit-log"},
 		{http.MethodGet, "/settings"},
 		{http.MethodPatch, "/settings"},
+		{http.MethodGet, "/config"},
 		{http.MethodPost, "/logs/ticket"},
 	} {
 		if w := doRequest(t, handler, tc.method, tc.path, token, nil); w.Code != http.StatusForbidden {
@@ -170,7 +177,7 @@ func TestAuditAndSettings_ModeratorForbidden(t *testing.T) {
 
 func TestAuditAndSettings_BitHoldersAllowed(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	_, auditToken := createRoleUser(t, database, 12, "Auditor", permissions.ViewAuditLog, 50, "auditoruser")
 	_, cfgToken := createRoleUser(t, database, 13, "Configurator", permissions.ManageServer, 50, "cfguser")
 
@@ -211,11 +218,195 @@ func TestOwnerOnlyRoutes_ModeratorForbidden(t *testing.T) {
 	}
 }
 
+// ownerOnlyRoutePathParam replaces every {param} segment in a route pattern
+// with a harmless literal, so a request can actually be dispatched to it —
+// the literal value never matters to ownerOnlyMiddleware, which runs before
+// any handler touches the param.
+var ownerOnlyRoutePathParam = regexp.MustCompile(`\{[^}]+\}`)
+
+// expectedOwnerOnlyRoutes is the exact, literal inventory of owner-only
+// admin routes (P2-13 PARTIAL, Codex review round 3: a vacuity guard
+// (">= N") only catches shrinkage or emptiness, not a route silently
+// swapped for a different one, or a stray extra — an exact comparison
+// against admin.OwnerOnlyRoutesForTest() catches drift in either
+// direction). Grown deliberately, alongside admin/api.go's own ownerOnly
+// call sites, when a new owner-only route is added.
+var expectedOwnerOnlyRoutes = []admin.OwnerOnlyRoute{
+	{Method: http.MethodPost, Pattern: "/users/{id}/recovery-credential"},
+	{Method: http.MethodGet, Pattern: "/tokens"},
+	{Method: http.MethodPost, Pattern: "/tokens"},
+	{Method: http.MethodDelete, Pattern: "/tokens/{id}"},
+	{Method: http.MethodPost, Pattern: "/backup"},
+	{Method: http.MethodGet, Pattern: "/backups"},
+	{Method: http.MethodDelete, Pattern: "/backups/{name}"},
+	{Method: http.MethodPost, Pattern: "/backups/{name}/restore"},
+	{Method: http.MethodGet, Pattern: "/updates"},
+	{Method: http.MethodPost, Pattern: "/updates/apply"},
+}
+
+// sortedOwnerOnlyRoutes returns a copy of routes sorted by (Method, Pattern)
+// so two route lists can be compared regardless of registration order.
+func sortedOwnerOnlyRoutes(routes []admin.OwnerOnlyRoute) []admin.OwnerOnlyRoute {
+	sorted := append([]admin.OwnerOnlyRoute(nil), routes...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Method != sorted[j].Method {
+			return sorted[i].Method < sorted[j].Method
+		}
+		return sorted[i].Pattern < sorted[j].Pattern
+	})
+	return sorted
+}
+
+// TestBackupPolicySettings_NonOwnerForbidden pins BPR-072: the backup policy
+// is owner-only even though PATCH /settings otherwise only needs MANAGE_SERVER.
+// A MANAGE_SERVER holder and an ADMINISTRATOR that is not the Owner must both
+// get 403 when the request carries backup_schedule or backup_retention, while
+// the Owner and a plain setting both succeed — so the refusal is the owner
+// check on those keys, not a route that rejects everyone.
+func TestBackupPolicySettings_NonOwnerForbidden(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	_, manageToken := createRoleUser(t, database, 20, "ServerAdmin", permissions.ManageServer, 50, "serveradminuser")
+	_, adminToken := createRoleUser(t, database, 21, "Administrator", permissions.Administrator, 90, "administratoruser")
+	_, ownerToken := createRoleUser(t, database, permissions.OwnerRoleID, "Owner", permissions.Administrator, 100, "backuppolicyowner")
+
+	validValue := map[string]string{"backup_schedule": "daily", "backup_retention": "30"}
+	for _, key := range []string{"backup_schedule", "backup_retention"} {
+		for _, tc := range []struct {
+			name  string
+			token string
+		}{
+			{"MANAGE_SERVER non-owner", manageToken},
+			{"ADMINISTRATOR non-owner", adminToken},
+		} {
+			w := doRequest(t, handler, http.MethodPatch, "/settings", tc.token, map[string]string{key: validValue[key]})
+			if w.Code != http.StatusForbidden {
+				t.Errorf("%s PATCH %s = %d, want 403; body: %s", tc.name, key, w.Code, w.Body.String())
+			}
+		}
+		// Positive control: the Owner may set it.
+		w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{key: validValue[key]})
+		if w.Code != http.StatusOK {
+			t.Errorf("Owner PATCH %s = %d, want 200; body: %s", key, w.Code, w.Body.String())
+		}
+	}
+
+	// Positive control: the same MANAGE_SERVER token succeeds on an ordinary
+	// setting, proving the 403s above are the owner-only key gate.
+	if w := doRequest(t, handler, http.MethodPatch, "/settings", manageToken, map[string]string{"motd": "hello"}); w.Code != http.StatusOK {
+		t.Errorf("MANAGE_SERVER PATCH motd = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestBackupPolicySettings_BoundedRetention rejects out-of-range backup
+// retention values before they reach the maintenance sweep.
+func TestBackupPolicySettings_BoundedRetention(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	_, ownerToken := createRoleUser(t, database, permissions.OwnerRoleID, "Owner", permissions.Administrator, 100, "retentionowner")
+
+	for _, value := range []string{"1", "6", "banana", "-1", "99999"} {
+		w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{"backup_retention": value})
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("PATCH backup_retention=%q = %d, want 400; body: %s", value, w.Code, w.Body.String())
+		}
+	}
+	for _, value := range []string{"0", "7", "3650"} {
+		w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{"backup_retention": value})
+		if w.Code != http.StatusOK {
+			t.Errorf("PATCH backup_retention=%q = %d, want 200; body: %s", value, w.Code, w.Body.String())
+		}
+	}
+}
+
+// TestOwnerOnlyControlsStayOwnerOnly extends TestOwnerOnlyRoutes_ModeratorForbidden
+// by walking the ACTUAL set of owner-only routes NewAdminAPI wires
+// (admin.OwnerOnlyRoutesForTest) instead of a hand-listed subset (P2-13,
+// Codex review: the previous version of this test hard-coded six routes and
+// had already drifted, missing backup delete and restore). It is compared
+// against expectedOwnerOnlyRoutes EXACTLY (P2-13 PARTIAL, round 3) rather
+// than a vacuity guard, so both a shrunk inventory and a swapped or
+// unexpectedly added route fail loudly. For each route: a
+// narrow-but-AdminPerimeter role (MODERATE_MEMBERS|KICK_MEMBERS|
+// BAN_MEMBERS|MUTE_MEMBERS, none of them owner-only) is refused with 403,
+// and a POSITIVE CONTROL — an actual Owner-role user — is never refused
+// with 403, proving the walk exercises ownerOnlyMiddleware's real gate
+// rather than routes that would 403 (or 404, or panic) for everyone
+// regardless of role. admin.SetBackupBaseDir points the two backup routes
+// with real filesystem effects at a temp dir so the Owner's requests stay
+// hermetic.
+func TestOwnerOnlyControlsStayOwnerOnly(t *testing.T) {
+	database := openAdminTestDB(t)
+	admin.SetBackupBaseDir(t.TempDir())
+	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+
+	routes := admin.OwnerOnlyRoutesForTest()
+	got, want := sortedOwnerOnlyRoutes(routes), sortedOwnerOnlyRoutes(expectedOwnerOnlyRoutes)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("admin.OwnerOnlyRoutesForTest() = %+v, want exactly %+v", got, want)
+	}
+
+	narrowMask := permissions.ModerateMembers | permissions.KickMembers | permissions.BanMembers | permissions.MuteMembers
+	_, modToken := createRoleUser(t, database, 15, "NarrowMod", narrowMask, 60, "narrowmoduser")
+	_, ownerToken := createRoleUser(t, database, permissions.OwnerRoleID, "Owner", permissions.Administrator, 100, "realowneruser")
+
+	for _, route := range routes {
+		path := ownerOnlyRoutePathParam.ReplaceAllString(route.Pattern, "x")
+		t.Run(route.Method+" "+route.Pattern, func(t *testing.T) {
+			if w := doRequest(t, handler, route.Method, path, modToken, nil); w.Code != http.StatusForbidden {
+				t.Errorf("%s %s (narrow AdminPerimeter role) = %d, want 403; body: %s", route.Method, path, w.Code, w.Body.String())
+			}
+			if w := doRequest(t, handler, route.Method, path, ownerToken, nil); w.Code == http.StatusForbidden {
+				t.Errorf("%s %s (Owner) = 403, want anything but 403 — ownerOnlyMiddleware must admit an actual Owner", route.Method, path)
+			}
+		})
+	}
+
+	// Positive control (Codex review): every case above asserts 403 for
+	// modToken, which a blanket "reject everything" perimeter bug would
+	// satisfy just as well as a correct ownerOnlyMiddleware — proving
+	// nothing about whether it is the OWNER check specifically doing the
+	// refusing. NarrowMod's mask (KickMembers, BanMembers, MuteMembers) is
+	// all AdminPerimeter membership, and GET /me sits behind the perimeter
+	// alone with no further requirePerm — so the SAME narrow-role token
+	// that gets 403 on every owner-only route above must be admitted here.
+	if w := doRequest(t, handler, http.MethodGet, "/me", modToken, nil); w.Code == http.StatusForbidden {
+		t.Fatalf("GET /me (narrow AdminPerimeter role) = 403, want admitted — "+
+			"the owner-only routes' 403s must come from ownerOnlyMiddleware, not a perimeter that rejects everything; body: %s", w.Body.String())
+	}
+}
+
+// TestModerateMembersAloneIsOutsideTheAdminPerimeter pins the half of the
+// perimeter rule the test above relies on without asserting it: MODERATE_MEMBERS
+// is deliberately NOT in permissions.AdminPerimeter (permissions.go states the
+// exclusion and the permissions package locks the constant), so a role holding
+// only that bit is refused at the perimeter itself, before any per-route
+// requirePerm. GET /me is the probe because it sits behind the perimeter alone.
+// The positive control adds one perimeter bit (MUTE_MEMBERS) to the same
+// mask and must be admitted, so a perimeter that rejected everyone could not
+// pass this test either.
+func TestModerateMembersAloneIsOutsideTheAdminPerimeter(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+
+	_, modOnlyToken := createRoleUser(t, database, 16, "ModOnly", permissions.ModerateMembers, 60, "modonlyuser")
+	if w := doRequest(t, handler, http.MethodGet, "/me", modOnlyToken, nil); w.Code != http.StatusForbidden {
+		t.Fatalf("GET /me (MODERATE_MEMBERS only) = %d, want 403 — ModerateMembers must stay outside AdminPerimeter; body: %s", w.Code, w.Body.String())
+	}
+
+	_, modPlusToken := createRoleUser(t, database, 17, "ModPlusMute", permissions.ModerateMembers|permissions.MuteMembers, 60, "modplusmuteuser")
+	if w := doRequest(t, handler, http.MethodGet, "/me", modPlusToken, nil); w.Code == http.StatusForbidden {
+		t.Fatalf("GET /me (MODERATE_MEMBERS|MUTE_MEMBERS) = 403, want admitted — MuteMembers is in AdminPerimeter, "+
+			"so the refusal above must come from the missing bit, not from a perimeter that rejects everything; body: %s", w.Body.String())
+	}
+}
+
 // ─── KICK_MEMBERS (force logout) ─────────────────────────────────────────────
 
 func TestForceLogout_RequiresKickMembers(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	_, token := createRoleUser(t, database, 14, "ChannelMod", permissions.ManageChannels, 60, "chanmoduser")
 
 	targetUID, _ := database.CreateUser(context.Background(), "victim", "hash", 3)
@@ -235,7 +426,7 @@ func TestForceLogout_RequiresKickMembers(t *testing.T) {
 
 func TestForceLogout_HierarchyEnforced(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	_, token := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
 
 	// Owner (role 1, position 100) outranks the moderator.
@@ -269,7 +460,7 @@ func TestForceLogout_HierarchyEnforced(t *testing.T) {
 
 func TestPatchUserRole_RequiresManageRoles(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	// The seeded Moderator mask stops at bit 19 — no MANAGE_ROLES (bit 24).
 	_, token := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
 	targetUID, _ := database.CreateUser(context.Background(), "promoteme", "hash", 3)
@@ -286,7 +477,7 @@ func TestPatchUserRole_RequiresManageRoles(t *testing.T) {
 
 func TestPatchUserRole_CannotPromoteToOwner(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	// Role 2 "Admin" (position 80) holds MANAGE_ROLES but is below Owner.
 	_, token := createRoleUser(t, database, 2, "Admin", 0x3FFFFFFF, 80, "adminuser2")
 	targetUID, _ := database.CreateUser(context.Background(), "wannabeowner", "hash", 3)
@@ -304,7 +495,7 @@ func TestPatchUserRole_CannotPromoteToOwner(t *testing.T) {
 
 func TestPatchUserRole_ModeratorCannotDemoteAdmin(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	// A moderator that does hold MANAGE_ROLES still cannot touch a higher rank.
 	_, token := createRoleUser(t, database, 10, "Moderator", moderatorMask|permissions.ManageRoles, 60, "moduser")
 	adminUID, err := database.CreateUser(context.Background(), "sitting-admin", "hash", 2)
@@ -330,7 +521,7 @@ func TestPatchUserRole_ModeratorCannotDemoteAdmin(t *testing.T) {
 func TestRequireAdminAuth_StaysAdministratorOnly(t *testing.T) {
 	database := openAdminTestDB(t)
 	reached := false
-	guarded := admin.RequireAdminAuth(database)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	guarded := admin.RequireAdminAuth(service.NewSessionService(database))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		reached = true
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -366,9 +557,17 @@ func TestGetMe_ReportsCallerPermissions(t *testing.T) {
 		RolePosition int    `json:"role_position"`
 		Permissions  int64  `json:"permissions"`
 		IsOwner      bool   `json:"is_owner"`
+		ServerName   string `json:"server_name"`
+		Version      string `json:"version"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &me); err != nil {
 		t.Fatalf("unmarshal me: %v", err)
+	}
+	if me.ServerName != "Test Server" {
+		t.Errorf("server_name = %q, want the seeded setting", me.ServerName)
+	}
+	if me.Version != "1.0.0" {
+		t.Errorf("version = %q for a moderator, want the build version", me.Version)
 	}
 	if me.Username != "moduser" || me.RoleName != "Moderator" {
 		t.Errorf("me = %+v, want moduser/Moderator", me)
@@ -381,9 +580,21 @@ func TestGetMe_ReportsCallerPermissions(t *testing.T) {
 	}
 }
 
+func TestGetMe_Unauthenticated(t *testing.T) {
+	handler, _, _ := newModeratorHandler(t)
+
+	w := doRequest(t, handler, http.MethodGet, "/me", "", nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "1.0.0") {
+		t.Errorf("unauthenticated body leaks the build version: %s", w.Body.String())
+	}
+}
+
 func TestGetMe_OwnerFlagged(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/me", token, nil)
@@ -391,12 +602,16 @@ func TestGetMe_OwnerFlagged(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 	var me struct {
-		IsOwner bool `json:"is_owner"`
+		IsOwner bool   `json:"is_owner"`
+		Version string `json:"version"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &me); err != nil {
 		t.Fatalf("unmarshal me: %v", err)
 	}
 	if !me.IsOwner {
 		t.Error("is_owner = false for the Owner role")
+	}
+	if me.Version != "1.0.0" {
+		t.Errorf("version = %q for the owner, want the build version", me.Version)
 	}
 }

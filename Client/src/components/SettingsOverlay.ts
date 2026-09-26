@@ -1,16 +1,24 @@
 /**
  * SettingsOverlay component — full-screen overlay with tabbed settings panels.
- * Tabs: Account, Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds, Advanced, Logs.
+ * Tabs: Account, Safety (once its feature ships), Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds, Advanced, Logs.
  * Subscribes to uiStore for settingsOpen state.
  */
 
+import { Disposable } from "@lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
-import type { UserStatus } from "@lib/types";
+import type { PartialSuccessResponse, UserStatus } from "@lib/types";
+import type {
+  RecoveryKitIssue,
+  RecoveryKitStatus,
+  RevokeAllSessionsResponse,
+  SessionInfo,
+} from "@lib/api";
 import { uiStore } from "@stores/ui.store";
+import { settingsText } from "../i18n/settings";
 import { authStore } from "@stores/auth.store";
 import { buildAccountTab } from "./settings/AccountTab";
 import { buildAppearanceTab } from "./settings/AppearanceTab";
@@ -28,7 +36,18 @@ import { createLogsTab } from "./settings/LogsTab";
 
 export interface SettingsOverlayOptions {
   onClose(): void;
-  onChangePassword(oldPassword: string, newPassword: string): Promise<void>;
+  /** Where focus goes on close when the opener is gone or cannot take focus. */
+  fallbackFocus?(): HTMLElement | null;
+  /**
+   * Change the password. Resolves with the server's partial-success body
+   * when the password changed but the other sessions could not be revoked
+   * (its `warning` is the instruction the form must keep showing), or with
+   * `undefined` on a clean success.
+   */
+  onChangePassword(
+    oldPassword: string,
+    newPassword: string,
+  ): Promise<PartialSuccessResponse | undefined>;
   /**
    * Patch the signed-in user's profile. Every field is optional and omitted
    * means "leave unchanged"; an empty string clears the nullable ones, which
@@ -43,16 +62,39 @@ export interface SettingsOverlayOptions {
   onUploadAvatar(file: File): Promise<string>;
   onLogout(): void;
   onDeleteAccount(password: string): Promise<void>;
+  /** The server-default retention sentence for the Account tab, or null when
+   *  the server did not report one (B7-15c). */
+  getRetentionNotice?(): string | null;
   onStatusChange(status: UserStatus): void;
   onEnableTotp(password: string): Promise<{ qr_uri: string; backup_codes: string[] }>;
   onConfirmTotp(password: string, code: string): Promise<void>;
   onDisableTotp(password: string): Promise<void>;
+  /** Re-read the 2FA state from GET /users/me, the only response that
+   *  carries it, and put it in the auth store (OC-0354). */
+  onRefreshTotpStatus(): Promise<void>;
+  /** Replace the emergency recovery codes (password-confirmed); resolves with
+   *  the new set, which the tab shows once and never keeps. */
+  onRegenerateRecoveryCodes(password: string): Promise<string[]>;
+  /** Issue or replace the recovery kit (password-confirmed). The secret in
+   *  the result is shown once and never kept. */
+  onEnrolRecoveryKit(password: string): Promise<RecoveryKitIssue>;
+  onGetRecoveryKitStatus(): Promise<RecoveryKitStatus>;
+  /** List the account's signed-in devices (GET /users/me/sessions). */
+  onListSessions(): Promise<readonly SessionInfo[]>;
+  /** Sign one device out; it can no longer connect. */
+  onRevokeSession(id: number): Promise<void>;
+  /** Sign out every device, this one included. The page clears local auth
+   *  when the response reports the current session revoked. */
+  onRevokeAllSessions(): Promise<RevokeAllSessionsResponse>;
   /** When false, the Account tab is hidden (e.g. on the connect page). Defaults to true. */
   isAuthenticated?: boolean;
+  /** Builds the Safety tab (B9-4, Q2). Absent until its feature ships, and then no tab shows. */
+  safetyTab?: (signal: AbortSignal) => HTMLDivElement;
 }
 
 export type TabName =
   | "Account"
+  | "Safety"
   | "Appearance"
   | "Notifications"
   | "Text & Images"
@@ -64,6 +106,7 @@ export type TabName =
 
 const TAB_ICONS: Record<TabName, IconName> = {
   Account: "user",
+  Safety: "shield",
   Appearance: "palette",
   Notifications: "bell",
   "Text & Images": "image",
@@ -73,6 +116,29 @@ const TAB_ICONS: Record<TabName, IconName> = {
   Advanced: "settings",
   Logs: "scroll-text",
 };
+
+// i18n-exempt: TabName key; its label is settingsText("tabs.safety")
+const SAFETY = "Safety" satisfies TabName;
+// i18n-exempt: TabName key; its label is settingsText("tabs.account")
+const ACCOUNT = "Account" satisfies TabName;
+
+/** What each tab is called on screen (B9-20 moved every label onto the seam). */
+const TAB_LABEL_KEYS = {
+  Account: "tabs.account",
+  Safety: "tabs.safety",
+  Appearance: "tabs.appearance",
+  Notifications: "tabs.notifications",
+  "Text & Images": "tabs.textImages",
+  Accessibility: "tabs.accessibility",
+  "Voice & Audio": "tabs.voice",
+  Keybinds: "tabs.keybinds",
+  Advanced: "tabs.advanced",
+  Logs: "tabs.logs",
+} as const satisfies Record<TabName, string>;
+
+function tabLabel(name: TabName): string {
+  return settingsText(TAB_LABEL_KEYS[name]);
+}
 
 /** Stable DOM id for a tab button (aria-labelledby target), e.g. "settings-tab-text-images". */
 function tabId(name: TabName): string {
@@ -86,13 +152,14 @@ function tabId(name: TabName): string {
 export function createSettingsOverlay(
   options: SettingsOverlayOptions,
 ): MountableComponent & { open(): void; close(): void } {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   const authenticated = options.isAuthenticated !== false;
   let root: HTMLDivElement | null = null;
   let panel: HTMLDivElement | null = null;
   let contentArea: HTMLDivElement | null = null;
   let pageTitle: HTMLHeadingElement | null = null;
-  let activeTab: TabName = authenticated ? "Account" : "Appearance";
+  // i18n-exempt: TabName key; its label is settingsText("tabs.appearance")
+  let activeTab: TabName = authenticated ? ACCOUNT : "Appearance";
   /** False once the active tab's content has been torn down by `hide()`. */
   let contentLive = false;
   /** Puts focus back on whatever opened the panel; null while closed. */
@@ -103,21 +170,23 @@ export function createSettingsOverlay(
   /**
    * Scopes the *current* tab build's element listeners. `renderActiveTab()`
    * aborts the previous one before building the next, so a discarded pane's
-   * listeners are dropped immediately instead of accumulating on `ac` for
+   * listeners are dropped immediately instead of accumulating on `disposable` for
    * the whole overlay lifetime (OC-0268) — every render used to register
-   * against `ac.signal` directly, and nothing ever aborted a stale build's
+   * against `disposable.signal` directly, and nothing ever aborted a stale build's
    * registrations short of `destroy()`.
    */
-  let renderAC: AbortController | null = null;
+  let renderOwner: Disposable | null = null;
 
   // Stateful tabs — create via factory for proper cleanup on tab switch
-  const logsTab = createLogsTab(() => activeTab, ac.signal);
-  const voiceTab = createVoiceAudioTab(ac.signal);
+  const logsTab = createLogsTab(() => activeTab, disposable.signal);
+  const voiceTab = createVoiceAudioTab(disposable.signal);
 
   // ---- Tab content builders -------------------------------------------------
 
   const TAB_BUILDERS: Readonly<Record<TabName, (signal: AbortSignal) => HTMLDivElement>> = {
     Account: (signal) => buildAccountTab(options, signal),
+    // Only reachable through its tab button, which exists only with the option.
+    Safety: (signal) => options.safetyTab?.(signal) ?? createElement("div"),
     Appearance: (signal) => buildAppearanceTab(signal),
     Notifications: (signal) => buildNotificationsTab(signal),
     "Text & Images": (signal) => buildTextImagesTab(signal),
@@ -133,13 +202,13 @@ export function createSettingsOverlay(
   function renderActiveTab(): void {
     if (contentArea === null) return;
     // Drop the previous build's listeners before replacing its DOM — see
-    // the `renderAC` comment above.
-    renderAC?.abort();
-    renderAC = new AbortController();
-    const buildSignal = AbortSignal.any([ac.signal, renderAC.signal]);
+    // the `renderOwner` comment above.
+    renderOwner?.destroy();
+    renderOwner = new Disposable();
+    const buildSignal = AbortSignal.any([disposable.signal, renderOwner.signal]);
     clearChildren(contentArea);
     if (pageTitle === null) return;
-    pageTitle.textContent = activeTab;
+    pageTitle.textContent = tabLabel(activeTab);
     contentArea.appendChild(pageTitle);
     const builder = TAB_BUILDERS[activeTab];
     contentArea.appendChild(builder(buildSignal));
@@ -172,6 +241,12 @@ export function createSettingsOverlay(
   function show(): void {
     const wasOpen = root?.classList.contains("open") ?? false;
     root?.classList.add("open");
+    // Another surface asked for a tab (a Q4 notice links to Safety). A tab
+    // that is not shown here is ignored.
+    const requested = uiStore.getState().settingsTab;
+    if (requested !== null && requested !== activeTab && tabButtons.has(requested)) {
+      setActiveTab(requested);
+    }
     // Closing tore down the live parts of the active tab (mic meter, camera
     // preview, log listener). Rebuild it so a reopened panel shows live state
     // instead of a frozen snapshot — and so every tab re-reads current prefs.
@@ -179,12 +254,16 @@ export function createSettingsOverlay(
     // Move focus in only on the closed→open transition — a repeated show()
     // would otherwise capture an element inside the panel as the "opener".
     if (!wasOpen && panel !== null) {
-      restoreFocus = focusDialog(panel);
+      restoreFocus = focusDialog(panel, options.fallbackFocus);
     }
   }
 
   function hide(): void {
     root?.classList.remove("open");
+    // The hidden pane is rebuilt on reopen (contentLive), so drop its build
+    // now: anything shown once (recovery codes, a recovery kit secret) is
+    // wiped from the DOM on abort rather than lingering while closed.
+    renderOwner?.destroy();
     // Stop camera preview, mic meter, and the log listener when the overlay closes
     cleanupActiveTab();
     contentLive = false;
@@ -207,7 +286,7 @@ export function createSettingsOverlay(
       class: "settings-sidebar",
       role: "tablist",
       "aria-orientation": "vertical",
-      "aria-label": "Settings sections",
+      "aria-label": settingsText("shell.sections"),
     });
 
     // Arrow-key navigation between tabs, activate-on-focus (the simpler
@@ -232,7 +311,7 @@ export function createSettingsOverlay(
         setActiveTab(name);
         tabButtons.get(name)?.focus();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     // User profile section at top of sidebar
@@ -247,16 +326,16 @@ export function createSettingsOverlay(
     const profileName = createElement(
       "div",
       { class: "settings-sidebar-name" },
-      user?.username ?? "Unknown",
+      user?.username ?? settingsText("common.unknown"),
     );
     const editProfileLink = createElement(
       "div",
       { class: "settings-sidebar-edit" },
-      "Edit Profile",
+      settingsText("shell.editProfile"),
     );
     if (authenticated) {
-      editProfileLink.addEventListener("click", () => setActiveTab("Account"), {
-        signal: ac.signal,
+      editProfileLink.addEventListener("click", () => setActiveTab(ACCOUNT), {
+        signal: disposable.signal,
       });
     } else {
       editProfileLink.style.display = "none";
@@ -270,44 +349,64 @@ export function createSettingsOverlay(
     unsubAuth = authStore.subscribeSelector(
       (s) => s.user?.username,
       (name) => {
-        profileName.textContent = name ?? "Unknown";
+        profileName.textContent = name ?? settingsText("common.unknown");
         avatarEl.textContent = (name ?? "U").charAt(0).toUpperCase();
       },
     );
 
     // "User Settings" category — only Account belongs here (hidden when not authenticated)
     if (authenticated) {
-      const userSettingsCat = createElement("div", { class: "settings-cat" }, "User Settings");
+      const userSettingsCat = createElement(
+        "div",
+        { class: "settings-cat" },
+        settingsText("shell.userSettings"),
+      );
       sidebar.appendChild(userSettingsCat);
 
       const accountBtn = createElement("button", {
-        class: `settings-nav-item${activeTab === "Account" ? " active" : ""}`,
-        id: tabId("Account"),
+        class: `settings-nav-item${activeTab === ACCOUNT ? " active" : ""}`,
+        id: tabId(ACCOUNT),
         role: "tab",
-        "aria-selected": activeTab === "Account" ? "true" : "false",
-        tabindex: activeTab === "Account" ? "0" : "-1",
+        "aria-selected": activeTab === ACCOUNT ? "true" : "false",
+        tabindex: activeTab === ACCOUNT ? "0" : "-1",
       });
-      accountBtn.prepend(createIcon(TAB_ICONS["Account"], 18));
-      accountBtn.appendChild(document.createTextNode("Account"));
-      accountBtn.addEventListener("click", () => setActiveTab("Account"), { signal: ac.signal });
-      tabButtons.set("Account", accountBtn);
+      accountBtn.prepend(createIcon(TAB_ICONS[ACCOUNT], 18));
+      accountBtn.appendChild(document.createTextNode(settingsText("tabs.account")));
+      accountBtn.addEventListener("click", () => setActiveTab(ACCOUNT), {
+        signal: disposable.signal,
+      });
+      tabButtons.set(ACCOUNT, accountBtn);
       sidebar.appendChild(accountBtn);
+
+      if (options.safetyTab !== undefined) {
+        const safetyBtn = createElement("button", {
+          class: "settings-nav-item",
+          id: tabId(SAFETY),
+          role: "tab",
+          "aria-selected": "false",
+          tabindex: "-1",
+        });
+        safetyBtn.prepend(createIcon(TAB_ICONS[SAFETY], 18));
+        safetyBtn.appendChild(document.createTextNode(tabLabel(SAFETY)));
+        safetyBtn.addEventListener("click", () => setActiveTab(SAFETY), {
+          signal: disposable.signal,
+        });
+        tabButtons.set(SAFETY, safetyBtn);
+        sidebar.appendChild(safetyBtn);
+      }
     }
 
     // "App Settings" category — remaining tabs
-    const appSettingsCat = createElement("div", { class: "settings-cat" }, "App Settings");
+    const appSettingsCat = createElement(
+      "div",
+      { class: "settings-cat" },
+      settingsText("shell.appSettings"),
+    );
     sidebar.appendChild(appSettingsCat);
 
-    const appTabs: readonly TabName[] = [
-      "Appearance",
-      "Notifications",
-      "Text & Images",
-      "Accessibility",
-      "Voice & Audio",
-      "Keybinds",
-      "Advanced",
-      "Logs",
-    ];
+    const appTabs = (Object.keys(TAB_LABEL_KEYS) as TabName[]).filter(
+      (name) => name !== ACCOUNT && name !== SAFETY,
+    );
     for (const name of appTabs) {
       const btn = createElement("button", {
         class: `settings-nav-item${name === activeTab ? " active" : ""}`,
@@ -317,8 +416,8 @@ export function createSettingsOverlay(
         tabindex: name === activeTab ? "0" : "-1",
       });
       btn.prepend(createIcon(TAB_ICONS[name], 18));
-      btn.appendChild(document.createTextNode(name));
-      btn.addEventListener("click", () => setActiveTab(name), { signal: ac.signal });
+      btn.appendChild(document.createTextNode(tabLabel(name)));
+      btn.addEventListener("click", () => setActiveTab(name), { signal: disposable.signal });
       tabButtons.set(name, btn);
       sidebar.appendChild(btn);
     }
@@ -327,14 +426,18 @@ export function createSettingsOverlay(
       // Separator + Log Out at sidebar bottom
       const logoutWrap = createElement("div", { class: "settings-sidebar-logout" });
       const logoutSep = createElement("div", { class: "settings-sep" });
-      const logoutBtn = createElement("button", { class: "settings-nav-item danger" }, "Log Out");
-      logoutBtn.addEventListener("click", () => options.onLogout(), { signal: ac.signal });
+      const logoutBtn = createElement(
+        "button",
+        { class: "settings-nav-item danger" },
+        settingsText("shell.logOut"),
+      );
+      logoutBtn.addEventListener("click", () => options.onLogout(), { signal: disposable.signal });
       appendChildren(logoutWrap, logoutSep, logoutBtn);
       sidebar.appendChild(logoutWrap);
     }
 
     // Page title (h1) at top of content area — created here, inserted in renderActiveTab
-    pageTitle = createElement("h1", {}, activeTab);
+    pageTitle = createElement("h1", {}, tabLabel(activeTab));
 
     // Content — the single tabpanel, renamed per switch via aria-labelledby
     contentArea = createElement("div", {
@@ -352,9 +455,13 @@ export function createSettingsOverlay(
       () => {
         options.onClose();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
-    const escLabel = createElement("div", { class: "settings-esc-label" }, "ESC");
+    const escLabel = createElement(
+      "div",
+      { class: "settings-esc-label" },
+      settingsText("shell.esc"),
+    );
     appendChildren(closeWrap, closeBtn, escLabel);
 
     // Escape key
@@ -365,15 +472,15 @@ export function createSettingsOverlay(
           options.onClose();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     // Inner panel (Discord-style centered card)
     panel = createElement("div", { class: "settings-panel" });
-    applyDialogSemantics(panel, { label: "Settings" });
+    applyDialogSemantics(panel, { label: settingsText("shell.title") });
     // Arming the trap while hidden is safe: Tab can't land inside a
     // display:none panel, so the handler only fires while the overlay is open.
-    trapFocus(panel, ac.signal);
+    trapFocus(panel, disposable.signal);
     appendChildren(panel, sidebar, contentArea, closeWrap);
 
     // Click backdrop (outside panel) to close
@@ -382,7 +489,7 @@ export function createSettingsOverlay(
       (e: MouseEvent) => {
         if (e.target === root) options.onClose();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     root.appendChild(panel);
@@ -417,7 +524,7 @@ export function createSettingsOverlay(
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     if (unsubUi !== null) {
       unsubUi();
       unsubUi = null;

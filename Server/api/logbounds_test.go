@@ -60,15 +60,22 @@ func TestBoundRequestID_OverLongHeaderNeverReachesLog(t *testing.T) {
 }
 
 // TestBoundRequestID_ControlBytesRejected covers the charset half of the bound:
-// a short id carrying control bytes is dropped too.
+// a short id carrying control bytes is dropped too. The marker is long and
+// distinctive on purpose: the server-generated fallback id is a short random
+// base64 run, and a three-letter marker ("abc") once matched inside it by
+// chance (CI run 33308823281, req_id=…/qj9LabcvlI-000002).
 func TestBoundRequestID_ControlBytesRejected(t *testing.T) {
+	const marker = "ILLFORMEDREQUESTID"
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
-	req.Header.Set("X-Request-Id", "abc\x00def\tghi")
+	req.Header.Set("X-Request-Id", marker+"\x00def\tghi")
 
 	out, _ := loggedRequest(t, req)
 
-	if strings.Contains(out, "abc") {
+	if strings.Contains(out, marker) {
 		t.Errorf("ill-formed X-Request-Id reached the log record: %q", out)
+	}
+	if !strings.Contains(out, "req_id=") {
+		t.Errorf("no request id was logged at all — correlation lost: %q", out)
 	}
 }
 

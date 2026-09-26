@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS voice_states (
     deafened   INTEGER NOT NULL DEFAULT 0,
     speaking   INTEGER NOT NULL DEFAULT 0,
     server_muted    INTEGER NOT NULL DEFAULT 0,
+    server_muted_by INTEGER,
     server_deafened INTEGER NOT NULL DEFAULT 0,
     joined_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -40,6 +41,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
     target_type TEXT    NOT NULL DEFAULT '',
     target_id   INTEGER NOT NULL DEFAULT 0,
     detail      TEXT    NOT NULL DEFAULT '',
+    subject_token TEXT,
+    actor_token TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -79,7 +82,7 @@ func newHandlerHub(t *testing.T) (*ws.Hub, *db.DB) {
 	limiter := auth.NewRateLimiter()
 	st := database
 	svc := service.New(st, limiter)
-	hub := ws.NewHub(database, limiter, svc)
+	hub := newTestHubDeps(t, database, limiter, svc)
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 	return hub, database
@@ -168,21 +171,6 @@ func receiveErrorCode(ch <-chan []byte, deadline time.Duration) string {
 }
 
 // ─── 2.2: Session expiry check in readPump ────────────────────────────────────
-
-// TestSessionExpiry_TokenHashStoredOnClient verifies that a Client created via
-// NewTestClientWithTokenHash carries the tokenHash field for periodic revalidation.
-func TestSessionExpiry_TokenHashStoredOnClient(t *testing.T) {
-	hub, database := newHandlerHub(t)
-	user := seedOwnerUser(t, database, "expiry-user1")
-	send := make(chan []byte, 16)
-
-	hash := "deadbeefdeadbeef"
-	c := ws.NewTestClientWithTokenHash(hub, user, hash, 0, send)
-
-	if got := c.GetTokenHash(); got != hash {
-		t.Errorf("GetTokenHash() = %q, want %q", got, hash)
-	}
-}
 
 // TestSessionExpiry_ValidSessionAllowsMessages verifies that when a client has a
 // valid (non-expired) session stored in the DB, the periodic expiry check does

@@ -1,14 +1,13 @@
 package admin
 
 import (
-	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -28,6 +27,12 @@ type SetupOptions struct {
 	RunningCfg *config.Config
 	// Restart replaces the process-restart hook (tests). Nil = requestRestart.
 	Restart func(reason string)
+	// SetupToken, when non-empty, must accompany POST /api/setup. The server
+	// generates one per start and prints it to its own console only, so
+	// creating the owner account takes access to the host's start-up output,
+	// not just an address inside admin_allowed_cidrs. Empty = not required
+	// (the direct-construction test path).
+	SetupToken string
 }
 
 // ─── Wizard payload ──────────────────────────────────────────────────────────
@@ -36,9 +41,11 @@ type SetupOptions struct {
 // Every field is a pointer: absent means "keep the current/default value".
 type setupWizardRequest struct {
 	// Stored in the settings table (read live, no restart needed).
-	ServerName       *string `json:"server_name"`
-	Motd             *string `json:"motd"`
-	RegistrationOpen *bool   `json:"registration_open"`
+	ServerName *string `json:"server_name"`
+	Motd       *string `json:"motd"`
+	// RegistrationMode is closed / invite / approval / open (B4-1); the
+	// wizard defaults to invite.
+	RegistrationMode *string `json:"registration_mode"`
 
 	// Stored in config.yaml (consumed at startup — changes need a restart).
 	Port            *int    `json:"port"`
@@ -57,7 +64,7 @@ type setupWizardRequest struct {
 type setupDefaults struct {
 	ServerName        string `json:"server_name"`
 	Motd              string `json:"motd"`
-	RegistrationOpen  bool   `json:"registration_open"`
+	RegistrationMode  string `json:"registration_mode"`
 	Port              int    `json:"port"`
 	TLSMode           string `json:"tls_mode"`
 	TLSDomain         string `json:"tls_domain"`
@@ -109,6 +116,13 @@ func validateWizard(wr *setupWizardRequest) error {
 // identical treatment of the username field, and service.SanitizeText's doc
 // comment.
 func wizardValidateIdentity(wr *setupWizardRequest) error {
+	if wr.RegistrationMode != nil {
+		mode, ok := service.ParseRegistrationMode(*wr.RegistrationMode)
+		if !ok {
+			return fmt.Errorf("registration_mode must be one of closed, invite, approval, open")
+		}
+		*wr.RegistrationMode = string(mode)
+	}
 	if wr.ServerName != nil {
 		name := strings.TrimSpace(service.SanitizeText(*wr.ServerName))
 		if name == "" {
@@ -203,11 +217,15 @@ func validateHostname(h string) error {
 
 // ─── Applying the wizard ─────────────────────────────────────────────────────
 
-// applyWizardSettings persists the wizard's DB-backed settings atomically.
-// server_name, motd and registration_open are read live by the server;
+// wizardSettingUpdates maps the wizard payload onto the settings rows it
+// writes. server_name, motd and registration_mode are read live by the server;
 // max_upload_bytes and voice_quality are written so the Settings page shows
 // values consistent with what the wizard put in config.yaml.
-func applyWizardSettings(ctx context.Context, database *db.DB, wr *setupWizardRequest) error {
+//
+// This is the mapping only — SetupService.ApplyWizardSettings commits the
+// result in one transaction, so a partial write cannot leave the Settings page
+// showing values the wizard never applied.
+func wizardSettingUpdates(wr *setupWizardRequest) map[string]string {
 	updates := map[string]string{}
 	if wr.ServerName != nil {
 		updates["server_name"] = *wr.ServerName
@@ -215,12 +233,8 @@ func applyWizardSettings(ctx context.Context, database *db.DB, wr *setupWizardRe
 	if wr.Motd != nil {
 		updates["motd"] = *wr.Motd
 	}
-	if wr.RegistrationOpen != nil {
-		if *wr.RegistrationOpen {
-			updates["registration_open"] = "1"
-		} else {
-			updates["registration_open"] = "0"
-		}
+	if wr.RegistrationMode != nil {
+		updates["registration_mode"] = *wr.RegistrationMode
 	}
 	if wr.UploadMaxSizeMB != nil {
 		updates["max_upload_bytes"] = strconv.Itoa(*wr.UploadMaxSizeMB * 1024 * 1024)
@@ -228,25 +242,23 @@ func applyWizardSettings(ctx context.Context, database *db.DB, wr *setupWizardRe
 	if wr.VoiceQuality != nil {
 		updates["voice_quality"] = *wr.VoiceQuality
 	}
-	if len(updates) == 0 {
+	return updates
+}
+
+// wizardSettingKeys returns the sorted keys wizardSettingUpdates would write,
+// for the server_setup audit row — naming which settings the wizard applied,
+// never their values.
+func wizardSettingKeys(wr *setupWizardRequest) []string {
+	if wr == nil {
 		return nil
 	}
-
-	tx, err := database.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("starting transaction: %w", err)
+	updates := wizardSettingUpdates(wr)
+	keys := make([]string, 0, len(updates))
+	for k := range updates {
+		keys = append(keys, k)
 	}
-	for key, value := range updates {
-		if _, txErr := tx.ExecContext(ctx,
-			`INSERT INTO settings (key, value) VALUES (?, ?)
-			 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-			key, value,
-		); txErr != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("writing setting %s: %w", key, txErr)
-		}
-	}
-	return tx.Commit()
+	slices.Sort(keys)
+	return keys
 }
 
 // buildConfigPatch maps the wizard payload onto config.yaml keys. When the

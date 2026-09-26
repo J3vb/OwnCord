@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createUserProfilePopup, type UserProfileData } from "@components/UserProfilePopup";
 
 function makeUser(overrides?: Partial<UserProfileData>): UserProfileData {
@@ -108,6 +108,29 @@ describe("UserProfilePopup", () => {
     popup.destroy?.();
   });
 
+  it("Report closes the popup, returns focus, then reports the user (B9-10)", () => {
+    const opener = document.createElement("button");
+    container.appendChild(opener);
+    opener.focus();
+    const onReport = vi.fn(() => {
+      // The report dialog opens from where the popup put focus back.
+      expect(document.activeElement).toBe(opener);
+      expect(container.querySelector(".upp-popup")).toBeNull();
+    });
+    const popup = createUserProfilePopup({
+      user: makeUser({ id: 9 }),
+      anchorX: 100,
+      anchorY: 100,
+      onReport,
+    });
+    popup.mount(container);
+    const btn = container.querySelector<HTMLButtonElement>('[data-testid="upp-report-btn"]');
+    expect(btn?.textContent?.trim()).toBe("Report");
+    expect(btn?.getAttribute("aria-haspopup")).toBe("dialog");
+    btn?.click();
+    expect(onReport).toHaveBeenCalledWith(9);
+  });
+
   it("outside click closes the popup", () => {
     const user = makeUser();
     const popup = createUserProfilePopup({
@@ -153,6 +176,55 @@ describe("UserProfilePopup", () => {
     // Avatar should have gray background
     const avatar = container.querySelector(".upp-avatar") as HTMLElement;
     expect(avatar.style.background).toBe("rgb(78, 80, 88)"); // #4e5058
+
+    popup.destroy?.();
+  });
+
+  it("traps Tab inside the dialog even when the popup container itself still holds focus", () => {
+    // popup.focus() (mount) leaves document.activeElement === the popup
+    // container, not one of its buttons — Shift+Tab from there must still be
+    // caught, not fall through to the page behind the overlay.
+    const popup = createUserProfilePopup({
+      user: makeUser(),
+      anchorX: 200,
+      anchorY: 200,
+      onMessage: () => {},
+      onCall: () => {},
+    });
+    popup.mount(container);
+
+    const popupEl = container.querySelector('[data-testid="user-profile-popup"]') as HTMLElement;
+    expect(document.activeElement).toBe(popupEl);
+
+    const event = new KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    const prevented = !popupEl.dispatchEvent(event);
+    expect(prevented).toBe(true);
+
+    const callBtn = container.querySelector('[data-testid="upp-call-btn"]') as HTMLElement;
+    expect(document.activeElement).toBe(callBtn);
+
+    popup.destroy?.();
+  });
+
+  it("traps Tab even when the popup has no focusable control (own-row popup)", () => {
+    // MemberList omits both handlers for the actor's own row, so focusable
+    // is empty — Tab must still be swallowed instead of escaping to the page.
+    const popup = createUserProfilePopup({
+      user: makeUser(),
+      anchorX: 200,
+      anchorY: 200,
+    });
+    popup.mount(container);
+
+    const popupEl = container.querySelector('[data-testid="user-profile-popup"]') as HTMLElement;
+    const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    const prevented = !popupEl.dispatchEvent(event);
+    expect(prevented).toBe(true);
 
     popup.destroy?.();
   });

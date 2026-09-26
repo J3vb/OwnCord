@@ -32,6 +32,186 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 ---
 
+## Route index (generated)
+
+<!-- gendocs:routes:start -->
+
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 167 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+
+| Method  | Path                                                                 |
+| ------- | -------------------------------------------------------------------- |
+| GET     | `/admin/`                                                            |
+| GET     | `/admin/*`                                                           |
+| GET     | `/admin/api/attention`                                               |
+| GET     | `/admin/api/audit-log`                                               |
+| POST    | `/admin/api/backup`                                                  |
+| GET     | `/admin/api/backups`                                                 |
+| DELETE  | `/admin/api/backups/{name}`                                          |
+| POST    | `/admin/api/backups/{name}/restore`                                  |
+| GET     | `/admin/api/channels`                                                |
+| POST    | `/admin/api/channels`                                                |
+| DELETE  | `/admin/api/channels/{id}`                                           |
+| PATCH   | `/admin/api/channels/{id}`                                           |
+| GET     | `/admin/api/channels/{id}/access/explain`                            |
+| POST    | `/admin/api/channels/{id}/access/preview`                            |
+| GET     | `/admin/api/channels/{id}/permissions`                               |
+| DELETE  | `/admin/api/channels/{id}/permissions/{roleId}`                      |
+| PUT     | `/admin/api/channels/{id}/permissions/{roleId}`                      |
+| DELETE  | `/admin/api/channels/{id}/retention`                                 |
+| PUT     | `/admin/api/channels/{id}/retention`                                 |
+| DELETE  | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
+| PUT     | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
+| GET     | `/admin/api/config`                                                  |
+| GET     | `/admin/api/logs/stream`                                             |
+| POST    | `/admin/api/logs/ticket`                                             |
+| GET     | `/admin/api/me`                                                      |
+| GET     | `/admin/api/registrations`                                           |
+| POST    | `/admin/api/registrations/{id}/approve`                              |
+| POST    | `/admin/api/registrations/{id}/deny`                                 |
+| GET     | `/admin/api/retention`                                               |
+| GET     | `/admin/api/retention/preview`                                       |
+| POST    | `/admin/api/retention/preview`                                       |
+| GET     | `/admin/api/roles`                                                   |
+| POST    | `/admin/api/roles`                                                   |
+| PATCH   | `/admin/api/roles/reorder`                                           |
+| DELETE  | `/admin/api/roles/{id}`                                              |
+| PATCH   | `/admin/api/roles/{id}`                                              |
+| GET     | `/admin/api/settings`                                                |
+| PATCH   | `/admin/api/settings`                                                |
+| POST    | `/admin/api/setup`                                                   |
+| GET     | `/admin/api/setup/status`                                            |
+| GET     | `/admin/api/stats`                                                   |
+| POST    | `/admin/api/support-bundles/download`                                |
+| POST    | `/admin/api/support-bundles/preview`                                 |
+| GET     | `/admin/api/tokens`                                                  |
+| POST    | `/admin/api/tokens`                                                  |
+| DELETE  | `/admin/api/tokens/{id}`                                             |
+| GET     | `/admin/api/updates`                                                 |
+| POST    | `/admin/api/updates/apply`                                           |
+| GET     | `/admin/api/users`                                                   |
+| DELETE  | `/admin/api/users/{id}`                                              |
+| PATCH   | `/admin/api/users/{id}`                                              |
+| POST    | `/admin/api/users/{id}/recovery-credential`                          |
+| DELETE  | `/admin/api/users/{id}/sessions`                                     |
+| GET     | `/api/v1/admin/plugins/`                                             |
+| POST    | `/api/v1/admin/plugins/install`                                      |
+| DELETE  | `/api/v1/admin/plugins/{id}`                                         |
+| POST    | `/api/v1/admin/plugins/{id}/disable`                                 |
+| POST    | `/api/v1/admin/plugins/{id}/enable`                                  |
+| POST    | `/api/v1/appeals/`                                                   |
+| GET     | `/api/v1/appeals/mine`                                               |
+| POST    | `/api/v1/appeals/{id}/withdraw`                                      |
+| DELETE  | `/api/v1/auth/account`                                               |
+| POST    | `/api/v1/auth/login`                                                 |
+| POST    | `/api/v1/auth/logout`                                                |
+| GET     | `/api/v1/auth/me`                                                    |
+| POST    | `/api/v1/auth/recover`                                               |
+| POST    | `/api/v1/auth/register`                                              |
+| POST    | `/api/v1/auth/verify-totp`                                           |
+| GET     | `/api/v1/blocks/`                                                    |
+| DELETE  | `/api/v1/blocks/{userId}`                                            |
+| PUT     | `/api/v1/blocks/{userId}`                                            |
+| GET     | `/api/v1/channels/`                                                  |
+| GET     | `/api/v1/channels/{id}/messages`                                     |
+| GET     | `/api/v1/channels/{id}/messages/around/{messageId}`                  |
+| POST    | `/api/v1/channels/{id}/messages/purge`                               |
+| GET     | `/api/v1/channels/{id}/messages/{messageId}/reactions/{emoji}/users` |
+| DELETE  | `/api/v1/channels/{id}/nsfw-acknowledgement/`                        |
+| PUT     | `/api/v1/channels/{id}/nsfw-acknowledgement/`                        |
+| GET     | `/api/v1/channels/{id}/pins`                                         |
+| DELETE  | `/api/v1/channels/{id}/pins/{messageId}`                             |
+| POST    | `/api/v1/channels/{id}/pins/{messageId}`                             |
+| GET     | `/api/v1/client-update/{target}/{current_version}`                   |
+| GET     | `/api/v1/diagnostics/connectivity`                                   |
+| GET     | `/api/v1/dm-requests/`                                               |
+| POST    | `/api/v1/dm-requests/{id}/accept`                                    |
+| POST    | `/api/v1/dm-requests/{id}/block`                                     |
+| POST    | `/api/v1/dm-requests/{id}/delete`                                    |
+| POST    | `/api/v1/dm-requests/{id}/ignore`                                    |
+| GET     | `/api/v1/dms/`                                                       |
+| POST    | `/api/v1/dms/`                                                       |
+| POST    | `/api/v1/dms/group`                                                  |
+| DELETE  | `/api/v1/dms/{channelId}`                                            |
+| PATCH   | `/api/v1/dms/{channelId}`                                            |
+| GET     | `/api/v1/emoji/`                                                     |
+| POST    | `/api/v1/emoji/`                                                     |
+| DELETE  | `/api/v1/emoji/{id}`                                                 |
+| GET     | `/api/v1/emoji/{id}/image`                                           |
+| GET     | `/api/v1/files/{id}`                                                 |
+| GET     | `/api/v1/gif/search`                                                 |
+| GET     | `/api/v1/gif/trending`                                               |
+| GET     | `/api/v1/health`                                                     |
+| GET     | `/api/v1/info`                                                       |
+| GET     | `/api/v1/invites/`                                                   |
+| POST    | `/api/v1/invites/`                                                   |
+| DELETE  | `/api/v1/invites/{code}`                                             |
+| GET     | `/api/v1/livekit/health`                                             |
+| POST    | `/api/v1/livekit/webhook`                                            |
+| GET     | `/api/v1/metrics`                                                    |
+| GET     | `/api/v1/moderation/appeals/`                                        |
+| GET     | `/api/v1/moderation/appeals/{id}`                                    |
+| POST    | `/api/v1/moderation/appeals/{id}/assign`                             |
+| POST    | `/api/v1/moderation/appeals/{id}/decide`                             |
+| GET     | `/api/v1/moderation/queue/`                                          |
+| GET     | `/api/v1/moderation/queue/{id}`                                      |
+| POST    | `/api/v1/moderation/queue/{id}/act`                                  |
+| POST    | `/api/v1/moderation/queue/{id}/assign`                               |
+| POST    | `/api/v1/moderation/queue/{id}/close`                                |
+| POST    | `/api/v1/moderation/queue/{id}/notes`                                |
+| GET     | `/api/v1/moderation/users/{id}/actions`                              |
+| POST    | `/api/v1/moderation/users/{id}/timeout`                              |
+| POST    | `/api/v1/moderation/users/{id}/untimeout`                            |
+| POST    | `/api/v1/moderation/users/{id}/warn`                                 |
+| GET     | `/api/v1/push/subscriptions`                                         |
+| POST    | `/api/v1/push/subscriptions`                                         |
+| DELETE  | `/api/v1/push/subscriptions/{id}`                                    |
+| GET     | `/api/v1/push/vapid`                                                 |
+| POST    | `/api/v1/reports/`                                                   |
+| GET     | `/api/v1/reports/mine`                                               |
+| GET     | `/api/v1/search`                                                     |
+| GET     | `/api/v1/server-info`                                                |
+| POST    | `/api/v1/uploads`                                                    |
+| PATCH   | `/api/v1/users/me/`                                                  |
+| POST    | `/api/v1/users/me/avatar`                                            |
+| GET     | `/api/v1/users/me/moderation`                                        |
+| POST    | `/api/v1/users/me/notices/{id}/ack`                                  |
+| PUT     | `/api/v1/users/me/password`                                          |
+| GET     | `/api/v1/users/me/recovery-kit`                                      |
+| POST    | `/api/v1/users/me/recovery-kit`                                      |
+| DELETE  | `/api/v1/users/me/sessions`                                          |
+| GET     | `/api/v1/users/me/sessions`                                          |
+| DELETE  | `/api/v1/users/me/sessions/{id}`                                     |
+| DELETE  | `/api/v1/users/me/totp`                                              |
+| POST    | `/api/v1/users/me/totp/confirm`                                      |
+| POST    | `/api/v1/users/me/totp/enable`                                       |
+| POST    | `/api/v1/users/me/totp/recovery-codes`                               |
+| GET     | `/api/v1/ws`                                                         |
+| GET     | `/health`                                                            |
+| CONNECT | `/livekit/*`                                                         |
+| DELETE  | `/livekit/*`                                                         |
+| GET     | `/livekit/*`                                                         |
+| HEAD    | `/livekit/*`                                                         |
+| OPTIONS | `/livekit/*`                                                         |
+| PATCH   | `/livekit/*`                                                         |
+| POST    | `/livekit/*`                                                         |
+| PUT     | `/livekit/*`                                                         |
+| QUERY   | `/livekit/*`                                                         |
+| TRACE   | `/livekit/*`                                                         |
+| CONNECT | `/metrics/*`                                                         |
+| DELETE  | `/metrics/*`                                                         |
+| GET     | `/metrics/*`                                                         |
+| HEAD    | `/metrics/*`                                                         |
+| OPTIONS | `/metrics/*`                                                         |
+| PATCH   | `/metrics/*`                                                         |
+| POST    | `/metrics/*`                                                         |
+| PUT     | `/metrics/*`                                                         |
+| QUERY   | `/metrics/*`                                                         |
+| TRACE   | `/metrics/*`                                                         |
+
+<!-- gendocs:routes:end -->
+
+---
+
 ## Standard Error Response
 
 Error responses use this JSON envelope (one exception: the plugin admin
@@ -55,10 +235,18 @@ endpoints return plain-text errors — see their section):
 | `RATE_LIMITED`                  | 429         | Too many requests; response includes `Retry-After` header (seconds)                                                                                                                                                                              |
 | `INVALID_INPUT` / `BAD_REQUEST` | 400         | Malformed body, missing required fields, invalid query params, or an upload exceeding the size limit (oversize uploads are rejected 400, not 413; the only 413 in the API is the plugin-install endpoint's plain-text "plugin upload too large") |
 | `CONFLICT`                      | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                           |
+| `DUPLICATE_REPORT`              | 409         | The reporter already has an open or assigned report against this exact target (B5-8)                                                                                                                                                             |
+| `ALREADY_DELETED`               | 409         | The target of a removal was already soft-deleted, e.g. the author deleted the reported message first (B9-14)                                                                                                                                     |
+| `ALREADY_APPEALED`              | 409         | An appeal against this moderation action already exists, in any state — decided appeals can never be re-appealed (B5-10)                                                                                                                         |
+| `SELF_REVIEW`                   | 403         | A moderator acting on their own filed report, deciding/assigning the appeal of an action they themselves took where another eligible moderator exists, or being that appeal's own appellant (B5-8/B5-10)                                         |
+| `REVERSAL_FAILED`               | 409         | Overturning an appeal hit a genuine error applying its ledger reversal — nothing committed, including the decision itself (B5-10)                                                                                                                |
 | `INTERNAL_ERROR`                | 500         | Internal server error                                                                                                                                                                                                                            |
 | `STORAGE_ERROR`                 | 507         | Upload could not be persisted (storage backend write failure)                                                                                                                                                                                    |
 | `BAD_GATEWAY`                   | 502         | Upstream failure (GitHub API, LiveKit, GIF provider, asset download)                                                                                                                                                                             |
 | `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                    |
+| `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                 |
+| `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                             |
+| `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                               |
 
 ---
 
@@ -66,7 +254,21 @@ endpoints return plain-text errors — see their section):
 
 ### POST /api/v1/auth/register
 
-Create a new account using an invite code. The first user is created via `/admin/api/setup` instead.
+Create a new account. What it takes depends on the server's `registration_mode`
+setting (B4-1; the admin panel's Settings page, or the setup wizard):
+
+| Mode       | Behaviour                                                                                                                                                                        |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `closed`   | Every request is refused with `403` before the body is read.                                                                                                                     |
+| `invite`   | The default. A valid, unexpired, unrevoked invite with remaining uses is required and consumed. `201` with a session.                                                            |
+| `approval` | No invite. The account is created locked and answers `202`; it cannot sign in (`403 account is awaiting approval`) until an admin approves it in the admin panel's Members page. |
+| `open`     | No invite. `201` with a session.                                                                                                                                                 |
+
+`approval` and `open` also budget 5 registrations per client address per 24
+hours, and `approval` caps the pending queue at 100 applications; both refusals
+are `429 RATE_LIMITED`. A fresh install is `invite`; an upgraded server keeps
+its former `registration_open` choice as `invite` (1) or `closed` (0), never
+`open`. The first user is created via `/admin/api/setup` instead.
 
 **Auth:** None (public)
 **Rate limit:** 3 requests/minute per IP
@@ -81,11 +283,11 @@ Create a new account using an invite code. The first user is created via `/admin
 }
 ```
 
-| Field         | Type   | Required | Notes                                                                 |
-| ------------- | ------ | -------- | --------------------------------------------------------------------- |
-| `username`    | string | Yes      | HTML-stripped, trimmed. Must be non-empty.                            |
-| `password`    | string | Yes      | Validated for strength (min length, complexity).                      |
-| `invite_code` | string | Yes      | Must be a valid, non-expired, non-revoked invite with remaining uses. |
+| Field         | Type   | Required         | Notes                                                                                                        |
+| ------------- | ------ | ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| `username`    | string | Yes              | HTML-stripped, trimmed. Must be non-empty.                                                                   |
+| `password`    | string | Yes              | Validated for strength (min length, complexity).                                                             |
+| `invite_code` | string | In `invite` mode | Must be a valid, non-expired, non-revoked invite with remaining uses. Ignored in `approval` and `open` mode. |
 
 #### Response 201 Created
 
@@ -109,15 +311,79 @@ Create a new account using an invite code. The first user is created via `/admin
 
 See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table.
 
+#### Response 202 Accepted (`approval` mode)
+
+```json
+{ "status": "pending_approval" }
+```
+
+No session is issued. The applicant signs in normally once approved; a denied
+application is anonymised and locked, and its username is released.
+
 #### Errors
 
-| Status | Code                  | Cause                                                                   |
-| ------ | --------------------- | ----------------------------------------------------------------------- |
-| 400    | `INVALID_INPUT`       | Missing username/password/invite_code, or weak password                 |
-| 400    | `INVALID_CREDENTIALS` | Bad invite code, expired/revoked invite, or duplicate username          |
-| 403    | `FORBIDDEN`           | Registration is closed or unavailable while server-wide 2FA is required |
-| 429    | `RATE_LIMITED`        | Exceeded 3 registrations/minute from this IP                            |
-| 500    | `INTERNAL_ERROR`      | Hashing failure, session creation failure, or DB error                  |
+| Status | Code                  | Cause                                                                                                                   |
+| ------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`       | Missing username or password, or weak password                                                                          |
+| 400    | `INVALID_CREDENTIALS` | In `invite` mode: missing or bad invite code, expired/revoked invite; any mode: duplicate username                      |
+| 403    | `FORBIDDEN`           | Registration is closed or unavailable while server-wide 2FA is required                                                 |
+| 429    | `RATE_LIMITED`        | Exceeded 3 registrations/minute from this IP; in `approval`/`open` mode, 5 per address per day or a full approval queue |
+| 500    | `INTERNAL_ERROR`      | Hashing failure, session creation failure, or DB error                                                                  |
+
+---
+
+### POST /api/v1/auth/recover
+
+Recover an account with its recovery kit (B4-5, BPR-044; owner decision 2)
+in `kit_secret`, or with an owner-issued credential (B4-6, BPR-045; owner
+decision 3) in `credential` — the two are told apart by shape (32 and 24
+characters), so one compare per attempt runs against the right verifier and
+the paths never interfere. Using either means "I lost my devices": on success
+the password is replaced by `new_password`, every existing session is
+revoked, the kit is spent (or the credential consumed) and a
+`recovery_kit_used` / `recovery_assist_used` audit row is written — all in
+one transaction — and a fresh session is issued **without** the second
+factor, so an account with 2FA enrolled signs in from this response and can
+disable or re-enrol 2FA in Settings. A spent kit is worthless; the holder
+issues a new one while signed in. A kit recovery withdraws an outstanding
+credential; a credential recovery leaves the kit enrolled.
+
+Every failure — unknown account, no live kit or credential, a wrong secret —
+is the same `401` and costs the same argon2id compare. Five failures against an
+account or from one address lock recovery for 15 minutes; the per-account
+lockout is audited (`recovery_kit_locked`).
+
+**Auth:** None (public)
+**Rate limit:** 5 requests/minute per IP
+
+#### Request
+
+```json
+{ "username": "alex", "kit_secret": "K7QF-3M2X-…-ZB5A", "new_password": "N3w-Str0ng!Pass" }
+```
+
+or, with an owner-issued credential:
+
+```json
+{
+  "username": "alex",
+  "credential": "K7QF-3M2X-9PLA-ZB5A-QW2E-TT7Y",
+  "new_password": "N3w-Str0ng!Pass"
+}
+```
+
+#### Response 200 OK
+
+The login shape: `token` and `user`, `requires_2fa` false.
+
+#### Errors
+
+| Status | Code                  | Cause                                                       |
+| ------ | --------------------- | ----------------------------------------------------------- |
+| 400    | `INVALID_INPUT`       | A field missing, or a weak new password                     |
+| 401    | `INVALID_CREDENTIALS` | Unknown account, no live kit or credential, or wrong secret |
+| 403    | `FORBIDDEN`           | The account is banned                                       |
+| 429    | `RATE_LIMITED`        | Recovery lockout, or the admission budget full              |
 
 ---
 
@@ -189,6 +455,12 @@ Complete a TOTP login challenge started by `POST /api/v1/auth/login`.
 
 **Auth:** Required with the `partial_token` from the login response
 **Rate limit:** 10 requests/minute per IP, plus a 5-attempt budget per partial challenge
+
+`code` is a six-digit authenticator code, or one of the account's emergency
+recovery codes (`XXXXX-XXXXX`, case-insensitive, separator optional). A
+recovery code is accepted once; the success response then carries
+`recovery_codes_remaining` so the client can prompt for regeneration. Either
+kind counts against the same attempt budget when wrong.
 
 #### Request
 
@@ -284,7 +556,18 @@ Invalidate the current session token.
 
 ### DELETE /api/v1/auth/account
 
-Permanently delete the authenticated user's account. Requires password confirmation.
+Erase the authenticated user's account (B4-9, BPR-052). Requires password
+confirmation. Every row attributable to the account is hard-deleted in one
+transaction — the account itself, its messages (channel history shows
+nothing where they were) and their search-index entries, reactions,
+mentions, uploads and the avatar, DM membership, invites it created, blocks,
+channel overrides, sessions, API tokens, second-factor and recovery
+material, and its replay events — with SQLite's `secure_delete` on for the
+transaction; custom emoji it uploaded stay, reassigned to the oldest
+remaining admin-class account. Its files are removed after the commit from a
+journal (`erasure_jobs`) that survives a restart and is resumed until every
+file is gone. The last admin-class account cannot be erased. Connected
+clients receive `member_ban` and the account's own socket is closed.
 
 **Auth:** Required (Bearer token)
 **Rate limit:** 5 requests/minute per IP. After 3 failed password attempts, the endpoint locks out for 15 minutes per user.
@@ -299,7 +582,9 @@ Permanently delete the authenticated user's account. Requires password confirmat
 
 #### Response 204 No Content
 
-Account deleted successfully. All sessions, messages (soft-deleted), and associated data are cleaned up.
+The account is erased. The response is sent once the database transaction
+has committed; if a file could not be removed yet, the journal finishes it on
+the next maintenance tick.
 
 #### Errors
 
@@ -314,7 +599,13 @@ Account deleted successfully. All sessions, messages (soft-deleted), and associa
 
 ### POST /api/v1/users/me/totp/enable
 
-Start TOTP enrollment for the authenticated user. The secret is not persisted until `/api/v1/users/me/totp/confirm` succeeds.
+Start TOTP enrollment for the authenticated user. The secret is not persisted until `/api/v1/users/me/totp/confirm` succeeds; the pending enrollment survives a server restart for its ten-minute lifetime.
+
+`backup_codes` are the account's ten emergency recovery codes, shown here and
+nowhere else again: the server keeps bcrypt hashes only. They become usable
+the moment `confirm` succeeds, each once, in place of a TOTP code at
+`POST /api/v1/auth/verify-totp`. Calling `enable` again replaces the set;
+disabling 2FA removes it.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute per IP
@@ -332,7 +623,7 @@ Start TOTP enrollment for the authenticated user. The secret is not persisted un
 ```json
 {
   "qr_uri": "otpauth://totp/OwnCord:alex?...",
-  "backup_codes": []
+  "backup_codes": ["7KQ3M-RX2WN", "…nine more…"]
 }
 ```
 
@@ -360,7 +651,7 @@ Confirm a pending TOTP enrollment.
 
 ### DELETE /api/v1/users/me/totp
 
-Disable TOTP for the authenticated user.
+Disable TOTP for the authenticated user. The account's recovery codes are removed with the secret.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute per IP
@@ -374,6 +665,84 @@ Disable TOTP for the authenticated user.
 ```
 
 #### Response 204 No Content
+
+---
+
+### POST /api/v1/users/me/totp/recovery-codes
+
+Replace the account's emergency recovery codes with a fresh set. The
+previous set is invalid the moment the new one is stored. Requires 2FA to be
+enabled (`409 CONFLICT` otherwise) and writes a `recovery_codes_regenerated`
+audit row that carries no code.
+
+**Auth:** Required
+**Rate limit:** 5 requests/minute per IP
+
+#### Request
+
+```json
+{
+  "password": "MyStr0ng!Pass"
+}
+```
+
+#### Response 200 OK
+
+```json
+{
+  "backup_codes": ["7KQ3M-RX2WN", "…nine more…"]
+}
+```
+
+---
+
+### POST /api/v1/users/me/recovery-kit
+
+Issue the account's recovery kit (B4-5, BPR-044), replacing any previous
+one. The server stores only an argon2id verifier of the kit secret. With no
+`kit_secret` in the body the server generates the secret and returns it
+**once**; with one, the client generated it locally (32 base32 characters,
+any grouping or case) and the response never echoes it. Writes a
+`recovery_kit_issued` audit row that carries no secret.
+
+**Auth:** Required
+**Rate limit:** 5 requests/minute per IP
+
+#### Request
+
+```json
+{ "password": "MyStr0ng!Pass" }
+```
+
+#### Response 200 OK
+
+```json
+{ "kit_secret": "K7QF-3M2X-…-ZB5A", "created_at": "2026-09-02T18:00:00Z" }
+```
+
+`kit_secret` is absent when the client supplied the secret.
+
+#### Errors
+
+| Status | Code            | Cause                                                       |
+| ------ | --------------- | ----------------------------------------------------------- |
+| 400    | `INVALID_INPUT` | Wrong password, or a client secret of the wrong shape       |
+| 429    | `RATE_LIMITED`  | Password-confirmation lockout, or the admission budget full |
+
+---
+
+### GET /api/v1/users/me/recovery-kit
+
+Whether the account holds an unspent kit — what a client needs to decide to
+(re-)enrol, never the verifier.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+{ "enrolled": true, "created_at": "2026-09-02T18:00:00Z", "used_at": null }
+```
 
 ---
 
@@ -425,7 +794,7 @@ Broadcasts a `user_update` on success, exactly like the PATCH above.
 The bytes are stored as an ordinary attachment with no channel, and
 `users.avatar` is set to `/api/v1/files/{id}`. That URL is what makes the
 picture readable: `GET /api/v1/files/{id}` normally serves an unlinked
-attachment only to its uploader, and additionally admits one that some user's
+attachment only to its uploader (administrators included), and additionally admits one that some user's
 avatar currently points at — so an avatar is readable by every authenticated
 user for exactly as long as it is in use, and stops being readable the moment
 it is replaced.
@@ -512,6 +881,15 @@ old one).
 
 List the authenticated user's active sessions.
 
+`unseen` is the new-login signal (B4-7, BG-08): a session created by a login
+starts `true` and stays so until the account lists its sessions from
+another device. This listing is that acknowledgement — every row's flag
+clears except the caller's own, so the device that just signed in never
+acknowledges itself, and the response carries the flags as they were before
+it. An API-token principal, which holds no session, acknowledges every row.
+No push transport exists for the signal; a client that wants it polls this
+route.
+
 **Auth:** Required
 
 #### Response 200 OK
@@ -525,7 +903,8 @@ List the authenticated user's active sessions.
       "ip": "192.168.1.100",
       "created_at": "2026-07-01T10:00:00Z",
       "last_used": "2026-07-19T09:00:00Z",
-      "is_current": true
+      "is_current": true,
+      "unseen": false
     }
   ]
 }
@@ -540,6 +919,34 @@ Revoke one of the authenticated user's sessions by ID.
 **Auth:** Required
 
 #### Response 204 No Content
+
+---
+
+### DELETE /api/v1/users/me/sessions
+
+Sign out everywhere: revoke every session of the authenticated account,
+the current one included, and drop the account's live WebSocket
+connections in the same request. The caller's token stops working with this
+response, so the client re-authenticates rather than treating the next 401
+as an error. Never touches another account's sessions. Writes a
+`session_revoke_all` audit row naming the account and the count when at
+least one session was revoked (an API-token principal, which holds no
+session, revokes nothing and writes nothing). Limited to 5 calls per
+account per minute (`429 RATE_LIMITED`).
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+{
+  "sessions_revoked": 3,
+  "current_session_revoked": true
+}
+```
+
+`current_session_revoked` is `false` only for an API-token principal, which
+holds no session of its own.
 
 ---
 
@@ -571,31 +978,31 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 ]
 ```
 
-| Field             | Type   | Description                                                                                                                   |
-| ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `id`              | int64  | Channel ID                                                                                                                    |
-| `name`            | string | Channel name                                                                                                                  |
-| `type`            | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post)     |
-| `topic`           | string | Channel topic/description                                                                                                     |
-| `category`        | string | Category grouping                                                                                                             |
-| `position`        | int    | Sort order within category                                                                                                    |
-| `slow_mode`       | int    | Slow-mode delay in seconds (0 = disabled)                                                                                     |
-| `archived`        | bool   | Whether the channel is archived                                                                                               |
-| `nsfw`            | bool   | Age-restriction label. **Stored and shipped only** — the server applies no content behaviour to a flagged channel (see below) |
-| `voice_max_users` | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                              |
-| `voice_max_video` | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                        |
+| Field             | Type   | Description                                                                                                               |
+| ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | int64  | Channel ID                                                                                                                |
+| `name`            | string | Channel name                                                                                                              |
+| `type`            | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
+| `topic`           | string | Channel topic/description                                                                                                 |
+| `category`        | string | Category grouping                                                                                                         |
+| `position`        | int    | Sort order within category                                                                                                |
+| `slow_mode`       | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
+| `archived`        | bool   | Whether the channel is archived                                                                                           |
+| `nsfw`            | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
+| `voice_max_users` | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
+| `voice_max_video` | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
 
 #### The `nsfw` flag
 
-`nsfw` is metadata and nothing else. The server stores it, ships it in `ready`
-and in the `channel_create` / `channel_update` broadcasts, and audits an
-operator flipping it — and does **not** filter content, check anyone's age, or
-restrict who may read or post in a flagged channel. Every consequence is the
-client's: the desktop client shows a one-time-per-session "may contain
-sensitive content" gate before rendering a flagged channel's messages
-(remembered in `sessionStorage`, so a new session asks again) and marks the
-channel in its sidebar. A client that ignores the field behaves exactly as it
-did before the field existed.
+The server stores `nsfw`, ships it in `ready` and in the `channel_create` /
+`channel_update` broadcasts, and audits an operator flipping it. Since B5-7 it
+also enforces it: a member who has not acknowledged a labelled channel gets
+none of its content on any path, whatever their role — see
+[NSFW Acknowledgement](#nsfw-acknowledgement) for the paths and the
+acknowledge/revoke routes. The server checks no one's age. The desktop client
+also shows a one-time-per-session "may contain sensitive content" gate before
+rendering a flagged channel's messages (remembered in `sessionStorage`) and
+marks the channel in its sidebar; the client consent UI is B9's.
 
 ---
 
@@ -962,6 +1369,137 @@ Same auth, rate limit, response shape, and error codes as
 
 ---
 
+## Web Push
+
+Server-side storage of Web Push subscriptions, plus dispatch behind its own,
+second opt-in: `push.dispatch_enabled` (default **off**, independent of
+`push.enabled`). See [Server Configuration](server-configuration.md#web-push-push)
+for both keys, the staleness window, and the rotation procedure below.
+
+**Default-off contract:** with `push.enabled` false, every endpoint below
+answers `503 PUSH_DISABLED` after authenticating the caller. A disabled
+server writes nothing. With `push.enabled` true but `push.dispatch_enabled`
+false — the state an install upgraded from an earlier release starts in —
+subscriptions are stored but nothing is ever sent to one.
+
+**What dispatch sends, and to whom.** With both keys true, a new message
+sends a fixed, generic `{"t":"activity"}` payload — no message text, channel
+name, sender or count — to: the message's direct `@mentions` in a guild
+channel, or every other participant of a one-to-one DM who trusts the
+author (the same `trusted_senders` row Message Requests gates on — see
+"Message Requests" below; a first-contact message from someone not yet
+trusted rings no one's phone). Within that set, only offline subscribers
+are pushed to (a connected client already has the message), and permission
+is re-checked at dispatch time (`CanReadContent`, not whatever it was when
+the subscription was created) — the same predicate every content read path
+resolves, so a channel labelled `nsfw` pushes only to a recipient who has
+acknowledged it (see "NSFW Acknowledgement" below); a revoke between the
+first attempt and a retry drops the retry. At most one push per user per channel per 60
+seconds. A `404`/`410` response prunes the subscription; a `429` or `5xx`
+(or a network error) gets two retries — three attempts total — before being
+dropped, and any other failure status drops immediately. Nothing is written
+per attempt, and a restart drops anything in flight. Turning dispatch on
+makes the server
+open outbound HTTPS connections to the push service named in each stored
+subscription's endpoint — see
+[diagnostics.md](architecture/diagnostics.md)'s egress table.
+
+**Refresh-by-re-POST:** a subscription is kept alive by POSTing the same
+`endpoint` again — the server upserts the row (same id, `last_seen_at`
+bumped) rather than creating a second one. A subscription not refreshed
+within `push.subscription_ttl_days` is removed by the maintenance sweep.
+
+**Rotation and `key_id`:** the server signs with one VAPID key at a time.
+`GET /vapid` reports its `key_id`; a client that sees a different `key_id`
+than the one it last subscribed under should re-subscribe — rotating the key
+(an operator action: replace the key file or `OWNCORD_PUSH_VAPID_KEY`, then
+restart) invalidates every subscription created under the old key. Such rows
+stop being listed immediately and are removed by the sweep.
+
+### GET /api/v1/push/vapid
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+{ "public_key": "base64url-encoded-65-byte-P-256-point", "key_id": "a1b2c3d4e5f6a7b8" }
+```
+
+### GET /api/v1/push/subscriptions
+
+**Auth:** Required
+
+Lists the caller's own subscriptions under the currently running VAPID key.
+A subscription created under a since-rotated key is not listed.
+
+#### Response 200 OK
+
+```json
+{
+  "subscriptions": [
+    {
+      "id": 1,
+      "device_name": "My Laptop",
+      "endpoint_host": "fcm.googleapis.com",
+      "created_at": "2026-09-05T12:00:00Z",
+      "last_seen_at": "2026-09-05T12:00:00Z"
+    }
+  ]
+}
+```
+
+`endpoint_host` is the endpoint URL's host only — never the endpoint itself,
+never the `p256dh`/`auth` keys. An endpoint plus its auth secret is a push
+credential.
+
+### POST /api/v1/push/subscriptions
+
+**Auth:** Required
+**Body limit:** 8 KiB
+
+```json
+{
+  "endpoint": "https://fcm.googleapis.com/fcm/send/...",
+  "keys": { "p256dh": "...", "auth": "..." },
+  "device_name": "My Laptop"
+}
+```
+
+There is no user id in the body — the row's owner is always the
+authenticated session's. `endpoint` must be an `https://` URL with a host, no
+embedded credentials, at most 2048 characters. `p256dh` must decode (standard or unpadded base64url)
+to a 65-byte uncompressed P-256 point (`0x04` prefix); `auth` must decode to
+16 bytes. `device_name` is at most 64 runes and must not contain control
+characters. A user may hold at most 10 subscriptions; the 11th evicts the
+oldest by `last_seen_at`.
+
+#### Response 201 Created
+
+```json
+{ "id": 1 }
+```
+
+#### Errors
+
+| Status | Code            | When                                                   |
+| ------ | --------------- | ------------------------------------------------------ |
+| 400    | `INVALID_INPUT` | Malformed body, or a credential field fails validation |
+| 503    | `PUSH_DISABLED` | `push.enabled` is false                                |
+
+### DELETE /api/v1/push/subscriptions/{id}
+
+**Auth:** Required
+
+Revokes one of the caller's own subscriptions.
+
+#### Response
+
+`204 No Content` on success. `404 NOT_FOUND` when `id` does not exist or
+belongs to another user — the two cases are indistinguishable by design.
+
+---
+
 ## Direct Messages
 
 DM channels use participant-based authorization rather than role-based permissions.
@@ -1162,6 +1700,154 @@ participants receive a fresh `dm_channel_open` with the new membership.
 | Status | Code        | Reason                       |
 | ------ | ----------- | ---------------------------- |
 | 404    | `NOT_FOUND` | Not a participant of this DM |
+
+---
+
+## Message Requests
+
+B5-6: the first message from a sender the recipient does not yet trust, in a
+**one-to-one** DM, stages a request instead of opening the conversation
+(`message_requests`, `trusted_senders` — `docs/schema.md`, migration `046`).
+Group DMs are untouched. Existing one-to-one DM pairs were grandfathered as
+trusted when `046` applied, so no live conversation broke on upgrade.
+
+**The sender's side is byte-identical across `pending`, `ignored` and
+`deleted`** (decision 5, `docs/architecture/community-services.md` section
+S1): `chat_send_ok`, `chat_message`, `GET /api/v1/dms` and
+`GET /channels/{id}/messages` are the same whether the request ends up
+pending, ignored or deleted. A sender can never distinguish those three
+states from one another, or from a request nobody has looked at yet —
+silence, not a rejection. `block` is not part of this claim: a blocked
+sender's _later_ sends fail with `ErrBlocked` (Codex P2-9) — that denial is
+the existing block gate (`PUT /api/v1/blocks/{userId}`), unchanged by B5-6,
+and it is visible to the sender by design.
+
+Transitions are **recipient-only** and legal **only from `pending`**:
+
+- `accept` — trusts the sender, opens the conversation for the recipient
+  (`dm_channel_open`), and marks the request accepted, all in one
+  transaction.
+- `ignore` — the request drops out of the inbox; nothing else changes.
+- `delete` — identical to `ignore` server-side; the held message rows stay in
+  the channel (the recipient never opened it).
+- `block` — blocks the sender (`PUT /api/v1/blocks/{userId}`'s existing
+  effects) and only then marks the request blocked.
+
+A transition attempted on a row that is not pending returns **409
+CONFLICT** if the row exists for the caller (a race, including the loser of
+two simultaneous decisions) or **404 NOT_FOUND** if it does not — including
+when the caller is the sender or an unrelated user, so a foreign request's
+existence is never confirmed.
+
+### GET /api/v1/dm-requests
+
+List the caller's pending inbox, newest first.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+{
+  "requests": [
+    {
+      "id": 1,
+      "channel_id": 42,
+      "sender": {
+        "id": 7,
+        "username": "stranger",
+        "display_name": "",
+        "avatar": ""
+      },
+      "preview": {
+        "message_id": 100,
+        "content": "hi, stranger",
+        "timestamp": "2026-09-05T12:00:00Z"
+      },
+      "created_at": "2026-09-05T12:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### POST /api/v1/dm-requests/{id}/accept
+
+### POST /api/v1/dm-requests/{id}/ignore
+
+### POST /api/v1/dm-requests/{id}/delete
+
+### POST /api/v1/dm-requests/{id}/block
+
+Decide a pending request. `block` additionally blocks the sender.
+
+**Auth:** Required (recipient only)
+
+#### Response 200 OK
+
+```json
+{
+  "id": 1,
+  "state": "accepted",
+  "decided_at": "2026-09-05T12:05:00Z"
+}
+```
+
+#### Errors
+
+| Status | Code        | Reason                                             |
+| ------ | ----------- | -------------------------------------------------- |
+| 404    | `NOT_FOUND` | Not this recipient's request, or it does not exist |
+| 409    | `CONFLICT`  | The request is no longer pending                   |
+
+---
+
+## NSFW Acknowledgement
+
+B5-7: a channel's `nsfw` label (`docs/schema.md`, migration `025`) is
+enforced server-side (migration `047`, decision 13). A member with no
+acknowledgement row for a labelled channel gets no content from it on any
+path — history, around, pins, reaction users, search, live/replayed socket
+delivery, or attachment bytes — regardless of role; an administrator
+acknowledges like anyone else. Revoking takes effect on the caller's very
+next read, with no client-side cache to invalidate.
+
+### PUT /api/v1/channels/{id}/nsfw-acknowledgement
+
+Record the caller's own consent to the channel's labelled content.
+Idempotent. Sends the caller's other live sockets an `nsfw_ack` frame
+(`docs/protocol.md`) with `"acknowledged": true`.
+
+**Auth:** Required
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code        | Reason                                                     |
+| ------ | ----------- | ---------------------------------------------------------- |
+| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
+| 409    | `NOT_NSFW`  | The channel is not labelled — nothing to acknowledge       |
+
+---
+
+### DELETE /api/v1/channels/{id}/nsfw-acknowledgement
+
+Revoke the caller's own acknowledgement, if any. Idempotent — revoking a row
+that does not exist (never acknowledged, or the channel was since unlabelled)
+still answers 204. Sends the caller's other live sockets an `nsfw_ack` frame
+with `"acknowledged": false`.
+
+**Auth:** Required
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code        | Reason                                                     |
+| ------ | ----------- | ---------------------------------------------------------- |
+| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
 
 ---
 
@@ -1432,6 +2118,706 @@ literal `:shortcode:` text. Broadcasts `emoji_update` on success.
 
 ---
 
+## Reports and the moderation queue
+
+Local report intake, greenfield since B5-8 (BPR-070, BPR-071's server half).
+There is no cross-server or central delivery of any kind — every route below
+is served by this server alone, over its own database (see
+`TestAbsenceContract_NoCentralOrCrossServerReportDelivery`).
+
+`MODERATE_MEMBERS` is granted automatically only to an untouched, default
+Moderator role. If that role was ever renamed or had its permissions edited
+before upgrading to a server version carrying this bit, the queue has no
+reader by default — grant "Moderate Members" to the role that should have it
+by hand, in the admin panel's role grid.
+
+### POST /api/v1/reports
+
+File a report against a message, a user or an attachment. **Auth:**
+Required. Rate-limited: 5 per 10 minutes per reporter.
+
+The subject is derived by the server from the target (the message's author,
+the attachment's uploader, or the user named) — it is never read from the
+body, so there is no field for it.
+
+#### Request
+
+```json
+{
+  "target_type": "message",
+  "target_id": "1234",
+  "reason": "harassment",
+  "detail": "optional free text, at most 2000 runes, no control characters"
+}
+```
+
+`target_type` is one of `message`, `user`, `attachment`. `reason` is one of
+`spam`, `harassment`, `nsfw_unlabelled`, `illegal`, `other`.
+
+#### Response 201 Created
+
+```json
+{ "id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9" }
+```
+
+`id` is an opaque 32-character hex string (16 random bytes), never the
+report's sequential internal id — every response, route parameter and the
+`mod_queue` frame carry this public id only. Reports are filed in sequence
+server-side, so a bit holder who can see reports 1 and 3 but not 2 could
+otherwise infer report 2 concerns them; the public id carries no order.
+
+#### Errors
+
+| Status | Code               | Cause                                                                                        |
+| ------ | ------------------ | -------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`    | invalid `target_type`/`reason`, missing `target_id`, or `detail` too long/unsafe             |
+| 404    | `NOT_FOUND`        | the target does not exist, or the reporter cannot see it (never `403` — no existence oracle) |
+| 409    | `DUPLICATE_REPORT` | the reporter already has an open or assigned report against this exact target                |
+| 429    | `RATE_LIMITED`     | more than 5 reports from this reporter in 10 minutes                                         |
+
+---
+
+### GET /api/v1/reports/mine
+
+The caller's own reports: id, target type, reason, state, outcome,
+`created_at`, `closed_at`. Never the assignee, never the internal notes.
+`id` is the opaque public id (see above).
+
+**Auth:** Required.
+
+#### Response 200 OK
+
+```json
+[
+  {
+    "id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9",
+    "target_type": "message",
+    "reason": "harassment",
+    "state": "assigned",
+    "outcome": "",
+    "created_at": "2026-09-05T10:00:00Z",
+    "closed_at": null
+  }
+]
+```
+
+---
+
+### GET /api/v1/moderation/queue
+
+The moderator queue. **Auth:** Required. **Permission:** `MODERATE_MEMBERS`
+(or `ADMINISTRATOR`), through the canonical predicate (`CanModerate`) — never
+a raw bit check.
+
+**Query:** `state` — `open`, `assigned` or `closed` (every terminal state);
+omitted defaults to open+assigned together. Newest first. A report whose
+subject is the caller is excluded even when it would otherwise match — the
+confidentiality rule applies to the listing, not only to `GET .../{id}`.
+
+#### Response 200 OK
+
+Returns a JSON array of queue rows, each carrying the reporter's and
+subject's usernames but never the report's free-text detail or its notes.
+
+---
+
+### GET /api/v1/moderation/queue/{id}
+
+One report, its evidence snapshot, its internal notes and its immutable
+history (`events`: `created`, `assigned`, `noted`, `closed`, each with an
+actor id and a state-or-outcome-word detail — never free text). `{id}` is
+the opaque public id, resolved to the internal id server-side before any
+lookup. **Auth:** Required. **Permission:** `MODERATE_MEMBERS` (or
+`ADMINISTRATOR`).
+
+The history lives in its own table (`report_events`), never the shared
+audit log — `VIEW_AUDIT_LOG` grants no route to any of it, only the same bit
+and confidentiality gate this endpoint already enforces.
+
+`404 NOT_FOUND` both for a missing id and for a report whose SUBJECT is the
+caller — indistinguishable, even when the caller holds the bit: the subject
+of a report must never learn one exists. A moderator who is instead the
+report's REPORTER may read it (their own filing, already visible via
+`GET /api/v1/reports/mine`), but `notes` is always `[]` for them — internal
+notes never reach the person who filed the report.
+
+The evidence snapshot is content from the report's source channel
+(`channel_id`), so it follows that channel's NSFW consent (B5-7, decision
+13): while the channel is labelled, `evidence` is `[]` and
+`evidence_withheld` is `NSFW_ACKNOWLEDGEMENT_REQUIRED` unless the caller
+has acknowledged it themselves (`PUT /api/v1/channels/{id}/nsfw-acknowledgement`)
+— no bit, `ADMINISTRATOR` included, bypasses this. Label and
+acknowledgement are read on every request, so a revoke, an unlabel and
+relabel, or a label added after filing applies to the next read. When the
+source channel has been deleted, the snapshot stays readable only if that
+channel was never labelled while the report existed (`reports.source_nsfw`,
+migration 052). Otherwise, including when that is unknown, `evidence` is
+`[]` and `evidence_withheld` is `SOURCE_CHANNEL_UNAVAILABLE`. `evidence_withheld` is omitted when the
+snapshot is returned. Files the snapshot references are served by
+`GET /api/v1/files/{id}` under that route's own channel and consent checks.
+Once the source channel is deleted the file is unlinked, and that route
+serves it only to its uploader — `ADMINISTRATOR` included.
+
+---
+
+### POST /api/v1/moderation/queue/{id}/assign
+
+Assign the report to the caller. `{id}` is the opaque public id. **Auth:**
+Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+
+**Query:** `force=1` reassigns a report already assigned to someone else,
+and only succeeds when the caller outranks the current assignee (the same
+hierarchy rule ban/kick/timeout use).
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                                                                              |
+| ------ | ------------- | -------------------------------------------------------------------------------------------------- |
+| 403    | `FORBIDDEN`   | caller lacks `MODERATE_MEMBERS`, or `force=1` without outranking                                   |
+| 403    | `SELF_REVIEW` | caller is the report's own reporter — a moderator may not act on a report they filed               |
+| 404    | `NOT_FOUND`   | no such report, or its subject is the caller                                                       |
+| 409    | `CONFLICT`    | already assigned to someone else and `force` was not set, or the report is no longer open/assigned |
+
+---
+
+### POST /api/v1/moderation/queue/{id}/notes
+
+Add an internal note, visible to `MODERATE_MEMBERS` holders only — never to
+the reporter, never to the subject. `{id}` is the opaque public id. **Auth:**
+Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`). `403
+SELF_REVIEW` if the caller is the report's own reporter; `409 CONFLICT` if
+the report is not open or assigned (a note may not land on a report a
+concurrent close just closed) or if the moderator account no longer exists.
+
+#### Request
+
+```json
+{ "body": "at most 4000 runes, no control characters" }
+```
+
+#### Response 204 No Content
+
+---
+
+### POST /api/v1/moderation/queue/{id}/close
+
+Close the report. `{id}` is the opaque public id. **Auth:** Required.
+**Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`). `403 SELF_REVIEW` if
+the caller is the report's own reporter.
+
+#### Request
+
+```json
+{ "outcome": "actioned" }
+```
+
+`outcome` is one of `actioned`, `no_action`, `duplicate`. `open` and
+`assigned` may both close directly (assigning first is not required).
+Nothing leaves a closed state — closing an already-closed report answers
+`409 CONFLICT`, including under a concurrent double-close.
+
+#### Response 204 No Content
+
+---
+
+### POST /api/v1/moderation/queue/{id}/act
+
+Perform a moderator action against the report's subject (or, for
+`"removal"`, the reported message) with `report_id` set on the ledger row,
+in one transaction with the action's effect. `{id}` is the opaque public id.
+**Auth:** Required. Reading the report first requires `MODERATE_MEMBERS` (or
+`ADMINISTRATOR`) — the same read `GET .../{id}` gates; the action itself
+then requires the bit that action needs (see the permission ladder below).
+`403 SELF_REVIEW` if the caller is the report's own reporter.
+
+#### Request
+
+```json
+{
+  "kind": "timeout",
+  "reason": "at most 500 runes, no control characters",
+  "duration_seconds": 3600,
+  "message_id": "1234"
+}
+```
+
+`kind` is one of `warning`, `timeout`, `kick`, `ban`, `removal`.
+`duration_seconds` applies to `timeout` only (60..2419200, i.e. 1 minute to
+28 days). `message_id` applies to `removal` only, and defaults to the
+report's own target when the report is against a message.
+
+Dispatches through the exact same service call the direct route for that
+`kind` uses, and sends the same post-commit transport: `ban` broadcasts
+`member_ban` (and disconnects the target) exactly like
+`PATCH /admin/api/users/{id}` does; `removal` broadcasts `chat_bulk_deleted`
+for the removed message exactly like the channel purge route does.
+
+#### Response 204 No Content
+
+...for every `kind` except `timeout`, which answers `200 OK` with the same
+`voice` outcome `POST .../timeout` returns:
+
+```json
+{ "voice": "applied" }
+```
+
+#### Errors
+
+Same shape as `POST /api/v1/moderation/users/{id}/warn`/`timeout` below,
+plus the report read's own `403 SELF_REVIEW` (also given when the caller
+files the report and then tries to act on it themselves) and `404 NOT_FOUND`
+(missing report, or the caller is its subject). A `removal` whose target
+message is already deleted answers `409 ALREADY_DELETED` (never 404, which
+would read as the report itself being gone).
+
+---
+
+## Moderator actions
+
+Warning, timeout, kick and ban (BPR-072), narrowly permissioned per action —
+gating a gentle warning on the ability to ban would invert the moderation
+ladder:
+
+| Action                   | Permission                   |
+| ------------------------ | ---------------------------- |
+| Warning                  | `MODERATE_MEMBERS`           |
+| Timeout / lift a timeout | `MODERATE_MEMBERS`           |
+| Content removal          | `MANAGE_MESSAGES` (existing) |
+| Kick                     | `KICK_MEMBERS` (existing)    |
+| Ban                      | `BAN_MEMBERS` (existing)     |
+
+**Kick's real meaning.** OwnCord is single-server, so "remove from guild"
+has no referent — kick is `ForceLogout`: every session of the target is
+revoked and they must sign in again. It does not restrict the account from
+returning immediately.
+
+Every action writes a row to the moderator-action ledger, in the same
+transaction as its effect, so an appeal (B5-10) always has something to
+reference.
+
+**Removal is the one exception to the hierarchy rule below** (a conscious
+decision, not an oversight): it is governed by channel `MANAGE_MESSAGES`
+alone, exactly as message deletion always has been, with no requirement to
+outrank the message's author — a channel moderator routinely removes content
+from users the role hierarchy does not place them above. This holds through
+every entry point removal has, including the report-linked `act` route.
+
+Warning, timeout, kick and ban all additionally require the actor to
+strictly outrank the target by role position (`requireOutranks`),
+re-validated live at write time so a target promoted between the check and
+the write is refused, not sanctioned. Self, a peer, a superior, and the
+owner as target are all refused for these four kinds.
+
+### POST /api/v1/moderation/users/{id}/warn
+
+Issue a warning: an audited notice the target must acknowledge on next
+connect. **Auth:** Required. **Permission:** `MODERATE_MEMBERS`.
+
+#### Request
+
+```json
+{ "reason": "at most 500 runes, no control characters" }
+```
+
+#### Response 201 Created
+
+```json
+{ "id": 42 }
+```
+
+A live target also receives a `mod_action` frame
+(`{"id":42,"kind":"warning","reason":"...","expires_at":null}`), targeted
+and unsequenced.
+
+#### Errors
+
+| Status | Code          | Cause                                                           |
+| ------ | ------------- | --------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | invalid id, self-target, or reason too long/unsafe              |
+| 403    | `FORBIDDEN`   | caller lacks `MODERATE_MEMBERS`, or does not outrank the target |
+| 404    | `NOT_FOUND`   | no such user                                                    |
+
+---
+
+### POST /api/v1/moderation/users/{id}/timeout
+
+Time-box a restriction: the target cannot send messages, add reactions, or
+join voice while it is active (`403 TIMED_OUT`). **Auth:** Required.
+**Permission:** `MODERATE_MEMBERS`.
+
+#### Request
+
+```json
+{ "reason": "at most 500 runes, no control characters", "duration_seconds": 3600 }
+```
+
+`duration_seconds` is bounded 60..2419200 (1 minute to 28 days).
+
+#### Response 201 Created
+
+```json
+{ "id": 43, "voice": "applied" }
+```
+
+`voice` is `"applied"` only when the mute actually landed: the actor holds
+effective `MUTE_MEMBERS` in the target's CURRENT voice channel specifically
+(a channel-level deny, a room the actor cannot see, or — for a DM call — the
+actor not being a participant all count as not holding it there, even with
+the server-wide bit), the target is currently connected to voice, and the
+underlying server-mute call actually matched a live connection. Every other
+case — no channel authority there, the target not in voice at all, or a
+channel-switch race that leaves the mute unmatched — answers `"skipped"`.
+The timeout still lands for text and reactions either way; it never grants a
+voice mute the actor could not perform through the ordinary voice-moderation
+route. A live target also receives a `mod_action` frame carrying
+`expires_at`. The restriction is live on the target's very next send — no
+reconnect needed.
+
+#### Errors
+
+Same shape as `warn` above, plus `400 BAD_REQUEST` for a duration outside
+60..2419200.
+
+---
+
+### POST /api/v1/moderation/users/{id}/untimeout
+
+Lift an active timeout early, including its voice half if it was applied.
+**Auth:** Required. **Permission:** `MODERATE_MEMBERS`.
+
+#### Response 204 No Content
+
+A live target also receives a `mod_action` frame with `expires_at: null`.
+
+#### Errors
+
+Same shape as `warn` above, plus `404 NOT_FOUND` when there is no active
+timeout to lift.
+
+---
+
+### GET /api/v1/moderation/users/{id}/actions
+
+The full moderator-action ledger for one user, newest first: kind, actor,
+reason, timestamps, and the linked report's public id when one exists.
+**Auth:** Required. **Permission:** `MODERATE_MEMBERS`.
+
+A row's `report_id` is omitted (never rendered, not merely nulled) when the
+caller is the confidential SUBJECT of that report — the same guard
+`GET .../queue/{id}` applies, run per row here: holding `MODERATE_MEMBERS`
+is not enough to read a report's id about yourself just because it happens
+to be linked from your own action ledger.
+
+---
+
+### POST /api/v1/users/me/notices/{id}/ack
+
+Acknowledge a warning — own rows only. `{id}` is the ledger row id from
+`ready`'s `notices` (see [protocol.md](protocol.md)). **Auth:** Required
+(session).
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                                           |
+| ------ | ------------- | --------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | id is not a positive integer                                    |
+| 404    | `NOT_FOUND`   | not a warning, already acknowledged, or belongs to another user |
+
+---
+
+### GET /api/v1/users/me/moderation
+
+The caller's own sanctions, read from the ledger, so they survive a restart
+that live `mod_action` frames and `ready.notices` do not cover: every
+`warning`, `timeout`, `removal` and `ban` row that another moderator applied
+to the caller, newest first. Kicks are left out because nothing persists to
+appeal. Self-targeted rows are left out too: a moderator's own channel purge
+is recorded against the moderator but is not a sanction against them. A `ban` row can
+only reach a caller whose ban has lapsed or been reversed, since a currently
+banned caller cannot authenticate. A currently banned user still appeals out
+of band, as [Appeals](#appeals) describes. Rows leave this list when the
+retention sweep retires them (`moderation.action_retention_days`).
+**Auth:** Required (session). Rate-limited: 30 per minute per IP.
+
+#### Response 200 OK
+
+```json
+[
+  {
+    "id": 42,
+    "kind": "timeout",
+    "reason": "cool off",
+    "created_at": "2026-09-23 10:00:00",
+    "expires_at": "2026-09-23 11:00:00",
+    "lifted_at": null,
+    "acknowledged_at": null,
+    "appealable": true,
+    "appeal": null
+  },
+  {
+    "id": 17,
+    "kind": "warning",
+    "reason": "be nice",
+    "created_at": "2026-09-20 09:12:44",
+    "expires_at": null,
+    "lifted_at": null,
+    "acknowledged_at": "2026-09-20 09:30:01",
+    "appealable": false,
+    "appeal": { "id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9", "state": "open" }
+  }
+]
+```
+
+`id` is the ledger id that [`POST /api/v1/appeals`](#post-apiv1appeals) takes
+as `action_id` and that the acknowledgement route above takes. `appealable`
+follows the rules the appeal route itself applies: an appealable kind with no
+appeal filed against it yet, in any state. `appeal` is the appeal filed
+against this row (its opaque public id and state), or `null`. The response
+never includes the acting moderator, who lifted the action, the linked
+report, evidence, or moderator notes.
+
+#### Errors
+
+| Status | Code           | Cause                       |
+| ------ | -------------- | --------------------------- |
+| 429    | `RATE_LIMITED` | more than 30 reads a minute |
+
+---
+
+## Appeals
+
+Rate-limited appeals against a moderation action (BPR-073, plan decision 8).
+`action_id` is the moderator-action ledger's own id (the caller's own `GET
+/api/v1/users/me/moderation` row `id`, `GET
+/api/v1/moderation/users/{id}/actions`'s `id`, or the `id` a live
+`mod_action` frame or a `ready` notice already carried to the target) — not
+an opaque public id; only reports and appeals carry one of those.
+
+**Appealable kinds:** `warning`, `timeout`, `removal`, and `ban`. Kick is
+never appealable — a force-logout persists nothing to reverse, the target
+simply signs back in. A **ban appeal has no path here while the ban is still
+in effect**: every route in this API rejects a currently effectively-banned
+caller (`api/middleware.go`), including this one, so a `ban`-kind
+submission can only ever arrive from a target whose ban has since lapsed or
+been reversed. A ban appeal from a target who is still banned must arrive
+out of band — the operator's own contact channel — until a later phase adds
+one.
+
+### POST /api/v1/appeals
+
+File an appeal against a moderation action. **Auth:** Required. Rate-limited:
+3 per 24 hours per appellant (a "blocked appellant" per decision 8 — over
+the window, the caller submits nothing).
+
+#### Request
+
+```json
+{ "action_id": 42, "body": "at most 4000 runes, no control characters" }
+```
+
+#### Response 201 Created
+
+```json
+{ "id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9" }
+```
+
+`id` is an opaque 32-character hex string, the same shape reports' public id
+uses and for the identical reason — appeals are filed in sequence
+server-side, so a moderator who can see appeals 1 and 3 but never 2 could
+otherwise infer appeal 2 concerns someone specific.
+
+#### Errors
+
+| Status | Code               | Cause                                                                                      |
+| ------ | ------------------ | ------------------------------------------------------------------------------------------ |
+| 400    | `BAD_REQUEST`      | invalid `action_id`, body too long/unsafe, or the action's kind is not appealable (`kick`) |
+| 404    | `NOT_FOUND`        | no such action, or the caller is not its target (never `403` — no existence oracle)        |
+| 409    | `ALREADY_APPEALED` | an appeal against this action already exists, in any state                                 |
+| 429    | `RATE_LIMITED`     | more than 3 appeals from this appellant in 24 hours                                        |
+
+---
+
+### GET /api/v1/appeals/mine
+
+The caller's own appeals: id, the appealed action's kind/reason/
+`created_at`, state, `decision_note` (once decided), `created_at`,
+`decided_at`. **Auth:** Required.
+
+A state change (assignment, decision, or withdrawal) sends the appellant an
+`appeal_status` frame — see [protocol.md](protocol.md).
+
+---
+
+### POST /api/v1/appeals/{id}/withdraw
+
+Withdraw the caller's own appeal — the appellant only, `open` or `assigned`
+states only. `{id}` is the opaque public id. **Auth:** Required. Sends the
+appellant an `appeal_status` frame and a connected moderator queue a
+`mod_queue` `"withdrawn"` frame, both under decision 8's per-appeal write
+ordering (a delayed assignment or decision can never notify out of order
+with this one) — see [protocol.md](protocol.md).
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code        | Cause                                         |
+| ------ | ----------- | --------------------------------------------- |
+| 404    | `NOT_FOUND` | no such appeal, or it belongs to someone else |
+| 409    | `CONFLICT`  | the appeal is already decided                 |
+
+---
+
+### GET /api/v1/moderation/appeals
+
+The moderator appeal queue. **Auth:** Required. **Permission:**
+`MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+
+**Query:** `state` — `open`, `assigned` or `decided` (both `upheld` and
+`overturned` together); omitted defaults to open+assigned together.
+
+**The appellant's own appeal rule:** a moderator viewing this queue never
+sees their OWN filed appeal in the list, even when it matches the requested
+state — the same confidentiality rule reports apply between the reporter
+and the subject. Their own appeal's state is still visible through `GET
+/api/v1/appeals/mine` and the live `appeal_status` frame; only the
+moderation-facing surfaces built for reviewing OTHER people's appeals hide
+it.
+
+---
+
+### GET /api/v1/moderation/appeals/{id}
+
+One appeal, the appealed action, and the action's linked report's public id
+when the action was report-linked. `{id}` is the opaque public id. **Auth:**
+Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+
+The appellant's own appeal rule applies here too: a moderator requesting
+their OWN appeal's detail gets `403 SELF_REVIEW`, not the row — it would
+otherwise show them who is assigned and who decided, neither of which is
+visible on the appeal surfaces any other way. The acting moderator's
+identity is a narrower case: this response would be the first appeal
+surface to show it, but a moderator (holding `MODERATE_MEMBERS`) can
+already see it via the moderation ledger (`GET
+/api/v1/moderation/users/{id}/actions`), so the 403 does not newly hide
+that fact from them — only from a non-moderator appellant, who cannot
+reach the ledger either way.
+
+#### Errors
+
+| Status | Code          | Cause                                     |
+| ------ | ------------- | ----------------------------------------- |
+| 403    | `FORBIDDEN`   | caller lacks `MODERATE_MEMBERS`           |
+| 403    | `SELF_REVIEW` | the caller is this appeal's own appellant |
+| 404    | `NOT_FOUND`   | no such appeal                            |
+
+---
+
+### POST /api/v1/moderation/appeals/{id}/assign
+
+Assign the appeal to the caller. `{id}` is the opaque public id. **Auth:**
+Required. **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+
+**Query:** `force=1` reassigns an appeal already assigned to someone else,
+and only succeeds when the caller outranks the current assignee (the same
+hierarchy rule ban/kick/timeout and the report queue use).
+
+**Two self-review rules apply, and they are different:** the moderator who
+took the appealed action may not assign it to themself **where another
+eligible moderator exists** (decision 8's deciding-moderator rule, applied
+symmetrically to assignment) — on a one-moderator install, where no one
+else is eligible, they may. Separately, and with **no such escape**, the
+appellant themself may never assign their own filed appeal, even if they
+independently hold `MODERATE_MEMBERS` — a governance gap on a
+one-moderator install, not a bug this route papers over.
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                                                                                |
+| ------ | ------------- | ---------------------------------------------------------------------------------------------------- |
+| 403    | `FORBIDDEN`   | caller lacks `MODERATE_MEMBERS`, or `force=1` without outranking                                     |
+| 403    | `SELF_REVIEW` | the caller is this appeal's own appellant, or the acting moderator where another eligible one exists |
+| 404    | `NOT_FOUND`   | no such appeal                                                                                       |
+| 409    | `CONFLICT`    | already assigned to someone else and `force` was not set, or the appeal is no longer open/assigned   |
+
+---
+
+### POST /api/v1/moderation/appeals/{id}/decide
+
+Decide the appeal. `{id}` is the opaque public id. **Auth:** Required.
+**Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
+
+**Two self-review rules apply, and they are different:** the moderator who
+took the appealed action may not decide its appeal **where another eligible
+moderator exists** — eligible meaning a different user holding
+`MODERATE_MEMBERS` or `ADMINISTRATOR`, and not currently banned. On a
+one-moderator install, where no one else is eligible, the acting moderator
+may decide their own appeal, and the audit row records that it was the
+sole-moderator exception. Separately, and with **no such escape**, the
+appellant themself may never decide their own filed appeal, even if they
+independently hold `MODERATE_MEMBERS`.
+
+#### Request
+
+```json
+{ "outcome": "overturned", "note": "at most 2000 runes, no control characters" }
+```
+
+`outcome` is one of `upheld`, `overturned`.
+
+#### Response 204 No Content
+
+**Effect of overturning:** the self-review check, the decision, and the
+kind-specific ledger reversal below all commit in ONE transaction — a
+decider who fails a fresh in-transaction check (their own `MODERATE_MEMBERS`
+bit revoked, or a ban landed, since the request was authorized), or a
+reversal that genuinely fails, leaves NOTHING committed: the appellant is
+never told "overturned" while the sanction it named is still in effect.
+The reversal targets the SPECIFIC appealed action by its ledger id, never
+"whatever is currently active for this target" — appealing an older,
+already-superseded timeout or ban cannot disturb a newer one. A `timeout`
+is lifted; a `ban` is undone, but only if no strictly newer ban exists for
+the same target (ban → unban → re-ban → overturn the first ban leaves the
+target still banned); a `warning` is marked acknowledged, so the notice
+disappears from the target's next connect. A `removal` has nothing to
+restore — the reported content is already gone; overturning a removal
+appeal is a record of the decision only. Upholding changes nothing further.
+Each reversal that actually changes something writes its own audit row
+(`user_untimeout`, `user_unban`, or a warning-acknowledged equivalent),
+actor `0` (a mechanical consequence of the decision, not a second
+moderation action by the human decider), alongside the decision's own
+`appeal_decide` row.
+
+**Voice**, for a live target server-muted by the overturned timeout: lifts
+alongside the ledger reversal above, through
+`ModerationService.FinalizeTimeoutLift` — the same post-commit method a
+moderator's direct `POST .../untimeout` uses. It clears only a mute the
+appealed action itself put in place (session-bound ownership, never a
+different moderator's own `voice_mod_mute`, and never a still-active,
+strictly newer timeout that has since superseded this one — that mute stays
+until ITS OWN issue or lift decides it, and this overturn sends no frame
+for it). A ban carries no voice-mute reconcile of its own; the target's
+live session was already ended when the ban landed.
+
+#### Errors
+
+| Status | Code              | Cause                                                                                                            |
+| ------ | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`     | invalid `outcome`, or `note` too long/unsafe                                                                     |
+| 403    | `FORBIDDEN`       | caller lacks `MODERATE_MEMBERS`, or the decider's own authority no longer holds when re-checked at decision time |
+| 403    | `SELF_REVIEW`     | the caller is this appeal's own appellant, or the acting moderator where another eligible one exists             |
+| 404    | `NOT_FOUND`       | no such appeal                                                                                                   |
+| 409    | `CONFLICT`        | the appeal is already decided or withdrawn                                                                       |
+| 409    | `REVERSAL_FAILED` | overturning hit a genuine error applying the ledger reversal — nothing committed, including the decision itself  |
+
+---
+
 ## Health Check
 
 ### GET /health
@@ -1474,6 +2860,51 @@ unauthenticated endpoint (anti-fingerprinting hardening, C-2).
 }
 ```
 
+### GET /api/v1/server-info
+
+Reports server identity, connection compatibility, registration mode and the
+server-default message retention window before sign-in.
+
+**Auth:** None
+
+| Field                     | Type    | Meaning                                                                                                                                                 |
+| ------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                    | string  | The operator's server name (`server.name`)                                                                                                              |
+| `protocol_epoch`          | integer | The wire-protocol epoch this server speaks. A client whose epoch differs cannot connect                                                                 |
+| `browser_client_enabled`  | boolean | Whether the operator has opted in to browser-client hosting (`server.browser_client_enabled`)                                                           |
+| `registration_mode`       | string  | `closed`, `invite`, `approval`, or `open`. A missing setting defaults to `invite`; an invalid value fails closed to `closed`                            |
+| `retention`               | object  | Server-default message retention only; channel overrides are not disclosed                                                                              |
+| `retention.messages_days` | integer | Server-default message window in days; `0` means kept indefinitely. Attachments are deleted with their messages; there is no separate attachment window |
+
+```json
+{
+  "name": "My OwnCord Server",
+  "protocol_epoch": 1,
+  "browser_client_enabled": false,
+  "registration_mode": "invite",
+  "retention": {
+    "messages_days": 0
+  }
+}
+```
+
+The response is cached server-side for **5 seconds**, so setting changes may
+take that long to appear. A hard settings-read failure returns **500** with a
+generic `INTERNAL_ERROR`; failures are also cached for 5 seconds. Missing,
+malformed or out-of-range retention settings report `0` (keep indefinitely).
+
+**No version is returned**, here or on `/api/v1/info` or `/health`. C-2 keeps
+build identity off every unauthenticated endpoint so a server cannot be matched
+against a CVE list; the protocol epoch does not leak it, because every server on
+a given wire contract reports the same number. The version is available on the
+admin-authenticated `GET /api/v1/diagnostics/connectivity`.
+
+**`browser_client_enabled: true` does not mean a client is being served.** The
+flag reports the operator's setting; the bundle, its route and its own CSP
+arrive in B8. Until then no route is mounted and no asset is served in either
+state — `Server/api/browser_hosting_posture_test.go` proves it by route walk and
+by wire probe.
+
 ---
 
 ## Metrics
@@ -1506,6 +2937,8 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
   "disk_free_mb": 51200.5,
   "db_writer_wait_count": 3,
   "db_writer_wait_seconds": 0.021,
+  "db_reader_wait_count": 11,
+  "db_reader_wait_seconds": 0.004,
   "perm_cache_hits": 5120,
   "perm_cache_misses": 84,
   "event_persister": {
@@ -1530,7 +2963,10 @@ attempts served from the in-memory ring buffer, the persisted event log, and
 full-resync fallback; a rising `full` share means the replay budget is too
 small for observed disconnect gaps. `db_writer_wait_count`/`_seconds`
 accumulate time requests spent queueing for SQLite's single write connection —
-the most direct saturation signal for the write path. `perm_cache_*` report
+the most direct saturation signal for the write path. `db_reader_wait_count`/
+`_seconds` are the same pair for the reader pool (`max_readers` connections);
+on in-memory databases reader and writer are the same handle, so the two
+pairs report one pool. `perm_cache_*` report
 permission-cache effectiveness (a miss is any lookup that repopulated from the
 database). `ws_conn_rejects` counts upgrades refused by the
 `server.max_ws_connections` cap, and `disk_free_mb` is free space on the data
@@ -1561,24 +2997,32 @@ Authorization is two-layered:
    `VIEW_AUDIT_LOG`, `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS`). Banned
    users are rejected here even while their session is still valid.
 2. **Per-route bit.** Route groups then require the specific permission below.
-   `ADMINISTRATOR` bypasses every one of them; owner-only routes gate on role
-   _position_ (`>= 100`) instead of on a bit, so not even `ADMINISTRATOR`
-   substitutes for being the owner.
+   `ADMINISTRATOR` bypasses every one of them; owner-only routes gate on the
+   Owner role itself (`permissions.IsOwner`: role id 1 **or** role position
+   `>= 100`) instead of on a bit, so not even `ADMINISTRATOR` substitutes for
+   being the owner.
 
-| Route                                                                                       | Requires                                                                                     |
-| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `GET /admin/api/me`                                                                         | perimeter only                                                                               |
-| `GET /admin/api/stats`                                                                      | perimeter only                                                                               |
-| `GET /admin/api/users`                                                                      | perimeter only                                                                               |
-| `PATCH /admin/api/users/{id}`                                                               | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
-| `DELETE /admin/api/users/{id}/sessions`                                                     | `KICK_MEMBERS`                                                                               |
-| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions` and `/user-permissions`) | `MANAGE_CHANNELS`                                                                            |
-| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                          | `MANAGE_ROLES`                                                                               |
-| `GET /admin/api/audit-log`                                                                  | `VIEW_AUDIT_LOG`                                                                             |
-| `GET/PATCH /admin/api/settings`                                                             | `MANAGE_SERVER`                                                                              |
-| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                 | `ADMINISTRATOR`                                                                              |
-| `/api/v1/admin/plugins…`                                                                    | `ADMINISTRATOR`                                                                              |
-| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                        | Owner role (position 100)                                                                    |
+| Route                                                                                                           | Requires                                                                                     |
+| --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `GET /admin/api/me`                                                                                             | perimeter only                                                                               |
+| `GET /admin/api/stats`                                                                                          | perimeter only                                                                               |
+| `GET /admin/api/users`                                                                                          | perimeter only                                                                               |
+| `PATCH /admin/api/users/{id}`                                                                                   | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
+| `DELETE /admin/api/users/{id}/sessions`                                                                         | `KICK_MEMBERS`                                                                               |
+| `DELETE /admin/api/users/{id}`                                                                                  | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
+| `POST /admin/api/users/{id}/recovery-credential`                                                                | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`), not a bit — B4-6         |
+| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)        | `MANAGE_CHANNELS`                                                                            |
+| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                              | `MANAGE_ROLES`                                                                               |
+| `GET /admin/api/audit-log`                                                                                      | `VIEW_AUDIT_LOG`                                                                             |
+| `GET/PATCH /admin/api/settings`                                                                                 | `MANAGE_SERVER`                                                                              |
+| `GET /admin/api/config`                                                                                         | `MANAGE_SERVER`                                                                              |
+| `GET /admin/api/retention`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
+| `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                      | `MANAGE_SERVER`                                                                              |
+| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |
+| `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                           | `ADMINISTRATOR`                                                                              |
+| `GET /admin/api/attention`                                                                                      | `ADMINISTRATOR` — RI-07                                                                      |
+| `/api/v1/admin/plugins…`                                                                                        | `ADMINISTRATOR`                                                                              |
+| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                                            | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
 
 Moderation routes additionally enforce the **role hierarchy**: the actor must
 strictly outrank the target (`actor.position > target.position`), and a role
@@ -1589,7 +3033,9 @@ admin. Violations return `403 FORBIDDEN`.
 ### GET /admin/api/me
 
 Describes the calling principal so a panel can hide what the role cannot use.
-Every route still re-checks its bit server-side.
+Every route still re-checks its bit server-side. `server_name` is the live
+`server_name` setting and `version` is the build version, both for the
+panel's top bar. Unauthenticated endpoints never report the version.
 
 #### Response 200 OK
 
@@ -1601,7 +3047,9 @@ Every route still re-checks its bit server-side.
   "role_name": "Moderator",
   "role_position": 60,
   "permissions": 1048575,
-  "is_owner": false
+  "is_owner": false,
+  "server_name": "OwnCord Server",
+  "version": "1.2.0"
 }
 ```
 
@@ -1611,7 +3059,8 @@ Every route still re-checks its bit server-side.
 
 ### GET /admin/api/setup/status
 
-Reports whether initial setup is needed (no users exist yet).
+Reports whether initial setup is needed (the durable `settings.setup_completed`
+flag is unset and no account exists).
 
 **Auth:** None (public). After the first user exists, the response reveals
 nothing about the configuration.
@@ -1624,7 +3073,7 @@ nothing about the configuration.
   "defaults": {
     "server_name": "OwnCord",
     "motd": "Welcome!",
-    "registration_open": false,
+    "registration_mode": "invite",
     "port": 8443,
     "tls_mode": "self-signed",
     "tls_domain": "",
@@ -1643,22 +3092,28 @@ present only while `needs_setup` is `true`.
 ### POST /admin/api/setup
 
 Create the first (Owner) account, optionally applying first-run wizard
-configuration. Only functional while no users exist; afterwards it returns an
-error.
+configuration. Only functional while the durable `settings.setup_completed`
+flag (migration 043) is unset — the flag is set in the same transaction as the
+first owner and never cleared by the server, so erasing every account does not
+reopen the wizard; afterwards the endpoint returns an error.
 
-**Auth:** None (public)
+**Auth:** None (public), plus the one-time setup token
 **Rate limit:** 5 requests/minute per IP
+
+`setup_token` must equal the token the server printed in its start-up output;
+a missing or different value is `403 FORBIDDEN`. The server makes a fresh token each time it starts.
 
 #### Request
 
 ```json
 {
+  "setup_token": "token-from-start-up-output",
   "username": "owner",
   "password": "MyStr0ng!Pass",
   "wizard": {
     "server_name": "My Server",
     "motd": "Welcome!",
-    "registration_open": false,
+    "registration_mode": "invite",
     "port": 8443,
     "tls_mode": "self-signed",
     "tls_domain": "",
@@ -1670,8 +3125,9 @@ error.
 ```
 
 All `wizard` fields are optional; `server_name`, `motd` and
-`registration_open` are stored in the settings table (live), the rest are
-written back to `config.yaml` (consumed at startup).
+`registration_mode` (`closed` / `invite` / `approval` / `open`, default
+`invite`) are stored in the settings table (live), the rest are written back
+to `config.yaml` (consumed at startup).
 
 #### Response 200 OK
 
@@ -1683,7 +3139,8 @@ written back to `config.yaml` (consumed at startup).
   "invite_code": "abc123def",
   "restart_required": false,
   "restart_url": "",
-  "warnings": []
+  "warnings": [],
+  "certificate_fingerprint": "3f:a1:...:9c"
 }
 ```
 
@@ -1692,6 +3149,9 @@ written back to `config.yaml` (consumed at startup).
 after responding, and `restart_url` is where the admin panel will be reachable
 afterwards. `warnings` lists non-fatal problems (e.g. `config.yaml` not
 writable) — the account exists whenever this response is returned.
+`certificate_fingerprint` is as in [`GET /admin/api/stats`](#get-adminapistats),
+and is also omitted when `wizard.tls_mode` differs from the running mode —
+the restarted server serves a different certificate.
 
 ---
 
@@ -1712,36 +3172,130 @@ Aggregate counts for the admin dashboard.
   "channel_count": 9,
   "invite_count": 2,
   "db_size_bytes": 1048576,
-  "online_count": 3
+  "online_count": 3,
+  "certificate_fingerprint": "3f:a1:...:9c"
 }
 ```
+
+`certificate_fingerprint` is the served TLS leaf certificate's SHA-256 in the
+lower-case colon-hex form the desktop client shows before its trust prompt —
+the value users compare out of band. Omitted when there is no statically
+loaded certificate (TLS off, or ACME before its first handshake).
+
+---
+
+### GET /admin/api/attention
+
+The dashboard's attention panel (RI-07): server-side health signals and the
+deduplicated warnings raised from them. The server samples once a minute
+(the free space on the data volume, the SQLite writer pool's cumulative wait,
+reconnect resumes, hub broadcast drops plus send-queue overflow disconnects, the newest
+backup file and each maintenance job's last run); this route only reads that
+state. Thresholds and hysteresis are in
+[server-configuration.md](server-configuration.md#admin-attention-panel-attention).
+Nothing here is exported off the host.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Response 200 OK
+
+```json
+{
+  "evaluated_at": "2026-09-23T12:00:00Z",
+  "signals": [
+    {
+      "id": "disk",
+      "label": "Disk space",
+      "status": "unknown",
+      "detail": "disk space is not measured on this server",
+      "observed_at": "2026-09-23T12:00:00Z"
+    },
+    {
+      "id": "backup",
+      "label": "Last successful backup",
+      "status": "ok",
+      "value": "2026-09-23 03:00 UTC",
+      "threshold": "daily schedule: warn after 36h0m0s",
+      "detail": "9h0m0s old",
+      "observed_at": "2026-09-23T12:00:00Z"
+    }
+  ],
+  "warnings": [
+    {
+      "id": "job:Backups",
+      "severity": "warning",
+      "title": "Maintenance job failing: Backups",
+      "detail": "2 consecutive failed runs · disk I/O error",
+      "action": "Search Server Logs for …",
+      "first_observed": "2026-09-23T11:30:00Z",
+      "last_observed": "2026-09-23T12:00:00Z",
+      "occurrences": 1,
+      "recovered_at": null
+    }
+  ]
+}
+```
+
+- `status` is `ok`, `warning`, `critical` or `unknown`. `unknown` means the
+  server could not take the measurement (an unsupported platform, a failed
+  read, a rate with one sample so far, a job that has not run since start,
+  disk space with `attention.disk_warn_free_mb` and `server.min_free_disk_mb`
+  both `0`).
+  It is never reported as healthy and neither raises nor clears a warning.
+- `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `backup`,
+  and `job:<name>` for each maintenance step.
+- The first disk level is reported at once, and a stopped dispatch loop as
+  soon as it is seen; every other level change, including a rate's first
+  warning, holds for two samples.
+  A rate's `threshold` is its `attention.*` floor until it has learned a
+  baseline, then the higher of the floor and three times that baseline.
+  While learning, `reconnects` raises nothing and `db_writer_wait`
+  and `delivery` raise at the floor; samples above the floor are not learned.
+- A warning's `id` is its signal's id. A signal that keeps failing updates
+  `last_observed`. One that recovers gets `recovered_at` and is listed for 24
+  hours; if it fails again in that window, the same entry reopens and
+  `occurrences` increments. Active warnings are listed first, critical before
+  warning. The state is in memory, so a restart resets warning history;
+  active problems re-raise within the next sample intervals, about two
+  minutes (a rate needs a first sample plus two sustained ones).
+- `evaluated_at` is `null` until the first sample.
+
+#### Response 500
+
+`INTERNAL_ERROR` "attention service unavailable" when the server was built
+without the attention service (partial wirings in tests).
 
 ---
 
 ### GET /admin/api/users
 
-List all users with role and ban state.
+List active users with role and ban state, in id order. The filters apply in
+the query, so they narrow every page, not just the one returned.
 
 **Auth:** Admin perimeter
-**Query params:** `limit` (default 50, min 1), `offset` (default 0)
+**Query params:** `limit` (default 50, min 1, max 500), `offset` (default 0),
+`q` (case-insensitive username substring, at most 64 characters; longer is
+`400`), `role_id` (one role; omitted or `0` means any), `banned=1` (only
+effective bans: a lapsed temporary ban is not listed)
 
 #### Response 200 OK
 
 Array of:
 
-| Field         | Type    | Notes                      |
-| ------------- | ------- | -------------------------- |
-| `id`          | int     |                            |
-| `username`    | string  |                            |
-| `avatar`      | string? | omitted when unset         |
-| `role_id`     | int     |                            |
-| `role_name`   | string  |                            |
-| `status`      | string  | presence status            |
-| `created_at`  | string  |                            |
-| `last_seen`   | string? | omitted when never seen    |
-| `banned`      | bool    |                            |
-| `ban_reason`  | string? | omitted when unset         |
-| `ban_expires` | string? | omitted for permanent bans |
+| Field           | Type    | Notes                                                                                                                                                                                           |
+| --------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`            | int     |                                                                                                                                                                                                 |
+| `username`      | string  |                                                                                                                                                                                                 |
+| `avatar`        | string? | omitted when unset                                                                                                                                                                              |
+| `role_id`       | int     |                                                                                                                                                                                                 |
+| `role_name`     | string  |                                                                                                                                                                                                 |
+| `role_position` | int     | the role's hierarchy position; the server refuses role changes and moderation on a member whose position is at or above the caller's (`/me` `role_position`), and the panel hides those actions |
+| `status`        | string  | presence status                                                                                                                                                                                 |
+| `created_at`    | string  |                                                                                                                                                                                                 |
+| `last_seen`     | string? | omitted when never seen                                                                                                                                                                         |
+| `banned`        | bool    |                                                                                                                                                                                                 |
+| `ban_reason`    | string? | omitted when unset                                                                                                                                                                              |
+| `ban_expires`   | string? | omitted for permanent bans                                                                                                                                                                      |
 
 Password hashes and TOTP secrets are never included.
 
@@ -1794,18 +3348,237 @@ is audited.
 
 ---
 
+### DELETE /admin/api/users/{id}
+
+Erase the target account (B4-9): the same erasure as
+[`DELETE /api/v1/auth/account`](#delete-apiv1authaccount), started by an
+administrator. The hierarchy rule (actor outranks target) is enforced in the
+moderation service, the actor cannot erase its own account here, the last
+admin-class account cannot be erased, and the action is audited as
+`account_deleted` with the actor and the target unlinked to the deletion
+marker's token (B4-10). Connected clients receive `member_ban`.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                                                                             |
+| ------ | ------------- | ------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Invalid id, or the actor's own account                                                            |
+| 403    | `FORBIDDEN`   | Missing bit, the actor does not outrank the target, or the target is the last admin-class account |
+| 404    | `NOT_FOUND`   | User not found                                                                                    |
+
+---
+
+### POST /admin/api/users/{id}/recovery-credential
+
+Owner-assisted recovery (B4-6, BPR-045; owner decision 3). The server owner,
+having verified the person out of band, receives a **15-minute, single-use**
+recovery credential for the account, shown once. The user redeems it at
+[`POST /api/v1/auth/recover`](#post-apiv1authrecover) in the `credential`
+field: the password is replaced, every session revoked and a session issued
+without the second factor. Only an argon2id verifier is stored; issuing again
+replaces the outstanding credential, and a recovery by kit withdraws it.
+Refused for the caller's own account, a banned or pending account and an
+anonymised row; budgeted at 5 issuances per owner and 3 per account per hour.
+Audited as `recovery_assist_issued` with the verification wording only.
+
+**Auth:** Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`); `ADMINISTRATOR` does not substitute
+
+#### Request
+
+`verification` is one of `in_person`, `voice_call`, `video_call`,
+`trusted_contact` — fixed wording, never free text, so nothing about the
+person exists to leak into the audit log.
+
+```json
+{ "verification": "in_person" }
+```
+
+#### Response 201 Created
+
+```json
+{
+  "credential": "K7QF-3M2X-9PLA-ZB5A-QW2E-TT7Y",
+  "expires_at": "2026-09-02T19:15:00Z",
+  "username": "alex",
+  "verification": "in_person"
+}
+```
+
+#### Errors
+
+| Status | Code           | Cause                                                        |
+| ------ | -------------- | ------------------------------------------------------------ |
+| 400    | `BAD_REQUEST`  | Unknown verification wording, or an account this cannot help |
+| 403    | `FORBIDDEN`    | Not the owner                                                |
+| 404    | `NOT_FOUND`    | No such account                                              |
+| 429    | `RATE_LIMITED` | Issuance budget spent, or the admission budget full          |
+
+---
+
 ## Audit Log
+
+### GET /admin/api/retention
+
+The message-retention policy (B4-11): the server window and every channel
+override.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 200 OK
+
+```json
+{
+  "server_days": 30,
+  "revision": "opaque-policy-revision",
+  "channels": [
+    { "channel_id": 4, "days": 0, "updated_by": 1, "updated_at": "2026-09-03 12:00:00" },
+    { "channel_id": 7, "days": 7, "updated_by": 1, "updated_at": "2026-09-03 12:01:00" }
+  ]
+}
+```
+
+`days` on a channel overrides the server window in either direction; `0`
+keeps that channel forever.
+
+---
+
+### GET /admin/api/retention/preview
+
+The owner-facing effect preview: per channel with an effective window, the
+cutoff the next sweep uses and how many messages it would remove.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 200 OK
+
+```json
+[
+  {
+    "channel_id": 1,
+    "channel_name": "general",
+    "days": 30,
+    "source": "server",
+    "cutoff": "2026-08-04T12:00:00Z",
+    "would_delete": 1284
+  }
+]
+```
+
+---
+
+### POST /admin/api/retention/preview
+
+**Auth:** `MANAGE_SERVER`. Computes the effect of a proposed policy without
+saving or deleting anything. Send the `revision` from `GET /retention` and
+exactly one edit:
+
+```json
+{
+  "revision": "opaque-policy-revision",
+  "proposed": { "scope": "server", "days": 30 }
+}
+```
+
+For a channel, use `{"scope":"channel","channel_id":4,"days":7}`. Zero
+means keep forever; `days: null` removes the override and inherits the server
+window, including when removing an indefinite override.
+
+The response contains `proposed`, `revision`, `observed_at` (UTC RFC3339),
+`token`, `would_delete`, `affected_channels`, `protected_pinned`,
+`protected_indefinite`, `protected_direct_messages`, and `channels`. Each
+non-DM channel has `channel_id`, `channel_name`, effective `days`, `source`,
+`cutoff` (finite windows only), `would_delete`, `protected_pinned` and
+`protected_indefinite`. Totals describe the **whole proposed policy**, not
+only the difference from the saved policy. Protected categories do not
+repeat messages: indefinite channels count all messages as indefinite;
+pinned counts cover finite channels. DMs are counted only in the aggregate.
+Pinned messages are excluded regardless of age. A message exactly at the
+cutoff is not due. The same candidate predicate is used by the sweep.
+
+After confirmation, send `X-Retention-Preview: <token>` on the existing
+server `PATCH /settings` or channel `PUT`/`DELETE` below. The token binds the
+exact edit, actor, revision and observation, expires after 15 minutes, and
+is invalid after server restart. It grants no permissions: the current
+bearer/session and `MANAGE_SERVER` permission are resolved again on apply.
+
+A stale revision on preview or apply returns **409** with code
+`STALE_RETENTION_POLICY` and instructions to reload and preview again. Apply
+compares the revision and writes in one transaction; it cannot overwrite a
+concurrent policy edit. Missing, altered, expired or mismatched tokens return
+**400**. All retention write routes require a preview token. A server-window
+PATCH must contain only `retention_days`; apply other settings separately.
+The audit entry records the prior and new policy, preview observation time
+and base revision. Counts may change with new messages, pins and elapsed
+time; the preview does not reserve messages or trigger an immediate sweep.
+
+---
+
+### PUT /admin/api/channels/{id}/retention
+
+Set a channel's retention window. `days` is `0` (keep forever, even under a
+server window) or between 1 and 3650. Refused for direct-message channels.
+Audited as `channel_retention_change` with the old and new window.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Request
+
+```json
+{ "days": 14 }
+```
+
+#### Response 200 OK
+
+The channel's policy row (`channel_id`, `days`, `updated_by`, `updated_at`).
+
+#### Errors
+
+| Status | Code          | Cause                                           |
+| ------ | ------------- | ----------------------------------------------- |
+| 400    | `BAD_REQUEST` | Invalid id or days, or a direct-message channel |
+| 404    | `NOT_FOUND`   | Channel not found                               |
+
+---
+
+### DELETE /admin/api/channels/{id}/retention
+
+Remove a channel's override so the server window applies again. Audited as
+`channel_retention_change`.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 204 No Content
+
+`404 NOT_FOUND` when the channel has no override.
+
+---
 
 ### GET /admin/api/audit-log
 
 Read the audit trail, newest first.
 
 **Auth:** `VIEW_AUDIT_LOG`
-**Query params:** `limit` (default 50, min 1), `offset` (default 0)
+**Query params:** `limit` (default 50, 1–500), `offset` (default 0), and two
+optional filters that narrow the whole log before paging:
+
+- `q`: case-insensitive (ASCII) substring of the actor's name, the action, the
+  target type or the detail. Surrounding whitespace is trimmed; at most 100
+  characters.
+- `action`: one exact action name, such as `channel_delete`; at most 64 bytes.
+
+An over-long or non-UTF-8 `q` or `action` is `400 BAD_REQUEST`.
 
 #### Response 200 OK
 
-Array of:
+On the first page (`offset` 0) the response also carries an
+`X-Audit-Actions` header: a JSON array of the distinct action names in the
+whole log, sorted, at most 200, whatever `q` and `action` are — so the admin
+panel's action filter can offer actions no fetched row contains. The body is
+an array of:
 
 ```json
 {
@@ -1819,6 +3592,72 @@ Array of:
   "created_at": "2026-08-04T12:00:00Z"
 }
 ```
+
+Rows about an erased account (B4-10) carry the deletion marker's token in
+place of the id — `"subject_token"` where the erased account was the target,
+`"actor_token"` where it acted, both on a row naming two erased accounts —
+with `actor_id` and/or `target_id` at `0` and `detail` cleared; the fields
+are omitted on every other row.
+
+---
+
+## Registration Queue
+
+Approval-mode applications (`registration_mode = approval`) wait here. An
+application is a locked account: it holds its username but cannot sign in
+until approved. Denial anonymises the row and locks it for good (the same
+convention account deletion uses, because audit rows reference the id) and
+releases the username. Both decisions are audited (`registration_approve`,
+`registration_deny`).
+
+### GET /admin/api/registrations
+
+**Auth:** `MANAGE_SERVER`
+
+Query: `limit` (1–500, default 50), `offset`.
+
+#### Response 200 OK
+
+```json
+[{ "id": 12, "username": "alex", "created_at": "2026-09-02T10:00:00Z" }]
+```
+
+Oldest application first.
+
+---
+
+### POST /admin/api/registrations/{id}/approve
+
+Unlock the application; the account can sign in from now on.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                  |
+| ------ | ------------- | -------------------------------------- |
+| 400    | `BAD_REQUEST` | Malformed id                           |
+| 404    | `NOT_FOUND`   | No application with that id is pending |
+
+---
+
+### POST /admin/api/registrations/{id}/deny
+
+Refuse the application: the row is anonymised and locked, its username
+released.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                  |
+| ------ | ------------- | -------------------------------------- |
+| 400    | `BAD_REQUEST` | Malformed id                           |
+| 404    | `NOT_FOUND`   | No application with that id is pending |
 
 ---
 
@@ -1834,7 +3673,7 @@ Returns the settings table as a flat string map, e.g.:
 {
   "server_name": "My Server",
   "motd": "Welcome!",
-  "registration_open": "1",
+  "registration_mode": "invite",
   "require_2fa": "0"
 }
 ```
@@ -1853,18 +3692,39 @@ audited as `setting_change`.
 
 A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `max_upload_bytes`, `voice_quality`, `require_2fa`,
-`registration_open`, `backup_schedule`, `backup_retention`. Boolean settings
-accept `1/0/true/false` and are normalized to `1`/`0`.
+`registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`.
+Boolean settings
+accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
+accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
+lower-case); a change of mode is audited as `registration_mode_change`
+naming the old and new mode, and while `require_2fa` is on the mode cannot
+leave `closed`.
 
-`backup_schedule` (`off`/`daily`/`weekly`) and `backup_retention` (days) are
-enforced by the server's maintenance loop — see the Backup Strategy section
-of `docs/deployment.md` for the exact semantics.
+`backup_schedule` (`off`/`daily`/`weekly`) and `backup_retention` (days,
+`0` to keep backups forever or `7`–`3650`) decide the owner-only backup
+policy (BPR-072) and are enforced by the server's maintenance loop — see the
+Backup Strategy section of `docs/deployment.md` for the exact semantics.
+Because they control which of the owner's backups survive, they are the one
+pair of settings a PATCH may not change without the **Owner** role: a request
+carrying either key from a non-owner principal is refused with `403 FORBIDDEN`
+even though the rest of this route only needs `MANAGE_SERVER`. `ADMINISTRATOR`
+does not bypass it. Retention pruning never removes the `pre_restore_*`
+safety copies.
+
+`retention_days` (B4-11) is the server-wide message-retention window: `0`
+(the default) keeps everything, otherwise between 1 and 3650 days; a change
+is audited as `retention_policy_change` naming the old and new value. The
+maintenance loop removes past-window messages and their attachments per
+channel (pinned messages exempt, direct messages never in scope); a
+per-channel override in either direction is
+[`PUT /admin/api/channels/{id}/retention`](#put-adminapichannelsidretention).
 
 Three keys are accepted and stored but have **no runtime effect**:
 `server_icon` (reserved for a future release), `max_upload_bytes` (the real
 limit is `upload.max_size_mb` in config.yaml, applied at startup), and
 `voice_quality` (the real setting is `voice.quality` in config.yaml). The
-admin panel shows them read-only for this reason.
+admin panel does not show them; it reads the values in effect from
+[`GET /admin/api/config`](#get-adminapiconfig).
 
 Enabling `require_2fa` is refused unless registration is closed **and** every
 user has TOTP enabled.
@@ -1873,9 +3733,32 @@ user has TOTP enabled.
 
 #### Errors
 
-| Status | Code          | Cause                                                                |
-| ------ | ------------- | -------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | Unknown key, invalid boolean, or `require_2fa` preconditions not met |
+| Status | Code          | Cause                                                                                     |
+| ------ | ------------- | ----------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Unknown key, invalid boolean or registration mode, or `require_2fa` preconditions not met |
+
+---
+
+### GET /admin/api/config
+
+**Auth:** `MANAGE_SERVER`
+
+The config.yaml values the admin panel's Settings page shows as read-only
+facts, taken from the configuration the server booted with — so an edit to
+config.yaml shows here only after a restart, which is also when it takes
+effect.
+
+#### Response 200 OK
+
+```json
+{ "upload_max_size_mb": 100, "voice_quality": "medium" }
+```
+
+#### Errors
+
+| Status | Code                 | Cause                                                     |
+| ------ | -------------------- | --------------------------------------------------------- |
+| 503    | `CONFIG_UNAVAILABLE` | The admin API was built without the running configuration |
 
 ---
 
@@ -2196,12 +4079,12 @@ Roles ordered by position descending, each with its member count.
 }
 ```
 
-| Field         | Type    | Required | Description                                    |
-| ------------- | ------- | -------- | ---------------------------------------------- |
-| `name`        | string  | Yes      | 1–32 characters, unique case-insensitively     |
-| `color`       | string  | No       | `#rgb`/`#rrggbb`, or `""` for none             |
-| `permissions` | integer | No       | Bitfield; defaults to `0`                      |
-| `position`    | integer | No       | Defaults to one below the actor's own position |
+| Field         | Type    | Required | Description                                                           |
+| ------------- | ------- | -------- | --------------------------------------------------------------------- |
+| `name`        | string  | Yes      | 1–32 characters, unique case-insensitively                            |
+| `color`       | string  | No       | `#rgb`/`#rrggbb`, or `""` for none                                    |
+| `permissions` | integer | No       | Bitfield; defaults to `0`                                             |
+| `position`    | integer | No       | Must be free; defaults to the highest free slot below the actor's own |
 
 #### Response 201 Created
 
@@ -2212,7 +4095,7 @@ The created role (`id`, `name`, `color`, `permissions`, `position`,
 
 | Status | Code          | When                                                                                |
 | ------ | ------------- | ----------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | Missing/blank/over-long name, duplicate name, bad color, negative position          |
+| 400    | `BAD_REQUEST` | Missing/blank/over-long name, duplicate name, bad color, negative or taken position |
 | 403    | `FORBIDDEN`   | Missing `MANAGE_ROLES`, position at or above your own, or a permission bit you lack |
 
 ### PATCH /admin/api/roles/{id}
@@ -2287,8 +4170,8 @@ refused body writes nothing at all:
 | `voice_max_users` | 0…99    | Voice capacity; 0 = unlimited                             |
 | `voice_max_video` | 0…99    | Simultaneous cameras/screen shares; 0 = unlimited         |
 
-`nsfw` is a bool and is stored, broadcast and audited only — the server applies
-no content behaviour to a flagged channel (see `GET /api/v1/channels`). The
+`nsfw` is a bool; the server stores, broadcasts and audits it, and enforces it
+on every content path (see "NSFW Acknowledgement"). The
 audit detail names the transition: `updated #foo (marked NSFW)` /
 `(unmarked NSFW)`, and plain `updated #foo` when the flag did not move.
 
@@ -2422,6 +4305,125 @@ Content`; deleting a row that does not exist is a no-op, not a `404`. Same
 cache/fan-out behavior as the writes; audits as `channel_perms_clear` /
 `channel_user_perms_clear`.
 
+### GET /admin/api/channels/{id}/access/explain
+
+Explain one member's effective access in a channel (RI-06). Query:
+`user_id` and `action`, both required. Actions map one-to-one onto the
+server's authorization predicates:
+
+| `action`         | Predicate                                                 |
+| ---------------- | --------------------------------------------------------- |
+| `view_channel`   | `CanViewChannel`                                          |
+| `read_content`   | `CanReadContent` (adds NSFW consent)                      |
+| `send_message`   | `CanSendMessage`                                          |
+| `add_reaction`   | `CanAddReaction`                                          |
+| `join_voice`     | `CanJoinVoice`                                            |
+| `moderate_voice` | `AuthorizeVoiceModerator` (base `MUTE_MEMBERS` + channel) |
+
+The decision is the predicate's own verdict over the member's live state —
+role bits, both override layers, active timeout and NSFW acknowledgement,
+never the 30-second permission cache. An effectively banned account, or one
+whose registration is not `active`, holds no session, so every action is
+denied with that reason. Nothing here creates or uses a session for the
+member. `bits` traces each bit the predicate consulted through the layers
+(`""` means the layer has no opinion). It is omitted when
+`administrator_bypass` is true: an Administrator's decision consults no bit
+and no override layer.
+
+Like editing a member's override, explaining one is refused for a member
+whose role ranks at or above the caller's own, unless the caller holds
+`ADMINISTRATOR`: the answer discloses that member's ban, registration,
+timeout and NSFW consent state.
+
+```json
+{
+  "user_id": 12,
+  "username": "alice",
+  "role_id": 4,
+  "role_name": "Member",
+  "channel_id": 4,
+  "restrictions": {
+    "banned": false,
+    "registration_status": "active",
+    "timed_out": true,
+    "nsfw_acknowledged": false,
+    "channel_archived": false,
+    "channel_nsfw": false,
+    "channel_type": "text"
+  },
+  "decisions": [
+    {
+      "action": "send_message",
+      "allowed": false,
+      "reason": "user is timed out",
+      "administrator_bypass": false,
+      "bits": [
+        {
+          "bit": "SEND_MESSAGES",
+          "base": true,
+          "role_override": "deny",
+          "user_override": "allow",
+          "effective": true
+        },
+        {
+          "bit": "READ_MESSAGES",
+          "base": true,
+          "role_override": "",
+          "user_override": "",
+          "effective": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+Audited as `permission_explain`, target `user`.
+
+### POST /admin/api/channels/{id}/access/preview
+
+Evaluate a proposed override before saving it. Body: exactly one of `role_id`
+(role layer) or `user_id` (member layer), plus the `allow`/`deny` masks the
+matching `PUT` would take (clamped the same way). Every member the override
+could reach — each holder of the role, or the one member — is evaluated for
+every action with the current and the proposed layer, through the same
+predicates as `explain`; `members` lists only those whose decision changes.
+Nothing is written. A `user_id` preview follows the same rank rule as
+`explain`. A `role_id` preview is refused for a role at or above the caller's
+own rank, with no Administrator bypass, as saving that role's override is. The
+save path still applies its own escalation and hierarchy checks.
+
+```json
+{
+  "channel_id": 4,
+  "allow": 0,
+  "deny": 2,
+  "evaluated": 3,
+  "members": [
+    {
+      "user_id": 12,
+      "username": "alice",
+      "changes": [
+        {
+          "action": "view_channel",
+          "before": true,
+          "after": false,
+          "after_reason": "permission denied: missing READ_MESSAGES"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Audited as `permission_preview`, target `channel`.
+
+| Status | Code          | When                                                                      |
+| ------ | ------------- | ------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Bad `user_id`, missing or unknown `action`, or not exactly one of the ids |
+| 403    | `FORBIDDEN`   | Missing `MANAGE_CHANNELS`, or the member or role ranks at or above you    |
+| 404    | `NOT_FOUND`   | Unknown or DM channel, unknown role or user                               |
+
 ---
 
 ## Plugin Administration
@@ -2512,7 +4514,7 @@ Check whether the LiveKit server is reachable.
 
 All requests to `/livekit/*` are reverse-proxied to the LiveKit server URL. The `/livekit` prefix is stripped before forwarding. This allows the client to connect to LiveKit through OwnCord's HTTPS server, avoiding mixed-content blocks.
 
-**Auth:** None (LiveKit handles its own JWT-based auth)
+**Auth:** None (LiveKit handles its own JWT-based auth). The JWT arrives as the `access_token` query parameter (JS SDK) or an `Authorization: Bearer` header (Rust SDK, the Linux client's native voice); on a WebSocket upgrade the proxy forwards the query string, the `Sec-WebSocket-Protocol` values and `Authorization`, and no other request header.
 **Rate limit:** 30 requests/minute per IP
 
 ---
@@ -2543,10 +4545,66 @@ Returns connectivity diagnostics for debugging voice/network issues.
   },
   "client": {
     "remote_addr": "192.168.1.100",
-    "is_private_network": true
+    "is_private_network": true,
+    "address_class": "private"
   }
 }
 ```
+
+`client.address_class` is one of `loopback`, `private`, `cgnat`, `link_local`,
+`unique_local`, `global` or `other`. It exists because `is_private_network`
+alone cannot distinguish a LAN host from a tailnet peer from a carrier-NAT
+client — `cgnat` covers `100.64.0.0/10`, which is both the carrier-NAT range
+and the range Tailscale allocates from.
+
+#### The `reachability` block (optional)
+
+When `server.reachability_report_enabled` is set, the response carries an
+extra `reachability` object. It is **off by default**: it enumerates every
+address on every interface, which is the most topology-revealing part of an
+endpoint that is already admin-only for that reason. With the flag off the key
+is absent rather than empty, so "switched off" cannot be misread as "nothing to
+report".
+
+```json
+{
+  "reachability": {
+    "listen_port": 8443,
+    "binds_all_interfaces": true,
+    "local_addresses": [
+      { "addr": "127.0.0.1", "kind": "loopback" },
+      { "addr": "192.168.1.50", "kind": "private" }
+    ],
+    "has_global_address": false,
+    "cgnat_range_present": false,
+    "required_ports": [
+      { "port": "8443", "protocol": "tcp", "purpose": "OwnCord HTTPS, REST API and WebSocket" }
+    ],
+    "tls_mode": "self_signed",
+    "public_ip_https_supported": false,
+    "public_ip_https_reason": "This build cannot obtain a certificate for a bare IP address: ...",
+    "undeterminable": [
+      {
+        "fact": "Whether TCP port 8443 is reachable from the internet",
+        "why": "Proving inbound reachability needs something outside your network to connect back in. ...",
+        "how_to_check": "Test from a network that is not your own — a phone on mobile data works — ..."
+      }
+    ]
+  }
+}
+```
+
+The `undeterminable` list is the point of the block, and it is never empty —
+not even on a host where everything looks correct. **The server performs no
+network probe of any kind**: it opens no socket and resolves no name, so it
+cannot and does not claim to know whether anything outside can reach it.
+Blocked ports, CGNAT, hairpin NAT and a changing public IP are all invisible
+from inside the network, and each entry names the check the owner runs
+instead. `cgnat_range_present` is reported with a `cgnat_note` giving both
+explanations for a `100.64.0.0/10` address, never a verdict.
+
+See [docs/port-forwarding.md](port-forwarding.md) for the operator-facing
+version of the same material.
 
 ---
 
@@ -2560,10 +4618,10 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Path Parameters
 
-| Param             | Type   | Description                                                                                                                                                                                                                                                                                          |
-| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact (e.g., `linux-x86_64-deb`) get 204. |
-| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                      |
+| Param             | Type   | Description                                                                                                                                                                                                                                                                                                                  |
+| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `windows-aarch64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact (e.g., `linux-x86_64-deb`) get 204. |
+| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                                              |
 
 #### Response 200 OK (update available)
 
@@ -2583,7 +4641,12 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Response 204 No Content
 
-Client is already up-to-date, or no client build is published for `target`.
+Client is already up-to-date, no client build is published for `target`, or
+the newest release speaks a **newer protocol epoch than this server** (read
+from the release's signed server-update manifest, `protocol_epoch`; a manifest
+that fails signature verification is withheld the same way). The server
+upgrades first, then its clients are offered the matching release — see
+`docs/protocol.md`, Compatibility.
 
 ---
 

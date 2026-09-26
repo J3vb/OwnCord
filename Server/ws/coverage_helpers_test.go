@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS voice_states (
     camera      INTEGER NOT NULL DEFAULT 0,
     screenshare INTEGER NOT NULL DEFAULT 0,
     server_muted    INTEGER NOT NULL DEFAULT 0,
+    server_muted_by INTEGER,
     server_deafened INTEGER NOT NULL DEFAULT 0,
     joined_at   TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -42,6 +43,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
     target_type TEXT    NOT NULL DEFAULT '',
     target_id   INTEGER NOT NULL DEFAULT 0,
     detail      TEXT    NOT NULL DEFAULT '',
+    subject_token TEXT,
+    actor_token TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -82,9 +85,8 @@ func newCoverageHub(t *testing.T) (*ws.Hub, *db.DB) {
 	limiter := auth.NewRateLimiter()
 	st := database
 	svc := service.New(st, limiter)
-	hub := ws.NewHub(database, limiter, svc)
 
-	// Inject a test LiveKit client so voice_join passes the livekit!=nil guard.
+	// A test LiveKit client so voice_join passes the livekit!=nil guard.
 	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
 		LiveKitAPIKey:    "test-api-key-12345",
 		LiveKitAPISecret: "test-api-secret-67890abcdef",
@@ -93,7 +95,7 @@ func newCoverageHub(t *testing.T) (*ws.Hub, *db.DB) {
 	if err != nil {
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
-	hub.SetLiveKit(lk)
+	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, Services: svc, LiveKit: lk})
 
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })

@@ -1,0 +1,467 @@
+// Package app owns the server process lifecycle: it opens and migrates the
+// database, starts telemetry, plugins, the HTTP router and hub, event
+// persistence, the audit writer, the maintenance workers, ACME and the
+// listener, serves until a shutdown or restart signal, and tears every stage
+// back down through one composite close. main keeps only the CLI dispatch,
+// the log sinks and the restart handoff (B3-3).
+package app
+
+import (
+	"context"
+	"crypto/rand"
+	"fmt"
+	"io"
+	stdlog "log"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/service"
+)
+
+// shutdownBudget is the total time Close is given, and the same 30 seconds
+// the operator is told about in the "draining connections" log line. The
+// per-stage timeouts inside the individual stop steps are budgets of their
+// own and are unchanged by the move.
+const shutdownBudget = 30 * time.Second
+
+// stage is one start step, in start order. The name is what a failure is
+// reported as, so an operator reading `starting audit-writer: ...` knows
+// exactly how far the boot got — and it is the key the failure-injection
+// test selects on.
+type stage struct {
+	name  string
+	start func() error
+}
+
+// stages is the start sequence. Close walks the steps these register in
+// reverse, so this list IS the shutdown order read backwards. Three orderings
+// here are load-bearing rather than incidental:
+//
+//   - the database opens before the audit writer and event persistence start,
+//     so both stop before the handle closes;
+//   - ACME and the HTTP server start AFTER the maintenance loop, so the
+//     reverse walk drains in-flight HTTP handlers (whose broadcasts must
+//     still reach a live hub) before anything else is stopped — which is the
+//     order run()'s explicit shutdown call used to impose by hand;
+//   - signals are armed BEFORE the http stage, whose bind retries for about
+//     ten seconds while the port is in use: a SIGINT/SIGTERM in that window
+//     must drain through Close, not kill the process with the LiveKit child
+//     and the audit and event queues already running.
+func (a *App) stages() []stage {
+	return []stage{
+		{"data-dir", a.startDataDir},
+		{"tls", a.startTLS},
+		{"database", a.startDatabase},
+		{"migrate", a.startMigrate},
+		{"erasure-markers", a.startErasureMarkers},
+		{"push-vapid-key", a.startPushVAPIDKey},
+		{"telemetry", a.startTelemetry},
+		{"plugins", a.startPlugins},
+		{"hub", a.startHub},
+		{"router", a.startRouter},
+		{"event-persistence", a.startEventPersistence},
+		{"audit-writer", a.startAuditWriter},
+		{"maintenance", a.startMaintenance},
+		{"acme", a.startACME},
+		{"signals", a.startSignals},
+		{"http", a.startHTTP},
+	}
+}
+
+// Run starts every stage in order, serves until the listener fails or a
+// shutdown or restart signal arrives, and then closes every started stage in
+// the reverse order. Close runs on EVERY return path — a failed start, a
+// serve error and a clean shutdown alike — which is what keeps a supervised
+// LiveKit process from being orphaned by an early return (OC-0027).
+//
+// A start or serve error is what Run reports; a teardown error surfaces only
+// when there is no earlier one to report.
+func (a *App) Run(ctx context.Context) (err error) {
+	a.rootCtx = ctx
+	// WithoutCancel: bgCtx takes ctx's values but NOT its cancellation. The
+	// event persister, the audit writer and the maintenance loop run under
+	// it, and Close drains in-flight HTTP handlers FIRST precisely so their
+	// broadcasts and audit records still reach live consumers — inheriting
+	// cancellation would kill all three the instant a caller cancelled,
+	// before that drain, and would make caller-context shutdown behave
+	// differently from the SIGTERM and restart paths, which cancel only the
+	// serve context. Cancelling ctx stops SERVING (serveCtx descends from it
+	// in startSignals); when the background work stops is Close's decision.
+	bgCtx, bgCancel := context.WithCancel(context.WithoutCancel(ctx))
+	// The deferred cancel is only a hard backstop for an App whose Close is
+	// somehow never reached; the ordered teardown cancels bgCtx through the
+	// first-registered close step, which the reverse walk runs LAST — after
+	// the persistence and maintenance steps have joined their goroutines.
+	defer bgCancel()
+	a.bgCtx, a.bgCancel = bgCtx, bgCancel
+	a.onClose("background-context", func(context.Context) error {
+		bgCancel()
+		return nil
+	})
+
+	defer func() {
+		// WithoutCancel, not Background: teardown must run its full budget
+		// even when the caller's context is what ended the server, while
+		// still carrying whatever values that context holds.
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownBudget)
+		defer cancel()
+		if closeErr := a.Close(closeCtx); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
+
+	if startErr := a.start(); startErr != nil {
+		return startErr
+	}
+	return a.serve()
+}
+
+// start brings the stages up in order, stopping at the first failure — the
+// stages that did come up are already registered with Close, which Run runs
+// regardless.
+func (a *App) start() error {
+	for _, st := range a.stages() {
+		if st.name == a.failStage {
+			return fmt.Errorf("starting %s: %w", st.name, errStageInjected)
+		}
+		if err := st.start(); err != nil {
+			return fmt.Errorf("starting %s: %w", st.name, err)
+		}
+	}
+	// Only once every stage is up is the previous binary safe to remove. It
+	// used to be the FIRST act of start(), before the data-dir, TLS, database,
+	// migrate and later stages — so a migration error (or any other start
+	// failure) left an operator with no chatserver.old to roll back to, and
+	// under systemd Restart=always the unit has nothing local to fall back on
+	// (REL-01). Deferring it past the stages preserves the documented rollback
+	// copy through every start-up refusal; the schema-ahead check in
+	// db.MigrateFS stops that copy from then booting on a newer schema.
+	removeOldBinaryFn(a.log)
+	return nil
+}
+
+// serve blocks until the listener fails or the signal context is cancelled.
+// The graceful shutdown that used to follow it inline is now the http stage's
+// close step, so it happens on the error path too.
+func (a *App) serve() error {
+	return serveAndWait(a.serveCtx, a.log, a.deps.Restart, a.srv, a.ln, a.tlsCfg, a.addr, a.deps.Version)
+}
+
+// startDataDir creates the configured data directory and warns about the
+// volumes the server writes to. Nothing to close.
+func (a *App) startDataDir() error {
+	return prepareDataDir(a.log, a.cfg)
+}
+
+// startTLS resolves the serving certificate (and, in acme mode, the HTTP-01
+// challenge handler the acme stage serves) and prints the startup banner
+// above the init logs, as run() did. Nothing to close.
+func (a *App) startTLS() error {
+	tlsCfg := a.cfg.TLS
+	tlsCfg.HTTPSPort = a.cfg.Server.Port
+	tlsResult, err := auth.LoadOrGenerate(tlsCfg)
+	if err != nil {
+		return fmt.Errorf("configuring TLS: %w", err)
+	}
+	a.tlsCfg = tlsResult.TLSConfig
+	a.httpHandler = tlsResult.HTTPHandler
+	// The admin dashboard and the setup wizard's finish step surface the same
+	// fingerprint the banner prints, so an operator does not have to watch
+	// stderr. Set before the router mounts the admin handler.
+	admin.SetLeafFingerprint(tlsResult.Fingerprint)
+
+	printBanner(a.cfg, a.deps.Version, a.tlsCfg != nil, tlsResult.Fingerprint)
+	return nil
+}
+
+// startDatabase opens the handle and registers its close BEFORE migrating,
+// so a migration failure still releases it and its process lock.
+func (a *App) startDatabase() error {
+	database, err := openDatabase(a.cfg)
+	if err != nil {
+		return err
+	}
+	a.database = database
+	a.onClose("database", func(context.Context) error { return database.Close() })
+	return nil
+}
+
+// startMigrate runs the migrations and clears state left by a previous run.
+func (a *App) startMigrate() error {
+	return initDatabase(a.log, a.cfg, a.database, a.deps.Restart)
+}
+
+// startErasureMarkers opens the deletion-marker file and replays it against
+// the migrated database before anything can serve (B4-10): what a restored
+// backup brought back is erased again here. Its close releases the file.
+func (a *App) startErasureMarkers() error {
+	markers, err := openMarkers(context.Background(), a.log, a.cfg, a.database)
+	if err != nil {
+		return err
+	}
+	a.markers = markers
+	a.onClose("erasure-markers", func(context.Context) error { return markers.Close() })
+	return nil
+}
+
+// startPushVAPIDKey loads (or generates, on a confirmed absence) the Web
+// Push VAPID key beside totp.key and erasure.key, unconditionally — B5-4:
+// regardless of push.enabled, because the file is cheap and the maintenance
+// sweep needs the key id to recognise (and remove) rows a rotation orphaned
+// even while the feature is off. A load failure is fatal at start-up, same
+// as the erasure key's (startErasureMarkers, mirrored here). startHub
+// installs the loaded key on svc.Push once the service layer exists.
+func (a *App) startPushVAPIDKey() error {
+	key, err := auth.LoadOrGeneratePushVAPIDKey(a.cfg.Server.DataDir)
+	if err != nil {
+		return fmt.Errorf("push VAPID key: %w", err)
+	}
+	a.pushVAPIDKey = key
+	return nil
+}
+
+// startTelemetry initialises OpenTelemetry. Its shutdown is bounded by its
+// own 5s budget inside the returned step.
+func (a *App) startTelemetry() error {
+	stop := initTelemetry(a.log, a.cfg)
+	a.onClose("telemetry", func(context.Context) error {
+		stop()
+		return nil
+	})
+	return nil
+}
+
+// startPlugins constructs the plugin runtime before the router, so the router
+// can wire the live registry into the plugin admin handler. A nil registry is
+// the disabled case and has nothing to close.
+func (a *App) startPlugins() error {
+	a.plugins = initPlugins(a.bgCtx, a.log, a.cfg, a.database)
+	a.onClose("plugins", func(ctx context.Context) error {
+		closePlugins(ctx, a.plugins)
+		return nil
+	})
+	return nil
+}
+
+// pushDispatchEnabled is the one gate the composition root checks before
+// constructing a PushDispatcher and installing it on MessageService: BOTH
+// push.enabled and push.dispatch_enabled must be true (plan decision 9,
+// HP-5 scorecard Question 6, item 1). Storage on with dispatch off — the
+// B5-4 state, and what an upgraded install starts in — must never dispatch,
+// which is why this is a named function rather than an inline condition:
+// TestPushDispatchGate_RequiresBothKeys pins the "&&", not just its effect.
+func pushDispatchEnabled(cfg *config.Config) bool {
+	return cfg.Push.Enabled && cfg.Push.DispatchEnabled
+}
+
+// startHub builds the hub and the collaborators it shares with the router
+// and starts the dispatch goroutine — B3-3 moved all of that out of
+// api.NewRouter so the hub has exactly one owner, and B3-4 moved the pre-Run
+// wiring into ws.HubOptions, so an incomplete hub fails this start step
+// instead of panicking later.
+//
+// Its close step is stopHub: GracefulStopContext, which calls StopLiveKit,
+// the sole caller of LiveKitProcess.Stop, then a join on the dispatch
+// goroutine. gracefulOnce makes it idempotent alongside the stop the http
+// step performs on the normal path, so it is reached on every return from Run
+// and a supervised livekit-server process is never orphaned (OC-0027).
+func (a *App) startHub() error {
+	rt, err := StartRuntime(a.cfg, a.database, a.plugins)
+	if err != nil {
+		return err
+	}
+	a.runtime = rt
+	a.hub = a.runtime.Hub
+	// The emergency restart path must stop LiveKit even when an earlier
+	// shutdown step wedges before the hub's closer can run.
+	a.deps.Restart.setCompanionStop(a.hub.StopLiveKit)
+	// The routes' erasures record markers in the file start-up just replayed.
+	if rt.Services != nil && rt.Services.Erasure != nil {
+		rt.Services.Erasure.SetMarkers(a.markers)
+	}
+	if rt.Services != nil && rt.Services.Retention != nil {
+		rt.Services.Retention.SetMarkers(a.markers)
+	}
+	// The VAPID key startPushVAPIDKey loaded earlier, installed once the
+	// service layer exists (B5-4). SetSubscriptionTTL(0) falls back to the
+	// PushService default, so a partial wiring with no push-vapid-key stage
+	// (a direct StartRuntime call in a test) still leaves a usable default.
+	if rt.Services != nil && rt.Services.Push != nil {
+		rt.Services.Push.SetVAPIDKey(a.pushVAPIDKey)
+		rt.Services.Push.SetSubscriptionTTL(time.Duration(a.cfg.Push.SubscriptionTTLDays) * 24 * time.Hour)
+		rt.Services.Push.SetContact(a.cfg.Push.Contact)
+	}
+	// Web Push dispatch (B5-11, behind HP-5): its own second opt-in on top
+	// of push.enabled (plan decision 9) — an operator who enabled storage
+	// in the B5-4 era does not acquire dispatch by upgrade. Installed on
+	// MessageService only when both keys are true; SetPushNotifier is never
+	// called otherwise, so the hook stays the nil PushNotifier it defaults
+	// to (TestPushDispatch_OffByDefaultSendsNothing).
+	if pushDispatchEnabled(a.cfg) &&
+		rt.Services != nil && rt.Services.Messages != nil && rt.Services.Push != nil && rt.Services.Permissions != nil {
+		dispatcher := service.NewPushDispatcher(a.database, rt.Services.Permissions, rt.Services.Push, a.hub.IsUserConnected, nil)
+		rt.Services.Messages.SetPushNotifier(dispatcher)
+		rt.Services.PushDispatch = dispatcher
+	}
+	a.onClose("hub", func(ctx context.Context) error {
+		return stopHub(ctx, a.runtime.Hub)
+	})
+	return nil
+}
+
+// dispatchHub is the slice of *ws.Hub the hub close step drives.
+type dispatchHub interface {
+	GracefulStopContext(ctx context.Context)
+	Done() <-chan struct{}
+}
+
+// stopHub is the hub close step: GracefulStopContext, then wait for the
+// dispatch goroutine itself to exit. GracefulStopContext only signals the
+// loop, and on an early start failure the goroutine StartRuntime spawned may
+// not even have been scheduled yet — without the join, Run returned with the
+// loop still alive and Close went on to release what it reads.
+func stopHub(ctx context.Context, hub dispatchHub) error {
+	hub.GracefulStopContext(ctx)
+	select {
+	case <-hub.Done():
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("hub dispatch did not exit: %w", ctx.Err())
+	}
+}
+
+// startRouter mounts the HTTP handler over the already-built collaborators.
+// Its close step stops the router's own background goroutine (rate-limiter
+// cleanup); the hub it serves is stopped by the step above.
+func (a *App) startRouter() error {
+	a.runtime.SetupToken = rand.Text()
+	router, cleanup := api.NewRouter(a.cfg, a.database, a.deps.Version, a.deps.LogBuf, a.plugins, a.runtime)
+	a.router = router
+	// Print the token only while setup is still open. A failed check prints
+	// it too: the console is the host's own, and a silent start would leave
+	// the owner with no way through the wizard.
+	if svc := a.runtime.Services; svc != nil && svc.Setup != nil {
+		if open, err := svc.Setup.NeedsSetup(a.rootCtx); open || err != nil {
+			printSetupToken(a.runtime.SetupToken)
+		}
+	}
+	a.onClose("router", func(context.Context) error {
+		cleanup()
+		return nil
+	})
+	return nil
+}
+
+// startEventPersistence seeds the hub's replay state and, when persistence is
+// enabled, starts the persister and pruner. Its stop cancels bgCtx and joins
+// the pruner, which the reverse walk runs before database.Close so no prune
+// is mid-query against a closing pool.
+func (a *App) startEventPersistence() error {
+	a.persister, a.prunerDone = startEventPersister(a.bgCtx, a.log, a.cfg, a.hub, a.database)
+	a.onClose("event-persistence", func(ctx context.Context) error {
+		stopEventPersister(ctx, a.log, a.bgCancel, a.persister, a.prunerDone)
+		return nil
+	})
+	return nil
+}
+
+// startAuditWriter moves audit-log INSERTs off the request path. It starts
+// after the database opens, so the reverse walk drains its queue while the
+// handle is still live.
+func (a *App) startAuditWriter() error {
+	a.auditWriter = newAuditWriter(a.bgCtx, a.database)
+	a.onClose("audit-writer", func(ctx context.Context) error {
+		stopAuditWriter(ctx, a.auditWriter)
+		return nil
+	})
+	return nil
+}
+
+// startMaintenance starts the periodic purge of expired sessions, scheduled
+// backups and orphaned attachments. Its stop joins the loop, bounded, so an
+// in-flight tick (which can hold the writer — scheduled backups run VACUUM
+// INTO) is not still using the database when the handle closes.
+func (a *App) startMaintenance() error {
+	stop := startMaintenanceLoop(a.bgCtx, a.log, a.cfg, a.database, a.runtime.Services)
+	a.onClose("maintenance", func(context.Context) error {
+		stop()
+		return nil
+	})
+	return nil
+}
+
+// startACME serves the HTTP-01 challenge and the HTTP→HTTPS redirect on :80
+// when Let's Encrypt is configured, and is a no-op otherwise. It has no close
+// step of its own: the http step below shuts both servers down together, in
+// the order the drain requires.
+func (a *App) startACME() error {
+	a.acmeSrv = startACMEServer(a.log, a.httpHandler)
+	return nil
+}
+
+// startHTTP builds the main server and registers the ordered graceful
+// shutdown — ACME, then in-flight HTTP handlers, then the hub. It starts last
+// of the real stages so that shutdown is the FIRST thing the reverse walk
+// does: in-flight handlers' broadcasts must still reach a live hub and event
+// persister, or the frames vanish from the replay store across the restart.
+func (a *App) startHTTP() error {
+	a.addr = fmt.Sprintf(":%d", a.cfg.Server.Port)
+	a.srv = &http.Server{
+		Addr:         a.addr,
+		Handler:      a.router,
+		TLSConfig:    a.tlsCfg,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+		ErrorLog:     stdlog.New(io.Discard, "", 0), // suppress TLS handshake noise
+	}
+	// Shutdown closes only the listeners Serve has taken, so a later stage
+	// failing before serve() would otherwise leave the port bound. Registered
+	// before the http step so the reverse walk runs it after Shutdown.
+	a.onClose("listener", func(context.Context) error {
+		if a.ln != nil {
+			_ = a.ln.Close()
+		}
+		return nil
+	})
+	a.onClose("http", func(ctx context.Context) error {
+		return shutdownServers(ctx, a.log, a.srv, a.acmeSrv, a.hub)
+	})
+	// Bind here, not in serve(): a port that cannot be bound must fail start()
+	// before the previous binary is removed (REL-01).
+	return serveWithBindRetry(a.log, "server", func() (err error) {
+		a.ln, err = net.Listen("tcp", a.addr)
+		return err
+	})
+}
+
+// startSignals arms the shutdown context. The coordinator's context is the
+// parent, so a programmatic restart request (rc.Request) drains exactly like
+// a SIGTERM — including on Windows, where a process cannot signal itself.
+// Signals arriving mid-drain are swallowed until the stop step runs, same as
+// on the real-signal path.
+func (a *App) startSignals() error {
+	parent, cancelParent := context.WithCancel(a.rootCtx)
+	// A restart request cancels the same context a signal would, so
+	// rc.Request drains through the identical path — including on Windows,
+	// where a process cannot signal itself. AfterFunc rather than a
+	// goroutine so there is nothing to leak if neither ever fires.
+	stopWatch := context.AfterFunc(a.deps.Restart.Context(), cancelParent)
+	serveCtx, stopSignals := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	a.serveCtx = serveCtx
+	a.onClose("signals", func(context.Context) error {
+		stopSignals()
+		stopWatch()
+		cancelParent()
+		return nil
+	})
+	return nil
+}

@@ -4,7 +4,7 @@
  * Right-click context menu for admin actions (force logout, ban, role change).
  */
 
-import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
+import { createElement, appendChildren, clearChildren, setText, setOwnedTimeout } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import {
@@ -17,13 +17,15 @@ import { authStore } from "@stores/auth.store";
 import { blocksStore } from "@stores/blocks.store";
 import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { createMemberContextMenu } from "@components/AdminActions";
-import {
-  createUserProfilePopup,
-  type UserProfilePopupComponent,
-} from "@components/UserProfilePopup";
+import type { UserProfilePopupComponent } from "@components/UserProfilePopup";
+import { openMenuOnKeyboard } from "@lib/context-menu";
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
 import { roleHasPermission } from "@lib/permissions";
 import { createAvatarElement } from "@lib/avatar";
+import { readableRoleColor } from "@lib/themes";
+import { showToast } from "@lib/toast";
+import { reportEntryText } from "../i18n/reportEntry";
+import { shellText } from "../i18n/shell";
 
 /** Options for configuring admin action callbacks on the member list. */
 export interface MemberListOptions {
@@ -42,6 +44,8 @@ export interface MemberListOptions {
   readonly onToggleBlock: (userId: number, username: string, block: boolean) => Promise<void>;
   /** Start a DM with a user (wires the profile popup's Message button). */
   readonly onMessageUser?: (userId: number) => void;
+  /** Report a user to this server's moderators (the profile popup's Report button, B9-10). */
+  readonly onReportUser?: (userId: number, name: string) => void;
 }
 
 /** Roles offered in the "Change Role" submenu when the server hasn't sent any. */
@@ -97,12 +101,26 @@ const FALLBACK_ROLE_COLORS: Record<string, string> = {
 const MEMBER_COLOR = "var(--role-member, #949ba4)";
 
 /** Ordered role groups used when the server hasn't sent a role list. */
-const FALLBACK_ROLE_GROUPS: readonly RoleGroup[] = [
-  { role: "owner", label: "OWNER", colorVar: FALLBACK_ROLE_COLORS["owner"]! },
-  { role: "admin", label: "ADMIN", colorVar: FALLBACK_ROLE_COLORS["admin"]! },
-  { role: "moderator", label: "MODERATOR", colorVar: FALLBACK_ROLE_COLORS["moderator"]! },
-  { role: "member", label: "MEMBER", colorVar: MEMBER_COLOR },
-] as const;
+function fallbackRoleGroups(): readonly RoleGroup[] {
+  return [
+    {
+      role: "owner",
+      label: shellText("members.role.owner"),
+      colorVar: FALLBACK_ROLE_COLORS["owner"]!,
+    },
+    {
+      role: "admin",
+      label: shellText("members.role.admin"),
+      colorVar: FALLBACK_ROLE_COLORS["admin"]!,
+    },
+    {
+      role: "moderator",
+      label: shellText("members.role.moderator"),
+      colorVar: FALLBACK_ROLE_COLORS["moderator"]!,
+    },
+    { role: "member", label: shellText("members.role.member"), colorVar: MEMBER_COLOR },
+  ];
+}
 
 /**
  * Role groups from the server's `ready` role list (already ordered by position,
@@ -111,7 +129,7 @@ const FALLBACK_ROLE_GROUPS: readonly RoleGroup[] = [
  */
 function roleGroups(): readonly RoleGroup[] {
   const roles = channelsStore.getState().roles;
-  if (roles.length === 0) return FALLBACK_ROLE_GROUPS;
+  if (roles.length === 0) return fallbackRoleGroups();
   return roles.map((r) => {
     const key = r.name.toLowerCase();
     return {
@@ -165,6 +183,9 @@ function isAwayStatus(status: UserStatus): boolean {
 
 let activeMenu: { element: HTMLDivElement; destroy(): void } | null = null;
 let activePopup: UserProfilePopupComponent | null = null;
+/** Bumped by every open and close, so a popup still loading when the user
+ *  moves on (or the list is destroyed) is dropped instead of mounted. */
+let popupSeq = 0;
 
 function closeActiveMenu(): void {
   if (activeMenu !== null) {
@@ -174,16 +195,26 @@ function closeActiveMenu(): void {
 }
 
 function closeActivePopup(): void {
+  popupSeq++;
   if (activePopup !== null) {
     activePopup.destroy?.();
     activePopup = null;
   }
 }
 
+// One outside-click owner per open menu: destroyed when the menu closes and
+// when the list is torn down.
+let menuDismiss: Disposable | null = null;
+
+function releaseMenuDismiss(): void {
+  menuDismiss?.destroy();
+  menuDismiss = null;
+}
+
 function handleOutsideClick(e: MouseEvent): void {
   if (activeMenu !== null && !activeMenu.element.contains(e.target as Node)) {
     closeActiveMenu();
-    document.removeEventListener("mousedown", handleOutsideClick);
+    releaseMenuDismiss();
   }
 }
 
@@ -196,7 +227,13 @@ function createMemberItem(
   const item = createElement("div", {
     class: isAwayStatus(member.status) ? "member-item offline" : "member-item",
     "data-testid": `member-${member.id}`,
+    role: "button",
+    tabindex: "0",
+    "aria-haspopup": "dialog",
+    "aria-label": memberDisplayName(member),
   });
+  const statusId = `mi-status-${member.id}`;
+  const customId = `mi-custom-status-${member.id}`;
 
   const avatar = createAvatarElement(
     { username: member.username, displayName: member.displayName, avatar: member.avatar },
@@ -205,6 +242,7 @@ function createMemberItem(
 
   const statusDot = createElement("div", {
     class: "mi-status",
+    id: statusId,
     style: `background: ${statusColor(member.status)}`,
     "aria-label": member.status,
     title: member.status,
@@ -214,7 +252,11 @@ function createMemberItem(
   // Name + custom status stack. The custom status is only rendered when there
   // is one, so a member without it keeps the single-line row it always had.
   const nameWrap = createElement("div", { class: "mi-text" });
-  const name = createElement("span", { class: "mi-name", style: `color: ${colorVar}` });
+  const name = createElement("span", {
+    class: "mi-name",
+    style: `color: ${readableRoleColor(colorVar)}`,
+    "data-role-color": colorVar,
+  });
   setText(name, memberDisplayName(member));
   nameWrap.appendChild(name);
   const custom = member.customStatus;
@@ -222,108 +264,178 @@ function createMemberItem(
     const customEl = createElement("span", {
       class: "mi-custom-status",
       "data-testid": `member-custom-status-${member.id}`,
+      id: customId,
     });
     setText(customEl, custom);
     nameWrap.appendChild(customEl);
+    item.setAttribute("aria-describedby", `${customId} ${statusId}`);
+  } else {
+    item.setAttribute("aria-describedby", statusId);
   }
 
   appendChildren(item, avatar, nameWrap);
 
-  // Left-click opens the profile popup (previously dead code — built and
-  // tested but never mounted from anywhere).
+  // Left-click, Enter or Space opens the profile popup (previously dead code —
+  // built and tested but never mounted from anywhere). The row is a button so
+  // the profile, and its Report action, is reachable from the keyboard.
+  const openProfile = (anchorX: number, anchorY: number): void => {
+    closeActiveMenu();
+    closeActivePopup();
+    const currentUserId = authStore.getState().user?.id ?? 0;
+    const isSelf = member.id === currentUserId;
+    const onMessageUser = opts.onMessageUser;
+    const onReportUser = opts.onReportUser;
+    // `member` is the row's render-time snapshot; a presence-only update
+    // (see patchPresence) recolors the dot in place without rebuilding the
+    // row, so that snapshot's `status` can be stale. Re-resolve against the
+    // live store so the popup always agrees with the dot it was opened from.
+    const live = membersStore.getState().members.get(member.id) ?? member;
+    const list = item.parentElement;
+    // Loaded on first open: the popup is only ever needed after a click, so
+    // it stays out of the main-page bundle.
+    const seq = ++popupSeq;
+    import("@components/UserProfilePopup").then(
+      ({ createUserProfilePopup }) => {
+        if (seq !== popupSeq || signal.aborted) return;
+        const popup = createUserProfilePopup({
+          user: {
+            id: live.id,
+            username: live.username,
+            avatar: live.avatar,
+            role: live.role,
+            status: live.status,
+            displayName: live.displayName,
+            customStatus: live.customStatus,
+          },
+          anchorX,
+          anchorY,
+          ...(isSelf || onMessageUser === undefined
+            ? {}
+            : { onMessage: (userId: number) => onMessageUser(userId) }),
+          ...(isSelf || onReportUser === undefined
+            ? {}
+            : { onReport: (userId: number) => onReportUser(userId, memberDisplayName(live)) }),
+          onClose: () => {
+            if (activePopup === popup) activePopup = null;
+          },
+          fallbackFocus: () =>
+            list?.querySelector<HTMLElement>(`[data-testid="member-${member.id}"]`) ??
+            list?.querySelector<HTMLElement>(".member-item") ??
+            null,
+        });
+        activePopup = popup;
+        popup.mount(document.body);
+      },
+      () => showToast(reportEntryText("profileLoadFailed"), "error"),
+    );
+  };
+  item.addEventListener("click", (e) => openProfile(e.clientX, e.clientY), { signal });
   item.addEventListener(
-    "click",
+    "keydown",
     (e) => {
-      closeActiveMenu();
-      closeActivePopup();
-      const currentUserId = authStore.getState().user?.id ?? 0;
-      const isSelf = member.id === currentUserId;
-      const onMessageUser = opts.onMessageUser;
-      // `member` is the row's render-time snapshot; a presence-only update
-      // (see patchPresence) recolors the dot in place without rebuilding the
-      // row, so that snapshot's `status` can be stale. Re-resolve against the
-      // live store so the popup always agrees with the dot it was opened from.
-      const live = membersStore.getState().members.get(member.id) ?? member;
-      activePopup = createUserProfilePopup({
-        user: {
-          id: live.id,
-          username: live.username,
-          avatar: live.avatar,
-          role: live.role,
-          status: live.status,
-          displayName: live.displayName,
-          customStatus: live.customStatus,
-        },
-        anchorX: e.clientX,
-        anchorY: e.clientY,
-        ...(isSelf || onMessageUser === undefined
-          ? {}
-          : { onMessage: (userId: number) => onMessageUser(userId) }),
-      });
-      activePopup.mount(document.body);
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      const rect = item.getBoundingClientRect();
+      openProfile(rect.right, rect.top);
     },
     { signal },
   );
 
-  // Context menu for admin actions
+  // Context menu for admin actions. `openContextMenu` takes viewport
+  // coordinates; the keyboard path (Shift+F10 / the Menu key) anchors to the
+  // row's own edge instead of a pointer position.
+  const openContextMenu = (clientX: number, clientY: number): void => {
+    // Don't show context menu for yourself
+    const currentUserId = authStore.getState().user?.id ?? 0;
+    if (member.id === currentUserId) return;
+
+    // Moderation actions are permission-gated per item (a role name told us
+    // nothing about what its bits allow); block/unblock is open to everyone.
+    // The role name is read live from authStore, not the opts snapshot
+    // taken once at mount -- dispatcher.ts keeps authStore.user.role
+    // current on every self MEMBER_UPDATE precisely so gates like this one
+    // see a promotion/demotion without waiting for the sidebar to rebuild.
+    const gates = moderationGates(authStore.getState().user?.role ?? opts.currentUserRole);
+    const showAdminActions = gates.canKick || gates.canBan || gates.canManageRoles;
+
+    closeActiveMenu();
+    releaseMenuDismiss();
+
+    // Roles come from the server's `ready` payload — a hardcoded list made
+    // custom roles unreachable and, worse, unresolvable to a role id, so
+    // picking one silently did nothing.
+    const availableRoles = assignableRoleNames();
+    const isBlocked = blocksStore.getState().blockedByMe.has(member.id);
+
+    activeMenu = createMemberContextMenu({
+      userId: member.id,
+      username: member.username,
+      currentRole: member.role.toLowerCase(),
+      availableRoles,
+      showAdminActions,
+      canKick: gates.canKick,
+      canBan: gates.canBan,
+      canManageRoles: gates.canManageRoles,
+      isBlocked,
+      onToggleBlock: () => opts.onToggleBlock(member.id, member.username, !isBlocked),
+      onKick: () => opts.onKick(member.id, member.username),
+      onBan: (reason: string, durationHours: number) =>
+        opts.onBan(member.id, member.username, reason, durationHours),
+      onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
+    });
+
+    // Position at the anchor, kept on screen: a member low in the list at the
+    // 940x500 minimum window opened the menu past the bottom edge, leaving
+    // Force Logout, Ban and Block unreachable. When it does not fit below
+    // the anchor it is anchored by its bottom edge instead. The placement
+    // is re-run whenever the menu resizes, so the ban form expanding later
+    // cannot push Confirm Ban and Block off-screen from either anchor.
+    const menuEl = activeMenu.element;
+    menuEl.style.position = "fixed";
+    menuEl.style.zIndex = "1000";
+    document.body.appendChild(menuEl);
+    const margin = 8;
+    const place = (): void => {
+      const { innerWidth: vw, innerHeight: vh } = window;
+      const height = menuEl.offsetHeight;
+      const left = Math.min(clientX, vw - menuEl.offsetWidth - margin);
+      menuEl.style.left = `${Math.max(margin, left)}px`;
+      if (clientY + height > vh - margin) {
+        const bottom = Math.min(vh - clientY, vh - height - margin);
+        menuEl.style.top = "";
+        menuEl.style.bottom = `${Math.max(margin, bottom)}px`;
+      } else {
+        menuEl.style.bottom = "";
+        menuEl.style.top = `${clientY}px`;
+      }
+    };
+    place();
+
+    // Close on outside click (deferred so this click doesn't close it)
+    const dismiss = new Disposable();
+    menuDismiss = dismiss;
+    const resizeObserver = new ResizeObserver(place);
+    resizeObserver.observe(menuEl);
+    dismiss.addCleanup(() => resizeObserver.disconnect());
+    setOwnedTimeout(
+      dismiss.signal,
+      () => {
+        document.addEventListener("mousedown", handleOutsideClick, { signal: dismiss.signal });
+      },
+      0,
+    );
+  };
   item.addEventListener(
     "contextmenu",
     (e) => {
       e.preventDefault();
-
-      // Don't show context menu for yourself
-      const currentUserId = authStore.getState().user?.id ?? 0;
-      if (member.id === currentUserId) return;
-
-      // Moderation actions are permission-gated per item (a role name told us
-      // nothing about what its bits allow); block/unblock is open to everyone.
-      // The role name is read live from authStore, not the opts snapshot
-      // taken once at mount -- dispatcher.ts keeps authStore.user.role
-      // current on every self MEMBER_UPDATE precisely so gates like this one
-      // see a promotion/demotion without waiting for the sidebar to rebuild.
-      const gates = moderationGates(authStore.getState().user?.role ?? opts.currentUserRole);
-      const showAdminActions = gates.canKick || gates.canBan || gates.canManageRoles;
-
-      closeActiveMenu();
-      document.removeEventListener("mousedown", handleOutsideClick);
-
-      // Roles come from the server's `ready` payload — a hardcoded list made
-      // custom roles unreachable and, worse, unresolvable to a role id, so
-      // picking one silently did nothing.
-      const availableRoles = assignableRoleNames();
-      const isBlocked = blocksStore.getState().blockedByMe.has(member.id);
-
-      activeMenu = createMemberContextMenu({
-        userId: member.id,
-        username: member.username,
-        currentRole: member.role.toLowerCase(),
-        availableRoles,
-        showAdminActions,
-        canKick: gates.canKick,
-        canBan: gates.canBan,
-        canManageRoles: gates.canManageRoles,
-        isBlocked,
-        onToggleBlock: () => opts.onToggleBlock(member.id, member.username, !isBlocked),
-        onKick: () => opts.onKick(member.id, member.username),
-        onBan: (reason: string, durationHours: number) =>
-          opts.onBan(member.id, member.username, reason, durationHours),
-        onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
-      });
-
-      // Position at mouse
-      activeMenu.element.style.position = "fixed";
-      activeMenu.element.style.left = `${e.clientX}px`;
-      activeMenu.element.style.top = `${e.clientY}px`;
-      activeMenu.element.style.zIndex = "1000";
-      document.body.appendChild(activeMenu.element);
-
-      // Close on outside click (deferred so this click doesn't close it)
-      setTimeout(() => {
-        document.addEventListener("mousedown", handleOutsideClick);
-      }, 0);
+      openContextMenu(e.clientX, e.clientY);
     },
     { signal },
   );
+  // Keyboard entry point (A11Y-01): Shift+F10 / Menu key opens the menu,
+  // focused on its first item, and Escape restores focus to this row.
+  openMenuOnKeyboard(item, openContextMenu, signal);
 
   return item;
 }
@@ -341,7 +453,7 @@ function renderList(
 
   if (state.members.size === 0) {
     const emptyState = createElement("div", { class: "member-list-empty" });
-    const msg = createElement("p", { class: "member-list-empty-text" }, "No members online");
+    const msg = createElement("p", { class: "member-list-empty-text" }, shellText("members.empty"));
     emptyState.appendChild(msg);
     root.appendChild(emptyState);
     return;
@@ -393,7 +505,7 @@ function appendGroup(
   const header = createElement(
     "div",
     { class: "member-role-group" },
-    `${group.label} \u2014 ${groupMembers.length}`,
+    shellText("members.groupHeader", { role: group.label, count: groupMembers.length }),
   );
   root.appendChild(header);
 
@@ -469,17 +581,17 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
   // addEventListener({ signal }) keeps a detached row alive via that signal's
   // own retained "abort" listener list until it fires, so every rebuild would
   // otherwise leak one full set of detached rows (OC-0295), exactly the
-  // defect already fixed in ChannelSidebar (renderAc, OC-0229) and
-  // MessageList (OC-0286). renderAc is aborted and replaced at the top of
+  // defect already fixed in ChannelSidebar (renderOwner, OC-0229) and
+  // MessageList (OC-0286). renderOwner is aborted and replaced at the top of
   // every render, so only the CURRENT render's rows stay reachable.
-  let renderAc: AbortController | null = null;
+  let renderOwner: Disposable | null = null;
 
   function render(): void {
     if (root === null) return;
-    renderAc?.abort();
-    const currentRenderAc = new AbortController();
-    renderAc = currentRenderAc;
-    renderList(root, opts, currentRenderAc.signal, rowsByUserId);
+    renderOwner?.destroy();
+    const currentRender = new Disposable();
+    renderOwner = currentRender;
+    renderList(root, opts, currentRender.signal, rowsByUserId);
   }
 
   function mount(container: Element): void {
@@ -520,10 +632,10 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
   function destroy(): void {
     closeActiveMenu();
     closeActivePopup();
-    document.removeEventListener("mousedown", handleOutsideClick);
+    releaseMenuDismiss();
     disposable.destroy();
-    renderAc?.abort();
-    renderAc = null;
+    renderOwner?.destroy();
+    renderOwner = null;
     rowsByUserId.clear();
     if (root !== null) {
       root.remove();

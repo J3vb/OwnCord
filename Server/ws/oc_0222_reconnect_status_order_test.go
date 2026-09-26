@@ -68,7 +68,7 @@ func TestReconnect_AuthOKReflectsSettledStatus_NotDisconnectTimeStatus(t *testin
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -81,7 +81,7 @@ func TestReconnect_AuthOKReflectsSettledStatus_NotDisconnectTimeStatus(t *testin
 	rb.Push(99, 0, []byte(`{"seq":99,"type":"presence","payload":{}}`))
 	rb.Push(100, 0, []byte(`{"seq":100,"type":"presence","payload":{}}`))
 
-	srv := httptest.NewServer(ServeWS(hub, database, []string{"*"}, 0))
+	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
 
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

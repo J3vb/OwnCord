@@ -1,0 +1,8 @@
+{
+  "plugins": ["import"],
+  "categories": {},
+  "rules": {
+    "import/no-cycle": "warn"
+  },
+  "ignorePatterns": ["dist", "node_modules", "public"]
+}

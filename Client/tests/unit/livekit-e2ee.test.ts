@@ -98,6 +98,7 @@ import {
   importPublicKey,
   exportPublicKey,
   computeRawKeyFingerprint,
+  signEphemeralKey,
 } from "@lib/e2eeCrypto";
 import { getOrCreateIdentityKeyPair, getIdentityPin, storeIdentityPin } from "@lib/identity";
 import { authStore } from "@stores/auth.store";
@@ -125,7 +126,7 @@ describe("E2EEManager", () => {
   });
 
   it("setupKeyExchange as key holder generates the room key and sends a signed announce", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     const ok = await mgr.setupKeyExchange(true, 1);
@@ -139,7 +140,7 @@ describe("E2EEManager", () => {
   });
 
   it("queues an announce before the keypair exists and drains it on setup, sending an offer", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
@@ -166,7 +167,7 @@ describe("E2EEManager", () => {
   });
 
   it("setupKeyExchange as non-key-holder resolves once the key holder's offer arrives", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     // Seed the peer's ECDH key so the offer sender is known.
     await mgr.setupKeyExchange(true, 1);
@@ -186,7 +187,7 @@ describe("E2EEManager", () => {
   });
 
   it("clearState aborts a waiting key exchange so setup fails instead of hanging", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     const setupPromise = mgr.setupKeyExchange(false, 1);
@@ -201,7 +202,7 @@ describe("E2EEManager", () => {
   });
 
   it("elects a still-connecting client when the holder leaves mid-setup, instead of stranding it", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     // The session publishes no channel id for the whole "connecting" phase,
     // which spans the entire key-exchange wait.
     const mgr = new E2EEManager({
@@ -229,7 +230,7 @@ describe("E2EEManager", () => {
   });
 
   it("applies concurrent offers in arrival order, not completion order", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // establishes our keypair
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig"); // known peer
@@ -260,7 +261,7 @@ describe("E2EEManager", () => {
   });
 
   it("stops rotating once it accepts an offer, so a re-elected holder is not fought", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     // We joined first, so the server elected us key holder.
     await mgr.setupKeyExchange(true, 1);
@@ -283,7 +284,7 @@ describe("E2EEManager", () => {
   });
 
   it("keeps peer public keys across a reconnect so a later offer can still be unwrapped", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
@@ -303,8 +304,22 @@ describe("E2EEManager", () => {
     expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
   });
 
+  it("[OC-0352] skips the keypair swap and send when the WS is not connected, so the published key can't diverge from the local one", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+    const pairBefore = (mgr as unknown as { _ecdhKeyPair: unknown })._ecdhKeyPair;
+    ws.send.mockClear();
+
+    ws.getState = () => "reconnecting";
+    await mgr.reannounceForReconnect();
+
+    expect(sendsOfType(ws, "voice_e2ee_announce")).toHaveLength(0);
+    expect((mgr as unknown as { _ecdhKeyPair: unknown })._ecdhKeyPair).toBe(pairBefore);
+  });
+
   it("rotateKeyPeriodically advances the epoch and redistributes the key to peers", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
@@ -321,22 +336,23 @@ describe("E2EEManager", () => {
   // ── Batch C3 findings ───────────────────────────────────────────────────
 
   it("[finding 1] resumes as key holder when re-elected while a prior rotation is still in flight", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     mockVoiceState.voiceUsers.set(1, new Map([[1, {}]])); // we (uid 1) are always lowest
 
     await mgr.setupKeyExchange(true, 1); // epoch 1, holder
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig"); // peer key known
 
-    // Start a periodic rotation and stall it right after the epoch bump, at
-    // the keyProvider.setKey await — mirrors an in-flight become-holder
-    // rotation (same _rotatingKey guard).
-    let releaseRotationSetKey!: () => void;
-    const stall = new Promise<void>((resolve) => {
-      releaseRotationSetKey = resolve;
+    // Hold distribution open after the provider import so an offer can be
+    // applied while the original rotation still owns the rotation guard.
+    let releaseDistribution!: (offer: { encryptedKey: string; iv: string }) => void;
+    const stall = new Promise<{ encryptedKey: string; iv: string }>((resolve) => {
+      releaseDistribution = resolve;
     });
-    mockSetKey.mockImplementationOnce(() => stall);
+    vi.mocked(wrapRoomKey).mockClear();
+    vi.mocked(wrapRoomKey).mockReturnValueOnce(stall);
     const rotationPromise = mgr.rotateKeyPeriodically();
+    await vi.waitFor(() => expect(wrapRoomKey).toHaveBeenCalled());
     expect(mgr.rotatingKey).toBe(true);
     expect(mgr.epoch).toBe(2);
 
@@ -350,7 +366,7 @@ describe("E2EEManager", () => {
     await mgr.handleParticipantLeft(99);
 
     // Let the original (stalled) rotation finish.
-    releaseRotationSetKey();
+    releaseDistribution({ encryptedKey: "enc", iv: "iv" });
     await rotationPromise;
 
     // The re-election's finally -> drainPendingRotationOrArmTimer must have
@@ -362,7 +378,7 @@ describe("E2EEManager", () => {
   });
 
   it("[finding 2] marks a first-sight peer 'unverified' (not 'verified') when the identity-pin write fails", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // establishes our keypair
     vi.mocked(storeIdentityPin).mockResolvedValueOnce("failed");
@@ -383,7 +399,7 @@ describe("E2EEManager", () => {
   });
 
   it("[finding 3] discards a stale offer even when epoch is unchanged, because the keypair belongs to a cleared session", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     // Session 1 (non-key-holder): our keypair + the peer's key.
@@ -426,7 +442,7 @@ describe("E2EEManager", () => {
   });
 
   it("[finding 4] discards a stale announce-offer if the room key rotates while wrapRoomKey is in flight", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // holder, epoch 1
 
@@ -454,7 +470,7 @@ describe("E2EEManager", () => {
   });
 
   it("[finding 5] retries with a fresh promise after a decrypt failure, so a second good offer still completes setup", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     vi.mocked(unwrapRoomKey).mockRejectedValueOnce(new Error("bad offer"));
@@ -480,7 +496,7 @@ describe("E2EEManager", () => {
   });
 
   it("[finding 6] queues (does not drop) a live announce that arrives during setup, before isKeyHolder/roomKey are ready", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     // Stall the identity-key load inside buildAnnouncePayload so a "live"
@@ -512,7 +528,7 @@ describe("E2EEManager", () => {
   // ── Batch ts:livekit-e2ee findings ──────────────────────────────────────
 
   it("[finding v011] keeps the mismatch block when the re-pin write fails", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     vi.mocked(storeIdentityPin).mockResolvedValueOnce("failed");
 
@@ -526,7 +542,7 @@ describe("E2EEManager", () => {
   });
 
   it("[finding v011] clears the mismatch block when the re-pin write succeeds", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     const result = await mgr.rePinPeerIdentity(PEER_ID, "verified-key-b64");
@@ -536,7 +552,7 @@ describe("E2EEManager", () => {
   });
 
   it("[finding v043] a superseded attempt's retry guard checks keypair ownership, not just null, so it never re-announces a dead key over a live session", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     const keypairA = {
@@ -579,7 +595,7 @@ describe("E2EEManager", () => {
   });
 
   it("[finding v043] a superseded setup does not wipe the live session's peer keys", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     // Attempt A stalls inside generateECDHKeyPair — before it has written
@@ -613,7 +629,7 @@ describe("E2EEManager", () => {
   });
 
   it("[finding v043] a superseded setup does not clobber the live session's key-holder role", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     // Attempt A (non-key-holder) stalls inside buildAnnouncePayload's keyring
@@ -644,7 +660,7 @@ describe("E2EEManager", () => {
   });
 
   it("[finding v015] applies concurrent announces in arrival order, not completion order", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // establishes our keypair + room key
 
@@ -672,7 +688,7 @@ describe("E2EEManager", () => {
   });
 
   it("[finding v093] does not resurrect the keypair or send a stray announce if clearState() runs during reannounceForReconnect", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
     ws.send.mockClear();
@@ -703,7 +719,7 @@ describe("E2EEManager", () => {
   });
 
   it("[finding v101] discards a stale announce-offer if the keypair (not epoch) changes while wrapRoomKey is in flight", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // holder, epoch 1
 
@@ -734,7 +750,7 @@ describe("E2EEManager", () => {
   });
 
   it("[finding v045] aborts room-key distribution mid-loop when a concurrent reconnect swaps the keypair", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     mockVoiceState.voiceUsers.set(1, new Map([[1, {}]])); // we (uid 1) are always lowest
 
@@ -782,7 +798,7 @@ describe("E2EEManager", () => {
   // ── Batch B3 findings ───────────────────────────────────────────────────
 
   it("[B3-2] preserves a key-holder promotion that lands during setupKeyExchange's pre-publish awaits, instead of clobbering it with the stale server value", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     // After the real holder (PEER_ID) leaves, we (uid 1) are the only
     // remaining participant — client-side election promotes us.
@@ -825,7 +841,7 @@ describe("E2EEManager", () => {
   });
 
   it("[B3-7] does not resurrect peer key/verification state into a torn-down session when clearState() runs during verifyPeerAnnounce's pin lookup", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // establishes our keypair
 
@@ -858,7 +874,7 @@ describe("E2EEManager", () => {
     // then mints a SECOND, DIFFERENT keypair under `host:<realId>` — so the
     // published key and the announce signing key permanently disagree and
     // every peer's verifyPeerAnnounce reports a false MITM "mismatch".
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     vi.mocked(authStore.getState).mockReturnValueOnce({ user: null } as never);
 
@@ -876,7 +892,7 @@ describe("E2EEManager", () => {
   // ── Ledger findings OC-0098 / OC-0004 / OC-0006 / OC-0005 / OC-0007 ──
 
   it("[OC-0098] sends its own announce before offering the room key to a drained peer", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     // A peer's announce arrives (relayed by voice_join sync) before our own
@@ -900,7 +916,7 @@ describe("E2EEManager", () => {
   });
 
   it("[OC-0004] elects us key holder on a participant-left even when our own voice_state hasn't landed in the roster yet", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws); // getCurrentChannelId() => 1
     // mockVoiceState.voiceUsers has NO entry for channel 1: our own
     // voice_state broadcast hasn't landed (it's still queued behind the
@@ -918,8 +934,8 @@ describe("E2EEManager", () => {
     expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
   });
 
-  it("[OC-0006] self-heals the shared key provider when a rotation's setKey resolves after clearState() tore the session down", async () => {
-    const ws = { send: vi.fn() };
+  it("[OC-0006] serializes a new session's key after an unfinished rotation", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     mockVoiceState.voiceUsers.set(1, new Map([[1, {}]]));
 
@@ -937,31 +953,31 @@ describe("E2EEManager", () => {
       const rotationPromise = mgr.rotateKeyPeriodically();
       await vi.waitFor(() => expect(mockSetKey).toHaveBeenCalledWith("key-9"));
 
-      // The session is torn down (user hit Disconnect) while that setKey
-      // call is still in flight, and a brand-new session becomes holder
-      // with its OWN key before the stale call resolves.
+      // The new session waits for the unfinished import before applying its key.
       mgr.clearState();
       vi.mocked(generateRoomKey).mockReturnValueOnce(new Uint8Array(32).fill(7)); // live session's key
       mockSetKey.mockClear();
-      await mgr.setupKeyExchange(true, 2);
-      expect(mockSetKey).toHaveBeenCalledWith("key-7");
-      mockSetKey.mockClear();
+      const newSetup = mgr.setupKeyExchange(true, 2);
+      await vi.waitFor(() => expect(mgr.epoch).toBe(1));
+      expect(mockSetKey).not.toHaveBeenCalled();
 
       // The abandoned rotation's setKey call now resolves.
       releaseStale();
-      await rotationPromise;
+      await Promise.all([rotationPromise, newSetup]);
 
       // The shared key provider must end up on the LIVE session's key, not
       // silently left on the abandoned one — narrow race, but real: nothing
       // else re-applies the live key once the stale call lands.
       expect(mockSetKey).toHaveBeenCalledWith("key-7");
+      expect(mockSetKey).toHaveBeenCalledTimes(1);
     } finally {
+      mgr.clearState();
       vi.mocked(roomKeyToBase64).mockImplementation(() => "mock-room-key-base64");
     }
   });
 
   it("[OC-0005] paces room-key offers so a large channel's rotation stays under the server's per-second rate limit", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     mockVoiceState.voiceUsers.set(1, new Map([[1, {}]]));
     await mgr.setupKeyExchange(true, 1); // holder
@@ -993,7 +1009,7 @@ describe("E2EEManager", () => {
   });
 
   it("[OC-0155] shares the offer-pacing budget across back-to-back rotations instead of resetting it per call", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     mockVoiceState.voiceUsers.set(1, new Map([[1, {}]]));
     await mgr.setupKeyExchange(true, 1); // holder
@@ -1036,7 +1052,7 @@ describe("E2EEManager", () => {
   });
 
   it("[OC-0167] paces announce-driven offers through the same shared budget as rotation offers", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     // 70 existing participants' announces are relayed to the future key
@@ -1077,7 +1093,7 @@ describe("E2EEManager", () => {
   // ── Ledger findings OC-0010 / OC-0011 ─────────────────────────────────
 
   it("[OC-0010] does not stand down a new session's key-holder role when a stale offer's setKey resolves after teardown+rejoin", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     // Session A: we are the holder in channel 1, with PEER_ID's key on file.
@@ -1103,12 +1119,14 @@ describe("E2EEManager", () => {
       publicKey: { type: "chan2-pub" } as unknown as CryptoKey,
       privateKey: { type: "chan2-priv" } as unknown as CryptoKey,
     });
-    await mgr.setupKeyExchange(true, 2);
-    expect((mgr as unknown as { _isKeyHolder: boolean })._isKeyHolder).toBe(true);
+    const newSetup = mgr.setupKeyExchange(true, 2);
+    await vi.waitFor(() =>
+      expect((mgr as unknown as { _isKeyHolder: boolean })._isKeyHolder).toBe(true),
+    );
 
     // The stale (session-1) offer's setKey now resolves.
     releaseSetKey();
-    await offerPromise;
+    await Promise.all([offerPromise, newSetup]);
 
     // Channel 2's holder role must survive — the stale continuation must not
     // stand it down (it re-checks staleness before the setKey await, not
@@ -1117,7 +1135,7 @@ describe("E2EEManager", () => {
   });
 
   it("[OC-0010] does not write a stale peer key into a new session's map when clearState()+rejoin lands during the announce's key-import await", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     // Session A: holder in channel 1.
@@ -1148,7 +1166,7 @@ describe("E2EEManager", () => {
   });
 
   it("[OC-0011] rejects a replayed announce carrying a previously-retired peer key instead of overwriting the live key", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // establishes our keypair
 
@@ -1194,7 +1212,7 @@ describe("E2EEManager", () => {
   });
 
   it("[OC-0007] confirms the room key after a reconnect re-announce instead of declaring it fresh unconditionally", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     // Non-key-holder session with an already-established room key from
     // before the (simulated) disconnect.
@@ -1221,7 +1239,7 @@ describe("E2EEManager", () => {
   // ── Ledger findings OC-0002 / OC-0020 ─────────────────────────────────
 
   it("[OC-0002] applies an offer that arrives while its sender's own announce is still verifying, instead of dropping it as an unknown peer", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     // We were previously key holder (mirrors B in the repro): own keypair +
     // room key already established.
@@ -1259,7 +1277,7 @@ describe("E2EEManager", () => {
   });
 
   it("[OC-0020] retires a departed peer's key on leave, so a replay of it after they rejoin with a fresh key cannot resurrect it", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // establishes our keypair, holder
 
@@ -1316,7 +1334,7 @@ describe("E2EEManager", () => {
     ws: { send: ReturnType<typeof vi.fn> };
     mgr: E2EEManager;
   }> {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
@@ -1326,7 +1344,7 @@ describe("E2EEManager", () => {
   }
 
   it("[OC-0001] wraps each offer with the sender's current epoch", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
@@ -1416,7 +1434,7 @@ describe("E2EEManager", () => {
   // ── OC-0003: per-session fingerprint for every peer ───────────────────────
 
   it("[OC-0003] publishes a session fingerprint of the ephemeral key for a legacy (unverified) peer while safetyNumber stays null", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     mockMembers.set(PEER_ID, { identityPublicKey: null });
     await mgr.setupKeyExchange(true, 1);
@@ -1432,7 +1450,7 @@ describe("E2EEManager", () => {
   });
 
   it("[OC-0003] publishes the session fingerprint alongside the safety number for a verified peer", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
 
@@ -1447,7 +1465,7 @@ describe("E2EEManager", () => {
   });
 
   it("[OC-0003] publishes the local session fingerprint on setup and clears it on teardown", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     await mgr.setupKeyExchange(true, 1);
@@ -1460,7 +1478,7 @@ describe("E2EEManager", () => {
   // ── Guards the suite reached but never pinned (mutation audit T-2026-08-19-47) ──
 
   it("[T-47] aborts setup when a teardown lands during the key holder's keyProvider.setKey", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
     // Stall the holder's setKey — the last await before the keypair is
@@ -1488,11 +1506,12 @@ describe("E2EEManager", () => {
   });
 
   it("[T-47] a superseded reconnect re-announce publishes neither its fingerprint nor a stray announce", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
     ws.send.mockClear();
     vi.mocked(setLocalSessionFingerprint).mockClear();
+    vi.mocked(computeRawKeyFingerprint).mockClear();
 
     // Attempt A stalls after publishing its keypair, while computing its own
     // session fingerprint.
@@ -1528,7 +1547,7 @@ describe("E2EEManager", () => {
   it("[T-47] does not arm a reconnect-confirmation retry when there was no room key to go stale", async () => {
     vi.useFakeTimers();
     try {
-      const ws = { send: vi.fn() };
+      const ws = { send: vi.fn(), getState: () => "connected" };
       const mgr = createManager(ws); // never keyed: non-holder, no room key
 
       await mgr.reannounceForReconnect();
@@ -1544,7 +1563,7 @@ describe("E2EEManager", () => {
   });
 
   it("[T-47] skips the reconnect-confirmation retry once a fresh offer replaced the room key", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
@@ -1569,7 +1588,7 @@ describe("E2EEManager", () => {
   });
 
   it("[T-47] a duplicate announce does not reset the sender's offer high-water mark", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
     // Announce the exact key the export mock echoes back, so the repeat below
@@ -1597,7 +1616,7 @@ describe("E2EEManager", () => {
   });
 
   it("[T-47] does not promote itself on a leave while a lower-id participant remains", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     // We are uid 50; uid 10 stays behind, so the election must pick them.
     vi.mocked(authStore.getState).mockImplementation(() => ({ user: { id: 50 } }) as never);
@@ -1618,7 +1637,7 @@ describe("E2EEManager", () => {
   it("[T-47] arms the periodic rotation timer for the key holder so forward secrecy actually fires", async () => {
     vi.useFakeTimers();
     try {
-      const ws = { send: vi.fn() };
+      const ws = { send: vi.fn(), getState: () => "connected" };
       const mgr = createManager(ws);
       await mgr.setupKeyExchange(true, 1);
       await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
@@ -1636,7 +1655,7 @@ describe("E2EEManager", () => {
   // ── Ledger findings OC-0209 / OC-0212 / OC-0213 ───────────────────────────
 
   it("[OC-0209] rejects a replayed retired-key announce before it overwrites the peer's verification badge", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // establishes our keypair, holder
 
@@ -1680,7 +1699,7 @@ describe("E2EEManager", () => {
   });
 
   it("[OC-0212] replays the blocked announce after a successful re-pin, restoring the peer instead of leaving them un-keyed with the badge cleared", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // holder in channel 1
 
@@ -1718,7 +1737,7 @@ describe("E2EEManager", () => {
   });
 
   it("[OC-0213] does not permanently retire a peer's key on a stale voice_leave when the peer is still listed as present in the channel roster", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // holder in channel 1
 
@@ -1777,7 +1796,7 @@ describe("E2EEManager", () => {
   // roster looked "still present" right up until this event, matching what
   // production's real (post-mutation) roster read looks like.
   it("[OC-0283] retires a departed peer's key even though the roster listed them as present right up until this event", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // holder in channel 1
 
@@ -1816,7 +1835,7 @@ describe("E2EEManager", () => {
   });
 
   it("[OC-0257] a stale (demoted) key holder must not send a doomed voice_e2ee_offer to a peer with a lower user id", async () => {
-    const ws = { send: vi.fn() };
+    const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     // We are uid 10 and became holder while we were the lowest connected id.
     vi.mocked(authStore.getState).mockImplementation(() => ({ user: { id: 10 } }) as never);
@@ -1839,6 +1858,610 @@ describe("E2EEManager", () => {
       expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
     } finally {
       vi.mocked(authStore.getState).mockImplementation(() => ({ user: { id: 1 } }) as never);
+    }
+  });
+});
+
+// ── HP-2 question 4: adversarial membership and key-change rules ───────────
+// Each test pins one rule from docs/trust-model.md §"What is end-to-end
+// encrypted" that had no dedicated test before HP-2, or records a known gap
+// so the fix has a RED waiting for it.
+
+describe("E2EEManager — HP-2 adversarial membership and key-change rules", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockMembers.clear();
+    mockMembers.set(PEER_ID, { identityPublicKey: "peer-identity-b64" });
+    mockVoiceState.voiceUsers.clear();
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "unpinned" });
+    vi.mocked(storeIdentityPin).mockResolvedValue("stored");
+  });
+
+  it("[HP-2 known gap] a modified server that adds an unknown member at first contact gets the room key wrapped to it", async () => {
+    // Membership is server-controlled and the client accepts any first-sight
+    // identity (verifyPeerAnnounce). A server that inserts a member row it
+    // holds the identity key for, then relays a well-signed announce for it,
+    // is keyed by the holder like any real peer. The client has no
+    // independent membership evidence — the voice roster is server state
+    // too, and here it does not even list the newcomer.
+    //
+    // This pins TODAY's behaviour. When authenticated membership (or
+    // "refuse unrecognised participants") lands, this test goes RED and the
+    // expectations below invert. docs/trust-model.md §"What beta does not
+    // claim" names the gap.
+    const INTRUDER = 99;
+    mockMembers.set(INTRUDER, { identityPublicKey: "server-supplied-identity-b64" });
+    expect(mockVoiceState.voiceUsers.size).toBe(0);
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+    ws.send.mockClear();
+
+    await mgr.handleAnnounce(INTRUDER, "aW50cnVkZXI=", "sig-the-server-can-make");
+
+    // Today: keyed, pinned, verified — the RED of the desired rule (no offer,
+    // no pin) is recorded in docs/plans/hp-2-scorecard-2026-08-29.md Q4.
+    const offers = sendsOfType(ws, "voice_e2ee_offer");
+    expect(offers).toHaveLength(1);
+    expect((offers[0] as any).payload.target_user_id).toBe(INTRUDER);
+    expect(mgr.peerPublicKeys.has(INTRUDER)).toBe(true);
+    expect(storeIdentityPin).toHaveBeenCalledWith(
+      "localhost:7880",
+      String(INTRUDER),
+      "server-supplied-identity-b64",
+    );
+    expect(setPeerVerification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: INTRUDER, status: "verified" }),
+    );
+  });
+
+  it("[HP-2] a second device's key, once trusted, overwrites the account pin — the first device then mismatches", async () => {
+    // Pins are one per account ({host}:{userId}) while identity keys are per
+    // install (identity.ts; migration 017 holds one identity_public_key per
+    // user). Trusting device 2 therefore evicts device 1's pin, and device
+    // 1's next announce is blocked as a mismatch. docs/trust-model.md
+    // §"What is end-to-end encrypted" states the flip-flop; this pins it.
+    const DEVICE1 = "device1-identity-b64";
+    const DEVICE2 = "device2-identity-b64";
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: DEVICE1 });
+    mockMembers.set(PEER_ID, { identityPublicKey: DEVICE2 }); // server row: last announcer wins
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+    ws.send.mockClear();
+
+    // Device 2 announces: pinned key differs → blocked, nothing wrapped.
+    await mgr.handleAnnounce(PEER_ID, "ZGV2aWNlMg==", "sig2");
+    expect(setPeerVerification).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
+    );
+    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
+
+    // The human clicks "Trust new key": the ONE slot is overwritten and the
+    // buffered announce replays against the new pin, so device 2 is keyed.
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: DEVICE2 });
+    expect(await mgr.rePinPeerIdentity(PEER_ID, DEVICE2)).toBe(true);
+    expect(storeIdentityPin).toHaveBeenCalledTimes(1);
+    expect(storeIdentityPin).toHaveBeenCalledWith("localhost:7880", String(PEER_ID), DEVICE2);
+    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
+    const importsBefore = vi.mocked(importPublicKey).mock.calls.length;
+
+    // Device 1 comes back (the server row carries its key again) and is the
+    // one that mismatches now — no offer, no key imported, no second pin.
+    mockMembers.set(PEER_ID, { identityPublicKey: DEVICE1 });
+    await mgr.handleAnnounce(PEER_ID, "ZGV2aWNlMQ==", "sig1");
+    expect(setPeerVerification).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
+    );
+    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
+    expect(vi.mocked(importPublicKey).mock.calls.length).toBe(importsBefore);
+    expect(storeIdentityPin).toHaveBeenCalledTimes(1);
+  });
+
+  it("[HP-2 / OC-0316] a peer whose socket dropped across a rotation is re-keyed with the rotated key when the server replays its announce", async () => {
+    // Server side: hub.go re-relays the resumed client's stored announce to
+    // the channel (TestRegisterNow_ReannouncesOwnKeyOnResume). Holder side,
+    // pinned here: that replay is a duplicate announce, and the offer it
+    // triggers must carry the CURRENT room key and epoch — not the key the
+    // peer held before its outage.
+    // Round-trip import/export so the replayed announce is recognised as the
+    // SAME ephemeral key (the duplicate path), not a changed one.
+    vi.mocked(importPublicKey).mockImplementation(
+      async (b64: string) => ({ type: `peer-key-${b64}` }) as unknown as CryptoKey,
+    );
+    vi.mocked(exportPublicKey).mockImplementation(async (key: CryptoKey) =>
+      (key as unknown as { type: string }).type.replace("peer-key-", ""),
+    );
+    try {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      await mgr.setupKeyExchange(true, 1);
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      expect(mgr.epoch).toBe(1);
+
+      // Peer's WebSocket drops (media stays up, so no participant-left); the
+      // periodic rotation fires meanwhile.
+      await mgr.rotateKeyPeriodically();
+      expect(mgr.epoch).toBe(2);
+      const rotatedKey = (mgr as any)._roomKey as Uint8Array;
+      ws.send.mockClear();
+      vi.mocked(wrapRoomKey).mockClear();
+      vi.mocked(importPublicKey).mockClear();
+
+      // Peer resumes; the server replays its unchanged announce to us.
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+      expect(importPublicKey).not.toHaveBeenCalled(); // duplicate, not a new key
+      const offers = sendsOfType(ws, "voice_e2ee_offer");
+      expect(offers).toHaveLength(1);
+      expect((offers[0] as any).payload.target_user_id).toBe(PEER_ID);
+      expect(wrapRoomKey).toHaveBeenCalledTimes(1);
+      const [, , wrappedKey, wrappedEpoch] = vi.mocked(wrapRoomKey).mock.calls[0]!;
+      expect(wrappedKey).toBe(rotatedKey);
+      expect(wrappedEpoch).toBe(2);
+    } finally {
+      vi.mocked(importPublicKey).mockImplementation(
+        async () => ({ type: "public" }) as unknown as CryptoKey,
+      );
+      vi.mocked(exportPublicKey).mockImplementation(async () => "bW9ja2VwaGVtZXJhbA==");
+    }
+  });
+});
+
+describe("E2EE operation ownership", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSetKey.mockResolvedValue(undefined);
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "unpinned" });
+    vi.mocked(getOrCreateIdentityKeyPair).mockResolvedValue(mockIdentityKeyPair);
+    vi.mocked(authStore.getState).mockReturnValue({ user: { id: 1 } } as never);
+    mockMembers.clear();
+    mockMembers.set(PEER_ID, { identityPublicKey: "peer-identity-b64" });
+    mockVoiceState.voiceUsers.clear();
+  });
+
+  it("commits the current session key after an unfinished offer import", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    const appliedKeys: string[] = [];
+    let appliedKey: string | undefined;
+    const apply = (key: string) => {
+      appliedKey = key;
+      appliedKeys.push(key);
+    };
+    vi.mocked(roomKeyToBase64).mockImplementation((key) => `key-${key[0]}`);
+    vi.mocked(generateRoomKey)
+      .mockReturnValueOnce(new Uint8Array(32).fill(1))
+      .mockReturnValueOnce(new Uint8Array(32).fill(2));
+    vi.mocked(unwrapRoomKey).mockResolvedValueOnce({
+      roomKey: new Uint8Array(32).fill(3),
+      epoch: 9,
+    });
+    mockSetKey.mockImplementation(async (key: string) => apply(key));
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      let finishImport!: () => void;
+      mockSetKey.mockImplementationOnce(
+        (key: string) =>
+          new Promise<void>((resolve) => {
+            finishImport = () => {
+              apply(key);
+              resolve();
+            };
+          }),
+      );
+      const offer = mgr.handleOffer(PEER_ID, "enc", "iv");
+      await vi.waitFor(() => expect(finishImport).toBeDefined());
+      mgr.clearState();
+      const newSetup = mgr.setupKeyExchange(true, 2);
+      await vi.waitFor(() => expect(mgr.epoch).toBe(1));
+      expect(mockSetKey).not.toHaveBeenCalledWith("key-2");
+      finishImport();
+      await Promise.all([offer, newSetup]);
+      expect(appliedKeys).toEqual(["key-1", "key-3", "key-2"]);
+      expect(appliedKey).toBe("key-2");
+      expect((mgr as unknown as { _isKeyHolder: boolean })._isKeyHolder).toBe(true);
+    } finally {
+      mgr.clearState();
+      vi.mocked(roomKeyToBase64).mockReturnValue("mock-room-key-base64");
+    }
+  });
+
+  it("skips a queued provider key when its session has already ended", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    vi.mocked(roomKeyToBase64).mockImplementation((key) => `key-${key[0]}`);
+    vi.mocked(generateRoomKey)
+      .mockReturnValueOnce(new Uint8Array(32).fill(1))
+      .mockReturnValueOnce(new Uint8Array(32).fill(2))
+      .mockReturnValueOnce(new Uint8Array(32).fill(3));
+    try {
+      let finishImport!: () => void;
+      mockSetKey.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishImport = resolve;
+          }),
+      );
+      const firstSetup = mgr.setupKeyExchange(true, 1);
+      await vi.waitFor(() => expect(finishImport).toBeDefined());
+      mgr.clearState();
+      const secondSetup = mgr.setupKeyExchange(true, 2);
+      await vi.waitFor(() => expect(mgr.epoch).toBe(1));
+      mgr.clearState();
+      const thirdSetup = mgr.setupKeyExchange(true, 3);
+      await vi.waitFor(() => expect(mgr.epoch).toBe(1));
+      finishImport();
+      await expect(Promise.all([firstSetup, secondSetup, thirdSetup])).resolves.toEqual([
+        false,
+        false,
+        true,
+      ]);
+      expect(mockSetKey.mock.calls.map(([key]) => key)).toEqual(["key-1", "key-3"]);
+    } finally {
+      mgr.clearState();
+      vi.mocked(roomKeyToBase64).mockReturnValue("mock-room-key-base64");
+    }
+  });
+
+  it("allows a later provider import after an earlier import fails", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      mockSetKey.mockRejectedValueOnce(new Error("key import failed"));
+      await expect(mgr.setupKeyExchange(true, 1)).rejects.toThrow("key import failed");
+      mgr.clearState();
+      await expect(mgr.setupKeyExchange(true, 2)).resolves.toBe(true);
+      expect(mockSetKey).toHaveBeenCalledTimes(2);
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("drains a deferred membership rotation when an offer supersedes a pending key", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    const offeredKey = new Uint8Array(32).fill(4);
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      let finishImport!: () => void;
+      mockSetKey.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishImport = resolve;
+          }),
+      );
+      const rotation = mgr.rotateKeyPeriodically();
+      await vi.waitFor(() => expect(finishImport).toBeDefined());
+      vi.mocked(unwrapRoomKey).mockResolvedValueOnce({ roomKey: offeredKey, epoch: 8 });
+      const offer = mgr.handleOffer(PEER_ID, "enc", "iv");
+      await vi.waitFor(() =>
+        expect((mgr as unknown as { _roomKey: Uint8Array })._roomKey).toBe(offeredKey),
+      );
+      await mgr.handleParticipantLeft(PEER_ID);
+      expect(mgr.rotationPending).toBe(true);
+      finishImport();
+      await Promise.all([rotation, offer]);
+      expect(mgr.epoch).toBe(3);
+      expect(mgr.rotationPending).toBe(false);
+      expect(mgr.rotatingKey).toBe(false);
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("keeps an unfinished current rotation guarded when an older session finishes", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      let finishOldImport!: () => void;
+      mockSetKey.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishOldImport = resolve;
+          }),
+      );
+      const oldRotation = mgr.rotateKeyPeriodically();
+      await vi.waitFor(() => expect(finishOldImport).toBeDefined());
+      mgr.clearState();
+      ws.send.mockClear();
+      const newSetup = mgr.setupKeyExchange(false, 2);
+      await vi.waitFor(() => expect(sendsOfType(ws, "voice_e2ee_announce")).toHaveLength(1));
+      let finishCurrentImport!: () => void;
+      mockSetKey.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishCurrentImport = resolve;
+          }),
+      );
+      const currentRotation = mgr.handleParticipantLeft(99);
+      expect(mgr.rotatingKey).toBe(true);
+      finishOldImport();
+      await oldRotation;
+      await vi.waitFor(() => expect(finishCurrentImport).toBeDefined());
+      expect(mgr.rotatingKey).toBe(true);
+      finishCurrentImport();
+      await Promise.all([currentRotation, newSetup]);
+      expect(mgr.rotatingKey).toBe(false);
+      expect(mgr.epoch).toBe(1);
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("keeps queued announcements scoped to the call that received them", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      let releasePin!: (v: { status: "unpinned" }) => void;
+      vi.mocked(getIdentityPin).mockReturnValueOnce(
+        new Promise((resolve) => {
+          releasePin = resolve;
+        }),
+      );
+      const first = mgr.handleAnnounce(PEER_ID, "Zmlyc3Q=", "sig");
+      await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalledTimes(1));
+      const second = mgr.handleAnnounce(99, "c2Vjb25k", "sig");
+      mgr.clearState();
+      await mgr.setupKeyExchange(true, 2);
+      releasePin({ status: "unpinned" });
+      await Promise.all([first, second]);
+      expect([...mgr.peerPublicKeys.keys()]).toEqual([]);
+      expect(setPeerVerification).not.toHaveBeenCalled();
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("keeps queued offers scoped to the call that received them", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      let releasePin!: (v: { status: "unpinned" }) => void;
+      vi.mocked(getIdentityPin).mockReturnValueOnce(
+        new Promise((resolve) => {
+          releasePin = resolve;
+        }),
+      );
+      const announce = mgr.handleAnnounce(PEER_ID, "Zmlyc3Q=", "sig");
+      await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalledTimes(1));
+      const offer = mgr.handleOffer(PEER_ID, "enc", "iv");
+      mgr.clearState();
+      await mgr.setupKeyExchange(true, 2);
+      await mgr.handleAnnounce(PEER_ID, "c2Vjb25k", "sig");
+      vi.mocked(unwrapRoomKey).mockClear();
+      releasePin({ status: "unpinned" });
+      await Promise.all([announce, offer]);
+      expect(unwrapRoomKey).not.toHaveBeenCalled();
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("stops an announcement drain when its call ends", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.handleAnnounce(PEER_ID, "Zmlyc3Q=", "sig");
+      await mgr.handleAnnounce(99, "c2Vjb25k", "sig");
+      let releasePin!: (v: { status: "unpinned" }) => void;
+      vi.mocked(getIdentityPin).mockReturnValueOnce(
+        new Promise((resolve) => {
+          releasePin = resolve;
+        }),
+      );
+      const firstSetup = mgr.setupKeyExchange(true, 1);
+      await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalledTimes(1));
+      mgr.clearState();
+      await mgr.setupKeyExchange(true, 2);
+      releasePin({ status: "unpinned" });
+      await expect(firstSetup).resolves.toBe(false);
+      expect([...mgr.peerPublicKeys.keys()]).toEqual([]);
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("keeps verification scoped to the current membership and accepts a fresh rejoin", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      let releasePin!: (v: { status: "unpinned" }) => void;
+      vi.mocked(getIdentityPin).mockReturnValueOnce(
+        new Promise((resolve) => {
+          releasePin = resolve;
+        }),
+      );
+      const announce = mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalledTimes(1));
+      await mgr.handleParticipantLeft(PEER_ID);
+      releasePin({ status: "unpinned" });
+      await announce;
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+      expect(setPeerVerification).not.toHaveBeenCalled();
+      await mgr.handleAnnounce(PEER_ID, "cmVqb2lu", "sig");
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("removes pre-keypair announcements when that membership ends", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      await mgr.handleParticipantLeft(PEER_ID);
+      expect(mgr.pendingAnnounces).toEqual([]);
+      await mgr.setupKeyExchange(true, 1);
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("retains the current host identity when a superseded load completes", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    let host = "old.example.com";
+    const mgr = new E2EEManager({
+      getWs: () => ws as never,
+      getServerHost: () => host,
+      getCurrentChannelId: () => 1,
+    });
+    const oldIdentity = {
+      publicKey: { type: "old-public" },
+      privateKey: { type: "old-private" },
+    } as unknown as CryptoKeyPair;
+    const newIdentity = {
+      publicKey: { type: "new-public" },
+      privateKey: { type: "new-private" },
+    } as unknown as CryptoKeyPair;
+    try {
+      let releaseIdentity!: (key: CryptoKeyPair) => void;
+      vi.mocked(getOrCreateIdentityKeyPair).mockReturnValueOnce(
+        new Promise((resolve) => {
+          releaseIdentity = resolve;
+        }),
+      );
+      vi.mocked(getOrCreateIdentityKeyPair).mockResolvedValue(newIdentity);
+      const oldSetup = mgr.setupKeyExchange(true, 1);
+      await vi.waitFor(() => expect(getOrCreateIdentityKeyPair).toHaveBeenCalledTimes(1));
+      mgr.clearState();
+      mgr.clearIdentityKeyPair();
+      host = "new.example.com";
+      await mgr.setupKeyExchange(true, 1);
+      releaseIdentity(oldIdentity);
+      await expect(oldSetup).resolves.toBe(false);
+      vi.mocked(signEphemeralKey).mockClear();
+      await mgr.reannounceForReconnect();
+      expect(signEphemeralKey).toHaveBeenCalledWith(
+        newIdentity.privateKey,
+        1,
+        expect.any(Uint8Array),
+      );
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("uses the current account identity on a shared host", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    const secondIdentity = {
+      publicKey: { type: "second-public" },
+      privateKey: { type: "second-private" },
+    } as unknown as CryptoKeyPair;
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      mgr.clearState();
+      vi.mocked(authStore.getState).mockReturnValue({ user: { id: 2 } } as never);
+      vi.mocked(getOrCreateIdentityKeyPair).mockResolvedValueOnce(secondIdentity);
+      await mgr.setupKeyExchange(true, 1);
+      expect(getOrCreateIdentityKeyPair).toHaveBeenLastCalledWith("localhost:7880", 2);
+      expect(signEphemeralKey).toHaveBeenLastCalledWith(
+        secondIdentity.privateKey,
+        2,
+        expect.any(Uint8Array),
+      );
+    } finally {
+      mgr.clearState();
+      vi.mocked(authStore.getState).mockReturnValue({ user: { id: 1 } } as never);
+    }
+  });
+
+  it("[OC-0416] still rotates the room key when a second voice_leave for the same peer lands mid-retirement", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.setupKeyExchange(true, 1); // epoch 1, holder
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+
+      let releaseExport!: (v: string) => void;
+      vi.mocked(exportPublicKey).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseExport = resolve;
+          }),
+      );
+
+      // First voice_leave for PEER_ID: deletes the peer key synchronously,
+      // then suspends on exportPublicKey(departingKey) before reaching the
+      // election / membership-forward-secrecy rekey block.
+      const firstLeave = mgr.handleParticipantLeft(PEER_ID);
+      await vi.waitFor(() => expect(releaseExport).toBeDefined());
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+
+      // A second voice_leave for the SAME peer (server resend + local
+      // reconciliation both firing handleParticipantLeft) lands and runs to
+      // completion before the first resumes: departingKey is already gone,
+      // so its own hadPeerKey is false and it rotates nothing — but it DOES
+      // bump this peer's generation counter.
+      await mgr.handleParticipantLeft(PEER_ID);
+
+      releaseExport("bW9ja2VwaGVtZXJhbA==");
+      await firstLeave;
+
+      // The first invocation observed hadPeerKey=true while still the key
+      // holder — membership forward secrecy requires it to still rotate the
+      // room key even though the peer generation moved on under it during
+      // the await, which must only skip the (now-redundant) retirement
+      // write, not the whole handler.
+      expect(mgr.epoch).toBe(2);
+      expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
+    } finally {
+      mgr.clearState();
+    }
+  });
+
+  it("[OC-0442] abandons the whole handler when the SESSION is torn down mid-retirement", async () => {
+    // The companion to OC-0416. peerAttemptIsCurrent() conflates two very
+    // different reasons to go stale: a duplicate leave for the same peer
+    // (harmless — this invocation's own captures stay correct, so only the
+    // redundant retirement write is skipped) and a clearState() that ended
+    // the session entirely. The second must still abort everything: the
+    // captured channelId and roster now describe a room that no longer
+    // exists, and electing a holder or rotating _roomKey off them writes
+    // teardown-violating state that a freshly joined room then inherits.
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    try {
+      await mgr.setupKeyExchange(true, 1);
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+      let releaseExport!: (v: string) => void;
+      vi.mocked(exportPublicKey).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseExport = resolve;
+          }),
+      );
+
+      const leave = mgr.handleParticipantLeft(PEER_ID);
+      await vi.waitFor(() => expect(releaseExport).toBeDefined());
+
+      // The local user leaves voice (or switches rooms) while the export is
+      // still pending: clearState() bumps the session generation and resets
+      // _isKeyHolder, _roomKey and the epoch.
+      mgr.clearState();
+      mockSetKey.mockClear();
+
+      releaseExport("bW9ja2VwaGVtZXJhbA==");
+      await leave;
+
+      // Nothing from the dead session may land on the torn-down manager.
+      expect(mgr.epoch).toBe(0);
+      expect(mockSetKey).not.toHaveBeenCalled();
+      expect(mgr.rotatingKey).toBe(false);
+    } finally {
+      mgr.clearState();
     }
   });
 });

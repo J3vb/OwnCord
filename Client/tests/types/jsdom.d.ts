@@ -14,5 +14,6 @@ declare module "jsdom" {
   export class JSDOM {
     constructor(html: string, options?: JSDOMOptions);
     readonly window: Window & typeof globalThis & { close(): void };
+    serialize(): string;
   }
 }

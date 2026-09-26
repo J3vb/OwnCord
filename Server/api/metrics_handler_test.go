@@ -16,7 +16,7 @@ import (
 // buildMetricsRouter creates a chi router with the metrics endpoint behind AdminIPRestrict.
 func buildMetricsRouter(allowedCIDRs []string) http.Handler {
 	r := chi.NewRouter()
-	r.With(api.AdminIPRestrict(allowedCIDRs, nil)).
+	r.With(api.AdminIPRestrict("server.metrics_allowed_cidrs", allowedCIDRs, nil)).
 		Get("/api/v1/metrics", api.HandleMetricsForTest(api.MetricsSources{
 			ConnectedUsers: func() int { return 5 },
 			VoiceSessions:  func() int { return 2 },
@@ -26,6 +26,7 @@ func buildMetricsRouter(allowedCIDRs []string) http.Handler {
 			Backpressure:   func() (uint64, uint64, uint64) { return 4, 9, 11 },
 			PersisterStats: func() (uint64, uint64, uint64, uint64, bool) { return 100, 2, 10, 1, true },
 			DBStats:        func() sql.DBStats { return sql.DBStats{WaitCount: 6, WaitDuration: 1500 * time.Millisecond} },
+			DBReaderStats:  func() sql.DBStats { return sql.DBStats{WaitCount: 3, WaitDuration: 700 * time.Millisecond} },
 			PermCache:      func() (uint64, uint64) { return 42, 8 },
 		}))
 	return r
@@ -55,6 +56,7 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 		"reconnect_tier_buffer", "reconnect_tier_db", "reconnect_tier_full",
 		"backpressure_queue_disconnects", "backpressure_high_fallbacks", "backpressure_low_drops",
 		"db_writer_wait_count", "db_writer_wait_seconds",
+		"db_reader_wait_count", "db_reader_wait_seconds",
 		"perm_cache_hits", "perm_cache_misses",
 		"event_persister",
 	}
@@ -82,6 +84,9 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 	}
 	if got := resp["db_writer_wait_seconds"].(float64); got != 1.5 {
 		t.Errorf("db_writer_wait_seconds = %v, want 1.5", got)
+	}
+	if got := resp["db_reader_wait_seconds"].(float64); got != 0.7 {
+		t.Errorf("db_reader_wait_seconds = %v, want 0.7", got)
 	}
 	if int(resp["perm_cache_hits"].(float64)) != 42 {
 		t.Errorf("perm_cache_hits = %v, want 42", resp["perm_cache_hits"])
@@ -151,5 +156,46 @@ func TestHandleMetrics_WithoutLiveKitHealthCheck(t *testing.T) {
 	// event_persister should be absent when the persister reports ok=false.
 	if _, ok := resp["event_persister"]; ok {
 		t.Errorf("event_persister should be omitted when persistence is disabled, got %v", resp["event_persister"])
+	}
+}
+
+// TestHandleMetrics_PushCounters proves the three push_* fields (B5-11,
+// behind HP-5) surface real values when a PushCounters source is wired, and
+// stay at zero — never absent, they are plain uint64s — when it is nil, the
+// state of a server with dispatch off (the compiled default).
+func TestHandleMetrics_PushCounters(t *testing.T) {
+	r := chi.NewRouter()
+	r.Get("/api/v1/metrics", api.HandleMetricsForTest(api.MetricsSources{
+		PushCounters: func() (uint64, uint64, uint64) { return 7, 2, 1 },
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["push_dispatched"] != float64(7) || resp["push_failed"] != float64(2) || resp["push_pruned"] != float64(1) {
+		t.Errorf("push counters = %v/%v/%v, want 7/2/1", resp["push_dispatched"], resp["push_failed"], resp["push_pruned"])
+	}
+
+	// Dispatch off: PushCounters nil, the three fields stay at zero.
+	r2 := chi.NewRouter()
+	r2.Get("/api/v1/metrics", api.HandleMetricsForTest(api.MetricsSources{}))
+	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	req2.RemoteAddr = "127.0.0.1:9999"
+	rr2 := httptest.NewRecorder()
+	r2.ServeHTTP(rr2, req2)
+	var resp2 map[string]any
+	if err := json.NewDecoder(rr2.Body).Decode(&resp2); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp2["push_dispatched"] != float64(0) || resp2["push_failed"] != float64(0) || resp2["push_pruned"] != float64(0) {
+		t.Errorf("push counters with no source = %v/%v/%v, want 0/0/0", resp2["push_dispatched"], resp2["push_failed"], resp2["push_pruned"])
 	}
 }

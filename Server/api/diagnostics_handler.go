@@ -2,11 +2,13 @@ package api
 
 import (
 	"net/http"
+	"net/netip"
 	"net/url"
 	"runtime"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/netclass"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -15,6 +17,12 @@ type diagnosticsResponse struct {
 	Server serverDiag `json:"server"`
 	Voice  voiceDiag  `json:"voice"`
 	Client clientDiag `json:"client"`
+
+	// Reachability is nil unless server.reachability_report_enabled is set
+	// (B6-6). A pointer with omitempty rather than a value, so the key is
+	// absent when the owner has not opted in — an empty object would read as
+	// "nothing to report" rather than "not switched on".
+	Reachability *netclass.Report `json:"reachability,omitempty"`
 }
 
 type serverDiag struct {
@@ -35,6 +43,10 @@ type voiceDiag struct {
 type clientDiag struct {
 	RemoteAddr   string `json:"remote_addr"`
 	IsPrivateNet bool   `json:"is_private_network"`
+	// AddressClass names the range RemoteAddr falls in. IsPrivateNet alone
+	// cannot distinguish a tailnet peer from a LAN host from a carrier-NAT
+	// client, and B6-6 is precisely about not conflating those.
+	AddressClass netclass.Kind `json:"address_class"`
 }
 
 func handleDiagnosticsConnectivity(
@@ -76,24 +88,55 @@ func handleDiagnosticsConnectivity(
 			Client: clientDiag{
 				RemoteAddr:   clientAddr,
 				IsPrivateNet: isPrivateIP(clientAddr),
+				AddressClass: classifyIP(clientAddr),
 			},
+		}
+
+		// B6-6: owner opt-in. Building the report opens no socket and
+		// resolves no name — see the netclass package comment for why there
+		// is no probe — so it adds no latency budget to this handler beyond
+		// the LiveKit health check above, which carries its own 3s timeout.
+		if cfg.Server.ReachabilityReportEnabled {
+			report := netclass.BuildReport(netclass.LocalAddrs(), netclass.Params{
+				ListenPort:   cfg.Server.Port,
+				TLSMode:      cfg.TLS.Mode,
+				VoiceEnabled: cfg.Voice.LiveKitURL != "",
+				VoiceNodeIP:  cfg.Voice.NodeIP,
+			})
+			resp.Reachability = &report
 		}
 
 		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
-// isPrivateIP checks if an IP string is in a private/reserved range.
-func isPrivateIP(ip string) bool {
-	for _, prefix := range []string{
-		"10.", "172.16.", "172.17.", "172.18.", "172.19.",
-		"172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
-		"172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
-		"172.30.", "172.31.", "192.168.", "127.", "::1", "fc", "fd",
-	} {
-		if len(ip) >= len(prefix) && ip[:len(prefix)] == prefix {
-			return true
-		}
+// classifyIP names the range ip falls in, or KindOther when it does not parse.
+func classifyIP(ip string) netclass.Kind {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return netclass.KindOther
 	}
-	return false
+	return netclass.Classify(addr)
+}
+
+// isPrivateIP reports whether ip reaches this server from somewhere other than
+// the public internet.
+//
+// It used to be a list of string prefixes, which could not see three ranges
+// that matter here: 100.64.0.0/10 (carrier-grade NAT, and the range Tailscale
+// hands out — docs/tailscale.md:19-24), 169.254.0.0/16 and fe80::/10
+// (link-local), and any IPv4-mapped form such as ::ffff:192.168.1.1. A
+// tailnet peer was reported as a public-internet client, which is exactly the
+// confusion B6-6 exists to remove.
+//
+// The documentation and benchmarking ranges stay false, as they always were:
+// they are not private, they are simply not allocated to anyone.
+func isPrivateIP(ip string) bool {
+	switch classifyIP(ip) {
+	case netclass.KindLoopback, netclass.KindPrivate, netclass.KindUniqueLocal,
+		netclass.KindCGNAT, netclass.KindLinkLocal:
+		return true
+	default:
+		return false
+	}
 }

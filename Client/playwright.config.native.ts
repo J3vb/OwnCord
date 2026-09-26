@@ -1,32 +1,15 @@
 import { defineConfig } from "@playwright/test";
 
-/**
- * Playwright config for testing against the REAL Tauri production app.
- *
- * Connects to the WebView2 window via Chrome DevTools Protocol (CDP).
- *
- * Two projects:
- *
- * 1. `native-no-auth` — Tests that do NOT need login (smoke tests,
- *    connect page UI, auth flow verification). Each test gets a fresh
- *    Tauri exe via the original per-test fixture.
- *
- * 2. `native-authenticated` — Tests that need a logged-in session
- *    (channel nav, chat ops, settings, voice, overlays, app layout).
- *    Uses the persistent fixture: one Tauri exe for the entire project,
- *    login happens once, all tests reuse the same page.
- *
- * This design eliminates server rate limiting (5 logins/min, 10-failure
- * lockout) that previously caused test failures when 8+ spec files each
- * launched a fresh exe and logged in.
- *
- * Requirements:
- * - Built Tauri exe:  npm run tauri build
- * - Running server:   Server/chatserver.exe (or set OWNCORD_SERVER_URL)
- *
- * Usage:  npm run test:e2e:native
+/** Built Windows WebView2 app, isolated credentials/profile and local Go server.
+ * Five projects share one built binary: `native-core` is the required CI
+ * journey and `native-updater` the installer journey, while `native-no-auth`
+ * (connect page, auth), `native-authenticated` (layout, channel nav, chat,
+ * DMs, settings, appearance, overlays) and `native-extra` (window state, tray
+ * status, reload/DevTools keys, external links, push-to-talk) run in the same
+ * CI job. Binaries are built in CI only.
  */
 export default defineConfig({
+  outputDir: "test-results/native",
   timeout: 120_000,
   expect: {
     timeout: 15_000,
@@ -34,10 +17,17 @@ export default defineConfig({
   // Native tests run sequentially — one app instance at a time
   fullyParallel: false,
   workers: 1,
-  retries: 2,
+  retries: process.env.CI ? 1 : 0,
+  forbidOnly: !!process.env.CI,
+  failOnFlakyTests: !!process.env.CI,
+  // Applies per invocation. The combined native-no-auth + native-authenticated
+  // run is the large one (about 2 minutes on CI); this stays below the CI
+  // step's 25-minute timeout so the reporters finish writing on a hung run.
+  globalTimeout: 20 * 60 * 1000,
   reporter: process.env.CI
     ? [
-        ["html", { open: "never" }],
+        ["list"],
+        ["html", { open: "never", outputFolder: "playwright-report/native" }],
         ["junit", { outputFile: "test-results/native-junit.xml" }],
       ]
     : "html",
@@ -46,11 +36,30 @@ export default defineConfig({
     actionTimeout: 30_000,
     navigationTimeout: 45_000,
     screenshot: "only-on-failure",
-    trace: "on-first-retry",
-    video: "on-first-retry",
+    // CDP context lifecycle and traces are owned explicitly by native-app.ts.
+    trace: "off",
+    video: "off",
   },
 
   projects: [
+    {
+      name: "native-updater",
+      testDir: "./tests/e2e/native",
+      testMatch: ["packaged-update.spec.ts"],
+    },
+    {
+      name: "native-core",
+      testDir: "./tests/e2e/native",
+      testMatch: [
+        "reconnection.spec.ts",
+        "voice-controls.spec.ts",
+        "pending-messages.spec.ts",
+        "http-cancellation.spec.ts",
+        "long-session.spec.ts",
+        "b9-content-consent.spec.ts",
+        "b9-journeys.spec.ts",
+      ],
+    },
     {
       name: "native-no-auth",
       testDir: "./tests/e2e/native",
@@ -64,13 +73,18 @@ export default defineConfig({
         "channel-navigation.spec.ts",
         "chat-operations.spec.ts",
         "dm-system.spec.ts",
-        "reconnection.spec.ts",
         "settings-overlay.spec.ts",
         "theme-persistence.spec.ts",
-        "voice-controls.spec.ts",
         "overlays.spec.ts",
       ],
       dependencies: ["native-no-auth"],
+    },
+    {
+      // Own project, so its own worker: the window-state test launches its
+      // own app instances before the shared persistent app starts.
+      name: "native-extra",
+      testDir: "./tests/e2e/native",
+      testMatch: ["native-extra.spec.ts"],
     },
   ],
 });

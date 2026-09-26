@@ -1,8 +1,12 @@
 package auth_test
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -192,6 +196,62 @@ func TestLoadOrGenerateModeManualValidFiles(t *testing.T) {
 	}
 }
 
+// TestLeafFingerprint pins OP-01's one cross-language contract: the server
+// must print the leaf SHA-256 in exactly the lower-case colon-hex form the
+// desktop client shows and pins (Client/src-tauri/src/tofu.rs:23-31). A
+// mismatch — upper case, no colons, a different byte order — would make the
+// compare-out-of-band step fail for every user, which reads as an
+// interception attempt.
+func TestLeafFingerprint(t *testing.T) {
+	cert := tls.Certificate{Certificate: [][]byte{[]byte("abc")}}
+
+	// Known SHA-256("abc"), colon-hex, lower case — the exact string the
+	// client-side pin comparison depends on. Pinned as a literal rather than
+	// recomputed in the test, so a change to the hash, the case or the
+	// separators fails rather than tracking the implementation.
+	want := "ba:78:16:bf:8f:01:cf:ea:41:41:40:de:5d:ae:22:23:" +
+		"b0:03:61:a3:96:17:7a:9c:b4:10:ff:61:f2:00:15:ad"
+	got := auth.LeafFingerprint(cert)
+	if got != want {
+		t.Errorf("LeafFingerprint = %q, want %q", got, want)
+	}
+
+	if got := auth.LeafFingerprint(tls.Certificate{}); got != "" {
+		t.Errorf("LeafFingerprint of a cert with no leaf = %q, want empty", got)
+	}
+}
+
+// TestLoadOrGenerate_PublishesFingerprint pins that the modes with a
+// statically loaded certificate carry the fingerprint into TLSResult, and
+// that TLS off and ACME do not claim one they cannot know at start-up.
+func TestLoadOrGenerate_PublishesFingerprint(t *testing.T) {
+	tmpDir := t.TempDir()
+	certFile := filepath.Join(tmpDir, "cert.pem")
+	keyFile := filepath.Join(tmpDir, "key.pem")
+
+	for _, mode := range []string{"self_signed", "manual"} {
+		cfg := config.TLSConfig{Mode: mode, CertFile: certFile, KeyFile: keyFile}
+		result, err := auth.LoadOrGenerate(cfg)
+		if err != nil {
+			t.Fatalf("LoadOrGenerate(mode=%s): %v", mode, err)
+		}
+		if want := auth.LeafFingerprint(result.TLSConfig.Certificates[0]); result.Fingerprint != want {
+			t.Errorf("mode=%s Fingerprint = %q, want %q", mode, result.Fingerprint, want)
+		}
+		if result.Fingerprint == "" {
+			t.Errorf("mode=%s Fingerprint is empty", mode)
+		}
+	}
+
+	off, err := auth.LoadOrGenerate(config.TLSConfig{Mode: "off"})
+	if err != nil {
+		t.Fatalf("LoadOrGenerate(mode=off): %v", err)
+	}
+	if off.Fingerprint != "" {
+		t.Errorf("mode=off Fingerprint = %q, want empty", off.Fingerprint)
+	}
+}
+
 func TestLoadOrGenerateUnknownMode(t *testing.T) {
 	cfg := config.TLSConfig{Mode: "unknown_mode"}
 
@@ -293,5 +353,151 @@ func TestLoadOrGenerateACME_HTTPRedirect(t *testing.T) {
 	loc := rec.Header().Get("Location")
 	if !strings.HasPrefix(loc, "https://chat.example.com/") {
 		t.Errorf("redirect should point to HTTPS, got: %s", loc)
+	}
+}
+
+func TestLoadOrGenerateACME_HTTPRedirectNonDefaultPort(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.TLSConfig{
+		Mode:         "acme",
+		Domain:       "chat.example.com",
+		AcmeCacheDir: filepath.Join(tmpDir, "acme_certs"),
+		HTTPSPort:    8443,
+	}
+
+	result, err := auth.LoadOrGenerate(cfg)
+	if err != nil {
+		t.Fatalf("LoadOrGenerate(acme) error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://chat.example.com/some/path", nil)
+	rec := httptest.NewRecorder()
+	result.HTTPHandler.ServeHTTP(rec, req)
+
+	loc := rec.Header().Get("Location")
+	if want := "https://chat.example.com:8443/some/path"; loc != want {
+		t.Errorf("redirect Location = %q, want %q", loc, want)
+	}
+}
+
+// ─── B6-6: reachability failures must not be silent ─────────────────────────
+
+// TestLoadACME_IPErrorNamesTheRealLimit — the error used to read "Let's
+// Encrypt does not issue certificates for IP addresses". That stopped being
+// true on 2026-01-15, and blaming the CA sends an owner to the wrong place:
+// the limit is this build's ACME client, which accepts hostnames only.
+func TestLoadACME_IPErrorNamesTheRealLimit(t *testing.T) {
+	for _, ip := range []string{"192.168.1.1", "203.0.113.10", "2001:db8::1"} {
+		_, err := auth.LoadOrGenerate(config.TLSConfig{Mode: "acme", Domain: ip})
+		if err == nil {
+			t.Fatalf("%s: expected an error for an IP in tls.domain", ip)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "IP address") {
+			t.Errorf("%s: error should still name the IP-address case, got: %v", ip, err)
+		}
+		if strings.Contains(msg, "Let's Encrypt does not issue") {
+			t.Errorf("%s: error blames the CA for a limit that is this build's own: %v", ip, err)
+		}
+		for _, want := range []string{"hostname", "manual"} {
+			if !strings.Contains(strings.ToLower(msg), want) {
+				t.Errorf("%s: error does not point at %q as the way forward: %v", ip, want, err)
+			}
+		}
+	}
+}
+
+// TestLoadACME_LogsIssuanceFailureWithReachabilityCause — the server discards
+// its TLS ErrorLog (Server/internal/app/lifecycle.go) to suppress handshake
+// noise, which also discarded every certificate-issuance failure. A server
+// whose port 80 is unreachable logged "server starting", looked healthy, and
+// failed every handshake in silence: a reachability limit reported as
+// application success, which is the thing B6-6 exists to stop.
+//
+// The failure is injected. Reaching a real ACME directory from a test would
+// make this depend on network topology, which this milestone's plan forbids.
+func TestLoadACME_LogsIssuanceFailureWithReachabilityCause(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	boom := errors.New("acme/autocert: unable to satisfy authorization")
+	wrapped := auth.LogCertificateFailuresForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return nil, boom
+	}, "chat.example.com")
+
+	if _, err := wrapped(&tls.ClientHelloInfo{ServerName: "chat.example.com"}); !errors.Is(err, boom) {
+		t.Fatalf("the wrapper must return the underlying error unchanged, got: %v", err)
+	}
+
+	logged := buf.String()
+	for _, want := range []string{"chat.example.com", ":80", "certificate"} {
+		if !strings.Contains(logged, want) {
+			t.Errorf("issuance-failure log does not mention %q:\n%s", want, logged)
+		}
+	}
+
+	// Throttled, not once-per-handshake: a client retrying a failing
+	// connection must not be able to fill the disk.
+	before := buf.Len()
+	for range 5 {
+		_, _ = wrapped(&tls.ClientHelloInfo{ServerName: "chat.example.com"})
+	}
+	if buf.Len() != before {
+		t.Errorf("the wrapper logged again on repeat failures; %d extra bytes", buf.Len()-before)
+	}
+}
+
+// TestLoadACME_SuccessIsNotLogged — a working certificate path stays quiet.
+func TestLoadACME_SuccessIsNotLogged(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	wrapped := auth.LogCertificateFailuresForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return &tls.Certificate{}, nil
+	}, "chat.example.com")
+
+	if _, err := wrapped(&tls.ClientHelloInfo{ServerName: "chat.example.com"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("a successful issuance logged something:\n%s", buf.String())
+	}
+}
+
+// TestLoadACME_IssuanceFailureLogIsBoundedAndIgnoresSNI covers the two
+// properties this wrapper needs because it runs before any handshake
+// completes, on input from an unauthenticated peer.
+//
+// Deduplicating by hello.ServerName would have let a peer grow a map without
+// bound by varying SNI, and echoing that field would have put attacker-chosen
+// bytes in the operator's log. Neither happens: the throttle is a single
+// timestamp, and only the configured domain is logged.
+func TestLoadACME_IssuanceFailureLogIsBoundedAndIgnoresSNI(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	wrapped := auth.LogCertificateFailuresForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return nil, errors.New("acme/autocert: unable to satisfy authorization")
+	}, "chat.example.com")
+
+	// A peer varying SNI on every connection must not extend the log.
+	for i := range 500 {
+		_, _ = wrapped(&tls.ClientHelloInfo{ServerName: fmt.Sprintf("attacker-%d.example.invalid", i)})
+	}
+
+	if n := strings.Count(buf.String(), "TLS certificate issuance failed"); n != 1 {
+		t.Errorf("500 handshakes with distinct SNI produced %d log lines, want 1 — the throttle must not be per-name", n)
+	}
+	if strings.Contains(buf.String(), "attacker-") {
+		t.Errorf("the log echoes the peer-supplied server name:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "chat.example.com") {
+		t.Errorf("the log does not name the configured domain:\n%s", buf.String())
 	}
 }

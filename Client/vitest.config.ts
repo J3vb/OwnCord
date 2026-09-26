@@ -1,6 +1,23 @@
 import { configDefaults, defineConfig } from "vitest/config";
 import { resolve } from "path";
 
+// Node >= 22.4 ships its own Web Storage, and vitest's jsdom environment makes
+// `window === globalThis` — so Node's `localStorage` AND its `Storage` class
+// shadow jsdom's. `localStorage` then returns undefined without
+// `--localstorage-file`, and `Storage` names Node's class, which silently
+// defeats every `vi.spyOn(Storage.prototype, ...)` in the suite (OC-0415).
+// Switching Node's implementation off leaves jsdom's as the only one, which is
+// what the suite has always assumed and what CI's Node 26 happened to give.
+//
+// This module is evaluated in vitest's parent process, and the worker
+// processes inherit its environment — `poolOptions.forks.execArgv` does NOT
+// work here, vitest replaces execArgv with its own list. tests/setup.ts fails
+// loudly if the flag does not arrive, so this can never degrade in silence.
+const WEBSTORAGE_OFF = "--no-experimental-webstorage";
+if (!(process.env.NODE_OPTIONS ?? "").includes(WEBSTORAGE_OFF)) {
+  process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} ${WEBSTORAGE_OFF}`.trim();
+}
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -13,7 +30,19 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    // Restores `localStorage`, which Node 26 shadows out of the jsdom global.
+    // "forks" is vitest 4's default; pinning it makes the dependency explicit
+    // so a future default flip is a deliberate edit here rather than a silent
+    // behaviour change. Two things need child processes rather than worker
+    // threads. `process.env.TZ` only reaches Date's local-time engine on a
+    // process main thread, so the TZ-pinned regression blocks in
+    // tests/unit/{dispatcher,renderers}.test.ts measure nothing under threads
+    // — tests/helpers/tz-pin.ts throws rather than skipping if that happens.
+    // And the NODE_OPTIONS flag above is a process start-up flag: a worker
+    // thread inherits the variable but not its effect (today jsdom supplies
+    // the globals anyway, so that half is belt-and-braces, not load-bearing).
+    pool: "forks",
+    // Asserts the NODE_OPTIONS flag below actually arrived; see its comment
+    // and tests/setup.ts's header.
     setupFiles: ["./tests/setup.ts"],
     // Both the `tests/**/*.test.ts` suite and component-local
     // `src/**/*.test.ts` files are picked up.
@@ -24,12 +53,18 @@ export default defineConfig({
     exclude: [...configDefaults.exclude, "tests/browser/**"],
     coverage: {
       provider: "v8",
+      // json-summary emits coverage/coverage-summary.json, which
+      // scripts/coverage-floor.sh reads. It is NOT in vitest's defaults
+      // (text, html, clover, json), so without it the floor gate exits 2 with
+      // "no such file" — a broken gate that looks like a coverage failure.
+      reporter: ["text", "html", "clover", "json", "json-summary"],
       include: ["src/**/*.ts"],
       // Keep this list minimal and justified. An unexplained entry hides a
       // real gap: window-state.ts, credentials.ts, updater.ts and
       // UpdateNotifier.ts each sat here while having (or gaining) tests, so
       // their coverage never showed up in any report.
       exclude: [
+        // Type declarations only: no runtime statements to cover.
         "src/**/*.d.ts",
         // App bootstrap: wires the DOM, router and stores together at startup.
         // Has no seam to test below the e2e level; covered by tests/e2e.
@@ -42,7 +77,7 @@ export default defineConfig({
         "src/lib/noise-suppression.ts",
       ],
       thresholds: {
-        statements: 70,
+        statements: 90,
         branches: 70,
         functions: 70,
         lines: 70,

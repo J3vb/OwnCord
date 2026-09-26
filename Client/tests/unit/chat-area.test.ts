@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const {
   mockPinnedToggle,
   mockPinnedCleanup,
+  mockPinnedCloseFor,
   mockSearchOpen,
   mockSearchCleanup,
   mockVideoMount,
@@ -15,6 +16,7 @@ const {
 } = vi.hoisted(() => ({
   mockPinnedToggle: vi.fn(),
   mockPinnedCleanup: vi.fn(),
+  mockPinnedCloseFor: vi.fn(),
   mockSearchOpen: vi.fn(),
   mockSearchCleanup: vi.fn(),
   mockVideoMount: vi.fn(),
@@ -50,6 +52,7 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
   createPinnedPanelController: vi.fn((_opts: unknown) => ({
     toggle: mockPinnedToggle,
     cleanup: mockPinnedCleanup,
+    closeFor: mockPinnedCloseFor,
   })),
   createSearchOverlayController: vi.fn((_opts: unknown) => ({
     open: mockSearchOpen,
@@ -76,7 +79,14 @@ vi.mock("@components/VideoGrid", () => ({
 
 import { createChatArea } from "../../src/pages/main-page/ChatArea";
 import type { ChatAreaOptions } from "../../src/pages/main-page/ChatArea";
-import { hasMessageJumpHandler, setMessageJumpHandler } from "@lib/message-navigation";
+import { jumpToMessage, setMessageJumpHandler } from "@lib/message-navigation";
+import {
+  addChannel,
+  channelsStore,
+  resetChannelsStore,
+  setChannels,
+  setNsfwAcknowledged,
+} from "@stores/channels.store";
 import {
   createPinnedPanelController,
   createSearchOverlayController,
@@ -293,11 +303,11 @@ describe("createChatArea", () => {
 
   // --- Unsubscribers ---
 
-  it("includes cleanup functions for the jump handler and both controllers", () => {
+  it("includes cleanup functions for the jump handler, both controllers and the consent watch", () => {
     const result = createChatArea(makeOptions());
 
-    // jump-handler unregister + pinned + search
-    expect(result.unsubscribers.length).toBe(3);
+    // jump-handler unregister + pinned + search + NSFW consent subscription
+    expect(result.unsubscribers.length).toBe(4);
     for (const unsub of result.unsubscribers) {
       expect(typeof unsub).toBe("function");
     }
@@ -312,14 +322,58 @@ describe("createChatArea", () => {
     expect(mockSearchCleanup).toHaveBeenCalledTimes(1);
   });
 
-  it("registers a global message-jump handler and unregisters it on cleanup", () => {
+  it("closes that channel's pins and the search overlay when any channel loses NSFW consent", () => {
+    resetChannelsStore();
+    setChannels([
+      {
+        id: 7,
+        name: "spicy",
+        type: "text",
+        category: null,
+        position: 0,
+        nsfw: true,
+        nsfw_acknowledged: true,
+      },
+      { id: 8, name: "plain", type: "text", category: null, position: 1 },
+    ]);
     const result = createChatArea(makeOptions());
-    expect(hasMessageJumpHandler()).toBe(true);
+
+    addChannel({ id: 9, name: "new", type: "text", category: null, position: 2, nsfw: true });
+    channelsStore.flush();
+    expect(mockPinnedCloseFor).not.toHaveBeenCalled();
+    expect(mockSearchCleanup).not.toHaveBeenCalled();
+
+    setNsfwAcknowledged(7, false);
+    channelsStore.flush();
+    expect(mockPinnedCloseFor).toHaveBeenCalledWith(7);
+    expect(mockSearchCleanup).toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    setNsfwAcknowledged(7, true);
+    channelsStore.flush();
+    expect(mockPinnedCloseFor).not.toHaveBeenCalled();
+    expect(mockSearchCleanup).not.toHaveBeenCalled();
+
+    for (const unsub of result.unsubscribers) unsub();
+    resetChannelsStore();
+  });
+
+  it("registers a global message-jump handler and unregisters it on cleanup", () => {
+    // Drop any handler an earlier test in this file left installed.
+    setMessageJumpHandler(() => {})();
+
+    const result = createChatArea(makeOptions());
+
+    // A permalink jump routes to the chat area's jumper.
+    jumpToMessage(5, 42);
+    expect(mockJumpTo).toHaveBeenCalledWith(5, 42);
 
     for (const unsub of result.unsubscribers) unsub();
 
     // A page that has been torn down must not keep answering permalink jumps.
-    expect(hasMessageJumpHandler()).toBe(false);
+    const jumpsWithHandler = vi.mocked(mockJumpTo).mock.calls.length;
+    jumpToMessage(5, 42);
+    expect(vi.mocked(mockJumpTo).mock.calls.length).toBe(jumpsWithHandler);
   });
 
   // --- Pin button interaction ---

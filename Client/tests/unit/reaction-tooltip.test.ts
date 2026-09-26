@@ -79,6 +79,12 @@ describe("formatReactorNames", () => {
     );
   });
 
+  it("keeps a large overflow count ungrouped", () => {
+    expect(formatReactorNames(["alice", "bob", "carol"], 1237)).toBe(
+      "alice, bob, carol and 1234 others",
+    );
+  });
+
   it("returns an empty string for no reactors", () => {
     expect(formatReactorNames([])).toBe("");
   });

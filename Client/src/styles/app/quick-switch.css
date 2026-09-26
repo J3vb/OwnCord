@@ -1,0 +1,159 @@
+/* ── Quick-Switch Overlay ── */
+.quick-switch-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: var(--bg-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.quick-switch-modal {
+  width: 380px;
+  max-width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-glow, var(--border));
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+}
+.quick-switch-header {
+  padding: 20px 20px 12px;
+}
+.quick-switch-header h2 {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--header-primary);
+  margin: 0 0 4px;
+}
+.quick-switch-subtitle {
+  font-size: var(--font-size-xs);
+  color: var(--text-micro);
+  margin: 0;
+}
+.quick-switch-list {
+  padding: 0 12px 8px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.quick-switch-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast);
+}
+.quick-switch-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-glow, transparent);
+}
+.quick-switch-item.current {
+  background: var(--bg-active);
+  border-color: var(--border-glow, var(--border));
+  cursor: default;
+}
+.quick-switch-item.add-new {
+  border-style: dashed;
+  border-color: var(--border);
+  color: var(--accent-text);
+}
+.quick-switch-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.quick-switch-item.current .quick-switch-icon {
+  background: var(--accent-gradient, var(--accent));
+  color: var(--on-accent);
+}
+.quick-switch-item.add-new .quick-switch-icon {
+  background: transparent;
+  font-size: 20px;
+  color: inherit;
+}
+.quick-switch-info {
+  flex: 1;
+  min-width: 0;
+}
+.quick-switch-name {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.quick-switch-host {
+  font-size: var(--font-size-xxs);
+  color: var(--text-micro);
+}
+.quick-switch-connected-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-circle);
+  background: var(--green);
+  flex-shrink: 0;
+}
+.quick-switch-footer {
+  padding: 12px;
+  text-align: center;
+  font-size: var(--font-size-xs);
+  color: var(--text-micro);
+}
+
+/* ── Quick Switcher (Ctrl+K) ── */
+.quick-switcher {
+  width: 480px;
+  max-width: 90vw;
+  margin-top: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-glow, var(--border));
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.quick-switcher__input {
+  width: 100%;
+  padding: 14px 16px;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: var(--font-size-lg);
+  border: none;
+  border-bottom: 1px solid var(--border);
+}
+.quick-switcher__input::placeholder {
+  color: var(--text-muted);
+}
+.quick-switcher__results {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.quick-switcher__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+.quick-switcher__item--active {
+  background: var(--bg-modifier-selected, var(--bg-hover));
+  color: var(--text-normal);
+}
+.quick-switcher__category {
+  margin-left: auto;
+  color: var(--text-micro);
+  font-size: var(--font-size-xs);
+}

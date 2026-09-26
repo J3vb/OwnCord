@@ -2,7 +2,7 @@
  * E2E tests for emoji picker insertion into the message textarea.
  * Covers: clicking emoji inserts it, picker closes after selection.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { mockTauriFullSession, navigateToMainPage } from "./helpers";
 
 test.describe("Emoji Picker — Insert into textarea", () => {

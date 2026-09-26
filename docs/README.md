@@ -11,28 +11,36 @@ dated snapshots that were true when written and were never updated, and
 
 ## Start here
 
-| I want to…              | Read                                                        |
-| ----------------------- | ----------------------------------------------------------- |
-| Run a server            | [quick-start.md](quick-start.md)                            |
-| Deploy for real         | [deployment.md](deployment.md)                              |
-| Contribute a change     | [contributing.md](contributing.md)                          |
-| Understand the system   | [architecture/](architecture/README.md)                     |
-| Report a bug            | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose) |
-| Ask, or suggest an idea | [Discussions](https://github.com/J3vb/OwnCord/discussions)  |
-| Report a vulnerability  | [security.md](security.md)                                  |
+| I want to…                   | Read                                                         |
+| ---------------------------- | ------------------------------------------------------------ |
+| Run a server                 | [quick-start.md](quick-start.md)                             |
+| Deploy for real              | [deployment.md](deployment.md)                               |
+| Something is wrong           | [deployment.md — When it fails](deployment.md#when-it-fails) |
+| Know what beta does not do   | [known-limitations.md](known-limitations.md)                 |
+| Contribute a change          | [contributing.md](contributing.md)                           |
+| Understand the system        | [architecture/](architecture/README.md)                      |
+| Report a bug                 | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose)  |
+| Ask, or suggest an idea      | [Discussions](https://github.com/J3vb/OwnCord/discussions)   |
+| Report a vulnerability       | [security.md](security.md)                                   |
+| Know who can read what       | [trust-model.md](trust-model.md)                             |
+| Know what one server carries | [capacity.md](capacity.md)                                   |
 
 ## Guidance
 
-| Document                                 | Covers                                                                                           |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| [quick-start.md](quick-start.md)         | Getting a server running with the fewest steps.                                                  |
-| [deployment.md](deployment.md)           | Production deployment on Windows and Linux.                                                      |
-| [contributing.md](contributing.md)       | Environment setup, **the branch and PR model**, coding standards, how to run the checks CI runs. |
-| [security.md](security.md)               | How to report a vulnerability, and how findings are handled in public vs private.                |
-| [livekit-setup.md](livekit-setup.md)     | Standing up the LiveKit SFU for voice and video.                                                 |
-| [port-forwarding.md](port-forwarding.md) | Making a server reachable from outside the LAN.                                                  |
-| [tailscale.md](tailscale.md)             | Remote access without port forwarding.                                                           |
-| [mcp-introspect.md](mcp-introspect.md)   | Dev-only MCP server for introspecting a running instance.                                        |
+| Document                                     | Covers                                                                                                         |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| [quick-start.md](quick-start.md)             | Getting a server running with the fewest steps.                                                                |
+| [deployment.md](deployment.md)               | Production deployment on Windows and Linux, and day-2 operation: logs, storage, failure, recovery, updates.    |
+| [known-limitations.md](known-limitations.md) | What the beta does not do, and a short FAQ, with a pointer for each item.                                      |
+| [contributing.md](contributing.md)           | Environment setup, **the branch and PR model**, coding standards, how to run the checks CI runs.               |
+| [security.md](security.md)                   | How to report a vulnerability, and how findings are handled in public vs private.                              |
+| [trust-model.md](trust-model.md)             | Who can read what: operator-readable text and files, E2EE media, transport, at rest, what beta does not claim. |
+| [capacity.md](capacity.md)                   | What one server carries: the measured 250/100/25 profile, its hardware and its commands.                       |
+| [livekit-setup.md](livekit-setup.md)         | Standing up the LiveKit SFU for voice and video.                                                               |
+| [port-forwarding.md](port-forwarding.md)     | Making a server reachable from outside the LAN.                                                                |
+| [tailscale.md](tailscale.md)                 | Remote access without port forwarding.                                                                         |
+| [testing-behavior.md](testing-behavior.md)   | Which test lane detects which broken behavior, and their boundaries and evidence.                              |
+| [mcp-introspect.md](mcp-introspect.md)       | Dev-only MCP server for introspecting a running instance.                                                      |
 
 ## Reference
 
@@ -57,7 +65,8 @@ and a PR touching those updates the blueprint in the same change.
 - [system-overview.md](architecture/system-overview.md), [server.md](architecture/server.md), [client.md](architecture/client.md)
 - [data-model.md](architecture/data-model.md), [websocket.md](architecture/websocket.md), [voice-e2ee.md](architecture/voice-e2ee.md)
 - [ux/](architecture/ux/README.md) — target-state UX spec, per-view states and event→reaction maps
-- [platform-contracts.md](architecture/platform-contracts.md) — target-state desktop/browser seam: what has to move behind a contract before the client can run in a browser (B7)
+- [platform-contracts.md](architecture/platform-contracts.md) — target-state desktop/browser seam: what has to move behind a contract before the client can run in a browser (post-beta)
+- [plugins.md](architecture/plugins.md) — the experimental WASM plugin boundary: off by default, compiled out of releases, no API promise, what may become a plugin after beta and what never moves
 
 [client-architecture.md](client-architecture.md) is a redirect stub; the live
 document is [architecture/client.md](architecture/client.md).
@@ -69,17 +78,18 @@ are deliberately left alone when paths change, so links from commit messages
 keep resolving. Anything here may be stale; the ledger and the plan index carry
 current status.
 
-| Audit                                                                          | Scope                                                                     |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| [audit-2026-08-23-repository-layout.md](audit-2026-08-23-repository-layout.md) | Repository layout and contributor experience (`RL-01`…`RL-22`).           |
-| [audit-2026-08-23-repository-health.md](audit-2026-08-23-repository-health.md) | Full repository health.                                                   |
-| [audit-2026-08-19.md](audit-2026-08-19.md)                                     | Repo health. **States "0 open findings" — untrue since; see the ledger.** |
-| [audit-test-coverage-2026-08-19.md](audit-test-coverage-2026-08-19.md)         | Test audit (`T-*`, a separate register from the `OC-*` ledger).           |
-| [audit-2026-08-04-docs-and-coverage.md](audit-2026-08-04-docs-and-coverage.md) | Documentation accuracy and UI/UX test coverage.                           |
-| [audit-2026-08-04.md](audit-2026-08-04.md)                                     | Security review.                                                          |
-| [audit-test-coverage-2026-07-25.md](audit-test-coverage-2026-07-25.md)         | Test-coverage audit.                                                      |
-| [audit-2026-07-19.md](audit-2026-07-19.md)                                     | Architecture and spec-conformance review.                                 |
-| [audit-2026-04-07.md](audit-2026-04-07.md)                                     | First comprehensive audit.                                                |
+| Audit                                                                                      | Scope                                                                     |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| [audit-2026-09-23-windows-update-relaunch.md](audit-2026-09-23-windows-update-relaunch.md) | Windows client update: why the successor can start late (not conclusive). |
+| [audit-2026-08-23-repository-layout.md](audit-2026-08-23-repository-layout.md)             | Repository layout and contributor experience (`RL-01`…`RL-22`).           |
+| [audit-2026-08-23-repository-health.md](audit-2026-08-23-repository-health.md)             | Full repository health.                                                   |
+| [audit-2026-08-19.md](audit-2026-08-19.md)                                                 | Repo health. **States "0 open findings" — untrue since; see the ledger.** |
+| [audit-test-coverage-2026-08-19.md](audit-test-coverage-2026-08-19.md)                     | Test audit (`T-*`, a separate register from the `OC-*` ledger).           |
+| [audit-2026-08-04-docs-and-coverage.md](audit-2026-08-04-docs-and-coverage.md)             | Documentation accuracy and UI/UX test coverage.                           |
+| [audit-2026-08-04.md](audit-2026-08-04.md)                                                 | Security review.                                                          |
+| [audit-test-coverage-2026-07-25.md](audit-test-coverage-2026-07-25.md)                     | Test-coverage audit.                                                      |
+| [audit-2026-07-19.md](audit-2026-07-19.md)                                                 | Architecture and spec-conformance review.                                 |
+| [audit-2026-04-07.md](audit-2026-04-07.md)                                                 | First comprehensive audit.                                                |
 
 ## Plans
 
@@ -97,9 +107,11 @@ page. Status has owners:
 | Defect status              | `.superpowers/findings-ledger.json` (`FINDINGS.md` is rendered from it)            |
 | Security-sensitive defects | Private GitHub Security Advisories                                                 |
 | Phase order and gates      | [plans/repo-health-roadmap-2026-08-23.md](plans/repo-health-roadmap-2026-08-23.md) |
-| Current measured baseline  | [plans/b0-baseline-2026-08-25.md](plans/b0-baseline-2026-08-25.md)                 |
+| Current measured baseline  | [plans/b9-entry-baseline-2026-09-23.md](plans/b9-entry-baseline-2026-09-23.md)     |
 | Generated-code contracts   | `CLAUDE.md`, "Generated code — never hand-edit"                                    |
 
-A CI job checks that documents on this page do not contradict the ledger's
-counts. Adding a count to a document means adding it to that check's allow-list
-in `scripts/check-doc-counts.mjs`.
+A CI job checks explicitly current summaries against the live ledger's counts.
+Adding a current summary means opting its document into the allow-list in
+`scripts/check-doc-counts.mjs`. Dated baselines and signed scorecards retain
+their as-measured numbers at the cited source commits; never refresh them to
+make the live count check pass.

@@ -171,6 +171,17 @@ func TestIsOriginAllowed_SameHostDifferentPortDenied(t *testing.T) {
 	}
 }
 
+// An explicit default port (as the client's proxy synthesizes behind a
+// reverse proxy that strips the port from Host, e.g. nginx's $host) must be
+// treated as equivalent to the implicit default port, on either side.
+func TestIsOriginAllowed_ExplicitDefaultPortMatchesImplicit(t *testing.T) {
+	r := httptest.NewRequest("GET", "https://chat.example.com/livekit/", nil)
+	r.Header.Set("Origin", "https://chat.example.com:443")
+	if !isOriginAllowed(r, nil) {
+		t.Error("expected true for explicit :443 origin against a port-stripped Host")
+	}
+}
+
 // A lookalike origin must NOT ride along with the first-party allowance.
 func TestIsOriginAllowed_FirstPartyLookalikesDenied(t *testing.T) {
 	for _, origin := range []string{
@@ -299,6 +310,8 @@ func TestLiveKitProxy_DoesNotBlockUserMetrics(t *testing.T) {
 // 5-minute TTL by anyone reading stdout or the admin panel's log ring buffer.
 func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
 	const token = "eyJhbGciOiJIUzI1NiJ9.SECRET-LIVEKIT-JWT-PAYLOAD.c2lnbmF0dXJl"
+	// The native (Rust SDK) client sends its token as a header instead.
+	const headerToken = "eyJhbGciOiJIUzI1NiJ9.SECRET-HEADER-JWT-PAYLOAD.c2lnbmF0dXJl"
 
 	var logs bytes.Buffer
 	prev := slog.Default()
@@ -311,6 +324,7 @@ func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
 	r := httptest.NewRequest("GET", "/rtc?access_token="+token, nil)
 	r.Header.Set("Connection", "Upgrade")
 	r.Header.Set("Upgrade", "websocket")
+	r.Header.Set("Authorization", "Bearer "+headerToken)
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, r)
 
@@ -323,6 +337,11 @@ func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
 	}
 	if strings.Contains(out, token) {
 		t.Fatalf("the LiveKit access token leaked into the log stream:\n%s", out)
+	}
+	// Future-proofing: coder/websocket's dial errors omit request headers
+	// today, so this holds even without the proxy's Authorization scrub.
+	if strings.Contains(out, headerToken) {
+		t.Fatalf("the Authorization token leaked into the log stream:\n%s", out)
 	}
 	if !strings.Contains(out, "backend dial failed") {
 		t.Errorf("the failure must still be diagnosable, got:\n%s", out)

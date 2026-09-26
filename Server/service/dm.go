@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -89,21 +88,29 @@ type CreateDMResult struct {
 	Channel   *db.Channel
 	Created   bool
 	Recipient *db.User
+	// RecipientOpened reports whether the recipient's side is actually open
+	// and safe to announce (dm_channel_open, ready.dm_channels, GET /dms).
+	// Only meaningful when Created is true — GetOrCreateDMChannelGated's
+	// existing-channel branch never touches the other party's dm_open_state,
+	// so an existing channel's visibility is whatever it already was. B5-6:
+	// a brand-new one-to-one channel opens only the recipient's side too
+	// when the recipient already trusts the caller, decided atomically
+	// inside GetOrCreateDMChannelGated's own transaction — otherwise only
+	// the caller's side opens, and the recipient's opens at acceptance
+	// instead (MessageRequestService.Accept / AcceptMessageRequest).
+	// RecipientOpened tells the caller (api/dm_handler.go) whether to
+	// broadcast dm_channel_open.
+	RecipientOpened bool
 }
 
 // CreateDM creates or retrieves a DM channel between two users.
 // Validates that neither user has blocked the other.
 func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*CreateDMResult, error) {
-	ctx, span := telemetry.GlobalTracer("service/dm").Start(ctx, "DMService.CreateDM",
+	ctx, done := traceCall(ctx, "service/dm", "DMService.CreateDM",
 		telemetry.Int64("user_id", userID),
 		telemetry.Int64("recipient_id", recipientID),
 	)
-	start := time.Now()
-	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
-			telemetry.String("method", "CreateDM"))
-		span.End()
-	}()
+	defer done()
 
 	if recipientID <= 0 {
 		return nil, fmt.Errorf("%w: recipient_id must be positive", ErrBadRequest)
@@ -129,22 +136,29 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 
 	blocked, err := s.st.IsEitherBlocked(ctx, userID, recipientID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to check block status: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to check block status: %w", ErrInternal, err)
 	}
 	if blocked {
 		return nil, fmt.Errorf("%w: cannot create DM — user is blocked", ErrForbidden)
 	}
 
-	ch, created, err := s.st.GetOrCreateDMChannel(ctx, userID, recipientID)
+	// B5-6 (Codex review round 2, P1): the recipient's visibility is decided
+	// INSIDE GetOrCreateDMChannelGated's own transaction (does the recipient
+	// already trust the caller?) and written once, atomically, with the
+	// channel and participants — no separate post-hoc CloseDM call for a
+	// cancellation, a CloseDM failure, or a stale read racing an
+	// in-flight accept to land in.
+	ch, created, recipientOpened, err := s.st.GetOrCreateDMChannelGated(ctx, userID, recipientID)
 	if err != nil {
 		slog.Error("DMService.CreateDM", "err", err)
 		return nil, fmt.Errorf("%w: failed to create DM channel", ErrInternal)
 	}
 
 	return &CreateDMResult{
-		Channel:   ch,
-		Created:   created,
-		Recipient: recipient,
+		Channel:         ch,
+		Created:         created,
+		Recipient:       recipient,
+		RecipientOpened: recipientOpened,
 	}, nil
 }
 
@@ -152,7 +166,7 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 func (s *DMService) ListDMs(ctx context.Context, userID int64) ([]db.DMChannelInfo, error) {
 	dms, err := s.st.GetUserDMChannels(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list DMs: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to list DMs: %w", ErrInternal, err)
 	}
 	// GetUserDMChannels only applies db.StatusForViewer (invisible ->
 	// offline); apply the "no live connection" half too, see
@@ -198,12 +212,12 @@ func (s *DMService) CloseDM(ctx context.Context, userID, channelID int64) (*Clos
 
 	isGroup, err := s.st.IsGroupDM(ctx, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read DM kind: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to read DM kind: %w", ErrInternal, err)
 	}
 
 	if !isGroup {
 		if err := s.st.CloseDM(ctx, userID, channelID); err != nil {
-			return nil, fmt.Errorf("%w: failed to close DM: %v", ErrInternal, err)
+			return nil, fmt.Errorf("%w: failed to close DM: %w", ErrInternal, err)
 		}
 		slog.Debug("DM closed", "user_id", userID, "channel_id", channelID)
 		return &CloseDMResult{}, nil
@@ -214,7 +228,7 @@ func (s *DMService) CloseDM(ctx context.Context, userID, channelID int64) (*Clos
 	// never in it" if the delete half-succeeded.
 	remaining, err := s.st.GetDMParticipantIDs(ctx, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read DM participants: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to read DM participants: %w", ErrInternal, err)
 	}
 	survivors := make([]int64, 0, len(remaining))
 	for _, pid := range remaining {
@@ -225,7 +239,7 @@ func (s *DMService) CloseDM(ctx context.Context, userID, channelID int64) (*Clos
 
 	deleted, err := s.st.LeaveGroupDM(ctx, userID, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to leave group DM: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to leave group DM: %w", ErrInternal, err)
 	}
 
 	slog.Debug("group DM left", "user_id", userID, "channel_id", channelID, "deleted", deleted)
@@ -266,15 +280,10 @@ type CreateGroupDMResult struct {
 // Unlike CreateDM this always creates a new channel: the same set of people may
 // want more than one group, so there is no "the group for these users" to find.
 func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientIDs []int64, name string) (*CreateGroupDMResult, error) {
-	ctx, span := telemetry.GlobalTracer("service/dm").Start(ctx, "DMService.CreateGroupDM",
+	ctx, done := traceCall(ctx, "service/dm", "DMService.CreateGroupDM",
 		telemetry.Int64("user_id", userID),
 	)
-	start := time.Now()
-	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
-			telemetry.String("method", "CreateGroupDM"))
-		span.End()
-	}()
+	defer done()
 
 	// De-duplicate and drop the caller: a payload naming the same person twice
 	// is a client bug, not a reason to refuse, but it must not inflate the
@@ -320,7 +329,7 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 	}
 
 	// Block-check every pair in the room, not just creator-vs-recipient:
-	// group DMs are exempt from the send-time block gate (requireDMNotBlocked
+	// group DMs are exempt from the send-time block gate (RequireDMNotBlocked
 	// skips groups entirely) on the strength of this creation-time check, so
 	// two mutually-blocked recipients must not both end up in the same group
 	// even when neither of them blocked the creator. n <= MaxGroupDMParticipants,
@@ -330,7 +339,7 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 		for j := i + 1; j < len(participantIDs); j++ {
 			blocked, err := s.st.IsEitherBlocked(ctx, participantIDs[i], participantIDs[j])
 			if err != nil {
-				return nil, fmt.Errorf("%w: failed to check block status: %v", ErrInternal, err)
+				return nil, fmt.Errorf("%w: failed to check block status: %w", ErrInternal, err)
 			}
 			if blocked {
 				return nil, fmt.Errorf("%w: cannot add a blocked user to a group DM", ErrForbidden)
@@ -389,7 +398,7 @@ func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, 
 
 	isGroup, err := s.st.IsGroupDM(ctx, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read DM kind: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to read DM kind: %w", ErrInternal, err)
 	}
 	if !isGroup {
 		return nil, fmt.Errorf("%w: only group DMs can be named", ErrBadRequest)
@@ -403,7 +412,7 @@ func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, 
 	}
 
 	if err := s.st.SetDMChannelName(ctx, channelID, cleanName); err != nil {
-		return nil, fmt.Errorf("%w: failed to rename group DM: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to rename group DM: %w", ErrInternal, err)
 	}
 
 	ch, err := s.st.GetChannel(ctx, channelID)
@@ -427,7 +436,7 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 	}
 	participants, err := s.st.GetDMParticipants(ctx, channelID, viewerID)
 	if err != nil {
-		return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read DM participants: %v", ErrInternal, err)
+		return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read DM participants: %w", ErrInternal, err)
 	}
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
@@ -435,7 +444,7 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 	}
 	isGroup, err := s.st.IsGroupDM(ctx, channelID)
 	if err != nil {
-		return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read DM kind: %v", ErrInternal, err)
+		return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read DM kind: %w", ErrInternal, err)
 	}
 	// See presentableDMChannelInfo: this is the single place broadcastDMOpen
 	// (group create/rename/leave refresh) and PATCH /dms/{id}'s response
@@ -446,11 +455,11 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 
 // SharedOneToOneDM returns the id of the 1:1 DM channel the two users share,
 // or ok=false when they have none. Group DMs never match, mirroring the
-// block-enforcement boundary (requireDMNotBlocked exempts groups).
+// block-enforcement boundary (RequireDMNotBlocked exempts groups).
 func (s *DMService) SharedOneToOneDM(ctx context.Context, userA, userB int64) (int64, bool, error) {
 	id, ok, err := s.st.FindDMChannelIDBetween(ctx, userA, userB)
 	if err != nil {
-		return 0, false, fmt.Errorf("%w: failed to look up shared DM: %v", ErrInternal, err)
+		return 0, false, fmt.Errorf("%w: failed to look up shared DM: %w", ErrInternal, err)
 	}
 	return id, ok, nil
 }
@@ -469,28 +478,48 @@ func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([
 	}
 	ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to check DM participation: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to check DM participation: %w", ErrInternal, err)
 	}
 	if !ok {
 		return nil, fmt.Errorf("%w: not a participant in this DM", ErrForbidden)
 	}
 	// A ring is a DM interaction like any other sink: without this check a
 	// blocked user could still make the blocker's client ring (A-2026-08-03).
-	// Group DMs are exempt inside requireDMNotBlocked, matching every other
+	// Group DMs are exempt inside RequireDMNotBlocked, matching every other
 	// sink — blocks are enforced at group creation instead.
-	if err := requireDMNotBlocked(ctx, s.st, userID, channelID); err != nil {
+	if err := RequireDMNotBlocked(ctx, s.st, userID, channelID); err != nil {
 		return nil, err
 	}
 
 	ids, err := s.st.GetDMParticipantIDs(ctx, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read DM participants: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to read DM participants: %w", ErrInternal, err)
 	}
+
+	// B5-6 (Codex P1-2): call_incoming/call_declined is a DM interaction
+	// like chat, typing and reactions — an untrusted recipient of a pending
+	// request must not learn the sender is present in voice either. Group
+	// DMs are untouched (decision 4), matching the block check above.
+	//
+	// Codex review round 2, P2: a failed IsGroupDM lookup used to skip the
+	// trust filter entirely and ring every participant — fail closed
+	// instead: no ring targets at all rather than an unfiltered ring.
+	isGroup, gErr := s.st.IsGroupDM(ctx, channelID)
+	if gErr != nil {
+		return nil, nil //nolint:nilerr // fail closed to no targets, not an error — the ringer's own call_ring must still succeed
+	}
+
 	targets := make([]int64, 0, len(ids))
 	for _, pid := range ids {
-		if pid != userID {
-			targets = append(targets, pid)
+		if pid == userID {
+			continue
 		}
+		if !isGroup {
+			if trusted, tErr := s.st.IsTrustedSender(ctx, pid, userID); tErr != nil || !trusted {
+				continue
+			}
+		}
+		targets = append(targets, pid)
 	}
 	return targets, nil
 }

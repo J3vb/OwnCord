@@ -38,6 +38,7 @@ type textAssetCacheEntry struct {
 // install_deb reject every update.
 var clientAssetSuffixByTarget = map[string]string{
 	"windows-x86_64-nsis":    "_x64-setup.nsis.zip",
+	"windows-aarch64-nsis":   "_arm64-setup.nsis.zip",
 	"linux-x86_64-appimage":  "_amd64.AppImage.tar.gz",
 	"linux-aarch64-appimage": "_aarch64.AppImage.tar.gz",
 }
@@ -81,9 +82,10 @@ func (u *Updater) FetchTextAsset(ctx context.Context, url string) (string, error
 }
 
 // FetchTextAssetCached is FetchTextAsset with an in-memory cache keyed by URL,
-// using the same cacheTTL as the release cache. It lets unauthenticated,
-// unrate-limited callers (e.g. the client-update endpoint) be served from
-// memory instead of triggering an outbound fetch on every request.
+// using the same cacheTTL as the release cache. It lets unauthenticated
+// callers (e.g. the client-update endpoint, which api/router.go rate-limits to
+// 30/min/IP) be served from memory instead of triggering an outbound fetch on
+// every request.
 func (u *Updater) FetchTextAssetCached(ctx context.Context, url string) (string, error) {
 	if entry, ok := u.lookupTextAsset(url, time.Now()); ok {
 		return entry.content, entry.err

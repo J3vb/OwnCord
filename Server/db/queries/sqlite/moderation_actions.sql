@@ -1,0 +1,147 @@
+-- moderation_actions is the B5-9 moderator-action ledger (migration 049):
+-- every warning, timeout, kick, ban and removal writes a row here. Keep
+-- this file ASCII-only: sqlc v1.30 truncates the next query by the
+-- byte/rune difference of any multi-byte character.
+
+-- name: InsertModerationAction :one
+-- The rank guard (actor strictly outranks target, re-read live) runs in Go
+-- immediately before this insert, inside the same transaction as the
+-- caller's effect (Server/db/moderation_action_queries.go,
+-- recordModerationAction) -- not here, so this statement is a plain insert.
+INSERT INTO moderation_actions (kind, target_id, actor_id, report_id, reason, expires_at)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id;
+
+-- name: HasActiveTimeout :one
+-- The one indexed lookup permissions.Checker / service.PermissionService.Subject
+-- run, uncached, to fill Subject.TimedOut.
+SELECT EXISTS (
+    SELECT 1 FROM moderation_actions
+     WHERE target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
+) AS active;
+
+-- name: TimeoutActionIsActiveForTarget :one
+-- Disambiguates MuteForSession's own no-match result (round 5, Codex review
+-- P2): whether the INCOMING action_id is still a live timeout on this
+-- target, so a delayed mute call (its own row already lifted, or expired,
+-- by the time it finally reaches the SFU/DB) is told matched=false rather
+-- than mistaken for "already muted by someone else".
+SELECT EXISTS (
+    SELECT 1 FROM moderation_actions
+     WHERE id = ? AND target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
+) AS active;
+
+-- name: SupersedeActiveTimeouts :many
+-- On issuing a NEW timeout (P2-9, Codex review): lift every OTHER
+-- still-active timeout row for the same target, in the same transaction as
+-- the new row's insert, so a repeated timeout never leaves two overlapping
+-- active rows for LiftTimeout to pick between -- the single-row
+-- GetActiveTimeout this replaced used to silently orphan every row but the
+-- newest. id excludes the row this same transaction just inserted, which
+-- must stay active. RETURNING id (round 4, Codex review): the caller
+-- transfers voice-mute ownership from these ids onto the new row
+-- (voice_states.server_muted_by) in the same transaction, so a mute an
+-- earlier timeout owns is not stranded when its row stops being the active
+-- one LiftTimeout will act on.
+UPDATE moderation_actions
+   SET lifted_at = datetime('now'), lifted_by = sqlc.arg(lifted_by)
+ WHERE target_id = sqlc.arg(target_id)
+   AND kind = 'timeout'
+   AND lifted_at IS NULL
+   AND expires_at > datetime('now')
+   AND id != sqlc.arg(id)
+RETURNING id;
+
+-- name: ListActiveTimeouts :many
+-- Every currently-active timeout row id for target_id -- normally at most
+-- one after SupersedeActiveTimeouts (see its comment), but LiftTimeout acts
+-- on all of them defensively (P2-9). LiftTimeout passes these ids to
+-- db.LiftTimeoutActionsByID (round 4, B5-10 addendum -- replacing
+-- LiftAllActiveTimeouts's own WHERE target_id=... shape with the by-id
+-- primitive an appeal overturn can also call inside its own transaction),
+-- then to db.ClearServerMuteOwnedBy, which clears whichever voice_states
+-- row's server_muted_by currently matches one of them -- ownership lives on
+-- the session now, not a column read here (see migration 049's comment).
+SELECT id FROM moderation_actions
+ WHERE target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now');
+
+-- name: ListActiveTimeoutExpiries :many
+-- Every currently-active timeout's target and expiry, across all users, so
+-- the hub can re-arm its in-memory expiry refresh after a restart.
+SELECT target_id, expires_at FROM moderation_actions
+ WHERE kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now');
+
+-- name: ListUnacknowledgedWarnings :many
+-- ready's notices slot: every warning issued to userID that has not yet
+-- been acknowledged.
+SELECT id, kind, reason, created_at
+  FROM moderation_actions
+ WHERE target_id = ? AND kind = 'warning' AND acknowledged_at IS NULL
+ ORDER BY created_at;
+
+-- name: AcknowledgeWarning :execrows
+-- Own rows only: userID must be the target. Zero rows affected means the
+-- id does not exist, belongs to someone else, or is already acknowledged --
+-- the caller answers the same NOT_FOUND either way, so this can never be
+-- used to probe another user's warning ids.
+UPDATE moderation_actions
+   SET acknowledged_at = datetime('now')
+ WHERE id = ? AND target_id = ? AND kind = 'warning' AND acknowledged_at IS NULL;
+
+-- name: ListModerationActionsForTarget :many
+-- GET /api/v1/moderation/users/{id}/actions: the full ledger for one user,
+-- newest first.
+SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
+       expires_at, acknowledged_at, lifted_at, lifted_by, created_at
+  FROM moderation_actions
+ WHERE target_id = ?
+ ORDER BY created_at DESC, id DESC;
+
+-- name: ListModerationActionsForReport :many
+-- The queue detail's "actions taken" list.
+SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
+       expires_at, acknowledged_at, lifted_at, lifted_by, created_at
+  FROM moderation_actions
+ WHERE report_id = ?
+ ORDER BY created_at, id;
+
+-- name: GetModerationActionByID :one
+-- B5-10's appeal submission and decision both need the appealed action's
+-- own row: its kind (appealable or not), its target (must be the appellant),
+-- and its actor (the deciding-moderator self-review check).
+SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
+       expires_at, acknowledged_at, lifted_at, lifted_by, created_at
+  FROM moderation_actions
+ WHERE id = ?;
+
+-- name: RetireRetiredCandidates :execrows
+-- The maintenance-tick retention sweep, kept only as the pre-appeals
+-- fallback RetireModerationActions falls back to if the appeals table is
+-- somehow absent (Server/db/moderation_action_queries.go) -- in ordinary
+-- operation migration 050 has always run by the time this executes, so
+-- RetireRetiredCandidatesExcludingAppealed (appeals.sql) is the query that
+-- actually runs. Warnings retire moderation.action_retention_days after
+-- acknowledged_at; timeouts the same number of days after expires_at, or
+-- after lifted_at when lifted early. Ban, kick and removal rows are never
+-- touched here.
+DELETE FROM moderation_actions
+ WHERE (kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < sqlc.arg(cutoff))
+    OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < sqlc.arg(cutoff));
+
+-- name: ListOwnModerationActions :many
+-- GET /api/v1/users/me/moderation (B9 Q6): the caller's own warning,
+-- timeout, removal and ban rows with their appeal, newest first. Member-safe
+-- by construction -- no actor, lifted_by, report link or appeal body is
+-- selected. Kicks are left out (nothing persists to appeal). A ban row can
+-- only reach a caller whose ban has lapsed or been reversed, because
+-- AuthMiddleware refuses a currently banned one. appeals.action_id is
+-- UNIQUE, so the join adds at most one row per action. Self-targeted rows
+-- (a moderator's own channel purge) are not sanctions and are left out; a
+-- row whose actor was erased (NULL) is kept.
+SELECT m.id, m.kind, m.reason, m.created_at, m.expires_at, m.lifted_at,
+       m.acknowledged_at, a.public_id AS appeal_id, a.state AS appeal_state
+  FROM moderation_actions m
+  LEFT JOIN appeals a ON a.action_id = m.id
+ WHERE m.target_id = ? AND m.kind IN ('warning', 'timeout', 'removal', 'ban')
+   AND m.actor_id IS NOT m.target_id
+ ORDER BY m.created_at DESC, m.id DESC;

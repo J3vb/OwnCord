@@ -1,35 +1,33 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
-	"log/slog"
+	"errors"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ─── API Token Handlers ──────────────────────────────────────────────────────
 //
 // These are the HTTP-panel equivalent of `server token create|list|revoke`
-// (token_cli.go). They wrap the same db.*APIToken calls, so behaviour stays in
-// sync with the CLI. All three routes are Owner-gated in api.go: minting a
-// long-lived bearer credential over the network is the one admin action that,
-// via a hijacked session, would outlive a password change and bulk logout
-// (API tokens deliberately live outside the session table), so it stays behind
-// the Owner role rather than the broad ADMINISTRATOR bit.
+// (token_cli.go). Both are thin adapters over service.TokenService, which is
+// what keeps them in sync — they used to wrap the same db.*APIToken calls
+// twice and had already drifted apart. All three routes are Owner-gated in
+// api.go: minting a long-lived bearer credential over the network is the one
+// admin action that, via a hijacked session, would outlive a password change
+// and bulk logout (API tokens deliberately live outside the session table), so
+// it stays behind the Owner role rather than the broad ADMINISTRATOR bit.
 
-func handleListAPITokens(database *db.DB) http.HandlerFunc {
+func handleListAPITokens(tokens *service.TokenService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tokens, err := database.ListAPITokens(r.Context())
+		list, err := tokens.List(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list tokens")
 			return
 		}
-		writeJSON(w, http.StatusOK, tokens)
+		writeJSON(w, http.StatusOK, list)
 	}
 }
 
@@ -51,86 +49,62 @@ type createTokenResponse struct {
 	User  string `json:"user"`
 }
 
-func handleCreateAPIToken(database *db.DB) http.HandlerFunc {
+func handleCreateAPIToken(tokens *service.TokenService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createTokenRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 			return
 		}
-		req.Label = strings.TrimSpace(req.Label)
-		if req.Label == "" {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "label is required")
-			return
-		}
 		// expires_hours=0 means "never expires" (see createTokenRequest doc).
-		// Negatives must not fall into that same nil-expiresAt branch, and the
-		// upper bound keeps time.Duration(hours)*time.Hour from overflowing
-		// int64 nanoseconds into a past timestamp. 87600h = 10 years.
+		// Negatives must not fall into that same never-expires branch, and the
+		// upper bound is applied to the INT, before the multiply below can
+		// overflow int64 nanoseconds into a past instant. 87600h = 10 years,
+		// the same ceiling the service enforces on the duration it receives.
 		if req.ExpiresHours < 0 || req.ExpiresHours > 24*365*10 {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "expires_hours must be between 0 and 87600")
 			return
 		}
 
-		var user *db.User
-		var err error
-		if req.Username != "" {
-			user, err = database.GetUserByUsername(r.Context(), req.Username)
-		} else {
-			user, err = database.GetOwnerUser(r.Context())
-		}
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to look up user")
+		minted, err := tokens.Create(r.Context(), actorFromContext(r),
+			req.Username, req.Label, time.Duration(req.ExpiresHours)*time.Hour)
+		switch {
+		case errors.Is(err, service.ErrBadRequest):
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 			return
-		}
-		if user == nil {
+		case errors.Is(err, service.ErrNotFound), errors.Is(err, service.ErrNoOwnerAccount):
+			// Both are "there is nobody to bind this token to". The panel is
+			// only reachable once an owner exists, so the bootstrap case is
+			// unreachable here in practice; it is mapped rather than dropped
+			// so a future caller cannot fall through to a 500.
 			writeErr(w, http.StatusBadRequest, "NOT_FOUND", "user not found")
 			return
-		}
-
-		raw, err := auth.GenerateToken()
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate token")
-			return
-		}
-		var expiresAt *time.Time
-		if req.ExpiresHours > 0 {
-			t := time.Now().Add(time.Duration(req.ExpiresHours) * time.Hour)
-			expiresAt = &t
-		}
-		id, err := database.CreateAPIToken(r.Context(), user.ID, auth.HashToken(raw), req.Label, expiresAt)
-		if err != nil {
+		case err != nil:
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create token")
 			return
 		}
 
-		actor := actorFromContext(r)
-		slog.Info("api token created", "actor_id", actor, "token_id", id, "label", req.Label, "bound_user", user.Username)
-		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "api_token_create", "api_token", id, req.Label)
-
-		writeJSON(w, http.StatusCreated, createTokenResponse{ID: id, Token: raw, Label: req.Label, User: user.Username})
+		writeJSON(w, http.StatusCreated, createTokenResponse{
+			ID: minted.ID, Token: minted.Raw, Label: minted.Label, User: minted.User.Username,
+		})
 	}
 }
 
-func handleRevokeAPIToken(database *db.DB) http.HandlerFunc {
+func handleRevokeAPIToken(tokens *service.TokenService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid token id")
 			return
 		}
-		affected, err := database.RevokeAPIToken(r.Context(), id)
-		if err != nil {
+		switch err := tokens.Revoke(r.Context(), actorFromContext(r), id); {
+		case errors.Is(err, service.ErrNotFound):
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "no active token with that id")
+			return
+		case err != nil:
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to revoke token")
 			return
 		}
-		if affected == 0 {
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "no active token with that id")
-			return
-		}
-		actor := actorFromContext(r)
-		slog.Warn("api token revoked", "actor_id", actor, "token_id", id)
-		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "api_token_revoke", "api_token", id, "")
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

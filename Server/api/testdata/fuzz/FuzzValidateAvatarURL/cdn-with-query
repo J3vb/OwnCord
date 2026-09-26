@@ -1,0 +1,2 @@
+go test fuzz v1
+string("https://cdn.example.com/avatars/1/abc.webp?v=2")

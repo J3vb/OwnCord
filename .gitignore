@@ -9,7 +9,15 @@ Server/.env
 .claude/*
 !.claude/skills/
 !.claude/workflows/
+!.claude/rules/
 !.claude/settings.json
+!.claude/ecc-tools.json
+!.claude/identity.json
+!.claude/homunculus/
+# ECC's /plan writes step plans here. They are reviewable artifacts that belong
+# in the PR, not machine-local state. Prettier reads this file, so plans under
+# it are format-gated like any other tracked markdown -- `npm run format` fixes.
+!.claude/plans/
 CLAUDE.local.md
 .mcp.json
 
@@ -37,15 +45,26 @@ docs/security-findings/
 # Mutation-testing output (npm run test:mutate). Local-only by design: a
 # surviving-mutant report maps exactly which behaviour nothing tests.
 Client/.stryker-tmp/
-Client/reports/
+/Client/reports/
+
+# Load-test output (B6-9): k6's summary JSON and voice-load.sh's report. The
+# numbers that matter are published in docs/capacity.md and uploaded by
+# load-baseline.yml as a run artifact; a local run's copy is scratch.
+Server/scripts/k6/reports/
+Server/scripts/reports/
+# voice-load.sh's default REPORT is relative, so a run from the repo root lands here
+/reports/
 
 # Server runtime artifacts
 Server/chatserver.exe
+dbinventory.exe
 Server/chatserver.exe~
 Server/owncord-server.exe
 Server/server.exe
 Server/config.yaml
 Server/data/
+# Released asset the upgrade rehearsal downloads (ci.yml, B6-8).
+Server/.rehearsal-from/
 
 # Prebuilt plugin example (RL-08). Built from the main.go beside it with the
 # TinyGo toolchain that directory's README pins. Read by nothing in the build
@@ -81,6 +100,8 @@ Client/src/generated/
 
 # Node modules
 node_modules/
+# A symlink named node_modules is not a directory to the rule above; ignore that form too.
+node_modules
 
 # AI tooling
 .gstack/
@@ -134,3 +155,6 @@ server.log
 # directory — it reached ~208 MB with cache and dated snapshots — does not see it
 # as untracked noise.
 graphify-out/
+
+# Locally built end-to-end test binaries
+Client/tests/e2e/.bin/

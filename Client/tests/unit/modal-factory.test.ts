@@ -10,6 +10,9 @@ describe("createModal", () => {
   });
 
   afterEach(() => {
+    // Close any modal a test left open, so its document keydown listener does
+    // not outlive the test: Escape is the dismissal every such modal has.
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     container.remove();
     // Clean up any stray overlays
     document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
@@ -230,6 +233,8 @@ describe("createPromptModal", () => {
   });
 
   afterEach(() => {
+    // Close any prompt a test left open (see createModal's afterEach).
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     container.remove();
     document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
   });

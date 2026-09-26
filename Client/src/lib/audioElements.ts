@@ -10,9 +10,10 @@ import {
   type RemoteTrackPublication,
   type RemoteParticipant,
 } from "livekit-client";
-import { loadPref, savePref } from "@components/settings/helpers";
+import { loadPref, savePref, STORAGE_PREFIX } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
-import { parseUserId } from "@lib/livekitSession";
+import { migrateLegacyValue } from "@lib/legacyKeyMigration";
+import { parseUserId } from "../features/voice/sessionState";
 import { voiceStore } from "@stores/voice.store";
 
 const log = createLogger("audioElements");
@@ -37,6 +38,7 @@ export function setAudioVolumeHost(host: string | null): void {
 }
 
 function userVolumeKey(userId: number): string {
+  // i18n-exempt: localStorage key, not display text
   return currentHost === null ? `userVolume_${userId}` : `userVolume_${userId}:${currentHost}`;
 }
 
@@ -44,9 +46,13 @@ function userVolumeKey(userId: number): string {
 const VOLUME_NOT_SET = -1;
 
 /** Get saved per-user volume (0-200 range, default 100). Applied via LiveKit's
- *  GainNode-backed setVolume(). On a miss at the host-scoped key, reads
- *  through to the pre-scoping unscoped key once and persists the result
- *  under the scoped key so the read-through isn't repeated. */
+ *  GainNode-backed setVolume(). On a miss at the host-scoped key, migrates
+ *  the pre-scoping unscoped value through `migrateLegacyValue`, which moves
+ *  it under the scoped key of the FIRST host that misses and no other. User
+ *  ids are per-server autoincrement integers: a legacy value left readable
+ *  would let every later brand-new host miss its own scoped key, read
+ *  through to it and silence the unrelated user N there too (OC-0313) — the
+ *  shape channel-mutes.ts fixed for OC-0288. */
 function getSavedUserVolume(userId: number): number {
   const scopedKey = userVolumeKey(userId);
   if (currentHost === null) return loadPref<number>(scopedKey, 100);
@@ -54,12 +60,25 @@ function getSavedUserVolume(userId: number): number {
   const scoped = loadPref<number>(scopedKey, VOLUME_NOT_SET);
   if (scoped !== VOLUME_NOT_SET) return scoped;
 
-  const legacy = loadPref<number>(`userVolume_${userId}`, VOLUME_NOT_SET);
-  if (legacy !== VOLUME_NOT_SET) {
-    savePref(scopedKey, legacy);
-    return legacy;
+  const legacy = migrateLegacyValue(
+    `${STORAGE_PREFIX}userVolume_${userId}`,
+    STORAGE_PREFIX + scopedKey,
+  );
+  if (legacy !== null) {
+    const parsed = parseStoredVolume(legacy);
+    if (parsed !== null) return parsed;
   }
   return loadPref<number>(scopedKey, 100);
+}
+
+/** The stored form is loadPref's JSON; anything but a number is corrupt. */
+function parseStoredVolume(raw: string): number | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "number" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export class AudioElements {
@@ -74,6 +93,11 @@ export class AudioElements {
   /** Per-user screenshare volume (0-1, default 1) — kept independent of the
    *  element map so a volume chosen before the track attaches still applies. */
   private screenshareVolumeByUser = new Map<number, number>();
+
+  /** Told after a screen-share volume, mute or the output volume changes, for
+   *  a room that plays screen-share audio itself rather than through the
+   *  elements here (the Linux native room). */
+  private screenshareGainListener: (() => void) | null = null;
 
   /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier: number;
@@ -103,6 +127,16 @@ export class AudioElements {
   private getEffectiveScreenshareVolume(userId: number): number {
     const userVol = this.screenshareVolumeByUser.get(userId) ?? 1;
     return Math.max(0, Math.min(1, userVol * this.outputVolumeMultiplier));
+  }
+
+  /** The gain a user's screen-share audio plays at: its effective volume, or
+   *  0 while muted. */
+  getScreenshareGain(userId: number): number {
+    return this.getScreenshareAudioMuted(userId) ? 0 : this.getEffectiveScreenshareVolume(userId);
+  }
+
+  setScreenshareGainListener(listener: (() => void) | null): void {
+    this.screenshareGainListener = listener;
   }
 
   // --- Track subscription handlers ---
@@ -259,6 +293,7 @@ export class AudioElements {
         audioEl.volume = effective;
       }
     }
+    this.screenshareGainListener?.();
   }
 
   // --- Screenshare audio ---
@@ -268,6 +303,7 @@ export class AudioElements {
     // Always store, even before the audio track attaches — the stored value
     // is applied in handleTrackSubscribedAudio when the element appears.
     this.screenshareVolumeByUser.set(userId, clamped);
+    this.screenshareGainListener?.();
     const audioEls = this.screenshareAudioElements.get(userId);
     if (audioEls === undefined) return;
     const effective = this.getEffectiveScreenshareVolume(userId);
@@ -281,6 +317,7 @@ export class AudioElements {
 
   muteScreenshareAudio(userId: number, muted: boolean): void {
     this.screenshareAudioMutedByUser.set(userId, muted);
+    this.screenshareGainListener?.();
     const audioEls = this.screenshareAudioElements.get(userId);
     if (audioEls === undefined) return;
     for (const el of audioEls) el.muted = muted;

@@ -1,0 +1,178 @@
+{
+  "journey": "resume-replay",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "active_channel_id": "<id:number>",
+            "last_seq": "<seq:number>",
+            "token": "<token:string>"
+          },
+          "type": "auth"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "motd": "Welcome!",
+            "replay_source": "buffer",
+            "server_name": "OwnCord Server",
+            "user": {
+              "about": "fixture profile text",
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "custom_status": "fixture custom status",
+              "display_name": "Alice Fixture",
+              "id": "<id:number>",
+              "role": "member",
+              "status": "online",
+              "username": "alice"
+            }
+          },
+          "type": "auth_ok"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "custom_status": null,
+            "status": "offline",
+            "user_id": "<id:number>"
+          },
+          "seq": "<seq:number>",
+          "type": "presence"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "attachments": [],
+            "channel_id": 1,
+            "content": "sent while away",
+            "id": "<id:number>",
+            "mentions": [],
+            "mentions_everyone": false,
+            "mentions_here": false,
+            "pinned": false,
+            "reactions": [],
+            "reply_to": null,
+            "timestamp": "<ts:string>",
+            "user": {
+              "avatar": null,
+              "id": "<id:number>",
+              "role": "member",
+              "username": "bob"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "chat_message"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "custom_status": "fixture custom status",
+            "status": "online",
+            "user_id": "<id:number>"
+          },
+          "seq": "<seq:number>",
+          "type": "presence"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "custom_status": null,
+            "status": "offline",
+            "user_id": "<id:number>"
+          },
+          "seq": "<seq:number>",
+          "type": "presence"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "channel_id": 1,
+            "content": "sent while away"
+          },
+          "type": "chat_send"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "message_id": "<id:number>",
+            "timestamp": "<ts:string>"
+          },
+          "type": "chat_send_ok"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "attachments": [],
+            "channel_id": 1,
+            "content": "sent while away",
+            "id": "<id:number>",
+            "mentions": [],
+            "mentions_everyone": false,
+            "mentions_here": false,
+            "pinned": false,
+            "reactions": [],
+            "reply_to": null,
+            "timestamp": "<ts:string>",
+            "user": {
+              "avatar": null,
+              "id": "<id:number>",
+              "role": "member",
+              "username": "bob"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "chat_message"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}

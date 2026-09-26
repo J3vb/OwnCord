@@ -11,10 +11,14 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// requireChannelRead resolves a channel and asserts the user may read it: DM
-// membership for a DM, READ_MESSAGES otherwise. A DM the user is not in is
-// reported as ErrNotFound rather than ErrForbidden — its existence is not
-// something an outsider gets to learn.
+// requireChannelRead resolves a channel and asserts the user may read its
+// CONTENT: DM membership for a DM, READ_MESSAGES and — for a labelled
+// channel — the caller's own acknowledgement row otherwise (B5-7,
+// permissions.CanReadContent). A DM the user is not in is reported as
+// ErrNotFound rather than ErrForbidden — its existence is not something an
+// outsider gets to learn. Backs GetMessages, GetMessagesAround,
+// GetPinnedMessages and GetReactionUsers — every REST read of a channel's
+// content shares this one gate.
 func (s *MessageService) requireChannelRead(ctx context.Context, userID, channelID int64) error {
 	if channelID <= 0 {
 		return fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
@@ -23,17 +27,8 @@ func (s *MessageService) requireChannelRead(ctx context.Context, userID, channel
 	if err != nil || ch == nil {
 		return fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
-	if ch.Type == "dm" {
-		ok, dmErr := s.st.IsDMParticipant(ctx, userID, channelID)
-		if dmErr != nil || !ok {
-			return fmt.Errorf("%w: access denied", ErrNotFound)
-		}
-		return nil
-	}
-	if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages) {
-		return fmt.Errorf("%w: access denied", ErrForbidden)
-	}
-	return nil
+	sub := readSubject(ctx, s.st, s.perms, userID, ch)
+	return readContentDenial(permissions.CanReadContent(sub))
 }
 
 // GetMessages retrieves paginated messages for a channel with permission checks.
@@ -64,6 +59,33 @@ func (s *MessageService) GetMessages(ctx context.Context, userID, channelID, bef
 	return msgs, hasMore, nil
 }
 
+// requireSearchChannelAccess is SearchMessages' single-channel branch gate.
+// Inlined rather than routed through requireChannelRead — search has always
+// had its own bespoke access checks and error codes (a DM non-participant is
+// ErrForbidden here, ErrNotFound there) — but the NSFW check has to be
+// repeated too, or search stays the leak path the plan calls out as "would
+// ship silently".
+func (s *MessageService) requireSearchChannelAccess(ctx context.Context, userID, channelID int64) error {
+	ch, err := s.st.GetChannel(ctx, channelID)
+	if err != nil || ch == nil {
+		return fmt.Errorf("%w: channel not found", ErrNotFound)
+	}
+	switch {
+	case ch.Type == "dm":
+		ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
+		if err != nil || !ok {
+			return fmt.Errorf("%w: access denied", ErrForbidden)
+		}
+	case !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages):
+		return fmt.Errorf("%w: access denied", ErrForbidden)
+	case ch.NSFW:
+		if ok, ackErr := s.st.HasNSFWAcknowledgement(ctx, userID, channelID); ackErr != nil || !ok {
+			return fmt.Errorf("%w: %w", ErrForbidden, permissions.ErrNSFWUnacknowledged)
+		}
+	}
+	return nil
+}
+
 // SearchMessages performs full-text search across accessible channels.
 func (s *MessageService) SearchMessages(ctx context.Context, userID int64, query string, channelID *int64, limit int) ([]db.MessageSearchResult, error) {
 	if query == "" {
@@ -78,27 +100,22 @@ func (s *MessageService) SearchMessages(ctx context.Context, userID int64, query
 
 	// Single-channel search.
 	if channelID != nil && *channelID > 0 {
-		ch, err := s.st.GetChannel(ctx, *channelID)
-		if err != nil || ch == nil {
-			return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
-		}
-		if ch.Type == "dm" {
-			ok, err := s.st.IsDMParticipant(ctx, userID, *channelID)
-			if err != nil || !ok {
-				return nil, fmt.Errorf("%w: access denied", ErrForbidden)
-			}
-		} else if !s.perms.HasChannelPerm(ctx, userID, *channelID, permissions.ReadMessages) {
-			return nil, fmt.Errorf("%w: access denied", ErrForbidden)
+		if err := s.requireSearchChannelAccess(ctx, userID, *channelID); err != nil {
+			return nil, err
 		}
 		results, err := s.st.SearchMessages(ctx, query, channelID, limit)
 		if err != nil {
-			return nil, fmt.Errorf("%w: search failed: %v", ErrInternal, err)
+			return nil, fmt.Errorf("%w: search failed: %w", ErrInternal, err)
 		}
 		return results, nil
 	}
 
-	// Global search: build accessible channel list.
-	accessibleIDs, err := s.GetAccessibleChannelIDs(ctx, userID)
+	// Global search: build the READABLE channel list (B5-7) — the visible
+	// set minus any labelled channel the caller has not acknowledged, so a
+	// hit inside one is silently absent from the results rather than
+	// returned. This is the leak path the plan calls "would ship silently":
+	// a gate on the single-channel branch alone leaves this one wide open.
+	accessibleIDs, err := s.ReadableChannelIDs(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +125,7 @@ func (s *MessageService) SearchMessages(ctx context.Context, userID int64, query
 
 	results, err := s.st.SearchMessagesInChannels(ctx, query, accessibleIDs, limit)
 	if err != nil {
-		return nil, fmt.Errorf("%w: search failed: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: search failed: %w", ErrInternal, err)
 	}
 	return results, nil
 }
@@ -191,7 +208,7 @@ func (s *MessageService) GetPinnedMessages(ctx context.Context, userID, channelI
 	}
 	msgs, err := s.st.GetPinnedMessages(ctx, channelID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to fetch pinned messages: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to fetch pinned messages: %w", ErrInternal, err)
 	}
 	return msgs, nil
 }
@@ -217,7 +234,7 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 		if err != nil || !ok {
 			return fmt.Errorf("%w: access denied", ErrNotFound)
 		}
-		if blkErr := requireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
+		if blkErr := RequireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
 			return blkErr
 		}
 	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages|permissions.ManageMessages) {
@@ -242,7 +259,7 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 		if errors.Is(err, db.ErrNotFound) {
 			return fmt.Errorf("%w: message not found in this channel", ErrNotFound)
 		}
-		return fmt.Errorf("%w: %v", ErrInternal, err)
+		return fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	return nil
 }

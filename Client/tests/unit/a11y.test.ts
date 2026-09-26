@@ -1,6 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import { applyDialogSemantics, trapFocus, focusDialog } from "@lib/a11y";
+import {
+  applyDialogSemantics,
+  trapFocus,
+  focusDialog,
+  enableRovingNavigation,
+  setRovingTabindex,
+} from "@lib/a11y";
 
 let container: HTMLDivElement;
 
@@ -238,6 +244,63 @@ describe("focusDialog", () => {
     expect(document.activeElement).not.toBe(outside);
   });
 
+  it("focuses the fallback when the opener is in an inert subtree by close time", () => {
+    const region = document.createElement("div");
+    const opener = document.createElement("button");
+    const fallback = document.createElement("button");
+    region.appendChild(opener);
+    container.append(region, fallback);
+    opener.focus();
+
+    const dialog = document.createElement("div");
+    applyDialogSemantics(dialog);
+    container.appendChild(dialog);
+    const restore = focusDialog(dialog, () => fallback);
+
+    // e.g. the narrow-width sidebar drawer closed while the dialog was open
+    region.setAttribute("inert", "");
+    restore();
+
+    expect(document.activeElement).toBe(fallback);
+  });
+
+  it("focuses the fallback when the opener is gone by close time", () => {
+    const opener = document.createElement("button");
+    const fallback = document.createElement("button");
+    container.append(opener, fallback);
+    opener.focus();
+
+    const dialog = document.createElement("div");
+    applyDialogSemantics(dialog);
+    container.appendChild(dialog);
+    const restore = focusDialog(dialog, () => fallback);
+
+    opener.remove(); // e.g. the dialog deleted the row that opened it
+    dialog.remove();
+    restore();
+    expect(document.activeElement).toBe(fallback);
+  });
+
+  it("prefers a still-connected opener over the fallback, and ignores a detached fallback", () => {
+    const opener = document.createElement("button");
+    const fallback = document.createElement("button");
+    container.append(opener, fallback);
+    opener.focus();
+
+    const dialog = document.createElement("div");
+    applyDialogSemantics(dialog);
+    container.appendChild(dialog);
+    focusDialog(dialog, () => fallback)();
+    expect(document.activeElement).toBe(opener);
+
+    const detached = document.createElement("button");
+    fallback.focus();
+    const restore = focusDialog(dialog, () => detached);
+    fallback.remove();
+    restore();
+    expect(document.activeElement).not.toBe(detached);
+  });
+
   it("skips a display:none control that is earlier in DOM order than the first visible one", () => {
     // A hidden field (e.g. a group-name input revealed only after a
     // selection) sits first in DOM order. Browsers refuse to focus a
@@ -269,5 +332,93 @@ describe("focusDialog", () => {
     focusDialog(dialog);
 
     expect(document.activeElement).toBe(enabledBtn);
+  });
+});
+
+describe("enableRovingNavigation", () => {
+  it("leaves Enter on a control nested inside a cell to that control", () => {
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    const nested = document.createElement("button");
+    cell.appendChild(nested);
+    container.appendChild(cell);
+    const onCell = vi.fn();
+    cell.addEventListener("click", onCell);
+    const ac = new AbortController();
+    enableRovingNavigation(container, ".cell", ac.signal, "vertical");
+
+    const onNested = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
+    nested.dispatchEvent(onNested);
+    expect(onNested.defaultPrevented).toBe(false);
+    expect(onCell).not.toHaveBeenCalled();
+
+    const onItself = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
+    cell.dispatchEvent(onItself);
+    expect(onItself.defaultPrevented).toBe(true);
+    expect(onCell).toHaveBeenCalledTimes(1);
+    ac.abort();
+  });
+
+  it("keeps one Tab stop when an arrow starts from a cell focused by mouse", () => {
+    const [first, , third, fourth] = Array.from({ length: 4 }, () => {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      container.appendChild(cell);
+      return cell;
+    });
+    setRovingTabindex(container, ".cell");
+    const ac = new AbortController();
+    enableRovingNavigation(container, ".cell", ac.signal);
+
+    // A click focuses a tabindex=-1 cell without moving the stop off `first`.
+    third!.focus();
+    third!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }),
+    );
+
+    expect(Array.from(container.querySelectorAll(".cell[tabindex='0']"))).toEqual([fourth]);
+    expect(first!.getAttribute("tabindex")).toBe("-1");
+    ac.abort();
+  });
+});
+
+describe("setRovingTabindex", () => {
+  function cells(n: number): HTMLElement[] {
+    return Array.from({ length: n }, () => {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      container.appendChild(cell);
+      return cell;
+    });
+  }
+  const stops = (): Element[] => Array.from(container.querySelectorAll(".cell[tabindex='0']"));
+
+  it("puts the first Tab stop on the current cell, else the first", () => {
+    const [first, , third] = cells(3);
+    setRovingTabindex(container, ".cell");
+    expect(stops()).toEqual([first]);
+
+    first!.removeAttribute("tabindex");
+    third!.classList.add("active");
+    setRovingTabindex(container, ".cell");
+    expect(stops()).toEqual([third]);
+  });
+
+  it("keeps the Tab stop where it was across a re-render", () => {
+    const [first, second] = cells(3);
+    setRovingTabindex(container, ".cell");
+    first!.setAttribute("tabindex", "-1");
+    second!.setAttribute("tabindex", "0");
+
+    setRovingTabindex(container, ".cell");
+    expect(stops()).toEqual([second]);
   });
 });

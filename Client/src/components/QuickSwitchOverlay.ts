@@ -4,9 +4,11 @@
  * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
  */
 
+import { Disposable } from "@lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
+import { shellText } from "../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,7 +32,7 @@ export interface QuickSwitchOverlayOptions {
 // ---------------------------------------------------------------------------
 
 export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): MountableComponent {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
   let restoreFocus: (() => void) | null = null;
 
@@ -46,20 +48,20 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
       (e) => {
         if (e.target === root) options.onClose();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     const modal = createElement("div", { class: "quick-switch-modal" });
-    applyDialogSemantics(modal, { label: "Switch server" });
-    trapFocus(modal, ac.signal);
+    applyDialogSemantics(modal, { label: shellText("quickSwitch.label") });
+    trapFocus(modal, disposable.signal);
 
     // Header
     const header = createElement("div", { class: "quick-switch-header" });
-    const title = createElement("h2", {}, "Switch Server");
+    const title = createElement("h2", {}, shellText("quickSwitch.title"));
     const subtitle = createElement(
       "p",
       { class: "quick-switch-subtitle" },
-      "You\u2019ll disconnect from the current server.",
+      shellText("quickSwitch.subtitle"),
     );
     appendChildren(header, title, subtitle);
 
@@ -89,7 +91,7 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
       const hostEl = createElement(
         "div",
         { class: "quick-switch-host" },
-        `${profile.host}${isCurrent ? " \u00B7 Connected" : ""}`,
+        isCurrent ? shellText("quickSwitch.hostConnected", { host: profile.host }) : profile.host,
       );
       appendChildren(info, nameEl, hostEl);
 
@@ -103,7 +105,7 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
           () => {
             options.onSwitch(profile.host, profile.name);
           },
-          { signal: ac.signal },
+          { signal: disposable.signal },
         );
         // Divs get no native key activation; Enter/Space mirrors the click
         // so the row honors the button role it advertises.
@@ -115,7 +117,7 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
               options.onSwitch(profile.host, profile.name);
             }
           },
-          { signal: ac.signal },
+          { signal: disposable.signal },
         );
       }
 
@@ -131,15 +133,19 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
     });
     const addIcon = createElement("div", { class: "quick-switch-icon add" }, "+");
     const addInfo = createElement("div", { class: "quick-switch-info" });
-    const addName = createElement("div", { class: "quick-switch-name" }, "Add new server");
+    const addName = createElement(
+      "div",
+      { class: "quick-switch-name" },
+      shellText("quickSwitch.add"),
+    );
     const addHost = createElement(
       "div",
       { class: "quick-switch-host" },
-      "Connect to another OwnCord server",
+      shellText("quickSwitch.addHint"),
     );
     appendChildren(addInfo, addName, addHost);
     appendChildren(addItem, addIcon, addInfo);
-    addItem.addEventListener("click", () => options.onAddServer(), { signal: ac.signal });
+    addItem.addEventListener("click", () => options.onAddServer(), { signal: disposable.signal });
     addItem.addEventListener(
       "keydown",
       (e) => {
@@ -148,12 +154,16 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
           options.onAddServer();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
     list.appendChild(addItem);
 
     // Footer
-    const footer = createElement("div", { class: "quick-switch-footer" }, "Press Escape to cancel");
+    const footer = createElement(
+      "div",
+      { class: "quick-switch-footer" },
+      shellText("quickSwitch.escapeHint"),
+    );
 
     appendChildren(modal, header, list, footer);
     root.appendChild(modal);
@@ -169,12 +179,12 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
       (e) => {
         if (e.key === "Escape") options.onClose();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     if (root !== null) {
       root.remove();
       root = null;

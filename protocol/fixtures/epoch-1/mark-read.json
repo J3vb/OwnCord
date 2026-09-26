@@ -1,0 +1,29 @@
+{
+  "journey": "mark-read",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {
+            "channel_id": 1
+          },
+          "type": "mark_read"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}

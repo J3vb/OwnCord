@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 func TestRateLimiter_UnderLimitAllowed(t *testing.T) {
@@ -260,8 +261,11 @@ func TestKey_MatchesSprintfShape(t *testing.T) {
 func TestRateLimiter_LenSumsAcrossShards(t *testing.T) {
 	rl := auth.NewRateLimiter()
 	const n = 100 // enough distinct keys to populate many of the 32 shards
+	// A short window (item 6, round 3 review): Cleanup retires each entry on
+	// its OWN window now, not a caller-supplied horizon, so this test's own
+	// staleness has to come from the window Allow recorded.
 	for i := range n {
-		if !rl.Allow(auth.Key("shardspread", int64(i)), 1, time.Minute) {
+		if !rl.Allow(auth.Key("shardspread", int64(i)), 1, 10*time.Millisecond) {
 			t.Fatalf("Allow for fresh key %d = false, want true", i)
 		}
 	}
@@ -269,8 +273,87 @@ func TestRateLimiter_LenSumsAcrossShards(t *testing.T) {
 		t.Fatalf("Len().windows = %d, want %d", wins, n)
 	}
 	time.Sleep(15 * time.Millisecond)
-	rl.Cleanup(10 * time.Millisecond)
+	rl.Cleanup()
 	if wins, _ := rl.Len(); wins != 0 {
 		t.Errorf("Len().windows = %d after Cleanup, want 0 across all shards", wins)
+	}
+}
+
+// TestRateLimiter_CleanupHorizonShorterThanWindowForgetsHistory is N2's
+// (B5-10 review) bug and item 6's (round 3 review) fix: Cleanup used to take
+// ONE server-wide horizon for every key, forcing a choice between reclaiming
+// a short-window key promptly and covering service.AppealRateWindow's 24h
+// cap — too short (e.g. 6h) wiped a 7h-old appeal submission before its real
+// 24h window elapsed, letting a submission through that should have been
+// refused. Recording each key's own window (auth/ratelimit.go's
+// entry.window) removes that trade-off entirely: ONE Cleanup() sweep, no
+// argument, retires a short-window key within its own few minutes while the
+// appeal key survives until it is genuinely 24h stale. AppealRateWindow is
+// the real exported production constant (not a local literal), so this test
+// cannot stay green if production's window ever regresses out of sync with
+// what Cleanup is asked to preserve.
+func TestRateLimiter_CleanupHorizonShorterThanWindowForgetsHistory(t *testing.T) {
+	const shortKey = "login:1"   // e.g. a 1-minute login-attempt window
+	const appealKey = "appeal:1" // service.AppealRateWindow (24h)
+	sevenHoursAgo := time.Now().Add(-7 * time.Hour)
+
+	rl := auth.NewRateLimiter()
+	for range 3 {
+		rl.SeedTimestampForTest(shortKey, sevenHoursAgo, time.Minute)
+		rl.SeedTimestampForTest(appealKey, sevenHoursAgo, service.AppealRateWindow)
+	}
+	if wins, _ := rl.Len(); wins != 2 {
+		t.Fatalf("Len().windows = %d before Cleanup, want 2 (one entry per key)", wins)
+	}
+
+	rl.Cleanup()
+
+	// The short-window key is 7h past its own 1-minute window: its whole
+	// entry is reclaimed, not merely pruned down to zero timestamps.
+	if wins, _ := rl.Len(); wins != 1 {
+		t.Fatalf("Len().windows = %d after Cleanup, want 1 (only the appeal key survives)", wins)
+	}
+	// The appeal key is 7h old, well under its real 24h window: survives,
+	// so the three seeded submissions still count and a fourth is refused.
+	if rl.Allow(appealKey, 3, service.AppealRateWindow) {
+		t.Fatal("Allow(appealKey) after Cleanup = true, want false — a 7h-old submission is still within the real 24h window and must not have been forgotten")
+	}
+}
+
+// TestRateLimiter_AllowNeverShrinksAKeysRecordedWindow is P3 item 6, round
+// 4's test-strengthening review of the per-key window itself: Cleanup used
+// (before this fix) to evict a key's whole entry once every timestamp was
+// stale under WHATEVER window the LAST Allow call happened to pass — and
+// message_crud.go's slow mode is a per-channel, admin-configurable window
+// on the very same key shape (auth.Key("slow", userID), channelID). A
+// channel briefly turned down to a short slow mode and then back up to a
+// long one downgraded the key's recorded Cleanup horizon on the short call
+// alone, so a sweep landing in that gap could discard a timestamp the
+// restored long window still needed to enforce against — a key rate-
+// limited under a loosened-then-retightened window losing its history.
+// Ratcheting window to the MAXIMUM ever observed for a key, never down,
+// removes the gap entirely: this pins that a later Allow call with a
+// SMALLER window never regresses what an earlier, larger-window call
+// already recorded.
+func TestRateLimiter_AllowNeverShrinksAKeysRecordedWindow(t *testing.T) {
+	const key = "slow:1:100"
+	rl := auth.NewRateLimiter()
+
+	if !rl.Allow(key, 1, 6*time.Hour) {
+		t.Fatal("first Allow under the 6h window: want true (the key's first request)")
+	}
+	if got, ok := rl.WindowForTest(key); !ok || got != 6*time.Hour {
+		t.Fatalf("recorded window after a 6h Allow = (%v, %v), want (6h, true)", got, ok)
+	}
+
+	// Slow mode is (briefly) turned down to 60s: a second Allow call for
+	// the SAME key with a SHORTER window. Refused — the first call's
+	// timestamp is still within even this much shorter window — but the
+	// recorded Cleanup horizon must not be downgraded by this call.
+	if rl.Allow(key, 1, 60*time.Second) {
+		t.Fatal("second Allow under the 60s window: want false (refused — the first timestamp is still within 60s)")
+	}
+	if got, ok := rl.WindowForTest(key); !ok || got != 6*time.Hour {
+		t.Fatalf("recorded window after a 60s Allow call on the same key = (%v, %v), want (6h, true) — the max ever observed must not be downgraded", got, ok)
 	}
 }

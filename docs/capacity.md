@@ -1,0 +1,997 @@
+# Capacity
+
+What one OwnCord server is qualified to carry, on stated hardware, with the
+commands that reproduce the measurement.
+
+> **The hardware and the commands in this document were published before the
+> first qualifying run.** That ordering is deliberate and is visible in
+> `git log`: reference hardware chosen after seeing results is hardware chosen
+> to fit the numbers. If a target is missed, the miss is published here and
+> recorded in the findings ledger — it is never re-run on a bigger machine.
+
+## The profile
+
+| Property                 | Target | Why this number                                                 |
+| ------------------------ | ------ | --------------------------------------------------------------- |
+| Registered users         | ≥ 250  | BPR-030                                                         |
+| Simultaneous connections | ≥ 100  | BPR-030, sustained for 180 s rather than touched at a peak      |
+| Concurrent voice         | ≥ 25   | BPR-030; 25 audio publishers and 25 subscribers, so 625 streams |
+
+## Reference hardware
+
+**2 vCPU, 4 GB RAM, SSD, Linux x64** — the cheapest VPS or single-board class
+an owner is likely to buy.
+
+It is **reproduced, not owned**. The server runs inside a cgroup that gives it
+exactly that budget, so anyone with Docker can re-run the measurement:
+
+```
+docker run -d --name owncord-sut \
+  --network=host \
+  --cpuset-cpus=0,1 --cpus=2 \
+  --memory=4g --memory-swap=4g \
+  -v "$WORK:/app" -w /app \
+  -e OWNCORD_SECURITY_AUTH_RATE_LIMIT_MULTIPLIER=100 \
+  -e OWNCORD_VOICE_LIVEKIT_API_KEY="$LIVEKIT_API_KEY" \
+  -e OWNCORD_VOICE_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET" \
+  -e OWNCORD_VOICE_LIVEKIT_URL=ws://127.0.0.1:7880 \
+  -e OWNCORD_VOICE_LIVEKIT_BINARY=/app/livekit-server \
+  -e OWNCORD_VOICE_NODE_IP=127.0.0.1 \
+  -e OWNCORD_VOICE_ADVERTISE_INTERNAL_IP=true \
+  debian:bookworm-slim /app/chatserver
+```
+
+Why each part of that is load-bearing:
+
+- **`--cpuset-cpus=0,1` is the constraint, not `--cpus=2`.** `--cpus` is a CFS
+  quota, and `runtime.NumCPU()` reads the CPU affinity mask, not the quota. With
+  `--cpus=2` alone on a 32-core host the container still reports 32 CPUs, so the
+  server sizes `GOMAXPROCS` and its bcrypt admission budget
+  (`auth/admission.go`: twice the core count) for hardware the cgroup will never
+  give it. Both flags are passed: the cpuset for what the runtime sees, the
+  quota for what it may consume.
+- **`--memory-swap=4g` equal to `--memory`** disables swap, so 4 GB is the
+  ceiling rather than the point at which paging starts.
+- **`--network=host`** because LiveKit's media path is UDP 50000-60000, and
+  publishing ten thousand ports is not a thing. This removes a NAT hop, so the
+  latencies below are a **floor** for bridged or reverse-proxied deployments,
+  not a ceiling.
+- **`debian:bookworm-slim` with the release binary mounted, not the published
+  distroless image.** That image ships no shell and cannot host the companion
+  `livekit-server` process this profile needs. The capacity claim is about the
+  machine budget; the packaging is qualified separately by the artifact and
+  container lifecycle smokes (`Server/cmd/smoke`,
+  `Server/scripts/docker-smoke.sh`).
+- **`node_ip=127.0.0.1` with `advertise_internal_ip`.** OwnCord's generated
+  `livekit.yaml` sets `use_external_ip: true`; without a `node_ip` the SFU
+  discovers the machine's public address by STUN and advertises ICE candidates
+  no same-machine client can reach — voice connects and carries no media. These
+  two knobs are a property of measuring on one machine, not of the product. The
+  server logs its "node_ip is not a public address" warning, which is correct
+  here and must not be copied into a real deployment.
+- **The load generators are outside that budget**, pinned with
+  `taskset -c 2,3`. A generator sharing the server's cores measures the
+  generator.
+
+### What is not the reference hardware
+
+- The **ceiling leg** of `load-baseline.yml` runs the same profile with no
+  cgroup at all, on the whole runner. It shows headroom. It is not capacity.
+- The **benchmark baseline** in
+  [plans/b3-bench-baseline-2026-09-01.md](plans/b3-bench-baseline-2026-09-01.md)
+  was recorded on a 16-core developer workstation. It is a relative
+  before/after instrument for Go benchmarks. It is not capacity either.
+
+## Configuration
+
+Everything else is the shipped default. The non-defaults are:
+
+| Key                                             | Value       | Why                                                                                                                |
+| ----------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
+| `security.auth_rate_limit_multiplier`           | `100`       | Every connection logs in from 127.0.0.1, and the per-IP auth limits assume roughly one person per address          |
+| `voice.livekit_api_key` / `livekit_api_secret`  | per run     | The shipped dev credentials are blanked at load and disable voice entirely, so a run on them would measure nothing |
+| `voice.livekit_binary`                          | mounted SFU | Pins the SFU version and removes the container's need for egress and a CA bundle                                   |
+| `voice.node_ip` / `voice.advertise_internal_ip` | loopback    | See above — single-machine ICE, not a deployment setting                                                           |
+
+The SFU is **livekit-server 1.13.5**, the release the server itself downloads
+(`ws.DefaultLiveKitVersion`). Measuring a different SFU release than the product
+ships would measure something no owner ever runs.
+
+## Latency budgets
+
+Budgets may be **tightened from data and never loosened** — anything looser
+than a published figure is a finding, not a number to publish. These are the
+live budgets, already tightened from the first qualifying run; the "initial"
+column is where the B6 PRD started, kept so the tightening is auditable.
+
+| Path                                                    | p95      | p99      | Initial          | Measured by                      |
+| ------------------------------------------------------- | -------- | -------- | ---------------- | -------------------------------- |
+| REST login                                              | < 600 ms | < 1 s    | < 1 s / < 2 s    | k6 `auth_time`                   |
+| WebSocket open → `auth_ok` received                     | < 200 ms | < 500 ms | < 1 s / < 2 s    | k6 `ws_auth_ok_time`             |
+| Message send → sender acknowledgement                   | < 150 ms | < 300 ms | < 200 / < 500 ms | k6 `ws_broadcast_latency_ms`     |
+| Message send → recipient delivery (every connection)    | < 200 ms | < 400 ms | < 250 / < 500 ms | k6 `ws_delivery_latency_ms`      |
+| Voice join, OwnCord half (`voice_join` → `voice_token`) | < 250 ms | < 500 ms | < 2 s / < 4 s    | k6 `voice_join_time`             |
+| Graceful drain to exit 0                                | < 20 s   | —        | unchanged        | `Server/cmd/smoke` `drainBudget` |
+
+Each tightened budget keeps at least twice the measured p99 as headroom, so a
+busier runner does not turn a published promise into a flake. `auth_time` is
+the one with the least room on purpose: its floor is bcrypt at cost 12, roughly
+a quarter-second of one core, and that is a deliberate security cost rather
+than something to tune away.
+
+Two of the PRD's rows are corrected rather than satisfied, because as written
+they ask for measurements that cannot exist:
+
+- **The sender-acknowledgement row said "(REST)".** No REST endpoint creates a
+  message: every write reaches `service/message_delivery.go` from the WebSocket
+  read pump. The budget is applied to the WebSocket `chat_send` →
+  `chat_send_ok` round trip, which is the only send acknowledgement OwnCord has.
+- **"Voice join (token + LiveKit room join)" is published as two halves.** k6
+  has no WebRTC stack, and `lk load-test` publishes no join-latency
+  distribution, so no tool here can produce the combined figure as a
+  percentile. The OwnCord half is a real p95/p99 above; the LiveKit half is
+  reported as the cohort's ramp-inclusive connect wall clock in the voice
+  report, explicitly not a percentile.
+
+## Reproducing the measurement
+
+The whole profile is one workflow:
+
+```
+gh workflow run load-baseline.yml -f users=250 -f connections=100 -f voice=25
+```
+
+It runs both legs and uploads `capacity-constrained` and `capacity-ceiling`
+artifacts (k6 summary, voice report, the container's own view of its cgroup
+limits, the server's metrics snapshot and its log).
+
+To run it by hand, after booting the server with the `docker run` above:
+
+```bash
+# 1. the population: owner, a text channel, a voice channel, an invite, 250 users
+#    (a fresh install is invite mode, so the invite admits every registration)
+BASE=https://127.0.0.1:8443
+# The first-run setup token the server printed at start-up. It goes to stderr
+# beside the banner, and `docker logs` includes both streams.
+SETUP_TOKEN=$(docker logs owncord-sut 2>&1 | sed -n 's/.*Setup token[[:space:]]*//p' | tail -n 1)
+TOKEN=$(curl -sk -X POST "$BASE/admin/api/setup" -H 'Content-Type: application/json' \
+  -d "$(jq -nc --arg t "$SETUP_TOKEN" '{username:"loadadmin",password:"LoadTest123!Admin",setup_token:$t}')" | jq -r .token)
+CHANNEL_ID=$(curl -sk -X POST "$BASE/admin/api/channels" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"name":"loadtest","type":"text"}' | jq -r .id)
+VOICE_ID=$(curl -sk -X POST "$BASE/admin/api/channels" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"name":"loadvoice","type":"voice"}' | jq -r .id)
+INVITE=$(curl -sk -X POST "$BASE/api/v1/invites" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"max_uses":0}' | jq -r .code)
+for i in $(seq 1 250); do
+  curl -sk -o /dev/null -X POST "$BASE/api/v1/auth/register" -H 'Content-Type: application/json' \
+    -d "{\"username\":\"loadtest$i\",\"password\":\"LoadTest123!\",\"invite_code\":\"$INVITE\"}"
+done
+
+# 2. the SFU load — 25 audio publishers + 25 subscribers, in the background so
+#    voice is present for the whole WebSocket run
+PUBLISHERS=25 SUBSCRIBERS=25 DURATION=260s \
+LIVEKIT_URL=http://127.0.0.1:7880 \
+LIVEKIT_API_KEY="$LIVEKIT_API_KEY" LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET" \
+  taskset -c 2,3 bash Server/scripts/voice-load.sh &
+
+# 3. the WebSocket load — 100 connections, held for the whole run
+cd Server/scripts/k6 && mkdir -p reports
+K6_WS_URL=wss://127.0.0.1:8443/api/v1/ws K6_HTTP_URL=https://127.0.0.1:8443 \
+K6_CHANNEL_ID="$CHANNEL_ID" K6_VOICE_CHANNEL_ID="$VOICE_ID" \
+K6_PEAK_VUS=100 K6_VOICE_VUS=25 K6_RAMP=60s K6_SUSTAIN=180s \
+  taskset -c 2,3 k6 run --insecure-skip-tls-verify ws-load.js
+```
+
+`node --test Server/scripts/k6/ws-load.test.mjs` executes the WebSocket harness
+with mocked k6 I/O, checking channel assignment, rate bounds, restart boundaries,
+summary samples and profile compatibility. It runs in the PR consistency job;
+it does not replace a real load run.
+
+`Server/scripts/voice-load.sh --selftest` checks the voice harness's own
+assertions offline, with no SFU and no `lk` binary.
+
+## Reading these numbers
+
+- **One machine, one run.** A figure here is comparable with another run of the
+  same commands on the same cgroup, and with nothing else.
+- **250 registered users is a seeded population, not 250 active ones.** The
+  profile is 250 accounts in the database while 100 of them hold connections.
+- **The 25 voice participants are a composition, not one cohort of 25.** The SFU
+  carries 25 synthetic audio publishers and 25 subscribers from `lk load-test`
+  (625 streams); OwnCord's control plane simultaneously carries 25 `voice_join`
+  sessions from k6 with their tokens, voice states and broadcasts. They are not
+  the same 25 identities, because k6 cannot speak WebRTC and `lk` cannot speak
+  OwnCord's protocol. Both halves are under load at once, which is the property
+  that matters, but this document will not claim 25 end-to-end clients.
+- **`lk load-test` must be run with `--layout 5x5`.** Its default,
+  `--layout speaker`, subscribes each simulated subscriber to about six tracks
+  however many are published: a 25×25 room then reports 150/625 tracks at 0%
+  packet loss with exit status 0. `voice-load.sh` sets the layout and asserts
+  the track total for exactly that reason.
+- **Message rate.** Each connection sends one message every 2 seconds
+  (`K6_SEND_INTERVAL_MS`), so 100 connections produce ~50 messages/s fanned out
+  to 100 recipients. That is a stress shape, not typical chat traffic; it is the
+  fan-out the recipient-delivery budget is measured against.
+- **Nothing in CI gates these numbers.** Like the benchmark baseline, they are
+  recorded and published. `load-baseline.yml` is `workflow_dispatch` only,
+  because a perf run on shared runners is a flake source.
+- **The operational profiles below are per-phase, not per-run.** That section's
+  database figures are deltas between phases of one run, so they answer "which
+  scenario did the writer queue behind" and not "how long did the run wait".
+  The run total is the figure this section already publishes.
+
+## Operational measurements
+
+The profile above is a **steady** load: connections that arrive once, hold, and
+send. These seven measurements are what an operator meets afterwards — a storm
+of reconnects, a writer under load, a restart during an update, a quota that
+fills, TLS turned off. They use the same cgroup, the same generators and the
+same rule as the profile: **the scenarios and their commands are published
+before the first qualifying run**, and a figure comes from the constrained leg
+or is not published at all.
+
+They are selected by `K6_PROFILE`, and `capacity` remains the default.
+
+```
+gh workflow run load-baseline.yml -f profile=operational    --ref <branch>   # both TLS legs in one run
+gh workflow run load-baseline.yml -f profile=restart        --ref <branch>
+gh workflow run load-baseline.yml -f profile=ceiling-search -f ceiling_max=500 --ref <branch>
+```
+
+**None of them introduces a latency budget.** A scenario either applies a budget
+this document already publishes, or publishes its number as what it is with no
+budget attached — stated in its own subsection rather than left to inference.
+That is the whole of the rule: a new target would need a PRD, and measuring is
+not tuning.
+
+### Reconnect storm
+
+At `K6_STORM_AT` (default 120 s into the sustain, on the scenario clock) every
+connection closes its socket and reconnects at once, carrying
+`auth {last_seq, active_channel_id}`.
+
+- **Measures** `ws_resume_time` (socket open → `auth_ok` with `last_seq > 0`),
+  the `ws_replay_source{buffer,db,none}` split, and `ws_replay_gap` — the `seq`
+  values between a connection's stored `last_seq` and the first live frame after
+  `auth_ok` that were never delivered.
+- **Gated on** `ws_replay_gap: max==0` and `ws_replay_source{tier:none}: count==0`. A
+  replay with holes is a defect rather than a latency figure, and a storm that
+  fell through to a full re-sync measured the wrong tier.
+- **No latency budget.** A storm has none published here, and this document does
+  not invent one for it.
+- **Not `BenchmarkReconnectStorm`.** That is a Go microbenchmark with no sockets
+  and no server; it shares a name with this scenario and nothing else.
+- **Client timers keep their phase across the storm (OC-0445).** Every socket
+  reopens at one instant, so a send, typing or presence timer restarted from
+  that instant would put all 100 users on the same beat for the rest of the run
+  — a metronome no population produces, and one that measured 500–750 ms
+  acknowledgement p95 from the storm to the drain on an unchanged server.
+  `phasedInterval` re-anchors each timer on the phase the connection's first
+  socket established, and a resumed socket's first phased tick waits for
+  `auth_ok`. `ws_broadcast_latency_ms` and `ws_delivery_latency_ms` carry
+  `phase=ramp|sustain|upload|storm` so a run says which phase missed a budget.
+
+### Database waits
+
+An observer VU polls `/api/v1/metrics` every 5 s for the whole run, recording
+the writer pair (`db_writer_wait_count`, `db_writer_wait_seconds`) and the reader
+pair (`db_reader_wait_count`, `db_reader_wait_seconds`) as k6 **Counters** —
+each sample is the delta since the previous poll, so the counter's total over a
+window _is_ that window's delta — tagged `phase=<ramp|sustain|storm|upload>`,
+alongside the reconnect tier split, backpressure and connection rejects.
+Upload storage (`obs_upload_storage_used_mb`) is the one Gauge: it is a level,
+not a delta.
+
+The tier split and backpressure carry the phase alongside their own tag —
+`obs_reconnect_tier{phase:storm,tier:buffer}`,
+`obs_backpressure{phase:storm,kind:low_drops}` — which is what makes the
+storm's reconnect tiers and dropped frames a **storm** figure rather than a run
+total. The tier-only and kind-only keys stay beside them for the run total.
+
+**The published figure is the per-phase delta, not the run total.** The total is
+what the section above already had; the delta is what says which scenario the
+writer queued behind.
+
+**The reader pool was not surfaced before this, and now is.** The audit
+carryover asked for pool wait deltas, and `/api/v1/metrics` reported only the
+writer's `Stats()`. OwnCord runs one writer and a separate reader pool, so both
+are reported side by side — "the reader never waited" is a claim a document can
+only make after looking.
+
+### Message fan-out, to the ceiling
+
+`ceiling-search` steps connections by `K6_CEILING_STEP` (default 100) up to
+`K6_CEILING_MAX` (default 500), ramping each step in over 30 s and holding it
+60 s at the capacity profile's send rate. Every trend is tagged `step=<n>`, so
+the summary carries a per-step p95/p99 for recipient delivery, sender
+acknowledgement and login. Delivery and acknowledgement carry the tag only
+during the hold: the 30 s ramp-in is the step's logins landing (paced at ~3/s
+against a four-slot bcrypt admission budget), and a step's published figure is
+the minute it was held at that count, not the bcrypt that got it there.
+
+The search uses **multiple pre-seeded text channels**, supplied through
+`K6_CEILING_CHANNELS`. A connection focuses and posts in its assigned channel
+for its lifetime. Each connection still sends once per `K6_SEND_INTERVAL_MS`:
+step N still offers `N × 1000 / interval_ms` messages/s in total. The fan-out
+is now within each channel, so these results are a multi-channel capacity
+shape and are not directly comparable to the old single-channel fan-out.
+
+The harness reserves **50% of the 100-message sliding one-second topic limit**.
+For interval I, each VU can schedule `ceil(1000 / I)` sends in that window,
+even when timers align. Each channel therefore gets at most
+`floor(50 / ceil(1000 / I))` VU slots. Provision at least
+`ceil((ceiling_max + 1) / slots_per_channel)` distinct, readable text channels;
+the extra slot covers the observer's arbitrary VU id. The workflow seeds these
+automatically at its default 2 s interval: **11 channels for 500 connections**.
+Manual runs must supply the ids; missing, duplicate, invalid or insufficient
+lists fail at init instead of silently measuring a topic cap. Faster custom
+send intervals need more channels. The server's rate limit is unchanged.
+
+The send interval itself is also bounded: each user may send at most 10
+messages/second (`Server/service/message_crud.go`), so `ceiling-search` rejects
+`K6_SEND_INTERVAL_MS` below 100 at init. A faster interval would be admitted
+only for the subscribed subset and would silently publish that subset's latency
+as the hardware ceiling — the same code-cap-masquerading-as-hardware defect
+OC-0447 closed, one layer up.
+
+`k6-summary.json` and stdout include `load_measurement.steps`: hold boundaries,
+planned total and mean per-channel message rates, a conservative per-channel
+one-second send bound, and **each channel's observed send-attempt count/rate**
+(count divided by the 60 s hold, excluding ramp sends). This is generator-side
+traffic evidence, not a server admission counter. Delayed processing can still
+bunch frames at the server: the workflow's existing server-log gate must find
+zero `topic rate limit exceeded` lines before any step is called a hardware
+measurement. Report held population and generator saturation alongside it.
+
+- **Publishes** the last step at which every budget above still held, plus the
+  per-step table. The steps are informational and nothing is gated on them. The
+  table's population column is `obs_connected_users{step:<n>}` — the server's
+  own `connected_users`, sampled by the observer, because a socket opened at
+  step 100 is still held at step 300. `ws_connections{step:<n>}` beside it is
+  that step's arrivals only, i.e. whether its VUs got on the wire at all.
+- **Gated on** `obs_ws_conn_rejects: count==0`. The workflow caps connections at
+  twice the probe maximum for exactly this assertion: without it, a "ceiling"
+  could be a configuration default rather than the hardware's.
+- **A generator-limited step is marked, not published as a ceiling.** k6 shares
+  a four-CPU runner with the server; the sampler records the generator's load
+  average and the container's `cpu.stat` per step, and where the generator
+  saturates first the document says so.
+- **If every step holds at `K6_CEILING_MAX`, the answer is "above 500"** and the
+  search stops there. It is not chased further on a shared runner.
+
+### Voice control churn
+
+The voice connections stop joining once and sitting: every `K6_VOICE_CHURN_MS`
+(default 10 000) each leaves and rejoins. The voice-join budget above is
+therefore applied under churn rather than under a single join, and a new
+`voice_state_delivery_ms` measures a `voice_state` broadcast reaching a
+_different_ connection.
+
+- **Budget**: the voice-join row above. `voice_state_delivery_ms` has none.
+- **Still not a WebRTC measurement.** k6 speaks OwnCord's control plane only;
+  the media path remains `lk load-test`'s, as the profile's caveats say.
+
+### Upload and download pressure
+
+An HTTP scenario runs alongside the WebSocket sustain: connections upload one
+`K6_UPLOAD_BYTES` file (default 256 KiB) at a time, against a server running a
+1 MB per-user quota so that the quota bound is reachable inside the upload rate
+limit. Downloads cover `GET /api/v1/files/{id}` of a file the caller admitted,
+with a `Range` header on one request in four.
+
+- **Measures both sides of the bound** — admission and refusal. A refusal path
+  that was never exercised is a path with no evidence behind it, and the quota
+  is the one that users actually hit.
+- **Gated on** `upload_low_disk: count==0` and `upload_oversize: count==0`. A
+  507 `STORAGE_LOW_DISK` means the runner's disk is filling rather than the
+  server refusing, and an oversize rejection is a 400 here — so a non-zero count
+  on either means the scenario is wrong, not that the server behaved.
+- **The quota is 1 MB to be crossed, not to be recommended.** The shipped
+  default is untouched; this is a measurement setting, like the auth rate-limit
+  multiplier above.
+
+### TLS overhead
+
+The operational profile runs twice on the constrained leg, identical except for
+`tls.mode`: `self_signed`, and `off` with both URLs flipped to the plaintext
+scheme. Nothing else in the job differs, which is what makes the difference a
+TLS delta rather than a configuration delta.
+
+- **Publishes a delta per budget row**, `self_signed − off`, and nothing else.
+  The delta is the measurement; neither leg is a new budget.
+- **`tls: off` is measured and never shipped.** It exists to isolate what the
+  handshake costs on this profile. No figure here recommends running without
+  TLS, and the default remains `self_signed`.
+
+### Graceful shutdown under load
+
+The **workflow**, not k6, sends the stop: it waits until the connections are up
+and sending, `docker stop --time=90`s the container (a grace past the 30 s
+budget, so an overrun is measured rather than SIGKILLed), records the server's
+exit code and the drain wall clock, then starts the same container again — same
+cgroup, same flags, same data directory, so the second boot is the same server
+and not a lookalike.
+
+- **Measures** the restart frame reaching every connection and the lead from
+  frame arrival to the socket actually closing; the resume time after the second
+  boot; the sends attempted during the drain; and the sends lost.
+- **Gated on** exit code 0, a drain inside the 30 s stop timeout, `sends_lost:
+count==0`, and no replay gap across the restart. A message that was sent,
+  never acknowledged and absent from the channel history after the second boot
+  is a **lost message** — a defect recorded in the findings ledger and
+  published as "lost N of M" until it is fixed, not a number to round. The
+  history is the only place to look: the post-restart resume is a full re-sync
+  (next point), so no replay will ever carry a drain-window send.
+- **Delivery and acknowledgement keep their `phase:pre-restart` and
+  `phase:post-restart` tags**, with a separate `phase:recovery` for the stop,
+  drain, outage and reconnects. The explicit windows below separate recovery
+  from settled load; neither ramp is included in the steady comparison.
+- **Post-restart resume is always the `none` tier, by design.** A restart
+  renumbers the sequence space and marks visibility changed, so a connection
+  that resumes after one cannot be served from the `events` table and the server
+  says so rather than replaying a gap. The tier split above is therefore
+  measured on the storm, where the tiers are reachable.
+- **The 20 s figure above is not this gate.** That is the idle smoke's drain;
+  this drill's hard bound is the 30 s stop timeout, after which the container is
+  killed and the run fails.
+
+#### Restart measurement windows
+
+All boundaries are seconds from the executor's scenario start, inclusive at
+the start and exclusive at the end. Samples are assigned **at receipt**;
+a delayed delivery sent in recovery but received after its boundary belongs
+to the settled window. Defaults (`K6_RAMP=60s`, `K6_SUSTAIN=180s`,
+`K6_RESTART_RECOVERY_S=30`) are:
+
+| Existing phase tag | Window                                  | What it measures                                     |
+| ------------------ | --------------------------------------- | ---------------------------------------------------- |
+| `ramp`             | [0, 60) s                               | Growing population; excluded from steady comparison  |
+| `pre-restart`      | [60, 135) s                             | 75 s of steady load before the scheduled stop        |
+| `recovery`         | [135, 165) s                            | Stop, drain, outage and reconnect activity           |
+| `post-restart`     | [165, 240) s                            | 75 s of planned settled load after recovery          |
+| `ramp-down`        | [240, 260) s and any graceful-stop tail | Draining population; excluded from steady comparison |
+
+`K6_RESTART_AT` defaults to `(2 × ramp + sustain − recovery) / 2`, rounded to
+a whole second; the workflow uses 135 s. Manual runs must schedule the actual
+stop to match this knob. The summary's `load_measurement.windows` gives the
+configured boundaries/durations and **delivery and acknowledgement p95 and
+sample counts** for every phase. Existing tagged metrics remain in place.
+Empty windows report `sample_count: 0, p95_ms: null`, never a zero-latency
+success. The steady-window delivery floors scale separately with each window's
+duration, so explicit asymmetric `K6_RESTART_AT` overrides still work. Empty or
+reversed steady/recovery windows fail configuration validation.
+
+The recovery window is fixed, not proof that all connections recovered within
+30 s. No receipts during an outage means no latency samples: read its sample
+count with drain duration, resume timings and losses. Check the actual stop
+against the planned boundary and verify the cohort recovered before calling
+`post-restart` settled. A full load run is still needed to compare recovery
+with settled and pre-stop p95s; a remaining steady-state gap is not automatically
+caused by the restart. Historical numbers used different windows and must be
+read with their original boundaries, even though the pre/post tag names survive.
+
+The observer uses the same scenario clock and phases. After a detected reboot
+(`uptime_seconds` decreases), counter deltas start from the new boot rather
+than subtracting the old process's totals. Polls remain 5 s apart, and deltas
+crossing a boundary are booked at the poll's end; they are supporting evidence,
+not exact per-message attribution.
+
+### Reproducing an operational scenario by hand
+
+```bash
+# server, with the profile's extra knobs; the boot itself is unchanged
+docker run -d --name owncord-sut ... \
+  -e OWNCORD_TLS_MODE=self_signed \
+  -e OWNCORD_UPLOAD_USER_QUOTA_MB=1 \
+  debian:bookworm-slim /app/chatserver
+
+cd Server/scripts/k6 && mkdir -p reports
+K6_PROFILE=operational K6_WS_URL=wss://127.0.0.1:8443/api/v1/ws \
+K6_HTTP_URL=https://127.0.0.1:8443 K6_CHANNEL_ID="$CHANNEL_ID" \
+K6_VOICE_CHANNEL_ID="$VOICE_ID" K6_PEAK_VUS=100 K6_VOICE_VUS=25 \
+K6_RAMP=60s K6_SUSTAIN=180s \
+  taskset -c 2,3 k6 run --insecure-skip-tls-verify ws-load.js
+```
+
+The `VAR=value command` prefix above is POSIX shell syntax; neither PowerShell
+nor cmd understands it, so on Windows that line runs k6 with no knobs set and
+silently measures the default profile. Pass them with k6's own flag instead
+(`k6 run -e K6_PROFILE=operational …`), which works everywhere. These runs are
+made on Linux, which is where the form above applies.
+
+OC-0445's diagnosis profiled the constrained server with a one-off build, not
+a workflow input. To recreate it by hand, add a `net/http/pprof` listener on
+`127.0.0.1` to a scratch build of the server, with
+`runtime.SetBlockProfileRate` and `runtime.SetMutexProfileFraction` switched on
+(a CPU profile alone cannot see contention on the single SQLite writer). The
+container runs with `--network=host`, so the host reaches that listener
+directly. During the run, curl `goroutine?debug=2` dumps every 2 s and
+back-to-back 30 s CPU profiles, then block, mutex and heap profiles once at the
+end, with the sampler pinned to the generator CPUs (`taskset -c 2,3`) so it
+does not compete with the server it measures.
+
+## Measured
+
+Every number below comes from the **constrained** leg and from nothing else.
+
+> **Provenance note (2026-09-25).** These qualifying runs were dispatched from
+> measurement branches, not from `dev` or `main`: the `commit:` line in each
+> block is that branch's head, which is **not** an ancestor of `dev`/`main` and
+> so does not resolve in a checkout of either. The **workflow run id** in each
+> block is the resolvable handle — it names the branch, the commit and the run
+> logs on GitHub. The B10 release-candidate load run on a `dev`/`main` ancestor
+> (the comparison B10 item 8 asks for) is **pending at R6**; until it exists,
+> these branch runs are the only qualifying evidence, and they are published as
+> that. No unresolvable short SHA is presented as a release-revision citation.
+
+```
+commit:          593c764b2d749a9415741211c01216d9d5da2153  (measurement branch feat/b6-9-published-capacity-profile; not on dev/main)
+date (UTC):      2026-09-12
+workflow run:    34701291805  (.github/workflows/load-baseline.yml)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container:
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.5
+lk:              2.18.6
+load generators: k6 and lk, pinned to CPUs 2-3 with taskset
+```
+
+| Profile target                       | Achieved                                                   | Met? |
+| ------------------------------------ | ---------------------------------------------------------- | ---- |
+| 250 registered users                 | 250 seeded, all registrations accepted                     | Yes  |
+| 100 simultaneous connections (180 s) | 100 authenticated and ready, `vus_max` 100 for the sustain | Yes  |
+| 25 concurrent voice participants     | 625/625 tracks at 12.5 mbps, 0% packet loss, 0 errors      | Yes  |
+
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 307 ms | 344 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 13 ms  | 29 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 57 ms  | 83 ms  | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 60 ms  | 85 ms  | 200 ms / 400 ms    | Yes  |
+| Voice join (OwnCord half)     | 3 ms   | 4 ms   | 250 ms / 500 ms    | Yes  |
+
+Volumes behind those percentiles, so nobody has to take the distribution on
+trust: 12,137 messages sent and 12,131 acknowledged, **1,139,476
+cross-connection deliveries**, 25 voice tokens issued, **0 WebSocket errors**.
+The voice cohort's connect-and-teardown wall clock was 5 s for all 50
+participants, ramp-inclusive — not a percentile, and not comparable with the
+OwnCord half above.
+
+### Reproduced, and the tightened budgets re-verified
+
+The tightened budgets above were set from run 34701291805 and then **run
+again** against them, because a threshold that has never been evaluated is not
+a gate. Run **34701991385**, same commit family, same constrained leg:
+
+| Path                          | run 1 p95 / p99 | run 2 p95 / p99 | Budget          |
+| ----------------------------- | --------------- | --------------- | --------------- |
+| REST login                    | 307 / 344 ms    | 315 / 331 ms    | 600 ms / 1 s    |
+| WebSocket open → `auth_ok`    | 13 / 29 ms      | 21 / 35 ms      | 200 ms / 500 ms |
+| Send → sender acknowledgement | 57 / 83 ms      | 51 / 78 ms      | 150 ms / 300 ms |
+| Send → recipient delivery     | 60 / 85 ms      | 53 / 79 ms      | 200 ms / 400 ms |
+| Voice join (OwnCord half)     | 3 / 4 ms        | 4 / 6 ms        | 250 ms / 500 ms |
+
+Run 2 again reached 100 connections, 1,139,491 cross-connection deliveries, 25
+voice tokens, 625/625 voice tracks at 0% loss, and 0 WebSocket errors. Run-to-run
+movement is a few milliseconds, so the budgets are not sitting on the noise.
+
+### What this run also says
+
+- **The reference hardware is not the limiting factor at this profile.** The
+  ceiling leg — same run, same commit, no cgroup, the whole 4-CPU runner — came
+  out within noise of the constrained leg (recipient delivery p95 58 ms vs
+  60 ms, p99 83 ms vs 85 ms). Two CPUs and 4 GB are not saturated by 100
+  connections and 25 voice participants, so the profile is met with room rather
+  than met at the edge. It follows that these figures say little about where the
+  real ceiling is; locating it is the `ceiling-search` profile's job, below.
+- **The budgets were tightened, not met-and-left.** Every initial budget was
+  between 3× and 1000× the measured figure, which would have let a large
+  regression land without failing anything.
+- **The `--layout` trap was not hypothetical.** The first 25×25 room measured
+  during development reported 150/625 tracks at 0% loss and exit status 0 under
+  `lk load-test`'s default layout. Every figure above comes from a run that
+  asserted the track total.
+
+### The operational profiles
+
+The operational blocks below were re-made on 2026-09-23 from commit `4b2ea56b`
+(run 35856013841, on branch `fm/oc-0445-fable`), after OC-0445 found that the
+2026-09-16 operational figures had measured a phase-locked load generator rather
+than the server — the `self_signed` block says how. The restart and
+ceiling-search blocks are still the 2026-09-16 runs from commit `e57335c7`, on
+the branch that added them. None of these SHAs is an ancestor of `dev`/`main`;
+the run id is the resolvable handle. Each block is filled from its own
+**constrained** leg and from nothing else, and the `tls off` block publishes as
+a delta against the `self_signed` one rather than on its own.
+
+The budget rows missed under the restart drill are published as missed and are
+findings-ledger entries (OC-0446, OC-0447); neither was re-run on a bigger
+machine and no budget was loosened. The operational profile's two misses were
+OC-0445, and the blocks below are its re-measurement, with the harness
+corrected and the server unchanged.
+
+#### Operational, `tls.mode: self_signed`
+
+```
+commit:          4b2ea56bb9777c6a435b8eb6423d1293a7276230  (measurement branch fm/oc-0445-fable; not on dev/main)
+date (UTC):      2026-09-23
+workflow run:    35856013841  (.github/workflows/load-baseline.yml, profile=operational)
+job:             107164548694  (operational, constrained, tls self_signed)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.5
+lk:              2.18.6
+load generators: k6 and lk, pinned to CPUs 2-3 with taskset
+```
+
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 239 ms | 335 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 12 ms  | 19 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 45 ms  | 234 ms | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 48 ms  | 231 ms | 200 ms / 400 ms    | Yes  |
+| Voice join (OwnCord half)     | 157 ms | 204 ms | 250 ms / 500 ms    | Yes  |
+
+Every threshold was met; this is the first operational run to conclude
+`success`. Per phase (the `phase` tag `ws_broadcast_latency_ms` and
+`ws_delivery_latency_ms` carry since OC-0445), send → acknowledgement p95 / p99
+was 68 / 299 ms in the ramp, 46 / 224 ms in the sustain, 44 / 186 ms under
+uploads and 37 / 282 ms in the storm window; delivery 93 / 355, 48 / 219,
+46 / 184 and 40 / 284 ms. A second run the same hour (35856019988) measured
+41 / 80 ms and 43 / 81 ms on this leg; two `dev` runs interleaved with the pair
+(35856016690, 35856022553) measured 287 / 427 and 330 / 467 ms for
+acknowledgement, with the same server.
+
+**The 2026-09-16 figures (run 35113946945: 228 / 348 ms and 250 / 361 ms,
+published as OC-0445) measured the load generator, not the server.** Per-10 s
+buckets on an unchanged server (run 35852682786) put send → acknowledgement
+p95 at 3–69 ms in every bucket up to the storm and at 506–582 ms in every
+bucket after it on the `self_signed` leg, and at 2–89 ms and 584–746 ms on the
+TLS-off leg. The storm closed every socket at one scenario instant, and each
+new socket's send timer was a plain `setInterval` from that instant, so from
+t=180 s all 100 senders sent in the same 50 ms slot
+every 2 s. A hundred simultaneous sends queue behind the single SQLite writer
+at about 6 ms a hop — the checkout itself is held 0.4 ms; the hop is the next
+sender waiting out the previous send's 100-recipient fan-out on two vCPUs —
+which is 600 ms for the last in line. The server did the same work at the same
+rate before and after the storm; only the arrival pattern changed. `ws-load.js`
+now keeps each connection's send, typing and presence phase across reconnects
+(`phasedInterval`): a reconnect changes when a user is connected, not when they
+type. OC-0445 records the diagnosis and OC-0454 the per-hop cost of a burst that
+is genuinely simultaneous.
+
+`K6_SEND_PHASE=aligned` reproduces that burst on purpose: every VU sends on the
+same epoch-aligned instant. The default, `spread`, is unchanged. A local
+re-profile (OC-0454, 2026-09-23; 4-CPU sandbox, server and k6 on two CPUs each)
+confirmed the hop is not the writer checkout. The message transaction holds
+the writer ~0.3 ms. The rest is the burst's 10,000 fan-out frames, each its own
+TLS record and write syscall, saturating two CPUs for ~100 ms. About half of
+the acknowledgement time k6 reports in a burst is the generator itself: a VU
+parses the other senders' frames before it reaches its own `chat_send_ok`.
+Since then a send takes the writer once, not twice: the author's read-state
+advance runs inside the message transaction. That halved writer waits and
+took ~7% off the aligned-burst p95 (318 → 297 ms locally). Spread sends are
+unchanged at 18 ms. These local figures are not reference-runner figures.
+
+**Measurement-only rows — no budget is published for any of them, and this
+document does not invent one.**
+
+| Figure                                | p95    | p99    | Count               |
+| ------------------------------------- | ------ | ------ | ------------------- |
+| Storm resume, open → `auth_ok`        | 72 ms  | 77 ms  | 100                 |
+| `voice_state` reaching another socket | 175 ms | 214 ms | 58,396              |
+| Upload admitted (201)                 | 119 ms | 274 ms | 300                 |
+| Upload refused by quota (507)         | 9 ms   | 113 ms | 995                 |
+| Authenticated download                | 10 ms  | 19 ms  | 300 (1 in 4 ranged) |
+
+Storm: 100 of 100 sockets closed and resumed, **every one served from the
+in-memory buffer** (`ws_replay_source{tier:buffer}` 100, `db` 0, `none` 0),
+`ws_replay_gap` max 0, and the storm phase's `ws_conn_rejects` and all three
+`backpressure_*` deltas 0. Uploads: 300 admits, 995 quota refuses, 0
+`STORAGE_LOW_DISK`, 0 oversize, 75 MB of storage charged. 0 WebSocket errors,
+0 login give-ups, 1,133,495 cross-connection deliveries from 12,078 sends.
+
+Database waits, **per phase, as deltas** — the figure this section exists for:
+
+| Phase   | Writer waits | Writer seconds | Reader waits | Reader seconds |
+| ------- | ------------ | -------------- | ------------ | -------------- |
+| ramp    | 940          | 10.3 s         | 7,901        | 3.1 s          |
+| sustain | 3,428        | 23.5 s         | 29,880       | 9.9 s          |
+| storm   | 1,327        | 9.6 s          | 13,667       | 5.9 s          |
+| upload  | 4,394        | 47.5 s         | 43,324       | 14.2 s         |
+| run     | 10,666       | 98.6 s         | 102,413      | 35.2 s         |
+
+With the senders spread out again, the writer's wait per waiting checkout is
+7–11 ms in every phase (6.9 ms in the sustain, 7.2 ms in the storm window,
+10.8 ms under uploads) instead of the 2026-09-16 run's 12 s inside a 30 s storm
+window. The upload phase still carries the most writer wait because it is half
+the run, not because it queues differently.
+
+Server CPU inside the cgroup, from `cpu.stat.log` (5 s samples of
+`usage_usec`): 0.26 CPUs of 2 on average over the run, 0.83 at the peak, in the
+uploads cohort's login ramp. **The two CPUs were not the constraint on this
+run.**
+
+#### Operational, `tls.mode: off`
+
+```
+commit:          4b2ea56bb9777c6a435b8eb6423d1293a7276230  (measurement branch fm/oc-0445-fable; not on dev/main)
+date (UTC):      2026-09-23
+workflow run:    35856013841  (.github/workflows/load-baseline.yml, profile=operational)
+job:             107164548275  (operational, constrained, tls off)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.5
+lk:              2.18.6
+load generators: k6 and lk, pinned to CPUs 2-3 with taskset
+```
+
+Same shape as the block above: 100 of 100 storm resumes all from the buffer,
+`ws_replay_gap` max 0, 0 WebSocket errors, 0 login give-ups, 1,133,899
+deliveries from 12,084 sends, 300 admits / 993 quota refuses / 300 downloads,
+0 `STORAGE_LOW_DISK`, 0 oversize. Server CPU 0.31 of 2 on average, 0.98 at the
+peak. Every threshold was met:
+
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 307 ms | 544 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 5 ms   | 11 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 85 ms  | 266 ms | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 93 ms  | 270 ms | 200 ms / 400 ms    | Yes  |
+| Voice join (OwnCord half)     | 130 ms | 176 ms | 250 ms / 500 ms    | Yes  |
+
+Per phase, send → acknowledgement p95 / p99: ramp 35 / 151 ms, sustain
+51 / 176 ms, upload 110 / 301 ms, storm window 102 / 271 ms. The second run
+(35856019988) measured 96 / 267 ms and 98 / 266 ms on this leg and missed the
+voice-join p95 (335 ms against 250) — a row the interleaved `dev` runs missed
+too (437 ms on `self_signed` in 35856022553); voice join p95 moved between 130
+and 437 ms across the four runs of that hour and is not distinguishable from
+runner noise at one run per mode. The `dev` runs measured 373 / 452 and
+276 / 352 ms for acknowledgement on this leg.
+
+Per-phase database waits on this leg, for comparison with the table above:
+
+| Phase   | Writer waits | Writer seconds | Reader waits | Reader seconds |
+| ------- | ------------ | -------------- | ------------ | -------------- |
+| ramp    | 694          | 7.6 s          | 8,712        | 3.3 s          |
+| sustain | 1,809        | 21.3 s         | 29,593       | 9.8 s          |
+| storm   | 1,334        | 20.3 s         | 13,184       | 6.6 s          |
+| upload  | 3,766        | 75.2 s         | 45,414       | 15.5 s         |
+| run     | 8,257        | 137.0 s        | 100,112      | 35.8 s         |
+
+#### TLS delta, `self_signed − off`
+
+A positive number means the TLS leg was slower.
+
+| Row                                 | self_signed p95 / p99 | off p95 / p99 | Delta p95 / p99   |
+| ----------------------------------- | --------------------- | ------------- | ----------------- |
+| REST login                          | 239 / 335 ms          | 307 / 544 ms  | **−68 / −209 ms** |
+| WebSocket open → `auth_ok`          | 12 / 19 ms            | 5 / 11 ms     | **+7 / +8 ms**    |
+| Send → sender acknowledgement       | 45 / 234 ms           | 85 / 266 ms   | **−40 / −32 ms**  |
+| Send → recipient delivery           | 48 / 231 ms           | 93 / 270 ms   | **−45 / −39 ms**  |
+| Voice join (OwnCord half)           | 157 / 204 ms          | 130 / 176 ms  | **+27 / +28 ms**  |
+| Storm resume                        | 72 / 77 ms            | 156 / 162 ms  | −84 / −85 ms      |
+| `voice_state` cross-socket delivery | 175 / 214 ms          | 155 / 174 ms  | +20 / +40 ms      |
+| Upload admitted                     | 119 / 274 ms          | 128 / 184 ms  | −9 / +90 ms       |
+| Upload refused by quota             | 9 / 113 ms            | 102 / 203 ms  | −93 / −90 ms      |
+| Authenticated download              | 10 / 19 ms            | 12 / 22 ms    | −2 / −3 ms        |
+| Writer wait, run total              | 98.6 s                | 137.0 s       | −38.4 s           |
+
+**Most rows still come out negative: the plaintext leg measured slower on the
+two message paths, on resume and on refusals.** That is published as it was
+measured, and no TLS cost is claimed from this pair for the same reason as
+before: the two legs are two matrix jobs on two different runner VMs, so every
+row carries a full run's worth of runner noise, and the second pair of the
+same hour (35856019988: 41 / 80 ms against 96 / 267 ms for acknowledgement)
+moved the message rows by more than this delta. The honest reading remains
+**"the TLS cost of this profile is not distinguishable from runner noise at
+one run per mode"**. Nothing here recommends running with TLS off; the default
+remains `self_signed`.
+
+#### Restart under load
+
+```
+commit:          e57335c789e19b08b3302a68de1598353cf1578d  (measurement branch feat/b6-10-operational-measurements; not on dev/main)
+date (UTC):      2026-09-16
+workflow run:    35113950011  (.github/workflows/load-baseline.yml, profile=restart)
+job:             104854480908  (restart, constrained, tls self_signed)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.5
+lk:              2.18.6
+load generators: k6, pinned to CPUs 2-3 with taskset (no voice leg on this profile)
+```
+
+The stop was sent 90 s into the run — 60 s of ramp plus 30 s at full fan-out.
+
+| Drill figure                       | Measured                                    | Gate                    | Met? |
+| ---------------------------------- | ------------------------------------------- | ----------------------- | ---- |
+| Drain wall clock (`docker stop`)   | **6,157 ms**                                | inside 30 s             | Yes  |
+| Server exit code                   | **0**                                       | 0                       | Yes  |
+| `server_restart` frames received   | **100 of 100**                              | 100                     | Yes  |
+| Lead, frame arrival → socket close | p95 5,013 ms, max 5,018 ms                  | ≥ `delay_seconds` (5 s) | Yes  |
+| Sends attempted during the drain   | **250: 250 acked, 0 errored, 0 unanswered** | —                       | —    |
+| Sends lost across the restart      | **0**                                       | 0                       | Yes  |
+| Replay gap across the restart      | max 0                                       | 0                       | Yes  |
+| Resume tier after the second boot  | 100 of 100 `none`                           | `none` by design        | Yes  |
+| Resume time after the second boot  | p95 154 ms, p99 171 ms, max 226 ms          | no budget               | —    |
+
+No message was lost: every one of the 250 drain-window sends was acknowledged
+before the socket closed, and all 100 connections came back and re-synced with
+no gap. The drain finished in a fifth of the 30 s budget under 100 connections
+and in-flight writes.
+
+The budget rows, and the two sides of the stop:
+
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met?          |
+| ----------------------------- | ------ | ------ | ------------------ | ------------- |
+| REST login                    | 272 ms | 301 ms | 600 ms / 1 s       | Yes           |
+| WebSocket open → `auth_ok`    | 17 ms  | 22 ms  | 200 ms / 500 ms    | Yes           |
+| Send → sender acknowledgement | 371 ms | 437 ms | 150 ms / 300 ms    | **No** — both |
+| Send → recipient delivery     | 378 ms | 444 ms | 200 ms / 400 ms    | **No** — both |
+
+| Side           | Recipient delivery p95 / p99 | Sender ack p95 / p99 | Deliveries |
+| -------------- | ---------------------------- | -------------------- | ---------- |
+| `pre-restart`  | **34 / 51 ms**               | 32 / 47 ms           | 271,051    |
+| `post-restart` | **393 / 452 ms**             | 389 / 444 ms         | 859,303    |
+
+**That ~10× gap is not an equal-load comparison, and must not be quoted as
+one.** The `pre-restart` window is the first 90 s of the run: 60 s of ramp
+during which most connections are not yet on the wire, then 30 s at full
+fan-out. The `post-restart` window is the remaining ~186 s, all of it at full
+fan-out. The delivery rates say the same thing — 3,012/s before the stop
+against ~4,620/s after it — so part of the gap is simply that the two windows
+carried different loads. It is a finding (OC-0446) rather than a published
+per-side number, and the fix is to the measurement first: a pre-stop window
+that is held at full fan-out for as long as the post-stop one.
+
+What the artifacts can add on the post-restart side is narrow, and it does not
+explain the gap:
+
+- Server CPU inside the cgroup was **flat across the stop** — 0.23 CPUs of 2
+  over the 30 s at full fan-out before it, 0.20 CPUs over the whole
+  post-restart window. The second boot was not busier than the first.
+- **No observer VU runs under the `restart` profile**, so there are no
+  per-phase writer-wait deltas for this drill. That is the instrument this
+  profile is missing, and it is why the paragraph above stops where it does.
+
+**The harness has since been corrected (OC-0446), and the figures above predate
+it.** Three things changed, none of which re-measures anything published here:
+
+- **The stop is placed to equalize the windows.** The workflow now derives
+  `RESTART_AT` as the midpoint that makes the steady-before and steady-after
+  windows the same length — `(2·ramp + sustain − recovery) / 2`, which for the
+  BPR-030 defaults is 135 s instead of 90 s. Both windows become 75 s of full
+  fan-out.
+- **The phases are read off the run clock, not off whether a connection
+  resumed.** `restartPhase` splits the run into `ramp`, `pre-restart`,
+  `recovery`, `post-restart` and `ramp-down`. The ramp and the ramp-down are
+  excluded from both steady windows — the second because `TOTAL_S` runs 20 s
+  past `SUSTAIN_S`, and a still-draining population is no more comparable to a
+  fixed one than a still-filling one; the outage and its reconnects are
+  _published as their own phase_ rather than discarded, because that cost is
+  exactly what burying it in a warm-up exclusion would erase. A resumed
+  connection is no longer evidence of anything — it is true for every sample
+  after the stop, including those taken while the rest of the cohort was still
+  coming back. The observer's samples carry these same phase names, so its
+  writer-wait and reader-wait deltas split at the stop too.
+- **The observer VU runs under `restart`**, so the per-phase writer-wait
+  deltas exist on both sides of the stop, and a floor on
+  `ws_deliveries{phase:pre-restart}` / `{phase:post-restart}` fails the drill
+  when a window did not carry the workload — a comparison between two windows
+  is worthless if either was empty.
+
+The next restart run must validate these windows and publish the recovery and
+settled p95s with their counts; the harness correction alone establishes no
+new latency result. The
+34/51 ms and 393/452 ms above remain what that run measured, and remain not an
+equal-load comparison.
+
+#### Ceiling search
+
+```
+commit:          e57335c789e19b08b3302a68de1598353cf1578d  (measurement branch feat/b6-10-operational-measurements; not on dev/main)
+date (UTC):      2026-09-16
+workflow run:    35113953670  (.github/workflows/load-baseline.yml, profile=ceiling-search)
+job:             104854495119  (ceiling-search, constrained, tls self_signed)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.5
+lk:              2.18.6
+load generators: k6, pinned to CPUs 2-3 with taskset (no voice leg on this profile)
+```
+
+500 users seeded, `obs_ws_conn_rejects` **0** — so no figure below is a
+configuration cap — and `login_giveups` 0. Four logins were refused by the
+bcrypt admission budget and retried successfully.
+
+| Step | Held (`obs_connected_users`) | Delivery p95 / p99 | Sender ack p95 / p99 | Login p95 | Writer wait | Server CPU (avg / peak of 2) | Host loadavg |
+| ---- | ---------------------------- | ------------------ | -------------------- | --------- | ----------- | ---------------------------- | ------------ |
+| 100  | 100                          | **29 / 142 ms**    | **28 / 134 ms**      | 241 ms    | 13.1 s      | 0.41 / 0.93                  | 1.26         |
+| 200  | 200                          | 397 / 697 ms       | 378 / 675 ms         | 448 ms    | 132.0 s     | 0.71 / 1.22                  | 1.81         |
+| 300  | 300                          | 27,349 / 29,477 ms | 30,005 / 33,108 ms   | 485 ms    | 319.2 s     | 0.93 / 1.57                  | 2.67         |
+| 400  | **370** of 400               | 29,368 / 29,884 ms | 50,152 / 54,158 ms   | 833 ms    | 486.4 s     | 1.12 / 1.84                  | 3.43         |
+| 500  | **411** of 500               | 29,076 / 29,830 ms | 50,906 / 55,674 ms   | 2,735 ms  | 2,395.2 s   | 1.37 / 1.93                  | 3.76         |
+
+**The last step at which every budget above held is 100.** Step 200 already
+misses recipient delivery (p95 397 ms against 200 ms) and sender
+acknowledgement (378 ms against 150 ms).
+
+**From step 200 up, this search is not measuring the hardware.** All
+connections are in one channel sending one message every 2 s, so step 200 is
+exactly 100 messages/s into a single channel — and
+`topicRateLimitPerSecond = 100` (`Server/ws/hub_stats.go:73`, enforced at
+`Server/ws/hub_broadcast.go:402`) caps any single channel at 100 messages/s.
+The server log for this run carries **24,893 "hub: topic rate limit exceeded,
+dropping message" lines**. Every step at or above 200 is therefore shed by a
+constant in the code, and the latency above it is the shed queue plus a
+quadratic fan-out (N senders × N recipients on one channel), not a machine
+running out. A configuration or code cap must never be published as the
+ceiling, so it is not: this table locates the **single-channel topic limiter**,
+and the harness shape that walked into it is a finding (OC-0447).
+
+The rest of what the run says, for whoever re-runs it:
+
+- **No step was server-CPU-saturated.** The cgroup peaked at 1.93 of 2 CPUs in
+  the top step and averaged 1.37; `nr_throttled` rose by 3 over the whole
+  500 s run. Latency in the tens of seconds against a server at two-thirds of
+  its budget is the limiter, not the box.
+- **Steps 400 and 500 did not hold their population** — 370 of 400 and 411 of
+  500 — while the 4-CPU host's load average reached 3.43 and 3.76 with k6 on
+  two of those CPUs, and the server closed slow consumers: 797 "client send
+  buffer full, closing connection to force reconnect" lines and 857 write-pump
+  errors in the server log, against 4,062 client-side `ws_errors` from the
+  reconnect churn that followed. **Both steps are marked generator-limited and
+  population-short**, and neither is published as a server ceiling.
+- The per-step figures are informational. Nothing is gated on them and no new
+  budget is set by them.
+
+**The harness has since been corrected (OC-0447), and the figures above predate
+it.** The search no longer walks into the limiter:
+
+- **The cohort is spread across channels with enforced headroom.** The earlier
+  correction seeded `ceil(ceiling_max / 150)` channels but allowed missing or
+  insufficient lists and did not bound aligned sends. The completed correction
+  uses the sliding-window calculation above: 11 channels at max 500 and a 2 s
+  send interval, no more than 46 VU slots per channel (23 messages/s scheduled
+  mean, at most 46 scheduled sends in one second). The total remains 250
+  messages/s at step 500. The summary publishes the planned rate and observed
+  send-attempt rate for every channel and hold. Sender and focus use the same id.
+- **Shedding is now a hard failure, not a footnote.** A post-run step greps
+  the server log for `topic rate limit exceeded` on the ceiling leg and fails
+  the run if it finds any, with the same posture as the run's own
+  `obs_ws_conn_rejects == 0`: the search is shaped to stay under the limiter,
+  so a shed frame means the shaping is wrong and the steps above the first shed
+  are **inconclusive rather than a ceiling**. `CEILING_CHANNELS` is printed in
+  the failure so the fix is one input away.
+
+The table above remains historical evidence from the single-channel run.
+The new spread changes recipient fan-out at **every** step, including 100;
+none of the old latency figures qualifies this multi-channel shape. The next
+constrained run must hold each requested population, show the unchanged total
+send rate and per-channel headroom, and pass the zero-shedding log gate before
+publishing a new per-step budget table or a hardware-ceiling claim.

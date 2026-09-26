@@ -4,7 +4,6 @@ package ws
 import (
 	"context"
 	"log/slog"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -51,8 +50,7 @@ type Hub struct {
 	// bare test hubs; the broadcast gate fails closed then.
 	messageSvc *service.MessageService
 
-	pubsub       *PubSub           // topic-based pub/sub for O(subscribers) broadcast
-	topicLimiter *TopicRateLimiter // per-topic throughput caps
+	pubsub *PubSub // topic-based pub/sub for O(subscribers) broadcast
 
 	seq            uint64           // atomic monotonic sequence counter
 	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
@@ -60,17 +58,18 @@ type Hub struct {
 	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
 
 	// Phase B Step 7 — event persistence. nil = ring buffer only. Atomic
-	// because main.go wires these after NewRouter has already started the
-	// Run loop, which reads them on the broadcast/replay paths.
+	// because internal/app wires these one lifecycle stage after Run has
+	// started, which reads them on the broadcast/replay paths.
 	eventPersister atomic.Pointer[EventPersister]
 	eventStore     atomic.Pointer[EventStore] // read path for cold-tier replay
 
 	// Phase C Step 9 — plugin wiring.
-	pluginRegistry *plugin.Registry                 // slash-command dispatch; nil = no plugins; wire before Run
+	pluginRegistry *plugin.Registry                 // slash-command dispatch; nil = no plugins; HubOptions field (B3-4)
 	pluginSink     atomic.Pointer[plugin.EventSink] // hub→plugin event fan-out; nil = no plugins
 
-	// running flips when Run starts; plain-field setters check it so a late
-	// call fails loudly instead of racing the dispatch loop.
+	// running flips when Run starts. The pre-Run setters that used to check
+	// it died in B3-4 (their fields are HubOptions now); tests still read it
+	// via RunningForTest to wait for the dispatch loop.
 	running atomic.Bool
 
 	// dispatchExited flips when Run returns for good — normal Stop or the
@@ -78,6 +77,12 @@ type Hub struct {
 	// registering and appearing online through registerNow even with the
 	// dispatch loop dead, so nothing else makes the outage observable.
 	dispatchExited atomic.Bool
+
+	// runDone closes when Run returns, after dispatchExited is set. Stop and
+	// GracefulStopContext only signal the loop; whoever started Run joins it
+	// here (Done) before releasing what the loop reads. Made by NewHub; nil
+	// on the struct-literal hubs internal tests build.
+	runDone chan struct{}
 
 	// fatalFn runs when the panic breaker trips (3 panics/60s). A hub that
 	// panicked three times in a minute has unknown state, so production exits
@@ -97,7 +102,7 @@ type Hub struct {
 	connRejects atomic.Uint64
 
 	// coldReplayLimit caps persisted-event replay per reconnect. 0 = the
-	// compiled-in default (maxColdReplay). Set via ConfigureReplay before Run.
+	// compiled-in default (maxColdReplay). HubOptions.ReplayColdLimit (B3-4).
 	coldReplayLimit int
 
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
@@ -118,7 +123,64 @@ type Hub struct {
 	// connection always gets a correctly filtered ready payload anyway.
 	visibilityChangeSeq atomic.Uint64
 
+	// replayPurgeSeq is the watermark of the last account-erasure replay
+	// purge (PurgeUserFromReplay): a client resuming from a seq at or
+	// before it may have missed the purged member_ban and takes the full
+	// ready, since the purge left holes replay cannot fill. Ratcheted like
+	// visibilityChangeSeq. purgedUsers is the tombstone set behind it: a
+	// frame naming one of these ids that a producer sequences after the
+	// purge is dropped instead of buffered and persisted. Both guarded by
+	// seqMu on the write side; purgedUsers is read under seqMu too.
+	replayPurgeSeq atomic.Uint64
+	purgedUsers    map[int64]struct{}
+	// purgedMessages is the retention sweep's tombstone set
+	// (PurgeMessagesFromReplay): the ids of the last sweep's messages, so a
+	// frame about one of them that a producer sequences after the purge is
+	// dropped; replaced by the next sweep's ids, since a late frame reaches
+	// the hub within moments of the purge. Guarded by seqMu like purgedUsers.
+	purgedMessages map[int64]struct{}
+
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
+	// settings is the read seam the cache below refreshes through —
+	// the B3-8 settings family owns the underlying reads.
+	settings SettingsReader
+
+	// readers are the hub's remaining read seams (readers.go): snapshot,
+	// visibility, member payloads and dispatch.
+	readers HubReaders
+
+	// presence is the connection lifecycle's own two writes (readers.go's
+	// PresenceStamper): the status a session comes online as, and the offline
+	// stamp when its last pump exits. Required, like settings and voice.
+	presence PresenceStamper
+
+	// authn is the auth family's service (readers.go's SocketAuthenticator):
+	// the handshake's bearer-token resolution, the sweep's session verdicts
+	// and the connect audit row. Required.
+	authn SocketAuthenticator
+
+	// voice is the voice family's service (readers.go's VoiceStore): every
+	// voice_states read and write the join, moderation, control and sweep
+	// paths make. Required, like settings and readers — a hub that could
+	// answer a voice_join with a nil store would fail on the first join
+	// rather than at construction.
+	voice VoiceStore
+
+	// defaultVoiceQuality is the operator-configured voice.quality
+	// (HubOptions.VoiceQuality), used by voiceJoinComplete as the fallback
+	// when a channel has no per-channel voice_quality override (OC-0439).
+	// Always one of voiceQualities' keys — NewHub normalizes it. Set once at
+	// construction and never mutated (voice.quality is startup-only), so no
+	// mutex guards it, like livekit/lkProcess below.
+	defaultVoiceQuality string
+
+	// voiceMod is the per-target-user lock serializing a voice-moderation
+	// DB transition with its paired LiveKit call (round 4, Codex review
+	// Part B) — see voice_mod_lock.go. Always non-nil (initialized in
+	// NewHub, never a setter): a hub built without it would let the
+	// timeout path and the manual voice-mute endpoint interleave.
+	voiceMod *voiceModLocks
+
 	settingsMu         syncutil.RWMutex
 	settingsName       string
 	settingsMotd       string
@@ -137,133 +199,6 @@ type Hub struct {
 	presenceFlushArmed bool
 }
 
-// NewHub creates a Hub ready to be started with Run.
-// It also initializes the settings cache from the database.
-// If svc is non-nil, V2 handlers receive service references for business logic delegation.
-func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *Hub {
-	reg := NewHandlerRegistry()
-
-	h := &Hub{
-		clients:         make(map[int64]*Client),
-		db:              database,
-		limiter:         limiter,
-		broadcast:       make(chan broadcastMsg, 1024),
-		clientEvents:    make(chan clientEvent, 64),
-		stop:            make(chan struct{}),
-		pubsub:          NewPubSub(),
-		topicLimiter:    NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
-		replayBuf:       NewEventRingBuffer(1000),
-		registry:        reg,
-		permChecker:     permissions.NewChecker(database),
-		settingsName:    "OwnCord Server",
-		settingsMotd:    "Welcome!",
-		voiceKeyHolders: make(map[int64]int64),
-		fatalFn:         func() { os.Exit(1) },
-	}
-
-	// V2 handler registrations (need Hub fields for deps).
-	registerPingHandler(reg, PingDeps{Limiter: h.limiter})
-
-	chatDeps := ChatDeps{
-		Limiter: h.limiter,
-	}
-	presenceDeps := PresenceDeps{
-		Limiter: h.limiter,
-	}
-	reactionDeps := ReactionDeps{}
-	callDeps := CallDeps{Limiter: h.limiter}
-	if svc != nil {
-		chatDeps.MessageSvc = svc.Messages
-		presenceDeps.ChannelSvc = svc.Channels
-		reactionDeps.MessageSvc = svc.Messages
-		callDeps.DMSvc = svc.DMs
-		h.messageSvc = svc.Messages
-		h.perms = svc.Permissions
-		// So @here's offline narrowing can tell a disconnected idle/dnd reader
-		// (users.status keeps their last *chosen* value across a disconnect)
-		// from one who is actually still connected — the same live-connection
-		// rule presentableMembers applies to the members array.
-		svc.Messages.SetOnlineChecker(h.IsUserConnected)
-		// So every DM payload DMService builds (GET/POST /dms, POST
-		// /dms/group, PATCH /dms/{id}, and every broadcastDMOpen refresh)
-		// applies the same live-connection rule instead of only the ready
-		// payload's presentableDMChannels doing so (OC-0304).
-		svc.DMs.SetOnlineChecker(h.IsUserConnected)
-	}
-
-	registerChatHandlers(reg, chatDeps)
-	registerPresenceHandlers(reg, presenceDeps)
-	registerReactionHandlers(reg, reactionDeps)
-	registerCallHandlers(reg, callDeps)
-	// Phase C Step 9 — plugin slash commands. Registry is read live because
-	// SetPluginRegistry wires it after NewHub; MessageSvc gates broadcasts.
-	reg.RegisterV2(MsgTypeChatCommand, handleChatCommandV2, PluginDeps{
-		// A nil registry must yield a nil interface, not a typed-nil
-		// *plugin.Registry — the handler's "no plugins loaded" check is an
-		// interface comparison.
-		Registry: func() CommandDispatcher {
-			if h.pluginRegistry == nil {
-				return nil
-			}
-			return h.pluginRegistry
-		},
-		MessageSvc: h.messageSvc,
-		Limiter:    h.limiter,
-	})
-	registerVoiceControlsV2(reg, VoiceDeps{
-		DB:          h.db,
-		Limiter:     h.limiter,
-		Permissions: h.permChecker,
-		PermSvc:     h.perms,
-		LiveKit:     h.livekit,
-		TokenGen:    h, // Hub delegates to h.livekit at call time (set via SetLiveKit)
-		KeyHolder:   h,
-		Mod:         h,
-	})
-
-	h.refreshSettingsLocked(context.Background())
-	return h
-}
-
-// getCachedSettings returns server_name and motd, refreshing the cache if stale.
-func (h *Hub) getCachedSettings(ctx context.Context) (string, string) {
-	h.settingsMu.RLock()
-	if time.Since(h.settingsLastUpdate) < settingsCacheTTL {
-		name, motd := h.settingsName, h.settingsMotd
-		h.settingsMu.RUnlock()
-		return name, motd
-	}
-	h.settingsMu.RUnlock()
-
-	h.settingsMu.Lock()
-	defer h.settingsMu.Unlock()
-	// Double-check after acquiring write lock.
-	if time.Since(h.settingsLastUpdate) < settingsCacheTTL {
-		return h.settingsName, h.settingsMotd
-	}
-	h.refreshSettingsLocked(ctx)
-	return h.settingsName, h.settingsMotd
-}
-
-// refreshSettingsLocked reloads server_name and motd from the DB.
-// Caller must hold settingsMu (write lock) or call during init.
-func (h *Hub) refreshSettingsLocked(ctx context.Context) {
-	if h.db == nil {
-		return
-	}
-	// The refresh serves the hub-wide settings cache, not the connection that
-	// happened to trigger it — a dying connection's ctx must not fail the
-	// fetches (the TTL stamp below would then pin stale values for 30s).
-	ctx = context.WithoutCancel(ctx)
-	if name, err := h.db.GetSetting(ctx, "server_name"); err == nil {
-		h.settingsName = name
-	}
-	if motd, err := h.db.GetSetting(ctx, "motd"); err == nil {
-		h.settingsMotd = motd
-	}
-	h.settingsLastUpdate = time.Now()
-}
-
 // Run starts the hub's dispatch loop. It blocks until Stop is called.
 // Must be called in its own goroutine.
 //
@@ -271,6 +206,9 @@ func (h *Hub) refreshSettingsLocked(ctx context.Context) {
 // panics more than 3 times within a 60-second window it stops permanently to
 // avoid a tight crash loop.
 func (h *Hub) Run() {
+	if h.runDone != nil {
+		defer close(h.runDone)
+	}
 	h.running.Store(true)
 	defer h.dispatchExited.Store(true)
 	var panicCount int
@@ -364,6 +302,22 @@ func (h *Hub) Stop() {
 	h.stopOnce.Do(func() { close(h.stop) })
 }
 
+// Done returns a channel that closes once Run has returned, with
+// DispatchAlive already false. Stop and GracefulStopContext do not wait for
+// that, so a caller that must know the loop is gone waits here.
+func (h *Hub) Done() <-chan struct{} {
+	return h.runDone
+}
+
+// StopLiveKit stops and reaps the owned companion before a restart handoff.
+// It is safe to call concurrently with GracefulStopContext, and deliberately
+// does not wait on hub/client teardown so the restart backstop can use it too.
+func (h *Hub) StopLiveKit() {
+	if h.lkProcess != nil {
+		h.lkProcess.Stop()
+	}
+}
+
 // GracefulStop stops the LiveKit process (if managed) and then stops the hub.
 // Safe to call multiple times concurrently. Prefer GracefulStopContext where a
 // shutdown budget exists — this variant waits the full client-notice window.
@@ -387,9 +341,7 @@ func (h *Hub) GracefulStopContext(ctx context.Context) {
 		}
 
 		// Stop LiveKit process.
-		if h.lkProcess != nil {
-			h.lkProcess.Stop()
-		}
+		h.StopLiveKit()
 
 		// Give clients the promised notice window to disconnect gracefully —
 		// the 5s matches the countdown BroadcastServerRestart told them.
@@ -412,393 +364,9 @@ func (h *Hub) GracefulStopContext(ctx context.Context) {
 	})
 }
 
-// bumpVisibilityWatermark ratchets visibilityChangeSeq up to the current seq,
-// never down. All three writers (RefreshChannelVisibility,
-// revokeUnreadableChannels, DMChannelOpenEvent in emit.go) must go through
-// this instead of a plain Store: a plain Store(Load(&h.seq)) lets a writer
-// that read an older h.seq — e.g. one that spent time in a per-topic DB loop
-// — finish and overwrite a concurrently stored higher watermark with its
-// stale value, silently regressing the forced-full-resync boundary mustFullResync
-// depends on being monotonic. Mirrors SeedSeq's CAS-max pattern.
-func (h *Hub) bumpVisibilityWatermark() {
-	for {
-		cur := h.visibilityChangeSeq.Load()
-		next := atomic.LoadUint64(&h.seq)
-		if next <= cur {
-			return
-		}
-		if h.visibilityChangeSeq.CompareAndSwap(cur, next) {
-			return
-		}
-	}
-}
-
-// MarkVisibilityChanged bumps the visibility watermark. It is the exported
-// entry point REST handlers (api.markDMVisibilityChanged, reached via a
-// dmVisibilityMarker type assertion) use to force the same full-resync
-// guarantee for an unsequenced, targeted DM event that the WS-side emitter of
-// the same event (emit.go DMChannelOpenEvent) already gets via
-// bumpVisibilityWatermark directly.
-func (h *Hub) MarkVisibilityChanged() {
-	h.bumpVisibilityWatermark()
-}
-
-// IsUserConnected returns true if a client with the given userID is already
-// registered in the hub. Safe to call from any goroutine.
-func (h *Hub) IsUserConnected(userID int64) bool {
-	h.mu.RLock()
-	_, ok := h.clients[userID]
-	h.mu.RUnlock()
-	return ok
-}
-
-// GetClient returns the client for userID, or nil if not connected.
-// Safe to call from any goroutine.
-func (h *Hub) GetClient(userID int64) *Client {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.clients[userID]
-}
-
-// Register queues a client for registration with the hub.
-func (h *Hub) Register(c *Client) {
-	h.clientEvents <- clientEvent{c: c, add: true}
-}
-
-// Unregister queues a client for removal from the hub.
-func (h *Hub) Unregister(c *Client) {
-	h.clientEvents <- clientEvent{c: c}
-}
-
 // clientEvent is a register (add=true) or unregister (add=false) request.
 // Both kinds share one channel so per-connection ordering is preserved.
 type clientEvent struct {
 	c   *Client
 	add bool
 }
-
-// registerNow adds c to the hub and subscribes it to its topics.
-//
-// readableChannelIDs is the set of channels the user holds READ_MESSAGES on,
-// as computed by the handshake (serve.go). It gates the inherited voice-channel
-// subscription only; a nil set denies it (fail closed).
-//
-// Replacing an existing connection strips its subscriptions (UnsubscribeAll)
-// and re-subscribes the new one (Subscribe) as two separate PubSub-lock
-// acquisitions — back to back, but not atomic. A caller that must not lose a
-// broadcast concurrently racing the replacement (i.e. one deliverBroadcast
-// could deliver in the gap between those two acquisitions) has to call this
-// while holding h.seqMu, the same lock deliverBroadcast holds for its entire
-// critical section (seq allocation, replay-buffer push, and publish) — that
-// serializes the two entirely, rather than merely narrowing the window. See
-// serve.go's handleReconnect, which re-reads the replay tail and calls
-// registerNow inside one h.seqMu section for exactly this reason.
-func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
-	// Voice channel the replaced connection was in, if any. Re-elected below,
-	// after the hub lock is released.
-	var replacedVoiceChID int64
-
-	h.mu.Lock()
-	if old, exists := h.clients[c.userID]; exists {
-		oldE2EEKey, oldE2EESig := old.getE2EEPubKey()
-		oldVoiceChID, oldVoiceJoinToken, oldVoiceJoinCompleted := old.clearVoiceState()
-		replacedVoiceChID = oldVoiceChID
-		// A moderator-imposed mute/deafen stashed by voice_mod_move
-		// (setPendingModFlags) lives ONLY on the old *Client between the
-		// target's eviction (which deletes the voice_states row that state
-		// normally lives in) and the target's own re-join, which consumes it
-		// via takePendingModFlags (voice_join.go). Any client replacement —
-		// reconnect or full resync alike — must carry it to the new *Client
-		// or it is silently destroyed and the mute is lost (OC-0302).
-		// Unlike the voice-state transfer below, this has none of the
-		// voiceJoinCompleted supersession concerns, so it is not gated on
-		// c.lastSeq > 0: take-and-clear leaves nothing behind for old to
-		// double-serve, and a stash nobody set is always (false, false).
-		if pendingMuted, pendingDeafened := old.takePendingModFlags(); pendingMuted || pendingDeafened {
-			c.setPendingModFlags(pendingMuted, pendingDeafened)
-		}
-		if c.lastSeq > 0 {
-			// Network reconnect — preserve voice state so the user stays
-			// in voice during brief WS drops.
-			//
-			// Gated on oldVoiceJoinCompleted (OC-0270): a join that
-			// voiceJoinPersist has merely committed to the DB and set on the
-			// old client, but that voiceJoinComplete has not yet finished, is
-			// still racing its own supersession guards in voice_join.go
-			// (voice_join.go:423, :470) — both compare the old client's live
-			// voiceChID/voiceJoinToken against the values captured when the
-			// join started. Clearing the old client's state above as part of
-			// this very transfer makes those guards read as "superseded" and
-			// abort the join (no token delivered, no voice_state broadcast,
-			// no VoiceTopic subscribe) — while the DB row and the new
-			// client's transferred state still agree, so sweepStaleVoiceStates
-			// never reaps it. Transferring only a completed join avoids
-			// resurrecting exactly that half-finished state; an incomplete
-			// one instead leaves the new client with voiceChID 0, so the
-			// still-committed row now disagrees with hub state and the next
-			// sweep tick reaps it, letting the user rejoin.
-			if c.getVoiceChID() == 0 && oldVoiceJoinCompleted {
-				c.setVoiceState(oldVoiceChID, oldVoiceJoinToken)
-				// c.setVoiceState above resets the fresh-join-in-progress flag
-				// it defaults to; restore it since we just verified the old
-				// client's join over this same (chID, token) had completed.
-				c.markVoiceJoinCompleteIfMatch(oldVoiceChID, oldVoiceJoinToken)
-				// The announced ECDH key must survive with the voice state:
-				// the client keeps its keypair across a WS blip and only
-				// re-announces on a LiveKit-room reconnect, so without the
-				// transfer voice_join replays nothing for this user and new
-				// joiners' key exchanges time out.
-				c.setE2EEPubKey(oldE2EEKey, oldE2EESig)
-			}
-			// The focused channel must transfer too: the client never
-			// re-sends channel_focus on a resume (mountChannel early-returns
-			// on the same channel), so without it the ChannelTopic
-			// re-subscribe below is a no-op and the message stream dies
-			// silently. READ-gated like every ChannelTopic subscription;
-			// a nil set denies (fail closed).
-			if oldChID := old.getChannelID(); oldChID != 0 &&
-				c.getChannelID() == 0 && readableChannelIDs[oldChID] {
-				c.mu.Lock()
-				c.channelID = oldChID
-				c.mu.Unlock()
-			}
-		}
-		// Fresh connections (lastSeq == 0): do NOT transfer voice state.
-		// Stale voice cleanup (DB + broadcast + LiveKit) is owned entirely
-		// by the handshake path in serve.go, which runs before registerNow.
-		// registerNow only handles in-memory client replacement.
-
-		// Kick the stale connection atomically before registering
-		// the new one — prevents TOCTOU races on duplicate login.
-		// closeSend MUST precede UnsubscribeAll: Subscribe refuses clients
-		// whose send is closed, so this ordering leaves the old connection's
-		// in-flight handlers no window to re-take a stripped topic.
-		slog.Warn("hub: kicking stale connection for re-registering user",
-			"user_id", c.userID, "last_seq", c.lastSeq)
-		old.closeSend()
-
-		// Remove the old client from all pub/sub topics before replacing.
-		h.pubsub.UnsubscribeAll(old)
-	}
-	h.clients[c.userID] = c
-
-	// Subscribe the new client to its default pub/sub topics immediately
-	// after UnsubscribeAll(old) above, with nothing in between.
-	//
-	// This does NOT make strip+resubscribe atomic, and must not be read as
-	// doing so: the two are separate ps.mu acquisitions, and PublishGlobal
-	// takes ps.mu alone (never h.mu), so a deliverBroadcast landing between
-	// them still finds no subscriber for this user. That frame is
-	// unrecoverable — its seq was already allocated and pushed to the replay
-	// buffer, the resuming client's replay snapshot was taken even earlier,
-	// and the client tracks only max(seq), so the next frame silently
-	// advances past the hole. Only a caller holding h.seqMu closes that
-	// window; see this function's doc comment and serve.go's handleReconnect.
-	//
-	// What the ordering does buy is the smallest possible gap for the callers
-	// that cannot hold seqMu — the fresh-connect path, whose buildReady
-	// rebuilds state from the DB afterwards, and the clientEvents path, which
-	// runs on the hub goroutine and so cannot race deliverBroadcast at all.
-	// The registration log line (a syscall-backed slog call) and
-	// updateKeyHolder (keyHolderMu plus a full h.clients scan under
-	// h.mu.RLock) both used to sit in that gap; both now run after the
-	// subscribes. Keeping the subscribes under h.mu is incidental but free:
-	// pubsub uses its own independent lock and never calls back into the hub,
-	// so h.mu → ps.mu adds no lock-ordering risk.
-	h.pubsub.Subscribe(c, TopicGlobal)
-	h.pubsub.Subscribe(c, UserTopic(c.userID))
-	// If the client already has a focused channel (e.g. test clients created with
-	// NewTestClientWithChannel, or reconnecting clients), subscribe immediately so
-	// deliverBroadcast can reach them without waiting for a channel_focus message.
-	if chID := c.getChannelID(); chID != 0 {
-		h.pubsub.Subscribe(c, ChannelTopic(chID))
-	}
-	// If the client is already in a voice channel (e.g. reconnect), restore its
-	// subscriptions without a new voice_join (a same-channel rejoin is rejected
-	// with ALREADY_JOINED) or channel_focus.
-	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
-		// VoiceTopic is the only transport for voice_e2ee_announce relays and
-		// carries nothing else, for a channel the user already joined via the
-		// CONNECT_VOICE-gated voice_join — so no READ gate.
-		h.pubsub.Subscribe(c, VoiceTopic(voiceChID))
-		// Voice membership is gated on CONNECT_VOICE alone, so it must not by
-		// itself grant a channel's message stream: subscribe only when the
-		// handshake confirmed READ_MESSAGES on that channel.
-		if readableChannelIDs[voiceChID] {
-			h.pubsub.Subscribe(c, ChannelTopic(voiceChID))
-		}
-	}
-	total := len(h.clients)
-	h.mu.Unlock()
-
-	slog.Info("hub: client registered", "user_id", c.userID, "total_clients", total)
-
-	// A fresh connect (lastSeq == 0) drops the replaced connection's voice state
-	// without transferring it, so that channel just lost a participant and the
-	// E2EE key holder may need to move. handleVoiceLeave never runs on this path
-	// — readPump skips it when replaced, and it early-returns on already-cleared
-	// state — so re-elect here. Must be outside h.mu: updateKeyHolder takes
-	// keyHolderMu and then h.mu.RLock. The recompute reads live client voice
-	// state, so it is idempotent and also correct when the state was transferred.
-	// It runs after the subscribe block above; updateKeyHolder only reads
-	// h.clients' voice state and writes voiceKeyHolders, so it has no
-	// ordering dependency on pub/sub subscriptions.
-	if replacedVoiceChID != 0 {
-		h.updateKeyHolder(replacedVoiceChID)
-	}
-
-	// Re-sync this connection's local E2EE peer-key map now that it is
-	// reachable (OC-0276). voice_e2ee_announce is delivered as an
-	// unsequenced pub/sub frame (sendToVoiceChannelExcept, voice_e2ee.go),
-	// bypassing deliverBroadcast/h.replayBuf entirely — so on a network
-	// reconnect (the transfer above), neither reconnect replay tier can ever
-	// redeliver a peer's key, or a mid-call key rotation, that was announced
-	// while this socket was down. voiceJoinComplete's relay
-	// (voice_join.go) only runs on a brand-new voice_join, never here, so
-	// without this call a resumed connection's peer-key map would silently
-	// and permanently desync from its (correctly replayed) voice roster.
-	// c.getVoiceChID() reflects the transfer above, so this covers a
-	// resumed connection as well as a client pre-set into a voice channel
-	// (e.g. NewTestClientWithChannel); it is a no-op whenever c is not
-	// currently in a voice channel, which is the common case (fresh login).
-	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
-		h.sendVoicePeerKeys(c, voiceChID)
-	}
-}
-
-func (h *Hub) unregisterNow(c *Client) bool {
-	h.mu.Lock()
-	current, exists := h.clients[c.userID]
-	if exists && current == c {
-		delete(h.clients, c.userID)
-		slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
-		h.mu.Unlock()
-		h.pubsub.UnsubscribeAll(c)
-		return false // not replaced
-	}
-	h.mu.Unlock()
-	// exists means a *different* client holds the slot — a genuine replacement,
-	// whose teardown must not mark the live connection's user offline. An absent
-	// entry means this client was already kicked (every kick path deletes it via
-	// kickClient), which is a real disconnect and still needs the offline
-	// presence broadcast and voice cleanup in readPump's defer.
-	return exists
-}
-
-// shouldMarkOffline reports whether a disconnect teardown should run
-// MarkUserDisconnected and broadcast an offline presence for c's user.
-//
-// `replaced` (unregisterNow's return, sampled once at the start of teardown)
-// is necessary but not sufficient: both readPump's defer and
-// unregisterFailedHandshake sample it BEFORE handleVoiceLeave, which can
-// block for seconds (DB delete, audience scan, a LiveKit call bounded by
-// lkTimeout=5s). A reconnect landing during that window registers a new
-// client for the same user and is invisible to the stale boolean, so the
-// dead connection's teardown would otherwise mark the live session offline
-// (OC-0019). Re-checking h.clients at decision time closes that gap: any
-// entry present once c has been removed is necessarily a newer connection —
-// unregisterNow only ever deletes c's own slot, never someone else's.
-func (h *Hub) shouldMarkOffline(c *Client, replaced bool) bool {
-	return !replaced && h.GetClient(c.userID) == nil
-}
-
-// ClientCount returns the number of currently registered clients (test helper).
-func (h *Hub) ClientCount() int {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return len(h.clients)
-}
-
-// BroadcastDropCount returns the cumulative number of messages dropped due to a
-// full broadcast channel. Safe to call from any goroutine.
-func (h *Hub) BroadcastDropCount() uint64 {
-	return h.broadcastDrops.Load()
-}
-
-// DispatchAlive reports whether the hub's dispatch loop is still running.
-// It is true before Run starts (so a health probe racing startup does not
-// flap) and false once Run has returned — normal shutdown or the panic
-// breaker. Safe to call from any goroutine.
-func (h *Hub) DispatchAlive() bool {
-	return !h.dispatchExited.Load()
-}
-
-// BackpressureStats returns the process-lifetime per-client backpressure
-// counters: connections closed due to send-buffer overflow, high-priority
-// sends that fell back to the normal buffer, and low-priority messages
-// silently dropped. Safe to call from any goroutine.
-func (h *Hub) BackpressureStats() (queueDisconnects, highFallbacks, lowDrops uint64) {
-	return h.bpQueueDisconnects.Load(), h.bpHighFallbacks.Load(), h.bpLowDrops.Load()
-}
-
-// ConnRejectCount returns how many WebSocket upgrade requests were refused by
-// the max_ws_connections capacity guardrail. Safe to call from any goroutine.
-func (h *Hub) ConnRejectCount() uint64 {
-	return h.connRejects.Load()
-}
-
-// ConfigureReplay resizes the reconnect replay budget: the in-memory ring and
-// the persisted-event cap per reconnect (event_persistence.replay_ring_size /
-// replay_cold_limit). Zero or negative values keep the compiled-in defaults.
-// Must be called before Run — the dispatch loop reads replayBuf unlocked.
-func (h *Hub) ConfigureReplay(ringSize, coldLimit int) {
-	if h.rejectIfRunning("ConfigureReplay") {
-		return
-	}
-	if ringSize > 0 {
-		h.replayBuf = NewEventRingBuffer(ringSize)
-	}
-	if coldLimit > 0 {
-		h.coldReplayLimit = coldLimit
-	}
-}
-
-// maxColdReplayLimit returns the effective persisted-replay cap.
-func (h *Hub) maxColdReplayLimit() int {
-	if h.coldReplayLimit > 0 {
-		return h.coldReplayLimit
-	}
-	return maxColdReplay
-}
-
-// EventPersisterStats returns the attached persister's lifetime counters.
-// ok is false when event persistence is disabled (no persister attached).
-func (h *Hub) EventPersisterStats() (persisted, dropped, flushes, errs uint64, ok bool) {
-	p := h.eventPersister.Load()
-	if p == nil {
-		return 0, 0, 0, 0, false
-	}
-	persisted, dropped, flushes, errs = p.Stats()
-	return persisted, dropped, flushes, errs, true
-}
-
-// VoiceSessionCount returns the number of clients currently in a voice channel.
-func (h *Hub) VoiceSessionCount() int {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	count := 0
-	for _, c := range h.clients {
-		if c.getVoiceChID() != 0 {
-			count++
-		}
-	}
-	return count
-}
-
-// rejectIfRunning reports whether Run has already started, logging an error
-// when it has. Plain-field setters must be wired before Run: the dispatch
-// loop and connection goroutines read those fields without synchronization,
-// so a late set would be a data race. Late calls are dropped.
-func (h *Hub) rejectIfRunning(setter string) bool {
-	if h.running.Load() {
-		slog.Error("ws: setter called after Hub.Run started; ignoring (must be wired before Run)",
-			"setter", setter)
-		return true
-	}
-	return false
-}
-
-// topicRateLimitPerSecond is the default maximum messages per second for any
-// single channel topic. Prevents a busy channel from saturating the broadcast
-// loop and starving other channels.
-const topicRateLimitPerSecond = 100

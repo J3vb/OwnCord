@@ -1,0 +1,20 @@
+diff --git a/node_modules/livekit-client/dist/livekit-client.esm.mjs b/node_modules/livekit-client/dist/livekit-client.esm.mjs
+index 0bdf985..60984d8 100644
+--- a/node_modules/livekit-client/dist/livekit-client.esm.mjs
++++ b/node_modules/livekit-client/dist/livekit-client.esm.mjs
+@@ -15960,10 +15960,12 @@ class E2EEManager extends eventsExports.EventEmitter {
+             this.encryptionEnabled = data.enabled;
+           } else if (data.participantIdentity) {
+             const participant = (_b = this.room) === null || _b === void 0 ? void 0 : _b.getParticipantByIdentity(data.participantIdentity);
+-            if (!participant) {
+-              throw TypeError("couldn't set encryption status, participant not found".concat(data.participantIdentity));
++            // OwnCord patch: the participant can leave between the post and
++            // this ack; there is then no status to report. Throwing here was
++            // an uncaught error from the worker's onmessage.
++            if (participant) {
++              this.emit(EncryptionEvent.ParticipantEncryptionStatusChanged, data.enabled, participant);
+             }
+-            this.emit(EncryptionEvent.ParticipantEncryptionStatusChanged, data.enabled, participant);
+           }
+           break;
+         case 'ratchetKey':

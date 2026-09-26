@@ -12,6 +12,7 @@ vi.mock("@tauri-apps/api/event", async () => ({
 
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient } from "../../src/lib/ws";
+import { expectConsole } from "../helpers/console";
 
 describe("lastSeq tracking", () => {
   let client: ReturnType<typeof createWsClient>;
@@ -677,6 +678,7 @@ describe("scheduleReconnect guard clauses", () => {
       fingerprint: "sha256:NEW",
       status: "mismatch",
     });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
 
     emitTauriEvent("ws-state", "closed");
     mockInvoke.mockClear();
@@ -767,6 +769,7 @@ describe("auth_error during reconnection replay", () => {
         payload: { message: "Token expired" },
       }),
     );
+    expectConsole("error", /\[ws\] Authentication failed/);
 
     expect(errors).toHaveLength(1);
     expect(client.getState()).toBe("disconnected");

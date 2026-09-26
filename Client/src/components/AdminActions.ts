@@ -3,8 +3,11 @@
  * Provides confirmation steps for destructive actions (force logout, ban, delete).
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { createMenuItem as buildMenuItem, enableMenuKeyboard } from "@lib/context-menu";
 import { appendPurgeSection } from "./purge-prompt";
+import { shellText } from "../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,13 +42,15 @@ export interface MemberContextMenuOptions {
   onChangeRole(newRole: string): Promise<void>;
 }
 
-/** Ban duration choices offered in the ban flow (label → hours; 0 = permanent). */
-const BAN_DURATIONS: readonly { readonly label: string; readonly hours: number }[] = [
-  { label: "Forever", hours: 0 },
-  { label: "1 hour", hours: 1 },
-  { label: "1 day", hours: 24 },
-  { label: "7 days", hours: 24 * 7 },
-  { label: "30 days", hours: 24 * 30 },
+/** Ban duration choices offered in the ban flow (label key → hours; 0 = permanent). */
+const noop = (): void => {};
+
+const BAN_DURATIONS = [
+  { key: "ban.forever", hours: 0 },
+  { key: "ban.oneHour", hours: 1 },
+  { key: "ban.oneDay", hours: 24 },
+  { key: "ban.sevenDays", hours: 24 * 7 },
+  { key: "ban.thirtyDays", hours: 24 * 30 },
 ] as const;
 
 export interface ChannelContextMenuOptions {
@@ -76,8 +81,8 @@ function createMenuItem(
   className: string,
   onClick: () => void,
   signal: AbortSignal,
-): HTMLDivElement {
-  const item = createElement("div", { class: className }, label);
+): HTMLElement {
+  const item = buildMenuItem(label, className);
   item.addEventListener("click", onClick, { signal });
   return item;
 }
@@ -97,11 +102,11 @@ const CONFIRM_TIMEOUT_MS = 4000;
  * request is running — a slow force logout used to look like nothing happened.
  */
 function withConfirmation(
-  item: HTMLDivElement,
+  item: HTMLElement,
   confirmLabel: string,
   onConfirm: () => void | Promise<void>,
   signal: AbortSignal,
-  pendingLabel = "Working...",
+  pendingLabel = shellText("common.working"),
 ): void {
   let confirming = false;
   let running = false;
@@ -160,21 +165,30 @@ function withConfirmation(
 // Member Context Menu
 // ---------------------------------------------------------------------------
 
+/** Wrap a finished menu: enable the shared keyboard model and return the
+ *  result. `destroy` tears the menu and its listeners down, whether called by
+ *  Escape/close or by the owner, and always restores focus to the opener. */
+function finishMenu(menu: HTMLDivElement, disposable: Disposable): ContextMenuResult {
+  let restoreFocus: () => void = noop;
+  function destroy(): void {
+    disposable.destroy();
+    menu.remove();
+    restoreFocus();
+  }
+  restoreFocus = enableMenuKeyboard(menu, { signal: disposable.signal, onClose: destroy });
+  return { element: menu, destroy };
+}
+
 export function createMemberContextMenu(options: MemberContextMenuOptions): ContextMenuResult {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   const menu = createElement("div", { class: "context-menu" });
 
   // Block / Unblock — available to every member, not just admins. Blocking is
   // disruptive (kills DMs both ways) so it confirms; unblocking is one click.
-  const blockItem = createElement(
-    "div",
-    {
-      class: options.isBlocked
-        ? "context-menu__item"
-        : "context-menu__item context-menu__item--danger",
-      "data-testid": "block-toggle",
-    },
-    options.isBlocked ? "Unblock" : "Block",
+  const blockItem = buildMenuItem(
+    shellText(options.isBlocked ? "member.unblock" : "member.block"),
+    options.isBlocked ? "context-menu__item" : "context-menu__item context-menu__item--danger",
+    { testId: "block-toggle" },
   );
   if (options.isBlocked) {
     let unblockRunning = false;
@@ -184,24 +198,24 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
         e.stopPropagation();
         if (unblockRunning) return;
         unblockRunning = true;
-        setText(blockItem, "Unblocking...");
+        setText(blockItem, shellText("member.unblocking"));
         blockItem.classList.add("context-menu__item--pending");
         const done = (): void => {
           unblockRunning = false;
           blockItem.classList.remove("context-menu__item--pending");
-          setText(blockItem, "Unblock");
+          setText(blockItem, shellText("member.unblock"));
         };
         void options.onToggleBlock().then(done, done);
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
   } else {
     withConfirmation(
       blockItem,
-      "Are you sure?",
+      shellText("common.areYouSure"),
       () => options.onToggleBlock(),
-      ac.signal,
-      "Blocking...",
+      disposable.signal,
+      shellText("member.blocking"),
     );
   }
 
@@ -211,24 +225,14 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
 
   if (!options.showAdminActions || (!canManageRoles && !canKick && !canBan)) {
     menu.appendChild(blockItem);
-    return {
-      element: menu,
-      destroy(): void {
-        ac.abort();
-        menu.remove();
-      },
-    };
+    return finishMenu(menu, disposable);
   }
 
   // Role submenu trigger
   if (canManageRoles) {
-    const roleItem = createElement(
-      "div",
-      {
-        class: "context-menu__item",
-      },
-      "Change Role",
-    );
+    const roleItem = buildMenuItem(shellText("member.changeRole"), "context-menu__item", {
+      submenu: true,
+    });
 
     const roleSub = createElement("div", { class: "context-menu__submenu" });
     // One guard across every option: `currentRole` only updates when the
@@ -253,24 +257,26 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
           };
           options.onChangeRole(role).then(done, done);
         },
-        ac.signal,
+        disposable.signal,
       );
       roleSub.appendChild(roleOption);
     }
 
+    // Hover reveals the flyout without moving focus; the keyboard path
+    // (ArrowRight/Enter) is the same reveal plus focus, in context-menu.ts.
     roleItem.addEventListener(
       "mouseenter",
       () => {
         roleSub.style.display = "";
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
     roleItem.addEventListener(
       "mouseleave",
       () => {
         roleSub.style.display = "none";
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     roleSub.style.display = "none";
@@ -284,35 +290,27 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
   // the target's sessions (KICK_MEMBERS), it does not remove a membership —
   // there is no membership model — so the user can sign straight back in.
   if (canKick) {
-    const kickItem = createElement(
-      "div",
-      {
-        class: "context-menu__item context-menu__item--danger",
-        "data-testid": "force-logout",
-      },
-      "Force Logout",
+    const kickItem = buildMenuItem(
+      shellText("member.forceLogout"),
+      "context-menu__item context-menu__item--danger",
+      { testId: "force-logout" },
     );
     withConfirmation(
       kickItem,
-      "Log them out?",
+      shellText("member.forceLogoutConfirm"),
       () => options.onKick(),
-      ac.signal,
-      "Logging out...",
+      disposable.signal,
+      shellText("member.loggingOut"),
     );
     menu.appendChild(kickItem);
   }
 
-  if (canBan) appendBanFlow(menu, options, ac.signal);
+  if (canBan) appendBanFlow(menu, options, disposable.signal);
 
   menu.appendChild(createSeparator());
   menu.appendChild(blockItem);
 
-  function destroy(): void {
-    ac.abort();
-    menu.remove();
-  }
-
-  return { element: menu, destroy };
+  return finishMenu(menu, disposable);
 }
 
 /** Ban entry plus its reason/duration form. Split out so the member menu can
@@ -323,12 +321,9 @@ function appendBanFlow(
   signal: AbortSignal,
 ): void {
   // Ban — collects the reason the server stores and displays alongside the ban.
-  const banItem = createElement(
-    "div",
-    {
-      class: "context-menu__item context-menu__item--danger",
-    },
-    "Ban",
+  const banItem = buildMenuItem(
+    shellText("member.ban"),
+    "context-menu__item context-menu__item--danger",
   );
   const banReasonRow = createElement("div", {
     class: "context-menu__reason",
@@ -337,7 +332,7 @@ function appendBanFlow(
   const banReasonInput = createElement("input", {
     class: "form-input",
     type: "text",
-    placeholder: "Reason (optional)",
+    placeholder: shellText("member.banReason"),
     maxlength: "200",
     "data-testid": "ban-reason-input",
     style: "width:100%;font-size:12px",
@@ -345,16 +340,17 @@ function appendBanFlow(
   const banDurationSelect = createElement("select", {
     class: "form-input",
     "data-testid": "ban-duration-select",
+    "aria-label": shellText("member.banDuration"),
     style: "width:100%;font-size:12px;margin-top:4px",
   });
   for (const d of BAN_DURATIONS) {
-    const opt = createElement("option", { value: String(d.hours) }, d.label);
+    const opt = createElement("option", { value: String(d.hours) }, shellText(d.key));
     banDurationSelect.appendChild(opt);
   }
-  const banConfirm = createElement(
-    "div",
-    { class: "context-menu__item context-menu__item--danger", "data-testid": "ban-confirm" },
-    "Confirm Ban",
+  const banConfirm = buildMenuItem(
+    shellText("member.banConfirm"),
+    "context-menu__item context-menu__item--danger",
+    { testId: "ban-confirm" },
   );
   appendChildren(banReasonRow, banReasonInput, banDurationSelect, banConfirm);
 
@@ -364,6 +360,9 @@ function appendBanFlow(
       e.stopPropagation();
       banItem.style.display = "none";
       banReasonRow.style.display = "";
+      // The confirm button is a menuitem with tabindex -1 (roving navigation
+      // owns the Tab stop); now that its form is shown it must be Tab-reachable.
+      banConfirm.setAttribute("tabindex", "0");
       banReasonInput.focus();
     },
     { signal },
@@ -381,12 +380,12 @@ function appendBanFlow(
   function submitBan(): void {
     if (banRunning) return;
     banRunning = true;
-    setText(banConfirm, "Banning...");
+    setText(banConfirm, shellText("member.banning"));
     banConfirm.classList.add("context-menu__item--pending");
     const done = (): void => {
       banRunning = false;
       banConfirm.classList.remove("context-menu__item--pending");
-      setText(banConfirm, "Confirm Ban");
+      setText(banConfirm, shellText("member.banConfirm"));
     };
     const durationHours = Number.parseInt(banDurationSelect.value, 10) || 0;
     void options.onBan(banReasonInput.value.trim(), durationHours).then(done, done);
@@ -419,38 +418,41 @@ function appendBanFlow(
 // ---------------------------------------------------------------------------
 
 export function createChannelContextMenu(options: ChannelContextMenuOptions): ContextMenuResult {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   const menu = createElement("div", { class: "context-menu" });
 
   // Edit Channel
   const editItem = createMenuItem(
-    "Edit Channel",
+    shellText("channel.edit"),
     "context-menu__item",
     () => options.onEdit(),
-    ac.signal,
+    disposable.signal,
   );
   menu.appendChild(editItem);
 
   // Create Channel
   const createItem = createMenuItem(
-    "Create Channel",
+    shellText("channel.create"),
     "context-menu__item",
     () => options.onCreate(),
-    ac.signal,
+    disposable.signal,
   );
   menu.appendChild(createItem);
 
   menu.appendChild(createSeparator());
 
   // Delete Channel with confirmation
-  const deleteItem = createElement(
-    "div",
-    {
-      class: "context-menu__item context-menu__item--danger",
-    },
-    "Delete Channel",
+  const deleteItem = buildMenuItem(
+    shellText("channel.delete"),
+    "context-menu__item context-menu__item--danger",
   );
-  withConfirmation(deleteItem, "Are you sure?", () => options.onDelete(), ac.signal, "Deleting...");
+  withConfirmation(
+    deleteItem,
+    shellText("common.areYouSure"),
+    () => options.onDelete(),
+    disposable.signal,
+    shellText("common.deleting"),
+  );
   menu.appendChild(deleteItem);
 
   const onPurge = options.onPurge;
@@ -460,14 +462,9 @@ export function createChannelContextMenu(options: ChannelContextMenuOptions): Co
       dangerItemClass: "context-menu__item context-menu__item--danger",
       separatorClass: "context-menu__separator",
       onPurge: (count) => onPurge(count),
-      signal: ac.signal,
+      signal: disposable.signal,
     });
   }
 
-  function destroy(): void {
-    ac.abort();
-    menu.remove();
-  }
-
-  return { element: menu, destroy };
+  return finishMenu(menu, disposable);
 }

@@ -74,7 +74,7 @@ func TestTheLoadTest(t *testing.T) {
 
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	hub := ws.NewHub(database, limiter, svc)
+	hub := newTestHubDeps(t, database, limiter, svc)
 
 	runDone := make(chan struct{})
 	go func() {
@@ -229,7 +229,7 @@ func TestTheLoadTest(t *testing.T) {
 					hub.BroadcastToChannel(chID, msg)
 				case 1:
 					msg := fmt.Appendf(nil, `{"type":"voice_state","payload":{"channel_id":%d,"user_id":%d}}`, chID, idx)
-					hub.BroadcastVoiceEventForTest(chID, msg)
+					hub.BroadcastVoiceEventForTest(chID, int64(idx), msg)
 				case 2:
 					anchorUser := anchors[idx%len(anchors)].user
 					status := []string{"online", "idle", "dnd", "invisible"}[i%4]
@@ -267,19 +267,46 @@ func TestTheLoadTest(t *testing.T) {
 		t.Error("hub stopped running mid-test (panic-loop guard tripped?)")
 	}
 
-	// Only the anchors should remain registered — every churned client
-	// unregistered itself at the end of its own round. Those Unregister calls
-	// are async: they queue behind whatever broadcast work the hub loop still
-	// holds, and how long that drain takes scales with the runner. A fixed 5s
-	// budget failed on a slow windows-latest -race runner (the whole package
-	// ran 74% slower than usual) while the workers themselves had finished
-	// fine — so bound the settle by the same "only a genuine hang takes this
-	// long" limit the workers use. waitFor returns the moment the count
-	// matches, so a healthy run pays nothing extra.
-	waitFor(t, overallTimeout, func() bool { return hub.ClientCount() == numAnchors },
-		"churned clients to fully unregister")
-	if got := hub.ClientCount(); got != numAnchors {
-		t.Errorf("ClientCount = %d after churn settled, want %d (anchors only)", got, numAnchors)
+	// Every churned client unregistered itself at the end of its own round.
+	// Those Unregister calls are async — they queue behind whatever broadcast
+	// work the hub loop still holds — so the settle waits for them.
+	//
+	// The wait is over the churn users by name, not over ClientCount, because
+	// the total is not this test's property and a loaded runner can move it in
+	// both directions. Two bounds on the count have already failed on
+	// windows-latest under -race: a fixed 5s budget (the package ran 74% slower
+	// than usual), and then "wait while the count is still falling" — which
+	// stalled at 0 against an expected 8, because a starved anchor drain lets
+	// its send buffer fill and the hub disconnects that anchor. That is correct
+	// production behavior (BUG-124) and deliberately not what this test probes,
+	// but it makes "only the anchors remain" unreachable, so the wait now says
+	// what it means: no churned client is still registered.
+	//
+	// What that proves is that the hub kept draining its client queue, which is
+	// this soak test's real subject — a wedged run loop processes neither the
+	// unregisters nor the broadcasts, so nothing evicts these clients and the
+	// wait fails. It does not prove each worker called Unregister: a churn
+	// client has a 32-slot send buffer and no drain, so one whose Unregister
+	// was skipped is disconnected by the buffer-full guard within a round
+	// anyway (verified by mutation — skipping ten unregisters still passes).
+	// A healthy run pays nothing extra.
+	deadline := time.Now().Add(overallTimeout)
+	var stillRegistered []int64
+	for {
+		stillRegistered = stillRegistered[:0]
+		for _, u := range churnUsers {
+			if hub.GetClient(u.ID) != nil {
+				stillRegistered = append(stillRegistered, u.ID)
+			}
+		}
+		if len(stillRegistered) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d churned client(s) still registered after %v (first few: %v)",
+				len(stillRegistered), overallTimeout, stillRegistered[:min(5, len(stillRegistered))])
+		}
+		time.Sleep(waitPoll)
 	}
 
 	t.Logf("load test done: %d anchors, %d churn users x %d rounds, %d broadcasters x %d iters, broadcast drops=%d",
@@ -288,7 +315,10 @@ func TestTheLoadTest(t *testing.T) {
 	for _, a := range anchors {
 		hub.Unregister(a.c)
 	}
-	waitFor(t, 5*time.Second, func() bool { return hub.ClientCount() == 0 }, "anchors to unregister")
+	// Same bound as the churn settle above, and for the same reason: these
+	// Unregister calls are async too, and a 5s budget is a wall-clock guess
+	// about a runner rather than a statement about the hub.
+	waitFor(t, overallTimeout, func() bool { return hub.ClientCount() == 0 }, "anchors to unregister")
 	for _, a := range anchors {
 		close(a.stopDrain)
 	}

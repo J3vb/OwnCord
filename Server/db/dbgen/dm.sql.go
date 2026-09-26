@@ -331,20 +331,6 @@ func (q *Queries) OpenDM(ctx context.Context, arg OpenDMParams) (int64, error) {
 	return result.RowsAffected()
 }
 
-const removeDMParticipant = `-- name: RemoveDMParticipant :exec
-DELETE FROM dm_participants WHERE channel_id = ? AND user_id = ?
-`
-
-type RemoveDMParticipantParams struct {
-	ChannelID int64 `json:"channelId"`
-	UserID    int64 `json:"userId"`
-}
-
-func (q *Queries) RemoveDMParticipant(ctx context.Context, arg RemoveDMParticipantParams) error {
-	_, err := q.db.ExecContext(ctx, removeDMParticipant, arg.ChannelID, arg.UserID)
-	return err
-}
-
 const setDMChannelName = `-- name: SetDMChannelName :exec
 UPDATE channels SET name = ? WHERE id = ? AND type = 'dm'
 `

@@ -427,4 +427,81 @@ describe("showContextMenu", () => {
       expect(removeSpy).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("keyboard model (A11Y-01)", () => {
+    async function open(items: Parameters<typeof showContextMenu>[0]["items"]) {
+      showContextMenu({ x: 0, y: 0, items, signal: ac.signal, className: "kbd-menu" });
+      await new Promise((r) => setTimeout(r, 0));
+      return document.querySelector(".kbd-menu") as HTMLElement;
+    }
+
+    it("renders role=menu items and focuses the first one on open", async () => {
+      const menu = await open([
+        { label: "One", onClick: vi.fn() },
+        { label: "Two", onClick: vi.fn() },
+      ]);
+      expect(menu.getAttribute("role")).toBe("menu");
+      const items = menu.querySelectorAll('[role="menuitem"]');
+      expect(items.length).toBe(2);
+      expect(items[0]!.tagName).toBe("BUTTON");
+      expect(document.activeElement).toBe(items[0]);
+      expect(items[0]!.getAttribute("tabindex")).toBe("0");
+      expect(items[1]!.getAttribute("tabindex")).toBe("-1");
+    });
+
+    it("moves with ArrowDown/ArrowUp and Home/End, moving the roving tabindex", async () => {
+      const menu = await open([
+        { label: "One", onClick: vi.fn() },
+        { label: "Two", onClick: vi.fn() },
+        { label: "Three", onClick: vi.fn() },
+      ]);
+      const items = menu.querySelectorAll<HTMLElement>('[role="menuitem"]');
+      items[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      expect(document.activeElement).toBe(items[1]);
+      expect(items[1]!.getAttribute("tabindex")).toBe("0");
+      expect(items[0]!.getAttribute("tabindex")).toBe("-1");
+      items[1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+      expect(document.activeElement).toBe(items[2]);
+      items[2]!.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+      expect(document.activeElement).toBe(items[0]);
+      items[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      expect(document.activeElement).toBe(items[0]);
+    });
+
+    it("activates a row with Enter through its native button click", async () => {
+      const onClick = vi.fn();
+      await open([{ label: "Go", onClick }]);
+      const item = document.querySelector<HTMLElement>('.kbd-menu [role="menuitem"]')!;
+      item.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      item.click();
+      expect(onClick).toHaveBeenCalledTimes(1);
+    });
+
+    it("Escape closes the menu and restores focus to the element focused at open", async () => {
+      const invoker = document.createElement("button");
+      document.body.appendChild(invoker);
+      invoker.focus();
+      await open([{ label: "One", onClick: vi.fn() }]);
+      (document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      expect(document.querySelector(".kbd-menu")).toBeNull();
+      expect(document.activeElement).toBe(invoker);
+      invoker.remove();
+    });
+
+    it("an outside click that moved focus to a control keeps it there", async () => {
+      const invoker = document.createElement("button");
+      const input = document.createElement("input");
+      document.body.append(invoker, input);
+      invoker.focus();
+      await open([{ label: "One", onClick: vi.fn() }]);
+      input.focus();
+      input.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      expect(document.querySelector(".kbd-menu")).toBeNull();
+      expect(document.activeElement).toBe(input);
+      invoker.remove();
+      input.remove();
+    });
+  });
 });

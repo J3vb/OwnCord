@@ -2,13 +2,12 @@
 
 `tools/mcp-introspect/` is a small [Model Context Protocol](https://modelcontextprotocol.io)
 (MCP) server that lets an AI agent — Claude Code — inspect a **locally running** OwnCord
-instance: read its logs, query any REST endpoint, and tail the desktop client's log file.
+instance: read its logs and query any REST endpoint.
 
 It is a **development tool**, not part of the shipped product. It ships no data of its own and
-adds nothing to the server binary — it is a thin wrapper over OwnCord's existing REST API plus
-the client's on-disk log.
+adds nothing to the server binary — it is a thin wrapper over OwnCord's existing REST API.
 
-- **Code:** `tools/mcp-introspect/index.mjs` (one file, ~270 lines)
+- **Code:** `tools/mcp-introspect/index.mjs` (one file, ~250 lines)
 - **Runtime:** Node ≥ 24, ESM. One real dependency: `@modelcontextprotocol/sdk` (+ `zod`)
 - **Registration:** `/.mcp.json` (committed) and `.claude/settings.local.json` (local)
 
@@ -21,12 +20,11 @@ flowchart LR
     CC["Claude Code<br/>(MCP client)"] -->|"stdio<br/>JSON-RPC"| MCP["owncord-introspect<br/>index.mjs"]
     MCP -->|"Bearer API token<br/>over pinned TLS"| SRV["OwnCord server<br/>https://127.0.0.1:8443"]
     SRV -->|"REST JSON / SSE"| MCP
-    MCP -->|"readFile"| LOG[("owncord-client.log")]
 ```
 
 Claude Code launches `index.mjs` as a child process (`node tools/mcp-introspect/index.mjs`) and
 speaks MCP over stdin/stdout. When you (or the agent) call one of its tools, the server makes a
-request to the local OwnCord instance — or reads a file — and returns the result.
+request to the local OwnCord instance and returns the result.
 
 ### Authentication
 
@@ -54,10 +52,9 @@ So the tool uses `node:https` and:
 2. **skips hostname matching** (`checkServerIdentity: () => undefined`).
 
 Identity is proven by the pin — a MITM would need the identical cert. This is the same
-trust-on-first-use model the desktop client's proxy already uses. (`client_logs` needs neither
-the token nor the cert.)
+trust-on-first-use model the desktop client's proxy already uses.
 
-### The three tools
+### The two tools
 
 **`api_request`** — a single generic passthrough that covers the _entire_ REST API. It issues one
 `https.request` to `https://127.0.0.1:<port><path>` with the bearer token and returns
@@ -84,10 +81,9 @@ With `follow_ms: 0` (default) it returns after the backfill burst goes quiet; wi
 it keeps reading live records for that long. Filtering by `level`/`source` and the `limit` are
 applied client-side.
 
-**`client_logs`** — reads the desktop client's rotating log file directly
-(`%LOCALAPPDATA%\com.owncord.client\logs\owncord-client.log`); no server involved. Returns the last
-N lines with optional level/substring filtering, and degrades gracefully if the file doesn't exist
-yet.
+The desktop client's log is **not** exposed as a tool: it is an ordinary file at
+`%LOCALAPPDATA%\com.owncord.client\logs\owncord-client.log`, so read it with the agent's own
+Read/Grep rather than through a tailer that duplicates them.
 
 ---
 
@@ -135,7 +131,7 @@ cd tools/mcp-introspect
 npx @modelcontextprotocol/inspector node index.mjs
 ```
 
-The three tools should appear. Call `api_request` with `{ "method": "GET", "path": "/health" }` and
+The two tools should appear. Call `api_request` with `{ "method": "GET", "path": "/health" }` and
 expect `{status:200, body:{...}}`.
 
 ---
@@ -181,29 +177,17 @@ Returns an array of `{ ts, level, msg, source, attrs }` (`attrs` is parsed from 
 { "source": "websocket", "follow_ms": 3000 }   // ws logs, backfill + 3s of live tail
 ```
 
-### `client_logs`
-
-| Param   | Type    | Default | Notes                                     |
-| ------- | ------- | ------- | ----------------------------------------- |
-| `lines` | number? | 200     | Trailing lines to return                  |
-| `level` | string? | —       | Keep only lines tagged `[LEVEL]`          |
-| `grep`  | string? | —       | Keep only lines containing this substring |
-
-Returns `{ path, found: true, lines: [...] }`, or `{ path, found: false, note }` if the client has
-not run yet.
-
 ---
 
 ## Configuration
 
-All optional except the token (which only the two server-backed tools need).
+All optional except `OWNCORD_API_TOKEN`, which both tools need.
 
-| Env var              | Default                                                     | Purpose                                                                                        |
-| -------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `OWNCORD_API_TOKEN`  | _(required for `api_request`/`server_logs`)_                | Bearer token from `server token create`.                                                       |
-| `OWNCORD_BASE_URL`   | `https://127.0.0.1:<server.port>`                           | Override the whole base URL (e.g. a non-TLS endpoint). Port is read from `Server/config.yaml`. |
-| `OWNCORD_CERT_PATH`  | `Server/data/cert.pem`                                      | Self-signed cert to pin.                                                                       |
-| `OWNCORD_CLIENT_LOG` | `%LOCALAPPDATA%\com.owncord.client\logs\owncord-client.log` | Desktop client log path.                                                                       |
+| Env var             | Default                           | Purpose                                                                                        |
+| ------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `OWNCORD_API_TOKEN` | _(required)_                      | Bearer token from `server token create`.                                                       |
+| `OWNCORD_BASE_URL`  | `https://127.0.0.1:<server.port>` | Override the whole base URL (e.g. a non-TLS endpoint). Port is read from `Server/config.yaml`. |
+| `OWNCORD_CERT_PATH` | `Server/data/cert.pem`            | Self-signed cert to pin.                                                                       |
 
 ---
 
@@ -216,7 +200,6 @@ All optional except the token (which only the two server-backed tools need).
 | `api_request` returns `401`               | Token missing/revoked/expired. Mint a fresh owner-bound token.                                                                                                                                                                              |
 | `api_request` returns `403` on `/admin/*` | Either the request didn't come from an allowed IP (the tool must run on the same host as the server; localhost is allowed by default), or the token's user lacks the permission that route requires — see the route table in `docs/api.md`. |
 | `server_logs` fails at the ticket step    | The log stream still needs ADMINISTRATOR (the widened `/admin/api/*` perimeter does not open it), or the server isn't the current build.                                                                                                    |
-| `client_logs` → `found: false`            | The desktop client hasn't run yet, or the path differs — set `OWNCORD_CLIENT_LOG`.                                                                                                                                                          |
 
 ---
 

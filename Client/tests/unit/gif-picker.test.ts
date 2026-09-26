@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createGifPicker, GIF_UNAVAILABLE_MESSAGE } from "@components/GifPicker";
+import { createGifPicker } from "@components/GifPicker";
+import { messagingText } from "../../src/i18n/messaging";
 import { ApiClientError } from "@lib/api";
 import type { GifPickerOptions } from "@components/GifPicker";
 import type { GifApi, GifResult } from "@lib/gifProvider";
@@ -8,13 +9,33 @@ import type { GifApi, GifResult } from "@lib/gifProvider";
 // Module mock — must be hoisted before imports in vitest
 // ---------------------------------------------------------------------------
 
+// B9-8: this suite exercises content the viewer has already consented to;
+// the consent gate itself is proven in src/features/content-consent/external.test.ts.
+vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
+  externalAllowed: () => true,
+}));
+
 vi.mock("@lib/gifProvider", () => ({
   searchGifs: vi.fn(),
   getTrendingGifs: vi.fn(),
 }));
 
+// B7-16: grid thumbnails come from the native external-content broker.
+const { previewMock, imageMock } = vi.hoisted(() => ({
+  previewMock: vi.fn(),
+  imageMock: vi.fn(),
+}));
+vi.mock("../../src/platform/desktop/externalContent", () => ({
+  externalContent: { preview: previewMock, image: imageMock },
+}));
+
 // Import the mocks so tests can control their return values
 import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
+import { clearExternalImageCache } from "@components/message-list/attachments";
+
+let blobCounter = 0;
+const createObjectURLMock = vi.fn(() => `blob:test/${++blobCounter}`);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -66,6 +87,15 @@ describe("GifPicker", () => {
     // Default: trending returns data, search returns search data
     vi.mocked(getTrendingGifs).mockResolvedValue(TRENDING_GIFS);
     vi.mocked(searchGifs).mockResolvedValue(SEARCH_GIFS);
+
+    URL.createObjectURL = createObjectURLMock;
+    URL.revokeObjectURL = vi.fn();
+    imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/gif" }) });
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: { title: null, description: null, siteName: null, image: null },
+    });
+    clearExternalImageCache();
 
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -249,9 +279,18 @@ describe("GifPicker", () => {
       const imgs = picker.element.querySelectorAll(".gp-img") as NodeListOf<HTMLImageElement>;
       expect(imgs.length).toBe(TRENDING_GIFS.length);
 
+      // The webview never loads the Klipy URL itself: the broker is asked for
+      // each preview url and the img shows the blob: URL it produced.
       TRENDING_GIFS.forEach((gif, i) => {
-        expect(imgs[i]!.src).toBe(gif.url);
+        expect(imgs[i]!.getAttribute("src")).not.toBe(gif.url);
+        expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url: gif.url });
       });
+      await vi.waitFor(() => {
+        imgs.forEach((img) => expect(img.getAttribute("src")).toMatch(/^blob:/));
+      });
+      const srcs = [...imgs].map((img) => img.getAttribute("src"));
+      expect(new Set(srcs).size).toBe(TRENDING_GIFS.length);
+      srcs.forEach((src) => expect(createObjectURLMock).toHaveReturnedWith(src));
       picker.destroy();
     });
   });
@@ -366,6 +405,40 @@ describe("GifPicker", () => {
         items[i]!.click();
         expect(onSelect).toHaveBeenCalledWith(gif.fullUrl);
       });
+      picker.destroy();
+    });
+
+    // OC-0365: renderGifs replaces the whole cell set on every search, but a
+    // per-cell click listener bound to the picker-lifetime `signal` (which
+    // only aborts once, at destroy()) would keep every discarded cell from
+    // a prior search reachable — and its click handler still live — for the
+    // rest of the picker's life.
+    it("does not fire onSelect for a cell discarded by a later search (OC-0365)", async () => {
+      const onSelect = vi.fn();
+      const { picker } = makePicker({ onSelect });
+      container.appendChild(picker.element);
+
+      // Flush trending
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const staleItem = picker.element.querySelector(".gp-item") as HTMLElement;
+      expect(staleItem).not.toBeNull();
+
+      // A search re-renders the grid, discarding the trending cells.
+      const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
+      input.value = "cats";
+      input.dispatchEvent(new Event("input"));
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(picker.element.contains(staleItem)).toBe(false);
+
+      // Clicking the detached, stale cell must not still reach onSelect.
+      staleItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(onSelect).not.toHaveBeenCalled();
+
       picker.destroy();
     });
   });
@@ -498,7 +571,7 @@ describe("GifPicker", () => {
   // ── Error state ───────────────────────────────────────────────────────────
 
   describe("error state", () => {
-    it("shows error message when getTrendingGifs throws", async () => {
+    it("shows a typed failure line with a bounded retry, not the raw error", async () => {
       vi.mocked(getTrendingGifs).mockRejectedValue(new Error("Network error"));
 
       const { picker } = makePicker();
@@ -508,13 +581,37 @@ describe("GifPicker", () => {
       await Promise.resolve();
       await Promise.resolve(); // extra tick for rejection path
 
-      const errEl = picker.element.querySelector(".gp-empty");
-      expect(errEl).not.toBeNull();
-      expect(errEl!.textContent).toBe("Network error");
+      // The transient state must not look like the empty-results state.
+      expect(picker.element.querySelector(".gp-empty")).toBeNull();
+      const status = picker.element.querySelector(".msg-media-fallback-text");
+      expect(status?.textContent).toBe("Couldn't load GIFs");
+      expect(status?.textContent).not.toContain("Network error");
+      expect(picker.element.querySelector(".msg-media-retry")).not.toBeNull();
       picker.destroy();
     });
 
-    it("shows generic fallback message when thrown value is not an Error", async () => {
+    it("retries the last query when the retry is activated", async () => {
+      vi.mocked(getTrendingGifs)
+        .mockRejectedValueOnce(new Error("Network error"))
+        .mockResolvedValue(TRENDING_GIFS);
+
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      const before = vi.mocked(getTrendingGifs).mock.calls.length;
+
+      picker.element.querySelector<HTMLButtonElement>(".msg-media-retry")!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(vi.mocked(getTrendingGifs).mock.calls.length).toBeGreaterThan(before);
+      expect(picker.element.querySelectorAll(".gp-item").length).toBe(TRENDING_GIFS.length);
+      picker.destroy();
+    });
+
+    it("shows the typed failure for a non-Error rejection too", async () => {
       vi.mocked(getTrendingGifs).mockRejectedValue("oops");
 
       const { picker } = makePicker();
@@ -524,9 +621,9 @@ describe("GifPicker", () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      const errEl = picker.element.querySelector(".gp-empty");
-      expect(errEl).not.toBeNull();
-      expect(errEl!.textContent).toBe("Failed to load GIFs");
+      expect(picker.element.querySelector(".msg-media-fallback-text")?.textContent).toBe(
+        "Couldn't load GIFs",
+      );
       picker.destroy();
     });
   });
@@ -552,7 +649,7 @@ describe("GifPicker", () => {
 
       const el = picker.element.querySelector(".gp-empty");
       expect(el).not.toBeNull();
-      expect(el!.textContent).toBe(GIF_UNAVAILABLE_MESSAGE);
+      expect(el!.textContent).toBe(messagingText("gif.disabled"));
       picker.destroy();
     });
 
@@ -583,7 +680,7 @@ describe("GifPicker", () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(onUnavailable).toHaveBeenCalledWith(GIF_UNAVAILABLE_MESSAGE);
+      expect(onUnavailable).toHaveBeenCalledWith(messagingText("gif.disabled"));
       picker.destroy();
     });
 

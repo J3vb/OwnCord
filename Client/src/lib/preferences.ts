@@ -35,8 +35,13 @@ export function savePref(key: string, value: unknown): void {
     // Dispatch a custom event so same-window listeners can invalidate caches.
     // The native `storage` event only fires for cross-tab changes.
     window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key } }));
-  } catch {
-    // localStorage may throw on quota exceeded or when storage is disabled.
+  } catch (err) {
+    // console, not ./logger: logger reads its level from this module, so
+    // importing it here would be an import cycle.
+    console.warn("[preferences] Failed to save preference (localStorage may be full or disabled)", {
+      key,
+      err,
+    });
   }
 }
 

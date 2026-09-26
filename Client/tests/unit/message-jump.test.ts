@@ -42,11 +42,7 @@ import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { renderMessage } from "../../src/components/message-list/renderers";
 import { renderMentionSegment } from "../../src/components/message-list/content-parser";
-import {
-  jumpToMessage,
-  setMessageJumpHandler,
-  hasMessageJumpHandler,
-} from "@lib/message-navigation";
+import { jumpToMessage, setMessageJumpHandler } from "@lib/message-navigation";
 import { messagesStore, setAroundMessages } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { channelsStore, setChannels } from "@stores/channels.store";
@@ -55,6 +51,7 @@ import { authStore } from "@stores/auth.store";
 import { ApiClientError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import type { MessageResponse, ReadyChannel } from "@lib/types";
+import { expectConsole } from "../helpers/console";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },
@@ -254,6 +251,33 @@ describe("createMessageJumper", () => {
     expect(messagesStore.getState().detachedChannels.has(1)).toBe(false);
   });
 
+  it("leaves a gated NSFW channel's refusal to its gate, without a toast", async () => {
+    const ctrl = {
+      currentChannelId: 1,
+      messageList: { scrollToMessage: vi.fn().mockReturnValue(false) },
+    } as unknown as ReturnType<typeof fakeCtrl>["ctrl"];
+    const toastsBefore = toastCalls.length;
+    const jumper = createMessageJumper({
+      api: fakeApi(
+        vi
+          .fn()
+          .mockRejectedValue(
+            new ApiClientError(
+              403,
+              "NSFW_ACKNOWLEDGEMENT_REQUIRED",
+              "NSFW_ACKNOWLEDGEMENT_REQUIRED",
+            ),
+          ),
+      ),
+      getChannelCtrl: () => ctrl,
+      nextFrame: immediateFrame,
+    });
+
+    await expect(jumper.jumpTo(1, 42)).resolves.toBe(false);
+
+    expect(toastCalls.length).toBe(toastsBefore);
+  });
+
   it("surfaces a transport failure without detaching the channel", async () => {
     const scrollToMessage = vi.fn().mockReturnValue(false);
     const ctrl = {
@@ -267,6 +291,7 @@ describe("createMessageJumper", () => {
     });
 
     await expect(jumper.jumpTo(1, 42)).resolves.toBe(false);
+    expectConsole("error", /\[message-jump\] Failed to fetch the message window/);
 
     expect(toastCalls.at(-1)?.type).toBe("error");
     expect(messagesStore.getState().detachedChannels.has(1)).toBe(false);
@@ -337,6 +362,7 @@ describe("createMessageJumper", () => {
     // B's response lands first (real network reordering).
     resolveB({ messages: [response(20)], has_more_before: true, has_more_after: true });
     await jumpB;
+    expectConsole("warn", /\[message-jump\] Around-window loaded but the row did not render/);
     expect(
       messagesStore
         .getState()
@@ -362,7 +388,6 @@ describe("createMessageJumper", () => {
 
 describe("message-navigation registry", () => {
   it("is a no-op before a page registers a handler", () => {
-    expect(hasMessageJumpHandler()).toBe(false);
     expect(() => jumpToMessage(1, 2)).not.toThrow();
   });
 
@@ -374,7 +399,9 @@ describe("message-navigation registry", () => {
     expect(handler).toHaveBeenCalledWith(5, 42);
 
     unregister();
-    expect(hasMessageJumpHandler()).toBe(false);
+    // After unregistering, the handler must stop receiving jumps.
+    jumpToMessage(5, 43);
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 
   it("a stale unregister does not clear a newer handler", () => {
@@ -388,7 +415,6 @@ describe("message-navigation registry", () => {
     jumpToMessage(1, 1);
     expect(second).toHaveBeenCalled();
     expect(first).not.toHaveBeenCalled();
-    expect(hasMessageJumpHandler()).toBe(true);
   });
 
   afterEach(() => {

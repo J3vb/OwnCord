@@ -1,0 +1,1000 @@
+# B2 — Freeze server protocol, trust, and compatibility contracts
+
+**Drafted:** 2026-08-28  
+**Base commit:** `64d2e108` (`dev`, post-PR #1425); `main` @ `b7d388a3` =
+`v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
+onto `dd7ed091` (#1432) before merge  
+**Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0,
+B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 landed 2026-08-29 (PR #1443 = `88c7a824`); B2-9 done 2026-08-29 (PR #1444 = `2bfc5e30`); **HP-2 accepted 2026-08-29** ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)) — **B2 is complete, B3 may begin.**
+Update this line, not only the step table, when a step lands.
+
+Primary inputs:
+
+- [beta roadmap](repo-health-roadmap-2026-08-23.md), B2 section and HP-2
+- [HP-1 scorecard](hp-1-scorecard-2026-08-27.md), "Hand-off to B2" and "Open
+  items carried past B1"
+- [issue register](repo-health-issue-register-2026-08-23.md) — every row
+  tagged `B2`
+- [requirement traceability](beta-requirements-traceability-2026-08-23.md) —
+  BPR-031, 032, 040, 050, 051, 080–083
+
+## Context
+
+B1 made the repository discoverable and gave the protocol one owner
+(`protocol/schema.json`). It changed no behaviour. B2 is the first phase that
+does: it freezes the contracts every later server service and every client
+must obey — the protocol epoch, the update order, the trust model, the
+permission predicates, the audit surface, and the boundary of what beta does
+not promise (plugins, federation, a directory).
+
+The owner's decision on 2026-08-28: execute B2 as written rather than cut the
+roadmap to ship sooner. BPR-002 (no deadline) and BPR-003 (frozen scope)
+stand. Sizes below are personal estimates and never a gate; the honest total is
+one to one and a half weeks with agents working steps in parallel.
+
+## Steps at a glance
+
+| Step     | What                                                                                                              | Size     | Parallel with          |
+| -------- | ----------------------------------------------------------------------------------------------------------------- | -------- | ---------------------- |
+| **B2-0** | **Done 2026-08-28.** Alpha.4 verified; `dev` synced (#1432); `environment: release`; ENV-03; `dev` `strict: true` | hours    | —                      |
+| **B2-1** | Capture the epoch-1 fixtures; retire `voice_speakers` and `member_leave`                                          | 1 day    | B2-6, B2-7             |
+| **B2-2** | Protocol epoch and negotiation — **DONE 2026-08-29 (slim; absorbs B2-3, B2-4)**                                   | 1 day    | serialized, after B2-8 |
+| **B2-3** | Server-first updates through the signed manifest — folded into B2-2                                               | ½ day    | after B2-2             |
+| **B2-4** | Compatibility matrix — folded into B2-2                                                                           | ½ day    | after B2-2             |
+| **B2-5** | One permission predicate per security property — **DONE 2026-08-29 (PR #1440)**                                   | 1–2 days | serialized             |
+| **B2-6** | Safe audit coverage — **DONE 2026-08-29 (PR #1441)**                                                              | ½ day    | B2-1, B2-7             |
+| **B2-7** | Trust model, absence proofs, plugin boundary — **DONE 2026-08-29 (PR #1443)**                                     | 1 day    | B2-1, B2-6             |
+| **B2-8** | The nine B2-tagged findings — **DONE 2026-08-28 (PR #1436)**                                                      | 1 day    | before B2-2            |
+| **B2-9** | Security owners and acceptance tests — **DONE 2026-08-29** (SEC-03 → B5; table closed)                            | spread   | —                      |
+| **HP-2** | Protocol and threat-model sign-off — **ACCEPTED 2026-08-29**                                                      | —        | —                      |
+
+Order: B2-0, B2-1, B2-8, then B2-2 → B2-3 → B2-4; B2-5 is serialized on its
+own; B2-6, B2-7 and B2-9 run in parallel where the table allows.
+
+## Entry gate
+
+| Condition                                                            | State 2026-08-28                                                                                                                      |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| B1 complete; protocol source has one owner                           | **Met.** HP-1 accepted 2026-08-27; `protocol/schema.json` generates both consumers from `npm run generate`.                           |
+| Confirmed security findings have private owners and acceptance tests | **B2-9.** Seven local reports under the gitignored `docs/security-findings/`, each already mapped to a public row (HP-0, question 4). |
+| Alpha protocol fixtures and updater contracts are captured           | **B2-1.** Must land before any protocol change — alpha.4 is the last client that speaks the pre-epoch wire, and it is live now.       |
+
+## What B1 carried over that B2-0 closes
+
+| Item                                        | State                                                                                                                                   | B2-0 action                                |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `dev` `strict: false` (B1 exit condition 6) | 12 checks pinned; a PR can still merge without re-testing against a moved base                                                          | Flip to `true` — owner approved 2026-08-28 |
+| `environment: release` absent from workflow | The `release` environment exists (1 reviewer) but `release.yml` does not name it, so the reviewer gate never fires                      | Add it to the publishing job               |
+| ENV-03 `MSYS_NO_PATHCONV`                   | `Server/scripts/docker-smoke.sh` still needs the variable set by the caller; Git Bash on Windows otherwise reports a false boot failure | Export it inside the script                |
+
+## Verify before you implement
+
+Every claim the roadmap's B2 section rests on, re-tested against `64d2e108`.
+
+| Claim                                         | Verdict                     | What it means for the work                                                                                                                                                                                                                                   |
+| --------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| No protocol epoch exists                      | **Confirmed**               | `protocol/schema.json` has `"version": 1` — the schema _format_, read by `Server/cmd/genprotocol/main.go:35`. The `auth` payload (`Server/ws/serve_auth.go:46-52`) is `token`, `last_seq`, `active_channel_id`. Nothing carries a version.                   |
+| The client has no "update required" path      | **Half refuted**            | `Client/src/lib/ws.ts:306-314` already treats `auth_error` as non-recoverable: sets `intentionalClose`, dispatches, disconnects. So a rejected client **does not** loop today. B2-2 rides that path and pins it with a test; it does not build a new one.    |
+| The update endpoint ignores compatibility     | **Confirmed**               | `Server/api/client_update.go:34` advertises the newest GitHub release for the target. The signed manifest (`Server/updater/verify.go:29`) has `version`, `asset`, `sha256`, `assets` — no epoch.                                                             |
+| WASM is disabled by default                   | **Confirmed, already done** | `Server/config/config.go` (plugins `Enabled` defaults false; the example config says "Disabled by default"). B2-7 adds wording only.                                                                                                                         |
+| Reserved entries with no sender (S-15)        | **Confirmed**               | `protocol/schema.json:65` `voice_speakers`, `:75` `member_leave`. No production emit site in `Server/`.                                                                                                                                                      |
+| L-08 prebuilt WASM still tracked              | **Refuted**                 | Deleted in #1418; `.gitignore` ignores it; the example's README documents the build. Only the deterministic-build gate remains, and it is blocked (B1 plan). B2-7 item 4 is that decision, not the untracking.                                               |
+| Audit events exist                            | **Confirmed**               | `Server/db/audit_writer.go` (async batched writer, drops are logged); the `WriteAudit(`, `LogAudit(` and `EnqueueAudit(` call sites (a grep for `Audit(` catches all three). Invite create/revoke have none (S-02).                                          |
+| Permission helpers exist but are mirrored     | **Confirmed**               | `Server/permissions/permissions.go`: `HasPerm`, `HasAnyPerm`, `HasAdmin`, `HasServerPerm`, `EffectivePerms`, `EffectiveChannelPerms`. Typing checks a weaker permission than posting (S-01); ready/refresh/ws mirror send policy by hand (S-12).             |
+| Trust model has one document                  | **Refuted**                 | Pieces live in `docs/protocol.md`, `docs/architecture/voice-e2ee.md`, `docs/credential-storage.md`, `docs/security.md`. No single statement of what the operator can read.                                                                                   |
+| Federation / directory / central identity     | **Absent, unproven**        | Nothing exists. B2-7 turns "nothing" into a test that fails if something appears.                                                                                                                                                                            |
+| WS application close codes in use             | **Refuted**                 | None. Non-test code closes only with the library's 1000/1011. The `4000`/`4096` grep hits are unrelated constants (`CONFIRM_TIMEOUT_MS`, `maxMessageLen`, `Vec::with_capacity`, `touchThrottleMaxEntries`). `4426` will be the first application close code. |
+| CI needs a new job for the compatibility test | **Refuted**                 | A Go table test runs under `go test ./...`, which the required `Server Build & Test` check already executes. No new job, no pin-script change for B2-4.                                                                                                      |
+
+Net effect: B2-2 is smaller than the roadmap implies (the rejection path
+exists), B2-4 needs no CI change, and the trust-model document is a genuine
+gap.
+
+## B2-0 — Alpha.4 out the door, `dev` synced, release hygiene
+
+Done in this order; the tag is already pushed.
+
+1. **Verify the release.** Run `33144028968` completed `success` 2026-08-28
+   05:23 UTC. `gh release view v1.2.0-alpha.4 --json assets --jq '.assets|length'`
+   → **20**, the same set alpha.3 shipped: server binary + archive + `.sig` +
+   `checksums.sha256` + source snapshot + signed `server-update-manifest.json`,
+   plus the AppImage/deb/NSIS client assets and their signatures. The
+   workflow's own `Verify signed assets against pinned server update key` step
+   passed inside that run. Record the asset list in HP-2 as the pre-epoch
+   updater contract.
+2. **Sync `dev`.** **Done 2026-08-28 by the owner** — #1432 "merge main into
+   dev after the v1.2.0-alpha.4 release" (`dd7ed091`), the same shape as #1425.
+   `main` was 5 ahead of `dev` before it. **Known trap, still live:**
+   squash-merging a sync PR re-diverges `dev` from `main` by content-identical
+   commits; the next release PR then shows phantom conflicts and is unblocked
+   by creating `release/<tag>` with `git merge --no-ff main` (how alpha.4
+   itself was unblocked). Accept the trap; it is cheaper than changing the
+   merge model mid-phase.
+3. **`environment: release`.** In `.github/workflows/release.yml`, add
+   `environment: release` at job level on the `publish` job (its header is
+   near line 490 of `release.yml`; the "Generate server update manifest" and
+   signing steps live inside it). The environment
+   exists with one reviewer, so the next tag waits for approval. Verify with
+   `actionlint` (the hygiene job runs it in CI; locally it may be absent on
+   Windows — CI is the gate).
+4. **ENV-03.** Add `export MSYS_NO_PATHCONV=1` near the top of
+   `Server/scripts/docker-smoke.sh`. Verify: on Git Bash, build and run the
+   smoke **without** setting the variable in the shell —
+   `docker build --build-arg VERSION=ci -t owncord-smoke:candidate Server/ && bash Server/scripts/docker-smoke.sh owncord-smoke:candidate`
+   exits 0. Remember the build context is `Server/`, not the root.
+5. **`dev` strict.** Edit `docs/plans/b0-dev-branch-protection.sh` line 63,
+   `"strict": false,` → `"strict": true,`, run it
+   (`bash docs/plans/b0-dev-branch-protection.sh`), and read back:
+   `gh api repos/J3vb/OwnCord/branches/dev/protection --jq '.required_status_checks.strict'`
+   → `true`. Repository-settings writes need a person; the owner approved this
+   one on 2026-08-28. Record the read-back in HP-2.
+
+Items 3–5 are one PR (`chore(b2-0): release hygiene`). Item 2 landed as
+#1432. Item 1 is evidence, not a change.
+
+**Evidence, 2026-08-28** — HP-2 questions 1 and 7 cite this block:
+
+- Release: `gh release view v1.2.0-alpha.4 --json assets --jq '.assets|length'`
+  → `20`, target `main`. The pre-epoch updater contract is that asset set:
+  `chatserver.exe` + `.sig`, `chatserver-linux-amd64.tar.gz`,
+  `checksums.sha256`, `owncord-src-v1.2.0-alpha.4.tar.gz`,
+  `server-update-manifest.json` + `.sig`, the client AppImages (amd64 and
+  aarch64, each with a `.tar.gz` and `.sig` pair), `.deb` (amd64, arm64), and
+  the NSIS installer (`-setup.exe`, `.nsis.zip` + `.sig`).
+- `dev` strict: script run 2026-08-28 07:58 UTC;
+  `gh api repos/J3vb/OwnCord/branches/dev/protection --jq '.required_status_checks.strict'`
+  → `true`, the 12 contexts unchanged.
+- `environment: release`: one required reviewer (`J3vb`, self-review allowed),
+  `deployment_branch_policy: null` (tag refs may deploy — the gate holds the
+  run, it does not reject it), and no environment-scoped secrets, so nothing
+  can shadow the repository secrets the build jobs sign with. actionlint
+  v1.7.12 on `release.yml`: clean.
+- ENV-03: from Git Bash with `MSYS_NO_PATHCONV` unset, the pre-change script
+  exits 1 (`::error::container never reported healthy within 30s` — Git Bash
+  had rewritten `/chatserver` into a Windows path); the changed script exits 0
+  against `owncord-smoke:candidate` built from `Server/` with
+  `--build-arg VERSION=ci`.
+
+## B2-1 — Capture the epoch-1 fixtures
+
+Lands **before** B2-2. Alpha.4 is the last client on the pre-epoch wire; once
+B2-2 merges there is no clean way to record what "epoch 0/1" looked like.
+
+1. **Golden wire transcripts.** A contract test in `Server/ws`
+   (`protocol_epoch1_contract_test.go`, matching the existing
+   `*_contract_test.go` tier) drives the required journeys through the
+   in-process hub harness the package's tests already use (reuse it — do not
+   write a second harness) and compares each journey's frame sequence with a
+   JSON file under `protocol/fixtures/epoch-1/`. Journeys: fresh connect
+   (`auth` → `auth_ok` → `ready`); resume with `last_seq` and a replay burst;
+   `chat_send` and its fan-out; edit and delete; reaction add/remove; typing;
+   `mark_read`; DM send; `voice_join` → `voice_state`, `voice_e2ee_announce`
+   and `voice_e2ee_offer` relay, `voice_leave`; `ping`; failed auth
+   (`auth_error`). Volatile fields (`id`, `seq`, timestamps, tokens, user ids)
+   are normalised to stable placeholders before comparison, which is what lets
+   the fixtures survive refactors. `go test ./ws -run TestEpoch1Fixtures -update`
+   regenerates; the default run compares.
+2. **Client side of the same contract.** `Client/tests/contract/ws-auth-frame.test.ts`
+   pins the `auth` frame `Client/src/lib/ws.ts:447` sends today (`token`,
+   `last_seq`, optional `active_channel_id`). B2-2 extends this test rather
+   than replacing it.
+3. **Updater contract.** Before B2-3 changes them, assert the current shapes:
+   the manifest fields in `Server/updater/release_manifest_test.go`, and the
+   `client-update` 200/204 bodies in the handler's test next to
+   `Server/api/client_update.go`.
+4. **Retire the reserved entries (S-15).** Remove `voice_speakers` and
+   `member_leave` from `protocol/schema.json` via the `protocol-change` skill
+   (`npm run generate`, then `git grep -nE 'VOICE_SPEAKERS|MEMBER_LEAVE|MsgTypeVoiceSpeakers|MsgTypeMemberLeave'`
+   must return only the generated files' history, i.e. nothing at HEAD), and
+   delete their rows from `docs/protocol.md`. Own commit, before the fixtures
+   are captured, so epoch 1 does not carry dead entries.
+5. **Document the fixtures** in `protocol/README.md`: what a fixture is, how to
+   regenerate, and the rule that a fixture may only change with an epoch bump.
+
+Verification: `npm run check:server` (regenerates and diffs both generators;
+runs the new test under `go test ./...`), `npm run check:client`.
+
+**Evidence, 2026-08-28** — HP-2 question 1 cites this block:
+
+- Branch `feat/b2-1-epoch1-fixtures` from `dev` `fb6b51a0`; PR #1435 to `dev`,
+  squash-merged 2026-08-28 as `1fe3df79`. Pre-squash head at merge time:
+  `069412db` (`git ls-remote origin refs/pull/1435/head` →
+  `069412dbbfb9fa11318a8a6f16af251563e78d09`); HP-2 question 1 cites it.
+- Pre-squash commits: retirement `dd638f1c` (own commit, before capture);
+  fixtures `54cae614` (capture), `c0719519` (end-of-journey barriers,
+  present-form optionals), `d5fe06e5` (null forms of `auth_ok`/`member_join`
+  user fields, `id` on `auth`, unsigned announce); client auth frame
+  `0f15fafb`; updater shapes `8e065130`; docs `00a7b65c`, `f7c161a5`,
+  `5b5b5c19`.
+- Gates at `5b5b5c19`: `check:server`, `check:client`, `check:docs`,
+  `check:hygiene` all exit 0; `TestEpoch1Fixtures` passes `-count=3`,
+  `-race -count=3`, `-tags deadlock -count=10`; regeneration is
+  byte-identical; both trailing-frame guards proven by negative control.
+- Item 4 grep at HEAD hits only `docs/audit-2026-07-19.md` (dated record) and
+  this file's own command text.
+- Item 5 refined twice: the rule is **shape, not value** (a seeded default
+  value change is regenerated in the same PR; normalising those values was
+  rejected because it hides enum drift), and an epoch bump is for what older
+  clients cannot process — additive keys stay within the epoch and are
+  regenerated deliberately (Codex review on #1435; B2-2's negotiation fields
+  are the first such regeneration). Open for B2-2/B2-4: whether the epoch-1
+  transcript should also replay with additive tolerance as the "old client
+  still works" check, and whether the captured wire is called epoch 0 (absent
+  `epoch`) or epoch 1 — this plan currently says both.
+- Scope addition: six `docs/protocol.md` statements the captured wire proved
+  false were corrected in the same PR (relayed `voice_state` has no `seq`,
+  `chat_message.user.display_name`, the six real `auth_error` messages,
+  connect examples' `seq`, `voice_join` reply order, `voice_max_video` default
+  25), plus the auth-failure close code 1008.
+- Found, not fixed (behaviour change): the joiner's own `voice_state` is
+  broadcast through the hub queue while the rest of the join burst is written
+  directly (`Server/ws/voice_join.go:498` vs `:445`/`:523`/`:546`), so its
+  position on the joiner's socket is not guaranteed (~1/30 under
+  `-tags deadlock`). Documented; B2-8 / ledger candidate.
+
+## B2-2 — Protocol epoch and negotiation
+
+**Owner decision 2026-08-29: shipped slim.** The one-epoch policy below
+replaces the three-wide window (N-2..N), the `server-info` endpoint, the
+obligations table and the per-epoch fixture matrix that this section
+specified on 2026-08-28. Reason: OwnCord is alpha with one maintainer; a
+window is a standing promise that every future protocol change must keep two
+older transcripts replaying, and nothing today needs it. Each dropped piece is
+one constant or one handler away if it is ever wanted; the owner's earlier
+"execute B2 as written" decision is knowingly walked back for this step only.
+
+What shipped (branch `feat/b2-2-protocol-epoch` from `dev` `e6c6bf12`,
+pre-squash SHAs for HP-2):
+
+1. **One number, generated** — `2ac9b5ba`. `protocol/schema.json` gains
+   `"protocol_epoch": 1`; `genprotocol` validates it (>= 1) and emits
+   `const ProtocolEpoch = 1` and `export const PROTOCOL_EPOCH = 1;`.
+   `TestProtocolEpochMatchesSchema` pins the Go constant to the schema.
+2. **Handshake, server** — `77051648`. `auth` gains `epoch` (absent = 0).
+   Rule: accept `minClientEpoch <= epoch <= ProtocolEpoch`, with
+   `minClientEpoch = 0` for epoch 1 only (alpha.4 clients send no epoch).
+   Otherwise `auth_error` with `code: "protocol_epoch_unsupported"`,
+   `client_epoch`, `server_epoch`, `min_epoch`, a message naming which side
+   to update, then the same 1008 close as every handshake failure — **no
+   4426**, nothing reads close codes. `ready` is unchanged (fixtures
+   untouched). `TestAuth_ProtocolEpoch` drives absent/0/N/N+1/-1 over a real
+   socket; `TestEpoch1Fixtures` still passes unmodified, which is the
+   "old client still works" check B2-1 left open — answered as: the epoch-1
+   transcript replays verbatim, no additive tolerance needed because the
+   accepted frames did not change.
+3. **Handshake, client** — `41ef091d`. `ws.ts` sends `epoch: PROTOCOL_EPOCH`
+   (`ws-auth-frame.test.ts` extended on purpose). On the refusal with a newer
+   server, the dispatcher records the host in `ui.store.updateRequiredHost`
+   and `main.ts` mounts `UpdateNotifier` on the connect page, so the refused
+   client gets the same Update Now banner it would have had on the main page.
+   No `client_version` field: nothing reads it.
+4. **Server-first updates (was B2-3)** — `899c956f`. The signed
+   server-update manifest gains `protocol_epoch`, written by `release.yml`
+   from `jq .protocol_epoch protocol/schema.json`.
+   `Updater.ReleaseProtocolEpoch` verifies the manifest through the existing
+   minisign path and reads it; `GET /api/v1/client-update` answers 204 when
+   the release's epoch is newer than `ws.ProtocolEpoch` or the manifest does
+   not verify. Releases without a manifest are epoch 0 (advertised as
+   before), so the existing updater-contract tests did not move. Dropped
+   from the B2-3 spec: the "fall back to the newest compatible release"
+   search — the endpoint only knows the latest release, and a held-back
+   release simply waits for the server to upgrade.
+   Docs: `docs/protocol.md` § Compatibility (protocol epoch), `docs/api.md`,
+   `docs/deployment.md` § Upgrading, `protocol/README.md`, `CHANGELOG.md`
+   Unreleased.
+
+Answers to B2-1's open questions: the captured wire is **epoch 1**; "absent
+`epoch`" is the number 0 and is accepted by epoch-1 servers only.
+
+Not shipped, and why:
+
+| Spec item                          | Status  | Reason                                                                                      |
+| ---------------------------------- | ------- | ------------------------------------------------------------------------------------------- |
+| Window `max(0, N-2) <= epoch <= N` | dropped | One epoch by policy; `minClientEpoch` is the knob (`Server/ws/messages.go`)                 |
+| Close code 4426                    | dropped | Payload `code` is what the client reads; 1008 keeps auth-failure uniform                    |
+| `ready.protocol_epoch`             | dropped | Nothing consumes it; would regenerate every fixture carrying `ready`                        |
+| `client_version` in `auth`         | dropped | Diagnostics only; add with the first reader                                                 |
+| `GET /api/v1/server-info`          | dropped | B6/B8 add it when they need it; the refusal frame already carries `server_epoch`            |
+| Obligations table (E2EE blob date) | dropped | Only meaningful with a window; the blob note in `docs/protocol.md` stands as written        |
+| B2-4 compatibility matrix          | folded  | `TestAuth_ProtocolEpoch` is the accept/reject table; fixtures replay for the accepted epoch |
+| B2-3 newest-compatible fallback    | dropped | See item 4                                                                                  |
+
+## B2-3 — Server-first updates
+
+Folded into B2-2 item 4 (`899c956f`). The `v2.0.0-beta.1` tag-line note for
+`CHANGELOG.md`/`docs/contributing.md` was not written: the changelog entry is
+under `## Unreleased` and takes the tag when one is cut; the release procedure
+in `docs/contributing.md` now carries the rename step.
+
+## B2-4 — Compatibility matrix
+
+Folded into B2-2 item 2. With one accepted epoch there is no matrix: the
+table test covers absent/0/N/N+1/-1 on a real socket, and the epoch-1
+fixtures replay for the accepted epoch under the required
+`Server Build & Test` check. Exit evidence for BPR-032 and BG-07's server
+half stands on those two tests.
+
+## B2-5 — One permission predicate per security property
+
+1. **Inventory.** `git grep -nE 'HasPerm|HasAnyPerm|HasServerPerm|EffectivePerms|EffectiveChannelPerms' Server/ -- ':!*_test.go'`
+   plus every hand-rolled visibility/send check in `Server/ws` and
+   `Server/service`. Table (file, line, property it decides) goes into the
+   HP-2 scorecard.
+2. **Canonical predicates** in `Server/permissions`: value-taking functions,
+   no database access — `CanViewChannel`, `CanSendMessage`, `CanType` (defined
+   as `CanSendMessage`), `CanModerateVoice`, `CanJoinVoice`, `CanAdmitSession`
+   — each over a small struct of role bits, channel overrides, channel flags,
+   DM/block state.
+3. **Parity, then delegation.** For each predicate, a table test runs the old
+   call site's logic and the new predicate over the same inputs and asserts
+   equality; then the site delegates; then the old logic is deleted. One
+   commit per property.
+4. **Closes:** S-01 (typing delegates to `CanSendMessage`), S-12
+   (ready/refresh/ws delegate to `CanViewChannel`/`CanSendMessage`), and the
+   server half of SEC-02 (voice moderation delegates to
+   `CanModerateVoice`, which takes the channel override) — the specifics are
+   in the local report `docs/security-findings/voice-moderation-channel-overrides/`.
+5. **Invariant rule candidate.** If, after migration, no file outside
+   `Server/permissions` calls the bit helpers directly, add an
+   `authz-chokepoint` rule to `Server/invariants` that fails on the first new
+   one. If residual calls remain with a reason, record them in HP-2 and leave
+   the rule to B3 (roadmap B3 item 15).
+
+**Evidence, 2026-08-29** — branch `feat/b2-5-permission-predicates` from
+`dev` `9c9b8be6`; PR #1440 to `dev`. HP-2 question 5 cites this block.
+
+- Pre-squash SHAs, one commit per property: `00761523` (predicates +
+  `Checker` delegation), `94aba833` (send — S-01), `0271cbbe` (view /
+  session admission — S-12), `802101a0` (voice join), `aeee37e8` (voice
+  moderation — SEC-02 server half).
+- Predicates (`Server/permissions/predicates.go`), each pure over a
+  `Subject` (role bits, both override layers, channel flags, DM membership
+  and block state): `CanViewChannel`, `CanAdmitSession` (= view),
+  `CanSendMessage`, `CanType` (= send), `CanJoinVoice`, `CanModerateVoice`;
+  `Subject.Has` is the one value-taking bit predicate `Checker` and
+  `PermissionService` route through. Refusals are sentinels
+  (`ErrPermissionDenied` + bit name, `ErrArchived`, `ErrBlocked`,
+  `ErrNotDMParticipant`, `ErrNotVoiceChannel`) so each site keeps its own
+  status codes. Permission is checked before the archive flag everywhere, so
+  an unauthorized caller learns nothing from the error.
+- Parity tables (site vs predicate over the same fixture, both the
+  cached-service and bare-hub branch, every override layer):
+  `Server/service/predicate_parity_test.go` (`CanPost`, `HandleTyping`,
+  `HandleChannelFocus`) and `Server/ws/predicate_parity_internal_test.go`
+  (`channelCanSend`, `refreshChannelVisibilityCanSend`, `applySetChannelID`,
+  `channelReadAudience`, `RefreshChannelVisibility`, `channelSubject`,
+  `voiceJoinPrecheck`, `voiceStillAllowed`). Red before delegation: S-01 (19
+  typing rows) and SEC-02 (`TestVoiceMod_ChannelOverridesApply`, three deny
+  rows); every other site already agreed with its predicate.
+- Decision recorded for SEC-02's open question ("READ_MESSAGES or
+  CONNECT_VOICE?"): `CanModerateVoice` requires effective `READ_MESSAGES` +
+  `MUTE_MEMBERS` in the target's channel — a moderator acts only where they
+  can see. The base-bit `HasServerPerm` check stays as an early rejection
+  (never admits), which keeps FORBIDDEN ahead of the voice-state lookup and
+  means a channel allow cannot grant `MUTE_MEMBERS` to a base role lacking it.
+- Inventory, step 1 grep plus the hand-rolled sites, before → after:
+
+  | Site (before)                                                       | Property        | After                                         |
+  | ------------------------------------------------------------------- | --------------- | --------------------------------------------- |
+  | `permissions/checker.go` HasChannelPerm / Batch / VisibleChannelIDs | view (bit)      | `Subject.Has` / `CanViewChannel`              |
+  | `service/message_perms.go:93-100` checkSendPermission               | send            | `CanSendMessage`                              |
+  | `service/channel.go:132` HandleTyping (READ only — S-01)            | type            | `CanType`                                     |
+  | `service/channel.go:256` HandleChannelFocus                         | admit           | `CanAdmitSession`                             |
+  | `ws/serve_ready.go:149-157` channelCanSend                          | send            | `CanSendMessage`                              |
+  | `ws/hub_broadcast.go:519-523` refreshChannelVisibilityCanSend       | send            | `CanSendMessage`                              |
+  | `ws/hub_broadcast.go:265,283` channelReadAudience                   | view            | `CanViewChannel`                              |
+  | `ws/hub_broadcast.go:422-439` RefreshChannelVisibility              | view            | `CanViewChannel`                              |
+  | `ws/handlers.go:296` applySetChannelID (hasPermChecked)             | admit           | `CanAdmitSession`; helper deleted             |
+  | `ws/voice_join.go:105-151` voiceJoinPrecheck (requireChannelAccess) | join            | `CanJoinVoice`; helper deleted                |
+  | `ws/voice_join.go:594-612` handleVoiceTokenRefreshV2                | join            | `CanJoinVoice`                                |
+  | `ws/voice_moderation.go:416-433` move destination                   | join            | `CanJoinVoice`                                |
+  | `ws/hub_sweep.go:353` hasChannelPermChecked (EffectiveChannelPerms) | join (bit only) | `CanJoinVoice` (whole rule, error-aware)      |
+  | `ws/voice_moderation.go:64` voiceModTarget (HasServerPerm — SEC-02) | moderate        | `CanModerateVoice` + base-bit early rejection |
+  | `ws/deps.go` hasChannelAccess / hasChannelAccessLive                | join/admit glue | deleted (`channelSubject` + predicates)       |
+
+- Residue after migration (direct bit-helper calls outside
+  `Server/permissions`, non-test), each with its reason — so step 5's
+  condition is not met and the `authz-chokepoint` rule stays with B3 item
+  15, consistent with the 2026-08-18 measurement that dropped it (1 hit in
+  `api/`, a false positive; 30 widened, 87% legitimate):
+  - Server-scoped permissions with no channel — `HasServerPerm` in
+    `api/middleware.go:200`, `admin/middleware.go:109`, `service/emoji.go:95`,
+    `service/moderation.go:51`, `service/role.go:82`, and `HasAnyPerm`
+    (`AdminPerimeter`) in `admin/middleware.go:84`. These ARE the canonical
+    server-wide predicate; there is no channel to resolve a `Subject` for.
+  - `HasAdmin` as a fetch short-circuit (skip the override query for admins)
+    in `service/channel.go:59`, `service/message_perms.go:25`,
+    `service/permission.go:224`, `ws/serve.go:780`, `ws/serve_ready.go:169`,
+    `ws/voice_join.go:355`; as an authorization input in
+    `admin/handlers_channel_perms.go:95,325`, `admin/logstream.go:452`,
+    `api/upload_handler.go:404`, `service/role.go:104` (role hierarchy — the
+    measurement's "no `Outranks`" class).
+  - `& permissions.AllPerms` masks on admin input (`admin/handlers_channel_perms.go:131-358`,
+    `service/role.go:210,307`) — sanitisation, not a decision.
+  - `service/mentions.go:262-266,302-304` — the bulk @everyone reader walk
+    resolves the role layer per role and the user layer as a set difference;
+    the owner declined the mechanical `HasPerm` conversion on 2026-08-18
+    (memory `owncord-invariant-rule-measurement-2026-08-18`).
+  - `ws/voice_moderation.go:65` — the base-bit early rejection described
+    above.
+- Behaviour deltas beyond the three findings, all narrowing: the stale-voice
+  sweep re-runs the whole join rule (deleted/archived channel, lost DM
+  membership, new block evict too); the token refresh refuses a deleted
+  channel; the bare-hub `RefreshChannelVisibility` branch fails closed on a
+  lookup error like the service branch always did. Two fixtures needed
+  completing, assertions untouched: the deafen-race `VoiceDeps` gain a
+  `Checker`, and `TestHandleVoiceTokenRefresh_NilUser` seeds the channel it
+  refreshes.
+- Gates at `aeee37e8`, from `Server/`: four build-tag variants, `go vet`,
+  `go test -race ./...`, `go test -tags deadlock ./ws/`, `golangci-lint run`
+  — all exit 0, run before each of the five commits.
+- Codex review on #1440 (P2): `CanJoinVoice`'s DM branch returned before the
+  archive flag, while the old `voiceJoinPrecheck` refused every archived
+  channel and the admin PATCH accepts `archived` for a DM. Fixed in
+  `fdd2a3ff` (archive checked after membership and block for both kinds,
+  pinned in the predicate table), same gate green; thread resolved.
+
+## B2-6 — Safe audit coverage
+
+1. Enumerate the security-sensitive mutations: credential and TOTP changes,
+   role assignment, invite create/revoke, ban/kick/timeout, channel permission
+   edits, TLS/config changes, API-token create/revoke, plugin install,
+   account/message deletion. Cross with `git grep -n 'Audit(' Server/ -- ':!*_test.go'`.
+2. A table test in the package that owns the handlers calls each mutation with
+   a fake `db.AuditStore` and asserts an entry with the expected `action`
+   arrives. Invite create/revoke fail first (S-02); add their `Audit` calls.
+3. A second table asserts `detail` never carries a token, password, recovery
+   secret, or message body — a denylist over the recorded corpus. Fix any hit
+   at the call site, never by loosening the list.
+
+**Evidence, 2026-08-29** — branch `feat/b2-6-audit-coverage` from `dev`
+`67fdd18d`; PR #1441 to `dev`. HP-2 cites this block.
+
+- Step 1 — the mutation inventory, crossed with the 43 non-test `Audit(` call
+  sites at `67fdd18d` (`WriteAudit`, `LogAudit`, `EnqueueAudit`). "Before" is
+  whether the mutation wrote an audit row at that SHA; "table" names the B2-6
+  test that now asserts it (`TestAuditCoverage_*` in `service`, `api` and
+  `admin`, each over a fake `db.AuditStore` from `Server/db/audittest`).
+
+  | Mutation                  | Handler                                                        | Action                                                   | Before | Table                                                          |
+  | ------------------------- | -------------------------------------------------------------- | -------------------------------------------------------- | ------ | -------------------------------------------------------------- |
+  | Password change           | `service/user.go` `ChangePassword`                             | `password_change`                                        | yes    | service                                                        |
+  | Session revoke            | `service/user.go` `RevokeSession`                              | `session_revoke`                                         | yes    | service                                                        |
+  | TOTP enrol                | `api/totp_handler.go` confirm                                  | `totp_enabled`                                           | yes    | api                                                            |
+  | TOTP disable              | `api/totp_handler.go` disable                                  | `totp_disabled`                                          | yes    | api                                                            |
+  | Role assignment           | `service/moderation.go` `ChangeUserRole`                       | `role_change`                                            | yes    | service                                                        |
+  | Invite create             | `service/invite.go` `CreateInvite`                             | `invite_create`                                          | **no** | service — added (S-02)                                         |
+  | Invite revoke             | `service/invite.go` `RevokeInvite`                             | `invite_revoke`                                          | **no** | service — added (S-02); actor threaded from the handler        |
+  | Ban / unban               | `service/moderation.go` `BanUser` / `UnbanUser`                | `user_ban` / `user_unban`                                | yes    | service                                                        |
+  | Kick (sessions)           | `service/moderation.go` `ForceLogout`                          | `force_logout`                                           | yes    | service                                                        |
+  | Kick (voice)              | `ws/voice_moderation.go` `handleVoiceModKick`                  | `voice_mod_kick`                                         | yes    | existing `TestVoiceMod_Kick_RemovesFromVoiceAndNotifiesTarget` |
+  | Timeout                   | — no timeout mutation exists on the server                     | —                                                        | n/a    | —                                                              |
+  | Channel role overrides    | `admin/handlers_channel_perms.go` put / delete                 | `channel_perms_update` / `channel_perms_clear`           | yes    | admin                                                          |
+  | Channel user overrides    | `admin/handlers_channel_perms.go` put / delete (user layer)    | `channel_user_perms_update` / `channel_user_perms_clear` | yes    | admin                                                          |
+  | TLS / config change       | `admin/setup_handler.go` `setupApplyWizard`                    | `config_write` (with `server_setup`)                     | yes    | admin                                                          |
+  | Settings change           | `admin/handlers_settings.go` `handlePatchSettings`             | `setting_change`                                         | yes    | admin                                                          |
+  | API token create / revoke | `admin/handlers_tokens.go` (`token_cli.go` shares the actions) | `api_token_create` / `api_token_revoke`                  | yes    | admin                                                          |
+  | Plugin install            | `api/plugins_handler.go` `install`                             | `plugin_install`                                         | **no** | api — added                                                    |
+  | Plugin uninstall          | `api/plugins_handler.go` `uninstall`                           | `plugin_uninstall`                                       | **no** | api — added                                                    |
+  | Account deletion          | `api/auth_handler.go` delete account                           | `account_deleted`                                        | yes    | api                                                            |
+  | Message deletion          | `service/message_crud.go` `DeleteMessage`                      | `message_delete`                                         | yes    | service                                                        |
+  | Message purge             | `service/message_purge.go` `PurgeMessages`                     | `message_purge`                                          | yes    | service                                                        |
+
+  Call sites outside the security-sensitive list (channel CRUD, emoji,
+  profile, identity key, backups, login/logout/register, `ws_connect`, the
+  other three voice moderation actions) keep their existing rows and are not
+  in the table; the denylist in step 3 does not run over them.
+
+- Pre-squash SHAs, one commit per step: `ea914e66` (step 1, the table
+  above), `a06499f2` (step 2, tables + the four audit calls), `6193a709`
+  (step 3, denylist + its self-test). `474ec74c` and `cbbf41c1` are the
+  register/CHANGELOG/security.md edits, committed from outside the session
+  while the step-2 gate ran; content unchanged, kept as-is.
+- Step 2 — fixture: `Server/db/audittest` installs a `db.AuditWriter` over a
+  recording `AuditStore` via `SetAuditWriter`, so every `WriteAudit` through
+  the test's `*db.DB` lands in memory regardless of package. Tables:
+  `TestAuditCoverage_ServiceMutations` (10 rows), `TestAuditCoverage_APIMutations`
+  (3), `TestAuditCoverage_PluginLifecycle` (2, package-internal fixtures),
+  `TestAuditCoverage_AdminMutations` (8). Red at `ea914e66` + tests on exactly
+  the four rows the table predicts — `invite_create`, `invite_revoke`,
+  `plugin_install`, `plugin_uninstall` (each `no "<action>" audit entry
+recorded; recorded actions: []`); every other row green before any
+  production change. Green after the four calls. `RevokeInvite` gained the
+  actor parameter (threaded from `handleRevokeInvite`); the plugin handler
+  gained a `db.Auditor` and `admin.ActorIDFromContext` was exported so its
+  rows name the `RequireAdminAuth` principal. S-02's failure half:
+  `TestAuditCoverage_InviteRevokeFailureEmitsNothing`.
+- Step 3 — `audittest.AssertSafeDetails` runs over the union corpus each
+  table recorded: shape denylist (bcrypt/argon2 hashes, `password=` /
+  `token=` / `secret=` / recovery-code key-value leaks, `otpauth://`,
+  `Bearer `) plus every fixture secret the rows return (raw session and API
+  tokens and their hashes, passwords, TOTP secrets and codes, invite codes,
+  message bodies, the setup password). `TestAssertSafeDetails_Bites` proves
+  each class rejects and ordinary details pass. Zero hits on the corpus at
+  `6193a709`; no call site changed.
+- Gates from `Server/` before each commit: four build-tag variants, `go vet`,
+  `go test -race ./...`, `go test -tags deadlock ./ws/`, `golangci-lint run`
+  (one `contextcheck` round: hoisted `ctx` in the tables, inlined),
+  `sqlc generate` and `genprotocol` drift — all exit 0. Docs commits:
+  `npm run check:docs`, `npm run check:hygiene`.
+- Closes S-02 (register: resolved/superseded). Ledger untouched.
+- Codex review on #1441, two P2s, both fixed test-first in `aadd911b`, same
+  gate green: `CreateInvite` read the invite back on the request context, so
+  a cancel after the committed insert failed the call and skipped
+  `invite_create` — read-back and audit now run on `context.WithoutCancel`
+  (`TestCreateInvite_AuditSurvivesCanceledLookup`); and
+  `Registry.UninstallPlugin` is idempotent on an unknown id, so the handler
+  audited uninstalls that never happened — it now checks the row first and
+  answers 404 with no audit (`TestPluginsHandlerUninstallUnknownID`).
+
+## B2-7 — Trust model, absence proofs, plugin boundary (documents)
+
+Runs in parallel with B2-1 and B2-6.
+
+1. **`docs/trust-model.md`** (new; BPR-050/051). Sections: what the server can
+   read and why (text, files, metadata — delivery, search, moderation, backup);
+   what is end-to-end encrypted (voice, video, screen share; the key-holder
+   model and identity TOFU from `docs/architecture/voice-e2ee.md`; the server
+   relays what it cannot read); transport (TLS modes; desktop certificate
+   pinning; browser: publicly trusted or local-CA, no pinning); the desktop
+   preview destination policy (C-09) — what the native boundary must own:
+   resolution, redirects, destinations, time and body limits — stated as a
+   contract so B7 implements it rather than rediscovers it; at rest (SQLite
+   is not encrypted; secrets are hashed; desktop secrets in the OS keychain);
+   what the operator can and cannot do; multi-device sessions; what beta does
+   not claim. Linked from `docs/security.md`, `docs/deployment.md`,
+   `docs/quick-start.md`, `docs/README.md`. Exit evidence for BPR-051 is one
+   non-developer reading it and answering "who can read my messages?"
+   correctly — record who and when in HP-2.
+2. **Absence proofs** (BPR-040/082/083). A contract test beside
+   `Server/api/client_update.go` walks the mounted router and fails if any
+   route matches `federat|directory|discover|listing`; a table in
+   `trust-model.md` lists every outbound host the server contacts and why
+   (GitHub for updates, LiveKit download, the existing preview/GIF/YouTube
+   providers on user action) so B6's network capture has a checklist. Same
+   username on two servers = two unrelated identities is already true; state it.
+3. **Plugin boundary** (BPR-080/081, BG-17). New
+   `docs/architecture/plugins.md`, linked from `docs/architecture/server.md`
+   and `docs/README.md`: WASM is experimental and disabled by default; no
+   beta API promise; the post-beta candidate list (GIF/embed providers, slash
+   commands and automation, webhooks, optional moderation automation with
+   human authority retained, UI tabs, import/export bridges, observability
+   exporters); the core list that never moves (authentication, authorization,
+   TLS, safe fetch, quotas, E2EE, updates, deletion, recovery, moderation
+   audit). Release-notes wording for beta goes in the same file.
+4. **L-08.** B1-6 (#1418) already untracked the prebuilt example WASM,
+   ignores it in `.gitignore`, and documented the TinyGo build in
+   `Server/plugin/examples/hello/README.md` (pinned TinyGo 0.40.1; rejects
+   Go 1.26). What remains is the register's "deterministic source build
+   passes" gate, which B1-6 found blocked on a second Go SDK. B2-7 decides
+   one of two: a compile-and-compare job using a second Go SDK, or
+   re-tagging the gate to B10 with the reason recorded in HP-2. Doing
+   neither is not an option.
+
+**Evidence, 2026-08-29** — branch `feat/b2-7-trust-model` from `dev`
+`2b2d58ab`; PR #1443 to `dev`, squash-merged 2026-08-29 as `88c7a824`
+(16 commits; 11 Codex rounds, all documentation-only). HP-2 questions 3 and 6
+cite this block.
+
+- Pre-squash SHAs, one commit per item: `a4cd077b` (item 1, trust model +
+  links), `083d87d9` (item 2, absence test + outbound-host table), `cbfcf702`
+  (item 3, plugin boundary), and the commit carrying this block (item 4, the
+  L-08 decision + register row).
+- Item 1 — `docs/trust-model.md`. Sections as planned: the short answer,
+  server-readable data and why, E2EE rules with their tests, transport per
+  `tls.mode` with desktop pinning and the browser rule, the C-09 contract
+  (eight MUST clauses and the regression list, stated as requirements — the
+  private report's mechanism is not reproduced), at rest, operator can/cannot,
+  multi-device sessions, what beta does not claim. Every claim carries a
+  `path:line` or a test name, verified by reading the line at `2b2d58ab`;
+  two claims are absences with no positive test and say so (server holds no
+  room key; text is not encrypted). Linked from `docs/security.md` (new
+  §Trust model), `docs/deployment.md` §TLS Setup, `docs/quick-start.md`
+  §Client Connection Notes, `docs/README.md` (both tables).
+  - **BPR-051 exit evidence** — a non-developer reads "The short answer" and
+    answers "who can read my messages?" correctly. Reader: **\_\_\_\_**.
+    Date: **\_\_\_\_**. Answer given: **\_\_\_\_**. (Owner fills in;
+    HP-2 question 3 quotes this line.)
+- Item 2 — `Server/api/absence_contract_test.go`
+  `TestAbsenceContract_NoFederationDirectoryOrListingRoutes`. Builds the
+  production router with uploads, voice and the GIF proxy on (the bare
+  `setupRouter` config mounts only 92 routes; the full one clears the 100-route
+  floor), `chi.Walk`s the tree including the mounted `/admin` and
+  `/api/v1/admin/plugins` subrouters, and fails on `(?i)federat|directory|discover|listing`.
+  Green on `2b2d58ab` (`go test -race ./api/`). Proven able to fail by
+  temporarily mounting `r.Get("/directory", healthHandler)` under `/api/v1`
+  in `router.go`:
+
+  ```
+  absence_contract_test.go:92: routes matching "(?i)federat|directory|discover|listing" must not exist (see docs/trust-model.md, "What OwnCord does not have"):
+        GET /api/v1/directory
+  --- FAIL: TestAbsenceContract_NoFederationDirectoryOrListingRoutes (0.02s)
+  ```
+
+  `router.go` restored before the commit (`git checkout`, tree clean). A grep
+  of non-test `Server/` for `federat` is empty; every `directory|discover|listing`
+  hit is a filesystem directory, a config field or a query-result noun. The
+  outbound-host table in `trust-model.md` §"Outbound connections the server
+  makes" came from a read of every `http.Client`, `net.Dial` and URL literal
+  in non-test server code (ten rows, each with trigger, purpose, off switch
+  and anchor) and is B6's capture checklist; no analytics, crash reporting or
+  phone-home exists.
+
+- Item 3 — `docs/architecture/plugins.md`, linked from
+  `docs/architecture/README.md`, `docs/architecture/server.md`,
+  `docs/README.md`. Finding worth stating on its own: **release binaries and
+  the Docker image are built without `-tags wazero`**
+  (`.github/workflows/release.yml:261`, `:268`; `Server/Dockerfile:13`), so
+  no shipped artifact can execute a plugin regardless of `plugins.enabled`;
+  the HP-2 question 6 configuration audit (fresh, upgraded, Docker,
+  standalone, source-with-flag) is the table in that document. The beta
+  release-notes paragraph is in the same file and is to be quoted verbatim.
+- Item 4 — **L-08 decision: re-tag the build gate to B10.** The two options
+  were a compile-and-compare job with a second Go SDK, or re-tagging with the
+  reason recorded for HP-2. Re-tagged, because: (a) "compare" cannot pass in
+  principle — TinyGo 0.40.1 embeds absolute host paths and has no `-trimpath`
+  (`Server/plugin/examples/hello/README.md:70-74`), so the only honest
+  check is compile-only; (b) that compile needs TinyGo 0.40.1, a Go 1.25.x
+  SDK beside the repo's Go 1.26, and Binaryen 129 on every PR
+  (`hello/README.md:37-44`); (c) the subsystem is compiled out of every
+  shipped artifact (item 3), so a per-PR job guards nothing a release
+  contains. B10 (qualify and publish the beta) runs the compile once against
+  the release candidate or closes on the provenance record already in the
+  README. The register row now says so
+  (`docs/plans/repo-health-issue-register-2026-08-23.md` L-08, phase
+  `B1/B10`); the "no API promise" half of its closure evidence is closed by
+  item 3. HP-2 cites this paragraph as the reason.
+- Codex review of `56f23a36` (2026-08-29): two P1 and three P2, all
+  verified against the code and all accepted, fixed in one follow-up commit.
+  P1 — the short answer said "nobody in between because TLS"; it now states
+  the desktop's first-connection TOFU window and the out-of-band fingerprint
+  check that closes it. P1 — the identity-pin paragraph implied the pin
+  catches a substituted key at first contact; it now scopes TOFU to changes
+  after the first pin (`livekitE2EE.ts:611-620`) and points at the
+  verification surface. P2 — 2FA secrets: pre-encryption databases can still
+  hold plaintext (`totp_encrypt.go:109-117`), now disclosed with the
+  re-enrol remedy. P2 — the absence test pinned route vocabulary only; two
+  sibling tests now cover the WebSocket wire types in `protocol/schema.json`
+  and every `koanf` key of `config.Config` (allowlist: `plugins.directory`,
+  whose continued existence the test asserts so the walker is proven to see
+  a matching key), and the document states the bound — vocabulary at three
+  boundaries, network by the host table, semantics by review. RED for the
+  wire-type test: a temporary `directory_list` entry in the schema →
+  `WebSocket message types matching ... must not exist: directory_list`.
+  P2 — plugins.md said unknown config keys are rejected; `config.go:520`
+  warns and ignores them, which still leaves plugins off; corrected.
+- Codex re-review of `4d870ff6`: one P1 and one P2, both verified and
+  accepted. P1 — the round-1 fix had said a public-CA certificate has no
+  first-use window; on the desktop it does, because `ws_connect` installs
+  `tofu::CaptureVerifier` with no web-PKI validation in every `tls.mode`
+  (`Client/src-tauri/src/ws_proxy.rs:140-147`, `tofu.rs:72-111`; web-PKI
+  exists only in the updater's `HostScopedVerifier`). The short answer and
+  the pinning list now say the window applies to every certificate kind and
+  that a public CA closes it only for a browser. P2 — `tls.mode: off` served
+  directly is plaintext HTTP (`Server/auth/tls.go:94-95`,
+  `Server/main.go:636-639`) and nothing enforces the proxy; the transport
+  table row now states that in full.
+- Codex round 3 of `9e0593c0`: one P1 and one P2, both verified and
+  accepted. P1 — the document claimed E2EE media survives a hostile operator
+  with root; it does not on first contact: a modified server can deliver an
+  unpinned peer's first announce with keys the operator holds, the client
+  pins it (`livekitE2EE.ts:603-620`) and the key holder wraps the room key
+  to it (`:842-912`). The short answer, the operator can/cannot list, the
+  hostile-root paragraph and "What beta does not claim" now scope E2EE to a
+  reading operator, and to a modified server only for peers pinned and
+  compared out of band beforehand. P2 — plugins.md said the memory cap came
+  from the manifest or config; `platformInit` sizes the shared runtime from
+  `plugins.max_memory_mb` alone (`sandbox_wazero.go:83-102`) and the
+  manifest value is validated, never applied; the row now says so.
+- Codex round 4 of `2ade0bdb`: two P2, both accepted. The transport
+  introduction was still categorical ("everything ... is TLS"); it now
+  excludes `tls.mode: off`. The C-09 contract presented the server's
+  `ipAllowed` as the complete deny-set; it rejects loopback, private,
+  link-local, unspecified, multicast and CGN only (`host_http.go:224-249`),
+  so the clause now names the documentation and benchmarking ranges the
+  broker must add and records that widening `ipAllowed` is a separate server
+  change (plugin HTTP is off by default and the GIF proxy follows no
+  redirects, so the server-side gap is bounded).
+- Codex round 5 of `7b450b70`: one P1 and one P2, both accepted. P1 —
+  "export (via backup) any text or file" implied uploads are in the backup;
+  `handleBackup` only runs `VACUUM INTO` on the SQLite file
+  (`handlers_backup.go:76-84`, `admin_queries.go:404`), so the can/cannot
+  list and the at-rest table now say uploads are excluded and
+  `upload.storage_dir` needs its own backup; `docs/deployment.md` §Backup
+  Strategy gained the same sentence, since that is where an operator would
+  otherwise be misled. P2 — "no tracked script fetches an external host"
+  was categorical; the release workflow's AppImage step downloads
+  `appimagetool` at build time (`Client/scripts/strip-appimage-bundled-libs.sh:25-26`);
+  the claim is now scoped to scripts the server runs, with that build-time
+  fetch listed.
+- Codex round 6 of `5f4da93b`: two P1 and one P2, all accepted. P1 — the
+  quick-start cross-link still said voice and video are "not readable by the
+  operator"; it now says end-to-end encrypted with the stated limits. P1 —
+  the document claimed peers pin each device separately; pins are keyed
+  `{host}:{userId}` (`identity.ts:11-12`, `livekitE2EE.ts:521`, `:612`), one
+  per account, so a second device overwrites the pin and the first device
+  then mismatches; both places now say so. P2 — the outbound-host table
+  omitted the supervised LiveKit process's WebRTC media (UDP 50000–60000,
+  TCP 7881, `livekit_process.go:123-144`), which would have made any voice
+  call a false finding for B6; the row is added and the capture contract is
+  scoped to traffic the server initiates.
+- Codex round 7 of `6adae00a`: one P1 and one P2, both accepted. P1 —
+  the round-3 wording still claimed E2EE holds against a modified server for
+  pinned, out-of-band-verified peers; it does not, because membership is
+  server-controlled and the client accepts any first-sight identity
+  (`livekitE2EE.ts:603-638`), so a modified server can add a member it holds
+  the keys for and the key holder wraps the room key to it (`:842-912`).
+  All four places now say E2EE resists an operator who reads and is not a
+  defence against one who modifies the server; authenticated membership or
+  refusing unrecognised participants is named as the missing control and
+  listed under what beta does not claim. P2 — the supervised LiveKit
+  process's generated config sets `use_external_ip: true` unconditionally
+  (`livekit_process.go:130-133`), so STUN/metadata discovery traffic is a
+  normal part of a capture; a row is added with its conditions.
+- Codex round 8 of `20515e7f`: three P2, all accepted. The LiveKit
+  signalling row's "leave credentials empty — voice disabled" is not an off
+  switch: `applyVoiceDefaults` generates random credentials and defaults the
+  URL to loopback (`config.go:645-662`); the row now says no switch exists
+  and names `voice.enabled` as the server change that would be one. The
+  pinning bullet claimed rejection "before any application byte"; the
+  WebSocket upgrade request (no credential) reaches the peer before
+  `tofu::evaluate` (`ws_proxy.rs:148-178`), so the claim is scoped to the
+  auth frame and payloads. The identity keychain account is
+  `identity:{userId}@{host}` (`identity.ts:221-222`, `credentials.rs:214-220`),
+  not the legacy `identity:{host}`; corrected.
+- Codex round 9 of `a0ee10c0`: two P2, both accepted. The absence bullet
+  promised an off switch for every outbound row while two rows have none;
+  it now says condition-plus-control and names the two. The desktop-client
+  inventory listed LiveKit only via `/livekit/*`; local servers use
+  `direct_url` (`livekitSession.ts:711-738`) and media always goes straight
+  to the SFU's ICE endpoints (TCP 7881 / UDP 50000–60000); both listed.
+- Codex round 10 of `cdd793ab`: four P2, all accepted. Capture contract:
+  DNS to the configured resolver is now named and filtered by destination;
+  the LiveKit download row lists the GitHub asset hosts reached on redirect
+  (`http.DefaultClient`, `livekit_download.go:271-300`). plugins.md: the
+  100 ms CPU value is the final default, not a floor
+  (`sandbox_wazero.go:317-323`); `wasi_snapshot_preview1` is instantiated
+  (`:105`), so "no host imports" is scoped to the OwnCord-specific ones.
+- Codex round 11 of `308f57d8`: two P2. Clause 7 of the C-09 contract now
+  requires the broker to return the preview image as bytes or an opaque
+  handle, never a remote URL for the renderer to load (accepted). The other
+  asked the document to name which desktop fetch paths lack the destination
+  filter today; that is the private report's mechanism, so per
+  `docs/security.md` the paragraph states the public property instead — the
+  policy is applied per call site, not centralised, and not every automatic
+  fetch applies the same checks — and the reply says why. No further review
+  round requested after this commit so CI can complete on a quiet head.
+- Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
+  (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
+  them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`
+  (0 issues), `go test -race -count=1 ./api/`; the full server gate (four
+  build variants, `go vet`, `go test -race ./...`, `-tags deadlock ./ws/`,
+  `golangci-lint run`) ran before push.
+
+## B2-8 — The B2-tagged findings
+
+Lands **before** B2-2; they touch the same replay/resume files.
+
+| Finding | Area                | Public summary                                                                          |
+| ------- | ------------------- | --------------------------------------------------------------------------------------- |
+| OC-0311 | Client voice/E2EE   | A leave from another readable voice channel can mutate the active call's peer-key state |
+| OC-0315 | Client replay       | Replay-gate timestamps mix naive-UTC server values with local wall-clock parsing        |
+| OC-0316 | Server/client E2EE  | Resume restores peer public keys but not a room key rotated during the outage           |
+| OC-0317 | Client DM state     | Replay can regress a DM's `lastMessageId`                                               |
+| OC-0318 | Server plugins      | Install-time and restart-time manifest precedence differ between JSON and TOML          |
+| OC-0322 | Client connection   | TypeScript host validation accepts a hostname form the native proxy rejects             |
+| OC-0328 | Client unread state | Channel badges lack the message-id replay guard DMs already have                        |
+| OC-0337 | Server replay       | Cold-tier voice replay truncation can discard the newest events                         |
+| OC-0338 | Server plugins      | TOML manifests can omit configured memory and CPU limits                                |
+
+Run `bughunt-fix` on exactly these nine (test-first, per-file agents, one
+`ci-check` gate, one PR). A finding that turns out to need B7 (client
+platform seam) is re-tagged in the issue register with the reason, per the roadmap's
+phase execution pattern, not silently skipped.
+
+**Evidence, 2026-08-28** — branch `fix/b2-8-findings-2026-08-28` from `dev`
+`1fe3df79`; PR #1436 to `dev`.
+
+- Re-verified against HEAD first, one read-only agent per finding, before any
+  fix: all nine still open; none needs B7 — the `B2/B7` tags in the issue
+  register are scheduling hints, not a platform-seam dependency, so nothing
+  was re-tagged. Two coordinates had drifted after #1435
+  (`dispatcher.ts` 1077→1069 and 688→687); the rest were exact.
+- Two `bughunt-fix` waves so the same-run overlap guard never fired: wave 1
+  (OC-0311/0315, 0316, 0317, 0318, 0322, 0337, 0338 — seven file clusters),
+  wave 2 (OC-0328, whose fix also edits the `dispatcher.ts` call site that
+  wave 1's first cluster owned). 9/9 fixed test-first in 8 commits
+  (`a231108f`, `cd4cc850`, `7c159c11`, `bbbaeed4`, `e95c57a4`,
+  `7aeab0ed`, `073e8799`, `3e74c968`), each revert-proven by its prove
+  agent and then independently by `verify-fixes.mjs`: 8/8 PASS, red then green (4 client, 4 server), plus a hand RED/GREEN of the wazero-tagged OC-0318 parity test that the untagged run cannot exercise.
+- Test-design facts worth keeping: OC-0315's RED needs a pinned non-UTC zone
+  (Asia/Tokyo via the `renderers.test.ts` probe pattern) because
+  `Date.parse` and `parseTimestamp` agree under CI's UTC; OC-0338's pinning
+  test decodes with `BurntSushi/toml` directly from an untagged file because
+  `tryLoadPluginTOML` is `//go:build wazero`; OC-0318's default-build RED is
+  the both-manifests rejection, and its install/scan precedence parity is a
+  wazero-tagged test (CI runs `go test -tags wazero ./plugin/...`).
+- Also in this PR: the B2-1 evidence block above records pre-squash head
+  `069412db`, and ledger OC-0349 (open, low) records the `voice_join`
+  ordering hazard B2-1 found (`Server/ws/voice_join.go:498` vs
+  `:445/:523/:546`) — a behaviour change left for a later fix batch.
+- Gates at `3e74c968`: `check:server` plus `go vet -tags wazero ./...` and
+  `go test -tags wazero -count=1 ./plugin/...`, `check:client` plus
+  `npx knip` (blocking in CI since 2026-08-04 but not part of
+  `check:client`), `check:docs`, `check:hygiene` — all exit 0.
+- Codex review on #1436 (P2): OC-0337’s cap guard treated a complete window of
+  exactly `coldCap` rows as truncated and skipped the reconciliation; fixed
+  test-first in the follow-up commit by fetching `coldCap+1` rows and discarding
+  only when the extra row exists. The sibling `reconnectSelectReplay` keeps its
+  `>=` form deliberately — there the over-approximation only costs a full
+  `ready`, never data.
+- Found, not fixed (workflow tooling, not B2): the `bughunt-fix` gate list
+  still runs `npm run format:check` from `Client/` (removed in B1-3; the
+  formatting gate is root-scoped) and omits `knip`, so every run ends with a
+  phantom `gate: FAIL` — every real command passed. Recorded in the skill
+  observation log for the workflow script.
+
+## B2-9 — Security owners and acceptance tests
+
+The seven local reports in `docs/security-findings/` (gitignored, never
+committed; the directory-to-row mapping lives in its local README) and
+where each goes:
+
+| Public row | Owner phase                     | Acceptance test lives                                                                    | Lands with                                                      |
+| ---------- | ------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| S-01       | **B2**                          | landed with B2-5 (`Server/service/predicate_parity_test.go`)                             | B2-5 (PR #1440, `67fdd18d`) — done                              |
+| SEC-02     | **B2** (server half)            | landed with B2-5 (`Server/ws/voice_moderation_overrides_test.go`)                        | B2-5 (PR #1440, `67fdd18d`) — done; UI half in B5               |
+| C-09       | **B2** (contract) / B7 (client) | beside the report                                                                        | contract in B2-7 docs (PR #1443, `88c7a824`) — done; code in B7 |
+| SEC-03     | **B5** (decided 2026-08-29)     | beside the report                                                                        | B5 item 11 — see evidence below                                 |
+| SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                               | B4                                                              |
+| SEC-04     | **B3/B5**                       | no advisory — fixed by B5-2 (#1543); placeholder retired by the owner 2026-09-24         | B5 (B5-2) — done                                                |
+| OC-0324    | **B4**                          | beside the report; no advisory — the tracked ledger already carries this finding in full | B4                                                              |
+
+An acceptance test demonstrates the defect, so it is exploit detail: it stays
+local until its fix lands, then lands publicly in the same PR. The two
+advisories (SEC-01, SEC-04) are created by the owner in the GitHub UI (Security → Advisories →
+New draft), not by CLI with the report text; their IDs are recorded in
+`docs/security-findings/README.md`, which is local. Public commits, issues and
+PR bodies never name the mechanism (`docs/security.md`). **SEC-04 closed
+2026-09-24:** re-tagged to B5 (fixed by B5-2, [#1543](https://github.com/J3vb/OwnCord/pull/1543))
+and the owner retired its placeholder ID without publishing an advisory; only
+SEC-01 remains an owner advisory action.
+
+**Evidence, 2026-08-29** — branch `feat/b2-9-hp2` from `dev` `88c7a824`;
+PR #1444 to `dev`, squash-merged 2026-08-29 as `2bfc5e30`. HP-2 cites this
+block for exit-gate condition 7.
+
+- **SEC-03 verdict: B5, not B2.** Sized against the code the local report
+  cites at `88c7a824` before deciding. What the register's closure line
+  requires — streaming limits enforced before any buffering, aggregate
+  memory and concurrency budgets, timeout, cancellation, adversarial
+  boundary tests — is not one guard: it is a shared bounded reader behind
+  every automatic fetch the desktop renderer makes (four call sites across
+  three client modules, ~1.1k lines), byte-weighted budgets at more than
+  one level, cache eviction by bytes instead of entry count, plus server
+  support (bounded thumbnails, range-capable media) that does not exist.
+  A per-response cap alone is a few dozen lines but would not close the
+  row, and it would land in the per-call-site TypeScript layer that the
+  C-09 contract (`docs/trust-model.md` §"Desktop preview destination
+  policy", clause 6: "bound time, bytes and concurrency … enforced while
+  reading") exists to retire. Doing it twice is the wrong kind of small.
+  So: register row re-tagged `B2/B5` → `B5`; roadmap B5 item 11 loses its
+  "unless B2-9 already landed it" clause and names clause 6 as the shape
+  the fix takes, so B5 implements the byte accounting once, where B7's
+  broker will own it. No acceptance test lands here — it stays local
+  beside the report until the fix, per the rule above.
+- **Table closed.** B2-owned rows, all done with their public acceptance
+  tests in the tree: S-01 and the SEC-02 server half (B2-5, PR #1440 →
+  `67fdd18d`), the C-09 contract (B2-7, PR #1443 → `88c7a824`; the client
+  code is B7's). Rows that stay where the table puts them: SEC-03 → B5
+  (above), OC-0324 and SEC-01 → B4, SEC-04 → B5 (re-tagged from B6; fixed by
+  B5-2 [#1543](https://github.com/J3vb/OwnCord/pull/1543), placeholder
+  retired 2026-09-24). Exit-gate condition 7 ("no
+  unresolved B2 security advisory remains") is therefore met on the B2-owned
+  set: zero B2-owned rows open, and no advisory was needed for any of them.
+- **Advisories for the deferred rows** — created by the owner in the GitHub
+  UI (Security → Advisories → New draft), never by CLI, report text never
+  leaves the local package. IDs, once created (the local
+  `docs/security-findings/README.md` is the record of which report each maps
+  to): SEC-01 — `GHSA-____-____-____`; SEC-04 — placeholder retired
+  2026-09-24 (fixed by B5-2, [#1543](https://github.com/J3vb/OwnCord/pull/1543);
+  no advisory published).
+- Pre-squash SHAs: `355b1fc1` (records #1443's squash SHA in the B2-7
+  block), `be8454d0` (item 1, SEC-03 verdict), the commit carrying this
+  bullet (item 2, table closure); HP-2's commits are listed in its own block.
+
+`docs/plans/hp-2-scorecard-<date>.md`, in the HP-1 shape. Questions it must
+answer with commands, not assertions:
+
+1. Is the epoch wire frozen? Schema, generated constants, `auth`/`ready`/
+   `auth_error` shapes, close code — with the pre-squash SHAs of B2-1's
+   fixture commit and B2-2's negotiation commits.
+2. Does downgrade behave? The B2-4 matrix output for every epoch case.
+3. Are the trust claims true? `trust-model.md` reviewed by the owner and one
+   non-developer; every claim traced to a test or a code line.
+4. Are the E2EE membership and key-change rules stated and tested? A table of
+   rules with the test that pins each (identity TOFU, re-pin TOCTOU, rekey on
+   leave, rotation during outage from OC-0316) — existing tests inventoried,
+   missing adversarial cases added.
+5. Is there one predicate per property? The B2-5 inventory before and after:
+   direct bit-helper calls outside `Server/permissions` → 0 or a listed
+   residue with reasons.
+6. Are the deferred systems bounded? The absence test, the plugin document,
+   and the configuration audit (WASM off in fresh, upgraded, Docker and
+   standalone configurations).
+7. Is `dev` strict? The API read-back from B2-0.
+
+The owner signs. Acceptance authorises B3 and claims nothing about beta
+readiness.
+
+**Evidence, 2026-08-29** — the scorecard is
+[hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md), measured at
+`83a535c3` on `feat/b2-9-hp2` (same PR as B2-9: #1444, squash-merged
+2026-08-29 as `2bfc5e30`).
+
+- All seven questions answered with commands and their output; the B2 exit
+  gate walked, nine conditions, all met (condition 1 at the slim one-epoch
+  scope, condition 4 with one gap recorded). Every pre-squash SHA the
+  questions cite was resolved on the fetched PR refs.
+- Question 4 added three adversarial tests (`a51e2e89`,
+  `Client/tests/unit/livekit-e2ee.test.ts`): the modified-server unknown
+  member at first contact (a known gap — pinned as today's behaviour, its RED
+  against the desired rule recorded in the scorecard), the second device
+  overwriting the one-per-account pin, and the holder side of OC-0316
+  (resumed peer re-keyed with the rotated key). The last two were proven able
+  to fail by temporary code mutation, restored with `git checkout`.
+- `docs/plans/hp-2-trust-model-anchors.py` is the Question 3 check: 119
+  `path:line` anchors in `trust-model.md`, 0 unresolvable at HEAD.
+- Codex review of `f3d6103d` (P2, accepted): the checker's extension
+  allowlist skipped the `.sh` anchor — and, found on the read-back, the
+  extensionless `Server/Dockerfile:13`. The allowlist is gone (any path with
+  a `/`, or a basename with an alphabetic extension); 117 → 119 checked, 0
+  unresolvable. #1444 was merged before the fix was pushed, so it lands in
+  a follow-up PR to `dev` (cherry-pick of `ed49426c`); no re-review
+  requested.
+- Pre-squash SHAs: `a51e2e89` (Q4 tests), the commit carrying this block
+  (scorecard, this block, plan index, roadmap slice); B2-9's are in its block.
+- **Owner lines, left blank on purpose:** the BPR-051 reader line in the B2-7
+  block (Question 3 quotes it), the owner-review date in Question 3, and the
+  decision and signature lines at the top and bottom of the scorecard.
+
+## Exit gate
+
+The roadmap's seven conditions, plus two:
+
+| #   | Condition                                                                                                                             | Evidence                                   |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| 1   | Clients from epochs N, N-1, N-2 pass the matrix; N-3 fails safely and actionably; the bundled browser client matches the server epoch | B2-4 output (browser client: n/a until B8) |
+| 2   | Protocol and update-metadata changes are generated, documented, and downgrade-tested                                                  | B2-2, B2-3, drift gate                     |
+| 3   | Effective-permission and resource-existence sibling cases have parity tests                                                           | B2-5                                       |
+| 4   | Voice/video/screen E2EE membership and key-change behaviour pass adversarial tests                                                    | HP-2 question 4                            |
+| 5   | No central identity, directory, federation path, or required external service exists                                                  | B2-7 absence test + host table             |
+| 6   | WASM disabled by default; release artifacts do not imply API stability                                                                | B2-7 plugin document + config audit        |
+| 7   | No unresolved B2 security advisory remains                                                                                            | B2-9 table, B2-owned rows closed           |
+| 8   | _(added)_ Epoch-1 fixtures were captured before the first protocol change, in a separate commit                                       | B2-1 SHA precedes B2-2's                   |
+| 9   | _(added)_ Pre-squash SHAs recorded for the fixture and negotiation commits                                                            | HP-2 question 1                            |
+
+## Explicitly out of scope for B2
+
+- The BPR-033 update experience (B7). B2 ships the frame and the "no reconnect
+  loop" property only.
+- External-fetch policy beyond SEC-03's bounded reads (B5).
+- Any database, service or domain extraction (B3).
+- The client platform seam (`Client/src/platform/`, B7).
+- Re-tagging or fixing findings not tagged B2, other than as B2-8 records.
+
+## Traps carried forward
+
+- **Docker:** build context is `Server/`; compare `docker images --format '{{.Size}}'`
+  (50.1 MB), not `docker image inspect` (12.5 MB). `docker-smoke.sh` exports
+  `MSYS_NO_PATHCONV=1` itself since B2-0; ad-hoc `docker exec … /path` calls
+  from Git Bash still need it set.
+- **Squash merges hide structure.** Record `refs/pull/<n>/head` SHAs at merge
+  time for every B2 PR a hold point will review.
+- **`check:docs` counts.** `docs/plans/README.md` is watched; never write two
+  `<n> <status>` pairs on one line there unless they match the ledger.
+- **`strict: true` after B2-0:** every open PR needs "Update branch" after
+  another merges. Keep one PR in flight per hot file.
+- **Schema edits go through the `protocol-change` skill**; `make` is not on
+  PATH on Windows, so use `npm run generate` and `npm run check:server`.
+- **Never pass `-c user.email` to git.** The identity is configured.

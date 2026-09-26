@@ -13,8 +13,10 @@ How to set up the development environment and contribute to OwnCord.
 | Linux ARM64     | ✅     | ✅ (CI only) |
 
 - **Go 1.26+** (server)
-- **Node.js 24+** (client) — pinned in `Client/.nvmrc`; `engine-strict` makes a
-  wrong major a hard failure, not a warning
+- **Node.js 26.x / npm 11.x** (client) — `Client/.nvmrc` is the source of truth;
+  `engine-strict` makes a different major a hard failure at `npm ci`, not a
+  warning, and `node scripts/check-node-policy.mjs` fails the Repository
+  Hygiene job when any other statement of the version disagrees with it
 - **Rust / Cargo** (Tauri client — not needed for server-only work)
 - **Docker + Compose v2** (optional — alternative to building the server locally)
 
@@ -26,18 +28,18 @@ From the repository root. These orchestrate the per-stack commands below; they
 are a convenience, not a replacement. Nothing here needs `make`, and everything
 works the same on Windows, macOS and Linux.
 
-| Command                       | Description                                                                                       |
-| ----------------------------- | ------------------------------------------------------------------------------------------------- |
-| `npm run bootstrap`           | `npm ci` in all three package roots                                                               |
-| `npm run check`               | Everything CI gates on: server, client, Rust                                                      |
-| `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift                   |
-| `npm run check:client`        | Client only — typecheck, lint, format, unit + integration tests                                   |
-| `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                                     |
-| `npm run check:docs`          | Fail if a watched document contradicts the ledger's finding counts, or the ledger fails to render |
-| `npm run format`              | Prettier over the client, `gofmt -w` over the server                                              |
-| `npm run generate`            | Regenerate protocol constants and the sqlc query layer                                            |
-| `npm run release:preflight`   | `check` plus a client production build                                                            |
-| `node scripts/run.mjs --list` | Print the exact command every task runs, and where                                                |
+| Command                       | Description                                                                                                                   |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `npm run bootstrap`           | `npm ci` in all three package roots                                                                                           |
+| `npm run check`               | Everything CI gates on: server, client, Rust                                                                                  |
+| `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift                                               |
+| `npm run check:client`        | Client only — typecheck, lint (warnings denied, import cycles), knip, coverage-gated unit + integration tests, bundle budgets |
+| `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                                                                 |
+| `npm run check:docs`          | Fail if a watched document contradicts the ledger's finding counts, or the ledger fails to render                             |
+| `npm run format`              | Prettier over the client, `gofmt -w` over the server                                                                          |
+| `npm run generate`            | Regenerate protocol constants and the sqlc query layer                                                                        |
+| `npm run release:preflight`   | `check` plus a client production build                                                                                        |
+| `node scripts/run.mjs --list` | Print the exact command every task runs, and where                                                                            |
 
 Tools CI installs but you may not have — `golangci-lint`, `sqlc` — are skipped
 with a printed reason rather than failing the run.
@@ -78,44 +80,80 @@ next section, and using them directly is equally correct.
 
 **Build & dev**
 
-| Command               | Description                                                      |
-| --------------------- | ---------------------------------------------------------------- |
-| `npm run dev`         | Start Vite dev server with hot reload                            |
-| `npm run build`       | TypeScript check + Vite production build                         |
-| `npm run tauri dev`   | Launch Tauri app in dev mode                                     |
-| `npm run tauri build` | Build release installer (NSIS on Windows, AppImage+deb on Linux) |
+| Command                 | Description                                                               |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `npm run dev`           | Start Vite dev server with hot reload (alias for `dev:desktop`)           |
+| `npm run dev:desktop`   | Vite dev server with the Tauri overlay (`vite.config.desktop.ts`)         |
+| `npm run build`         | TypeScript check + Vite production build (alias for `build:desktop`)      |
+| `npm run build:desktop` | TypeScript check + production build of the Tauri target                   |
+| `npm run build:budget`  | Scratch `--manifest` build into `dist-budget/` (input to `check:budgets`) |
+| `npm run check:budgets` | Bundle budget gate — gzip sizes vs `bundle-budgets.json`, fails closed    |
+| `npm run tauri dev`     | Launch Tauri app in dev mode                                              |
+| `npm run tauri build`   | Build release installer (NSIS on Windows, AppImage+deb on Linux)          |
+
+**Linux native voice build prerequisite.** The Linux client links LiveKit's
+Rust SDK (`livekit`), whose `webrtc-sys` crate compiles C++ against Chromium's
+hermetic libc++ and therefore needs **clang >= 21** plus a prebuilt
+**libwebrtc** (~148 MB download, ~800 MB extracted). GCC is refused. Run the
+installer in each shell you build from, before any Linux Rust build (`cargo
+test`, `cargo clippy`, `tauri build`):
+
+```bash
+eval "$(Client/scripts/linux-webrtc-toolchain.sh)"
+```
+
+It uses `CC`/`CXX` if both are already set, else an installed `clang++-21` or
+`clang++` reporting version 21 or newer; only if neither exists does it install
+clang-21 from apt.llvm.org (once, system-wide, on the Debian/Ubuntu releases
+apt.llvm.org publishes — elsewhere install clang >= 21 yourself). It downloads
+libwebrtc once into `~/.cache/owncord-linux-webrtc`, and prints the
+environment (`CC`, `CXX`, `LK_CUSTOM_WEBRTC`) for the current shell only, so a
+new terminal needs the `eval` again. In CI it writes them to `$GITHUB_ENV`;
+ci.yml caches the libwebrtc directory, and clang is installed fresh each run.
+Windows client builds and server-only work need none of this. Design and rationale:
+[docs/architecture/voice-e2ee.md](architecture/voice-e2ee.md).
 
 **Tests**
 
-| Command                    | Description                            |
-| -------------------------- | -------------------------------------- |
-| `npm test`                 | Run all tests (vitest)                 |
-| `npm run test:unit`        | Unit tests only                        |
-| `npm run test:integration` | Integration tests only                 |
-| `npm run test:contract`    | Cross-component contract tests only    |
-| `npm run test:e2e`         | Playwright E2E (mocked Tauri)          |
-| `npm run test:e2e:native`  | Playwright E2E (real Tauri exe + CDP)  |
-| `npm run test:e2e:admin`   | Playwright E2E (real Go server + SPA)  |
-| `npm run test:e2e:prod`    | Playwright E2E (prod build)            |
-| `npm run test:e2e:ui`      | Playwright UI mode                     |
-| `npm run test:watch`       | Vitest watch mode                      |
-| `npm run test:coverage`    | Coverage report                        |
-| `npm run test:mutate`      | Stryker mutation testing               |
-| `npm run test:mutate:dry`  | Stryker dry-run (no mutations applied) |
-| `npm run test:browser`     | Vitest browser-mode tests              |
+| Command                     | Description                                |
+| --------------------------- | ------------------------------------------ |
+| `npm test`                  | Run all tests (vitest)                     |
+| `npm run test:unit`         | Unit tests only                            |
+| `npm run test:integration`  | Integration tests only                     |
+| `npm run test:contract`     | Cross-component contract tests only        |
+| `npm run test:e2e`          | Playwright E2E (mocked Tauri)              |
+| `npm run test:e2e:native`   | Playwright E2E (real Tauri exe + CDP)      |
+| `npm run test:e2e:artifact` | Installed release artifact smoke (CI only) |
+| `npm run test:e2e:admin`    | Playwright E2E (real Go server + SPA)      |
+| `npm run test:e2e:prod`     | Playwright E2E (prod build)                |
+| `npm run test:e2e:ui`       | Playwright UI mode                         |
+| `npm run test:watch`        | Vitest watch mode                          |
+| `npm run test:coverage`     | Coverage report                            |
+| `npm run test:mutate`       | Stryker mutation testing                   |
+| `npm run test:mutate:dry`   | Stryker dry-run (no mutations applied)     |
+| `npm run test:browser`      | Vitest browser-mode tests                  |
+
+PR CI runs only the narrow mutation subset (`Client/stryker.ci.config.mjs`,
+`src/lib/permissions.ts`). The full-client mutation baseline
+(`src/lib/**` + `src/stores/**`, 76 files / 12 387 mutants) is the sharded
+`mutation` job in `.github/workflows/nightly-test-depth.yml`, driven locally
+with `cd Client && STRYKER_SHARD=<livekit|audio-media|transport-auth|lib-rest|stores>
+npx stryker run stryker.shard.config.mjs`. `Client/scripts/check-mutation-shards.mjs`
+proves the shard union still equals the configured surface. The measured score
+is recorded in `docs/plans/b7-8-mutation-baseline-*.md`.
 
 **Type checking, linting & formatting**
 
-| Command                   | Description                           |
-| ------------------------- | ------------------------------------- |
-| `npm run typecheck`       | Full typecheck (all sources)          |
-| `npm run typecheck:build` | Typecheck build config only           |
-| `npm run lint`            | oxlint + ESLint check (src/)          |
-| `npm run lint:fix`        | ESLint auto-fix                       |
-| `npm run lint:ox`         | oxlint only (fast correctness checks) |
-| `npm run format`          | Prettier format (src/ + tests/)       |
-| `npm run format:check`    | Prettier check only (no writes)       |
-| `npm run knip`            | Dead code and unused export detection |
+| Command                   | Description                                                    |
+| ------------------------- | -------------------------------------------------------------- |
+| `npm run typecheck`       | Full typecheck (all sources)                                   |
+| `npm run typecheck:build` | Typecheck build config only                                    |
+| `npm run lint`            | oxlint (warnings denied) + import cycles + ESLint check (src/) |
+| `npm run lint:fix`        | ESLint auto-fix                                                |
+| `npm run lint:ox`         | oxlint only; fails on any warning under `Client/src/`          |
+| `npm run format`          | Prettier format (src/ + tests/)                                |
+| `npm run format:check`    | Prettier check only (no writes)                                |
+| `npm run knip`            | Dead code and unused export detection                          |
 
 ### Git hooks (recommended)
 
@@ -125,10 +163,10 @@ Committed hooks in `.githooks/` catch the most common CI failures locally. Enabl
 npm run hooks:install    # = git config core.hooksPath .githooks
 ```
 
-| Hook         | What it runs                                                                                                                                                      |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pre-commit` | gofmt + `go vet` (when Go files staged), oxlint + prettier + `tsc --noEmit` (when client TS staged), `sqlc-verify` / `protocol-verify` (when their inputs staged) |
-| `pre-push`   | Server build in all build-tag variants, client typecheck + type-aware ESLint. Set `OWNCORD_PREPUSH_TESTS=1` to also run `go test -race ./...`                     |
+| Hook         | What it runs                                                                                                                                                                                            |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pre-commit` | gofmt + `go vet` (when Go files staged), oxlint (warnings denied under `Client/src/`) + prettier + `tsc --noEmit` (when client TS staged), `sqlc-verify` / `protocol-verify` (when their inputs staged) |
+| `pre-push`   | Server build in all build-tag variants, client typecheck + type-aware ESLint. Set `OWNCORD_PREPUSH_TESTS=1` to also run `go test -race ./...`                                                           |
 
 Bypass with `--no-verify` or `OWNCORD_SKIP_HOOKS=1` when needed — CI still enforces everything.
 
@@ -201,17 +239,119 @@ links here rather than restating it.
 - `main` -- releases only. `dev` is merged to `main` for a release, and release
   tags are cut from `main`.
 
-`dev` is protected and PR-only: direct pushes are rejected, twelve status checks
+`dev` is protected and PR-only: direct pushes are rejected, fifteen status checks
 are required, `required_approving_review_count` is 0, and the rule is enforced
 on admins. So a PR is self-mergeable once CI is green, but no commit reaches
 `dev` without CI having run on it. Settings and rationale live in
 [`docs/plans/b0-dev-branch-protection.sh`](plans/b0-dev-branch-protection.sh).
 
-Two consequences worth knowing before you open a PR:
+Three consequences worth knowing before you open a PR:
 
 - The Docker and Tauri Full Build jobs are gated on `main` and report as
   _skipped_ on a PR into `dev`. That is expected, not a failure.
+- Which of the remaining jobs run is chosen from your diff, and **only on a PR
+  into `dev`**. A plan or prose change runs neither the server legs nor the
+  browser suites; a change to `.github/`, `scripts/`, a lockfile, or any path
+  the classifier has not been taught runs everything. The rules — and the
+  cross-boundary dependencies behind them, such as the two `docs/architecture`
+  files a Go test reads — are in
+  [`scripts/ci-select.mjs`](../scripts/ci-select.mjs), and its unit suite runs
+  in the Repository Hygiene check. To see what your branch selects:
+
+  ```bash
+  git diff --name-status -M origin/dev...HEAD > "$TMPDIR/changed-paths.txt"
+  node scripts/ci-select.mjs --paths-file "$TMPDIR/changed-paths.txt"
+  ```
+
+  A PR into `main` always runs every job, because release evidence requires each
+  required check to have concluded `success` on the tagged commit, so a
+  legitimately skipped check would block the release instead of saving anything.
+
 - Squash merge, and a conventional commit subject on the squashed commit.
+
+## Release procedure
+
+This is the one end-to-end procedure for cutting a release. It supersedes the
+older per-phase notes, which named a moving tag and line numbers. Every step
+runs on `main` or against it; the order matters, because the release workflow
+fails closed on any missing input.
+
+1. **Reconcile `main` into `dev` first (only if the last release was squashed).**
+   A release PR that was squash-merged makes `dev` diverge from `main`, so
+   `git merge-tree origin/main origin/dev` conflicts. Precedent: #1425 for
+   `v1.2.0-alpha.4`. The reconciliation landed for this release as a real merge
+   commit, `#1809`/`07a11f9a` — one commit with `main` as a parent, not a
+   squash. Do it again whenever the divergence test reports conflicts.
+
+2. **Bump the three client manifests to the release version.** They must all
+   read the same version, because `release.yml`'s `verify-versions` job compares
+   each against the tag and fails the whole run on any mismatch:
+   - `Client/src-tauri/tauri.conf.json` (`version`),
+   - `Client/package.json` (`version`),
+   - `Client/src-tauri/Cargo.toml` (`version`).
+
+   For the first beta that version is **`2.0.0-beta.1`**, so the tag is
+   `v2.0.0-beta.1`. It sits above the published `v1.2.0-alpha.*` releases, which
+   is what keeps semver auto-update working for existing servers. This is a
+   release-time edit: do not land it ahead of the tag.
+
+3. **Put the release notes under the tag heading.** `release.yml` extracts this
+   tag's notes by finding the exact `## v2.0.0-beta.1` heading and stopping at
+   the next `## `, and it aborts the publish if that section is absent or empty.
+   In the normal flow the working notes live under `## Unreleased` and you
+   rename that heading to the tag; the beta's section is already written (RE-04
+   moved it to `## v2.0.0-beta.1` in this lane), so at tag time only confirm it
+   and start a fresh `## Unreleased` for the work that follows.
+
+4. **Flip the platform table and the alpha wording.** In `docs/quick-start.md`
+   the "Server binary / Linux ARM64" row changes from "Not published yet" to the
+   tag that publishes it. Flip the project-status wording (README badge and
+   text, `SECURITY.md`, `CLAUDE.md`, `AGENTS.md`, `PRD.md`) from alpha to beta;
+   the hobby-project disclaimer stays.
+
+5. **Open the release PR from `dev` into `main`.** Every CI job runs on a PR
+   into `main` (a legitimately skipped check would block the release, so the
+   classifier is bypassed). This is the first full Tauri build of the frozen
+   tree and the point at which the workflows carried from `dev` land on `main`,
+   so it is also where their schedules first register.
+
+6. **Merge the release PR with a merge commit.** Squash-merging `dev` into
+   `main` recreates the step-1 divergence at every release; a merge commit keeps
+   `dev` and `main` sharing history. Squash stays the rule for PRs into `dev`.
+
+7. **Tag on `main`.** Cut the tag (`v2.0.0-beta.1`) on the merge commit. The
+   release ruleset forbids deleting a tag, so a failed first tag run costs a
+   `beta.2`, not a rewrite. The beta stays a **full release**, not a
+   pre-release: `gh release create` is called without `--prerelease`, so
+   existing servers' `/releases/latest` updater still sees it.
+
+8. **Approve the two `environment: release` stops.** The `release-server-docker`
+   and `publish` jobs each wait on the required reviewer; record who approved
+   and when. Nothing is pushed to `ghcr.io` or published until both pass.
+
+9. **Verify the published assets off-runner.** Run the `deployment.md`
+   [Verifying a Download](deployment.md#verifying-a-download) commands from a
+   machine that is not the runner: checksums, minisign on the server assets,
+   and `gh attestation verify` for the files and the container image.
+   Record the **timestamped-signature exception** here: the Windows client
+   installers are **unsigned** (D-08, owner decision — code signing is declined
+   for the beta), so first launch shows the SmartScreen "Windows protected your
+   PC" prompt and the quick-start's note is the user-facing half of the
+   decision. The server assets and every provenance/SBOM attestation are still
+   signed and must verify.
+
+10. **Dispatch one `upgrade-rehearsal.yml` run** (`gh workflow run
+upgrade-rehearsal.yml --ref dev`) and record its run id. The workflow is
+    inert until it reaches `main`; this is its first registered run, and the
+    public drill log needs the owner's OK before dispatch.
+
+Two facts are easy to get wrong and are recorded here deliberately, by owner
+decision: `dev`→`main` release PRs use a **merge commit** (step 6, **D-13**);
+the release is a **full release, not a pre-release** (step 7, **D-14**). The
+major-version bump changes nothing about protocol compatibility: that is keyed
+on `protocol_epoch` (`protocol/schema.json`, still **1** for this beta), never on
+the version string, so a `2.x` client speaks the same epoch as the
+`1.2.0-alpha.*` releases and the epoch-1 fixtures keep replaying.
 
 ## Branch Naming
 
@@ -252,7 +392,7 @@ and target.
 
 1. Branch from `dev`
 2. Open the PR against `dev`
-3. All twelve required checks must pass -- `dev` is protected, so a red PR cannot
+3. All fifteen required checks must pass -- `dev` is protected, so a red PR cannot
    merge
 4. Request code review
 5. Squash merge, conventional commit subject
@@ -265,29 +405,39 @@ no file paths.
 
 ## Testing
 
-The client suite enforces **70% coverage thresholds** in `vitest.config.ts`;
-the Go suite has deliberately no floor (T-2026-07-25-19) — use `make cover-all`
-to see the honest cross-package number. Follow a test-driven workflow and never
-lower a threshold to make a change fit.
+The client suite enforces a 90% statement threshold plus 70% branch, function
+and line thresholds in `vitest.config.ts`, and `Client/scripts/coverage-floor.sh`
+holds the aggregate statement coverage to the **92%** floor in
+`Client/coverage-floor.json`.
+The Go suite has floors too, since B3-6: `Server/coverage-floor.json` names an
+aggregate and a per-package floor for the five core packages (`ws`, `service`,
+`permissions`, `auth`, `db`), and `Server/scripts/coverage-floor.sh` enforces
+them on the ubuntu leg of Server Build & Test. It fails closed — an empty or
+unparseable profile exits 2 rather than passing. A PR that raises coverage
+ratchets the file in the same PR; the ratchet rule is in `Server/CLAUDE.md`.
+Use `make cover-all` to see the honest cross-package number. Follow a
+test-driven workflow and never lower a threshold to make a change fit.
 
 ### Tiers
 
-| Tier                       | Command                    | CI job                                      | Blocking |
-| -------------------------- | -------------------------- | ------------------------------------------- | -------- |
-| `Client/tests/unit`        | `npm run test:unit`        | Client Unit Tests                           | yes      |
-| `Client/tests/integration` | `npm run test:integration` | Client Unit Tests                           | yes      |
-| `Client/tests/contract`    | `npm run test:contract`    | Client Unit Tests                           | yes      |
-| `Client/tests/browser`     | `npm run test:browser`     | —                                           | no       |
-| `Client/tests/e2e`         | `npm run test:e2e`         | Client E2E (Playwright)                     | yes      |
-| `Client/tests/e2e` @parity | —                          | Client E2E (parity subset, blocking)        | yes      |
-| `Client/tests/e2e/native`  | `npm run test:e2e:native`  | —                                           | no       |
-| `Client/tests/e2e/admin`   | `npm run test:e2e:admin`   | Admin Panel E2E (real server, non-blocking) | **no**   |
-| `Server/**/*_test.go`      | `make test`                | Server Build & Test                         | yes      |
-| `Client/src-tauri`         | `cargo test --lib`         | Rust Unit Tests                             | yes      |
+| Tier                              | Command                      | CI job                                                                                               | Blocking               |
+| --------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------- |
+| `Client/tests/unit`               | `npm run test:unit`          | Client Unit Tests                                                                                    | yes                    |
+| `Client/tests/integration`        | `npm run test:integration`   | Client Unit Tests                                                                                    | yes                    |
+| `Client/tests/contract`           | `npm run test:contract`      | Client Unit Tests                                                                                    | yes                    |
+| `Client/tests/browser`            | `npm run test:browser`       | Client E2E (Playwright)                                                                              | yes                    |
+| `Client/tests/e2e`                | `npm run test:e2e`           | Client E2E (Playwright)                                                                              | yes                    |
+| `Client/tests/e2e` @parity        | —                            | Client E2E (parity subset, blocking)                                                                 | yes                    |
+| `Client/tests/e2e/native`         | `npm run test:e2e:native`    | Client E2E (Windows native)                                                                          | yes                    |
+| `Client/tests/e2e/artifact-smoke` | `npm run test:e2e:artifact`  | Desktop Artifact Smoke (`client-artifact-smoke.yml`: nightly, and before `publish` in `release.yml`) | no (gates the release) |
+| `Client/tests/e2e/admin`          | `npm run test:e2e:admin`     | Admin Panel E2E (real server)                                                                        | yes                    |
+| `Client/tests/e2e/fullstack`      | `npm run test:e2e:fullstack` | Client E2E (real server and media)                                                                   | yes                    |
+| `Server/**/*_test.go`             | `make test`                  | Server Build & Test                                                                                  | yes                    |
+| `Client/src-tauri`                | `cargo test --lib`           | Rust Unit Tests                                                                                      | yes                    |
 
-`npm test` — not `npm run test:unit` — is what CI runs and what
-`npm run check:client` invokes, so it is the command that covers
-`tests/contract`.
+`npm test` — not `npm run test:unit` — is the suite that covers
+`tests/contract`. CI runs it as `vitest run --coverage`, and
+`npm run check:client` invokes the same thing through `npm run test:coverage`.
 
 ### What belongs in `tests/contract`
 
@@ -305,9 +455,12 @@ side does not count.
 2. **Ownership is declared in the name, never in the directory.** The file name
    and the top-level `describe`/`Test` name must name the owned artifact's path.
 3. **A contract test may only live in a blocking tier.** A non-blocking job is
-   not coverage. `Admin Panel E2E` is `continue-on-error: true`
-   (`.github/workflows/ci.yml`), so it is ineligible however well it fits
-   topically — until it graduates.
+   not coverage. Blocking means the tier's CI job is in the required-contexts
+   list of `dev`'s branch protection, recorded in
+   `docs/plans/b0-dev-branch-protection.sh` — a hard-failing job in
+   `.github/workflows/ci.yml` that is missing from that list still gates
+   nothing. Every tier above is in it; `Admin Panel E2E (real server)`, the
+   real-media and the Windows native jobs graduated in #1563.
 4. `Client/` is one component: its TypeScript frontend and its thin Rust backend
    in `src-tauri/` are the same side of the boundary, so a `tests/unit` test that
    reads `src-tauri/tauri.conf.json` is an ordinary unit test. The same goes for a
@@ -349,8 +502,13 @@ closing audit findings 2026-04-07 #8 / DC-11):
   client dependencies outright.
 - **Version skew is pinned at the toolchain level** too: `Client/.nvmrc`, every
   `actions/setup-node` in CI, and an `engines` block in all three
-  `package.json` files say Node 24 — with `engine-strict=true` in each
-  package's `.npmrc`, so a wrong major fails the install instead of warning.
+  `package.json` files say Node 26 — with `engine-strict=true` in each
+  package's `.npmrc`, so a different major fails the install instead of
+  warning. Three things keep them from drifting apart: `Client/.nvmrc` is the
+  single source of truth, `node scripts/check-node-policy.mjs` fails the
+  Repository Hygiene job when any other statement disagrees with it, and the
+  `node-policy` CI job installs a wrong major on purpose to prove all three
+  roots really do refuse it.
   `Server/sqlc.version` pins sqlc, Go pins via `go.mod` (`GOTOOLCHAIN=auto`),
   and GitHub Actions are SHA-pinned with Dependabot bumping the pins. The one
   deliberate exception is the plugin toolchain: TinyGo and Binaryen are

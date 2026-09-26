@@ -11,7 +11,9 @@ import (
 // ─── Cleanup ──────────────────────────────────────────────────────────────────
 
 // TestCleanup_RemovesExpiredWindows verifies that window entries whose
-// timestamps are all older than the max window are deleted by Cleanup.
+// timestamps are all older than the entry's OWN window (item 6, round 3
+// review: Cleanup is per-key-window-aware, no shared horizon argument) are
+// deleted by Cleanup.
 func TestCleanup_RemovesExpiredWindows(t *testing.T) {
 	rl := auth.NewRateLimiter()
 
@@ -19,12 +21,10 @@ func TestCleanup_RemovesExpiredWindows(t *testing.T) {
 	shortWindow := 30 * time.Millisecond
 	rl.Allow("stale-ip", 10, shortWindow)
 
-	// Wait long enough that all timestamps fall outside the 15-minute
-	// cleanup horizon — we override by using a very short max-window for test.
+	// Wait long enough that the timestamp falls outside its own window.
 	time.Sleep(shortWindow + 10*time.Millisecond)
 
-	// Use a maxWindow shorter than 15 minutes so the test runs fast.
-	rl.Cleanup(shortWindow)
+	rl.Cleanup()
 
 	wins, _ := rl.Len()
 	if wins != 0 {
@@ -40,7 +40,7 @@ func TestCleanup_RemovesExpiredLockouts(t *testing.T) {
 	rl.Lockout(context.Background(), "stale-lockout", 20*time.Millisecond)
 	time.Sleep(40 * time.Millisecond)
 
-	rl.Cleanup(15 * time.Minute)
+	rl.Cleanup()
 
 	_, locks := rl.Len()
 	if locks != 0 {
@@ -53,11 +53,10 @@ func TestCleanup_RemovesExpiredLockouts(t *testing.T) {
 func TestCleanup_PreservesActiveWindows(t *testing.T) {
 	rl := auth.NewRateLimiter()
 
-	// Issue a request; the timestamp is recent.
+	// Issue a request; the timestamp is recent, well within its own 1h window.
 	rl.Allow("active-ip", 100, time.Hour)
 
-	// Cleanup with a 15-minute max window should keep the fresh entry.
-	rl.Cleanup(15 * time.Minute)
+	rl.Cleanup()
 
 	wins, _ := rl.Len()
 	if wins != 1 {
@@ -72,7 +71,7 @@ func TestCleanup_PreservesActiveLockouts(t *testing.T) {
 
 	rl.Lockout(context.Background(), "live-lockout", time.Hour)
 
-	rl.Cleanup(15 * time.Minute)
+	rl.Cleanup()
 
 	_, locks := rl.Len()
 	if locks != 1 {
@@ -84,8 +83,8 @@ func TestCleanup_PreservesActiveLockouts(t *testing.T) {
 // from active entries when both are present.
 //
 // Strategy: the "stale" window key gets a single request right now, then we
-// sleep until that timestamp is outside the cleanup maxWindow.  The "active"
-// key gets a new request AFTER the sleep so its timestamp is always fresh.
+// sleep until that timestamp is outside ITS OWN window.  The "active" key
+// gets a new request AFTER the sleep so its timestamp is always fresh.
 func TestCleanup_MixedEntries(t *testing.T) {
 	rl := auth.NewRateLimiter()
 	shortWindow := 30 * time.Millisecond
@@ -102,9 +101,9 @@ func TestCleanup_MixedEntries(t *testing.T) {
 	rl.Allow("active", 10, time.Hour)
 	rl.Lockout(context.Background(), "live-lock", time.Hour)
 
-	// Cleanup with shortWindow: "stale" was recorded before the cutoff, so it
-	// is evicted.  "active" was just recorded, so it is kept.
-	rl.Cleanup(shortWindow)
+	// "stale" was recorded before its own window's cutoff, so it is evicted.
+	// "active" was just recorded, well within ITS window, so it is kept.
+	rl.Cleanup()
 
 	wins, locks := rl.Len()
 	if wins != 1 {
@@ -171,7 +170,7 @@ func TestStartCleanup_RunsPeriodically(t *testing.T) {
 	stop := make(chan struct{})
 	// Run cleanup every 10 ms with a 20 ms max window so the stale entry is
 	// evicted after the first tick.
-	go rl.StartCleanup(10*time.Millisecond, shortWindow, stop)
+	go rl.StartCleanup(10*time.Millisecond, stop)
 	defer close(stop)
 
 	// Give the ticker at least two cycles to fire.
@@ -198,7 +197,7 @@ func TestStartCleanup_StopsOnSignal(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		rl.StartCleanup(10*time.Millisecond, 15*time.Minute, stop)
+		rl.StartCleanup(10*time.Millisecond, stop)
 		close(done)
 	}()
 

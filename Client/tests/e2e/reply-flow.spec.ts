@@ -2,7 +2,7 @@
  * E2E tests for the reply-to message flow.
  * Covers: click reply → see reply bar → send reply → verify.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { mockTauriFullSessionWithMessagesAndEcho, navigateToMainPage } from "./helpers";
 
 test.describe("Reply Flow", () => {

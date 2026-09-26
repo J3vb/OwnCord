@@ -1,15 +1,83 @@
 use serde::Serialize;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::time::Duration;
+use tauri::utils::{config::BundleType, platform::bundle_type};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
 use crate::tofu::{cert_store_key, load_stored_fingerprint, HostScopedVerifier};
+
+const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const UPDATE_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+// The native operation outlives a webview notifier and server switches. Keep
+// its ownership here so a remount (or another invoke) cannot start a second
+// installer against the same executable.
+static UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+// Set once the download is done and `install()` is about to be called. From
+// that point the old process still owns the single-instance mutex while
+// `ShellExecuteW` waits for the installer, so the single-instance callback must
+// stop restoring the old window for any forwarded launch (shortcut click,
+// owncord:// link, autostart): doing so puts the old UI back for the whole gap.
+static INSTALLER_LAUNCHING: AtomicBool = AtomicBool::new(false);
+
+/// True while `install()` runs (on Windows, until the process exits). Read by the
+/// single-instance callback (`lib.rs`) to ignore forwarded launches.
+pub(crate) fn installer_launching() -> bool {
+    INSTALLER_LAUNCHING.load(Ordering::SeqCst)
+}
+
+/// True for the whole download+install operation; logged by the single-instance
+/// callback so a report shows whether a forwarded launch landed mid-update.
+pub(crate) fn update_in_progress() -> bool {
+    UPDATE_IN_PROGRESS.load(Ordering::SeqCst)
+}
+
+struct InstallGuard<'a> {
+    active: &'a AtomicBool,
+    installed: bool,
+}
+
+impl<'a> InstallGuard<'a> {
+    fn acquire(active: &'a AtomicBool) -> Result<Self, String> {
+        active
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .map_err(|_| "an update is already in progress or waiting for restart".to_string())?;
+        Ok(Self {
+            active,
+            installed: false,
+        })
+    }
+
+    fn installed(mut self) {
+        // Linux returns after replacing the AppImage, before the frontend
+        // relaunches. Its running version is still old in that interval, so
+        // retain ownership until process exit even if relaunch fails.
+        self.installed = true;
+    }
+}
+
+impl Drop for InstallGuard<'_> {
+    fn drop(&mut self) {
+        if !self.installed {
+            // Every error and dropped/cancelled future can be retried.
+            self.active.store(false, Ordering::Release);
+        }
+    }
+}
 
 #[derive(Serialize)]
 pub struct UpdateCheckResult {
     pub available: bool,
     pub version: Option<String>,
     pub body: Option<String>,
+    /// True when this install kind cannot update itself at all, so
+    /// `available: false` must not be read as "you are up to date".
+    pub manual_upgrade: bool,
 }
 
 /// Download progress, emitted to the webview as `update-progress` so the banner
@@ -106,16 +174,22 @@ fn build_updater(
     // Use TOFU-pinned certificate for self-signed servers, or system certs
     // for CA-signed servers. Never blindly accept invalid certs (BUG-134).
     let tls_config = build_tls_config(app, server_url)?;
-    let mut builder = app
-        .updater_builder()
+    app.updater_builder()
         .endpoints(vec![url])
-        .map_err(|e| format!("failed to set endpoints: {e}"))?;
-    if let Some(config) = tls_config {
-        let config = Arc::new(config);
-        builder =
-            builder.configure_client(move |client| client.use_preconfigured_tls((*config).clone()));
-    }
-    builder
+        .map_err(|e| format!("failed to set endpoints: {e}"))?
+        .configure_client(move |client| {
+            // This callback applies to both metadata checks and downloads.
+            // UpdaterBuilder::timeout only bounds checks in updater 2.10.1;
+            // its returned Update has no timeout. Bound idle reads instead
+            // of total download time so slow, progressing downloads finish.
+            let client = client
+                .connect_timeout(UPDATE_CONNECT_TIMEOUT)
+                .read_timeout(UPDATE_READ_TIMEOUT);
+            match &tls_config {
+                Some(config) => client.use_preconfigured_tls(config.clone()),
+                None => client,
+            }
+        })
         .build()
         .map_err(|e| format!("failed to build updater: {e}"))
 }
@@ -133,6 +207,21 @@ fn validate_server_url(server_url: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Whether an install packaged this way can ever update itself from an OwnCord
+/// server.
+///
+/// The release publishes signed updater artifacts for the appimage and nsis
+/// targets only, and the server answers every other target with 204
+/// (`Server/updater/assets.go`, `TestClientUpdate_DebTargetNoContent`). A .deb
+/// or .rpm client therefore gets `None` from `check()` whether or not it is
+/// behind — indistinguishable from an up-to-date one. `bundle_type()` is the
+/// type the bundler patched into this binary, i.e. how it was packaged, which
+/// is what decides whether any updater artifact exists for it. An unpatched or
+/// tarball binary reports no type and stays silent rather than guessing.
+fn cannot_self_update(bundle: Option<&BundleType>) -> bool {
+    matches!(bundle, Some(BundleType::Deb | BundleType::Rpm))
 }
 
 /// Check for a client update using the given server URL to build the endpoint
@@ -155,20 +244,22 @@ pub async fn check_client_update(
             available: true,
             version: Some(u.version.clone()),
             body: Some(u.body.clone().unwrap_or_default()),
+            manual_upgrade: false,
         }),
         None => Ok(UpdateCheckResult {
             available: false,
             version: None,
             body: None,
+            manual_upgrade: cannot_self_update(bundle_type().as_ref()),
         }),
     }
 }
 
-/// Download and install a pending update, then signal the frontend.
-/// The frontend should call `relaunch()` from @tauri-apps/plugin-process
-/// after this completes.
+/// Download and install a pending update. Windows exits through its installer;
+/// on Linux/macOS the frontend must call `relaunch()` after this completes.
 #[tauri::command]
 pub async fn download_and_install_update(app: AppHandle, server_url: String) -> Result<(), String> {
+    let install_guard = InstallGuard::acquire(&UPDATE_IN_PROGRESS)?;
     let updater = build_updater(&app, &server_url)?;
 
     let update = updater
@@ -182,16 +273,41 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
             // A failed emit must never abort the install, hence `let _ =`.
             let progress_app = app.clone();
             let mut received: u64 = 0;
-            u.download_and_install(
-                move |chunk_len, total| {
-                    received += chunk_len as u64;
-                    let _ =
-                        progress_app.emit("update-progress", DownloadProgress { received, total });
-                },
-                || {},
-            )
-            .await
-            .map_err(|e| format!("download/install failed: {e}"))?;
+            let bytes = u
+                .download(
+                    move |chunk_len, total| {
+                        received += chunk_len as u64;
+                        let _ = progress_app
+                            .emit("update-progress", DownloadProgress { received, total });
+                    },
+                    || {},
+                )
+                .await
+                .map_err(|e| format!("download/install failed: {e}"))?;
+            log::info!(
+                "[update] download finished ({} bytes) for version {}",
+                bytes.len(),
+                u.version
+            );
+
+            // The split from `download_and_install` exists for this point: from
+            // here the old process may still be alive (the plugin hides the
+            // window, then blocks in ShellExecuteW on Windows) while any
+            // forwarded launch would otherwise restore the old UI. Set the flag
+            // and install.
+            INSTALLER_LAUNCHING.store(true, Ordering::SeqCst);
+            log::info!(
+                "[update] installer launching for version {} (old window will ignore forwarded launches)",
+                u.version
+            );
+            // A successful Windows install exits the process and never returns.
+            // Any return (an error, or Linux/macOS success awaiting the
+            // frontend relaunch) leaves this process serving the user, so clear
+            // the flag or every later forwarded launch is swallowed until restart.
+            let installed = u.install(&bytes);
+            INSTALLER_LAUNCHING.store(false, Ordering::SeqCst);
+            installed.map_err(|e| format!("download/install failed: {e}"))?;
+            install_guard.installed();
             Ok(())
         }
         None => Err("no update available".into()),
@@ -201,6 +317,76 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn install_guard_allows_only_one_concurrent_installer() {
+        use std::sync::{atomic::AtomicUsize, Barrier};
+
+        let active = AtomicBool::new(false);
+        let winners = AtomicUsize::new(0);
+        let started = Barrier::new(8);
+        let attempted = Barrier::new(8);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    started.wait();
+                    let guard = InstallGuard::acquire(&active).ok();
+                    if guard.is_some() {
+                        winners.fetch_add(1, Ordering::Relaxed);
+                    }
+                    // Keep the winner alive until every contender tried.
+                    attempted.wait();
+                    drop(guard);
+                });
+            }
+        });
+
+        assert_eq!(winners.load(Ordering::Relaxed), 1);
+        assert!(InstallGuard::acquire(&active).is_ok());
+    }
+
+    #[test]
+    fn failed_install_releases_guard_for_retry() {
+        let active = AtomicBool::new(false);
+        let attempt = || -> Result<(), String> {
+            let _guard = InstallGuard::acquire(&active)?;
+            Err("download failed".into())
+        };
+
+        assert_eq!(attempt(), Err("download failed".into()));
+        assert!(InstallGuard::acquire(&active).is_ok());
+    }
+
+    #[tokio::test]
+    async fn cancelled_install_releases_guard_for_retry() {
+        let active = Arc::new(AtomicBool::new(false));
+        let task_active = Arc::clone(&active);
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _guard = InstallGuard::acquire(&task_active).expect("first install");
+            started_tx.send(()).expect("signal acquired guard");
+            std::future::pending::<()>().await;
+        });
+
+        started_rx.await.expect("install started");
+        assert!(InstallGuard::acquire(&active).is_err());
+        task.abort();
+        assert!(task
+            .await
+            .expect_err("task should be cancelled")
+            .is_cancelled());
+        assert!(InstallGuard::acquire(&active).is_ok());
+    }
+
+    #[test]
+    fn installed_update_remains_guarded_until_restart() {
+        let active = AtomicBool::new(false);
+        let guard = InstallGuard::acquire(&active).expect("first install");
+
+        guard.installed();
+
+        assert!(InstallGuard::acquire(&active).is_err());
+    }
 
     #[test]
     fn endpoint_includes_target_arch_and_bundle_type_variables() {
@@ -220,6 +406,30 @@ mod tests {
             build_update_endpoint("https://chat.example.com:8443", "0.0.0"),
             "https://chat.example.com:8443/api/v1/client-update/{{target}}-{{arch}}-{{bundle_type}}/0.0.0"
         );
+    }
+
+    #[test]
+    fn package_installs_report_they_cannot_self_update() {
+        // Only these two mean "the server has no updater artifact for you"
+        // rather than "you are current".
+        assert!(cannot_self_update(Some(&BundleType::Deb)));
+        assert!(cannot_self_update(Some(&BundleType::Rpm)));
+
+        // Everything else — including the two targets the release does
+        // publish — must stay quiet, or the banner becomes noise on every
+        // install that has simply nothing new to fetch.
+        for bundle in [
+            Some(BundleType::AppImage),
+            Some(BundleType::Nsis),
+            Some(BundleType::Msi),
+            Some(BundleType::App),
+            None,
+        ] {
+            assert!(
+                !cannot_self_update(bundle.as_ref()),
+                "{bundle:?} must not ask for a manual upgrade"
+            );
+        }
     }
 
     #[test]

@@ -13,19 +13,21 @@ import (
 // ValidateUsername checks that a (pre-trimmed) username meets naming rules:
 //   - Length 2-32 runes (after trim)
 //   - Only printable characters (no control chars, no zero-width chars)
-//   - Not inside the "[deleted-…]" namespace reserved for anonymised accounts
+//   - Not inside the "[deleted-…]" / "[denied-…]" namespaces reserved for anonymised rows
 //
 // Returns a descriptive error on failure, nil on success.
 func ValidateUsername(username string) error {
 	username = strings.TrimSpace(username)
-	// db.DeleteAccount anonymises an account by renaming it to "[deleted-<id>]",
-	// and users.username is UNIQUE COLLATE NOCASE. With the namespace
-	// unreserved, anyone could rename themselves to "[deleted-<victimID>]" and
-	// make the victim's own account deletion fail on the unique index for as
-	// long as they held the name. Reserve the whole namespace, not just the
-	// exact "[deleted-<digits>]" form, so the collision-fallback names
-	// DeleteAccount generates are unavailable too.
-	if lower := strings.ToLower(username); strings.HasPrefix(lower, "[deleted-") && strings.HasSuffix(lower, "]") {
+	// Before B4-9 account deletion anonymised the row by renaming it to
+	// "[deleted-<id>]" (with randomly suffixed fallbacks on collision), and
+	// databases from that time still hold such rows; users.username is
+	// UNIQUE COLLATE NOCASE, so the whole namespace stays reserved rather
+	// than letting a registration impersonate a deleted account's marker.
+	// Erasure (db.EraseAccount) deletes the row and needs no name.
+	// "[denied-<id>]" is the same shape for a refused approval-mode
+	// application (db.DenyPendingUser), reserved for the same reason.
+	if lower := strings.ToLower(username); strings.HasSuffix(lower, "]") &&
+		(strings.HasPrefix(lower, "[deleted-") || strings.HasPrefix(lower, "[denied-")) {
 		return fmt.Errorf("username is reserved")
 	}
 	n := len([]rune(username))
@@ -62,6 +64,20 @@ func ExtractBearerToken(r *http.Request) (string, bool) {
 	return strings.TrimSpace(parts[1]), true
 }
 
+// parseTS parses s as either the SQLite space-separated format
+// ("2006-01-02 15:04:05") or the ISO-8601 UTC format ("2006-01-02T15:04:05Z"),
+// reporting ok=false if neither layout matches. Shared by IsEffectivelyBanned
+// and IsSessionExpired, which each have their own fail-safe verdict for an
+// unparseable timestamp.
+func parseTS(s string) (t time.Time, ok bool) {
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05Z"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
 // IsEffectivelyBanned reports whether u is currently banned, accounting for
 // temporary ban expiry. A user is effectively banned when:
 //   - u.Banned is true, AND
@@ -79,15 +95,13 @@ func IsEffectivelyBanned(u *db.User) bool {
 		return true
 	}
 	// Temporary ban — parse the expiry and compare to now.
-	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05Z"} {
-		t, err := time.Parse(layout, *u.BanExpires)
-		if err == nil {
-			// Ban is still active if expiry is in the future.
-			return time.Now().UTC().Before(t.UTC())
-		}
+	t, ok := parseTS(*u.BanExpires)
+	if !ok {
+		// Unparseable expiry — fail-safe: treat as still banned.
+		return true
 	}
-	// Unparseable expiry — fail-safe: treat as still banned.
-	return true
+	// Ban is still active if expiry is in the future.
+	return time.Now().UTC().Before(t.UTC())
 }
 
 // IsSessionExpired reports whether the expiresAt timestamp string represents a
@@ -95,12 +109,10 @@ func IsEffectivelyBanned(u *db.User) bool {
 // ("2006-01-02 15:04:05") and the ISO-8601 UTC format ("2006-01-02T15:04:05Z").
 // Any string that cannot be parsed is treated as expired for safety.
 func IsSessionExpired(expiresAt string) bool {
-	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05Z"} {
-		t, err := time.Parse(layout, expiresAt)
-		if err == nil {
-			return time.Now().UTC().After(t.UTC())
-		}
+	t, ok := parseTS(expiresAt)
+	if !ok {
+		// Unparseable expiry — treat as expired for safety.
+		return true
 	}
-	// Unparseable expiry — treat as expired for safety.
-	return true
+	return time.Now().UTC().After(t.UTC())
 }

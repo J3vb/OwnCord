@@ -10,12 +10,17 @@
  * A11y: role="dialog", aria-label, focus trap, return focus on close.
  */
 
+import { Disposable } from "@lib/disposable";
+import { trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { createAvatarElement, resolveDisplayName } from "@lib/avatar";
 import { roleColorVar } from "./message-list/formatting";
+import { reportEntryText } from "../i18n/reportEntry";
+import { shellText } from "../i18n/shell";
+import { requestsText } from "../i18n/requests";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,6 +51,12 @@ export interface UserProfilePopupOptions {
   readonly onMessage?: (userId: number) => void;
   /** Called when the user clicks "Call". */
   readonly onCall?: (userId: number) => void;
+  /** Called when the user clicks "Report" (B9-10); the popup closes first. */
+  readonly onReport?: (userId: number) => void;
+  /** Called once when the popup closes, however it was closed. */
+  readonly onClose?: () => void;
+  /** Where focus goes on close when the opener has left the document. */
+  readonly fallbackFocus?: () => HTMLElement | null;
 }
 
 export type UserProfilePopupComponent = MountableComponent & {
@@ -73,13 +84,18 @@ const STATUS_COLORS: Record<UserStatus, string> = {
   offline: "#747f8d",
 };
 
-const STATUS_LABELS: Record<UserStatus, string> = {
-  online: "Online",
-  idle: "Idle",
-  dnd: "Do Not Disturb",
-  invisible: "Invisible",
-  offline: "Offline",
+const STATUS_LABELS: Record<
+  UserStatus,
+  "status.online" | "status.idle" | "status.dnd" | "status.invisible" | "status.offline"
+> = {
+  online: "status.online",
+  idle: "status.idle",
+  dnd: "status.dnd",
+  invisible: "status.invisible",
+  offline: "status.offline",
 };
+
+const statusLabel = (status: UserStatus): string => shellText(STATUS_LABELS[status]);
 
 // ---------------------------------------------------------------------------
 // Component factory
@@ -88,8 +104,8 @@ const STATUS_LABELS: Record<UserStatus, string> = {
 export function createUserProfilePopup(
   options: UserProfilePopupOptions,
 ): UserProfilePopupComponent {
-  const ac = new AbortController();
-  const { signal } = ac;
+  const disposable = new Disposable();
+  const { signal } = disposable;
 
   let overlay: HTMLDivElement | null = null;
   let popup: HTMLDivElement | null = null;
@@ -100,17 +116,19 @@ export function createUserProfilePopup(
   }
 
   function close(): void {
-    if (overlay !== null) {
-      overlay.remove();
-      overlay = null;
-    }
+    if (overlay === null) return;
+    overlay.remove();
+    overlay = null;
     popup = null;
-    ac.abort();
+    disposable.destroy();
 
     // Return focus to the element that was focused before opening
-    if (previousFocus instanceof HTMLElement) {
+    if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
       previousFocus.focus();
+    } else {
+      options.fallbackFocus?.()?.focus();
     }
+    options.onClose?.();
   }
 
   /**
@@ -167,7 +185,7 @@ export function createUserProfilePopup(
     // Status dot overlay
     const statusDot = createElement("div", { class: "upp-status-dot" });
     statusDot.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
-    statusDot.title = STATUS_LABELS[user.status] ?? "Offline";
+    statusDot.title = statusLabel(user.status);
     wrapper.appendChild(statusDot);
 
     return wrapper;
@@ -188,7 +206,7 @@ export function createUserProfilePopup(
     popup = createElement("div", {
       class: "upp-popup",
       role: "dialog",
-      "aria-label": "User profile",
+      "aria-label": requestsText("profile.label"),
       "aria-modal": "true",
       tabindex: "-1",
       "data-testid": "user-profile-popup",
@@ -236,13 +254,17 @@ export function createUserProfilePopup(
     const statusLine = createElement("div", { class: "upp-status-line" });
     const statusDotInline = createElement("span", { class: "upp-status-dot-inline" });
     statusDotInline.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
-    const statusText = createElement("span", {}, STATUS_LABELS[user.status] ?? "Offline");
+    const statusText = createElement("span", {}, statusLabel(user.status));
     appendChildren(statusLine, statusDotInline, statusText);
 
     // About section (2 lines max)
     const aboutSection = createElement("div", { class: "upp-about" });
     if (user.about !== undefined && user.about !== null && user.about.length > 0) {
-      const aboutTitle = createElement("div", { class: "upp-section-title" }, "ABOUT ME");
+      const aboutTitle = createElement(
+        "div",
+        { class: "upp-section-title" },
+        requestsText("profile.about"),
+      );
       const aboutText = createElement("div", { class: "upp-about-text" }, user.about);
       appendChildren(aboutSection, aboutTitle, aboutText);
     }
@@ -250,7 +272,11 @@ export function createUserProfilePopup(
     // Join date
     const joinSection = createElement("div", { class: "upp-join-date" });
     if (user.joinDate !== undefined && user.joinDate !== null) {
-      const joinTitle = createElement("div", { class: "upp-section-title" }, "MEMBER SINCE");
+      const joinTitle = createElement(
+        "div",
+        { class: "upp-section-title" },
+        requestsText("profile.memberSince"),
+      );
       const joinText = createElement("div", { class: "upp-join-text" }, user.joinDate);
       appendChildren(joinSection, joinTitle, joinText);
     }
@@ -270,7 +296,7 @@ export function createUserProfilePopup(
         "data-testid": "upp-message-btn",
       });
       messageBtn.appendChild(createIcon("send", 16));
-      messageBtn.appendChild(document.createTextNode(" Message"));
+      messageBtn.appendChild(document.createTextNode(requestsText("profile.message")));
       messageBtn.addEventListener(
         "click",
         () => {
@@ -289,7 +315,7 @@ export function createUserProfilePopup(
         "data-testid": "upp-call-btn",
       });
       callBtn.appendChild(createIcon("phone", 16));
-      callBtn.appendChild(document.createTextNode(" Call"));
+      callBtn.appendChild(document.createTextNode(requestsText("profile.call")));
       callBtn.addEventListener(
         "click",
         () => {
@@ -299,6 +325,28 @@ export function createUserProfilePopup(
         { signal },
       );
       actions.appendChild(callBtn);
+    }
+
+    if (options.onReport !== undefined) {
+      const onReport = options.onReport;
+      const reportBtn = createElement("button", {
+        class: "upp-action-btn",
+        "data-testid": "upp-report-btn",
+        "aria-haspopup": "dialog",
+      });
+      reportBtn.appendChild(createIcon("flag", 16));
+      reportBtn.appendChild(document.createTextNode(` ${reportEntryText("report")}`));
+      reportBtn.addEventListener(
+        "click",
+        () => {
+          // Close first: focus goes back to the opener, which the report
+          // dialog then remembers as the place to return to.
+          close();
+          onReport(user.id);
+        },
+        { signal },
+      );
+      actions.appendChild(reportBtn);
     }
 
     // Assemble the card: a banner strip and a body, with the avatar straddling
@@ -363,28 +411,7 @@ export function createUserProfilePopup(
     );
 
     // Focus trap: keep focus inside popup
-    popup.addEventListener(
-      "keydown",
-      (e: KeyboardEvent) => {
-        if (e.key !== "Tab" || popup === null) return;
-        const focusable = popup.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        );
-        if (focusable.length === 0) return;
-
-        const first = focusable[0]!;
-        const last = focusable[focusable.length - 1]!;
-
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      },
-      { signal },
-    );
+    trapFocus(popup, signal);
   }
 
   function destroy(): void {

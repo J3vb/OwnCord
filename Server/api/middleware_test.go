@@ -18,6 +18,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -60,7 +61,7 @@ func TestAuthMiddleware_ValidToken(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
 	rr := httptest.NewRecorder()
@@ -84,7 +85,7 @@ func TestAuthMiddleware_TouchSessionThrottled(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 
 	const sentinel = "2000-01-01 00:00:00"
 	backdate := func() {
@@ -130,7 +131,7 @@ func TestAuthMiddleware_TouchSessionThrottled(t *testing.T) {
 func TestAuthMiddleware_MissingToken(t *testing.T) {
 	database := newAPITestDB(t)
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
@@ -150,7 +151,7 @@ func TestAuthMiddleware_ValidAPIToken(t *testing.T) {
 	}
 
 	var gotUserID int64
-	h := api.AuthMiddleware(database)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if u, ok := r.Context().Value(api.UserKey).(*db.User); ok && u != nil {
 			gotUserID = u.ID
 		}
@@ -182,7 +183,7 @@ func TestAuthMiddleware_RevokedAPIToken(t *testing.T) {
 		t.Fatalf("RevokeAPIToken: %v", err)
 	}
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token)
 	rr := httptest.NewRecorder()
 
@@ -196,7 +197,7 @@ func TestAuthMiddleware_RevokedAPIToken(t *testing.T) {
 func TestAuthMiddleware_InvalidToken(t *testing.T) {
 	database := newAPITestDB(t)
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, "notarealtoken")
 	rr := httptest.NewRecorder()
@@ -221,7 +222,7 @@ func TestAuthMiddleware_ExpiredSession(t *testing.T) {
 		uid, hash, "test", "127.0.0.1", pastTime,
 	)
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
 	rr := httptest.NewRecorder()
@@ -236,7 +237,7 @@ func TestAuthMiddleware_ExpiredSession(t *testing.T) {
 func TestAuthMiddleware_MalformedAuthHeader(t *testing.T) {
 	database := newAPITestDB(t)
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 
 	cases := []string{
 		"Token abc", // wrong scheme
@@ -287,7 +288,7 @@ func TestAuthMiddleware_DanglingRoleUnauthorized(t *testing.T) {
 		t.Fatalf("insert session: %v", err)
 	}
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
 	rr := httptest.NewRecorder()
@@ -313,7 +314,7 @@ func TestAuthMiddleware_DBErrorIsNotUnauthorized(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 
 	// Close the underlying DB so the next GetSessionByTokenHash call fails
 	// with a wrapped "database is closed" error rather than sql.ErrNoRows —
@@ -345,7 +346,7 @@ func TestRequirePermission_Allowed(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(
+	h := api.AuthMiddleware(service.NewSessionService(database))(
 		api.RequirePermission(permissions.SendMessages)(http.HandlerFunc(ok)),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -366,7 +367,7 @@ func TestRequirePermission_Forbidden(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(
+	h := api.AuthMiddleware(service.NewSessionService(database))(
 		api.RequirePermission(permissions.ManageRoles)(http.HandlerFunc(ok)),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -389,7 +390,7 @@ func TestRequirePermission_Administrator_Bypass(t *testing.T) {
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
 	// Any permission should pass for ADMINISTRATOR
-	h := api.AuthMiddleware(database)(
+	h := api.AuthMiddleware(service.NewSessionService(database))(
 		api.RequirePermission(permissions.ManageRoles)(http.HandlerFunc(ok)),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -414,7 +415,7 @@ func TestRequirePermission_MultiBitRequiresAllBits(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(
+	h := api.AuthMiddleware(service.NewSessionService(database))(
 		api.RequirePermission(permissions.SendMessages | permissions.ManageRoles)(http.HandlerFunc(ok)),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -666,7 +667,7 @@ func TestAuthMiddleware_BannedUserBlocked(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
 	rr := httptest.NewRecorder()
@@ -692,7 +693,7 @@ func TestAuthMiddleware_ExpiredBanAllowed(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
 	rr := httptest.NewRecorder()
@@ -718,7 +719,7 @@ func TestAuthMiddleware_ActiveTemporaryBanBlocked(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
 	rr := httptest.NewRecorder()
@@ -900,7 +901,7 @@ func TestMaxBodySize_PassesThrough(t *testing.T) {
 // ─── AdminIPRestrict tests ──────────────────────────────────────────────────
 
 func TestAdminIPRestrict_AllowedCIDR(t *testing.T) {
-	h := api.AdminIPRestrict([]string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
@@ -913,7 +914,7 @@ func TestAdminIPRestrict_AllowedCIDR(t *testing.T) {
 }
 
 func TestAdminIPRestrict_BlockedCIDR(t *testing.T) {
-	h := api.AdminIPRestrict([]string{"10.0.0.0/8"}, nil)(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"10.0.0.0/8"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.168.1.1:9999" // not in 10.0.0.0/8
@@ -925,8 +926,30 @@ func TestAdminIPRestrict_BlockedCIDR(t *testing.T) {
 	}
 }
 
+// TestAdminIPRestrict_BlockedNamesTheSetting pins OP-05: the refusal must name
+// server.admin_allowed_cidrs so a self-hoster on a VPS can fix it without
+// reading the source, and must not disclose the configured CIDRs or the
+// address the server saw. Without the name the operator sees a bare "access
+// denied" and has no way to tell a firewall from this setting.
+func TestAdminIPRestrict_BlockedNamesTheSetting(t *testing.T) {
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"10.0.0.0/8"}, nil)(http.HandlerFunc(ok))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.168.1.1:9999"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "server.admin_allowed_cidrs") {
+		t.Errorf("403 body does not name server.admin_allowed_cidrs: %s", body)
+	}
+	if strings.Contains(body, "192.168.1.1") || strings.Contains(body, "10.0.0.0/8") {
+		t.Errorf("403 body leaks the client address or the configured CIDRs: %s", body)
+	}
+}
+
 func TestAdminIPRestrict_EmptyAllowsAll(t *testing.T) {
-	h := api.AdminIPRestrict(nil, nil)(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", nil, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "203.0.113.1:9999"
@@ -942,7 +965,7 @@ func TestAdminIPRestrict_InvalidCIDR(t *testing.T) {
 	// Invalid CIDR should fail closed: the entry is skipped at construction,
 	// leaving a non-empty allowed list with zero parsed networks — nothing
 	// matches, so access is denied.
-	h := api.AdminIPRestrict([]string{"not-a-cidr"}, nil)(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"not-a-cidr"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
@@ -955,7 +978,7 @@ func TestAdminIPRestrict_InvalidCIDR(t *testing.T) {
 }
 
 func TestAdminIPRestrict_MultipleCIDRs(t *testing.T) {
-	h := api.AdminIPRestrict([]string{"10.0.0.0/8", "192.168.0.0/16"}, nil)(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"10.0.0.0/8", "192.168.0.0/16"}, nil)(http.HandlerFunc(ok))
 
 	// First CIDR matches.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -992,7 +1015,7 @@ func TestAdminIPRestrict_MultipleCIDRs(t *testing.T) {
 // X-Forwarded-For and checked against admin CIDRs.
 func TestAdminIPRestrict_TrustedProxy_UsesXForwardedFor(t *testing.T) {
 	// Admin allowed: only 203.0.113.0/24. Trusted proxy: 127.0.0.1.
-	h := api.AdminIPRestrict(
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs",
 		[]string{"203.0.113.0/24"},
 		[]string{"127.0.0.0/8"},
 	)(http.HandlerFunc(ok))
@@ -1021,7 +1044,7 @@ func TestAdminIPRestrict_TrustedProxy_UsesXForwardedFor(t *testing.T) {
 // TestAdminIPRestrict_TrustedProxy_UsesXRealIP verifies X-Real-IP is preferred
 // over X-Forwarded-For when both are present from a trusted proxy.
 func TestAdminIPRestrict_TrustedProxy_UsesXRealIP(t *testing.T) {
-	h := api.AdminIPRestrict(
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs",
 		[]string{"203.0.113.0/24"},
 		[]string{"127.0.0.0/8"},
 	)(http.HandlerFunc(ok))
@@ -1039,7 +1062,7 @@ func TestAdminIPRestrict_TrustedProxy_UsesXRealIP(t *testing.T) {
 // TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders verifies that proxy headers
 // are ignored when the connecting IP is NOT a trusted proxy.
 func TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders(t *testing.T) {
-	h := api.AdminIPRestrict(
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs",
 		[]string{"203.0.113.0/24"},
 		[]string{"10.0.0.0/8"}, // only 10.x is trusted
 	)(http.HandlerFunc(ok))
@@ -1059,7 +1082,7 @@ func TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders(t *testing.T) {
 // without trusted proxies, a proxy on localhost makes everything appear local.
 func TestAdminIPRestrict_ProxyCollapse_WithoutTrusted(t *testing.T) {
 	// Admin CIDR: private networks. No trusted proxies.
-	h := api.AdminIPRestrict(
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs",
 		[]string{"127.0.0.0/8", "10.0.0.0/8"},
 		nil, // no trusted proxies
 	)(http.HandlerFunc(ok))
@@ -1205,10 +1228,44 @@ CREATE TABLE IF NOT EXISTS users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
+    registration_status TEXT NOT NULL DEFAULT 'active',
     identity_public_key TEXT,
     display_name TEXT,
     about TEXT,
     custom_status TEXT
+);
+
+-- Second-factor state (migration 032): the auth service persists its
+-- partial-auth challenges, pending enrolments, replay window and recovery
+-- codes through the Store, so this schema carries the tables too.
+CREATE TABLE IF NOT EXISTS partial_auth_challenges (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device     TEXT    NOT NULL DEFAULT '',
+    ip_address TEXT    NOT NULL DEFAULT '',
+    failures   INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pending_totp_enrollments (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    secret_enc TEXT    NOT NULL,
+    expires_at TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS totp_used_codes (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash  TEXT    NOT NULL,
+    expires_at TEXT    NOT NULL,
+    PRIMARY KEY (user_id, code_hash)
+);
+
+CREATE TABLE IF NOT EXISTS totp_recovery_codes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash  TEXT    NOT NULL,
+    created_at TEXT    NOT NULL,
+    used_at    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -1219,7 +1276,22 @@ CREATE TABLE IF NOT EXISTS sessions (
     ip_address TEXT,
     created_at TEXT    NOT NULL DEFAULT (datetime('now')),
     last_used  TEXT    NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT    NOT NULL
+    expires_at TEXT    NOT NULL,
+    unseen     INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS recovery_kits (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    verifier   TEXT    NOT NULL,
+    created_at TEXT    NOT NULL,
+    used_at    TEXT
+);
+CREATE TABLE IF NOT EXISTS recovery_assists (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    verifier TEXT NOT NULL,
+    issued_by INTEGER NOT NULL,
+    verification TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
@@ -1256,7 +1328,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 INSERT OR IGNORE INTO settings (key, value) VALUES
 	('require_2fa', 'false'),
-	('registration_open', 'true');
+	('registration_mode', 'invite');
 
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1349,6 +1421,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
     target_type TEXT    NOT NULL DEFAULT '',
     target_id   INTEGER NOT NULL DEFAULT 0,
     detail      TEXT    NOT NULL DEFAULT '',
+    subject_token TEXT,
+    actor_token TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 

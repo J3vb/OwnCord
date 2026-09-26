@@ -20,6 +20,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // harvestVoiceRoleID is a non-seeded role carrying the voice bits these tests
@@ -80,7 +81,7 @@ func TestSweepStaleVoiceStates_EvictionIsScopedToCheckedChannel(t *testing.T) {
 		t.Fatalf("UpsertChannelOverride: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 2048))
 	h.clients[uid] = c
 
@@ -135,7 +136,7 @@ func TestHandleVoiceJoin_AbortedSwitchDoesNotResurrectVoiceTopicSubscription(t *
 		t.Fatalf("GetVoiceState: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	t.Cleanup(h.Stop) // ends the background leave retries the blocked delete spawns
 	lk, err := NewLiveKitClient(&config.VoiceConfig{
 		LiveKitAPIKey:    "harvest-key",
@@ -197,8 +198,8 @@ func TestHandleVoiceCameraV2_ChannelLookupErrorFailsClosed(t *testing.T) {
 		t.Fatalf("rename channels: %v", err)
 	}
 
-	d := VoiceDeps{DB: database, Permissions: permissions.NewChecker(database)}
-	res := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: uid, enabled: true}, ClientInfo{UserID: uid, VoiceChannelID: chID}, d)
+	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
+	res := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: uid, Enabled: true}, ClientInfo{UserID: uid, VoiceChannelID: chID}, d)
 
 	if res.Error == nil {
 		t.Error("voice_camera returned no error when the VoiceMaxVideo lookup failed — the cap check was silently skipped")

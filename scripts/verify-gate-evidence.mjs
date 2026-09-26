@@ -3,7 +3,7 @@
 // required check (R-09 / RL-16).
 //
 //   node scripts/verify-gate-evidence.mjs <sha>   # assert, using $GITHUB_TOKEN
-//   node scripts/verify-gate-evidence.mjs --selftest
+//   node --test scripts/verify-gate-evidence.test.mjs
 //
 // A tag push starts release.yml and nothing else. ci.yml has no `tags:` trigger,
 // so the tagged commit is only ever covered by the CI that ran when that same
@@ -15,11 +15,29 @@
 // states the rule: a step that exists only in release.yml first executes at tag
 // time, so its own bugs surface on the release. Server/scripts/docker-smoke.sh
 // is the worked example — one script, called from both workflows. Here the
-// second call site is `--selftest` in ci.yml, which exercises the decision logic
-// on fixtures every PR without needing a tag or a network call.
+// second call site is `node --test scripts/verify-gate-evidence.test.mjs` in
+// ci.yml, which exercises the decision logic on fixtures every PR without
+// needing a tag or a network call.
 //
 // The required set is read from b0-dev-branch-protection.sh rather than
 // duplicated, so pinning a new check cannot leave this gate behind.
+//
+// ── What a green required check means, and where ────────────────────────────
+// Since `dfa5f66a`, ci.yml selects which jobs run from the diff, but ONLY on a
+// pull request into `dev`. On a push to `main` and a PR into `main` the
+// selector answers `--all`, so every required context really does run there —
+// and that is what keeps this gate sound, because a tagged commit sits on
+// `main` and its latest run for each context is that full one.
+//
+// On a pull request into `dev` the same names mean less. A gated job that was
+// not selected reports `skipped`, which evaluate() already refuses. The two
+// `Server Build & Test` legs are the ones to know about: they cannot carry a
+// job-level `if:` without destroying their matrix-expanded contexts, so they
+// always run and gate their STEPS instead — and a leg that ran no step still
+// reports `success`. A green `Server Build & Test` on a dev PR therefore means
+// "the server legs were not selected for this diff" just as often as it means
+// "the server was tested". Do not extend this gate to trust dev-PR evidence
+// for those two contexts without changing how they report.
 
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -34,6 +52,25 @@ export function requiredContexts(scriptSrc) {
   const block = scriptSrc.match(/"contexts"\s*:\s*\[([^\]]*)\]/);
   if (!block) throw new Error(`no "contexts" array found in ${PROTECTION_SCRIPT}`);
   return [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+}
+
+// The identical-tree evidence model (G-03 as amended 2026-08-31) leans on
+// required_status_checks.strict: with strict off, a PR that is behind dev can
+// be squash-merged into a tree no CI run ever saw, and the PR-head evidence
+// this gate trusts stops describing what actually landed. strict: true is what
+// makes "the required matrix ran on the merged tree" a construction rather
+// than a habit — scripts/verify-integration-tree.sh spot-proves it per squash
+// SHA — so losing the flag must fail on a pull request, not in a later audit.
+export function strictUpToDate(scriptSrc) {
+  const block = scriptSrc.match(/"required_status_checks"\s*:\s*\{([\s\S]*?)\}/);
+  if (!block) {
+    throw new Error(`no "required_status_checks" object found in ${PROTECTION_SCRIPT}`);
+  }
+  const strict = block[1].match(/"strict"\s*:\s*(true|false)/);
+  if (!strict) {
+    throw new Error(`no "strict" key found under required_status_checks in ${PROTECTION_SCRIPT}`);
+  }
+  return strict[1] === "true";
 }
 
 // checkRuns is the API's check_runs array, already collected across pages.
@@ -59,7 +96,12 @@ export function evaluate(required, checkRuns) {
       continue;
     }
     // `neutral` and `skipped` are not success. A required check that skipped on
-    // the tagged commit proves nothing about it.
+    // the tagged commit proves nothing about it — which is exactly how a
+    // selection that legitimately skipped a job on a dev PR is refused here.
+    //
+    // The converse does NOT hold for every context: see the header. `success`
+    // proves the check ran only because a tagged commit lives on `main`, where
+    // the selector answers `--all`.
     if (run.conclusion !== "success") {
       problems.push(`${name}: ${run.conclusion}`);
     }
@@ -123,96 +165,13 @@ async function main() {
   console.log(`all ${required.length} required check(s) green — releasable`);
 }
 
-function selftest() {
-  let failed = 0;
-  const assert = (cond, msg) => {
-    console.log(`${cond ? "PASS" : "FAIL"} ${msg}`);
-    if (!cond) failed++;
-  };
-
-  // Parsing the real protection script, not a fixture: if its shape changes,
-  // this gate must find out on a pull request rather than at tag time.
-  const real = requiredContexts(readFileSync(join(ROOT, PROTECTION_SCRIPT), "utf8"));
-  assert(real.length >= 10, `reads the required set from ${PROTECTION_SCRIPT} (${real.length})`);
-  assert(
-    real.includes("Server Build & Test (ubuntu-latest)"),
-    "an ampersand name survives parsing",
-  );
-
-  const req = ["A", "B"];
-  const ok = (name, extra = {}) => ({
-    name,
-    status: "completed",
-    conclusion: "success",
-    ...extra,
-  });
-
-  assert(evaluate(req, [ok("A"), ok("B")]).length === 0, "all required green → releasable");
-  assert(
-    evaluate(req, [ok("A"), ok("B"), ok("Extra")]).length === 0,
-    "an unrequired extra check does not block",
-  );
-
-  const why = (runs) => evaluate(req, runs).join(" | ");
-  assert(why([ok("A")]).includes("B: never reported"), "a missing required check is caught");
-  assert(
-    why([ok("A"), { name: "B", status: "completed", conclusion: "failure" }]).includes(
-      "B: failure",
-    ),
-    "a failed required check is caught",
-  );
-  assert(
-    why([ok("A"), { name: "B", status: "in_progress", conclusion: null }]).includes("still"),
-    "a still-running required check is caught, not treated as absent",
-  );
-  assert(
-    why([ok("A"), { name: "B", status: "completed", conclusion: "skipped" }]).includes(
-      "B: skipped",
-    ),
-    "skipped is not success — a skipped required check proves nothing",
-  );
-  assert(
-    why([ok("A"), { name: "B", status: "completed", conclusion: "neutral" }]).includes(
-      "B: neutral",
-    ),
-    "neutral is not success",
-  );
-
-  // Re-runs: the latest attempt decides, in both directions.
-  assert(
-    evaluate(req, [
-      ok("A"),
-      { name: "B", status: "completed", conclusion: "failure", started_at: "2020-01-01T00:00:00Z" },
-      ok("B", { started_at: "2020-01-02T00:00:00Z" }),
-    ]).length === 0,
-    "a green re-run supersedes an earlier failure",
-  );
-  assert(
-    why([
-      ok("A"),
-      ok("B", { started_at: "2020-01-01T00:00:00Z" }),
-      { name: "B", status: "completed", conclusion: "failure", started_at: "2020-01-02T00:00:00Z" },
-    ]).includes("B: failure"),
-    "a failed re-run supersedes an earlier success",
-  );
-
-  assert(evaluate(req, []).length === 2, "a commit with no checks at all is not releasable");
-
-  console.log(
-    failed ? `\nselftest: ${failed} assertion(s) failed` : "\nselftest: all assertions pass",
-  );
-  process.exit(failed ? 1 : 0);
-}
-
 // Run only when invoked directly, so `evaluate` and `requiredContexts` can be
 // imported and exercised without the module trying to reach the network.
-// Compared against argv[1] rather than `import.meta.main`, which needs Node
-// 24.2 while package.json's engines floor is >=24 — on 24.0 it is undefined and
-// the script would silently do nothing.
+// Compared against argv[1] rather than the newer `import.meta.main`: the
+// engines floor is `^26`, where `import.meta.main` is defined, so the two are
+// equivalent here — the guard is spelled the way every other check in
+// `scripts/` spells it.
 const invokedDirectly =
   process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
-if (invokedDirectly) {
-  if (process.argv.includes("--selftest")) selftest();
-  else await main();
-}
+if (invokedDirectly) await main();

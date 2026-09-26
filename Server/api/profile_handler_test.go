@@ -553,6 +553,68 @@ func TestRevokeSession_CurrentSession(t *testing.T) {
 	}
 }
 
+// ─── DELETE /api/v1/users/me/sessions — sign-out-everywhere (B4-7) ─────────
+
+// The two-account proof the B4 exit gate asks for: signing out everywhere
+// revokes every session of the caller — the current one included — and
+// none of another account's, with the two accounts' sessions interleaved in
+// creation order.
+func TestRevokeAllSessions_OnlyTheCallersAccount(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	ctx := context.Background()
+
+	aliceTok := profileCreateToken(t, database, "alice-everywhere", 4)
+	alice, _ := database.GetUserByUsername(ctx, "alice-everywhere")
+	bobUID, _ := database.CreateUser(ctx, "bob-bystander", mustHash(t), 4)
+	if _, err := database.CreateSession(ctx, bobUID, auth.HashToken("bob-1"), "Firefox", "10.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.CreateSession(ctx, alice.ID, auth.HashToken("alice-2"), "Phone", "10.0.0.2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.CreateSession(ctx, bobUID, auth.HashToken("bob-2"), "Tablet", "10.0.0.3"); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := profileDelete(t, router, "/api/v1/users/me/sessions", aliceTok)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		SessionsRevoked int64 `json:"sessions_revoked"`
+		CurrentRevoked  bool  `json:"current_session_revoked"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.SessionsRevoked != 2 || !resp.CurrentRevoked {
+		t.Fatalf("response = %+v, want 2 sessions revoked including the current one", resp)
+	}
+
+	aliceLeft, _ := database.ListUserSessions(ctx, alice.ID)
+	if len(aliceLeft) != 0 {
+		t.Fatalf("alice still has %d session(s)", len(aliceLeft))
+	}
+	bobLeft, _ := database.ListUserSessions(ctx, bobUID)
+	if len(bobLeft) != 2 {
+		t.Fatalf("bob has %d session(s), want 2 untouched", len(bobLeft))
+	}
+
+	// The caller's own token is dead from here on.
+	if rr := getWithToken(t, router, "/api/v1/users/me/sessions", aliceTok); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked caller token answered %d, want 401", rr.Code)
+	}
+}
+
+func TestRevokeAllSessions_Unauthorized(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	if rr := profileDelete(t, router, "/api/v1/users/me/sessions", "badtoken"); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rr.Code)
+	}
+}
+
 // ─── PATCH /api/v1/users/me — identity_public_key (F3 voice E2EE TOFU) ───────
 
 func TestUpdateProfile_PublishIdentityKey(t *testing.T) {
@@ -713,5 +775,82 @@ func TestRateLimit_ProfileUpdatesDoNotConsumePasswordBudget(t *testing.T) {
 
 	if rr.Code == http.StatusTooManyRequests {
 		t.Fatal("password change 429'd with zero password attempts made — unrelated endpoints share one rate-limit bucket")
+	}
+}
+
+// B4-7's new-login signal (BG-08 server half): a session created by a login
+// is reported `unseen` until the account lists its sessions from another
+// device, and that listing is the acknowledgement — except for the caller's
+// own row, so the device that just signed in never acknowledges itself.
+func TestListSessions_NewLoginIsUnseenUntilAnotherDeviceLists(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	ctx := context.Background()
+	uid, err := database.CreateUser(ctx, "unseenuser", mustHash(t), 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	login := func(t *testing.T, device, ip string) (string, int64) {
+		t.Helper()
+		token, err := auth.GenerateToken()
+		if err != nil {
+			t.Fatalf("GenerateToken: %v", err)
+		}
+		id, err := database.CreateSession(ctx, uid, auth.HashToken(token), device, ip)
+		if err != nil {
+			t.Fatalf("CreateSession(%s): %v", device, err)
+		}
+		return token, id
+	}
+	laptopToken, laptopID := login(t, "Laptop", "10.0.0.1")
+	phoneToken, phoneID := login(t, "Phone", "10.0.0.2")
+
+	list := func(t *testing.T, token string) map[int64]map[string]any {
+		t.Helper()
+		rr := getWithToken(t, router, "/api/v1/users/me/sessions", token)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Sessions []map[string]any `json:"sessions"`
+		}
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		rows := make(map[int64]map[string]any, len(resp.Sessions))
+		for _, s := range resp.Sessions {
+			id, ok := s["id"].(float64)
+			if !ok {
+				t.Fatalf("session without a numeric id: %v", s)
+			}
+			rows[int64(id)] = s
+		}
+		return rows
+	}
+
+	// The phone, the newest login, lists first: both logins are still unseen,
+	// its own row included, and its listing acknowledges only the laptop's.
+	rows := list(t, phoneToken)
+	if rows[phoneID]["unseen"] != true || rows[laptopID]["unseen"] != true {
+		t.Errorf("first listing: phone unseen = %v, laptop unseen = %v; want both true", rows[phoneID]["unseen"], rows[laptopID]["unseen"])
+	}
+	if rows[phoneID]["is_current"] != true {
+		t.Errorf("the phone's own row is not marked current: %v", rows[phoneID])
+	}
+
+	// The laptop lists: the phone's login is the new one; the laptop's own
+	// was acknowledged by the phone's listing.
+	rows = list(t, laptopToken)
+	if rows[phoneID]["unseen"] != true {
+		t.Errorf("the phone's login was not reported unseen to the laptop: %v", rows[phoneID])
+	}
+	if rows[laptopID]["unseen"] != false {
+		t.Errorf("the laptop's own login should have been acknowledged by the phone: %v", rows[laptopID])
+	}
+
+	// That listing was the acknowledgement: nothing is new to the laptop now.
+	rows = list(t, laptopToken)
+	if rows[phoneID]["unseen"] != false {
+		t.Errorf("the laptop's listing did not acknowledge the phone's login: %v", rows[phoneID])
 	}
 }

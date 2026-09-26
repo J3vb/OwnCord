@@ -1,0 +1,10 @@
+go test fuzz v1
+int64(2147483647)
+int64(0)
+int64(0)
+int64(0)
+int64(0)
+string("voice")
+bool(true)
+bool(true)
+bool(false)

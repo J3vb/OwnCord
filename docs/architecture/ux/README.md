@@ -87,7 +87,9 @@ source of truth in `ui.store.connectionStatus`
 > `authenticating` read as `reconnecting`, since a reconnect cycle passes
 > through them). Consumers subscribe to the store instead of wiring ad-hoc
 > callbacks: the reconnect banner (`MainPage`, synced at mount and now also
-> showing "Disconnected" instead of going stale), the composer gating
+> keeping "Reconnecting…" until a dial fails, then telling a device that reports
+> no network apart from an unreachable server, both with a Retry action, instead
+> of going stale — B9-25), the composer gating
 > (`ChannelController`, "Reconnecting…" / "Not connected" per the table), and
 > the presence picker (`UserBar` — previously dead in production because
 > `SidebarArea` never passed it a `ws`; it now gates on the store and receives
@@ -115,32 +117,33 @@ source of truth in `ui.store.connectionStatus`
 ## 4. Global event → reaction map
 
 The dispatcher (`src/lib/dispatcher.ts`) is the single fan-in from the socket to
-the stores. Target: **every** inbound message type produces a defined store
+the stores: it holds every `ws.on(...)` registration, and the handler bodies it
+calls live in `src/features/*/wsHandlers.ts`. Target: **every** inbound message type produces a defined store
 mutation _and_, where user-visible, a defined UI reaction. The per-flow docs
 detail each; this is the index.
 
-| Inbound event                                                     | Store effect                                       | Target UI reaction                                                                                                |
-| ----------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `auth_ok`                                                         | `auth.setAuth`                                     | Advance handshake → ready overlay                                                                                 |
-| `auth_error`                                                      | `ui.setTransientError` + `auth.clearAuth`          | Return to connect page with the reason shown                                                                      |
-| `ready`                                                           | bulk-load channels/roles/members/voice/dm          | Render main view; resolve the connected overlay                                                                   |
-| `chat_message`                                                    | `messages.addMessage` (+ unread/DM/notify)         | Append; reconcile a pending optimistic row if it's our echo                                                       |
-| `chat_send_ok`                                                    | `messages.confirmSend`                             | Mark the optimistic row **sent** (see gap in [messaging.md](messaging.md))                                        |
-| `chat_edited` / `chat_deleted`                                    | `messages.editMessage` / `deleteMessage`           | In-place edit / tombstone                                                                                         |
-| `chat_bulk_deleted`                                               | `messages.bulkDeleteMessages`                      | Remove every purged row in one pass                                                                               |
-| `reaction_update`                                                 | `messages.updateReaction`                          | Toggle the pill + count, reflect `me`                                                                             |
-| `typing`                                                          | `members.setTyping` (5 s auto-clear)               | Typing indicator                                                                                                  |
-| `presence` / `member_update` / `user_update`                      | `members.*`                                        | Live member-list update                                                                                           |
-| `member_join` / `member_leave` / `member_ban`                     | `members.add/remove`                               | Member-list add/remove                                                                                            |
-| `channel_create` / `channel_update` / `channel_delete`            | `channels.*`                                       | Sidebar update; redirect if the active channel was deleted                                                        |
-| `roles_update`                                                    | `channels.setRoles`                                | Refresh name colors + permission-gated affordances                                                                |
-| `emoji_update`                                                    | `emoji.setCustomEmoji`                             | Refresh picker, autocomplete, and rendered custom emoji                                                           |
-| `voice_state` / `voice_leave` / `voice_config` / `voice_speakers` | `voice.*`                                          | Voice roster + speaking rings                                                                                     |
-| `voice_moved` / `voice_disconnected`                              | `voice.*` + `livekitSession`                       | Follow a mod move by rejoining the new channel / tear down after a mod kick with an error toast naming the reason |
-| `voice_token` / `voice_e2ee_*`                                    | `livekitSession.*`                                 | Drive the voice-join + securing indicators                                                                        |
-| `dm_channel_open` / `dm_channel_close`                            | `dm.*`                                             | DM list add/remove                                                                                                |
-| `server_restart`                                                  | `ui.setTransientError`                             | Restart banner with countdown                                                                                     |
-| `error`                                                           | `ui.setTransientError` (+ `clearAuth` on `BANNED`) | Map the code → the reaction in §5                                                                                 |
+| Inbound event                                          | Store effect                                                                                      | Target UI reaction                                                                                                |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `auth_ok`                                              | `auth.setAuth`                                                                                    | Advance handshake → ready overlay                                                                                 |
+| `auth_error`                                           | `ui.setTransientError` + `auth.clearAuth`                                                         | Return to connect page with the reason shown                                                                      |
+| `ready`                                                | bulk-load channels/roles/members/voice/dm                                                         | Render main view; resolve the connected overlay                                                                   |
+| `chat_message`                                         | `messages.addMessage` (+ unread/DM/notify)                                                        | Append; reconcile a pending optimistic row if it's our echo                                                       |
+| `chat_send_ok`                                         | `messages.confirmSend`                                                                            | Mark the optimistic row **sent** (see gap in [messaging.md](messaging.md))                                        |
+| `chat_edited` / `chat_deleted`                         | `messages.editMessage` / `deleteMessage`                                                          | In-place edit / tombstone                                                                                         |
+| `chat_bulk_deleted`                                    | `messages.bulkDeleteMessages`                                                                     | Remove every purged row in one pass                                                                               |
+| `reaction_update`                                      | `messages.updateReaction`                                                                         | Toggle the pill + count, reflect `me`                                                                             |
+| `typing`                                               | `members.setTyping` (5 s auto-clear)                                                              | Typing indicator                                                                                                  |
+| `presence` / `member_update` / `user_update`           | `members.*`                                                                                       | Live member-list update                                                                                           |
+| `member_join` / `member_ban`                           | `members.add/remove`                                                                              | Member-list add/remove                                                                                            |
+| `channel_create` / `channel_update` / `channel_delete` | `channels.*`                                                                                      | Sidebar update; redirect if the active channel was deleted                                                        |
+| `roles_update`                                         | `channels.setRoles`                                                                               | Refresh name colors + permission-gated affordances                                                                |
+| `emoji_update`                                         | `emoji.setCustomEmoji`                                                                            | Refresh picker, autocomplete, and rendered custom emoji                                                           |
+| `voice_state` / `voice_leave` / `voice_config`         | `voice.*`                                                                                         | Voice roster (speaking rings come from LiveKit's ActiveSpeakers, not the wire)                                    |
+| `voice_moved` / `voice_disconnected`                   | `voice.*` + `livekitSession`                                                                      | Follow a mod move by rejoining the new channel / tear down after a mod kick with an error toast naming the reason |
+| `voice_token` / `voice_e2ee_*`                         | `livekitSession.*`                                                                                | Drive the voice-join + securing indicators                                                                        |
+| `dm_channel_open` / `dm_channel_close`                 | `dm.*`                                                                                            | DM list add/remove                                                                                                |
+| `server_restart`                                       | `ui.setTransientError`                                                                            | Restart banner with countdown                                                                                     |
+| `error`                                                | `ui.setTransientError` (+ `clearAuth` on `BANNED`; `ui.setSessionReplaced` on `SESSION_REPLACED`) | Map the code → the reaction in §5                                                                                 |
 
 `call_incoming` / `call_declined` are deliberately _not_ routed through the
 dispatcher: `MainPage.ts` subscribes to them directly (page-scoped listeners)
@@ -158,9 +161,11 @@ and drives the ring state machine in `lib/call-ring.ts` +
 
 ## 5. Error & permission reaction matrix
 
-One canonical reaction per failure class, applied everywhere. Today error
-handling is per-call-site with no shared mapper (`doFetch()` in `lib/api.ts` centralizes only
-401); this matrix is the target contract.
+One canonical reaction per failure class, applied everywhere. Today the
+reaction is per-call-site (`doFetch()` in `lib/api.ts` centralizes only 401);
+only the displayed text is shared: `serverErrorText()`/`errorText()` in
+`lib/api.ts` map a server error code to catalog text and show the server
+message only when the code has no mapping. This matrix is the target contract.
 
 | Class                            | Source                      | Target reaction                                                                                                                                                                                                                                                  |
 | -------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -1,0 +1,96 @@
+# Desktop artifact smoke (B7-17). INSTALLS each of the four shipped desktop
+# artifacts — Windows x64/ARM64 NSIS, Linux x64/ARM64 AppImage (+ .deb) — on
+# its own architecture and drives the real UI through the owner journey:
+# install, boot, connect, use media, recover an account; at release time also
+# update from the previous release and roll back to it. A compile is not a
+# smoke: the release build is never executed anywhere else.
+#
+# Two callers, one harness (Client/tests/e2e/artifact-smoke, driven by
+# support/artifact-app.ts):
+#
+#   * release.yml calls this with `release-artifacts: true` BEFORE `publish`,
+#     on the signed bundles its build jobs uploaded — the files that ship.
+#     Only that path runs update and rollback, because only it has artifacts
+#     signed with the production updater key.
+#   * The nightly schedule (and workflow_dispatch) builds the four bundles
+#     itself, UNSIGNED — no signing secret, no generated key — and smokes
+#     install, boot, connect, media and recovery, so the harness and the
+#     shared staging script do not rot between releases.
+#
+# The schedule only fires from the default branch (main); until this file is
+# carried there it runs only when dispatched.
+#
+# No job here is a required status context, for the reason
+# nightly-docker-smoke.yml's header gives: a scheduled run lands its check on
+# the default branch's tip, and verify-gate-evidence.mjs does not count a
+# `skipped` or red context there as success.
+#
+# No cache is restored anywhere in this file: it runs inside the tag-triggered
+# release, which must not consume a cache an attacker could have poisoned.
+name: Desktop Artifact Smoke
+
+on:
+  schedule:
+    # After upgrade-rehearsal.yml (04:00) so they do not compete for runners.
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release-artifacts:
+        description: "Smoke the caller's uploaded release bundles, including update and rollback"
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  # One call per target, each building (nightly) and smoking its own bundle:
+  # a matrix leg's jobs need only each other, so one target's failed build
+  # skips that target's smoke and no other.
+  target:
+    name: ${{ matrix.label }} # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            os: windows-latest
+            platform: windows
+            arch: x64
+            bundles: nsis
+            artifact: windows-release-assets
+            previous: "*_x64-setup.exe"
+          - label: Windows ARM64, native windows-11-arm
+            os: windows-11-arm
+            platform: windows
+            arch: arm64
+            bundles: nsis
+            artifact: windows-arm64-release-assets
+            previous: "*_arm64-setup.exe"
+          - label: Linux x64
+            os: ubuntu-22.04
+            platform: linux
+            arch: x64
+            bundles: "appimage,deb"
+            artifact: linux-release-assets
+            previous: "*_amd64.AppImage"
+          - label: Linux ARM64
+            os: ubuntu-22.04-arm
+            platform: linux
+            arch: arm64
+            bundles: "appimage,deb"
+            artifact: linux-arm64-release-assets
+            previous: "*_aarch64.AppImage"
+    uses: ./.github/workflows/client-artifact-smoke-target.yml
+    with:
+      os: ${{ matrix.os }}
+      platform: ${{ matrix.platform }}
+      arch: ${{ matrix.arch }}
+      bundles: ${{ matrix.bundles }}
+      artifact: ${{ matrix.artifact }}
+      previous: ${{ matrix.previous }}
+      # Unset on schedule and workflow_dispatch; `== true` makes that false.
+      release-artifacts: ${{ inputs.release-artifacts == true }}
+    permissions:
+      contents: read

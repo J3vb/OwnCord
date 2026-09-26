@@ -32,6 +32,7 @@ vi.mock("../../src/stores/ui.store", async () => {
 function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPageCallbacks {
   return {
     onLogin: vi.fn().mockResolvedValue(undefined),
+    onLoginWithSavedPassword: vi.fn().mockResolvedValue(undefined),
     onRegister: vi.fn().mockResolvedValue(undefined),
     onTotpSubmit: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -39,6 +40,14 @@ function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPa
 }
 
 const testProfiles: SimpleProfile[] = [{ name: "Test Server", host: "localhost:8443" }];
+
+/** What Chromium does to a focused control once it is disabled; jsdom does not. */
+function dropFocusToBody(): void {
+  const sink = document.createElement("button");
+  document.body.appendChild(sink);
+  sink.focus();
+  sink.remove();
+}
 
 describe("ConnectPage", () => {
   let container: HTMLDivElement;
@@ -93,6 +102,28 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("does not throw an unhandled rejection when loadCredential rejects on a server click", async () => {
+    // ServerPanel's click handler fires an unawaited loadCredential() to
+    // auto-fill the password box; a rejection there must be caught, not left
+    // to become an unhandled rejection.
+    mockLoadCredential.mockRejectedValue(new Error("keychain locked"));
+
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    const serverItem = container.querySelector(".server-item") as HTMLElement;
+    serverItem.click();
+
+    await vi.waitFor(() => {
+      expect(mockLoadCredential).toHaveBeenCalledWith("localhost:8443");
+    });
+    // Give the rejected promise's catch handler a turn to run before the
+    // test ends, or an unhandled-rejection would surface after this test.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    page.destroy?.();
+  });
+
   it("shows error when submitting empty form", async () => {
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
@@ -133,6 +164,656 @@ describe("ConnectPage", () => {
       expect(errorBanner!.classList.contains("visible")).toBe(true);
       expect(errorBanner!.textContent).toContain("at least 8 characters");
     });
+    // A field error is announced once: through the focused field's
+    // description, not also through a live alert.
+    const errorBanner = container.querySelector(".error-banner")!;
+    expect(errorBanner.hasAttribute("role")).toBe(false);
+    expect(passwordInput.getAttribute("aria-describedby")).toBe(errorBanner.id);
+    expect(document.activeElement).toBe(passwordInput);
+
+    page.destroy?.();
+  });
+
+  it("announces a field error as an alert when that field already has focus", async () => {
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    (container.querySelector("#host") as HTMLInputElement).value = "localhost:8443";
+    (container.querySelector("#username") as HTMLInputElement).value = "testuser";
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.value = "short";
+    passwordInput.focus();
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    const errorBanner = container.querySelector(".error-banner")!;
+    await vi.waitFor(() => {
+      expect(errorBanner.textContent).toContain("at least 8 characters");
+    });
+    expect(errorBanner.getAttribute("role")).toBe("alert");
+    expect(passwordInput.getAttribute("aria-describedby")).toBe(errorBanner.id);
+    expect(document.activeElement).toBe(passwordInput);
+
+    page.destroy?.();
+  });
+
+  it("returns focus to the password field after the server rejects a login", async () => {
+    const onLogin = vi.fn().mockRejectedValue(new Error("Invalid credentials"));
+    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
+    page.mount(container);
+
+    (container.querySelector("#host") as HTMLInputElement).value = "localhost:8443";
+    (container.querySelector("#username") as HTMLInputElement).value = "testuser";
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.value = "long-enough-password";
+    passwordInput.focus();
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(passwordInput.disabled).toBe(true);
+    dropFocusToBody();
+
+    const errorBanner = container.querySelector(".error-banner")!;
+    await vi.waitFor(() => {
+      expect(errorBanner.textContent).toContain("Invalid credentials");
+    });
+    expect(errorBanner.getAttribute("role")).toBe("alert");
+    expect(document.activeElement).toBe(passwordInput);
+
+    page.destroy?.();
+  });
+
+  // ── Saved-password login (OCV-001) ───────────────────────────────────────
+  //
+  // The plaintext password no longer crosses IPC, so a remembered password is
+  // shown as a placeholder and submitted through the Rust backend instead.
+  // Submission branches on internal state, never on the field's text — the
+  // ordinary saved-password path never sends the placeholder as literal text.
+  // A pasted-back copy of the placeholder is a separate case (below):
+  // register mode refuses it outright, login mode just treats it as an
+  // ordinary (almost certainly wrong) typed password.
+
+  it("submits a remembered password through the backend, not as form text", async () => {
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLoginWithSavedPassword).toHaveBeenCalledWith("localhost:8443", "saveduser");
+    });
+    expect(onLogin).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("falls back to a normal login once the user edits the remembered password", async () => {
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    // An edit drops the placeholder outright — the field must never mix
+    // placeholder text with typed characters.
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
+    expect(passwordInput.value).toBe("");
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    passwordInput.value = "typed-password";
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLogin).toHaveBeenCalledWith("localhost:8443", "saveduser", "typed-password");
+    });
+    expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("does not drop the placeholder on caret movement alone", async () => {
+    // ArrowLeft moves the caret without editing the field, so the placeholder
+    // must survive it — unlike an actual edit.
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const value = passwordInput.value;
+    passwordInput.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+
+    expect(passwordInput.value).toBe(value);
+    expect(page.isUsingSavedPassword()).toBe(true);
+
+    page.destroy?.();
+  });
+
+  it("falls back to a normal login once a beforeinput edit clears the placeholder", async () => {
+    // Covers edits that never fire keydown/paste — drag-and-drop and
+    // autofill both mutate the value via beforeinput.
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    passwordInput.value = "dropped-in-password";
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLogin).toHaveBeenCalledWith("localhost:8443", "saveduser", "dropped-in-password");
+    });
+    expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("falls back to a normal login when a password manager replaces the value without beforeinput", async () => {
+    // A password manager (and some webview autofill implementations) sets
+    // the value and fires only `input`, never `beforeinput`. The `input`
+    // listener is the backstop that must still clear the placeholder.
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.value = "manager-filled-password";
+    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLogin).toHaveBeenCalledWith(
+        "localhost:8443",
+        "saveduser",
+        "manager-filled-password",
+      );
+    });
+    expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("logs in with the pasted placeholder text after editing a saved-password field (login)", async () => {
+    // Reveal the field, copy the bullets, paste them back: `beforeinput`
+    // clears `usingSavedPassword` and blanks the field before the paste
+    // lands, so the field ends up holding the placeholder string as literal
+    // text with `usingSavedPassword === false`. Login mode does not check the
+    // placeholder string at all — the account's real password could in
+    // principle be exactly those bullets, and rejecting it here would lock
+    // the owner out. Submitting it simply reaches onLogin like any other
+    // typed password; if it's not the real password, auth fails normally.
+    const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
+    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
+    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLogin).toHaveBeenCalledWith(
+        "localhost:8443",
+        "saveduser",
+        SAVED_PASSWORD_PLACEHOLDER,
+      );
+    });
+    expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("rejects the placeholder pasted back in as literal text (register)", async () => {
+    // Same round trip as the login case, but in Register mode the check is
+    // unconditional: this is the path that would otherwise create an account
+    // whose password is a fixed, publicly known constant.
+    const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const toggle = container.querySelector(".form-switch button") as HTMLElement;
+    toggle.click();
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
+    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+
+    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+    inviteInput.value = "invite-code";
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    usernameInput.value = "newuser";
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("still submits a normal saved-password login (guards the placeholder check)", async () => {
+    // The new placeholder check must not fire on the ordinary saved-password
+    // path, where the field legitimately holds the placeholder text while
+    // `usingSavedPassword` is true.
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLoginWithSavedPassword).toHaveBeenCalledWith("localhost:8443", "saveduser");
+    });
+    expect(onLogin).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("submits the bullet string as a real password when no placeholder was ever shown (login)", async () => {
+    // Login mode never checks the placeholder string, so a user whose real
+    // password happens to be exactly those twelve bullets can log in with it,
+    // whether or not a saved password was ever shown on this form.
+    const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
+    page.mount(container);
+
+    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+
+    hostInput.value = "localhost:8443";
+    usernameInput.value = "testuser";
+    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLogin).toHaveBeenCalledWith(
+        "localhost:8443",
+        "testuser",
+        SAVED_PASSWORD_PLACEHOLDER,
+      );
+    });
+
+    page.destroy?.();
+  });
+
+  it("rejects the placeholder string in register mode with no prior saved-password selection at all", async () => {
+    // Stateless: the check does not depend on any credential ever having
+    // been loaded or shown on this form. This is the case the old latch
+    // missed, because nothing had ever armed it.
+    const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    const toggle = container.querySelector(".form-switch button") as HTMLElement;
+    toggle.click();
+
+    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+
+    hostInput.value = "localhost:8443";
+    usernameInput.value = "newuser";
+    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
+    inviteInput.value = "invite-code";
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("logs in with the bullet string after switching to a server with no saved password", async () => {
+    // No lockout in any ordering: selecting server A (saved password) then
+    // server B (no saved password) and typing the twelve-bullet string as
+    // B's real password must reach onLogin like any other login-mode
+    // password — login mode never checks it.
+    const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+    mockLoadCredential
+      .mockResolvedValueOnce({ username: "saveduser", token: "tok", hasPassword: true })
+      .mockResolvedValueOnce({ username: "otheruser", token: "tok", hasPassword: false });
+
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
+    page.mount(container);
+
+    page.selectServer("server-a:8443", "saveduser");
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    page.selectServer("server-b:8443", "otheruser");
+    await vi.waitFor(() => {
+      const usernameInput = container.querySelector("#username") as HTMLInputElement;
+      expect(usernameInput.value).toBe("otheruser");
+    });
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
+    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onLogin).toHaveBeenCalledWith(
+        "server-b:8443",
+        "otheruser",
+        SAVED_PASSWORD_PLACEHOLDER,
+      );
+    });
+
+    page.destroy?.();
+  });
+
+  it("rejects the pasted placeholder in Register after reselecting the same host", async () => {
+    // The exact sequence that slipped through the old latch: select the
+    // saved-password host (arms it), switch to Register, then re-click the
+    // SAME server row — which used to reset the latch via setCredentials'
+    // else branch, since it runs for Register too. The stateless check does
+    // not care about any of that history.
+    const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    const serverItem = container.querySelector(".server-item") as HTMLElement;
+    serverItem.click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const toggle = container.querySelector(".form-switch button") as HTMLElement;
+    toggle.click();
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    // Reselect the same host while already in Register mode.
+    serverItem.click();
+    await vi.waitFor(() => {
+      expect((container.querySelector("#username") as HTMLInputElement).value).toBe("saveduser");
+    });
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    passwordInput.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
+    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
+    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+
+    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+    inviteInput.value = "invite-code";
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("never carries a remembered password into registration", async () => {
+    // Regression: the placeholder is a fixed, publicly known constant. If it
+    // survived a switch to Register it would be submitted as the NEW account's
+    // password, because only the login branch consults `usingSavedPassword`.
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    // Switch to Register without touching the password field.
+    const toggle = container.querySelector(".form-switch button") as HTMLElement;
+    toggle.click();
+
+    expect(page.isUsingSavedPassword()).toBe(false);
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    expect(passwordInput.value).toBe("");
+
+    // Submitting now must be rejected for a missing password, not sent.
+    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+    inviteInput.value = "invite-code";
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("never arms the placeholder when a server is picked while registering", async () => {
+    // The ordering the toggle-time clear does NOT cover: the form is already
+    // in Register mode when the credential load lands. Clicking a server row
+    // does not force the form back to login, so setCredentials must refuse to
+    // arm the placeholder itself.
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    // Switch to Register FIRST, then pick the saved server.
+    (container.querySelector(".form-switch button") as HTMLElement).click();
+    (container.querySelector(".server-item") as HTMLElement).click();
+
+    await vi.waitFor(() => {
+      expect((container.querySelector("#username") as HTMLInputElement).value).toBe("saveduser");
+    });
+
+    expect(page.isUsingSavedPassword()).toBe(false);
+    expect((container.querySelector("#password") as HTMLInputElement).value).toBe("");
+
+    (container.querySelector("#invite") as HTMLInputElement).value = "invite-code";
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("never arms the placeholder when the load resolves after switching to register", async () => {
+    // The race the toggle-time clear also misses: the credential load is
+    // in flight when the user switches, and re-arms the placeholder when it
+    // lands. Resolve it manually so the ordering is deterministic.
+    let resolveCredential: (v: unknown) => void = () => {};
+    mockLoadCredential.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCredential = resolve;
+        }),
+    );
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    // Click the server (load starts), switch to Register, THEN let it land.
+    (container.querySelector(".server-item") as HTMLElement).click();
+    (container.querySelector(".form-switch button") as HTMLElement).click();
+    resolveCredential({ username: "saveduser", token: "tok", hasPassword: true });
+
+    await vi.waitFor(() => {
+      expect((container.querySelector("#username") as HTMLInputElement).value).toBe("saveduser");
+    });
+
+    expect(page.isUsingSavedPassword()).toBe(false);
+    expect((container.querySelector("#password") as HTMLInputElement).value).toBe("");
+
+    page.destroy?.();
+  });
+
+  it("does not report a saved password as form text", async () => {
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    // "" means "nothing new to save", which makes save_credential preserve
+    // the stored password instead of clearing it.
+    expect(page.getPassword()).toBe("");
 
     page.destroy?.();
   });
@@ -169,7 +850,7 @@ describe("ConnectPage", () => {
     expect(inviteGroup.classList.contains("form-group--hidden")).toBe(true);
 
     // Click toggle link
-    const toggleLink = container.querySelector(".form-switch a") as HTMLElement;
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
     toggleLink.click();
 
     // Now in register mode — invite group visible
@@ -204,6 +885,10 @@ describe("ConnectPage", () => {
     const errorBanner = container.querySelector(".error-banner");
     expect(errorBanner!.classList.contains("visible")).toBe(true);
     expect(errorBanner!.textContent).toBe("Connection refused");
+    expect(errorBanner!.getAttribute("role")).toBe("alert");
+    for (const input of container.querySelectorAll(".connect-form input")) {
+      expect(input.getAttribute("aria-describedby")).not.toBe(errorBanner!.id);
+    }
 
     page.destroy?.();
   });
@@ -272,7 +957,7 @@ describe("ConnectPage", () => {
     mockLoadCredential.mockResolvedValue({
       username: "saveduser",
       token: "tok",
-      password: "savedpass",
+      hasPassword: true,
     });
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
@@ -288,9 +973,12 @@ describe("ConnectPage", () => {
       expect(usernameInput.value).toBe("saveduser");
     });
 
-    // The stored password prefills the field so the user isn't retyping it.
+    // The field reads as filled so the "Remember password" tick keeps its
+    // promise, but it holds a placeholder — the plaintext never leaves Rust.
     const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    expect(passwordInput.value).toBe("savedpass");
+    expect(passwordInput.value).not.toBe("");
+    expect(passwordInput.value).not.toBe("savedpass");
+    expect(page.isUsingSavedPassword()).toBe(true);
 
     page.destroy?.();
   });
@@ -519,6 +1207,133 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  // --- Incompatible epoch state (B7-12) ---
+
+  describe("incompatible state", () => {
+    it("shows the notice for a selected client-older server, naming the client", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      page.updateCompatibility("localhost:8443", "client-older", 2);
+      (container.querySelector(".server-item") as HTMLElement).click();
+
+      const notice = container.querySelector(".incompatible-notice")!;
+      expect(notice.classList.contains("visible")).toBe(true);
+      expect(notice.textContent).toContain("update the client");
+      expect(container.querySelector(".incompatible-notice-update")).not.toBeNull();
+
+      page.destroy?.();
+    });
+
+    it("mounts the notice inside the form panel, directly above the form", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      // A direct child of the flex-row .connect-page would claim its own column.
+      const notice = container.querySelector(".incompatible-notice")!;
+      expect(notice.parentElement!.classList.contains("form-container")).toBe(true);
+      expect(notice.nextElementSibling!.classList.contains("connect-form")).toBe(true);
+
+      page.destroy?.();
+    });
+
+    it("keeps the notice hidden for a compatible server", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      page.updateCompatibility("localhost:8443", "compatible", 1);
+      (container.querySelector(".server-item") as HTMLElement).click();
+
+      expect(container.querySelector(".incompatible-notice")!.classList.contains("visible")).toBe(
+        false,
+      );
+
+      page.destroy?.();
+    });
+
+    it("badges a background-probe server without showing the notice", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      // The 15 s background probe only reaches updateCompatibility — it must
+      // never raise the notice for a profile the user has not selected.
+      page.updateCompatibility("localhost:8443", "client-older", 2);
+
+      expect(container.querySelector(".srv-compat-badge")!.textContent).toBe(
+        "Client update needed",
+      );
+      expect(container.querySelector(".incompatible-notice")!.classList.contains("visible")).toBe(
+        false,
+      );
+
+      page.destroy?.();
+    });
+
+    it("gives server-older its own wording and no client-update exit", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      page.updateCompatibility("localhost:8443", "server-older", 0);
+      (container.querySelector(".server-item") as HTMLElement).click();
+
+      const notice = container.querySelector(".incompatible-notice")!;
+      expect(notice.classList.contains("visible")).toBe(true);
+      expect(notice.textContent).toContain("update the server");
+      expect(container.querySelector(".incompatible-notice-update")).toBeNull();
+      expect(container.querySelector(".incompatible-notice-leave")).not.toBeNull();
+
+      page.destroy?.();
+    });
+
+    it("the update exit asks the host to mount the updater", () => {
+      const onUpdateClient = vi.fn();
+      const page = createConnectPage(makeCallbacks({ onUpdateClient }), testProfiles);
+      page.mount(container);
+
+      page.showIncompatible("localhost:8443", 2, 1);
+      (container.querySelector(".incompatible-notice-update") as HTMLElement).click();
+
+      expect(onUpdateClient).toHaveBeenCalledWith("localhost:8443");
+
+      page.destroy?.();
+    });
+
+    it("the leave exit dismisses the notice and leaves the server rows usable", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      page.showIncompatible("localhost:8443", 2, 1);
+      expect(container.querySelector(".incompatible-notice")!.classList.contains("visible")).toBe(
+        true,
+      );
+
+      (container.querySelector(".incompatible-notice-leave") as HTMLElement).click();
+      expect(container.querySelector(".incompatible-notice")!.classList.contains("visible")).toBe(
+        false,
+      );
+
+      // The list is untouched: clicking the row still fills the form.
+      (container.querySelector(".server-item") as HTMLElement).click();
+      const hostInput = container.querySelector("#host") as HTMLInputElement;
+      expect(hostInput.value).toBe("localhost:8443");
+
+      page.destroy?.();
+    });
+
+    it("renders the notice for a WS-refusal host via showIncompatible", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      page.showIncompatible("server-a.example:8443", 2, 1);
+
+      const notice = container.querySelector(".incompatible-notice")!;
+      expect(notice.classList.contains("visible")).toBe(true);
+      expect(notice.textContent).toContain("server-a.example:8443");
+
+      page.destroy?.();
+    });
+  });
+
   // --- Pending transient error display ---
 
   it("shows pending transient error on mount and clears it", () => {
@@ -608,10 +1423,38 @@ describe("ConnectPage", () => {
     totpInput.value = "abc";
 
     const verifyBtn = container.querySelector(".totp-overlay .btn-primary") as HTMLButtonElement;
+    verifyBtn.focus();
     verifyBtn.click();
 
     expect(onTotpSubmit).not.toHaveBeenCalled();
     expect(totpInput.classList.contains("error")).toBe(true);
+    const totpError = container.querySelector("[data-testid='totp-invalid']")!;
+    expect(totpError.textContent).not.toBe("");
+    expect(totpError.hasAttribute("role")).toBe(false);
+    expect(totpInput.getAttribute("aria-describedby")).toBe(totpError.id);
+    expect(document.activeElement).toBe(totpInput);
+
+    page.destroy?.();
+  });
+
+  it("announces a malformed code submitted with Enter from the focused input", () => {
+    const onTotpSubmit = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
+    page.mount(container);
+
+    page.showTotp();
+    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    expect(document.activeElement).toBe(totpInput);
+    totpInput.value = "abc";
+    totpInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    // Focus cannot move to the field it is already on, so the error is the
+    // one live alert instead.
+    expect(onTotpSubmit).not.toHaveBeenCalled();
+    const totpError = container.querySelector("[data-testid='totp-invalid']")!;
+    expect(totpError.textContent).not.toBe("");
+    expect(totpError.getAttribute("role")).toBe("alert");
+    expect(document.activeElement).toBe(totpInput);
 
     page.destroy?.();
   });
@@ -704,7 +1547,7 @@ describe("ConnectPage", () => {
     page.mount(container);
 
     // Switch to register mode
-    const toggleLink = container.querySelector(".form-switch a") as HTMLElement;
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
     toggleLink.click();
 
     const hostInput = container.querySelector("#host") as HTMLInputElement;
@@ -736,7 +1579,7 @@ describe("ConnectPage", () => {
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
-    const toggleLink = container.querySelector(".form-switch a") as HTMLElement;
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
     toggleLink.click();
 
     const hostInput = container.querySelector("#host") as HTMLInputElement;
@@ -947,7 +1790,7 @@ describe("ConnectPage", () => {
     const errorBanner = container.querySelector(".error-banner")!;
     expect(errorBanner.classList.contains("visible")).toBe(true);
 
-    const toggleLink = container.querySelector(".form-switch a") as HTMLElement;
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
     toggleLink.click();
 
     expect(errorBanner.classList.contains("visible")).toBe(false);
@@ -961,7 +1804,7 @@ describe("ConnectPage", () => {
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
-    const toggleLink = container.querySelector(".form-switch a") as HTMLElement;
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
     toggleLink.click(); // to register
     toggleLink.click(); // back to login
 
@@ -975,7 +1818,7 @@ describe("ConnectPage", () => {
   // --- Credential loaded guard (host mismatch) ---
 
   it("does not apply credentials when host has changed before onCredentialLoaded", async () => {
-    mockLoadCredential.mockResolvedValue({ username: "loaded", token: "tok", password: "pass" });
+    mockLoadCredential.mockResolvedValue({ username: "loaded", token: "tok", hasPassword: true });
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
@@ -1031,8 +1874,8 @@ describe("ConnectPage", () => {
 
   // --- setCredentials with password sets remember checkbox ---
 
-  it("setCredentials with password checks the remember password checkbox", async () => {
-    mockLoadCredential.mockResolvedValue({ username: "user", token: "tok", password: "pass123" });
+  it("a saved password checks the remember-password box and fills a placeholder", async () => {
+    mockLoadCredential.mockResolvedValue({ username: "user", token: "tok", hasPassword: true });
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
@@ -1044,7 +1887,11 @@ describe("ConnectPage", () => {
     });
 
     const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    expect(passwordInput.value).toBe("pass123");
+    expect(passwordInput.value).not.toBe("");
+    expect(passwordInput.value).not.toBe("pass123");
+    // The property that actually matters: the box is on the saved-password
+    // path, not merely filled with something non-empty.
+    expect(page.isUsingSavedPassword()).toBe(true);
 
     page.destroy?.();
   });
@@ -1122,7 +1969,7 @@ describe("ConnectPage", () => {
     page.mount(container);
 
     // Switch to register mode
-    const toggleLink = container.querySelector(".form-switch a") as HTMLElement;
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
     toggleLink.click();
 
     const hostInput = container.querySelector("#host") as HTMLInputElement;
@@ -1170,6 +2017,252 @@ describe("ConnectPage", () => {
 
     const serverHost = container.querySelector(".srv-host");
     expect(serverHost?.textContent).toBe("localhost:8443");
+
+    page.destroy?.();
+  });
+
+  // ── Registration mode awareness (B7-15a) ─────────────────────────────────
+  //
+  // LoginForm reads the host's registration mode through the ConnectPage
+  // `getRegistrationMode` callback (fed from main.ts's per-host server-info
+  // snapshot). `closed` refuses register with a stated reason; `open` and
+  // `approval` submit without an invite code; `approval` also shows the
+  // pending-approval notice up front; an unavailable mode falls back to
+  // today's invite-required form.
+
+  /** Fill the register form, leaving the invite field at `invite`. */
+  function fillRegisterForm(el: HTMLDivElement, invite: string | null): HTMLFormElement {
+    // The mode is keyed by host, so set it (and let the input handler re-derive)
+    // before switching to register.
+    const host = el.querySelector("#host") as HTMLInputElement;
+    host.value = "localhost:8443";
+    host.dispatchEvent(new Event("input", { bubbles: true }));
+    const toggle = el.querySelector(".form-switch button") as HTMLElement;
+    toggle.click();
+    (el.querySelector("#username") as HTMLInputElement).value = "newuser";
+    (el.querySelector("#password") as HTMLInputElement).value = "password123";
+    if (invite !== null) {
+      (el.querySelector("#invite") as HTMLInputElement).value = invite;
+    }
+    return el.querySelector(".connect-form") as HTMLFormElement;
+  }
+
+  /** Select a host and enter register mode, in the order a real user would. */
+  function selectHostAndRegister(el: HTMLDivElement): void {
+    const host = el.querySelector("#host") as HTMLInputElement;
+    host.value = "localhost:8443";
+    host.dispatchEvent(new Event("input", { bubbles: true }));
+    (el.querySelector(".form-switch button") as HTMLElement).click();
+  }
+
+  it("invite mode requires an invite code and hides no notice", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onRegister, getRegistrationMode: () => "invite" }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    const form = fillRegisterForm(container, null);
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+    expect(container.querySelector(".registration-notice")!.classList.contains("visible")).toBe(
+      false,
+    );
+
+    page.destroy?.();
+  });
+
+  it("open mode submits without an invite code", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onRegister, getRegistrationMode: () => "open" }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    const form = fillRegisterForm(container, null);
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onRegister).toHaveBeenCalledWith("localhost:8443", "newuser", "password123", "");
+    });
+
+    page.destroy?.();
+  });
+
+  it("approval mode submits without a code and shows the pending-approval notice up front", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onRegister, getRegistrationMode: () => "approval" }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    const form = fillRegisterForm(container, null);
+
+    const notice = container.querySelector(".registration-notice")!;
+    expect(notice.classList.contains("visible")).toBe(true);
+    expect(notice.textContent).toContain("admin must approve");
+
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => {
+      expect(onRegister).toHaveBeenCalledWith("localhost:8443", "newuser", "password123", "");
+    });
+
+    page.destroy?.();
+  });
+
+  it("closed mode disables register and states why", () => {
+    const onRegister = vi.fn();
+    const page = createConnectPage(
+      makeCallbacks({ onRegister, getRegistrationMode: () => "closed" }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    selectHostAndRegister(container);
+
+    const submit = container.querySelector(".btn-primary[type='submit']") as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    const notice = container.querySelector(".registration-notice")!;
+    expect(notice.classList.contains("visible")).toBe(true);
+    expect(notice.textContent).toContain("Registration is closed");
+
+    // Even a forced submit refuses and never reaches the callback.
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+  // B7-15c: the server-default retention window is disclosed at sign-up.
+  it("discloses the retention window in register mode, not at login or when closed", () => {
+    const retention = "By default this server deletes messages after 30 days.";
+    const getRetentionNotice = vi.fn((host: string) =>
+      host === "localhost:8443" ? retention : null,
+    );
+    let mode: import("../../src/lib/types").RegistrationMode = "open";
+    const page = createConnectPage(
+      makeCallbacks({ getRegistrationMode: () => mode, getRetentionNotice }),
+      testProfiles,
+    );
+    page.mount(container);
+    const notice = container.querySelector(".registration-notice")!;
+    const host = container.querySelector("#host") as HTMLInputElement;
+    host.value = "localhost:8443";
+    host.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(notice.textContent).not.toContain(retention);
+
+    (container.querySelector(".form-switch button") as HTMLElement).click();
+    expect(notice.classList.contains("visible")).toBe(true);
+    expect(notice.textContent).toBe(retention);
+
+    mode = "approval";
+    host.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(notice.textContent).toContain("admin must approve");
+    expect(notice.textContent).toContain(retention);
+
+    mode = "closed";
+    host.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(notice.textContent).toBe("Registration is closed on this server.");
+
+    page.destroy?.();
+  });
+
+  it("an unavailable mode (no snapshot) still requires an invite code", async () => {
+    // No `getRegistrationMode` callback at all — the older-server / failed-read
+    // fallback. Registration must not be silently widened.
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    const form = fillRegisterForm(container, null);
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      const banner = container.querySelector(".error-banner")!;
+      expect(banner.classList.contains("visible")).toBe(true);
+      expect(banner.textContent).toContain("Invite code is required");
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("an unknown mode string (null from the parser) still requires an invite code", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onRegister, getRegistrationMode: () => null }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    const form = fillRegisterForm(container, null);
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.textContent).toContain(
+        "Invite code is required",
+      );
+    });
+    expect(onRegister).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("re-derives the mode when server-info arrives after a host is selected", () => {
+    let mode: import("../../src/lib/types").RegistrationMode | null = null;
+    const page = createConnectPage(
+      makeCallbacks({ getRegistrationMode: () => mode }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    (container.querySelector(".server-item") as HTMLElement).click();
+    const toggle = container.querySelector(".form-switch button") as HTMLElement;
+    toggle.click();
+    expect(
+      (container.querySelector(".btn-primary[type='submit']") as HTMLButtonElement).disabled,
+    ).toBe(false);
+
+    // A late snapshot flips the host to `closed`; updateCompatibility nudges
+    // the form to re-read it.
+    mode = "closed";
+    page.updateCompatibility("localhost:8443", "compatible", 1);
+
+    const submit = container.querySelector(".btn-primary[type='submit']") as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(container.querySelector(".registration-notice")!.textContent).toContain(
+      "Registration is closed",
+    );
+
+    page.destroy?.();
+  });
+
+  it("an invite link to another host re-derives the mode while already registering", () => {
+    const page = createConnectPage(
+      makeCallbacks({
+        getRegistrationMode: (host) => (host === "localhost:8443" ? "open" : "closed"),
+      }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    selectHostAndRegister(container);
+    const submit = container.querySelector(".btn-primary[type='submit']") as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+
+    page.applyInviteLink("abc123", "other.example:8443");
+
+    expect(submit.disabled).toBe(true);
+    expect(container.querySelector(".registration-notice")!.textContent).toContain(
+      "Registration is closed",
+    );
 
     page.destroy?.();
   });

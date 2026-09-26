@@ -48,9 +48,59 @@ type DB struct {
 	// synchronous — the token CLI and tests rely on that.
 	auditWriter atomic.Pointer[AuditWriter]
 
+	// Loaded from the durable sidecar before serving a restored database.
+	messageDeliveryFloor atomic.Int64
+
 	// lockRelease drops the single-process advisory lock taken by openFile.
 	// Nil for in-memory databases and when the lock mechanism is unavailable.
 	lockRelease func()
+
+	// acceptGuardHook is a test seam (Codex P2-8): called inside
+	// AcceptMessageRequest's transaction right after it confirms the row is
+	// still pending and before it writes anything. The transaction holds the
+	// sole writer connection (writer above) for as long as this hook blocks,
+	// so a test can force a competing TransitionMessageRequest call to be
+	// dispatched while this transaction is provably still open — the single
+	// writer connection then guarantees that call cannot execute until this
+	// one commits, proving the guard resolves a genuine race instead of
+	// relying on goroutine-scheduling luck for the two calls to ever
+	// overlap. Nil in production. No exported setter (Codex review round 2,
+	// P2-8): only reachable from db package tests, which is where the test
+	// that uses it lives.
+	acceptGuardHook func()
+
+	// afterDMParticipantsInsertHook is a test seam (Codex review round 2,
+	// P1): called inside getOrCreateDMChannel's create branch, after the
+	// participants insert but before the recipient's visibility is decided
+	// and written, so a test can simulate a failure/cancellation in that
+	// exact window and confirm the whole transaction rolls back rather than
+	// landing the recipient open. Nil in production, no exported setter.
+	afterDMParticipantsInsertHook func() error
+
+	// checkpointOwed records that an erasure's wal_checkpoint(TRUNCATE) came
+	// back blocked or partial, so frames holding erased bytes are still in the
+	// -wal and a retry is needed. Process-local on purpose: a crash loses it,
+	// which is why the start-up pass (CheckpointErasureWAL) runs
+	// unconditionally rather than on this flag.
+	//
+	// ponytail: process-local flag; persist in erasure_jobs if a tick ever
+	// needs to survive a crash before the startup pass runs
+	checkpointOwed atomic.Bool
+
+	// checkpointAttempts counts the retries the flag has driven, for the log
+	// line an operator reads when a checkpoint stays blocked.
+	checkpointAttempts atomic.Int64
+
+	// testEraseCommitHook is a test seam (B6-11 drill 9): called by
+	// eraseAccount once eraseAccountTx has committed and before the
+	// wal_checkpoint(TRUNCATE) that follows it. It is the window the drill is
+	// about — the erasure is durable, its frames are still in the WAL, and
+	// nothing has checkpointed them — so a test can copy the three files and
+	// read them exactly as a crash in that window leaves them on disk.
+	// eraseAccount still holds the sole writer connection while the hook runs,
+	// so the hook must not touch this DB's pools. Nil in production, no
+	// exported setter.
+	testEraseCommitHook func()
 }
 
 // filePragmas are the per-connection PRAGMAs applied to every file-backed
@@ -203,6 +253,10 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 			release()
 		}
 	}()
+	retryFloor, err := readMessageDeliveryFloor(path)
+	if err != nil {
+		return nil, fmt.Errorf("loading message retry cutoff: %w", err)
+	}
 
 	base := path
 	if !strings.HasPrefix(base, "file:") {
@@ -249,6 +303,7 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 	}
 
 	d := newDB(writer, reader)
+	d.messageDeliveryFloor.Store(retryFloor)
 	d.lockRelease = release
 	ok = true
 	return d, nil
@@ -433,6 +488,14 @@ func (d *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) 
 // must run on the writer to checkpoint the WAL it just stopped appending to.
 func (d *DB) SQLDb() *sql.DB {
 	return d.writer
+}
+
+// SQLReaderDB returns the underlying reader *sql.DB. It exists so
+// /api/v1/metrics can report reader-pool wait stats beside the writer pair —
+// for in-memory databases reader == writer, so the two reports then cover
+// the same pool.
+func (d *DB) SQLReaderDB() *sql.DB {
+	return d.reader
 }
 
 // PingRead answers whether the database can serve reads, via a bounded

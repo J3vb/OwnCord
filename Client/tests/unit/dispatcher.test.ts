@@ -5,7 +5,9 @@ import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
 // bundle-hygiene assertion, without pulling in node:fs.
 import dispatcherSource from "../../src/lib/dispatcher.ts?raw";
 import { createMockWsClient } from "../helpers/mock-ws";
-import { authStore, clearAuth } from "../../src/stores/auth.store";
+import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
+import { expectConsole } from "../helpers/console";
+import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles, getRoleIdByName } from "../../src/stores/channels.store";
 import {
   messagesStore,
@@ -28,7 +30,9 @@ import {
   listCustomEmoji,
   resolveEmoji,
 } from "../../src/stores/emoji.store";
-import { uiStore } from "../../src/stores/ui.store";
+import { uiStore, setUpdateRequiredHost } from "../../src/stores/ui.store";
+import { PROTOCOL_EPOCH } from "../../src/lib/protocolTypes";
+import { safetyText } from "../../src/i18n/safety";
 import {
   clearReactionUsersCache,
   getCachedReactionUsers,
@@ -51,7 +55,6 @@ vi.mock("@lib/livekitSession", () => ({
   handleE2EEOffer: vi.fn(async () => {}),
   leaveVoice: vi.fn(),
   cleanupAll: vi.fn(),
-  isVoiceConnected: vi.fn(() => false),
   isVoiceSessionActive: vi.fn(() => false),
   setMuted: vi.fn(),
   setDeafened: vi.fn(),
@@ -86,7 +89,6 @@ import {
   leaveVoice as mockLeaveVoice,
   disableCamera as mockDisableCamera,
   disableScreenshare as mockDisableScreenshare,
-  isVoiceConnected as mockIsVoiceConnected,
   isVoiceSessionActive as mockIsVoiceSessionActive,
   handleParticipantLeft as mockHandleParticipantLeft,
 } from "@lib/livekitSession";
@@ -107,6 +109,7 @@ function createMockWs() {
   const stateListeners = new Set<(state: ConnectionState) => void>();
 
   const ws: WsClient = {
+    ping: vi.fn(async () => {}),
     connect: vi.fn(),
     disconnect: vi.fn(),
     send: vi.fn(() => "test-id"),
@@ -274,7 +277,10 @@ describe("WS Dispatcher", () => {
     });
     expect(authStore.getState().isAuthenticated).toBe(true);
 
+    setUpdateRequiredHost(null);
     mock.dispatch("auth_error", { message: "Invalid token" });
+
+    expectConsole("error", /\[dispatcher\] Auth failed/);
 
     const state = authStore.getState();
     expect(state.isAuthenticated).toBe(false);
@@ -282,6 +288,65 @@ describe("WS Dispatcher", () => {
     // The refusal reason is only ever surfaced through ui.store — ConnectPage's
     // banner is its single reader.
     expect(uiStore.getState().transientError).toBe("Invalid token");
+  });
+
+  it("marks the server host as needing a client update when auth_error refuses this client's epoch as too old", () => {
+    cleanup();
+    setUpdateRequiredHost(null);
+    const getConfig = vi.fn(() => ({ host: "chat.example:8443", token: "t" }));
+    cleanup = wireDispatcher(mock.ws, { listBlocks: vi.fn().mockResolvedValue([]), getConfig });
+
+    mock.dispatch("auth_error", {
+      message: "update the client",
+      code: "protocol_epoch_unsupported",
+      client_epoch: PROTOCOL_EPOCH,
+      server_epoch: PROTOCOL_EPOCH + 1,
+      min_epoch: PROTOCOL_EPOCH + 1,
+    });
+
+    expectConsole("error", /\[dispatcher\] Auth failed/);
+
+    expect(uiStore.getState().updateRequiredHost).toEqual({
+      host: "chat.example:8443",
+      serverEpoch: PROTOCOL_EPOCH + 1,
+      clientEpoch: PROTOCOL_EPOCH,
+    });
+    expect(uiStore.getState().transientError).toBe("update the client");
+    expect(authStore.getState().isAuthenticated).toBe(false);
+    // The token is still valid — main.ts keeps the stored credential on this
+    // reason so the update relaunches straight into auto-login (Codex P2).
+    expect(authStore.getState().logoutReason).toBe("protocol_epoch");
+  });
+
+  it("marks the host with the server-older epochs when the SERVER is the older side, but not on an ordinary auth_error", () => {
+    cleanup();
+    setUpdateRequiredHost(null);
+    const getConfig = vi.fn(() => ({ host: "chat.example:8443", token: "t" }));
+    cleanup = wireDispatcher(mock.ws, { listBlocks: vi.fn().mockResolvedValue([]), getConfig });
+
+    mock.dispatch("auth_error", {
+      message: "update the server",
+      code: "protocol_epoch_unsupported",
+      client_epoch: PROTOCOL_EPOCH,
+      server_epoch: PROTOCOL_EPOCH - 1,
+      min_epoch: PROTOCOL_EPOCH - 1,
+    });
+    expectConsole("error", /\[dispatcher\] Auth failed .*update the server/);
+    expect(uiStore.getState().updateRequiredHost).toEqual({
+      host: "chat.example:8443",
+      serverEpoch: PROTOCOL_EPOCH - 1,
+      clientEpoch: PROTOCOL_EPOCH,
+    });
+
+    // Server older than the client: still a protocol refusal, still a valid
+    // token — the credential must survive this one too.
+    expect(authStore.getState().logoutReason).toBe("protocol_epoch");
+
+    setUpdateRequiredHost(null);
+    mock.dispatch("auth_error", { message: "Invalid token" });
+    expectConsole("error", /\[dispatcher\] Auth failed .*Invalid token/);
+    expect(uiStore.getState().updateRequiredHost).toBeNull();
+    expect(authStore.getState().logoutReason).toBe("user");
   });
 
   it("wires ready to channels, members, and voice stores", () => {
@@ -432,6 +497,54 @@ describe("WS Dispatcher", () => {
 
     const ch = channelsStore.getState().channels.get(5);
     expect(ch?.unreadCount).toBe(1);
+  });
+
+  // OC-0328: mirrors the DM-side "does not double-count" test below. A
+  // channel message delivered between the server's registerNow and
+  // buildReady is both counted in `ready`'s snapshot (lastMessageId already
+  // advanced to its id) AND redelivered as a queued chat_message once the
+  // socket drains — the channel path had no replay guard at all.
+  it("does not double-count a channel unread/mention whose id is already reflected in lastMessageId", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(5, {
+        id: 5,
+        name: "off-topic",
+        type: "text" as const,
+        category: null,
+        position: 0,
+        unreadCount: 1,
+        mentionCount: 1,
+        lastMessageId: 200, // already reflects message 200 via `ready`
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      });
+      return { ...prev, channels: ch, activeChannelId: 1 }; // active is channel 1
+    });
+
+    // The same message redelivered as a queued chat_message.
+    mock.dispatch("chat_message", {
+      id: 200,
+      channel_id: 5,
+      user: { id: 2, username: "bob", avatar: null },
+      content: "hey @me",
+      mentions: [5],
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    const ch = channelsStore.getState().channels.get(5);
+    expect(ch?.unreadCount).toBe(1);
+    expect(ch?.mentionCount).toBe(1);
   });
 
   // OC-0204: "active channel" normally means "the user is watching the live
@@ -678,6 +791,79 @@ describe("WS Dispatcher", () => {
       );
     });
   });
+
+  // OC-0315: payload.timestamp is the raw SQLite datetime('now') string —
+  // naive UTC, no 'Z' suffix (the server never emits one). Date.parse (used
+  // by the replay-gate comparison, unlike the parseTimestamp helper built
+  // for exactly this) interprets that as LOCAL time. On a viewer whose zone
+  // is east of UTC, the parsed epoch reads *earlier* than the true instant,
+  // so a genuinely live message can look like it predates the reconnect
+  // handshake and gets silently swallowed by the replay gate — worst when
+  // serverClockSkewMs is still 0 (nothing has been sampled yet this
+  // session), since nothing else offsets the bias. Pin a real east-of-UTC
+  // zone to observe it. The probe throws rather than skipping if the pin is
+  // not honored, so this block cannot quietly stop running (helpers/tz-pin.ts).
+  const oc0315PinHonored = tzPinHonored(
+    "Asia/Tokyo",
+    () => new Date(2026, 0, 15).getTimezoneOffset() === -540,
+  );
+
+  describe.skipIf(!oc0315PinHonored)(
+    "[OC-0315] naive-UTC server timestamps vs a non-UTC viewer clock",
+    () => {
+      const originalTZ = process.env.TZ;
+
+      beforeEach(() => {
+        process.env.TZ = "Asia/Tokyo";
+        vi.mocked(mockNotifyIncomingMessage).mockClear();
+      });
+
+      // restoreTZ, not a bare delete: deleting TZ leaves Date pinned to Tokyo
+      // for the rest of this forked worker's life, and vitest reuses a worker
+      // across test files. See helpers/tz-pin.ts.
+      afterEach(() => {
+        restoreTZ(originalTZ);
+      });
+
+      it("does not misclassify a live message as a replay when serverClockSkewMs is still 0 (cold, never sampled)", () => {
+        // Sanity: really pinned east of UTC (Tokyo has no DST, so this is
+        // stable year-round, unlike the America/New_York probe elsewhere).
+        expect(new Date(2026, 0, 15).getTimezoneOffset()).toBe(-540);
+
+        mock.dispatch("auth_ok", {
+          user: { id: 1, username: "alex", avatar: null, role: "admin" },
+          server_name: "TestServer",
+          motd: "",
+        });
+        const handshakeAt = Date.now();
+        // Second auth_ok in the same dispatcher lifetime = a reconnect.
+        mock.dispatch("auth_ok", {
+          user: { id: 1, username: "alex", avatar: null, role: "admin" },
+          server_name: "TestServer",
+          motd: "",
+        });
+
+        // A genuinely live message, 1s after the handshake, stamped by the
+        // server in its real wire form: naive UTC, no 'Z'.
+        vi.setSystemTime(handshakeAt + 1000);
+        const naiveUtcTimestamp = new Date(Date.now())
+          .toISOString()
+          .replace("T", " ")
+          .replace(/\.\d{3}Z$/, "");
+        mock.dispatch("chat_message", {
+          id: 1,
+          channel_id: 1,
+          user: { id: 2, username: "bob", avatar: null },
+          content: "live now, naive-UTC timestamp",
+          reply_to: null,
+          attachments: [],
+          timestamp: naiveUtcTimestamp,
+        });
+
+        expect(mockNotifyIncomingMessage).toHaveBeenCalledTimes(1);
+      });
+    },
+  );
 
   describe("mention counts", () => {
     function seedChannel(): void {
@@ -1037,6 +1223,34 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().channels.has(10)).toBe(false);
   });
 
+  it("wires nsfw_ack to the channel's consent state (B9-7)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(11, {
+        id: 11,
+        name: "spicy",
+        type: "text" as const,
+        category: null,
+        position: 0,
+        unreadCount: 0,
+        mentionCount: 0,
+        lastMessageId: null,
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: true,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      });
+      return { ...prev, channels: ch };
+    });
+
+    mock.dispatch("nsfw_ack", { channel_id: 11, acknowledged: true });
+    expect(channelsStore.getState().channels.get(11)?.nsfwAcknowledged).toBe(true);
+    mock.dispatch("nsfw_ack", { channel_id: 11, acknowledged: false });
+    expect(channelsStore.getState().channels.get(11)?.nsfwAcknowledged).toBe(false);
+  });
+
   it("wires member_join to members store, using the payload's status", () => {
     mock.dispatch("member_join", {
       user: { id: 99, username: "newuser", avatar: null, role: "member" },
@@ -1084,6 +1298,147 @@ describe("WS Dispatcher", () => {
     expect(messagesStore.getState().pendingSends.has("corr-123")).toBe(false);
   });
 
+  it("fetches the authoritative row after a deduplicated send ack", async () => {
+    cleanup();
+    const getMessagesAround = vi.fn().mockResolvedValue({
+      messages: [
+        {
+          id: 501,
+          channel_id: 1,
+          user: { id: 1, username: "alex", avatar: null },
+          content: "edited on the server",
+          reply_to: null,
+          attachments: [],
+          reactions: [],
+          pinned: false,
+          edited_at: "2026-03-15T10:05:00Z",
+          deleted: false,
+          timestamp: "2026-03-15T10:00:00Z",
+        },
+      ],
+      has_more_before: false,
+      has_more_after: false,
+    });
+    cleanup = wireDispatcher(mock.ws, {
+      listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+      getMessagesAround,
+    });
+
+    addOptimisticMessage({
+      correlationId: "corr-dedup",
+      clientMessageId: "dedup-logical",
+      channelId: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "local draft text",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    markSendFailed("corr-dedup", "UNCONFIRMED");
+
+    mock.dispatch(
+      "chat_send_ok",
+      { message_id: 501, timestamp: "2026-03-15T10:00:00Z", deduplicated: true },
+      "corr-dedup",
+    );
+
+    await vi.waitFor(() => {
+      expect(getMessagesAround).toHaveBeenCalledWith(1, 501);
+    });
+    expect(getChannelMessages(1)[0]).toMatchObject({
+      id: 501,
+      content: "edited on the server",
+      status: "sent",
+    });
+  });
+
+  it("does not let a stale reconcile overwrite a frame that landed while it was in flight", async () => {
+    cleanup();
+    const staleRow = {
+      id: 501,
+      channel_id: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "read before the delete",
+      reply_to: null,
+      attachments: [],
+      reactions: [],
+      pinned: false,
+      edited_at: null,
+      deleted: false,
+      timestamp: "2026-03-15T10:00:00Z",
+    };
+    let release: (resp: unknown) => void = () => {};
+    const getMessagesAround = vi
+      .fn()
+      // The first read took its snapshot before the delete; it resolves late.
+      .mockImplementationOnce(() => new Promise((resolve) => (release = resolve)))
+      // The retry is what the server answers for a message that is now gone.
+      .mockRejectedValueOnce(new Error("404"));
+    cleanup = wireDispatcher(mock.ws, {
+      listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+      getMessagesAround,
+    });
+
+    addOptimisticMessage({
+      correlationId: "corr-race",
+      clientMessageId: "race-logical",
+      channelId: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "local draft text",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    markSendFailed("corr-race", "UNCONFIRMED");
+    mock.dispatch(
+      "chat_send_ok",
+      { message_id: 501, timestamp: "2026-03-15T10:00:00Z", deduplicated: true },
+      "corr-race",
+    );
+    await vi.waitFor(() => expect(getMessagesAround).toHaveBeenCalledTimes(1));
+
+    mock.dispatch("chat_deleted", { message_id: 501, channel_id: 1 });
+    release({ messages: [staleRow], has_more_before: false, has_more_after: false });
+
+    // It noticed the row moved and asked again rather than applying the snapshot.
+    await vi.waitFor(() => expect(getMessagesAround).toHaveBeenCalledTimes(2));
+    expect(getChannelMessages(1)[0]).toMatchObject({ id: 501, deleted: true });
+    expectConsole("warn", /\[dispatcher\] Failed to reconcile a deduplicated send/);
+  });
+
+  it("does not refetch history for an ordinary send ack", async () => {
+    cleanup();
+    const getMessagesAround = vi.fn().mockResolvedValue({
+      messages: [],
+      has_more_before: false,
+      has_more_after: false,
+    });
+    cleanup = wireDispatcher(mock.ws, {
+      listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+      getMessagesAround,
+    });
+
+    addOptimisticMessage({
+      correlationId: "corr-plain",
+      clientMessageId: "plain-logical",
+      channelId: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "hello",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    mock.dispatch(
+      "chat_send_ok",
+      { message_id: 502, timestamp: "2026-03-15T10:00:00Z" },
+      "corr-plain",
+    );
+
+    // Settle the ack's own work before asserting the absence of a fetch.
+    await vi.waitFor(() => {
+      expect(messagesStore.getState().pendingSends.has("corr-plain")).toBe(false);
+    });
+    expect(getMessagesAround).not.toHaveBeenCalled();
+  });
+
   it("wires member_ban to remove member from members store", () => {
     membersStore.setState((prev) => {
       const m = new Map(prev.members);
@@ -1099,23 +1454,6 @@ describe("WS Dispatcher", () => {
 
     mock.dispatch("member_ban", { user_id: 77 });
     expect(membersStore.getState().members.has(77)).toBe(false);
-  });
-
-  it("wires member_leave to members store", () => {
-    membersStore.setState((prev) => {
-      const m = new Map(prev.members);
-      m.set(99, {
-        id: 99,
-        username: "bye",
-        avatar: null,
-        role: "member",
-        status: "online" as const,
-      });
-      return { ...prev, members: m };
-    });
-
-    mock.dispatch("member_leave", { user_id: 99 });
-    expect(membersStore.getState().members.has(99)).toBe(false);
   });
 
   it("wires voice_state to voice store", () => {
@@ -1931,6 +2269,7 @@ describe("WS Dispatcher", () => {
 
       expect(isChannelLoaded(1)).toBe(false);
       expect(getHistoryLoadState(1)).toBe("error");
+      expectConsole("warn", /\[dispatcher\] Failed to reload message history after resync/);
     });
 
     // Mirror of the .then guard: a rejection that lands after the user
@@ -1975,6 +2314,7 @@ describe("WS Dispatcher", () => {
       await Promise.resolve();
 
       expect(getHistoryLoadState(1)).not.toBe("error");
+      expectConsole("warn", /\[dispatcher\] Failed to reload message history after resync/);
     });
   });
 
@@ -2729,6 +3069,37 @@ describe("WS Dispatcher", () => {
     expect(mockHandleParticipantLeft).toHaveBeenCalledWith(7);
   });
 
+  // OC-0311: voice_leave is broadcast to channelReadAudience(channel), i.e.
+  // everyone with READ_MESSAGES on THAT channel — not just its voice
+  // participants. A client can read channel B (and so receive B's
+  // voice_leave frames) while its own live voice session is in channel A.
+  // Without a channel guard, a peer leaving a channel this client merely
+  // reads mutates this client's own E2EE peer state (deletes the peer's key,
+  // clears their verification badge, retires their key, and can trigger a
+  // room-key rotation) for a call that peer was never part of.
+  it("[OC-0311] does not touch E2EE peer state for a voice_leave from a channel this client is not in", async () => {
+    vi.mocked(mockHandleParticipantLeft).mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    // This client's live voice session is channel 3.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 3,
+    }));
+
+    // A peer leaves channel 99, which this client can merely read (hence
+    // seeing the broadcast) but is not the client's own voice channel.
+    mock.dispatch("voice_leave", {
+      channel_id: 99,
+      user_id: 7,
+    });
+    await vi.runAllTimersAsync();
+
+    expect(mockHandleParticipantLeft).not.toHaveBeenCalled();
+  });
+
   it("mirrors a moderator mute/deafen into the local flags and honors it", async () => {
     authStore.setState((prev) => ({
       ...prev,
@@ -2977,38 +3348,6 @@ describe("WS Dispatcher", () => {
     expect(configs.get(3)).toBeDefined();
   });
 
-  it("wires voice_speakers to voice store", () => {
-    voiceStore.setState((prev) => {
-      const users = new Map(
-        [1, 2, 4].map((userId) => [
-          userId,
-          {
-            userId,
-            username: `user${userId}`,
-            muted: false,
-            deafened: false,
-            speaking: false,
-            camera: false,
-            screenshare: false,
-          },
-        ]),
-      );
-      const voiceUsers = new Map(prev.voiceUsers);
-      voiceUsers.set(3, users);
-      return { ...prev, voiceUsers };
-    });
-
-    mock.dispatch("voice_speakers", {
-      channel_id: 3,
-      speakers: [1, 2, 3],
-    });
-
-    const users = voiceStore.getState().voiceUsers.get(3);
-    expect(users?.get(1)?.speaking).toBe(true);
-    expect(users?.get(2)?.speaking).toBe(true);
-    expect(users?.get(4)?.speaking).toBe(false);
-  });
-
   it("wires voice_token to handleVoiceToken", async () => {
     const { handleVoiceToken } = await import("@lib/livekitSession");
 
@@ -3037,6 +3376,7 @@ describe("WS Dispatcher", () => {
       reason: "update",
       delay_seconds: 10,
     });
+    expectConsole("warn", /\[dispatcher\] Server restarting/);
 
     const error = uiStore.getState().transientError;
     expect(error).toContain("Server is restarting");
@@ -3048,6 +3388,7 @@ describe("WS Dispatcher", () => {
       reason: null,
       delay_seconds: 5,
     });
+    expectConsole("warn", /\[dispatcher\] Server restarting/);
 
     const error = uiStore.getState().transientError;
     expect(error).toContain("maintenance");
@@ -3069,6 +3410,7 @@ describe("WS Dispatcher", () => {
     }));
 
     mock.dispatch("server_restart", { reason: "shutdown", delay_seconds: 5 });
+    expectConsole("warn", /\[dispatcher\] Server restarting/);
 
     // Kicked back to login: auth cleared, reason preserved so the logout
     // wiring keeps the saved credential.
@@ -3092,6 +3434,7 @@ describe("WS Dispatcher", () => {
     }));
 
     mock.dispatch("server_restart", { reason: "update", delay_seconds: 5 });
+    expectConsole("warn", /\[dispatcher\] Server restarting/);
 
     expect(authStore.getState().isAuthenticated).toBe(true);
   });
@@ -3107,16 +3450,19 @@ describe("WS Dispatcher", () => {
       code: "BANNED",
       message: "You have been banned from this server",
     });
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(authStore.getState().isAuthenticated).toBe(false);
     const error = uiStore.getState().transientError;
-    expect(error).toContain("banned");
+    expect(error).toBe(`You have been banned. ${safetyText("appeals.unavailable")}`);
+    expect(error).toContain("contact the server's operator directly");
   });
 
   it("wires error BANNED with empty message uses default", () => {
     mock.dispatch("error", { code: "BANNED", message: "" });
+    expectConsole("error", /\[dispatcher\] Server error/);
     const error = uiStore.getState().transientError;
-    expect(error).toBe("You have been banned");
+    expect(error).toBe(`You have been banned. ${safetyText("appeals.unavailable")}`);
   });
 
   it("wires error BANNED to disconnect the ws client (OC-0107: without this the banned token reconnects forever)", () => {
@@ -3130,6 +3476,7 @@ describe("WS Dispatcher", () => {
       code: "BANNED",
       message: "You have been banned from this server",
     });
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     // clearAuth() alone flips isAuthenticated, but main.ts's authStore
     // subscriber only tears down the ws (and cancels the reconnect loop) when
@@ -3147,14 +3494,15 @@ describe("WS Dispatcher", () => {
   // login screen, where it resurfaces stale and out of context. The
   // catch-all must use the same in-app toast the sibling CHANNEL_FULL /
   // VIDEO_LIMIT branches already use, and must leave transientError alone.
-  it("wires error RATE_LIMITED to an in-app toast (OC-0064)", () => {
+  it("wires error RATE_LIMITED to an in-app toast with its catalog text (OC-0064)", () => {
     mockShowToast.mockClear();
     mock.dispatch("error", {
       code: "RATE_LIMITED",
-      message: "Too many requests",
+      message: "too many requests, please slow down",
     });
+    expectConsole("error", /\[dispatcher\] Server error/);
 
-    expect(mockShowToast).toHaveBeenCalledWith("Too many requests", "error");
+    expect(mockShowToast).toHaveBeenCalledWith("Too many requests. Try again later.", "error");
     expect(uiStore.getState().transientError).toBeNull();
   });
 
@@ -3164,16 +3512,32 @@ describe("WS Dispatcher", () => {
       code: "FORBIDDEN",
       message: "Insufficient permissions",
     });
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(mockShowToast).toHaveBeenCalledWith("Insufficient permissions", "error");
     expect(uiStore.getState().transientError).toBeNull();
   });
 
-  it("wires error RATE_LIMITED with empty message uses default (OC-0064)", () => {
+  it("wires error RATE_LIMITED with empty message to its catalog text (OC-0064)", () => {
     mockShowToast.mockClear();
     mock.dispatch("error", { code: "RATE_LIMITED", message: "" });
-    expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
+    expectConsole("error", /\[dispatcher\] Server error/);
+    expect(mockShowToast).toHaveBeenCalledWith("Too many requests. Try again later.", "error");
     expect(uiStore.getState().transientError).toBeNull();
+  });
+
+  it("wires an unmapped error with an empty message to the generic fallback toast", () => {
+    mockShowToast.mockClear();
+    mock.dispatch("error", { code: "FORBIDDEN", message: "" });
+    expectConsole("error", /\[dispatcher\] Server error/);
+    expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
+  });
+
+  it("wires error INTERNAL to the generic fallback toast, never the server's message", () => {
+    mockShowToast.mockClear();
+    mock.dispatch("error", { code: "INTERNAL", message: "db: sqlite busy" });
+    expectConsole("error", /\[dispatcher\] Server error/);
+    expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
   });
 
   it("wires error with an unrecognized code to the generic fallback toast (OC-0064)", () => {
@@ -3187,6 +3551,7 @@ describe("WS Dispatcher", () => {
       code: "UNKNOWN",
       message: "Something odd",
     });
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(mockShowToast).toHaveBeenCalledWith("Something odd", "error");
     expect(uiStore.getState().transientError).toBeNull();
@@ -3201,6 +3566,7 @@ describe("WS Dispatcher", () => {
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
 
     mock.dispatch("error", { code: "BAD_REQUEST", message: "Message too long" }, "edit-id-1");
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(mockShowToast).toHaveBeenCalledWith("Message too long", "error");
     expect(uiStore.getState().transientError).toBeNull();
@@ -3228,6 +3594,7 @@ describe("WS Dispatcher", () => {
 
     // Error echoes the request id → the specific row is marked failed…
     mock.dispatch("error", { code: "SLOW_MODE", message: "slow down" }, "corr-1");
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     const row = getChannelMessages(7)[0]!;
     expect(row.status).toBe("failed");
@@ -3263,6 +3630,7 @@ describe("WS Dispatcher", () => {
     });
 
     mock.dispatch("error", { code: "FORBIDDEN", message: "blocked" }, "corr-dm");
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(blocksStore.getState().blockedByThem.has(5)).toBe(true);
     // Still marks the row failed (existing behaviour preserved).
@@ -3281,6 +3649,7 @@ describe("WS Dispatcher", () => {
     });
 
     mock.dispatch("error", { code: "FORBIDDEN", message: "nope" }, "corr-nondm");
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(blocksStore.getState().blockedByThem.size).toBe(0);
   });
@@ -3319,6 +3688,7 @@ describe("WS Dispatcher", () => {
     });
 
     mock.dispatch("error", { code: "FORBIDDEN", message: "not a participant" }, "corr-group");
+    expectConsole("error", /\[dispatcher\] Server error/);
 
     expect(blocksStore.getState().blockedByThem.has(5)).toBe(false);
     // Still marks the row failed (existing behaviour preserved).
@@ -3522,6 +3892,7 @@ describe("WS Dispatcher", () => {
     await Promise.resolve();
     emojiStore.flush();
     expect(listCustomEmoji()).toEqual([]);
+    expectConsole("warn", /\[dispatcher\] Failed to load custom emoji/);
   });
 
   it("on ready clears being-blocked state and refreshes blocked-by-me via api", async () => {
@@ -4281,6 +4652,7 @@ describe("WS Dispatcher", () => {
     });
 
     // The dispatcher should detect stale voice state and send voice_leave
+    expectConsole("warn", /\[dispatcher\] Stale voice state detected in ready payload/);
     expect(mock.ws.send).toHaveBeenCalledWith(
       expect.objectContaining({ type: "voice_leave", payload: {} }),
     );
@@ -4457,18 +4829,15 @@ describe("WS Dispatcher", () => {
       mockShowToast.mockClear();
     });
 
-    it("surfaces CHANNEL_FULL as a toast", () => {
+    it("surfaces CHANNEL_FULL as a toast with its catalog text, not the server's message", () => {
       mock.dispatch("error", { code: "CHANNEL_FULL", message: "voice channel is full" });
-      expect(mockShowToast).toHaveBeenCalledWith("voice channel is full", "error");
-    });
-
-    it("falls back to a readable message when the server sends none", () => {
-      mock.dispatch("error", { code: "CHANNEL_FULL", message: "" });
+      expectConsole("error", /\[dispatcher\] Server error/);
       expect(mockShowToast).toHaveBeenCalledWith("That voice channel is full", "error");
     });
 
     it("surfaces VIDEO_LIMIT as a toast", () => {
       mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" });
+      expectConsole("error", /\[dispatcher\] Server error/);
       expect(mockShowToast).toHaveBeenCalledWith(
         "That voice channel has reached its video limit",
         "error",
@@ -4481,6 +4850,7 @@ describe("WS Dispatcher", () => {
     // voice_state says camera=false, so VIDEO_LIMIT is otherwise cosmetic.
     it("rolls back the local camera publish on VIDEO_LIMIT", async () => {
       mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" });
+      expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
       expect(mockDisableCamera).toHaveBeenCalled();
@@ -4491,6 +4861,7 @@ describe("WS Dispatcher", () => {
     it("does not set the transient error", () => {
       uiStore.setState((prev) => ({ ...prev, transientError: null }));
       mock.dispatch("error", { code: "CHANNEL_FULL", message: "full" });
+      expectConsole("error", /\[dispatcher\] Server error/);
       expect(uiStore.getState().transientError).toBeNull();
     });
 
@@ -4504,6 +4875,7 @@ describe("WS Dispatcher", () => {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
 
       mock.dispatch("error", { code: "CHANNEL_FULL", message: "full" });
+      expectConsole("error", /\[dispatcher\] Server error/);
 
       expect(voiceStore.getState().currentChannelId).toBeNull();
       expect(voiceStore.getState().voiceStatus).toBe("idle");
@@ -4517,6 +4889,7 @@ describe("WS Dispatcher", () => {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "connected" }));
 
       mock.dispatch("error", { code: "CHANNEL_FULL", message: "full" });
+      expectConsole("error", /\[dispatcher\] Server error/);
 
       expect(voiceStore.getState().currentChannelId).toBe(5);
       expect(voiceStore.getState().voiceStatus).toBe("connected");
@@ -4535,6 +4908,7 @@ describe("WS Dispatcher", () => {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
 
       mock.dispatch("error", { code: "VOICE_ERROR", message: "voice is not configured" });
+      expectConsole("error", /\[dispatcher\] Server error/);
 
       expect(voiceStore.getState().currentChannelId).toBeNull();
       expect(voiceStore.getState().voiceStatus).toBe("idle");
@@ -4544,6 +4918,7 @@ describe("WS Dispatcher", () => {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "missing CONNECT_VOICE permission" });
+      expectConsole("error", /\[dispatcher\] Server error/);
 
       expect(voiceStore.getState().currentChannelId).toBeNull();
       expect(voiceStore.getState().voiceStatus).toBe("idle");
@@ -4569,32 +4944,7 @@ describe("WS Dispatcher", () => {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 7, voiceStatus: "joining" }));
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "missing CONNECT_VOICE permission" });
-      await vi.runAllTimersAsync();
-
-      expect(mockLeaveVoice).toHaveBeenCalledWith(true);
-      expect(voiceStore.getState().currentChannelId).toBeNull();
-      expect(voiceStore.getState().voiceStatus).toBe("idle");
-
-      vi.mocked(mockIsVoiceSessionActive).mockReturnValue(false);
-    });
-
-    // OC-0249: isVoiceConnected() reads session.getRoom(), whose `_room`
-    // getter is null for the ENTIRE "connecting" state — the very state a
-    // voice join is in while voiceStatus is "joining" and connectAndSetup()
-    // is still awaiting createRoom()/resolveLiveKitUrl(). An unrelated error
-    // that lands in that window (e.g. RATE_LIMITED from a different action)
-    // must still abort the in-flight connect attempt, not just roll back the
-    // store — otherwise the join completes with a hot mic and no UI. Because
-    // isVoiceConnected() alone can't see a "connecting" session, the guard
-    // must ask a broader question than "is there a Room" — isVoiceConnected()
-    // itself keeps reporting false throughout.
-    it("tears down an in-flight connect attempt that has no Room yet when a refusal lands", async () => {
-      vi.mocked(mockLeaveVoice).mockClear();
-      vi.mocked(mockIsVoiceConnected).mockReturnValue(false);
-      vi.mocked(mockIsVoiceSessionActive).mockReturnValue(true);
-      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
-
-      mock.dispatch("error", { code: "RATE_LIMITED", message: "too many requests" });
+      expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
       expect(mockLeaveVoice).toHaveBeenCalledWith(true);
@@ -4626,6 +4976,7 @@ describe("WS Dispatcher", () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue("camera");
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "no permission" }, "vid-1");
+      expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
       expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-1");
@@ -4639,11 +4990,12 @@ describe("WS Dispatcher", () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue("screen");
 
       mock.dispatch("error", { code: "RATE_LIMITED", message: "" }, "vid-2");
+      expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
       expect(mockDisableScreenshare).toHaveBeenCalled();
       expect(mockDisableCamera).not.toHaveBeenCalled();
-      expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
+      expect(mockShowToast).toHaveBeenCalledWith("Too many requests. Try again later.", "error");
       expect(uiStore.getState().transientError).toBeNull();
     });
 
@@ -4651,6 +5003,7 @@ describe("WS Dispatcher", () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue(undefined);
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "nope" }, "unrelated-id");
+      expectConsole("error", /\[dispatcher\] Server error/);
 
       expect(mockDisableCamera).not.toHaveBeenCalled();
       expect(mockDisableScreenshare).not.toHaveBeenCalled();
@@ -4667,6 +5020,7 @@ describe("WS Dispatcher", () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue("screen");
 
       mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" }, "vid-screen-1");
+      expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
       expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-screen-1");
@@ -4685,6 +5039,7 @@ describe("WS Dispatcher", () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue(undefined);
 
       mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" }, "vid-superseded-1");
+      expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
       expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-superseded-1");
@@ -4732,5 +5087,53 @@ describe("wireConnectionStatus", () => {
     unsub();
     mockWs.simulateStateChange("connected");
     expect(uiStore.getState().connectionStatus).toBe("disconnected");
+  });
+
+  it("keeps a dial failure for the whole outage, clearing it on a connection", () => {
+    const mockWs = createMockWsClient();
+    const unsub = wireConnectionStatus(mockWs);
+    const dialFailed = (): boolean => uiStore.getState().connectionDialFailed;
+
+    mockWs.simulateStateChange("connecting");
+    mockWs.simulateStateChange("authenticating");
+    mockWs.simulateStateChange("connected");
+    // A drop from a live connection has not failed a dial yet.
+    mockWs.simulateStateChange("reconnecting");
+    expect(dialFailed()).toBe(false);
+    mockWs.simulateStateChange("connecting");
+    expect(dialFailed()).toBe(false);
+
+    mockWs.simulateStateChange("reconnecting");
+    expect(dialFailed()).toBe(true);
+    // Later backoff dials, and their failures, keep the outage's fact.
+    for (let cycle = 0; cycle < 2; cycle++) {
+      mockWs.simulateStateChange("connecting");
+      expect(dialFailed()).toBe(true);
+      mockWs.simulateStateChange("reconnecting");
+      expect(dialFailed()).toBe(true);
+    }
+
+    mockWs.simulateStateChange("connecting");
+    mockWs.simulateStateChange("authenticating");
+    mockWs.simulateStateChange("connected");
+    expect(dialFailed()).toBe(false);
+
+    unsub();
+  });
+
+  it("starts a fresh outage when a stopped socket connects again", () => {
+    const mockWs = createMockWsClient();
+    const unsub = wireConnectionStatus(mockWs);
+    const dialFailed = (): boolean => uiStore.getState().connectionDialFailed;
+
+    mockWs.simulateStateChange("connecting");
+    mockWs.simulateStateChange("disconnected");
+    expect(dialFailed()).toBe(true);
+
+    // Sign-in, a server switch or "Use here" dials from a stopped socket.
+    mockWs.simulateStateChange("connecting");
+    expect(dialFailed()).toBe(false);
+
+    unsub();
   });
 });

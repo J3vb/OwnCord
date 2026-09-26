@@ -11,14 +11,15 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // BroadcastRolesForTest exposes broadcastRoles for external tests. It builds
 // a bare *http.Request carrying ctx, since broadcastRoles's only use of its
 // *http.Request argument is r.Context().
-func BroadcastRolesForTest(ctx context.Context, database *db.DB, hub HubBroadcaster) {
+func BroadcastRolesForTest(ctx context.Context, roles *service.RoleService, hub HubBroadcaster) {
 	r := httptest.NewRequest(http.MethodPost, "/roles", nil).WithContext(ctx)
-	broadcastRoles(r, database, hub)
+	broadcastRoles(r, roles, hub)
 }
 
 // CaptureSetupLimiter installs h so the next NewAdminAPI call reports the
@@ -31,16 +32,15 @@ func CaptureSetupLimiter(h func(*auth.RateLimiter)) (restore func()) {
 	return func() { setupLimiterHook = prev }
 }
 
-// SetSetupLimiterReapTiming overrides the interval and max-window the setup
-// endpoint's rate-limiter reaper uses, so tests don't wait on the real
-// 5-minute interval.
-func SetSetupLimiterReapTiming(interval, maxWindow time.Duration) (restore func()) {
-	prevI, prevW := setupLimiterReapInterval, setupLimiterReapMaxWindow
+// SetSetupLimiterReapTiming overrides the interval the setup endpoint's
+// rate-limiter reaper uses, so tests don't wait on the real 5-minute
+// interval. Cleanup no longer takes a separate max-window (item 6, round 3
+// review) — each entry retires on its own window.
+func SetSetupLimiterReapTiming(interval time.Duration) (restore func()) {
+	prev := setupLimiterReapInterval
 	setupLimiterReapInterval = interval
-	setupLimiterReapMaxWindow = maxWindow
 	return func() {
-		setupLimiterReapInterval = prevI
-		setupLimiterReapMaxWindow = prevW
+		setupLimiterReapInterval = prev
 	}
 }
 

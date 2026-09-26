@@ -5,7 +5,9 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -14,9 +16,18 @@ import (
 
 // ─── User Handlers ───────────────────────────────────────────────────────────
 
-func handleGetStats(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
+// statsResponse is the dashboard payload: the database stats flattened with
+// the served certificate's fingerprint (see SetLeafFingerprint). The
+// fingerprint is the value users compare out of band before accepting the
+// client's trust prompt; it is omitted when there is none to show.
+type statsResponse struct {
+	*db.ServerStats
+	CertificateFingerprint string `json:"certificate_fingerprint,omitempty"`
+}
+
+func handleGetStats(users *service.UserService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		stats, err := database.GetServerStats(r.Context())
+		stats, err := users.ServerStats(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get stats")
 			return
@@ -24,24 +35,43 @@ func handleGetStats(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 		if hub != nil {
 			stats.OnlineCount = hub.ClientCount()
 		}
-		writeJSON(w, http.StatusOK, stats)
+		writeJSON(w, http.StatusOK, statsResponse{ServerStats: stats, CertificateFingerprint: leafFingerprint})
 	}
 }
 
-func handleListUsers(database *db.DB) http.HandlerFunc {
+// maxUserSearchLen bounds the Members search box's q parameter. Usernames are
+// far shorter, so a longer query can only be a mistake or abuse.
+const maxUserSearchLen = 64
+
+// handleListUsers serves the Members page: q is a case-insensitive username
+// substring, role_id keeps one role and banned=1 keeps only effective bans.
+// Filtering happens in the query, so it covers every page, not the fetched one.
+func handleListUsers(users *service.UserService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := queryInt(r, "limit", 50, 1, 500)
 		offset := queryInt(r, "offset", 0, 0, math.MaxInt32)
+		filter := db.UserListFilter{
+			Query:      strings.TrimSpace(r.URL.Query().Get("q")),
+			RoleID:     int64(queryInt(r, "role_id", 0, 0, math.MaxInt32)),
+			BannedOnly: r.URL.Query().Get("banned") == "1",
+		}
+		if utf8.RuneCountInString(filter.Query) > maxUserSearchLen {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "search is too long")
+			return
+		}
 
-		users, err := database.ListAllUsers(r.Context(), limit, offset)
+		page, err := users.ListAll(r.Context(), filter, limit, offset)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list users")
 			return
 		}
 
-		safe := make([]adminUserResponse, len(users))
-		for i := range users {
-			safe[i] = toAdminUserResponse(users[i])
+		safe := make([]adminUserResponse, len(page))
+		for i := range page {
+			safe[i] = toAdminUserResponse(&page[i].User, page[i].RoleName)
+			// The panel compares it with its own role_position from /me to
+			// offer only the actions the server's outrank rule allows.
+			safe[i].RolePosition = &page[i].RolePosition
 		}
 		writeJSON(w, http.StatusOK, safe)
 	}
@@ -78,23 +108,14 @@ type memberUnbanBroadcaster interface {
 
 // writeModerationErr maps ModerationService errors onto admin API responses.
 func writeModerationErr(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, service.ErrForbidden):
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
-	case errors.Is(err, service.ErrNotFound):
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", "user not found")
-	case errors.Is(err, service.ErrBadRequest):
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
-	default:
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation action failed")
-	}
+	writeSvcErr(w, err, "user not found", "", "moderation action failed")
 }
 
 // patchUserPrecheck resolves and validates the target of a
 // PATCH /admin/api/users/{id} before any mutation is attempted. It reports
 // whether the handler may continue; on false it has already written the error
 // response.
-func patchUserPrecheck(w http.ResponseWriter, r *http.Request, database *db.DB) (int64, patchUserRequest, int64, bool) {
+func patchUserPrecheck(w http.ResponseWriter, r *http.Request, users *service.UserService) (int64, patchUserRequest, int64, bool) {
 	var req patchUserRequest
 
 	id, err := pathInt64(r, "id")
@@ -108,13 +129,12 @@ func patchUserPrecheck(w http.ResponseWriter, r *http.Request, database *db.DB) 
 		return 0, req, 0, false
 	}
 
-	user, err := database.GetUserByID(r.Context(), id)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch user")
-		return 0, req, 0, false
-	}
-	if user == nil {
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", "user not found")
+	if _, err := users.Get(r.Context(), id); err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "user not found")
+		} else {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch user")
+		}
 		return 0, req, 0, false
 	}
 
@@ -250,9 +270,9 @@ func patchUserApplyRole(w http.ResponseWriter, r *http.Request, hub HubBroadcast
 	return true
 }
 
-func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService) http.HandlerFunc {
+func handlePatchUser(users *service.UserService, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, req, actor, ok := patchUserPrecheck(w, r, database)
+		id, req, actor, ok := patchUserPrecheck(w, r, users)
 		if !ok {
 			return
 		}
@@ -285,12 +305,12 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 			return
 		}
 
-		updated, err := database.GetUserByID(r.Context(), id)
+		updated, roleName, err := users.GetWithRoleName(r.Context(), id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch updated user")
 			return
 		}
-		writeJSON(w, http.StatusOK, toAdminUserResponseFromUser(r.Context(), database, updated))
+		writeJSON(w, http.StatusOK, toAdminUserResponse(updated, roleName))
 	}
 }
 
@@ -318,10 +338,41 @@ func handleForceLogout(mod *service.ModerationService) http.HandlerFunc {
 	}
 }
 
+// handleDeleteUser erases the target account (B4-9). The route is gated on
+// ADMINISTRATOR; ModerationService additionally enforces the
+// actor-outranks-target hierarchy, refuses the last admin-class account and
+// writes the audit row. On success every connected client gets the same
+// member_ban the ban path sends, which also disconnects the subject.
+func handleDeleteUser(mod *service.ModerationService, hub HubBroadcaster) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt64(r, "id")
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+			return
+		}
+		if mod == nil {
+			// Fail closed rather than erase without a hierarchy check.
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+			return
+		}
+
+		if err := mod.EraseUser(r.Context(), actorFromContext(r), id); err != nil {
+			writeModerationErr(w, err)
+			return
+		}
+		if hub != nil && !mod.ErasureBroadcastsMemberBan() {
+			hub.BroadcastMemberBan(id)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 // handleGetMe describes the calling principal so the admin panel can hide the
 // surfaces its role cannot use. Perimeter-level: every authenticated principal
-// may read its own permissions.
-func handleGetMe() http.HandlerFunc {
+// may read its own permissions. It also names the server for the panel's top
+// bar with its build version. Only authenticated panel principals reach this
+// route; the unauthenticated health and info responses stay version-free.
+func handleGetMe(settings *service.SettingsService, version string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, userOK := r.Context().Value(adminUserKey).(*db.User)
 		role, roleOK := r.Context().Value(adminRoleKey).(*db.Role)
@@ -329,14 +380,21 @@ func handleGetMe() http.HandlerFunc {
 			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
-		writeJSON(w, http.StatusOK, adminMeResponse{
+		me := adminMeResponse{
 			ID:           user.ID,
 			Username:     user.Username,
 			RoleID:       role.ID,
 			RoleName:     role.Name,
 			RolePosition: role.Position,
 			Permissions:  role.Permissions,
-			IsOwner:      role.Position >= permissions.OwnerRolePosition,
-		})
+			IsOwner:      permissions.IsOwner(role.ID, role.Position),
+			Version:      version,
+		}
+		if settings != nil {
+			// Best effort: the name is decoration, so a failed read leaves it
+			// empty rather than failing the permission lookup the panel needs.
+			me.ServerName, _ = settings.Setting(r.Context(), "server_name")
+		}
+		writeJSON(w, http.StatusOK, me)
 	}
 }

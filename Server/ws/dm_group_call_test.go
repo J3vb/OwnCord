@@ -369,6 +369,35 @@ func TestCallRing_BlockedOneToOneForbidden(t *testing.T) {
 	}
 }
 
+// TestCallRing_UntrustedRecipientDoesNotRing is B5-6's Codex P1-2 fix:
+// call_ring/call_incoming is a DM interaction like chat, typing and
+// reactions — unlike the blocked case above, the ring itself succeeds
+// (decision 5's "the sender's side is byte-identical" posture), but an
+// untrusted recipient of a pending request must not be rung.
+func TestCallRing_UntrustedRecipientDoesNotRing(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, "ring-untrusted-alice")
+	bob := seedMemberUser(t, database, "ring-untrusted-bob")
+	chID := untrustedDMChannel(t, database, alice.ID, bob.ID)
+
+	sendAlice := make(chan []byte, 64)
+	sendBob := make(chan []byte, 64)
+	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
+	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
+	hub.Register(cAlice)
+	hub.Register(cBob)
+	waitRegistered(t, hub, cBob)
+
+	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
+
+	if code := dmFindErrorCode(dmCollectAll(sendAlice, absenceWindow)); code != "" {
+		t.Errorf("alice's own ring must succeed, got error code %q", code)
+	}
+	if got := dmFindMsgType(dmDrainAll(sendBob), "call_incoming"); got != nil {
+		t.Error("an untrusted recipient of a pending request received call_incoming")
+	}
+}
+
 // The group exemption applies to rings exactly as it does to sends: a block
 // between two members must not silence the room's call signal for everyone.
 func TestCallRing_GroupWithInternalBlockStillRings(t *testing.T) {

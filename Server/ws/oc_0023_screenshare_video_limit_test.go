@@ -8,10 +8,12 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // oc0023VideoLimitRoleID is a dedicated, non-seeded role carrying every
@@ -86,18 +88,19 @@ func TestHandleVoiceScreenshareV2_RefusedWhenCameraSlotFull(t *testing.T) {
 		t.Fatalf("JoinVoiceChannel B: %v", err)
 	}
 
-	d := VoiceDeps{DB: database, Permissions: permissions.NewChecker(database)}
+	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
-	camRes := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: userA, enabled: true}, ClientInfo{UserID: userA, VoiceChannelID: chID}, d)
+	camRes := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: userA, Enabled: true}, ClientInfo{UserID: userA, VoiceChannelID: chID}, d)
 	if camRes.Error != nil {
 		t.Fatalf("user A camera enable under an empty cap should succeed, got error: %+v", camRes.Error)
 	}
 
-	ssRes := handleVoiceScreenshareV2(ctx, VoiceScreenshareCmd{userID: userB, enabled: true}, ClientInfo{UserID: userB, VoiceChannelID: chID}, d)
+	ssRes := handleVoiceScreenshareV2(ctx, VoiceScreenshareCmd{userID: userB, Enabled: true}, ClientInfo{UserID: userB, VoiceChannelID: chID}, d)
 	if ssRes.Error == nil {
 		t.Fatal("voice_screenshare succeeded with the channel's single video slot already held by a camera publisher — VIDEO_LIMIT was never checked")
 	}
-	if ce, ok := ssRes.Error.(ClientError); !ok || ce.Code != ErrCodeVideoLimit {
+	var ce ClientError
+	if !errors.As(ssRes.Error, &ce) || ce.Code != ErrCodeVideoLimit {
 		t.Errorf("error = %+v, want ClientError{Code: %q}", ssRes.Error, ErrCodeVideoLimit)
 	}
 
@@ -129,18 +132,19 @@ func TestHandleVoiceCameraV2_RefusedWhenScreenshareSlotFull(t *testing.T) {
 		t.Fatalf("JoinVoiceChannel B: %v", err)
 	}
 
-	d := VoiceDeps{DB: database, Permissions: permissions.NewChecker(database)}
+	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
-	ssRes := handleVoiceScreenshareV2(ctx, VoiceScreenshareCmd{userID: userA, enabled: true}, ClientInfo{UserID: userA, VoiceChannelID: chID}, d)
+	ssRes := handleVoiceScreenshareV2(ctx, VoiceScreenshareCmd{userID: userA, Enabled: true}, ClientInfo{UserID: userA, VoiceChannelID: chID}, d)
 	if ssRes.Error != nil {
 		t.Fatalf("user A screenshare enable under an empty cap should succeed, got error: %+v", ssRes.Error)
 	}
 
-	camRes := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: userB, enabled: true}, ClientInfo{UserID: userB, VoiceChannelID: chID}, d)
+	camRes := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: userB, Enabled: true}, ClientInfo{UserID: userB, VoiceChannelID: chID}, d)
 	if camRes.Error == nil {
 		t.Fatal("voice_camera succeeded with the channel's single video slot already held by a screenshare publisher — the slot-count query ignores screenshare rows")
 	}
-	if ce, ok := camRes.Error.(ClientError); !ok || ce.Code != ErrCodeVideoLimit {
+	var ce ClientError
+	if !errors.As(camRes.Error, &ce) || ce.Code != ErrCodeVideoLimit {
 		t.Errorf("error = %+v, want ClientError{Code: %q}", camRes.Error, ErrCodeVideoLimit)
 	}
 

@@ -26,12 +26,12 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// testPermSvc wires a PermissionService around the test DB so
+// testUploadSvc wires an UploadService around the test DB so
 // MountUploadRoutes can enforce its non-nil contract. The tests don't
 // exercise per-channel ACLs directly — they go through the live
-// permissions.Checker, which is the production path anyway.
-func testPermSvc(database *db.DB) *service.PermissionService {
-	return service.NewPermissionService(database, permissions.NewChecker(database))
+// permissions.Checker behind the service, which is the production path anyway.
+func testUploadSvc(database *db.DB) *service.UploadService {
+	return service.NewUploadService(database, service.NewPermissionService(database, permissions.NewChecker(database)))
 }
 
 // ─── schema for upload tests ─────────────────────────────────────────────────
@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
+    registration_status TEXT NOT NULL DEFAULT 'active',
     identity_public_key TEXT,
     display_name TEXT,
     about TEXT,
@@ -77,7 +78,22 @@ CREATE TABLE IF NOT EXISTS sessions (
     ip_address TEXT,
     created_at TEXT    NOT NULL DEFAULT (datetime('now')),
     last_used  TEXT    NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT    NOT NULL
+    expires_at TEXT    NOT NULL,
+    unseen     INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS recovery_kits (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    verifier   TEXT    NOT NULL,
+    created_at TEXT    NOT NULL,
+    used_at    TEXT
+);
+CREATE TABLE IF NOT EXISTS recovery_assists (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    verifier TEXT NOT NULL,
+    issued_by INTEGER NOT NULL,
+    verification TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 
@@ -108,7 +124,8 @@ CREATE TABLE IF NOT EXISTS channels (
     archived       INTEGER NOT NULL DEFAULT 0,
     created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     voice_max_users INTEGER NOT NULL DEFAULT 0,
-    is_group        INTEGER NOT NULL DEFAULT 0
+    is_group        INTEGER NOT NULL DEFAULT 0,
+    nsfw            INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,6 +154,13 @@ CREATE TABLE IF NOT EXISTS attachments (
     width       INTEGER,
     height      INTEGER,
     uploader_id INTEGER REFERENCES users(id)
+);
+-- B5-2: the upload byte counter UploadService.Reserve charges before every
+-- store write, so no upload succeeds without it. Keep in step with
+-- migrations/044_user_storage.sql.
+CREATE TABLE IF NOT EXISTS user_storage (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    bytes_used INTEGER NOT NULL DEFAULT 0 CHECK (bytes_used >= 0)
 );
 CREATE TABLE IF NOT EXISTS dm_participants (
     user_id    INTEGER NOT NULL REFERENCES users(id),
@@ -198,7 +222,7 @@ func newUploadTestStorage(t *testing.T) *storage.Storage {
 func buildUploadRouter(database *db.DB, store *storage.Storage, allowedOrigins []string) http.Handler {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
-	api.MountUploadRoutes(r, database, store, limiter, allowedOrigins, testPermSvc(database))
+	api.MountUploadRoutes(r, service.NewSessionService(database), store, limiter, allowedOrigins, testUploadSvc(database))
 	return r
 }
 
@@ -207,7 +231,7 @@ func buildUploadRouterWithLimiter(database *db.DB, store *storage.Storage, limit
 	if limiter == nil {
 		limiter = auth.NewRateLimiter()
 	}
-	api.MountUploadRoutes(r, database, store, limiter, allowedOrigins, testPermSvc(database))
+	api.MountUploadRoutes(r, service.NewSessionService(database), store, limiter, allowedOrigins, testUploadSvc(database))
 	return r
 }
 
@@ -1272,14 +1296,14 @@ func TestServeFile_UnlinkedFile_OtherUserForbidden(t *testing.T) {
 	}
 }
 
-func TestServeFile_AdminBypassesAllChecks(t *testing.T) {
+func TestServeFile_AdminCannotReadAnotherUsersUnlinkedFile(t *testing.T) {
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
 	uploaderToken := uploadCreateToken(t, database, "acluploaderadmin", 4) // Member
 	adminToken := uploadCreateToken(t, database, "acladmin", 1)            // Owner (admin)
 
-	content := []byte("file for admin bypass test content with sufficient bytes")
+	content := []byte("file for admin unlinked test content with sufficient bytes")
 	rr := doUpload(t, router, uploaderToken, "file", "restricted.txt", content)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
@@ -1288,10 +1312,9 @@ func TestServeFile_AdminBypassesAllChecks(t *testing.T) {
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	fileID := resp["id"].(string)
 
-	// Admin can access any file regardless of ownership.
 	rr2 := doServeFile(t, router, fileID, adminToken, nil)
-	if rr2.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200 for admin bypass", rr2.Code)
+	if rr2.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for admin reading another user's unlinked file", rr2.Code)
 	}
 }
 
@@ -1461,9 +1484,9 @@ func TestServeFile_LinkedToDM_NonParticipantForbidden(t *testing.T) {
 
 // OC-0112: the admin bypass in handleServeFile must not cover the DM
 // participant check. Every sibling DM read gate (requireChannelRead,
-// PermissionService.RequireChannelAccess, checkSendPermission) denies a
-// non-participant Administrator just like anyone else — the file route must
-// match, not open every private DM to anyone holding the admin bit.
+// checkSendPermission) denies a non-participant Administrator just like
+// anyone else — the file route must match, not open every private DM to
+// anyone holding the admin bit.
 func TestServeFile_LinkedToDM_AdminNonParticipantForbidden(t *testing.T) {
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)

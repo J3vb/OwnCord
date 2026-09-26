@@ -58,6 +58,14 @@ func (q *Queries) DeleteSessionByToken(ctx context.Context, token string) error 
 	return err
 }
 
+const deleteUserSessions = `-- name: DeleteUserSessions :execresult
+DELETE FROM sessions WHERE user_id = ?
+`
+
+func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteUserSessions, userID)
+}
+
 const evictOldestSessions = `-- name: EvictOldestSessions :exec
 DELETE FROM sessions WHERE id IN (
     SELECT s2.id FROM sessions AS s2 WHERE s2.user_id = ?
@@ -77,7 +85,7 @@ func (q *Queries) EvictOldestSessions(ctx context.Context, arg EvictOldestSessio
 }
 
 const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
-SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at
+SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at, unseen
 FROM sessions WHERE token = ?
 `
 
@@ -93,6 +101,7 @@ func (q *Queries) GetSessionByTokenHash(ctx context.Context, token string) (Sess
 		&i.CreatedAt,
 		&i.LastUsed,
 		&i.ExpiresAt,
+		&i.Unseen,
 	)
 	return i, err
 }
@@ -140,8 +149,8 @@ func (q *Queries) GetSessionWithBanStatus(ctx context.Context, token string) (Ge
 }
 
 const insertSession = `-- name: InsertSession :execresult
-INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO sessions (user_id, token, device, ip_address, expires_at, unseen)
+VALUES (?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
@@ -150,6 +159,7 @@ type InsertSessionParams struct {
 	Device    *string `json:"device"`
 	IpAddress *string `json:"ipAddress"`
 	ExpiresAt string  `json:"expiresAt"`
+	Unseen    int64   `json:"unseen"`
 }
 
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) (sql.Result, error) {
@@ -159,11 +169,12 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) (s
 		arg.Device,
 		arg.IpAddress,
 		arg.ExpiresAt,
+		arg.Unseen,
 	)
 }
 
 const listUserSessions = `-- name: ListUserSessions :many
-SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at
+SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at, unseen
 FROM sessions
 WHERE user_id = ?
 ORDER BY created_at DESC
@@ -187,6 +198,7 @@ func (q *Queries) ListUserSessions(ctx context.Context, userID int64) ([]Session
 			&i.CreatedAt,
 			&i.LastUsed,
 			&i.ExpiresAt,
+			&i.Unseen,
 		); err != nil {
 			return nil, err
 		}
@@ -199,6 +211,22 @@ func (q *Queries) ListUserSessions(ctx context.Context, userID int64) ([]Session
 		return nil, err
 	}
 	return items, nil
+}
+
+const markSessionsSeen = `-- name: MarkSessionsSeen :execresult
+UPDATE sessions SET unseen = 0 WHERE user_id = ? AND id != ? AND unseen = 1
+`
+
+type MarkSessionsSeenParams struct {
+	UserID int64 `json:"userId"`
+	ID     int64 `json:"id"`
+}
+
+// The new-login signal (B4-7): listing the account's sessions from one
+// device acknowledges every other session's login. The caller's own row is
+// left alone so a device never acknowledges itself.
+func (q *Queries) MarkSessionsSeen(ctx context.Context, arg MarkSessionsSeenParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, markSessionsSeen, arg.UserID, arg.ID)
 }
 
 const touchSession = `-- name: TouchSession :exec

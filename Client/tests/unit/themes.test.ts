@@ -1,28 +1,16 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
+  applyAccent,
   applyThemeByName,
   getActiveThemeName,
-  listThemeNames,
-  saveCustomTheme,
-  loadCustomTheme,
-  deleteCustomTheme,
-  exportTheme,
+  readableRoleColor,
   restoreTheme,
-  type OwnCordTheme,
 } from "@lib/themes";
 
 describe("themes", () => {
   beforeEach(() => {
     localStorage.clear();
     document.body.className = "";
-  });
-
-  it("lists built-in theme names", () => {
-    const names = listThemeNames();
-    expect(names).toContain("dark");
-    expect(names).toContain("neon-glow");
-    expect(names).toContain("midnight");
-    expect(names).toContain("light");
   });
 
   it("applies neon-glow theme class to body", () => {
@@ -35,42 +23,6 @@ describe("themes", () => {
     applyThemeByName("dark");
     expect(document.body.classList.contains("theme-neon-glow")).toBe(false);
     expect(document.body.classList.contains("theme-dark")).toBe(true);
-  });
-
-  it("saves and loads a custom theme", () => {
-    const custom: OwnCordTheme = {
-      name: "my-red",
-      author: "TestUser",
-      version: "1.0.0",
-      colors: { "--accent-primary": "#ff0000" },
-    };
-    saveCustomTheme(custom);
-    const loaded = loadCustomTheme("my-red");
-    expect(loaded).toEqual(custom);
-  });
-
-  it("deletes a custom theme", () => {
-    const custom: OwnCordTheme = {
-      name: "temp",
-      author: "",
-      version: "1.0.0",
-      colors: {},
-    };
-    saveCustomTheme(custom);
-    deleteCustomTheme("temp");
-    expect(loadCustomTheme("temp")).toBeNull();
-  });
-
-  it("exports a theme as JSON", () => {
-    const custom: OwnCordTheme = {
-      name: "export-test",
-      author: "User",
-      version: "1.0.0",
-      colors: { "--accent-primary": "#00ff00" },
-    };
-    const json = exportTheme(custom);
-    const parsed = JSON.parse(json) as OwnCordTheme;
-    expect(parsed.name).toBe("export-test");
   });
 
   it("persists active theme name", () => {
@@ -91,73 +43,6 @@ describe("themes", () => {
 
     expect(getActiveThemeName()).toBe("midnight");
     expect(localStorage.getItem("owncord:theme:active")).toBe("midnight");
-  });
-});
-
-describe("CSS injection prevention", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    document.body.className = "";
-    // Clear any inline styles from previous tests
-    for (let i = document.body.style.length - 1; i >= 0; i--) {
-      const prop = document.body.style.item(i);
-      document.body.style.removeProperty(prop);
-    }
-  });
-
-  function applyCustomWithColors(colors: Record<string, string>): void {
-    const theme: OwnCordTheme = {
-      name: "injection-test",
-      author: "attacker",
-      version: "1.0.0",
-      colors,
-    };
-    saveCustomTheme(theme);
-    applyThemeByName("injection-test");
-  }
-
-  it("should reject custom theme value containing url()", () => {
-    applyCustomWithColors({ "--bg": "url(https://evil.com/steal)" });
-    expect(document.body.style.getPropertyValue("--bg")).toBe("");
-  });
-
-  it("should reject custom theme value containing expression()", () => {
-    applyCustomWithColors({ "--bg": "expression(alert(1))" });
-    expect(document.body.style.getPropertyValue("--bg")).toBe("");
-  });
-
-  it("should reject custom theme value containing semicolons", () => {
-    applyCustomWithColors({ "--bg": "#ff0000; background: red" });
-    expect(document.body.style.getPropertyValue("--bg")).toBe("");
-  });
-
-  it("should reject custom theme value containing braces {}", () => {
-    applyCustomWithColors({ "--bg": "red} body { background: red" });
-    expect(document.body.style.getPropertyValue("--bg")).toBe("");
-  });
-
-  it("should reject custom theme value containing !important", () => {
-    applyCustomWithColors({ "--bg": "#ff0000 !important" });
-    expect(document.body.style.getPropertyValue("--bg")).toBe("");
-  });
-
-  it("should reject property name not starting with --", () => {
-    applyCustomWithColors({ background: "#ff0000" });
-    // "background" does not start with "--", so it must not be set
-    expect(document.body.style.getPropertyValue("background")).toBe("");
-  });
-
-  it("should accept valid hex color values like #ff0000", () => {
-    applyCustomWithColors({ "--accent": "#ff0000" });
-    expect(document.body.style.getPropertyValue("--accent")).toBe("#ff0000");
-  });
-
-  it("should reject rgb()/rgba() values (parentheses blocked to prevent CSS injection)", () => {
-    applyCustomWithColors({ "--accent": "rgb(255, 0, 0)" });
-    expect(document.body.style.getPropertyValue("--accent")).toBe("");
-
-    applyCustomWithColors({ "--accent": "rgba(255, 0, 0, 0.5)" });
-    expect(document.body.style.getPropertyValue("--accent")).toBe("");
   });
 });
 
@@ -206,52 +91,123 @@ describe("restoreTheme", () => {
   });
 });
 
-describe("deleteCustomTheme", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    document.body.className = "";
+describe("applyAccent (B9-2, owner decision Q8)", () => {
+  const html = document.documentElement.style;
+  const body = document.body.style;
+
+  function clearInline(): void {
+    for (const style of [html, body]) {
+      for (let i = style.length - 1; i >= 0; i--) style.removeProperty(style.item(i));
+    }
+  }
+
+  /** The dark theme's surfaces, as inline tokens the contrast check reads back. */
+  function setDarkSurfaces(): void {
+    body.setProperty("--bg-primary", "#313338");
+    body.setProperty("--bg-secondary", "#2b2d31");
+    body.setProperty("--bg-tertiary", "#1e1f22");
+    body.setProperty("--bg-input", "#383a40");
+  }
+
+  beforeEach(clearInline);
+
+  it("honours a readable accent for fills, text and focus, and derives the rest", () => {
+    setDarkSurfaces();
+    applyAccent("#3ba55d");
+    for (const style of [html, body]) {
+      expect(style.getPropertyValue("--accent")).toBe("#3ba55d");
+      expect(style.getPropertyValue("--on-accent")).toBe("#000000");
+      expect(style.getPropertyValue("--accent-hover")).toBe("#58b375");
+      expect(style.getPropertyValue("--accent-active")).toBe("#76c08e");
+    }
+    // 3.64:1 at worst: a focus ring (>= 3:1) but not text (< 4.5:1).
+    expect(body.getPropertyValue("--accent-text")).toBe("");
+    expect(body.getPropertyValue("--focus-ring")).toBe("#3ba55d");
+
+    applyAccent("#57f287"); // 7.3:1 at worst: both uses
+    expect(body.getPropertyValue("--accent-text")).toBe("#57f287");
+    expect(body.getPropertyValue("--focus-ring")).toBe("#57f287");
   });
 
-  it("should fall back to dark theme when deleting active custom theme", () => {
-    const custom: OwnCordTheme = {
-      name: "doomed",
-      author: "",
-      version: "1.0.0",
-      colors: { "--accent": "#ff0000" },
-    };
-    saveCustomTheme(custom);
-    applyThemeByName("doomed");
-    expect(getActiveThemeName()).toBe("doomed");
+  it("keeps the theme's text and focus colours when the accent reads below 3:1", () => {
+    setDarkSurfaces();
+    // A tested theme value on documentElement (the light theme writes one there).
+    html.setProperty("--accent-text", "#4752c4");
+    applyAccent("#57f287");
+    applyAccent("#5865f2"); // 2.74:1 on #313338
+    expect(body.getPropertyValue("--accent")).toBe("#5865f2");
+    expect(body.getPropertyValue("--accent-text")).toBe("");
+    expect(body.getPropertyValue("--focus-ring")).toBe("");
+    expect(html.getPropertyValue("--accent-text")).toBe("#4752c4");
+  });
 
-    deleteCustomTheme("doomed");
-    expect(getActiveThemeName()).toBe("dark");
-    expect(document.body.classList.contains("theme-dark")).toBe(true);
+  it("falls back for text and focus when the surfaces cannot be read", () => {
+    applyAccent("#ffffff");
+    expect(body.getPropertyValue("--accent")).toBe("#ffffff");
+    expect(body.getPropertyValue("--accent-text")).toBe("");
+  });
+
+  it("applies nothing for a value that is not a colour", () => {
+    applyAccent("url(evil)");
+    expect(html.length).toBe(0);
+    expect(body.length).toBe(0);
   });
 });
 
-describe("loadCustomTheme validation", () => {
+describe("readableRoleColor (B9 Q13 role clamp)", () => {
+  const html = document.documentElement.style;
+
+  function setSurfaces(surfaces: readonly [string, string, string, string]): void {
+    for (const [i, token] of [
+      "--bg-primary",
+      "--bg-secondary",
+      "--bg-tertiary",
+      "--bg-input",
+    ].entries()) {
+      html.setProperty(token, surfaces[i]!);
+    }
+    // A theme switch is what re-reads the surfaces and empties the cache.
+    applyThemeByName("dark");
+  }
+  const DARK = ["#313338", "#2b2d31", "#1e1f22", "#383a40"] as const;
+  const LIGHT = ["#ffffff", "#f2f3f5", "#e3e5e8", "#ebedef"] as const;
+
   beforeEach(() => {
-    localStorage.clear();
+    document.body.replaceChildren();
+    for (let i = html.length - 1; i >= 0; i--) html.removeProperty(html.item(i));
   });
 
-  it("should return null for invalid JSON", () => {
-    localStorage.setItem("owncord:theme:custom:broken", "NOT JSON {{{");
-    expect(loadCustomTheme("broken")).toBeNull();
+  it("keeps a role colour that reads at 4.5:1 on every surface", () => {
+    setSurfaces(DARK);
+    expect(readableRoleColor("#57f287")).toBe("#57f287");
+    expect(readableRoleColor("rgb(87, 242, 135)")).toBe("#57f287");
   });
 
-  it("should return null for object missing name", () => {
-    localStorage.setItem(
-      "owncord:theme:custom:noname",
-      JSON.stringify({ colors: { "--a": "#000" } }),
-    );
-    expect(loadCustomTheme("noname")).toBeNull();
+  it("falls back to --text-normal below 4.5:1, like --accent-text", () => {
+    setSurfaces(LIGHT);
+    expect(readableRoleColor("#ff0000")).toBe("var(--text-normal)"); // 4.00:1 on white
+    expect(readableRoleColor("#57f287")).toBe("var(--text-normal)");
+    setSurfaces(DARK);
+    expect(readableRoleColor("#ff0000")).toBe("var(--text-normal)"); // 2.9:1 on #383a40
   });
 
-  it("should return null for object missing colors", () => {
-    localStorage.setItem(
-      "owncord:theme:custom:nocolors",
-      JSON.stringify({ name: "nocolors", author: "x", version: "1" }),
-    );
-    expect(loadCustomTheme("nocolors")).toBeNull();
+  it("never hands back the raw server string", () => {
+    setSurfaces(DARK);
+    const out = readableRoleColor("#57f287; background: url(https://example.invalid/x)");
+    expect(out).toMatch(/^(#[0-9a-f]{6}|var\(--text-normal\))$/);
+  });
+
+  it("re-clamps rendered names when the theme changes", () => {
+    setSurfaces(DARK);
+    const name = document.createElement("span");
+    name.dataset["roleColor"] = "#57f287";
+    name.style.color = readableRoleColor("#57f287");
+    document.body.appendChild(name);
+    expect(name.style.color).toBe("rgb(87, 242, 135)");
+
+    setSurfaces(LIGHT);
+    expect(name.style.color).toBe("var(--text-normal)");
+    setSurfaces(DARK);
+    expect(name.style.color).toBe("rgb(87, 242, 135)");
   });
 });

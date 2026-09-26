@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("PK\x03\x04\x14\x00\x00\x00\b\x00")

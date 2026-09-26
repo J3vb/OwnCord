@@ -13,14 +13,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// fakeEventStore is a minimal EventStore stub that records every prune
-// call and optionally returns a canned error. Only the methods actually
-// exercised by the pruner are implemented; the rest panic so an accidental
-// code path change is noisy.
+// fakeEventStore is a minimal eventPruneStore stub that records every prune
+// call and optionally returns a canned error.
 type fakeEventStore struct {
 	mu          sync.Mutex
 	pruneCalls  int
@@ -54,31 +50,6 @@ func (f *fakeEventStore) LastCutoff() time.Time {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lastCutoff
-}
-
-// Stubs for the rest of the EventStore interface — not exercised here.
-func (*fakeEventStore) PersistEvents(context.Context, []db.PersistedEvent) (int, error) {
-	return 0, nil
-}
-
-func (*fakeEventStore) PersistEvent(context.Context, int64, string, int64, []byte) error {
-	panic("unused")
-}
-
-func (*fakeEventStore) GetEventsSince(context.Context, int64, int) ([]db.PersistedEvent, error) {
-	panic("unused")
-}
-
-func (*fakeEventStore) GetEventsSinceForChannels(context.Context, int64, []int64, int) ([]db.PersistedEvent, error) {
-	panic("unused")
-}
-
-func (*fakeEventStore) CountEventsInRange(context.Context, int64, int64) (int64, error) {
-	panic("unused")
-}
-
-func (*fakeEventStore) GetMaxEventSeq(context.Context) (int64, error) {
-	panic("unused")
 }
 
 func TestRunPruneCutoffCalculation(t *testing.T) {

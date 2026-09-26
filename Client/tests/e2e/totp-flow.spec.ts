@@ -2,7 +2,7 @@
  * E2E tests for TOTP (2FA) submission flow.
  * Covers: valid code submits, invalid code shows error, cancel returns to login.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { buildTauriMockScript, MOCK_LOGIN_2FA_RESPONSE, MOCK_TOKEN } from "./helpers";
 
 async function mockTotpSuccess(page: import("@playwright/test").Page): Promise<void> {
@@ -56,7 +56,7 @@ test.describe("TOTP Submission Flow", () => {
     await page.goto("/");
     await loginToTotp(page);
 
-    const totpInput = page.locator(".totp-overlay input[inputmode='numeric']");
+    const totpInput = page.locator(".totp-overlay input[autocomplete='one-time-code']");
     await totpInput.fill("abc");
 
     const verifyBtn = page.locator(".totp-overlay button.btn-primary");
@@ -71,7 +71,7 @@ test.describe("TOTP Submission Flow", () => {
     await page.goto("/");
     await loginToTotp(page);
 
-    const totpInput = page.locator(".totp-overlay input[inputmode='numeric']");
+    const totpInput = page.locator(".totp-overlay input[autocomplete='one-time-code']");
     await totpInput.fill("123");
 
     const verifyBtn = page.locator(".totp-overlay button.btn-primary");
@@ -85,7 +85,7 @@ test.describe("TOTP Submission Flow", () => {
     await page.goto("/");
     await loginToTotp(page);
 
-    const totpInput = page.locator(".totp-overlay input[inputmode='numeric']");
+    const totpInput = page.locator(".totp-overlay input[autocomplete='one-time-code']");
     await totpInput.fill("123456");
 
     const verifyBtn = page.locator(".totp-overlay button.btn-primary");
@@ -101,7 +101,7 @@ test.describe("TOTP Submission Flow", () => {
     await page.goto("/");
     await loginToTotp(page);
 
-    const totpInput = page.locator(".totp-overlay input[inputmode='numeric']");
+    const totpInput = page.locator(".totp-overlay input[autocomplete='one-time-code']");
     await totpInput.fill("999999");
 
     const verifyBtn = page.locator(".totp-overlay button.btn-primary");

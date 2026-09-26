@@ -85,17 +85,46 @@ func NewDMChannelInfo(channelID int64, name string, isGroup bool, participants [
 
 // ─── GetOrCreateDMChannel ───────────────────────────────────────────────────
 
-// GetOrCreateDMChannel finds or creates a DM channel between two users.
-// Returns the channel, whether it was newly created, and any error.
-// The entire lookup+create is wrapped in a single IMMEDIATE transaction to
-// prevent a TOCTOU race where two concurrent requests both see ErrNoRows and
-// each create a separate DM channel for the same user pair.
+// GetOrCreateDMChannel finds or creates a DM channel between two users,
+// opening it for both unconditionally. Returns the channel, whether it was
+// newly created, and any error. Used where there is no first-contact gate to
+// apply (cmd/seed's demo data) — service/dm.go's CreateDM goes through
+// GetOrCreateDMChannelGated instead.
 func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*Channel, bool, error) {
+	ch, created, _, err := d.getOrCreateDMChannel(ctx, user1ID, user2ID, false)
+	return ch, created, err
+}
+
+// GetOrCreateDMChannelGated is GetOrCreateDMChannel's gated variant for a
+// caller-initiated one-to-one DM (service/dm.go's CreateDM): on the create
+// branch it decides whether to open the recipient's side (does the
+// recipient already trust callerID?) and writes dm_open_state accordingly —
+// INSIDE the same transaction as the trust check, with no separate
+// CloseDM step afterward. Codex review round 2, P1: the old shape (create
+// both sides open, then CloseDM the recipient's side in a later call) left
+// a window where a cancellation or a failed CloseDM left the recipient open,
+// and where a CloseDM built from a stale "not trusted" read could close a DM
+// the recipient had meanwhile accepted (the trust write racing the read).
+// recipientOpened is only meaningful when created is true — an existing
+// channel's recipient side is whatever it already was, untouched here.
+func (d *DB) GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *Channel, created bool, recipientOpened bool, err error) {
+	return d.getOrCreateDMChannel(ctx, callerID, recipientID, true)
+}
+
+// getOrCreateDMChannel is the shared implementation. user1ID is always the
+// caller (the one whose side always ends up open); gateRecipient controls
+// whether user2ID's side is conditioned on trust (true) or opened
+// unconditionally like user1ID's (false). The entire lookup+create is
+// wrapped in a single SERIALIZABLE transaction to prevent a TOCTOU race
+// where two concurrent requests both see ErrNoRows and each create a
+// separate DM channel for the same user pair — and, when gated, to keep the
+// trust check and the dm_open_state write atomic.
+func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, gateRecipient bool) (*Channel, bool, bool, error) {
 	tx, err := d.writer.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelSerializable,
 	})
 	if err != nil {
-		return nil, false, fmt.Errorf("GetOrCreateDMChannel begin tx: %w", err)
+		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel begin tx: %w", err)
 	}
 
 	// Check for an existing DM channel inside the transaction.
@@ -119,26 +148,29 @@ func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (
 	if err == nil {
 		// Existing channel found — ensure the calling user has it open (re-open
 		// is idempotent). Without this, a user who previously closed the DM would
-		// not see it in their sidebar after the other party re-initiates.
+		// not see it in their sidebar after the other party re-initiates. The
+		// recipient's own side is untouched — recipientOpened is meaningless
+		// here (created is false) so it is reported true for backward
+		// compatibility with callers checking it unconditionally.
 		_, _ = tx.Exec(
 			`INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?)`,
 			user1ID, existingID,
 		)
 		if commitErr := tx.Commit(); commitErr != nil {
-			return nil, false, fmt.Errorf("GetOrCreateDMChannel commit existing: %w", commitErr)
+			return nil, false, false, fmt.Errorf("GetOrCreateDMChannel commit existing: %w", commitErr)
 		}
 		ch, getErr := d.GetChannel(ctx, existingID)
 		if getErr != nil {
-			return nil, false, fmt.Errorf("GetOrCreateDMChannel fetch existing: %w", getErr)
+			return nil, false, false, fmt.Errorf("GetOrCreateDMChannel fetch existing: %w", getErr)
 		}
 		if ch == nil {
-			return nil, false, fmt.Errorf("GetOrCreateDMChannel: channel %d vanished", existingID)
+			return nil, false, false, fmt.Errorf("GetOrCreateDMChannel: channel %d vanished", existingID)
 		}
-		return ch, false, nil
+		return ch, false, true, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		_ = tx.Rollback()
-		return nil, false, fmt.Errorf("GetOrCreateDMChannel lookup: %w", err)
+		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel lookup: %w", err)
 	}
 
 	// No existing DM — create one inside the same transaction.
@@ -149,12 +181,12 @@ func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (
 	)
 	if err != nil {
 		_ = tx.Rollback()
-		return nil, false, fmt.Errorf("GetOrCreateDMChannel insert channel: %w", err)
+		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel insert channel: %w", err)
 	}
 	channelID, err := res.LastInsertId()
 	if err != nil {
 		_ = tx.Rollback()
-		return nil, false, fmt.Errorf("GetOrCreateDMChannel last insert id: %w", err)
+		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel last insert id: %w", err)
 	}
 
 	// Insert both participants.
@@ -164,28 +196,74 @@ func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (
 	)
 	if err != nil {
 		_ = tx.Rollback()
-		return nil, false, fmt.Errorf("GetOrCreateDMChannel insert participants: %w", err)
+		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel insert participants: %w", err)
 	}
 
-	// Open the DM for both users.
-	_, err = tx.Exec(
-		`INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?), (?, ?)`,
-		user1ID, channelID, user2ID, channelID,
-	)
+	// Test seam (package db only, no exported setter): lets a same-package
+	// test simulate a failure/cancellation in the exact window the old
+	// two-step create-then-CloseDM shape used to leave open, and confirm the
+	// whole transaction rolls back instead of landing the recipient open.
+	if hook := d.afterDMParticipantsInsertHook; hook != nil {
+		if hookErr := hook(); hookErr != nil {
+			_ = tx.Rollback()
+			return nil, false, false, hookErr
+		}
+	}
+
+	// Decide user2ID's (the recipient's) visibility and write dm_open_state
+	// in the SAME transaction — see getOrCreateDMChannel's doc comment
+	// (Codex review round 2, P1) for why this must not be a separate step.
+	recipientOpened, err := decideAndOpenRecipientDM(tx, user1ID, user2ID, channelID, gateRecipient)
 	if err != nil {
 		_ = tx.Rollback()
-		return nil, false, fmt.Errorf("GetOrCreateDMChannel open dm: %w", err)
+		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, false, fmt.Errorf("GetOrCreateDMChannel commit: %w", err)
+		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel commit: %w", err)
 	}
 
 	ch, err := d.GetChannel(ctx, channelID)
 	if err != nil {
-		return nil, false, fmt.Errorf("GetOrCreateDMChannel fetch new: %w", err)
+		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel fetch new: %w", err)
 	}
-	return ch, true, nil
+	return ch, true, recipientOpened, nil
+}
+
+// decideAndOpenRecipientDM decides (when gateRecipient) whether user2ID
+// already trusts user1ID and writes dm_open_state for the freshly created
+// channelID accordingly, both against tx — so it commits or rolls back as
+// one unit with the caller's transaction. Split out of getOrCreateDMChannel
+// only to keep that function's statement count down; it owns no transaction
+// lifecycle of its own (the caller rolls back on a non-nil error).
+func decideAndOpenRecipientDM(tx *sql.Tx, user1ID, user2ID, channelID int64, gateRecipient bool) (recipientOpened bool, err error) {
+	recipientOpened = true
+	if gateRecipient {
+		var trustCount int
+		if err := tx.QueryRow(
+			`SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = ? AND sender_id = ?`,
+			user2ID, user1ID,
+		).Scan(&trustCount); err != nil {
+			return false, fmt.Errorf("trust check: %w", err)
+		}
+		recipientOpened = trustCount > 0
+	}
+
+	if recipientOpened {
+		_, err = tx.Exec(
+			`INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?), (?, ?)`,
+			user1ID, channelID, user2ID, channelID,
+		)
+	} else {
+		_, err = tx.Exec(
+			`INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?)`,
+			user1ID, channelID,
+		)
+	}
+	if err != nil {
+		return recipientOpened, fmt.Errorf("open dm: %w", err)
+	}
+	return recipientOpened, nil
 }
 
 // FindDMChannelIDBetween returns the id of the 1:1 DM channel the two users

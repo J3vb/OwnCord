@@ -15,6 +15,13 @@ complete. Part-closes `R-08`.
 Acceptance is not a claim that OwnCord is beta-ready. It is a claim that the
 baseline is **truthful, reproducible, and sufficient to begin B1**.
 
+> **Correction — 2026-09-23 (B10 / B1/G-04):** Later live-ledger updates
+> overwrote the path-resolution row and Question 2. Restored the signed
+> observations from `7c286abe` (HP-0 acceptance, PR #1410), checked against
+> its cited source ledger at `6a1561fa`: 348 records, including 38 open
+> (11 medium / 27 low). The hunt, path and phase observations below belong
+> to that 2026-08-25 measurement, not today's ledger.
+
 ## Question 1 — what is green, red, unavailable, and unverified
 
 | Metric                                | Baseline                     | Target             | Actual                                         | Evidence                                                            |

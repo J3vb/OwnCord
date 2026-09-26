@@ -23,6 +23,7 @@ import { createElement } from "@lib/dom";
 import {
   fetchImageAsDataUrl,
   isSafeUrl,
+  recoverEvictedImage,
   resolveServerUrl,
 } from "@components/message-list/attachments";
 
@@ -115,6 +116,7 @@ export function createAvatarElement(
       loading: "lazy",
       decoding: "async",
     });
+    recoverEvictedImage(img, { url: resolved });
     // Replacing rather than hiding keeps the letter out of the accessibility
     // tree once a real picture is there.
     letter.remove();

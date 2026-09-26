@@ -14,7 +14,6 @@ import {
   setLocalCamera,
   setLocalScreenshare,
   setListenOnly,
-  setLocalSpeaking,
   setSpeakers,
   setVoiceConfig,
   getChannelVoiceUsers,
@@ -30,6 +29,11 @@ import {
 } from "../../src/stores/voice.store";
 import type { ReadyVoiceState, VoiceStatePayload, VoiceLeavePayload } from "../../src/lib/types";
 import { authStore } from "../../src/stores/auth.store";
+// vi.resetModules() below would hand the re-imported module a fresh logger,
+// which re-installs the logger's app-lifetime pref-change listener on every
+// reset. Those tests re-import against this already-loaded instance instead,
+// so the singleton stays one.
+import * as appLogger from "../../src/lib/logger";
 
 function resetStore(): void {
   voiceStore.setState(() => ({
@@ -539,80 +543,6 @@ describe("voice store", () => {
     });
   });
 
-  describe("setLocalSpeaking", () => {
-    it("updates speaking state for current user in active channel", () => {
-      // Set up: current user (id=1) in channel 10
-      authStore.setState(() => ({
-        token: "t",
-        user: { id: 1, username: "me", avatar: "", role: "member" },
-        serverName: "s",
-        motd: "",
-        isAuthenticated: true,
-      }));
-      setVoiceStates([VOICE_STATE_1]);
-      joinVoiceChannel(10);
-
-      setLocalSpeaking(true);
-      const user = voiceStore.getState().voiceUsers.get(10)?.get(1);
-      expect(user?.speaking).toBe(true);
-
-      setLocalSpeaking(false);
-      const userAfter = voiceStore.getState().voiceUsers.get(10)?.get(1);
-      expect(userAfter?.speaking).toBe(false);
-
-      // Cleanup
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
-    });
-
-    it("is a no-op when not in a voice channel", () => {
-      const before = voiceStore.getState();
-      setLocalSpeaking(true);
-      expect(voiceStore.getState()).toBe(before);
-    });
-
-    it("is a no-op with no signed-in user, even if a row's user_id is 0", () => {
-      // authStore has no user, so currentUserId defaults to 0. Without the
-      // `currentUserId === 0` early return, the function would happily
-      // treat a "user_id: 0" roster row as "us" and flip its speaking flag.
-      setVoiceStates([{ ...VOICE_STATE_1, user_id: 0 }]);
-      joinVoiceChannel(10);
-      setLocalSpeaking(true);
-      expect(voiceStore.getState().voiceUsers.get(10)?.get(0)?.speaking).toBe(false);
-    });
-
-    it("is a no-op (same state reference) when speaking already matches the requested value", () => {
-      authStore.setState(() => ({
-        token: "t",
-        user: { id: 1, username: "me", avatar: "", role: "member" },
-        serverName: "s",
-        motd: "",
-        isAuthenticated: true,
-      }));
-      setVoiceStates([VOICE_STATE_1]);
-      joinVoiceChannel(10);
-      setLocalSpeaking(true);
-      const before = voiceStore.getState();
-
-      setLocalSpeaking(true); // already true — must not allocate a new state
-
-      expect(voiceStore.getState()).toBe(before);
-
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
-    });
-  });
-
   describe("getChannelVoiceUsers", () => {
     it("returns all voice users for a channel", () => {
       setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
@@ -664,12 +594,12 @@ describe("voice store", () => {
       expect(voiceStore.getState().voiceUsers.get(10)?.get(1)?.speaking).toBe(false);
     });
 
-    it("updates remote users' speaking state from server", () => {
-      // Server says user 2 is speaking
+    it("updates remote users' speaking state from LiveKit", () => {
+      // LiveKit says user 2 is speaking
       setSpeakers({ channel_id: 10, speakers: [2], threshold_mode: "forwarding" });
       expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(true);
 
-      // Server says nobody is speaking — remote user updated, local unchanged
+      // LiveKit says nobody is speaking — remote user updated, local unchanged
       setSpeakers({ channel_id: 10, speakers: [], threshold_mode: "forwarding" });
       expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(false);
     });
@@ -1167,7 +1097,9 @@ describe("voice store", () => {
   describe("module INITIAL_STATE (fresh import, untouched by any reset)", () => {
     it("defaults every flag to false — the describe blocks above only ever observe state after the outer beforeEach's resetStore() has already overwritten it, and that local helper doesn't even set localServerMuted/localServerDeafened/pttGated/encryptionDegraded (they'd read `undefined` there, not the real default)", async () => {
       vi.resetModules();
+      vi.doMock("../../src/lib/logger", () => appLogger);
       const fresh = await import("../../src/stores/voice.store");
+      vi.doUnmock("../../src/lib/logger");
       const state = fresh.voiceStore.getState();
       expect(state.localMuted).toBe(false);
       expect(state.localDeafened).toBe(false);

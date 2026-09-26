@@ -6,6 +6,35 @@ import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
 import { Permission, type UserStatus } from "../../src/lib/types";
+import { applyThemeByName } from "@lib/themes";
+
+/**
+ * Give the role clamp (B9 Q13) the dark theme's surfaces to measure names
+ * against; a theme switch is what empties its cache.
+ */
+function useDarkSurfaces(): void {
+  const html = document.documentElement.style;
+  html.setProperty("--bg-primary", "#313338");
+  html.setProperty("--bg-secondary", "#2b2d31");
+  html.setProperty("--bg-tertiary", "#1e1f22");
+  html.setProperty("--bg-input", "#383a40");
+  applyThemeByName("dark");
+}
+// MemberList loads the profile popup on first open. Load it up front so its
+// modules' load-time listeners are not counted against the test that opens it.
+import "@components/UserProfilePopup";
+
+// jsdom has no ResizeObserver; the member menu re-clamps itself through one.
+// The fake hands the latest observer's callback to tests that resize the menu.
+let lastResizeCallback: (() => void) | null = null;
+globalThis.ResizeObserver = class {
+  constructor(callback: () => void) {
+    lastResizeCallback = callback;
+  }
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+} as unknown as typeof ResizeObserver;
 
 function resetStore(): void {
   membersStore.setState(() => ({
@@ -273,6 +302,7 @@ describe("MemberList", () => {
     // Role management makes the list mutable mid-session. Before this the list
     // only re-rendered on a member change, so a rename/recolor/delete sat
     // invisible until unrelated traffic arrived.
+    useDarkSurfaces();
     setRoles([
       { id: 1, name: "Owner", color: "#E74C3C", permissions: 0 },
       { id: 2, name: "Staff", color: "#00FF00", permissions: 0 },
@@ -292,11 +322,15 @@ describe("MemberList", () => {
     // Store notifications are batched onto a microtask.
     channelsStore.flush();
 
-    const stanName = container.querySelector('[data-testid="member-2"] .mi-name');
-    expect((stanName as HTMLSpanElement).style.color).toBe("rgb(0, 0, 255)");
+    // The new colour reaches the row; #0000ff reads 1.36:1 on #383a40, so the
+    // role clamp shows the name in --text-normal.
+    const stanName = container.querySelector<HTMLSpanElement>('[data-testid="member-2"] .mi-name')!;
+    expect(stanName.dataset["roleColor"]).toBe("#0000FF");
+    expect(stanName.style.color).toBe("var(--text-normal)");
   });
 
   it("renders groups for custom server roles, colored by the server's role color", () => {
+    useDarkSurfaces();
     setRoles([
       { id: 1, name: "Owner", color: "#E74C3C", permissions: 0 },
       { id: 2, name: "Staff", color: "#00FF00", permissions: 0 },
@@ -356,6 +390,92 @@ describe("MemberList", () => {
     expect(labels).toEqual(["Block"]);
 
     document.body.querySelector(".context-menu")?.remove();
+  });
+
+  // At the 940x500 minimum window a member low in the list opened the menu at
+  // the pointer with its bottom past the viewport, so Force Logout, Ban and
+  // Block could not be reached.
+  it("keeps the context menu inside the viewport near the bottom-right edge", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(144);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(180);
+    vi.stubGlobal("innerWidth", 940);
+    vi.stubGlobal("innerHeight", 500);
+    try {
+      setTestMembers(testMembers);
+      memberList.mount(container);
+      const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
+
+      memberItem.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 930, clientY: 430 }),
+      );
+      let menu = document.body.querySelector<HTMLElement>(".context-menu")!;
+      // Anchored by its bottom edge at the pointer: spans y 286..430, x 752..932.
+      expect(menu.style.top).toBe("");
+      expect(menu.style.bottom).toBe("70px");
+      expect(menu.style.left).toBe("752px");
+
+      memberItem.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 100 }),
+      );
+      menu = document.body.querySelector<HTMLElement>(".context-menu")!;
+      // Room below the pointer: opens there as before.
+      expect(menu.style.top).toBe("100px");
+      expect(menu.style.bottom).toBe("");
+      expect(menu.style.left).toBe("100px");
+    } finally {
+      document.body.querySelector(".context-menu")?.remove();
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  // Opening Ban swaps one item for the reason/duration/Confirm Ban row, about
+  // 90 px taller. A menu opened top-anchored in the band just above the fit
+  // limit then ran past the bottom of the 940x500 window, taking Confirm Ban
+  // and Block with it; a bottom-anchored one can likewise grow past the top.
+  it("re-clamps the context menu into the viewport when the ban form expands", () => {
+    let menuHeight = 144;
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(() => menuHeight);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(180);
+    vi.stubGlobal("innerWidth", 940);
+    vi.stubGlobal("innerHeight", 500);
+    setRoles([{ id: 7, name: "admin", color: null, permissions: Permission.ADMINISTRATOR }]);
+    try {
+      setTestMembers(testMembers);
+      memberList.mount(container);
+      const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
+
+      memberItem.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 320 }),
+      );
+      let menu = document.body.querySelector<HTMLElement>(".context-menu")!;
+      expect(menu.style.top).toBe("320px");
+
+      const banItem = Array.from(menu.children).find((el) => el.textContent === "Ban")!;
+      banItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(menu.querySelector('[data-testid="ban-confirm"]')).not.toBeNull();
+      menuHeight = 234;
+      lastResizeCallback!();
+      // Re-anchored by its bottom edge at the pointer: spans y 86..320.
+      expect(menu.style.top).toBe("");
+      expect(menu.style.bottom).toBe("180px");
+
+      menuHeight = 144;
+      memberItem.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 430 }),
+      );
+      menu = document.body.querySelector<HTMLElement>(".context-menu")!;
+      expect(menu.style.bottom).toBe("70px");
+      menuHeight = 470;
+      lastResizeCallback!();
+      // Too tall to hang above the pointer: pulled down so its top stays at 8.
+      expect(menu.style.top).toBe("");
+      expect(menu.style.bottom).toBe("22px");
+    } finally {
+      document.body.querySelector(".context-menu")?.remove();
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
   });
 
   // The menu used to gate on the role NAME (owner/admin), so the seeded
@@ -491,8 +611,10 @@ describe("MemberList", () => {
 
     const nameEl = container.querySelector(".mi-name") as HTMLSpanElement;
     expect(nameEl.textContent).toBe("OwnerUser");
-    // Owner role has specific color var
-    expect(nameEl.style.color).toBe("var(--role-owner, #e74c3c)");
+    // Owner role has specific color var, shown through the role clamp (B9 Q13).
+    // No theme surfaces are measurable here, so the clamp fails closed.
+    expect(nameEl.dataset["roleColor"]).toBe("var(--role-owner, #e74c3c)");
+    expect(nameEl.style.color).toBe("var(--text-normal)");
   });
 
   it("uses '?' as avatar fallback for empty username", () => {
@@ -565,7 +687,7 @@ describe("MemberList", () => {
     expect(eveRow.classList.contains("offline")).toBe(false);
   });
 
-  it("opens the profile popup with live status after a presence-only patch", () => {
+  it("opens the profile popup with live status after a presence-only patch", async () => {
     setTestMembers(testMembers);
     memberList.mount(container);
 
@@ -580,8 +702,11 @@ describe("MemberList", () => {
 
     eveRow.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
 
+    // The popup module loads on first open.
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
     const popup = document.querySelector('[data-testid="user-profile-popup"]');
-    expect(popup).not.toBeNull();
     const statusDot = popup!.querySelector(".upp-status-dot") as HTMLDivElement;
     // Bug: createMemberItem's click handler closes over the render-time
     // `member` snapshot, which patchPresence never replaces, so the popup
@@ -711,6 +836,119 @@ describe("MemberList profile fields", () => {
     const withStatus = container.querySelector('[data-testid="member-custom-status-1"]');
     expect(withStatus?.textContent).toBe("shipping phase 6");
     expect(container.querySelector('[data-testid="member-custom-status-2"]')).toBeNull();
+  });
+
+  it("opens the profile from the keyboard, where Report names the user (B9-10)", async () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice", displayName: "Alice A." }),
+      makeMember({ id: 2, username: "me" }),
+    ]);
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 2, username: "me", avatar: null, role: "member" },
+    }));
+    const onReportUser = vi.fn();
+    list = createMemberList({ ...opts, onReportUser });
+    list.mount(container);
+
+    const row = container.querySelector<HTMLElement>('[data-testid="member-1"]')!;
+    expect(row.getAttribute("role")).toBe("button");
+    expect(row.getAttribute("tabindex")).toBe("0");
+    expect(row.getAttribute("aria-label")).toBe("Alice A.");
+    row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const report = await vi.waitFor(() => {
+      const btn = document.querySelector<HTMLButtonElement>('[data-testid="upp-report-btn"]');
+      expect(btn).not.toBeNull();
+      return btn!;
+    });
+    report.click();
+    expect(onReportUser).toHaveBeenCalledWith(1, "Alice A.");
+
+    // Your own profile has nothing to report.
+    const self = container.querySelector<HTMLElement>('[data-testid="member-2"]')!;
+    self.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
+    expect(document.querySelector('[data-testid="upp-report-btn"]')).toBeNull();
+  });
+
+  it("returns focus to the row that opened the profile after an earlier one closed (B9-10)", async () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice" }),
+      makeMember({ id: 3, username: "carol" }),
+    ]);
+    list = createMemberList(opts);
+    list.mount(container);
+    const rowA = container.querySelector<HTMLElement>('[data-testid="member-1"]')!;
+    const rowB = container.querySelector<HTMLElement>('[data-testid="member-3"]')!;
+    const openFrom = async (row: HTMLElement): Promise<void> => {
+      row.focus();
+      row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await vi.waitFor(() =>
+        expect(document.activeElement?.getAttribute("data-testid")).toBe("user-profile-popup"),
+      );
+    };
+    const escape = (): void => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    };
+
+    await openFrom(rowA);
+    escape();
+    expect(document.activeElement).toBe(rowA);
+
+    await openFrom(rowB);
+    escape();
+    expect(document.activeElement).toBe(rowB);
+  });
+
+  it("returns focus to the user's rebuilt row when the list re-rendered while the profile was open (B9-10)", async () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice" }),
+      makeMember({ id: 3, username: "carol" }),
+    ]);
+    list = createMemberList(opts);
+    list.mount(container);
+    const before = container.querySelector<HTMLElement>('[data-testid="member-3"]')!;
+    before.focus();
+    before.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() =>
+      expect(document.activeElement?.getAttribute("data-testid")).toBe("user-profile-popup"),
+    );
+
+    updateMemberRole(3, "admin");
+    membersStore.flush();
+    const after = container.querySelector<HTMLElement>('[data-testid="member-3"]')!;
+    expect(after).not.toBe(before);
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.activeElement).toBe(after);
+  });
+
+  it("describes each row by its custom status and presence, kept current (B9-10)", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice", customStatus: "shipping" }),
+      makeMember({ id: 2, username: "bob", status: "idle" }),
+    ]);
+    list = createMemberList(opts);
+    list.mount(container);
+
+    const description = (testId: string): string =>
+      container
+        .querySelector(`[data-testid="${testId}"]`)!
+        .getAttribute("aria-describedby")!
+        .split(" ")
+        .map((id) => {
+          const el = document.getElementById(id)!;
+          return el.getAttribute("aria-label") ?? el.textContent;
+        })
+        .join(" ");
+    expect(description("member-1")).toBe("shipping online");
+    expect(description("member-2")).toBe("idle");
+
+    updatePresence(1, "dnd");
+    membersStore.flush();
+    expect(description("member-1")).toBe("shipping dnd");
   });
 
   it("renders an invisible member the way it renders an offline one", () => {

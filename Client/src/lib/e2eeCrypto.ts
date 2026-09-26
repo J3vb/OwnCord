@@ -21,6 +21,7 @@ const log = createLogger("e2eeCrypto");
 // ── WebCrypto availability check ───────────────────────────────────────────
 if (typeof crypto === "undefined" || !crypto.subtle) {
   throw new Error(
+    // i18n-exempt: internal E2EE guard; the failure is logged, never shown
     "E2EE requires WebCrypto (crypto.subtle). Ensure the app is served over HTTPS or a secure context.",
   );
 }
@@ -221,6 +222,7 @@ const OFFER_HEADER_BYTES = 9;
 
 function encodeOfferEpoch(epoch: number): Uint8Array<ArrayBuffer> {
   if (!Number.isSafeInteger(epoch) || epoch < 0) {
+    // i18n-exempt: internal E2EE protocol guard, never rendered
     throw new Error("E2EE: offer epoch must be a non-negative safe integer");
   }
   const header = new Uint8Array(OFFER_HEADER_BYTES);
@@ -286,11 +288,13 @@ export async function unwrapRoomKey(
   }
 
   if (blob.byteLength < OFFER_HEADER_BYTES || blob[0] !== OFFER_FORMAT_V1) {
+    // i18n-exempt: internal E2EE protocol guard, never rendered
     throw new Error("E2EE: unknown wrapped-key format");
   }
   const header = blob.subarray(0, OFFER_HEADER_BYTES);
   const epochBig = new DataView(blob.buffer, blob.byteOffset, OFFER_HEADER_BYTES).getBigUint64(1);
   if (epochBig > BigInt(Number.MAX_SAFE_INTEGER)) {
+    // i18n-exempt: internal E2EE protocol guard, never rendered
     throw new Error("E2EE: offer epoch out of range");
   }
   const plaintext = await crypto.subtle.decrypt(
@@ -346,6 +350,7 @@ function base64ToUint8(base64: string): Uint8Array<ArrayBuffer> {
   try {
     binary = atob(base64);
   } catch {
+    // i18n-exempt: internal E2EE protocol guard, never rendered
     throw new Error("E2EE: invalid base64 input");
   }
   const bytes = new Uint8Array(binary.length);

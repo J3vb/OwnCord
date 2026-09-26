@@ -12,45 +12,43 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-type revokingSSEWriter struct {
+// sseProbe is an httptest ResponseWriter for the log-stream handler that lets a
+// test act from inside the handler's own writes: after the n-th SSE data frame
+// it calls onData(n). That drives both the mid-backfill revocation cases (revoke
+// the caller's credential on frame 1, cancel the request on frame 2) and the
+// v059 gap case (write a fresh log line on frame 1, exactly the interleaving
+// Snapshot()-then-Subscribe() lost, then cancel once the frames have arrived).
+type sseProbe struct {
 	header     http.Header
 	statusCode int
 	writeCount int
-	revoke     func()
-	cancel     func()
 	buffer     bytes.Buffer
+	onData     func(n int)
 }
 
-func (w *revokingSSEWriter) Header() http.Header {
+func (w *sseProbe) Header() http.Header {
 	if w.header == nil {
 		w.header = make(http.Header)
 	}
 	return w.header
 }
 
-func (w *revokingSSEWriter) WriteHeader(statusCode int) {
+func (w *sseProbe) WriteHeader(statusCode int) {
 	w.statusCode = statusCode
 }
 
-func (w *revokingSSEWriter) Write(data []byte) (int, error) {
+func (w *sseProbe) Write(data []byte) (int, error) {
 	_, _ = w.buffer.Write(data)
 	if bytes.Contains(data, []byte("data: ")) {
 		w.writeCount++
-		switch w.writeCount {
-		case 1:
-			if w.revoke != nil {
-				w.revoke()
-			}
-		case 2:
-			if w.cancel != nil {
-				w.cancel()
-			}
+		if w.onData != nil {
+			w.onData(w.writeCount)
 		}
 	}
 	return len(data), nil
 }
 
-func (w *revokingSSEWriter) Flush() {}
+func (w *sseProbe) Flush() {}
 
 func newLogStreamTestDB(t *testing.T) *db.DB {
 	t.Helper()
@@ -97,12 +95,16 @@ func TestHandleLogStream_BackfillStopsAfterSessionRevocation(t *testing.T) {
 	defer cancel()
 
 	req := httptest.NewRequest(http.MethodGet, "/logs/stream?ticket="+ticket, nil).WithContext(ctx)
-	writer := &revokingSSEWriter{
+	writer := &sseProbe{
 		header: make(http.Header),
-		revoke: func() {
-			_ = database.DeleteSession(context.Background(), tokenHash)
+		onData: func(n int) {
+			switch n {
+			case 1:
+				_ = database.DeleteSession(context.Background(), tokenHash)
+			case 2:
+				cancel()
+			}
 		},
-		cancel: cancel,
 	}
 
 	handleLogStream(database, logBuf).ServeHTTP(writer, req)
@@ -145,12 +147,16 @@ func TestHandleLogStream_BackfillStopsAfterAPITokenRevocation(t *testing.T) {
 	defer cancel()
 
 	req := httptest.NewRequest(http.MethodGet, "/logs/stream?ticket="+ticket, nil).WithContext(ctx)
-	writer := &revokingSSEWriter{
+	writer := &sseProbe{
 		header: make(http.Header),
-		revoke: func() {
-			_, _ = database.RevokeAPIToken(context.Background(), tokenID)
+		onData: func(n int) {
+			switch n {
+			case 1:
+				_, _ = database.RevokeAPIToken(context.Background(), tokenID)
+			case 2:
+				cancel()
+			}
 		},
-		cancel: cancel,
 	}
 
 	handleLogStream(database, logBuf).ServeHTTP(writer, req)

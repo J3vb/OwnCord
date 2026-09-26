@@ -58,6 +58,19 @@ describe("CreateChannelModal", () => {
     return { modal, options };
   }
 
+  it("names each form control by its visible label", () => {
+    const { modal } = makeModal("Text Channels");
+    const labelOf = (testId: string) =>
+      [
+        ...((container.querySelector(`[data-testid='${testId}']`) as HTMLInputElement).labels ??
+          []),
+      ].map((l) => l.textContent);
+    expect(labelOf("channel-category-input")).toEqual(["Category"]);
+    expect(labelOf("channel-name-input")).toEqual(["Name"]);
+    expect(labelOf("channel-type-select")).toEqual(["Type"]);
+    modal.destroy?.();
+  });
+
   it("renders the modal overlay", () => {
     const { modal } = makeModal("Text Channels");
     const overlay = container.querySelector("[data-testid='create-channel-modal']");

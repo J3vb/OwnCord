@@ -1,4 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "./fixtures";
+import type { Page } from "@playwright/test";
 import {
   buildTauriMockScript,
   MOCK_LOGIN_RESPONSE,

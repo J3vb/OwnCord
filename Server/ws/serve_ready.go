@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/coder/websocket"
+
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // buildAuthOK constructs the auth_ok server→client message.
@@ -125,44 +128,66 @@ func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions.ChannelOverride {
 	out := make(map[int64]permissions.ChannelOverride, len(overrides))
 	for id, o := range overrides {
-		out[id] = permissions.ChannelOverride{
-			Allow:     o.Allow,
-			Deny:      o.Deny,
-			UserAllow: o.UserAllow,
-			UserDeny:  o.UserDeny,
-		}
+		out[id] = permOverride(o)
 	}
 	return out
 }
 
 // channelCanSend reports whether a user with the given role and per-channel
-// override may post in a channel of chanType. It mirrors the non-DM branch of
-// MessageService.checkSendPermission so the client can pre-disable the composer
-// without a round-trip; the server still enforces the rule authoritatively.
-func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string) bool {
+// override may post in a channel of chanType — the ready payload's can_send
+// affordance, so the client can pre-disable the composer without a
+// round-trip. It is permissions.CanSendMessage, the same predicate the send
+// path enforces, so the affordance cannot drift from the rule (S-12).
+//
+// timedOut is the caller's live HasActiveTimeout verdict (via subjectFor),
+// threaded through as a plain bool so the lookup happens once per ready
+// payload instead of once per channel — a timed-out user must not see
+// can_send: true anywhere (OC-0434).
+func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string, timedOut bool) bool {
 	if role == nil {
 		return false
 	}
-	if permissions.HasAdmin(role.Permissions) {
-		return true
-	}
-	eff := permissions.EffectiveChannelPerms(role.Permissions, permissions.ChannelOverride{
-		Allow: o.Allow, Deny: o.Deny, UserAllow: o.UserAllow, UserDeny: o.UserDeny,
-	})
-	need := permissions.ReadMessages | permissions.SendMessages
-	if eff&need != need {
+	return permissions.CanSendMessage(permissions.Subject{
+		RolePerms: role.Permissions,
+		Override:  permOverride(o),
+		Channel:   permissions.ChannelRef{Type: chanType},
+		TimedOut:  timedOut,
+	}) == nil
+}
+
+// channelCanModerateVoice is the ready payload's can_moderate_voice
+// affordance (B9 Q5): whether the caller may mute, deafen, move or
+// disconnect voice participants in this channel. It is
+// permissions.AuthorizeVoiceModerator — the one authorizer voiceModTarget
+// enforces in the target's channel (base MUTE_MEMBERS, then effective
+// READ|MUTE_MEMBERS after both override layers, i.e. CanModerateVoice) — so
+// the client's controls follow the effective permission, not the base bit.
+// Target rank and move capacity are per-target and stay server-side refusals.
+func channelCanModerateVoice(role *db.Role, o db.ChannelOverride, chanType string) bool {
+	if role == nil {
 		return false
 	}
-	if chanType == "announcement" {
-		return eff&permissions.ManageMessages == permissions.ManageMessages
-	}
-	return true
+	return permissions.AuthorizeVoiceModerator(permissions.Subject{
+		RolePerms: role.Permissions,
+		Override:  permOverride(o),
+		Channel:   permissions.ChannelRef{Type: chanType},
+	}) == nil
+}
+
+// channelRef maps one db channel to the predicates' db-agnostic ChannelRef.
+func channelRef(ch *db.Channel) permissions.ChannelRef {
+	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW}
+}
+
+// permOverride maps one db override (both layers) to the checker's type.
+func permOverride(o db.ChannelOverride) permissions.ChannelOverride {
+	return permissions.ChannelOverride{Allow: o.Allow, Deny: o.Deny, UserAllow: o.UserAllow, UserDeny: o.UserDeny}
 }
 
 // readyVisibleChannels resolves the channels the user may see for the ready
 // payload, returning the per-channel override map it fetched alongside them so
 // buildReady can reuse it for the can_send affordance without a second query.
-func (h *Hub) readyVisibleChannels(ctx context.Context, database *db.DB, userID int64, role *db.Role, channels []db.Channel) ([]db.Channel, map[int64]db.ChannelOverride, error) {
+func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role, channels []db.Channel) ([]db.Channel, map[int64]db.ChannelOverride, error) {
 	// Filter channels by READ_MESSAGES through the single permissions.Checker
 	// predicate shared with REST ListVisibleChannels and reconnect replay
 	// filtering (computeAllowedChannels). The overrides map is fetched once and
@@ -193,8 +218,13 @@ func (h *Hub) readyVisibleChannels(ctx context.Context, database *db.DB, userID 
 }
 
 // readyChannelPayloads builds the ready payload's channel objects — one entry
-// per visible channel, with the per-user unread fields folded in.
-func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role) []map[string]any {
+// per visible channel, with the per-user unread fields folded in. ackMap
+// carries the caller's own acknowledgement per NSFW-labelled channel id
+// (readyNSFWAcknowledgements); a missing entry (an unlabelled channel never
+// gets one) reads as false, which is correct either way — nothing needs
+// acknowledging there. timedOut is the caller's live HasActiveTimeout verdict,
+// fed into every channel's can_send — see channelCanSend (OC-0434).
+func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role, ackMap map[int64]bool, timedOut bool) []map[string]any {
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
 	for i := range visibleChannels {
 		entry := map[string]any{
@@ -209,15 +239,24 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 			// ± channel overrides must grant READ|SEND, and announcement
 			// channels additionally require MANAGE_MESSAGES; admins bypass. The
 			// server remains the authority — this only pre-disables the UI.
-			"can_send": channelCanSend(role, overrides[visibleChannels[i].ID], visibleChannels[i].Type),
+			"can_send": channelCanSend(role, overrides[visibleChannels[i].ID], visibleChannels[i].Type, timedOut),
+			// Voice-moderation affordance (B9 Q5), same shape and refresh
+			// path as can_send — see channelCanModerateVoice.
+			"can_moderate_voice": channelCanModerateVoice(role, overrides[visibleChannels[i].ID], visibleChannels[i].Type),
 			// Cooldown in seconds (0 = off). Lets the composer disable itself
 			// for the window instead of accepting a send the server refuses
 			// with SLOW_MODE. The server still enforces.
 			"slow_mode": visibleChannels[i].SlowMode,
-			// Age-gate flag. Shipped so a client can label or gate the
-			// channel; the server applies no content behaviour of its own to
-			// a flagged channel (migration 025).
+			// Age-gate flag. The server enforces content behaviour on a
+			// flagged channel now (B5-7, permissions.CanReadContent); see
+			// nsfw_acknowledged below for the caller's own consent state.
 			"nsfw": visibleChannels[i].NSFW,
+			// Whether THIS caller has acknowledged the label (B5-7). Always
+			// present, like nsfw itself — false for an unlabelled channel,
+			// where it means nothing but must not be omitted (two different
+			// meanings for "absent" is exactly what B5-7's other always-shipped
+			// fields avoid).
+			"nsfw_acknowledged": ackMap[visibleChannels[i].ID],
 			// Voice capacity limits (0 = unlimited) — the same values the
 			// voice-join path enforces with CHANNEL_FULL / VIDEO_LIMIT.
 			"voice_max_users": visibleChannels[i].VoiceMaxUsers,
@@ -242,7 +281,7 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 // readyDMChannels loads the user's open DM channels and reconciles them with
 // the rest of the ready payload: mention counts from unreadMap, and the same
 // presence rule presentableMembers applies to the members array.
-func (h *Hub) readyDMChannels(ctx context.Context, database *db.DB, userID int64, unreadMap map[int64]db.ChannelUnread) ([]db.DMChannelInfo, error) {
+func (h *Hub) readyDMChannels(ctx context.Context, database ReadySnapshotReader, userID int64, unreadMap map[int64]db.ChannelUnread) ([]db.DMChannelInfo, error) {
 	dmChannels, err := database.GetUserDMChannels(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady GetUserDMChannels: %w", err)
@@ -269,17 +308,17 @@ func (h *Hub) readyDMChannels(ctx context.Context, database *db.DB, userID int64
 
 // readyVoiceStates gathers the voice states the ready payload may expose to
 // this user. A collect failure is non-fatal, so this returns no error.
-func (h *Hub) readyVoiceStates(ctx context.Context, database *db.DB, channels []db.Channel, visibleChannels []db.Channel, dmChannels []db.DMChannelInfo, userID int64) []db.VoiceState {
+func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader, visibleChannels []db.Channel, dmChannels []db.DMChannelInfo, userID int64) []db.VoiceState {
 	// Collect voice states, filtered to visible channels (BUG-095) plus the
 	// user's own open DM channels — mirroring computeAllowedChannels, which
 	// layers DM IDs onto the same checker result for reconnect replay
 	// filtering. Without this, a DM voice call's voice_state rows are
 	// structurally unreachable: VisibleChannelIDs skips ch.Type == "dm", and
 	// nothing else re-adds them for this filter.
-	allVoiceStates, err := collectAllVoiceStates(ctx, database, channels)
+	allVoiceStates, err := database.GetAllVoiceStates(ctx)
 	if err != nil {
 		// Non-fatal: send empty list rather than failing the whole ready payload.
-		slog.Warn("buildReady collectAllVoiceStates", "err", err)
+		slog.Warn("buildReady GetAllVoiceStates", "err", err)
 		allVoiceStates = []db.VoiceState{}
 	}
 	visibleSet := make(map[int64]struct{}, len(visibleChannels)+len(dmChannels)+1)
@@ -309,11 +348,36 @@ func (h *Hub) readyVoiceStates(ctx context.Context, database *db.DB, channels []
 	return voiceStates
 }
 
+// readyNSFWAcknowledgements resolves userID's acknowledgement for every
+// LABELLED channel in visibleChannels — the ready payload's per-channel
+// nsfw_acknowledged field (B5-7). Bounded by how many labelled channels the
+// caller can see (typically zero), not by the full channel list, and skipped
+// entirely when none are labelled: an unflagged deployment pays nothing.
+func readyNSFWAcknowledgements(ctx context.Context, database VisibilityReader, userID int64, visibleChannels []db.Channel) map[int64]bool {
+	var ackMap map[int64]bool
+	for i := range visibleChannels {
+		if !visibleChannels[i].NSFW {
+			continue
+		}
+		ok, err := database.HasNSFWAcknowledgement(ctx, userID, visibleChannels[i].ID)
+		if err != nil {
+			slog.Warn("ws: buildReady HasNSFWAcknowledgement failed, reporting unacknowledged",
+				"user_id", userID, "channel_id", visibleChannels[i].ID, "err", err)
+			continue
+		}
+		if ackMap == nil {
+			ackMap = make(map[int64]bool)
+		}
+		ackMap[visibleChannels[i].ID] = ok
+	}
+	return ackMap
+}
+
 // buildReady constructs the ready server→client message.
 // Per docs/protocol.md, channels include unread_count and last_message_id per
 // user plus the channelPayloadFrom fields (slow_mode, nsfw, voice_* caps);
 // archived is the one stored field deliberately not shipped.
-func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, role *db.Role) ([]byte, error) {
+func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role) ([]byte, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
@@ -340,8 +404,22 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 		return nil, fmt.Errorf("buildReady GetChannelUnreadCounts: %w", err)
 	}
 
+	// Live, uncached timeout verdict (OC-0434): channelCanSend's Subject must
+	// carry the same TimedOut refreshChannelVisibilityAffordances resolves for a
+	// live socket (via the identical subjectFor), or a just-timed-out user's
+	// fresh-connect ready payload ships can_send: true on every channel right
+	// up until their next send bounces off TIMED_OUT. Channel 0 is fine here:
+	// only TimedOut is consulted below, and subjectFor already skips the
+	// lookup entirely for an administrator. A lookup failure fails the whole
+	// handshake closed, like every other buildReady read.
+	sub, err := h.subjectFor(ctx, userID, 0)
+	if err != nil {
+		return nil, fmt.Errorf("buildReady subjectFor: %w", err)
+	}
+
 	// Build protocol-compliant channel objects (strip extra fields).
-	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role)
+	ackMap := readyNSFWAcknowledgements(ctx, database, userID, visibleChannels)
+	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role, ackMap, sub.TimedOut)
 
 	// Load open DM channels for this user. Hoisted above the voice-state
 	// filter below so DM channel IDs can seed visibleSet — permissions.Checker
@@ -353,13 +431,27 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 		return nil, err
 	}
 
-	voiceStates := h.readyVoiceStates(ctx, database, channels, visibleChannels, dmChannels, userID)
+	voiceStates := h.readyVoiceStates(ctx, database, visibleChannels, dmChannels, userID)
 
 	serverName, motd := h.getCachedSettings(ctx)
+
+	notices, err := readyNotices(ctx, database, userID)
+	if err != nil {
+		return nil, fmt.Errorf("buildReady ListUnacknowledgedWarnings: %w", err)
+	}
+	retryFloorMS := int64(0)
+	if h.db != nil {
+		retryFloorMS = h.readers.Ready.MessageDeliveryFloorMS()
+	}
 
 	return buildJSON(map[string]any{
 		"type": MsgTypeReady,
 		"payload": map[string]any{
+			"capabilities": map[string]any{
+				"message_deduplication":        true,
+				"message_retry_window_seconds": int64(service.MessageRetryWindow.Seconds()),
+				"message_retry_floor_ms":       retryFloorMS,
+			},
 			"channels":     channelPayloads,
 			"members":      members,
 			"voice_states": voiceStates,
@@ -367,12 +459,213 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 			"dm_channels":  dmChannels,
 			"server_name":  serverName,
 			"motd":         motd,
+			"notices":      notices,
 		},
 	}), nil
 }
 
-// collectAllVoiceStates gathers voice states across all channels in a single
-// query, replacing the previous N+1 per-channel pattern.
-func collectAllVoiceStates(ctx context.Context, database *db.DB, _ []db.Channel) ([]db.VoiceState, error) {
-	return database.GetAllVoiceStates(ctx)
+// readyNoticePayload is one row of ready's notices slot (B5-9): an
+// unacknowledged warning. Never the actor, never the report link.
+type readyNoticePayload struct {
+	ID        int64  `json:"id"`
+	Kind      string `json:"kind"`
+	Reason    string `json:"reason"`
+	CreatedAt string `json:"created_at"`
+}
+
+// readyNotices resolves the connecting user's unacknowledged warnings for
+// ready's notices slot, always as a non-nil (possibly empty) slice so the
+// wire payload never carries a bare `null`.
+func readyNotices(ctx context.Context, database ReadySnapshotReader, userID int64) ([]readyNoticePayload, error) {
+	rows, err := database.ListUnacknowledgedWarnings(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]readyNoticePayload, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, readyNoticePayload{ID: r.ID, Kind: r.Kind, Reason: r.Reason, CreatedAt: r.CreatedAt})
+	}
+	return out, nil
+}
+
+func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *Client) error {
+	// The configured seam, never a caller-supplied handle: binding here is what
+	// lets a service-backed or instrumented Ready reader actually intercept the
+	// snapshot reads below — same posture as freshConnectCleanStaleVoice's
+	// own read through the voice service.
+	database := h.readers.Ready
+	// Clean stale voice state BEFORE building ready and registering.
+	// When a user F5-reloads while in voice, the DB row from the previous
+	// session must be removed so the ready payload doesn't include it and
+	// other clients see a voice_leave broadcast.
+	if vs, err := h.voice.State(ctx, c.userID); err == nil && vs != nil {
+		h.freshConnectCleanStaleVoice(ctx, c, vs)
+	}
+
+	// c.user is the auth-time snapshot — re-read it so the ready payload and
+	// any inherited subscriptions resolve from the user's CURRENT role, not
+	// the one they held when the auth frame was evaluated (audit-2026-08-19
+	// F-2; the resume path does the same in reconnectPrecheck). Fail closed
+	// like the role lookup below.
+	if err := h.refreshUserSnapshot(ctx, database, c); err != nil {
+		slog.Error("ws: user re-read failed, disconnecting", "user_id", c.userID, "err", err)
+		_ = conn.Close(websocket.StatusInternalError, "user lookup failed")
+		return err
+	}
+
+	// Look up role for permission-filtered ready payload.
+	// Fail closed: if the role lookup fails, disconnect rather than serving
+	// a permissive ready payload with nil role (BUG-094).
+	userRole, roleErr := database.GetRoleByID(ctx, c.user.RoleID)
+	if roleErr != nil || userRole == nil {
+		slog.Error("ws: role lookup failed, disconnecting", "user_id", c.userID, "role_id", c.user.RoleID, "err", roleErr)
+		_ = conn.Close(websocket.StatusInternalError, "role lookup failed")
+		return fmt.Errorf("role lookup failed for user %d: %w", c.userID, roleErr)
+	}
+
+	// Register BEFORE writing auth_ok + ready so broadcasts that arrive during
+	// the write window are queued in the client's send buffer instead of
+	// being lost (BUG-123). writePump hasn't started yet, so queued messages
+	// will be drained once the pumps begin.
+	//
+	// Only the replay-failure fallback (lastSeq > 0) can inherit voice state
+	// from the previous connection, so that is the only case where registerNow
+	// needs the read-permission set. Fail closed on error: nil denies the
+	// inherited voice-channel subscription.
+	var allowedChannelIDs map[int64]bool
+	if c.lastSeq > 0 {
+		allowed, allowedErr := h.computeAllowedChannels(ctx, database, c.user)
+		if allowedErr != nil {
+			slog.Warn("ws handleFreshConnect: computeAllowedChannels failed, skipping voice channel subscription",
+				"user_id", c.userID, "err", allowedErr)
+		} else {
+			allowedChannelIDs = allowed
+		}
+	}
+	// handleReconnect may have promoted an auth-frame active_channel_id into
+	// c.channelID (serve.go, honoured only when it was READ-visible at that
+	// moment) and then aborted on one of its own re-checks — most notably the
+	// final mustFullResync check, tripped by a permission revocation that
+	// landed mid-handshake. None of those abort paths undo the c.channelID
+	// write. registerNow subscribes c.channelID's ChannelTopic
+	// unconditionally, so re-gate it here against the freshly recomputed
+	// permission set before registering. Fail closed: a nil allowedChannelIDs
+	// (lastSeq == 0, or the computeAllowedChannels error branch above) denies.
+	if chID := c.getChannelID(); chID != 0 && !allowedChannelIDs[chID] {
+		c.mu.Lock()
+		c.channelID = 0
+		c.mu.Unlock()
+	}
+	if freshConnectPreRegisterRaceHook != nil {
+		freshConnectPreRegisterRaceHook()
+	}
+	h.registerNow(c, allowedChannelIDs)
+
+	// OC-0423: registerNow just above is the earliest point a revocation
+	// racing this handshake's DB work could have found this socket, so
+	// re-read the session now that c is reachable — see
+	// postRegisterSessionRecheck's doc. When it reports true it has already
+	// run the full failed-handshake teardown; only closing conn is left.
+	if h.postRegisterSessionRecheck(ctx, c) {
+		_ = conn.Close(websocket.StatusPolicyViolation, "session revoked")
+		return fmt.Errorf("handleFreshConnect: session revoked for user %d during handshake", c.userID)
+	}
+
+	// The re-read above and registerNow are not atomic: a role reassignment
+	// committing in between finds this socket absent from h.clients (so its
+	// revokeUnreadableChannels pass early-returns) yet builds our inherited
+	// subscriptions from the pre-change role. One PK re-read after
+	// registration makes the two orderings meet: a commit visible here is
+	// pruned by our own revoke pass, and a commit that is not yet visible
+	// necessarily runs its own revoke lookup after our registerNow and
+	// finds us.
+	// Scoped to the resume-fallback path — a pure fresh connect (lastSeq==0)
+	// inherits no subscriptions; channel_focus and voice_join re-check live.
+	if c.lastSeq > 0 {
+		if fresh, err := database.GetUserByID(ctx, c.userID); err != nil || fresh == nil || fresh.RoleID != c.user.RoleID {
+			//nolint:contextcheck // revokeUnreadableChannels takes no context by design (admin HubBroadcaster interface).
+			h.revokeUnreadableChannels(c.userID)
+		}
+	}
+
+	// Settle the session's status before buildReady reads the member list, so
+	// the ready payload and the presence broadcast below cannot disagree.
+	h.applyConnectStatus(ctx, c)
+
+	// Fresh connection or replay fallback: full auth_ok + ready flow.
+	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
+	if err := handshakeWrite(ctx, conn, h.buildAuthOK(ctx, c.user, c.roleName, "none")); err != nil {
+		slog.Warn("ws: failed to send auth_ok", "user_id", c.userID, "err", err)
+		h.unregisterFailedHandshake(ctx, c)
+		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+		return err
+	}
+	if ready, readyErr := h.buildReady(ctx, database, c.userID, userRole); readyErr == nil {
+		slog.Info("ws sending ready payload", "user_id", c.userID, "payload_bytes", len(ready))
+		if err := handshakeWrite(ctx, conn, ready); err != nil {
+			slog.Warn("ws: failed to send ready payload", "user_id", c.userID, "err", err)
+			h.unregisterFailedHandshake(ctx, c)
+			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+			return err
+		}
+	} else {
+		slog.Error("buildReady failed", "user_id", c.userID, "err", readyErr)
+		_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
+		h.unregisterFailedHandshake(ctx, c)
+		_ = conn.Close(websocket.StatusInternalError, "failed to build ready payload")
+		return readyErr
+	}
+
+	slog.Info("ws broadcasting member_join and presence", "user_id", c.userID, "username", c.user.Username)
+	h.BroadcastToAll(buildMemberJoin(c.user, c.roleName))
+	h.announceConnectPresence(c)
+
+	return nil
+}
+
+// freshConnectCleanStaleVoice removes the voice state left behind by this
+// user's previous session, unless that session is the still-registered
+// connection this one is about to inherit from.
+func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db.VoiceState) {
+	// Replay-failure fallback (lastSeq > 0): registerNow below transfers
+	// the still-registered old connection's live voice state into this
+	// client. Deleting the DB row here — and the LiveKit participant,
+	// whose removal token is the very JoinedAt being transferred — would
+	// leave the user "in voice" on the hub only: voice_join bounces off
+	// ALREADY_JOINED and sweepStaleVoiceStates never heals
+	// memory-without-row. Keep the row so ready stays consistent. If the
+	// old client unregisters before registerNow runs, the transfer is
+	// skipped and the next sweep reaps the then-truly-stale row.
+	if old := h.GetClient(c.userID); c.lastSeq > 0 && old != nil && old.getVoiceChID() == vs.ChannelID {
+		slog.Info("ws fresh connect: keeping voice state for replay-failure fallback",
+			"user_id", c.userID, "channel_id", vs.ChannelID)
+		return
+	}
+	slog.Info("ws fresh connect: cleaning stale voice state",
+		"user_id", c.userID, "channel_id", vs.ChannelID)
+	if _, delErr := h.voice.LeaveIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
+		slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
+	}
+	// The DB row is gone, but the still-registered OLD *Client (if any) is
+	// otherwise only cleared by registerNow — which two early-return paths
+	// further down handleFreshConnect (the refreshUserSnapshot and
+	// GetRoleByID failure branches) can skip entirely. Without this, that
+	// old client's in-memory voiceChID and the E2EE key-holder election for
+	// this room survive as a memory-without-row ghost that
+	// sweepStaleVoiceStates can never see, since it iterates DB rows
+	// (OC-0252). Clearing here makes freshConnectCleanStaleVoice self
+	// sufficient regardless of whether registerNow ever runs; registerNow's
+	// own replacedVoiceChID re-election later becomes a redundant no-op
+	// (clearVoiceState finds nothing left to clear), not a conflict.
+	if old := h.GetClient(c.userID); old != nil {
+		if _, cleared := old.clearVoiceStateIfMatch(vs.ChannelID); cleared {
+			h.pubsub.Unsubscribe(old, VoiceTopic(vs.ChannelID))
+		}
+	}
+	h.updateKeyHolder(vs.ChannelID)
+	h.broadcastVoiceEvent(ctx, vs.ChannelID, c.userID, buildVoiceLeave(vs.ChannelID, c.userID))
+	// BUG-089: pass the stale join token so the removal only hits the exact
+	// stale participant — the identity includes joinedAt, so a quick rejoin's
+	// new session has a different identity and won't be removed.
+	h.removeLiveKitParticipantAsync(ctx, vs.ChannelID, c.userID, vs.JoinedAt, "ws fresh connect:")
 }

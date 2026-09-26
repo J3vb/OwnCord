@@ -23,8 +23,12 @@ package db_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -831,5 +835,114 @@ func TestMigrate_022CreatesMentionSchema(t *testing.T) {
 	}
 	if n != 1 {
 		t.Error("messages.mentions_everyone column not added")
+	}
+}
+
+// TestMigrate_RefusesSchemaAhead is REL-02: a database migrated by a NEWER
+// server records migrations this binary does not carry, and MigrateFS must
+// refuse to run rather than serve on a schema it has never seen.
+func TestMigrate_RefusesSchemaAhead(t *testing.T) {
+	database := openMemory(t)
+	fsys := simpleFS("001_a.sql", "CREATE TABLE a (id INTEGER);")
+	if err := db.MigrateFS(database, fsys); err != nil {
+		t.Fatalf("first MigrateFS: %v", err)
+	}
+	// Simulate a newer server having recorded a migration we do not carry.
+	if _, err := database.ExecContext(context.Background(),
+		"INSERT INTO schema_versions (version) VALUES ('054_from_newer.sql')"); err != nil {
+		t.Fatalf("seed newer version: %v", err)
+	}
+
+	err := db.MigrateFS(database, fsys)
+	if err == nil {
+		t.Fatal("MigrateFS accepted a schema from a newer server")
+	}
+	if !errors.Is(err, db.ErrSchemaAhead) {
+		t.Errorf("err = %v, want ErrSchemaAhead", err)
+	}
+	if !strings.Contains(err.Error(), "054_from_newer.sql") {
+		t.Errorf("err = %q, want it to name the unknown migration", err)
+	}
+}
+
+// TestMigrate_SchemaAheadAllowsRollbackRowsAbsent locks the other half: a
+// database whose schema_versions rows all exist in the binary still migrates
+// (the supported manual rollback deletes its own row, so no false refusal).
+func TestMigrate_SchemaAheadAllowsKnownMigrationsOnly(t *testing.T) {
+	database := openMemory(t)
+	fsys := simpleFS(
+		"001_a.sql", "CREATE TABLE a (id INTEGER);",
+		"002_b.sql", "CREATE TABLE b (id INTEGER);",
+	)
+	if err := db.MigrateFS(database, fsys); err != nil {
+		t.Fatalf("MigrateFS: %v", err)
+	}
+	if err := db.MigrateFS(database, fsys); err != nil {
+		t.Fatalf("re-run with no unknowns: %v", err)
+	}
+}
+
+// TestCheckBackupSchemaAhead_NamesUnknownMigrations is the restore half of
+// REL-02: a backup file migrated by a newer server reports exactly the
+// migrations this binary does not carry, and none of the ones it does.
+func TestCheckBackupSchemaAhead_NamesUnknownMigrations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "newer.db")
+	database, err := db.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if _, err := database.ExecContext(context.Background(),
+		"INSERT INTO schema_versions (version) VALUES ('999_from_newer.sql')"); err != nil {
+		t.Fatalf("seed newer version: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	ahead, err := db.CheckBackupSchemaAhead(context.Background(), path)
+	if err != nil {
+		t.Fatalf("CheckBackupSchemaAhead: %v", err)
+	}
+	if !slices.Equal(ahead, []string{"999_from_newer.sql"}) {
+		t.Errorf("ahead = %v, want [999_from_newer.sql]", ahead)
+	}
+}
+
+// TestCheckBackupSchemaAhead_NoSchemaVersionsTable: a file with no
+// schema_versions table (pre-tracking) has nothing ahead of this binary.
+func TestCheckBackupSchemaAhead_NoSchemaVersionsTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "untracked.db")
+	conn, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := conn.Exec("CREATE TABLE t (id INTEGER)"); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	ahead, err := db.CheckBackupSchemaAhead(context.Background(), path)
+	if err != nil {
+		t.Fatalf("CheckBackupSchemaAhead: %v", err)
+	}
+	if len(ahead) != 0 {
+		t.Errorf("ahead = %v, want none", ahead)
+	}
+}
+
+// TestCheckBackupSchemaAhead_NotADatabase: a file SQLite cannot read is an
+// error, never a silent "nothing ahead" that would let the restore proceed.
+func TestCheckBackupSchemaAhead_NotADatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "garbage.db")
+	if err := os.WriteFile(path, []byte(strings.Repeat("not a database ", 100)), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := db.CheckBackupSchemaAhead(context.Background(), path); err == nil {
+		t.Fatal("CheckBackupSchemaAhead accepted a non-SQLite file")
 	}
 }

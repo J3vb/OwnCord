@@ -33,7 +33,7 @@ func TestBroadcastVoiceEvent_VoiceParticipantsAlwaysInAudience(t *testing.T) {
 	outsider := NewTestClient(h, 3, make(chan []byte, 8))
 	h.clients[3] = outsider
 
-	h.broadcastVoiceEvent(context.Background(), 5, buildVoiceLeave(5, 1))
+	h.broadcastVoiceEvent(context.Background(), 5, 1, buildVoiceLeave(5, 1))
 
 	select {
 	case bm := <-h.broadcast:
@@ -123,7 +123,7 @@ func TestChannelReadAudience_GetChannelErrorDeniesEveryone(t *testing.T) {
 	uid := seedHarvestVoiceUser(t, database, "audience-chan-err")
 	chID := mustCreateVoiceChannel(t, database, "audience-room")
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	h.clients[uid] = NewTestClient(h, uid, make(chan []byte, 8))
 
 	// Precondition: the role scan really does grant this user READ on this
@@ -157,7 +157,7 @@ func TestChannelReadAudience_DMParticipantsErrorDeniesEveryone(t *testing.T) {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	for _, uid := range []int64{alice, bob, mallory} {
 		h.clients[uid] = NewTestClient(h, uid, make(chan []byte, 8))
 	}

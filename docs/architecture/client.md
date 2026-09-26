@@ -1,14 +1,15 @@
 # Client Architecture (Tauri)
 
-**Verified against:** commit `5630aa1`, 2026-08-04
+**Verified against:** `origin/dev` at `4a70f7b8`, 2026-09-25.
 
-Desktop client built on Tauri v2: a TypeScript webview (~42k LOC, vanilla TS —
-no UI framework) plus ~4.7k LOC of Rust across 16 modules. State lives in a
+Desktop client built on Tauri v2: a TypeScript webview (~70k LOC of non-test
+sources, vanilla TS — no UI framework) plus ~13k LOC of Rust across 26 modules.
+State lives in a
 hand-rolled reactive store (`src/lib/store.ts`: immutable updates,
 microtask-batched notifications, selector subscriptions). Components are
 factory functions returning `{ element, mount, destroy }` built with the
-`@lib/dom` helpers; a 2-page state machine (`src/lib/router.ts`) switches
-between the Connect and Main pages.
+`@lib/dom` helpers; a 2-page state machine inline in `src/main.ts`
+(`activePage` + `navigate()`) switches between the Connect and Main pages.
 
 > `docs/client-architecture.md` is a 15-line redirect stub kept for old links;
 > this document is the client architecture reference. The abandoned SolidJS
@@ -37,15 +38,15 @@ flowchart TB
     subgraph comm ["Communication layer (src/lib)"]
         API["api.ts<br/>REST client via httpProxy.ts<br/>(TOFU-pinned Rust tunnel)"]
         WSC["ws.ts<br/>reconnect w/ backoff, seq replay,<br/>generation counters, cert-tofu events"]
-        DISP["dispatcher.ts<br/>34 msg types → store mutators"]
-        LKS["livekitSession.ts (1.4k LOC)<br/>voice state machine"]
-        LKE["livekitE2EE.ts<br/>key-holder election, room-key<br/>wrap/unwrap, peer verification"]
+        DISP["dispatcher.ts<br/>36 msg types → store mutators<br/>(handlers in features/*/wsHandlers.ts)"]
+        LKS["livekitSession.ts (0.9k LOC facade)<br/>+ features/voice/<br/>voice state machine"]
+        LKE["livekitE2EE.ts (1.0k LOC facade)<br/>+ features/voice/e2ee*<br/>key-holder election, room-key<br/>wrap/unwrap, peer verification"]
     end
 
     subgraph state ["Stores (9 singletons)"]
         AUTH2["auth"]
         CHAN["channels<br/>(incl. roles)"]
-        MSG["messages"]
+        MSG["messages<br/>(reducers in features/messaging/)"]
         MEM["members"]
         VOICE["voice"]
         DM["dm"]
@@ -104,25 +105,96 @@ yet scheduled.
 | ------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Reconnect           | `src/lib/ws.ts`                                                                        | Exponential backoff (cap 30s), heartbeat 30s, `last_seq` replay + bounded dedup set, generation counter invalidates stale listeners                                                                                                                                                                                                                                                                          |
 | Cert trust          | `src-tauri/src/tofu.rs` (shared by `ws_proxy.rs`, `http_proxy.rs`, `livekit_proxy.rs`) | TOFU with explicit consent: fingerprints stored per host in `certs.json`, but _deciding never writes a pin_ — first use and mismatch both reject the connection and emit a `cert-tofu` event; the TS side shows a blocking modal (`CertMismatchModal.ts`) and only an explicit Accept stores/updates the pin. The updater uses a fourth, host-scoped verifier (pin for the OwnCord host, WebPKI for GitHub). |
-| Voice E2EE identity | `src/lib/identity.ts` + `src-tauri/src/commands.rs`                                    | Long-term ECDSA identity key in the OS keyring (`identity:{host}`); peer identity keys pinned in `identity_pins.json`; changed peer key → blocking identity-mismatch modal with safety-number comparison                                                                                                                                                                                                     |
-| Credentials         | `src-tauri/src/credentials.rs`                                                         | OS keychain per host; password field `serde(skip)` so it never crosses IPC back to JS                                                                                                                                                                                                                                                                                                                        |
+| Voice E2EE identity | `src/lib/identity.ts` + `src-tauri/src/commands.rs`                                    | Long-term ECDSA identity key in the OS keyring (`identity:{userId}@{host}`); peer identity keys pinned in `identity_pins.json`; changed peer key → blocking identity-mismatch modal with safety-number comparison                                                                                                                                                                                            |
+| Credentials         | `src-tauri/src/credentials.rs`                                                         | OS keychain per host; password field `serde(skip)` so it never crosses IPC back to JS — the frontend gets `has_password` and shows a placeholder, and `login_with_saved_password` does the login inside Rust. `save_credential` preserves the stored password unless `clear_password` is set, so a re-save never has to resend it                                                                            |
 | Multi-server        | `src/lib/profiles.ts`                                                                  | Server profiles w/ 15s health polling and auto-connect; one active connection, quick-switch replaces WS + tunnels                                                                                                                                                                                                                                                                                            |
 | HTTP capability     | `src-tauri/capabilities/default.json`                                                  | `http:allow-fetch` is the only URL-scoped identifier (the other two `fetch_*` commands take a validated `ResourceId`); allows `https://*` + `http://127.0.0.1:*`, denies https loopback. Wildcard is required by link previews — see [docs/plans/tauri-capability-narrowing.md](../plans/tauri-capability-narrowing.md)                                                                                      |
-| Updates             | `src/lib/updater.ts` + `update_commands.rs`                                            | Endpoint derived from the connected server URL, https-only, TLS pinned to TOFU fingerprint, minisign-verified                                                                                                                                                                                                                                                                                                |
+| Updates             | `src/lib/updater.ts` + `update_commands.rs`                                            | Endpoint derived from the connected server URL, https-only, TLS pinned to TOFU fingerprint, minisign-verified. On Windows the NSIS pre-install hook (`src-tauri/nsis/hooks.nsh`) waits for the old executable to unlock before the installer overwrites it, so a first update after install cannot skip the copy and relaunch the old binary                                                                 |
 | Settings            | `commands.rs` + `src/lib/preferences.ts`                                               | Split persistence: Rust store (`settings.json`, key-allowlisted) _and_ raw `localStorage` for UI prefs/themes                                                                                                                                                                                                                                                                                                |
 | Theming             | `src/lib/themes.ts` + `styles/tokens.css`                                              | CSS custom properties; 4 built-in themes + custom overrides                                                                                                                                                                                                                                                                                                                                                  |
 | GIF picker          | `src/lib/gifProvider.ts` + `components/GifPicker.ts`                                   | Calls the user's own server (`/api/v1/gif/*`) through `api.ts` — no provider API key in the bundle. Server answers `503 GIF_DISABLED` when unconfigured: the picker shows "GIFs are not enabled on this server" and `onUnavailable` disables the composer's GIF button (with a `title`/`aria-label` reason) instead of failing silently. Returned media URLs are still pinned to the `klipy.com` CDN.        |
 
+#### Lifecycle ownership
+
+Timers and listeners are owned through two primitives (B7-11):
+
+- **`Disposable`** (`src/lib/disposable.ts`) owns a component, overlay or
+  render lifetime: one `AbortController` whose signal registers listeners,
+  plus cleanups. `addCleanup` returns nothing, so a timer re-armed on every
+  keystroke registers _one_ cleanup that clears the current handle. `destroy`
+  runs cleanups without per-cleanup isolation, so a page-level disposer list
+  that must survive a throwing cleanup (`MainPage`'s `unsubscribers`) stays an
+  array. A per-render child is a child `Disposable` the parent destroys.
+- **`SessionScope`** (`src/lib/sessionScope.ts`) owns session-bound async
+  work: `fork()` per request, isolated cleanups, and completions rejected after
+  the session ends. A request that must outlive the session it was sent from
+  (the logout revocation) runs on a detached scope instead.
+
+`tests/unit/lifecycle-ownership.test.ts` enforces four lexical rules from the
+syntax tree, each with an exact allowlist that fails on a stale entry, so the
+lists only shrink: **R1** a `window`/`document`/`navigator.*` listener carries a
+`signal` or `once` (or is an app-lifetime singleton with a reason); **R2** an
+interval keeps its handle and is cleared in its own file; **R3** a timeout keeps
+its handle (or a signal owns it through `setOwnedTimeout`); **R4** `new
+AbortController` appears only in the primitives and named cancellation tokens.
+`tests/helpers/lifecycle.ts` fails a unit test that ends with a bare
+`window`/`document` listener or a real interval alive, unless its file is on the
+shrink-only `tests/lifecycle-guard-baseline.json`.
+
+The lexical rules cannot see a listener on a signal that outlives what it
+served, so a CDP soak proves the runtime half
+(`tests/e2e/support/lifecycle-probe.ts`). After forced GC it counts listeners,
+nodes, documents, live `AbortController`s, live intervals and timeouts, open
+sockets and peer connections, live tracks and `AudioContext`s, and heap. The bar
+is no growth after warm-up: every count's slope is at most 0.05 per cycle
+(documents and intervals exactly flat), both across pages at the same page age
+and within one page (cycles 6 and 9, after that page's reconnect). A within-page
+nodes series also passes on a net move of at most 2, because a detached node can
+be in flux at one sample even after the settle loop (a 1-node move in a
+two-sample page series is a slope of 1/3). That is a blind spot: every page is
+two samples however long the soak runs, so page-scoped node growth of up to 2
+that the re-login navigation releases passes. The across-page series get no
+tolerance, so node growth that survives the navigation still fails. Heap
+stays within 1.10× and 25 KB per cycle at equal page age. It runs 20 cycles on
+every `client-fullstack` PR (`tests/e2e/fullstack/long-session.spec.ts`), 10 cycles
+over WebView2 in `client-native` (`tests/e2e/native/long-session.spec.ts`), and
+200 cycles plus 30 idle-connected minutes, in which every count must hold
+exactly and heap grow at most 100 KB per minute, through `npm run test:e2e:soak` (the `long-session-soak` job in
+`nightly-test-depth.yml`). The recorded runs are in
+[b7-0-client-baseline-2026-09-19.md](../plans/b7-0-client-baseline-2026-09-19.md).
+
+A **native voice backend** (Linux, LiveKit in `src-tauri/`) keeps the same rules
+on the TypeScript side, plus three that exist because the resource lives across
+IPC: a Tauri `listen()` subscription is registered on the voice attempt's owner
+and an unlisten that resolves after that owner is gone is called at once (the
+`retainListener` shape in `platform/desktop/pushToTalkService.ts`); every native
+handle (room, track, IPC channel) is released in the same teardown that
+disconnects the web room, behind the `livekitSession` facade, never a second
+teardown path; and native open rooms, live tracks and event channels are
+reported through `getSessionDebugInfo`, where the bar is 0 outside a call and
+no growth across cycles, because the webview counters cannot see Rust memory.
+
 ### Quality tooling
 
 224 test files (~83k LOC — about 2× the source): Vitest unit + integration
-(70% coverage gate, blocking in CI), Playwright E2E (web suite in CI —
-non-blocking full run plus a blocking `@parity` subset — and a native Tauri
-suite that is deliberately not wired to CI), Stryker mutation testing
+(70% coverage gate, blocking in CI), Playwright E2E (two blocking web jobs —
+`client-e2e-parity` runs the full 292-test suite against the production bundle,
+and `client-e2e` runs a 92-test smoke set against the Vite dev server, widening
+to the full suite when the specs or fixtures themselves change — plus a native
+Tauri suite that **is** wired to CI: the `client-native` job on `windows-latest`,
+a 100-minute budget, on pull requests to `main` and `dev`, which builds the app,
+runs the `native-core` Playwright project, then the auth, UI and
+native-extra projects listed in `docs/testing-behavior.md`, then the
+signed-NSIS install/relaunch script; and a four-target installed-artifact smoke,
+`client-artifact-smoke.yml`, which installs the Windows x64/ARM64 NSIS and
+Linux x64/ARM64 AppImage + deb bundles on their own architecture and drives
+install, boot, connect, media and recovery — nightly on unsigned builds, and in
+`release.yml` before `publish` on the signed bundles, where it also updates from
+the previous release and rolls back), Stryker mutation testing
 (manual-only), oxlint + type-checked ESLint, Prettier, Knip (non-blocking),
-strict `tsc`. Rust: 84 `cargo test --lib` tests across 10 of the 16 modules,
-blocking in CI together with `cargo clippy -D warnings`.
+strict `tsc`. Rust: the `cargo test --lib` suite lives beside the code across 22
+of the 26 modules, blocking in CI together with `cargo clippy -D warnings`.
 
-**Source of truth:** `src/main.ts`, `src/lib/dispatcher.ts`, `src/lib/ws.ts`,
-`src/lib/api.ts`, `src/lib/store.ts`, `src/stores/*.store.ts`,
+**Source of truth:** `src/main.ts`, `src/lib/dispatcher.ts` (+ `src/features/*/wsHandlers.ts`), `src/lib/ws.ts`,
+`src/lib/api.ts`, `src/lib/store.ts`, `src/stores/*.store.ts` (+ the `messages.store.ts` reducers in `src/features/messaging/`),
 `src-tauri/src/lib.rs`, `src-tauri/tauri.conf.json`.

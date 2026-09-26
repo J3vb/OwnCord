@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/updater"
+	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/mod/semver"
 )
@@ -54,6 +55,16 @@ func handleClientUpdate(u *updater.Updater) http.HandlerFunc {
 		cv := ensureV(currentVersion)
 		lv := ensureV(info.Latest)
 		if semver.Compare(cv, lv) >= 0 {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// Server first, clients second: never advertise a client that speaks
+		// a newer wire epoch than this server — it would auto-update straight
+		// into a refused handshake. The epoch comes from the release's signed
+		// manifest; a manifest that does not verify is withheld the same way.
+		epoch, err := u.ReleaseProtocolEpoch(r.Context(), info)
+		if err != nil || epoch > ws.ProtocolEpoch {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}

@@ -1,11 +1,17 @@
 // ServerPanel — server profile list sub-component for ConnectPage.
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import type { HealthStatus, ServerProfile } from "@lib/profiles";
+import { createModal } from "@lib/modalFactory";
+import type { Compatibility, HealthStatus, ServerProfile } from "@lib/profiles";
 import { loadCredential } from "@lib/credentials";
 import { isValidHost } from "@lib/hostValidation";
+import { createLogger } from "@lib/logger";
+import { connectText } from "../../i18n/connect";
+
+const log = createLogger("server-panel");
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,7 +56,7 @@ export interface ServerPanelOptions {
   /** Called immediately when the user clicks a server profile. */
   readonly onServerClick: (host: string, username?: string, autoConnect?: boolean) => void;
   /** Called after async credential lookup succeeds (may set password). */
-  readonly onCredentialLoaded: (host: string, username: string, password?: string) => void;
+  readonly onCredentialLoaded: (host: string, username: string, hasPassword?: boolean) => void;
   readonly onAddProfile?: (name: string, host: string) => void;
   readonly onDeleteProfile?: (profileId: string) => void;
   /** Called when the user toggles auto-login on a server profile. */
@@ -61,6 +67,11 @@ export interface ServerPanelApi {
   readonly element: HTMLDivElement;
   renderProfiles(profiles: readonly SimpleProfile[]): void;
   updateHealthStatus(host: string, status: HealthStatus): void;
+  /**
+   * Advisory epoch-compatibility badge. It NEVER disables Connect — the
+   * WebSocket auth_error stays authoritative (Decision 1).
+   */
+  updateCompatibility(host: string, compatibility: Compatibility): void;
   destroy(): void;
 }
 
@@ -72,6 +83,8 @@ export function createServerPanel(
   opts: ServerPanelOptions,
   initialProfiles: readonly SimpleProfile[],
 ): ServerPanelApi {
+  // Monotonic token: only the newest credential load may apply.
+  let credentialLoadSeq = 0;
   const {
     signal,
     onServerClick,
@@ -84,11 +97,27 @@ export function createServerPanel(
   // Map of host -> DOM elements for health status updates
   const healthElements = new Map<
     string,
-    { dot: HTMLDivElement; latency: HTMLSpanElement; onlineUsers: HTMLSpanElement }
+    {
+      dot: HTMLDivElement;
+      latency: HTMLSpanElement;
+      onlineUsers: HTMLSpanElement;
+      compat: HTMLSpanElement;
+    }
   >();
 
   // Cached DOM references
   let serverListEl: HTMLDivElement;
+
+  // renderServerProfiles rebuilds every row from scratch on every profile
+  // load/add/delete/toggle. Per-row listeners must NOT be registered on the
+  // page-lifetime `signal`, which only aborts once, at page teardown --
+  // addEventListener({ signal }) keeps a detached row reachable via that
+  // signal's own retained abort-listener list until it fires, so every
+  // re-render would otherwise leak the previous generation's rows (OC-0336),
+  // the same defect already fixed in MemberList/ChannelSidebar/MessageList.
+  // renderOwner is aborted and replaced at the top of every render, so only the
+  // CURRENT render's rows stay reachable.
+  let renderOwner: Disposable | null = null;
 
   // ---------------------------------------------------------------------------
   // DOM construction
@@ -98,7 +127,7 @@ export function createServerPanel(
     const panel = createElement("div", { class: "server-panel" });
 
     const header = createElement("div", { class: "server-panel-header" });
-    const heading = createElement("h2", {}, "Servers");
+    const heading = createElement("h2", {}, connectText("servers.heading"));
     header.appendChild(heading);
 
     serverListEl = createElement("div", { class: "server-list" });
@@ -111,7 +140,7 @@ export function createServerPanel(
       class: "btn-add-server",
       type: "button",
     });
-    setText(addBtn, "+ Add Server");
+    setText(addBtn, connectText("servers.addButton"));
     addBtn.addEventListener("click", handleAddServer, { signal });
     footer.appendChild(addBtn);
 
@@ -120,6 +149,11 @@ export function createServerPanel(
   }
 
   function renderServerProfiles(profiles: readonly SimpleProfile[]): void {
+    renderOwner?.destroy();
+    const currentRender = new Disposable();
+    renderOwner = currentRender;
+    const rowSignal = currentRender.signal;
+
     clearChildren(serverListEl);
     healthElements.clear();
     for (const profile of profiles) {
@@ -143,7 +177,10 @@ export function createServerPanel(
       const host = createElement("span", { class: "srv-host" }, profile.host);
       const latency = createElement("span", { class: "srv-latency" });
       const onlineUsersEl = createElement("span", { class: "srv-online-users" });
-      appendChildren(meta, host, latency, onlineUsersEl);
+      // Advisory epoch badge (B7-12): text + modifier class set by
+      // updateCompatibility; empty and inert until then.
+      const compatEl = createElement("span", { class: "srv-compat-badge" });
+      appendChildren(meta, host, latency, onlineUsersEl, compatEl);
 
       // Show username if available (full profile has it)
       const fullProfile = profile as Partial<ServerProfile>;
@@ -154,7 +191,12 @@ export function createServerPanel(
 
       appendChildren(info, name, meta);
 
-      healthElements.set(profile.host, { dot: statusDot, latency, onlineUsers: onlineUsersEl });
+      healthElements.set(profile.host, {
+        dot: statusDot,
+        latency,
+        onlineUsers: onlineUsersEl,
+        compat: compatEl,
+      });
 
       // Action buttons (auto-login toggle + delete)
       const actions = createElement("div", { class: "srv-actions" });
@@ -165,8 +207,12 @@ export function createServerPanel(
         const autoLoginBtn = createElement("button", {
           class: `srv-btn auto-login${isAutoLogin ? " active" : ""}`,
           type: "button",
-          "aria-label": isAutoLogin ? "Disable auto-login" : "Enable auto-login",
-          title: isAutoLogin ? "Auto-login enabled" : "Enable auto-login",
+          "aria-label": connectText(
+            isAutoLogin ? "servers.autoLogin.disable" : "servers.autoLogin.enable",
+          ),
+          title: connectText(
+            isAutoLogin ? "servers.autoLogin.enabled" : "servers.autoLogin.enable",
+          ),
         });
         autoLoginBtn.textContent = "";
         autoLoginBtn.appendChild(createIcon("zap", 14));
@@ -176,7 +222,7 @@ export function createServerPanel(
             e.stopPropagation();
             onToggleAutoLogin(fullProfile.id!, !isAutoLogin);
           },
-          { signal },
+          { signal: rowSignal },
         );
         actions.appendChild(autoLoginBtn);
       }
@@ -186,7 +232,7 @@ export function createServerPanel(
         const deleteBtn = createElement("button", {
           class: "srv-btn danger",
           type: "button",
-          "aria-label": "Delete server",
+          "aria-label": connectText("servers.delete"),
         });
         deleteBtn.textContent = "";
         deleteBtn.appendChild(createIcon("x", 14));
@@ -196,7 +242,7 @@ export function createServerPanel(
             e.stopPropagation();
             onDeleteProfile(fullProfile.id!);
           },
-          { signal },
+          { signal: rowSignal },
         );
         actions.appendChild(deleteBtn);
       }
@@ -210,14 +256,29 @@ export function createServerPanel(
           onServerClick(profile.host, fullProfile.username, fullProfile.autoConnect === true);
           // Auto-fill credentials from credential store (async)
           const requestedHost = profile.host;
+          // Two profiles can share a host (same server, different accounts),
+          // and `loadCredential` is keyed by host alone, so a slower earlier
+          // click could resolve last and overwrite the selection the user
+          // actually made. Only the newest click may apply its result. The
+          // host check downstream is not enough on its own, and a mismatch is
+          // no longer visible now that the password box shows identical dots.
+          credentialLoadSeq += 1;
+          const seq = credentialLoadSeq;
           void (async () => {
-            const cred = await loadCredential(requestedHost);
-            if (cred) {
-              onCredentialLoaded(requestedHost, cred.username, cred.password);
+            try {
+              const cred = await loadCredential(requestedHost);
+              if (cred && seq === credentialLoadSeq) {
+                onCredentialLoaded(requestedHost, cred.username, cred.hasPassword);
+              }
+            } catch (err) {
+              log.debug("Credential auto-fill failed (best-effort, user can type manually)", {
+                host: requestedHost,
+                err,
+              });
             }
           })();
         },
-        { signal },
+        { signal: rowSignal },
       );
 
       serverListEl.appendChild(item);
@@ -234,7 +295,7 @@ export function createServerPanel(
     // Update latency badge
     if (status.latencyMs !== null) {
       const ms = status.latencyMs;
-      setText(els.latency, `${ms}ms`);
+      setText(els.latency, connectText("servers.latency", { ms }));
       els.latency.className = `srv-latency ${ms < 100 ? "good" : ms < 500 ? "warn" : "bad"}`;
     } else {
       setText(els.latency, "");
@@ -243,11 +304,29 @@ export function createServerPanel(
 
     // Update online users count
     if (status.onlineUsers !== null && status.onlineUsers >= 0) {
-      setText(els.onlineUsers, `${status.onlineUsers} online`);
+      setText(els.onlineUsers, connectText("servers.online", { count: status.onlineUsers }));
       els.onlineUsers.className = `srv-online-users ${status.onlineUsers > 0 ? "has-users" : ""}`;
     } else {
       setText(els.onlineUsers, "");
       els.onlineUsers.className = "srv-online-users";
+    }
+  }
+
+  function updateCompatibility(host: string, compatibility: Compatibility): void {
+    const els = healthElements.get(host);
+    if (!els) return;
+
+    // Only a real mismatch earns a badge; `compatible` and `unreachable` are
+    // silence (an unreachable server is not an update requirement).
+    if (compatibility === "client-older") {
+      setText(els.compat, connectText("servers.clientUpdateNeeded"));
+      els.compat.className = "srv-compat-badge client-older";
+    } else if (compatibility === "server-older") {
+      setText(els.compat, connectText("servers.serverUpdateNeeded"));
+      els.compat.className = "srv-compat-badge server-older";
+    } else {
+      setText(els.compat, "");
+      els.compat.className = "srv-compat-badge";
     }
   }
 
@@ -258,32 +337,42 @@ export function createServerPanel(
   function handleAddServer(): void {
     if (!onAddProfile) return;
 
-    const overlay = createElement("div", { class: "modal-overlay visible" });
-    const modal = createElement("div", { class: "modal" });
-
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", {}, "Add Server");
-    const closeBtn = createElement("button", { class: "modal-close", type: "button" });
+    const title = createElement("h3", { id: "add-server-title" }, connectText("servers.add.title"));
+    // Icon-only button: the aria-label is its whole accessible name.
+    const closeBtn = createElement("button", {
+      class: "modal-close",
+      type: "button",
+      "aria-label": connectText("common.close"),
+    });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
     appendChildren(header, title, closeBtn);
 
     const body = createElement("div", { class: "modal-body" });
     const nameGroup = createElement("div", { class: "form-group" });
-    const nameLabel = createElement("label", { class: "form-label" }, "Server Name");
+    const nameLabel = createElement(
+      "label",
+      { class: "form-label" },
+      connectText("servers.add.nameLabel"),
+    );
     const nameInput = createElement("input", {
       class: "form-input",
       type: "text",
-      placeholder: "My Server",
+      placeholder: connectText("servers.add.namePlaceholder"),
     });
     appendChildren(nameGroup, nameLabel, nameInput);
 
     const hostGroup = createElement("div", { class: "form-group" });
-    const hostLabel = createElement("label", { class: "form-label" }, "Host Address");
+    const hostLabel = createElement(
+      "label",
+      { class: "form-label" },
+      connectText("servers.add.hostLabel"),
+    );
     const hostAddrInput = createElement("input", {
       class: "form-input",
       type: "text",
-      placeholder: "example.com:8443",
+      placeholder: "example.com:8443", // i18n-exempt: example host:port, the same in every language
     });
     appendChildren(hostGroup, hostLabel, hostAddrInput);
 
@@ -291,17 +380,45 @@ export function createServerPanel(
 
     const footer = createElement("div", { class: "modal-footer" });
     const cancelBtn = createElement("button", { class: "btn-ghost", type: "button" });
-    setText(cancelBtn, "Cancel");
+    setText(cancelBtn, connectText("common.cancel"));
     const saveBtn = createElement("button", { class: "btn-primary", type: "button" });
-    setText(saveBtn, "Add Server");
+    setText(saveBtn, connectText("servers.add.submit"));
     appendChildren(footer, cancelBtn, saveBtn);
 
-    appendChildren(modal, header, body, footer);
-    overlay.appendChild(modal);
+    // Each open modal gets its own Disposable so closeModal() can
+    // release its own button listeners; registering them on the
+    // page-lifetime `signal` instead (which only aborts once, at page
+    // teardown) would keep every discarded modal subtree reachable until
+    // then (OC-0335). Chained to the page signal so an open modal is also
+    // torn down on page teardown.
+    const modalOwner = new Disposable();
+    signal.addEventListener("abort", () => modalOwner.destroy(), {
+      once: true,
+      signal: modalOwner.signal,
+    });
 
     function closeModal(): void {
-      overlay.remove();
+      modalOwner.destroy();
+      instance.destroy();
     }
+
+    // A self-contained local modal with no caller-owned destroy() to
+    // decouple from, so backdrop click and Escape close it directly through
+    // the factory; dialog semantics, focus trap and focus save/restore come
+    // from there too. Mounted onto the panel's closest connect-page root.
+    const root = panelEl.closest(".connect-page") ?? document.body;
+    const instance = createModal(
+      {
+        content: header,
+        ariaLabelledBy: "add-server-title",
+        onClose: closeModal,
+        // Also tears the modal down on page teardown (the chained abort of
+        // modalOwner above), not just on backdrop click / Escape / Save.
+        signal: modalOwner.signal,
+      },
+      root,
+    );
+    appendChildren(instance.modal, body, footer);
 
     function handleSave(): void {
       const name = nameInput.value.trim();
@@ -313,7 +430,7 @@ export function createServerPanel(
       // the actual connection path, and vice versa (OC-0187).
       if (!isValidHost(addr)) {
         // Show inline validation error via the host input
-        hostAddrInput.setCustomValidity("Invalid server address (expected host or host:port)");
+        hostAddrInput.setCustomValidity(connectText("servers.add.invalidHost"));
         hostAddrInput.reportValidity();
         return;
       }
@@ -322,19 +439,9 @@ export function createServerPanel(
       closeModal();
     }
 
-    closeBtn.addEventListener("click", closeModal, { signal });
-    cancelBtn.addEventListener("click", closeModal, { signal });
-    saveBtn.addEventListener("click", handleSave, { signal });
-    overlay.addEventListener(
-      "click",
-      (e) => {
-        if (e.target === overlay) closeModal();
-      },
-      { signal },
-    );
-
-    // Allow backdrop stop propagation on modal body
-    modal.addEventListener("click", (e) => e.stopPropagation(), { signal });
+    closeBtn.addEventListener("click", closeModal, { signal: modalOwner.signal });
+    cancelBtn.addEventListener("click", closeModal, { signal: modalOwner.signal });
+    saveBtn.addEventListener("click", handleSave, { signal: modalOwner.signal });
 
     // Enter key submits
     hostAddrInput.addEventListener(
@@ -342,12 +449,9 @@ export function createServerPanel(
       (e) => {
         if (e.key === "Enter") handleSave();
       },
-      { signal },
+      { signal: modalOwner.signal },
     );
 
-    // Mount onto the panel's closest connect-page root
-    const root = panelEl.closest(".connect-page") ?? document.body;
-    root.appendChild(overlay);
     nameInput.focus();
   }
 
@@ -361,8 +465,10 @@ export function createServerPanel(
     element: panelEl,
     renderProfiles: renderServerProfiles,
     updateHealthStatus,
+    updateCompatibility,
     destroy(): void {
-      // Cleanup is handled by the shared AbortSignal from the parent
+      renderOwner?.destroy();
+      renderOwner = null;
     },
   };
 }

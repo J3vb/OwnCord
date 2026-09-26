@@ -12,11 +12,7 @@
  */
 
 import { createStore } from "@lib/store";
-
-/** Shown when the local user is the blocker. */
-export const BLOCKED_BY_ME_REASON = "You've blocked this user. Unblock to send messages.";
-/** Neutral reason for the blocking direction — never reveals the block explicitly. */
-export const BLOCKED_BY_THEM_REASON = "You can't message this user right now.";
+import { connectText } from "../i18n/connect";
 
 export interface BlocksState {
   readonly blockedByMe: ReadonlySet<number>;
@@ -91,9 +87,14 @@ export function clearBlockedByThem(): void {
 
 /** Reset both block directions (called on clearAuth — user ids are only
  *  unique per-server, so a previous server's block list must not carry
- *  into the next session). */
+ *  into the next session).
+ *
+ *  Bumps `blockedByMeRev` rather than resetting it to 0 (OC-0366): a reset
+ *  would let a still-in-flight GET /blocks from the session being torn
+ *  down match the next session's ready-time snapshot (both 0) and clobber
+ *  it with the previous server's block list. */
 export function resetBlocksStore(): void {
-  blocksStore.setState(() => INITIAL);
+  blocksStore.setState((prev) => ({ ...INITIAL, blockedByMeRev: (prev.blockedByMeRev ?? 0) + 1 }));
 }
 
 /**
@@ -101,7 +102,8 @@ export function resetBlocksStore(): void {
  * blockedByMe takes precedence so the user always sees that they are the blocker.
  */
 export function dmComposerBlockReason(state: BlocksState, recipientId: number): string | null {
-  if (state.blockedByMe.has(recipientId)) return BLOCKED_BY_ME_REASON;
-  if (state.blockedByThem.has(recipientId)) return BLOCKED_BY_THEM_REASON;
+  if (state.blockedByMe.has(recipientId)) return connectText("blocks.blockedByMe");
+  // The neutral reason never reveals the block explicitly.
+  if (state.blockedByThem.has(recipientId)) return connectText("blocks.blockedByThem");
   return null;
 }

@@ -1,14 +1,23 @@
 // Step 2.13 — REST API Client
 // Uses Tauri's HTTP plugin fetch to bypass self-signed cert rejection in webview.
 
-import { fetch } from "@tauri-apps/plugin-http";
+import { desktop } from "../platform/desktop";
 import { createLogger } from "./logger";
 import { ensureHttpProxy } from "./httpProxy";
 import { isValidHost } from "./hostValidation";
+import { SessionScope } from "./sessionScope";
+import {
+  NSFW_ACKNOWLEDGEMENT_REQUIRED,
+  nsfwContentBlocked,
+} from "../features/content-consent/nsfw";
+import { setNsfwAcknowledged } from "../stores/channels.store";
+import { connectText } from "../i18n/connect";
 import type {
   AuthResponse,
+  AdminUser,
   RegisterResponse,
   HealthResponse,
+  ServerInfoResponse,
   MessagesResponse,
   MessagesAroundResponse,
   ReactionUsersResponse,
@@ -26,7 +35,9 @@ import type {
   CreateDmResponse,
   GroupDmResponse,
   BlockedUsersResponse,
+  DmRequestListResponse,
   GifSearchResponse,
+  PartialSuccessResponse,
 } from "./types";
 
 /** Configuration for the API client. */
@@ -46,6 +57,29 @@ export class ApiClientError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+/**
+ * The text for a server error: catalog text when its code has a mapping, the
+ * server's message only when it has none, and `fallback` for an empty message.
+ * An internal failure maps to the caller's own `fallback`.
+ */
+export function serverErrorText(code: string, message: string, fallback: string): string {
+  switch (code) {
+    case "RATE_LIMITED":
+      return connectText("error.rateLimited");
+    case "INTERNAL":
+    case "INTERNAL_ERROR":
+      return fallback;
+    default:
+      return message || fallback;
+  }
+}
+
+/** A failed request's text: `serverErrorText` for an `ApiClientError`, else the error's own message. */
+export function errorText(err: unknown, fallback: string): string {
+  if (err instanceof ApiClientError) return serverErrorText(err.code, err.message, fallback);
+  return err instanceof Error ? err.message : fallback;
 }
 
 export type OnUnauthorized = () => void;
@@ -68,6 +102,239 @@ export interface SessionInfo {
   readonly created_at: string;
   readonly last_used: string;
   readonly is_current: boolean;
+  /** A sign-in no other device has acknowledged yet. Listing the sessions
+   *  acknowledges every row but the caller's own, so this is visible in
+   *  exactly one listing per device. */
+  readonly unseen: boolean;
+}
+
+/** DELETE /users/me/sessions: every session is revoked, the caller's included. */
+export interface RevokeAllSessionsResponse {
+  readonly sessions_revoked: number;
+  readonly current_session_revoked: boolean;
+}
+
+/** POST /users/me/recovery-kit: `kit_secret` is present only when the server
+ *  generated it, and it is shown exactly once. */
+export interface RecoveryKitIssue {
+  readonly kit_secret?: string;
+  readonly created_at: string;
+}
+
+/** GET /users/me/recovery-kit: whether the account holds an unspent kit. */
+export interface RecoveryKitStatus {
+  readonly enrolled: boolean;
+  readonly created_at?: string;
+  readonly used_at: string | null;
+}
+
+/** One row of GET /users/me/moderation: the caller's own warning, timeout,
+ *  removal or (lapsed) ban, read from the server's ledger, so it survives a
+ *  restart. `id` is the `action_id` an appeal takes. Mirrors
+ *  Server/api/moderation_handler.go's ownModerationActionResponse. */
+export interface OwnModerationAction {
+  readonly id: number;
+  readonly kind: "warning" | "timeout" | "removal" | "ban";
+  readonly reason: string;
+  readonly created_at: string;
+  readonly expires_at: string | null;
+  readonly lifted_at: string | null;
+  readonly acknowledged_at: string | null;
+  /** An appealable kind with no appeal filed against it yet. */
+  readonly appealable: boolean;
+  /** The appeal filed against this row: its opaque public id and state. */
+  readonly appeal: { readonly id: string; readonly state: AppealState } | null;
+}
+
+export type AppealState = "open" | "assigned" | "upheld" | "overturned" | "withdrawn";
+
+/** One row of GET /appeals/mine: never the assignee or who decided it.
+ *  Mirrors Server/api/appeal_handler.go's appealMineResponse. */
+export interface MyAppeal {
+  /** The opaque public id withdraw takes. */
+  readonly id: string;
+  /** The appealed action's kind, reason and time; all "" once that action is erased. */
+  readonly action_kind: OwnModerationAction["kind"] | "";
+  readonly action_reason: string;
+  readonly action_created_at: string;
+  readonly state: AppealState;
+  /** Set only once the appeal is decided (upheld or overturned). */
+  readonly decision_note: string | null;
+  readonly created_at: string;
+  readonly decided_at: string | null;
+}
+
+/** POST /reports target kinds and reason codes: B5's finite, server-owned
+ *  sets (Server/service/report.go). */
+export type ReportTargetType = "message" | "user" | "attachment";
+export type ReportReason = "spam" | "harassment" | "nsfw_unlabelled" | "illegal" | "other";
+
+/** POST /reports body. The server derives the subject from the target. */
+export interface FileReportRequest {
+  readonly target_type: ReportTargetType;
+  readonly target_id: string;
+  readonly reason: ReportReason;
+  readonly detail: string;
+}
+
+/** One row of GET /reports/mine: the reporter's own summary, never evidence,
+ *  assignee or notes. `id` is the opaque public id. Mirrors
+ *  Server/api/report_handler.go's reportSummaryResponse; kept apart from any
+ *  moderator shape so the two can never share a cache or a field. */
+export interface OwnReportSummary {
+  readonly id: string;
+  readonly target_type: string;
+  readonly reason: string;
+  /** open, assigned, resolved, dismissed or subject_erased. */
+  readonly state: string;
+  /** "" while open; actioned, no_action, duplicate or subject_erased once closed. */
+  readonly outcome: string;
+  readonly created_at: string;
+  readonly closed_at: string | null;
+}
+
+/** GET /moderation/queue's `state` filter: "" is open and assigned together. */
+export type ModerationQueueFilter = "" | "open" | "assigned" | "closed";
+
+/** One row of GET /moderation/queue (B5-8), for MODERATE_MEMBERS holders
+ *  only. `id` is the opaque public id. Mirrors
+ *  Server/api/moderation_queue_handler.go's moderationQueueRowResponse. */
+export interface ModerationQueueRow {
+  readonly id: string;
+  readonly reporter_name: string;
+  readonly subject_name: string;
+  readonly target_type: string;
+  readonly target_ref: string;
+  readonly channel_id?: number;
+  readonly reason: string;
+  readonly state: string;
+  readonly assignee_id: number;
+  readonly outcome: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+  readonly closed_at?: string;
+}
+
+/** GET /moderation/queue/{id}: the fields the Moderation Center reads (B9-11,
+ *  B9-12). Mirrors Server/api/moderation_queue_handler.go's
+ *  moderationReportDetailResponse. */
+export interface ModerationReportDetail {
+  readonly id: string;
+  readonly reporter_id: number;
+  /** The reported account; 0 once it is erased. */
+  readonly subject_id: number;
+  readonly target_type: string;
+  readonly channel_id?: number;
+  readonly reason: string;
+  readonly detail: string;
+  readonly state: string;
+  readonly assignee_id: number;
+  readonly outcome: string;
+  readonly created_at: string;
+  readonly closed_at?: string;
+  /** The snapshot the server captured at filing; empty when withheld. */
+  readonly evidence: readonly {
+    readonly seq: number;
+    readonly author_id: number;
+    readonly content: string;
+    /** JSON array of {id, filename, mime, size}: references, never bytes. */
+    readonly attachments: string;
+    readonly captured_at: string;
+  }[];
+  /** NSFW_ACKNOWLEDGEMENT_REQUIRED or SOURCE_CHANNEL_UNAVAILABLE when withheld. */
+  readonly evidence_withheld?: string;
+  /** Internal notes: always empty for the report's own reporter, once the
+   *  retention sweep has run on a closed report, and once the subject's
+   *  account is erased. */
+  readonly notes: readonly {
+    readonly id: number;
+    readonly author_id: number;
+    readonly body: string;
+    readonly created_at: string;
+  }[];
+  /** report_events, oldest first: created, assigned, noted, closed. Actor 0
+   *  is the server (created) or an erased account. */
+  readonly events: readonly {
+    readonly actor_id: number;
+    readonly action: string;
+    readonly detail: string;
+    readonly created_at: string;
+  }[];
+  /** Moderator actions taken with this report. */
+  readonly actions: readonly {
+    readonly id: number;
+    readonly kind: string;
+    readonly actor_id: number;
+    readonly reason: string;
+    readonly created_at: string;
+    /** A timeout's end. */
+    readonly expires_at?: string;
+    readonly lifted_at?: string;
+  }[];
+}
+
+/** POST /moderation/queue/{id}/act: the report-linked actions B9-13 sends. A
+ *  timeout's duration is 60 to 2,419,200 seconds (Server/service/moderation.go). */
+export type ModerationActRequest =
+  | { readonly kind: "warning"; readonly reason: string }
+  | { readonly kind: "timeout"; readonly reason: string; readonly duration_seconds: number }
+  /** B9-14: removal acts on the reported message; kick is a force-logout. */
+  | { readonly kind: "removal" | "kick" | "ban"; readonly reason: string };
+
+/** POST /moderation/queue/{id}/close outcomes (Server/service/report.go). */
+export type ModerationOutcome = "actioned" | "no_action" | "duplicate";
+
+/** GET /moderation/appeals' `state` filter: "" is open and assigned together;
+ *  "decided" is upheld and overturned. */
+export type ModerationAppealFilter = "" | "open" | "assigned" | "decided";
+
+/** One row of GET /moderation/appeals (B5-10), for MODERATE_MEMBERS holders
+ *  only; never the caller's own appeal. Mirrors Server/api/appeal_handler.go's
+ *  appealQueueRowResponse. */
+export interface ModerationAppealRow {
+  readonly id: string;
+  readonly action_id: number;
+  /** 0 once the appellant's account is erased. */
+  readonly appellant_id: number;
+  readonly state: AppealState;
+  /** 0 while no one holds it. */
+  readonly assignee_id: number;
+  readonly created_at: string;
+  readonly decided_at: string | null;
+}
+
+/** GET /moderation/appeals/{id}: the appeal and the action it is about. 403
+ *  SELF_REVIEW on the caller's own appeal. Mirrors appealDetailResponse. */
+export interface ModerationAppealDetail extends ModerationAppealRow {
+  /** The appellant's statement. */
+  readonly body: string;
+  readonly decided_by: number;
+  /** Sent to the appellant with the decision. */
+  readonly decision_note: string;
+  readonly action: {
+    readonly id: number;
+    readonly kind: string;
+    readonly actor_id: number;
+    readonly reason: string;
+    readonly created_at: string;
+    readonly expires_at?: string;
+    readonly acknowledged_at?: string;
+    readonly lifted_at?: string;
+  };
+  /** The report the action was taken with, only when this reader may open it. */
+  readonly report_id?: string;
+}
+
+export type AppealDecision = "upheld" | "overturned";
+
+/** The four recipient transitions of a pending Message Request (docs/api.md). */
+export type DmRequestDecision = "accept" | "ignore" | "delete" | "block";
+
+/** The 200 body of every POST /dm-requests/{id}/{decision}. */
+export interface DmRequestDecisionResult {
+  readonly id: number;
+  readonly state: "accepted" | "ignored" | "deleted" | "blocked";
+  readonly decided_at: string | null;
 }
 
 interface SessionsListResponse {
@@ -78,122 +345,140 @@ const log = createLogger("api");
 
 /** Create the REST API client. */
 export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?: OnUnauthorized) {
-  let config = { ...initialConfig };
+  let config: Readonly<ApiClientConfig> = Object.freeze({ ...initialConfig });
+  let generation = 0;
+  let session = new SessionScope({ host: config.host, generation });
 
-  // REST traffic is tunneled through the Rust HTTP TOFU proxy: instead of
-  // hitting https://{host} directly (which used to require accepting invalid
-  // certs), we hit http://127.0.0.1:{port} where the proxy pins the server
-  // certificate to the same trust-on-first-use fingerprint as the WS proxy.
-  async function baseUrl(): Promise<string> {
-    return `${await ensureHttpProxy(config.host)}/api/v1`;
+  function replaceSession(nextConfig: ApiClientConfig): void {
+    const previous = session;
+    config = Object.freeze({ ...nextConfig });
+    session = new SessionScope({ host: config.host, generation: ++generation });
+    previous.dispose();
   }
 
-  async function adminBaseUrl(): Promise<string> {
-    return `${await ensureHttpProxy(config.host)}/admin/api`;
-  }
-
-  function headers(): Record<string, string> {
-    const h: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (config.token) {
-      h["Authorization"] = `Bearer ${config.token}`;
-    }
-    return h;
-  }
-
+  // Snapshot both destination and credentials BEFORE starting the native proxy.
+  // Every path (including multipart, admin and TOTP) uses the same ownership
+  // checks through response-body consumption. Native cancellation is best-effort;
+  // SessionScope also rejects completions that arrive after a session switch.
   async function doFetch<T>(
     label: string,
-    urlBase: string,
+    prefix: string,
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-    opts?: { skipUnauthorized?: boolean },
+    opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean; detached?: boolean },
   ): Promise<T> {
-    const url = `${urlBase}${path}`;
-    const init: RequestInit = {
-      method,
-      headers: headers(),
-      signal,
-    };
-    if (body !== undefined) {
-      init.body = JSON.stringify(body);
-    }
-
-    log.debug(`${label} →`, { method, path });
-
-    let res: Response;
+    const snapshot = config;
+    // A detached request is owned by its caller's signal alone, so ending the
+    // session it was sent from does not cancel it.
+    const owner = opts?.detached
+      ? new SessionScope({ host: snapshot.host, generation }, signal ? [signal] : [])
+      : session.fork(signal);
+    // Tauri keeps abort listeners after a response body has been consumed.
+    // Detach transport cancellation when that work settles, while still
+    // disposing the logical request scope and all of its parent listeners.
+    const transport = new AbortController();
+    const releaseTransport = owner.addCleanup(() => transport.abort());
     try {
-      res = await fetch(url, init);
-    } catch (fetchErr) {
-      log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
-      if (fetchErr instanceof Error) {
-        throw fetchErr;
+      owner.assertCurrent();
+      const headers: Record<string, string> = {};
+      if (!opts?.multipart) headers["Content-Type"] = "application/json";
+      const token = opts?.token ?? snapshot.token;
+      // i18n-exempt: wire header value, never rendered
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const init: RequestInit = { method, headers, signal: transport.signal };
+      if (body !== undefined)
+        init.body = opts?.multipart ? (body as FormData) : JSON.stringify(body);
+      const origin = await owner.run(ensureHttpProxy(snapshot.host));
+      owner.assertCurrent();
+      log.debug(`${label} →`, { method, path });
+      let res: Response;
+      try {
+        res = await owner.run(desktop.http.fetch(`${origin}${prefix}${path}`, init));
+      } catch (fetchErr) {
+        owner.assertCurrent();
+        log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
+        if (fetchErr instanceof Error) throw fetchErr;
+        throw new Error(String(fetchErr), { cause: fetchErr });
       }
-      throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr), {
-        cause: fetchErr,
-      });
-    }
-
-    log.debug(`${label} ←`, { method, path, status: res.status });
-
-    if (res.status === 401) {
-      // Most 401s mean "the session is no longer valid" — the global sink
-      // (onUnauthorized) reacts by logging the user out and, for a
-      // remembered host, deleting the saved credential. A handful of
-      // endpoints instead use 401 as an ordinary per-call verdict (e.g.
-      // "invalid two-factor code" on totp/confirm) while the caller's
-      // session stays perfectly valid; those callers opt out via
-      // `skipUnauthorized` so a wrong answer there doesn't sign the user
-      // out and erase their stored credential.
-      if (!opts?.skipUnauthorized) {
-        onUnauthorized?.();
+      owner.assertCurrent();
+      log.debug(`${label} ←`, { method, path, status: res.status });
+      if (!res.ok) {
+        const err = await owner.run(parseError(res)).finally(releaseTransport);
+        owner.assertCurrent();
+        if (res.status === 401 && !opts?.skipUnauthorized) {
+          // Parse first: the session can change while the error body is arriving.
+          // This callback is allowed to synchronously dispose the current session.
+          onUnauthorized?.();
+        }
+        log.warn(`${label} error`, {
+          method,
+          path,
+          status: res.status,
+          code: err.error,
+          message: err.message,
+          reqId: res.headers.get("x-request-id") ?? undefined,
+        });
+        throw new ApiClientError(res.status, err.error, err.message);
       }
-      const err = await parseError(res);
-      throw new ApiClientError(401, err.error, err.message);
+      if (res.status === 204) {
+        releaseTransport();
+        return undefined as T;
+      }
+      const data = await owner.run(res.json() as Promise<T>).finally(releaseTransport);
+      owner.assertCurrent();
+      return data;
+    } finally {
+      owner.dispose();
     }
-
-    if (!res.ok) {
-      const err = await parseError(res);
-      log.warn(`${label} error`, {
-        method,
-        path,
-        status: res.status,
-        code: err.error,
-        message: err.message,
-        // Server echoes its request ID in this header — logging it lets a
-        // client-side failure be matched to the server's log line for it.
-        reqId: res.headers.get("x-request-id") ?? undefined,
-      });
-      throw new ApiClientError(res.status, err.error, err.message);
-    }
-
-    // 204 No Content
-    if (res.status === 204) {
-      return undefined as T;
-    }
-
-    return res.json() as Promise<T>;
   }
 
-  async function request<T>(
+  function request<T>(
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-    opts?: { skipUnauthorized?: boolean },
+    opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean; detached?: boolean },
   ): Promise<T> {
-    return doFetch<T>("API", await baseUrl(), method, path, body, signal, opts);
+    return doFetch<T>("API", "/api/v1", method, path, body, signal, opts);
   }
 
-  async function adminRequest<T>(
+  /**
+   * A content read from one channel, admitted only with NSFW consent (B9-7):
+   * refused locally, with the server's own error, before any request while
+   * the channel is gated, and discarded if consent was withdrawn while it was
+   * in flight — so nothing from a labelled channel is fetched or delivered
+   * pre-consent, whichever feature asked.
+   */
+  async function channelContent<T>(channelId: number, load: () => Promise<T>): Promise<T> {
+    const refusal = (): ApiClientError =>
+      new ApiClientError(403, NSFW_ACKNOWLEDGEMENT_REQUIRED, NSFW_ACKNOWLEDGEMENT_REQUIRED);
+    if (nsfwContentBlocked(channelId)) throw refusal();
+    let result: T;
+    try {
+      result = await load();
+    } catch (err) {
+      // The server's refusal outranks a stale local "consented". A resume
+      // that missed an nsfw_ack already gets a full ready (the revoke bumps
+      // the server's visibility watermark), so this is defence in depth.
+      if (err instanceof ApiClientError && err.code === NSFW_ACKNOWLEDGEMENT_REQUIRED) {
+        setNsfwAcknowledged(channelId, false);
+      }
+      throw err;
+    }
+    if (nsfwContentBlocked(channelId)) throw refusal();
+    return result;
+  }
+
+  function adminRequest<T>(
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
   ): Promise<T> {
-    return doFetch<T>("Admin API", await adminBaseUrl(), method, path, body, signal);
+    // i18n-exempt: log label for admin requests, never rendered
+    return doFetch<T>("Admin API", "/admin/api", method, path, body, signal);
   }
 
   // oxlint-disable-next-line consistent-function-scoping -- co-located with doFetch for encapsulation
@@ -217,6 +502,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     setConfig(newConfig: Partial<ApiClientConfig>): void {
       if (newConfig.host !== undefined && !isValidHost(newConfig.host)) {
         log.error("setConfig rejected invalid host", { host: newConfig.host });
+        // i18n-exempt: internal guard; callers validate the host before this runs
         throw new Error("Invalid host format");
       }
       // Switching to a different host without an accompanying new token must
@@ -224,15 +510,28 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       // login/register request to the new host rides a still-live session
       // token for the old one. Callers that only rotate the token (post-auth)
       // never pass `host`, so this never touches a same-host token refresh.
-      if (
-        newConfig.host !== undefined &&
+      const nextConfig = {
+        ...config,
+        ...newConfig,
+        ...(newConfig.host !== undefined &&
         newConfig.host !== config.host &&
         newConfig.token === undefined
-      ) {
-        config = { ...config, ...newConfig, token: undefined };
-      } else {
-        config = { ...config, ...newConfig };
+          ? { token: undefined }
+          : {}),
+      };
+      if (nextConfig.host !== config.host || nextConfig.token !== config.token) {
+        replaceSession(nextConfig);
       }
+    },
+
+    /** Capture before async work; public ownership metadata never exposes tokens. */
+    getSession(): SessionScope {
+      return session;
+    },
+
+    /** End even a same-host, pre-auth attempt and invalidate all its resources. */
+    endSession(): void {
+      replaceSession({ host: config.host });
     },
 
     /** Get current config (for debugging). Token is redacted. */
@@ -260,56 +559,37 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       );
     },
 
+    /** Revokes this session's token. It runs outside the session's scope, so the
+     *  session teardown that follows a logout cannot cancel it, and a 401 (the
+     *  token is already gone) does not start a second logout. */
     logout(signal?: AbortSignal): Promise<void> {
-      return request<void>("POST", "/auth/logout", undefined, signal);
+      return request<void>("POST", "/auth/logout", undefined, signal, {
+        detached: true,
+        skipUnauthorized: true,
+      });
     },
 
-    async verifyTotp(
-      code: string,
-      partialToken: string,
+    verifyTotp(code: string, partialToken: string, signal?: AbortSignal): Promise<AuthResponse> {
+      return request<AuthResponse>("POST", "/auth/verify-totp", { code }, signal, {
+        token: partialToken,
+      });
+    },
+
+    /** POST /auth/recover. `secret` is a recovery kit secret or an
+     *  owner-issued recovery credential; the server tells them apart by
+     *  shape, so both travel in `kit_secret`. Answers the login shape. */
+    recoverAccount(
+      username: string,
+      secret: string,
+      newPassword: string,
       signal?: AbortSignal,
     ): Promise<AuthResponse> {
-      // Don't mutate shared config — make direct fetch with the partial token
-      const url = `${await baseUrl()}/auth/verify-totp`;
-      const init: RequestInit = {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${partialToken}`,
-        },
-        body: JSON.stringify({ code }),
+      return request<AuthResponse>(
+        "POST",
+        "/auth/recover",
+        { username, kit_secret: secret, new_password: newPassword },
         signal,
-      };
-
-      let res: Response;
-      try {
-        res = await fetch(url, init);
-      } catch (fetchErr) {
-        log.error("API fetch failed", {
-          method: "POST",
-          path: "/auth/verify-totp",
-          error: String(fetchErr),
-        });
-        if (fetchErr instanceof Error) {
-          throw fetchErr;
-        }
-        throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr), {
-          cause: fetchErr,
-        });
-      }
-
-      if (res.status === 401) {
-        onUnauthorized?.();
-        const err = await parseError(res);
-        throw new ApiClientError(401, err.error, err.message);
-      }
-
-      if (!res.ok) {
-        const err = await parseError(res);
-        throw new ApiClientError(res.status, err.error, err.message);
-      }
-
-      return res.json() as Promise<AuthResponse>;
+      );
     },
 
     deleteAccount(password: string, signal?: AbortSignal): Promise<void> {
@@ -319,7 +599,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     // ── Users ─────────────────────────────────────────────
 
     getMe(signal?: AbortSignal): Promise<MemberResponse> {
-      return request<MemberResponse>("GET", "/users/me", undefined, signal);
+      return request<MemberResponse>("GET", "/auth/me", undefined, signal);
     },
 
     updateProfile(
@@ -345,36 +625,23 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
      * On success the server has already pointed the user's avatar at the
      * served file and broadcast a user_update.
      */
-    async uploadAvatar(file: File, signal?: AbortSignal): Promise<UploadResponse> {
+    uploadAvatar(file: File, signal?: AbortSignal): Promise<UploadResponse> {
       const formData = new FormData();
       formData.append("file", file);
 
-      const url = `${await baseUrl()}/users/me/avatar`;
-      const h: Record<string, string> = {};
-      if (config.token) {
-        h["Authorization"] = `Bearer ${config.token}`;
-      }
-
-      const res = await fetch(url, { method: "POST", headers: h, body: formData, signal });
-
-      if (res.status === 401) {
-        onUnauthorized?.();
-        const err = await parseError(res);
-        throw new ApiClientError(401, err.error, err.message);
-      }
-      if (!res.ok) {
-        const err = await parseError(res);
-        throw new ApiClientError(res.status, err.error, err.message);
-      }
-      return res.json() as Promise<UploadResponse>;
+      return request<UploadResponse>("POST", "/users/me/avatar", formData, signal, {
+        multipart: true,
+      });
     },
 
     changePassword(
       currentPassword: string,
       newPassword: string,
       signal?: AbortSignal,
-    ): Promise<void> {
-      return request<void>(
+    ): Promise<PartialSuccessResponse | undefined> {
+      // 204 on full success; 200 with a warning body when the password
+      // changed but the other sessions could not be revoked (OC-0314).
+      return request<PartialSuccessResponse | undefined>(
         "PUT",
         "/users/me/password",
         { old_password: currentPassword, new_password: newPassword },
@@ -389,30 +656,234 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request("POST", "/users/me/totp/enable", { password }, signal);
     },
 
-    confirmTotp(password: string, code: string, signal?: AbortSignal): Promise<void> {
+    confirmTotp(
+      password: string,
+      code: string,
+      signal?: AbortSignal,
+    ): Promise<PartialSuccessResponse | undefined> {
       // Unlike every other endpoint on this client, a wrong answer here
       // (an invalid enrollment code) is reported as 401 UNAUTHORIZED rather
       // than 400/403 — see doFetch's `skipUnauthorized`. Without this the
       // global session-expiry sink would fire on a mistyped code, signing
       // the user out and deleting their stored credential for a session
       // that was never actually invalid.
-      return request<void>("POST", "/users/me/totp/confirm", { password, code }, signal, {
-        skipUnauthorized: true,
-      });
+      return request<PartialSuccessResponse | undefined>(
+        "POST",
+        "/users/me/totp/confirm",
+        { password, code },
+        signal,
+        {
+          skipUnauthorized: true,
+        },
+      );
     },
 
-    disableTotp(password: string, signal?: AbortSignal): Promise<void> {
-      return request<void>("DELETE", "/users/me/totp", { password }, signal);
+    disableTotp(
+      password: string,
+      signal?: AbortSignal,
+    ): Promise<PartialSuccessResponse | undefined> {
+      return request<PartialSuccessResponse | undefined>(
+        "DELETE",
+        "/users/me/totp",
+        { password },
+        signal,
+      );
+    },
+
+    /** Replace the emergency recovery codes; the new set is returned once. */
+    regenerateRecoveryCodes(
+      password: string,
+      signal?: AbortSignal,
+    ): Promise<{ backup_codes: string[] }> {
+      return request("POST", "/users/me/totp/recovery-codes", { password }, signal);
+    },
+
+    /** Issue (or replace) the recovery kit; the server generates the secret. */
+    enrolRecoveryKit(password: string, signal?: AbortSignal): Promise<RecoveryKitIssue> {
+      return request<RecoveryKitIssue>("POST", "/users/me/recovery-kit", { password }, signal);
+    },
+
+    getRecoveryKitStatus(signal?: AbortSignal): Promise<RecoveryKitStatus> {
+      return request<RecoveryKitStatus>("GET", "/users/me/recovery-kit", undefined, signal);
+    },
+
+    getOwnModeration(signal?: AbortSignal): Promise<OwnModerationAction[]> {
+      return request<OwnModerationAction[]>("GET", "/users/me/moderation", undefined, signal);
+    },
+
+    /** File a local report; resolves to its opaque public id. */
+    fileReport(body: FileReportRequest, signal?: AbortSignal): Promise<{ id: string }> {
+      return request<{ id: string }>("POST", "/reports", body, signal);
+    },
+
+    getMyReports(signal?: AbortSignal): Promise<OwnReportSummary[]> {
+      return request<OwnReportSummary[]>("GET", "/reports/mine", undefined, signal);
+    },
+
+    /** The moderator queue (B9-11). 403 without MODERATE_MEMBERS. */
+    getModerationQueue(
+      state: ModerationQueueFilter,
+      signal?: AbortSignal,
+    ): Promise<ModerationQueueRow[]> {
+      const query = state === "" ? "" : `?state=${state}`;
+      return request<ModerationQueueRow[]>("GET", `/moderation/queue${query}`, undefined, signal);
+    },
+
+    /** One report with its evidence (B9-11). 404 for a report about the caller. */
+    getModerationReport(id: string, signal?: AbortSignal): Promise<ModerationReportDetail> {
+      return request<ModerationReportDetail>(
+        "GET",
+        `/moderation/queue/${encodeURIComponent(id)}`,
+        undefined,
+        signal,
+      );
+    },
+
+    /** Take a report (B9-12): 409 when another moderator already holds it or it closed. */
+    assignModerationReport(id: string, signal?: AbortSignal): Promise<void> {
+      return request<void>(
+        "POST",
+        `/moderation/queue/${encodeURIComponent(id)}/assign`,
+        undefined,
+        signal,
+      );
+    },
+
+    /** Add an internal note: 409 once the report is closed. */
+    addModerationNote(id: string, body: string, signal?: AbortSignal): Promise<void> {
+      return request<void>(
+        "POST",
+        `/moderation/queue/${encodeURIComponent(id)}/notes`,
+        { body },
+        signal,
+      );
+    },
+
+    /** Close a report with its outcome: 409 when it is already closed. */
+    closeModerationReport(
+      id: string,
+      outcome: ModerationOutcome,
+      signal?: AbortSignal,
+    ): Promise<void> {
+      return request<void>(
+        "POST",
+        `/moderation/queue/${encodeURIComponent(id)}/close`,
+        { outcome },
+        signal,
+      );
+    },
+
+    /** Warn or time out a report's subject, linked to the report (B9-13). A
+     *  timeout answers with its voice half, "applied" or "skipped"; a warning
+     *  answers nothing. 403 below MODERATE_MEMBERS or the subject's rank. */
+    actOnModerationReport(
+      id: string,
+      body: ModerationActRequest,
+      signal?: AbortSignal,
+    ): Promise<{ readonly voice?: string } | undefined> {
+      return request<{ readonly voice?: string } | undefined>(
+        "POST",
+        `/moderation/queue/${encodeURIComponent(id)}/act`,
+        body,
+        signal,
+      );
+    },
+
+    /** End a member's active timeout early: 404 when they have none. */
+    liftTimeout(userId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("POST", `/moderation/users/${userId}/untimeout`, undefined, signal);
+    },
+
+    /** The moderator appeal queue (B9-17). 403 without MODERATE_MEMBERS. */
+    getModerationAppeals(
+      state: ModerationAppealFilter,
+      signal?: AbortSignal,
+    ): Promise<ModerationAppealRow[]> {
+      const query = state === "" ? "" : `?state=${state}`;
+      return request<ModerationAppealRow[]>(
+        "GET",
+        `/moderation/appeals${query}`,
+        undefined,
+        signal,
+      );
+    },
+
+    getModerationAppeal(id: string, signal?: AbortSignal): Promise<ModerationAppealDetail> {
+      return request<ModerationAppealDetail>(
+        "GET",
+        `/moderation/appeals/${encodeURIComponent(id)}`,
+        undefined,
+        signal,
+      );
+    },
+
+    /** Take an appeal: 409 when someone else holds it or it closed; never forced. */
+    assignModerationAppeal(id: string, signal?: AbortSignal): Promise<void> {
+      return request<void>(
+        "POST",
+        `/moderation/appeals/${encodeURIComponent(id)}/assign`,
+        undefined,
+        signal,
+      );
+    },
+
+    /** Decide an appeal: 409 when it changed since read, or REVERSAL_FAILED. */
+    decideModerationAppeal(
+      id: string,
+      outcome: AppealDecision,
+      note: string,
+      signal?: AbortSignal,
+    ): Promise<void> {
+      return request<void>(
+        "POST",
+        `/moderation/appeals/${encodeURIComponent(id)}/decide`,
+        { outcome, note },
+        signal,
+      );
+    },
+
+    /** Records that the caller read their own warning. 404 when it is already
+     *  acknowledged (or not theirs). */
+    acknowledgeNotice(actionId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("POST", `/users/me/notices/${actionId}/ack`, undefined, signal);
+    },
+
+    /** Files an appeal against the caller's own moderation action (its ledger id).
+     *  409 ALREADY_APPEALED, 429 RATE_LIMITED, 404 when not theirs or gone. */
+    fileAppeal(actionId: number, body: string, signal?: AbortSignal): Promise<{ id: string }> {
+      return request<{ id: string }>("POST", "/appeals/", { action_id: actionId, body }, signal);
+    },
+
+    getMyAppeals(signal?: AbortSignal): Promise<MyAppeal[]> {
+      return request<MyAppeal[]>("GET", "/appeals/mine", undefined, signal);
+    },
+
+    /** Open or assigned appeals only: 409 once decided or withdrawn, 404 when not the caller's. */
+    withdrawAppeal(publicId: string, signal?: AbortSignal): Promise<void> {
+      return request<void>(
+        "POST",
+        `/appeals/${encodeURIComponent(publicId)}/withdraw`,
+        undefined,
+        signal,
+      );
     },
 
     getSessions(signal?: AbortSignal): Promise<SessionInfo[]> {
+      const owner = session;
       return request<SessionsListResponse>("GET", "/users/me/sessions", undefined, signal).then(
-        (r) => r.sessions,
+        (r) => {
+          owner.assertCurrent();
+          return r.sessions;
+        },
       );
     },
 
     revokeSession(sessionId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("DELETE", `/users/me/sessions/${sessionId}`, undefined, signal);
+    },
+
+    revokeAllSessions(signal?: AbortSignal): Promise<RevokeAllSessionsResponse> {
+      return request<RevokeAllSessionsResponse>("DELETE", "/users/me/sessions", undefined, signal);
     },
 
     // ── Channels ──────────────────────────────────────────
@@ -426,11 +897,13 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       if (options?.before !== undefined) params.set("before", String(options.before));
       if (options?.limit !== undefined) params.set("limit", String(options.limit));
       const qs = params.toString();
-      return request<MessagesResponse>(
-        "GET",
-        `/channels/${channelId}/messages${qs ? `?${qs}` : ""}`,
-        undefined,
-        signal,
+      return channelContent(channelId, () =>
+        request<MessagesResponse>(
+          "GET",
+          `/channels/${channelId}/messages${qs ? `?${qs}` : ""}`,
+          undefined,
+          signal,
+        ),
       );
     },
 
@@ -449,11 +922,13 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       const params = new URLSearchParams();
       if (options?.limit !== undefined) params.set("limit", String(options.limit));
       const qs = params.toString();
-      return request<MessagesAroundResponse>(
-        "GET",
-        `/channels/${channelId}/messages/around/${messageId}${qs ? `?${qs}` : ""}`,
-        undefined,
-        signal,
+      return channelContent(channelId, () =>
+        request<MessagesAroundResponse>(
+          "GET",
+          `/channels/${channelId}/messages/around/${messageId}${qs ? `?${qs}` : ""}`,
+          undefined,
+          signal,
+        ),
       );
     },
 
@@ -487,16 +962,20 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       emoji: string,
       signal?: AbortSignal,
     ): Promise<ReactionUsersResponse> {
-      return request<ReactionUsersResponse>(
-        "GET",
-        `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/users`,
-        undefined,
-        signal,
+      return channelContent(channelId, () =>
+        request<ReactionUsersResponse>(
+          "GET",
+          `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/users`,
+          undefined,
+          signal,
+        ),
       );
     },
 
     getPins(channelId: number, signal?: AbortSignal): Promise<MessagesResponse> {
-      return request<MessagesResponse>("GET", `/channels/${channelId}/pins`, undefined, signal);
+      return channelContent(channelId, () =>
+        request<MessagesResponse>("GET", `/channels/${channelId}/pins`, undefined, signal),
+      );
     },
 
     pinMessage(channelId: number, messageId: number, signal?: AbortSignal): Promise<void> {
@@ -517,7 +996,26 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       const params = new URLSearchParams({ q: query });
       if (options?.channelId !== undefined) params.set("channel_id", String(options.channelId));
       if (options?.limit !== undefined) params.set("limit", String(options.limit));
-      return request<SearchResponse>("GET", `/search?${params.toString()}`, undefined, signal);
+      const send = (): Promise<SearchResponse> =>
+        request<SearchResponse>("GET", `/search?${params.toString()}`, undefined, signal);
+      // A server-wide search already omits channels the caller has not
+      // acknowledged; a single-channel one is a content read like any other.
+      return options?.channelId === undefined ? send() : channelContent(options.channelId, send);
+    },
+
+    /** Acknowledge a labelled channel for this account, on every device (B5-7). */
+    acknowledgeNsfw(channelId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("PUT", `/channels/${channelId}/nsfw-acknowledgement`, undefined, signal);
+    },
+
+    /** Withdraw this account's acknowledgement of a labelled channel (B5-7). */
+    revokeNsfw(channelId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>(
+        "DELETE",
+        `/channels/${channelId}/nsfw-acknowledgement`,
+        undefined,
+        signal,
+      );
     },
 
     // ── GIFs ──────────────────────────────────────────────
@@ -548,36 +1046,11 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     // ── File Uploads ──────────────────────────────────────
 
-    async uploadFile(file: File, signal?: AbortSignal): Promise<UploadResponse> {
+    uploadFile(file: File, signal?: AbortSignal): Promise<UploadResponse> {
       const formData = new FormData();
       formData.append("file", file);
 
-      const url = `${await baseUrl()}/uploads`;
-      const h: Record<string, string> = {};
-      if (config.token) {
-        h["Authorization"] = `Bearer ${config.token}`;
-      }
-      // Don't set Content-Type — browser sets multipart boundary
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: h,
-        body: formData,
-        signal,
-      });
-
-      if (res.status === 401) {
-        onUnauthorized?.();
-        const err = await parseError(res);
-        throw new ApiClientError(401, err.error, err.message);
-      }
-
-      if (!res.ok) {
-        const err = await parseError(res);
-        throw new ApiClientError(res.status, err.error, err.message);
-      }
-
-      return res.json() as Promise<UploadResponse>;
+      return request<UploadResponse>("POST", "/uploads", formData, signal, { multipart: true });
     },
 
     // ── Invites ───────────────────────────────────────────
@@ -612,30 +1085,12 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
      * GIF/WebP, at most 512 KB and 128x128), so the only thing this promises
      * is to send it; a rejection arrives as an ApiClientError with the reason.
      */
-    async uploadEmoji(shortcode: string, file: File, signal?: AbortSignal): Promise<EmojiResponse> {
+    uploadEmoji(shortcode: string, file: File, signal?: AbortSignal): Promise<EmojiResponse> {
       const formData = new FormData();
       formData.append("shortcode", shortcode);
       formData.append("file", file);
 
-      const url = `${await baseUrl()}/emoji`;
-      const h: Record<string, string> = {};
-      if (config.token) {
-        h["Authorization"] = `Bearer ${config.token}`;
-      }
-      // Don't set Content-Type — browser sets multipart boundary
-
-      const res = await fetch(url, { method: "POST", headers: h, body: formData, signal });
-
-      if (res.status === 401) {
-        onUnauthorized?.();
-        const err = await parseError(res);
-        throw new ApiClientError(401, err.error, err.message);
-      }
-      if (!res.ok) {
-        const err = await parseError(res);
-        throw new ApiClientError(res.status, err.error, err.message);
-      }
-      return res.json() as Promise<EmojiResponse>;
+      return request<EmojiResponse>("POST", "/emoji", formData, signal, { multipart: true });
     },
 
     deleteEmoji(emojiId: number, signal?: AbortSignal): Promise<void> {
@@ -687,6 +1142,25 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<BlockedUsersResponse>("GET", "/blocks", undefined, signal);
     },
 
+    /** The pending Message Requests inbox (B5-6). */
+    listDmRequests(signal?: AbortSignal): Promise<DmRequestListResponse> {
+      return request<DmRequestListResponse>("GET", "/dm-requests", undefined, signal);
+    },
+
+    /** Decide a pending Message Request (B5-6). 409: no longer pending; 404: not the caller's. */
+    decideDmRequest(
+      id: number,
+      decision: DmRequestDecision,
+      signal?: AbortSignal,
+    ): Promise<DmRequestDecisionResult> {
+      return request<DmRequestDecisionResult>(
+        "POST",
+        `/dm-requests/${id}/${decision}`,
+        undefined,
+        signal,
+      );
+    },
+
     /** Block a user (prevents DMs in both directions). */
     blockUser(userId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("PUT", `/blocks/${userId}`, undefined, signal);
@@ -705,21 +1179,81 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     // ── Health ────────────────────────────────────────────
 
-    async getHealth(host?: string, timeoutMs = 3000): Promise<HealthResponse> {
+    async getHealth(
+      host?: string,
+      timeoutMs = 3000,
+      signal?: AbortSignal,
+    ): Promise<HealthResponse> {
+      // Explicit-host checks belong to the server picker, independently of the
+      // signed-in server. Its page supplies cancellation; current-server checks
+      // additionally belong to the authenticated session.
       const targetHost = host ?? config.host;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const owner =
+        host === undefined
+          ? session.fork(signal)
+          : new SessionScope({ host: targetHost, generation }, signal ? [signal] : []);
+      const transport = new AbortController();
+      const releaseTransport = owner.addCleanup(() => transport.abort());
+      const timer = setTimeout(() => owner.dispose(), timeoutMs);
       try {
-        const origin = await ensureHttpProxy(targetHost);
-        const res = await fetch(`${origin}/api/v1/health`, {
-          signal: controller.signal,
-        });
+        owner.assertCurrent();
+        const origin = await owner.run(ensureHttpProxy(targetHost));
+        owner.assertCurrent();
+        const res = await owner.run(
+          desktop.http.fetch(`${origin}/api/v1/health`, { signal: transport.signal }),
+        );
+        owner.assertCurrent();
         if (!res.ok) {
+          // i18n-exempt: internal ApiClientError diagnostic; the connect page shows a fixed status, not this message
           throw new ApiClientError(res.status, "HEALTH_CHECK_FAILED", "Health check failed");
         }
-        return res.json() as Promise<HealthResponse>;
+        const data = await owner
+          .run(res.json() as Promise<HealthResponse>)
+          .finally(releaseTransport);
+        owner.assertCurrent();
+        return data;
       } finally {
         clearTimeout(timer);
+        owner.dispose();
+      }
+    },
+
+    async getServerInfo(
+      host?: string,
+      timeoutMs = 3000,
+      signal?: AbortSignal,
+    ): Promise<ServerInfoResponse> {
+      // Same explicit-host shape as getHealth: the connect page probes every
+      // saved profile independently of the signed-in server. B7-15 reads
+      // through this method rather than inventing a second transport.
+      const targetHost = host ?? config.host;
+      const owner =
+        host === undefined
+          ? session.fork(signal)
+          : new SessionScope({ host: targetHost, generation }, signal ? [signal] : []);
+      const transport = new AbortController();
+      const releaseTransport = owner.addCleanup(() => transport.abort());
+      const timer = setTimeout(() => owner.dispose(), timeoutMs);
+      try {
+        owner.assertCurrent();
+        const origin = await owner.run(ensureHttpProxy(targetHost));
+        owner.assertCurrent();
+        const res = await owner.run(
+          desktop.http.fetch(`${origin}/api/v1/server-info`, { signal: transport.signal }),
+        );
+        owner.assertCurrent();
+        if (!res.ok) {
+          // i18n-exempt: internal ApiClientError diagnostic; the connect page shows a fixed status, not this message
+          throw new ApiClientError(res.status, "SERVER_INFO_FAILED", "Server info check failed");
+        }
+        const data = await owner
+          .run(res.json() as Promise<ServerInfoResponse>)
+          .finally(releaseTransport);
+        owner.assertCurrent();
+        return data;
+      } finally {
+        clearTimeout(timer);
+        owner.dispose();
       }
     },
 
@@ -750,8 +1284,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         position?: number;
         archived?: boolean;
         /**
-         * Age-restriction label. Stored, broadcast and audited by the server,
-         * which applies no content behaviour of its own to a flagged channel.
+         * Age-restriction label. The server withholds a labelled channel's
+         * content from anyone who has not acknowledged it (B5-7); clearing
+         * the label drops every acknowledgement.
          */
         nsfw?: boolean;
         /**
@@ -807,6 +1342,46 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         },
         signal,
       );
+    },
+
+    /**
+     * Lift a ban. The mirror of `adminBanMember`: the server broadcasts a
+     * `member_join` for the unbanned user, which every client turns back into a
+     * roster entry, so the roster needs no refreshing locally.
+     */
+    adminUnbanMember(userId: number, signal?: AbortSignal): Promise<void> {
+      return adminRequest<void>("PATCH", `/users/${userId}`, { banned: false }, signal);
+    },
+
+    /**
+     * The admin user page, which carries the ban state the roster cannot: a
+     * banned member is removed from the roster entirely (MEMBER_BAN), so this
+     * is the only way back to them. The server pages it (limit caps at 500,
+     * ordered by ascending id), so this walks every page: one page alone would
+     * hide a ban on any account past the first 500.
+     */
+    async adminListUsers(signal?: AbortSignal): Promise<AdminUser[]> {
+      const pageSize = 500;
+      const users: AdminUser[] = [];
+      // ponytail: 200 pages (100k accounts) is a stop for a server that never
+      // returns a short page, not a product limit; a banned-only server query
+      // is the upgrade if the walk ever gets slow.
+      for (let pageIndex = 0; pageIndex < 200; pageIndex++) {
+        const params = new URLSearchParams({
+          limit: String(pageSize),
+          offset: String(pageIndex * pageSize),
+        });
+        // oxlint-disable-next-line no-await-in-loop -- sequential paging: whether a next page exists depends on this one
+        const page = await adminRequest<AdminUser[]>(
+          "GET",
+          `/users?${params.toString()}`,
+          undefined,
+          signal,
+        );
+        users.push(...page);
+        if (page.length < pageSize) break;
+      }
+      return users;
     },
   };
 }

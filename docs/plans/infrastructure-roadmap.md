@@ -117,7 +117,7 @@ The highest-impact track. Ordered.
 5. **Bare-metal Linux posture.** Ship a systemd unit template (note:
    `ProtectSystem=strict` breaks the self-updater unless the install dir is
    writable; ACME needs `AmbientCapabilities=CAP_NET_BIND_SERVICE`;
-   `TimeoutStopSec=35` matches the 30s drain), a "Linux (systemd)" deployment
+   `TimeoutStopSec=60` covers the 30s drain and its ≈55s worst case), a "Linux (systemd)" deployment
    section, and a cron backup one-liner. Add a "Reverse Proxy Topology" section
    with a working nginx snippet — and state correctly that LiveKit _signaling_
    is already proxied at `/livekit/*`; only WebRTC media (UDP range / TCP

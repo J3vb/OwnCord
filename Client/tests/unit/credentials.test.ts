@@ -30,8 +30,15 @@ const { logMock, createLoggerMock } = vi.hoisted(() => {
 
 vi.mock("@lib/logger", () => ({ createLogger: createLoggerMock }));
 
-const { saveCredential, loadCredential, deleteCredential, createUserUpdateCredentialSaver } =
-  await import("@lib/credentials");
+const {
+  saveCredential,
+  loadCredential,
+  deleteCredential,
+  createUserUpdateCredentialSaver,
+  parseRelayedLogin,
+  loginWithSavedPassword,
+} = await import("@lib/credentials");
+const { ApiClientError } = await import("@lib/api");
 
 // saveCredential (called from createUserUpdateCredentialSaver's listener) is
 // fire-and-forget: `void saveCredential(...)`. Its own body has no `await`
@@ -61,6 +68,7 @@ describe("saveCredential", () => {
       username: "alice",
       token: "tok",
       password: null,
+      clearPassword: false,
     });
   });
 
@@ -72,6 +80,7 @@ describe("saveCredential", () => {
       username: "alice",
       token: "tok",
       password: "s3cret",
+      clearPassword: false,
     });
   });
 
@@ -83,6 +92,20 @@ describe("saveCredential", () => {
     const args = invoke.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(args.password).toBeNull();
     expect("password" in args).toBe(true);
+  });
+
+  it("only asks to clear the stored password when told to", async () => {
+    // A null password means "leave the stored one alone"; erasing it is a
+    // separate, explicit intent. Conflating the two used to force the
+    // plaintext back through IPC on every re-save.
+    await saveCredential("h.example", "alice", "tok");
+    const preserved = invoke.mock.calls[0]?.[1] as Record<string, unknown> | undefined;
+    expect(preserved?.clearPassword).toBe(false);
+
+    invoke.mockClear();
+    await saveCredential("h.example", "alice", "tok", undefined, true);
+    const cleared = invoke.mock.calls[0]?.[1] as Record<string, unknown> | undefined;
+    expect(cleared?.clearPassword).toBe(true);
   });
 
   it("returns false when the command rejects", async () => {
@@ -116,7 +139,7 @@ describe("createUserUpdateCredentialSaver", () => {
   });
 
   it("does not save when the session declined to remember the password (BUG-135)", async () => {
-    const listener = createUserUpdateCredentialSaver("h.example", false, "s3cret");
+    const listener = createUserUpdateCredentialSaver("h.example", false);
 
     listener({ user_id: 1, username: "alice2" });
     await flushMicrotasks();
@@ -124,8 +147,8 @@ describe("createUserUpdateCredentialSaver", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("saves the refreshed username with the session's password when opted in", async () => {
-    const listener = createUserUpdateCredentialSaver("h.example", true, "s3cret");
+  it("saves the refreshed username without resending the password when opted in", async () => {
+    const listener = createUserUpdateCredentialSaver("h.example", true);
 
     listener({ user_id: 1, username: "alice2" });
 
@@ -133,17 +156,20 @@ describe("createUserUpdateCredentialSaver", () => {
     // before calling invoke — wait for it rather than guessing a microtask
     // count.
     await vi.waitFor(() => {
+      // No plaintext password: the Rust side preserves the stored one when
+      // none is supplied, so it never has to cross IPC to survive a re-save.
       expect(invoke).toHaveBeenCalledWith("save_credential", {
         host: "h.example",
         username: "alice2",
         token: "sess-token",
-        password: "s3cret",
+        password: null,
+        clearPassword: false,
       });
     });
   });
 
   it("ignores a user_update for someone else", async () => {
-    const listener = createUserUpdateCredentialSaver("h.example", true, "s3cret");
+    const listener = createUserUpdateCredentialSaver("h.example", true);
 
     listener({ user_id: 999, username: "bob" });
     await flushMicrotasks();
@@ -153,7 +179,7 @@ describe("createUserUpdateCredentialSaver", () => {
 
   it("is a no-op when there is no current session token", () => {
     authStore.setState((prev) => ({ ...prev, token: null }));
-    const listener = createUserUpdateCredentialSaver("h.example", true, "s3cret");
+    const listener = createUserUpdateCredentialSaver("h.example", true);
 
     listener({ user_id: 1, username: "alice2" });
 
@@ -170,18 +196,35 @@ describe("loadCredential", () => {
     await expect(loadCredential("h.example")).resolves.toEqual({
       username: "alice",
       token: "tok",
+      hasPassword: false,
     });
     expect(invoke).toHaveBeenCalledWith("load_credential", { host: "h.example" });
   });
 
-  it("returns the stored password so the login form can prefill it", async () => {
-    invoke.mockResolvedValue({ username: "alice", token: "tok", password: "pass123" });
+  it("reports that a password exists without ever exposing it", async () => {
+    // The Rust side marks the field #[serde(skip)], so a plaintext password
+    // cannot reach here at all. Even if one somehow did, it must not survive
+    // reconstruction into the JS heap.
+    invoke.mockResolvedValue({ username: "alice", token: "tok", has_password: true });
 
-    await expect(loadCredential("h.example")).resolves.toEqual({
+    const got = await loadCredential("h.example");
+
+    expect(got).toEqual({ username: "alice", token: "tok", hasPassword: true });
+    expect(got).not.toHaveProperty("password");
+  });
+
+  it("does not carry a password through even if the backend sends one", async () => {
+    invoke.mockResolvedValue({
       username: "alice",
       token: "tok",
+      has_password: true,
       password: "pass123",
     });
+
+    const got = await loadCredential("h.example");
+
+    expect(got).not.toHaveProperty("password");
+    expect(JSON.stringify(got)).not.toContain("pass123");
   });
 
   it("drops any extra fields the backend returns", async () => {
@@ -193,7 +236,7 @@ describe("loadCredential", () => {
 
     // toEqual ignores the explicit `password: undefined`, so this still pins
     // the exact shape and catches any unknown field, not just `bogus`.
-    expect(got).toEqual({ username: "alice", token: "tok" });
+    expect(got).toEqual({ username: "alice", token: "tok", hasPassword: false });
     expect(got).not.toHaveProperty("bogus");
   });
 
@@ -221,14 +264,24 @@ describe("loadCredential", () => {
     await expect(loadCredential("h.example")).resolves.toBeNull();
   });
 
-  it("returns null when the command rejects", async () => {
+  it("propagates a command rejection instead of swallowing it to null", async () => {
+    // The Rust side distinguishes "nothing stored" from "couldn't read the
+    // store" (a locked keychain, an unparseable blob, ...); collapsing the
+    // latter into null here would let a caller like the remember-password
+    // opt-out silently skip a delete it should have surfaced as a failure.
     invoke.mockRejectedValue(new Error("keychain locked"));
 
-    await expect(loadCredential("h.example")).resolves.toBeNull();
+    await expect(loadCredential("h.example")).rejects.toThrow("keychain locked");
     expect(logMock.error).toHaveBeenCalledWith("Failed to load credential", {
       host: "h.example",
       error: "Error: keychain locked",
     });
+  });
+
+  it("wraps a non-Error rejection in an Error carrying the original reason", async () => {
+    invoke.mockRejectedValue("plain string reason");
+
+    await expect(loadCredential("h.example")).rejects.toThrow("plain string reason");
   });
 });
 
@@ -249,6 +302,47 @@ describe("deleteCredential", () => {
       host: "h.example",
       error: "Error: no such entry",
     });
+  });
+});
+
+// ── loginWithSavedPassword ─────────────────────────────────────────────────
+
+describe("loginWithSavedPassword", () => {
+  it("returns the relayed status and body as-is", async () => {
+    invoke.mockResolvedValue({ status: 200, body: '{"token":"tok"}' });
+
+    await expect(loginWithSavedPassword("h.example", "alice")).resolves.toEqual({
+      status: 200,
+      body: '{"token":"tok"}',
+    });
+    expect(invoke).toHaveBeenCalledWith("login_with_saved_password", {
+      host: "h.example",
+      username: "alice",
+    });
+  });
+
+  it("propagates a rejection as an Error carrying the original reason", async () => {
+    // Tauri commands reject with a plain string, not an Error — the caller's
+    // catch block reads err.message, so the string has to survive as one.
+    invoke.mockRejectedValue("saved-password login timed out");
+
+    await expect(loginWithSavedPassword("h.example", "alice")).rejects.toThrow(
+      "saved-password login timed out",
+    );
+    expect(logMock.error).toHaveBeenCalledWith("Saved-password login failed", {
+      host: "h.example",
+      error: "saved-password login timed out",
+    });
+  });
+
+  it("returns null for a resolved value of the wrong shape", async () => {
+    invoke.mockResolvedValue({ status: "200", body: "{}" });
+
+    await expect(loginWithSavedPassword("h.example", "alice")).resolves.toBeNull();
+    expect(logMock.error).toHaveBeenCalledWith(
+      "login_with_saved_password returned an unexpected shape",
+      { host: "h.example" },
+    );
   });
 });
 
@@ -299,5 +393,72 @@ describe("outside Tauri", () => {
 
     await expect(del("h.example")).resolves.toBe(false);
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("loginWithSavedPassword returns null instead of throwing", async () => {
+    const { loginWithSavedPassword: login } = await importWithoutInvoke();
+
+    await expect(login("h.example", "alice")).resolves.toBeNull();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+// ── parseRelayedLogin ──────────────────────────────────────────────────────
+//
+// The saved-password login gets the server's raw status and body from Rust, so
+// this is the single place that path reads the login contract. It has to behave
+// like api.ts's own error handling or the two login paths silently diverge.
+
+describe("parseRelayedLogin", () => {
+  it("returns the token from a successful login", () => {
+    const res = parseRelayedLogin({ status: 200, body: '{"token":"t","requires_2fa":false}' });
+    expect(res.token).toBe("t");
+    expect(res.requires_2fa).toBe(false);
+  });
+
+  it("relays a 2FA challenge instead of treating it as a failure", () => {
+    const res = parseRelayedLogin({
+      status: 200,
+      body: '{"requires_2fa":true,"partial_token":"pt"}',
+    });
+    expect(res.requires_2fa).toBe(true);
+    expect(res.partial_token).toBe("pt");
+  });
+
+  it("throws ApiClientError carrying the server's status and code", () => {
+    // A plain Error would drop .status/.code, so a caller could not narrow a
+    // saved-password failure the way it can a typed-password one.
+    try {
+      parseRelayedLogin({
+        status: 401,
+        body: '{"error":"INVALID_CREDENTIALS","message":"Wrong password"}',
+      });
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiClientError);
+      expect((err as InstanceType<typeof ApiClientError>).status).toBe(401);
+      expect((err as InstanceType<typeof ApiClientError>).code).toBe("INVALID_CREDENTIALS");
+      expect((err as Error).message).toBe("Wrong password");
+    }
+  });
+
+  it("falls back to a usable message when the error body is not JSON", () => {
+    try {
+      parseRelayedLogin({ status: 502, body: "<html>gateway</html>" });
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiClientError);
+      expect((err as InstanceType<typeof ApiClientError>).status).toBe(502);
+      expect((err as InstanceType<typeof ApiClientError>).code).toBe("UNKNOWN");
+      expect((err as Error).message).toContain("502");
+    }
+  });
+
+  it("throws rather than silently succeeding on an unreadable 2xx body", () => {
+    // Returning {} would enter neither the token nor the 2FA branch, stranding
+    // the login form in its loading state with nothing shown to the user.
+    expect(() => parseRelayedLogin({ status: 200, body: "not json" })).toThrow();
+    expect(() => parseRelayedLogin({ status: 200, body: "" })).toThrow();
+    expect(() => parseRelayedLogin({ status: 204, body: "" })).toThrow();
   });
 });

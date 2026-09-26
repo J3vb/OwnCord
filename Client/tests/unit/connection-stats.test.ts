@@ -166,14 +166,10 @@ describe("createConnectionStatsPoller", () => {
       engine: {
         pcManager: {
           publisher: {
-            pc: {
-              getStats: vi.fn().mockResolvedValue(report),
-            },
+            getStats: vi.fn().mockResolvedValue(report),
           },
           subscriber: {
-            pc: {
-              getStats: vi.fn().mockResolvedValue(report),
-            },
+            getStats: vi.fn().mockResolvedValue(report),
           },
         },
       },
@@ -336,7 +332,7 @@ describe("createConnectionStatsPoller", () => {
       }),
     };
     const room = {
-      engine: { pcManager: { publisher: { pc: mockPc } } },
+      engine: { pcManager: { publisher: mockPc } },
     };
 
     const qualityCb = vi.fn();
@@ -372,18 +368,16 @@ describe("createConnectionStatsPoller", () => {
       engine: {
         pcManager: {
           publisher: {
-            pc: {
-              getStats: vi.fn().mockImplementation(() => {
-                const report = new Map();
-                report.set("cp1", {
-                  type: "candidate-pair",
-                  currentRoundTripTime: currentRtt,
-                  bytesSent: 0,
-                  bytesReceived: 0,
-                });
-                return Promise.resolve(report);
-              }),
-            },
+            getStats: vi.fn().mockImplementation(() => {
+              const report = new Map();
+              report.set("cp1", {
+                type: "candidate-pair",
+                currentRoundTripTime: currentRtt,
+                bytesSent: 0,
+                bytesReceived: 0,
+              });
+              return Promise.resolve(report);
+            }),
           },
         },
       },
@@ -446,18 +440,16 @@ describe("createConnectionStatsPoller", () => {
       engine: {
         pcManager: {
           publisher: {
-            pc: {
-              getStats: vi.fn().mockImplementation(() => {
-                const report = new Map();
-                report.set("cp1", {
-                  type: "candidate-pair",
-                  currentRoundTripTime: currentRtt,
-                  bytesSent: 0,
-                  bytesReceived: 0,
-                });
-                return Promise.resolve(report);
-              }),
-            },
+            getStats: vi.fn().mockImplementation(() => {
+              const report = new Map();
+              report.set("cp1", {
+                type: "candidate-pair",
+                currentRoundTripTime: currentRtt,
+                bytesSent: 0,
+                bytesReceived: 0,
+              });
+              return Promise.resolve(report);
+            }),
           },
         },
       },
@@ -480,9 +472,7 @@ describe("createConnectionStatsPoller", () => {
       engine: {
         pcManager: {
           publisher: {
-            pc: {
-              getStats: vi.fn().mockRejectedValue(new Error("stats error")),
-            },
+            getStats: vi.fn().mockRejectedValue(new Error("stats error")),
           },
         },
       },
@@ -520,7 +510,7 @@ describe("createConnectionStatsPoller", () => {
       engine: {
         pcManager: {
           publisher: {
-            pc: { getStats: vi.fn().mockResolvedValue(report) },
+            getStats: vi.fn().mockResolvedValue(report),
           },
           // No subscriber
         },
@@ -549,7 +539,7 @@ describe("createConnectionStatsPoller", () => {
       engine: {
         pcManager: {
           subscriber: {
-            pc: { getStats: vi.fn().mockResolvedValue(report) },
+            getStats: vi.fn().mockResolvedValue(report),
           },
         },
       },
@@ -624,30 +614,28 @@ describe("createConnectionStatsPoller", () => {
       engine: {
         pcManager: {
           publisher: {
-            pc: {
-              getStats: vi.fn().mockImplementation(() => {
-                callCount++;
-                const report = new Map();
-                report.set("cp1", {
-                  type: "candidate-pair",
-                  currentRoundTripTime: 0.01,
-                  bytesSent: callCount === 1 ? 10000 : 5000,
-                  bytesReceived: callCount === 1 ? 10000 : 5000,
-                });
-                // Bytes that feed outRate/inRate via outbound-rtp/inbound-rtp
-                report.set("out1", {
-                  type: "outbound-rtp",
-                  packetsSent: 100,
-                  bytesSent: callCount === 1 ? 50000 : 20000,
-                });
-                report.set("in1", {
-                  type: "inbound-rtp",
-                  packetsReceived: 100,
-                  bytesReceived: callCount === 1 ? 50000 : 20000,
-                });
-                return Promise.resolve(report);
-              }),
-            },
+            getStats: vi.fn().mockImplementation(() => {
+              callCount++;
+              const report = new Map();
+              report.set("cp1", {
+                type: "candidate-pair",
+                currentRoundTripTime: 0.01,
+                bytesSent: callCount === 1 ? 10000 : 5000,
+                bytesReceived: callCount === 1 ? 10000 : 5000,
+              });
+              // Bytes that feed outRate/inRate via outbound-rtp/inbound-rtp
+              report.set("out1", {
+                type: "outbound-rtp",
+                packetsSent: 100,
+                bytesSent: callCount === 1 ? 50000 : 20000,
+              });
+              report.set("in1", {
+                type: "inbound-rtp",
+                packetsReceived: 100,
+                bytesReceived: callCount === 1 ? 50000 : 20000,
+              });
+              return Promise.resolve(report);
+            }),
           },
         },
       },
@@ -671,18 +659,16 @@ describe("createConnectionStatsPoller", () => {
       engine: {
         pcManager: {
           publisher: {
-            pc: {
-              getStats: vi.fn().mockImplementation(() => {
-                const report = new Map();
-                report.set("cp1", {
-                  type: "candidate-pair",
-                  currentRoundTripTime: currentRtt,
-                  bytesSent: 0,
-                  bytesReceived: 0,
-                });
-                return Promise.resolve(report);
-              }),
-            },
+            getStats: vi.fn().mockImplementation(() => {
+              const report = new Map();
+              report.set("cp1", {
+                type: "candidate-pair",
+                currentRoundTripTime: currentRtt,
+                bytesSent: 0,
+                bytesReceived: 0,
+              });
+              return Promise.resolve(report);
+            }),
           },
         },
       },

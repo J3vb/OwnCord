@@ -1,8 +1,12 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"io"
+	"log/slog"
 
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
 )
 
@@ -29,3 +33,36 @@ type FileStore interface {
 
 // compile-time proof the disk implementation satisfies the seam.
 var _ FileStore = (*storage.Storage)(nil)
+
+// saveReserved is the one production path that writes through a FileStore
+// (B5-2, decision 11): every byte the store takes has been admitted first —
+// by UploadService.Reserve, which charges the uploader's counter and checks
+// the headroom floor, or by ReserveHeadroom for the bounded emoji exclusion.
+// A failed write hands the reservation back; a successful one is the
+// caller's to commit once its row exists (UploadService.Record does that
+// under the same lock) or to settle in a defer.
+//
+// TestEveryFileStoreSaveIsReserved fails on any other Save call site. What
+// that proves is exactly "no second call to FileStore.Save"; a write that
+// bypasses the store (os.WriteFile into the directory) is outside it.
+func saveReserved(ctx context.Context, res *service.StorageReservation, store FileStore, name string, r io.Reader) (int64, error) {
+	if res == nil {
+		return 0, errors.New("api: store write without a storage reservation")
+	}
+	written, err := store.Save(name, r)
+	if err != nil {
+		res.Release(ctx)
+		return 0, err
+	}
+	// B5-2: an unknown or generous declared length reserves more than the
+	// upload turns out to cost; lower the charge to what was actually
+	// written before the reservation lands. A failure here leaves the
+	// counter high — the safe side — and the next maintenance recount
+	// repairs it (migrations/044_user_storage.sql), so it must not fail
+	// the upload itself.
+	if err := res.Resize(ctx, written); err != nil {
+		slog.Error("storage: could not resize a reservation to the bytes written", "bytes_written", written, "error", err)
+	}
+	res.Landed()
+	return written, nil
+}

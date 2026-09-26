@@ -1,0 +1,57 @@
+/* ── Incoming call banner ──────────────────────────────────────────────── */
+
+/* A banner, not a modal: a ring is an offer, and blocking the whole app until
+   a 30-second timer expires is not an offer. */
+.incoming-call-banner {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  max-width: min(92vw, 460px);
+}
+.incoming-call-icon {
+  display: flex;
+  align-items: center;
+  color: var(--green);
+}
+.incoming-call-info {
+  flex: 1;
+  min-width: 0;
+}
+.incoming-call-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.incoming-call-subtitle {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.incoming-call-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.call-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+}
+.call-btn:hover {
+  color: var(--green);
+}

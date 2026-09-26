@@ -4,6 +4,8 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { messagingText } from "../../i18n/messaging";
+import { shellText } from "../../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,6 +18,11 @@ export interface ChatHeaderRefs {
   /** The DM call button. Hidden outside DMs — a guild voice channel is joined
    *  from the sidebar, and a text channel has nobody in particular to call. */
   readonly callBtn: HTMLButtonElement;
+  /**
+   * The narrow-width sidebar toggle. Hidden above 800px; visible below it,
+   * where the sidebar collapses. The drawer owns its `aria-expanded`.
+   */
+  readonly sidebarToggle: HTMLButtonElement;
 }
 
 export interface ChatHeaderOptions {
@@ -35,11 +42,26 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   refs: ChatHeaderRefs;
 } {
   const header = createElement("div", { class: "chat-header", "data-testid": "chat-header" });
+
+  // The narrow-width navigation toggle. Always in the DOM (the drawer owns the
+  // open state), but hidden by default and revealed by the <=800px media rule
+  // in responsive.css, together with the rule that collapses the sidebar.
+  const sidebarToggle = createElement("button", {
+    type: "button",
+    class: "ch-sidebar-toggle",
+    title: shellText("sidebar.open"),
+    "aria-label": shellText("sidebar.open"),
+    "aria-expanded": "false",
+    "aria-controls": "unified-sidebar",
+    "data-testid": "sidebar-toggle",
+  });
+  sidebarToggle.appendChild(createIcon("menu", 18));
+
   const hash = createElement("span", { class: "ch-hash" }, "#");
   const nameEl = createElement(
     "span",
     { class: "ch-name", "data-testid": "chat-header-name" },
-    "general",
+    messagingText("header.channelFallback"),
   );
 
   // Wrap hash+name in a clickable region for DM profile toggle
@@ -66,8 +88,8 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   const callBtn = createElement("button", {
     type: "button",
     class: "call-btn",
-    title: "Start a call",
-    "aria-label": "Start a call",
+    title: messagingText("header.startCall"),
+    "aria-label": messagingText("header.startCall"),
     "data-testid": "call-btn",
   });
   callBtn.appendChild(createIcon("phone", 18));
@@ -79,8 +101,8 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   const pinBtn = createElement("button", {
     type: "button",
     class: "pin-btn",
-    title: "Pins",
-    "aria-label": "Pins",
+    title: messagingText("header.pins"),
+    "aria-label": messagingText("header.pins"),
     "data-testid": "pin-btn",
   });
   pinBtn.appendChild(createIcon("pin", 18));
@@ -90,7 +112,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   const searchInput = createElement("input", {
     class: "search-input",
     type: "text",
-    placeholder: "Search...",
+    placeholder: messagingText("header.search"),
     "data-testid": "search-input",
   });
   if (opts.onSearchFocus !== undefined) {
@@ -102,8 +124,11 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   }
   appendChildren(tools, searchInput, callBtn, pinBtn);
 
-  appendChildren(header, nameGroup, divider, topicEl, tools);
-  return { element: header, refs: { hashEl: hash, nameEl, topicEl, callBtn } };
+  appendChildren(header, sidebarToggle, nameGroup, divider, topicEl, tools);
+  return {
+    element: header,
+    refs: { hashEl: hash, nameEl, topicEl, callBtn, sidebarToggle },
+  };
 }
 
 // ---------------------------------------------------------------------------

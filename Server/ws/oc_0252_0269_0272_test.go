@@ -50,7 +50,7 @@ func TestFreshConnectCleanStaleVoice_ClearsOldClientVoiceState(t *testing.T) {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
 	// The still-registered OLD client from the previous session.
 	old := NewTestClient(h, uid, make(chan []byte, 32))
@@ -67,7 +67,7 @@ func TestFreshConnectCleanStaleVoice_ClearsOldClientVoiceState(t *testing.T) {
 	// registered — exactly the state handleFreshConnect calls this in.
 	c := NewTestClient(h, uid, make(chan []byte, 32))
 
-	h.freshConnectCleanStaleVoice(ctx, database, c, vs)
+	h.freshConnectCleanStaleVoice(ctx, c, vs)
 
 	if got := old.getVoiceChID(); got != 0 {
 		t.Errorf("old client's in-memory voiceChID = %d, want 0 (cleared alongside the DB row)", got)
@@ -113,7 +113,7 @@ func TestUpgradeAndAuth_RoleLookupFailure_FailsClosed(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
 	type upgradeResult struct {
 		c       *Client
@@ -132,7 +132,7 @@ func TestUpgradeAndAuth_RoleLookupFailure_FailsClosed(t *testing.T) {
 			t.Errorf("websocket.Accept: %v", acceptErr)
 			return
 		}
-		c, lastSeq, err := hub.upgradeAndAuth(conn, database, r)
+		c, lastSeq, err := hub.upgradeAndAuth(conn, r)
 		resultCh <- upgradeResult{c, lastSeq, err}
 	}))
 	defer srv.Close()
@@ -182,7 +182,7 @@ func TestRefreshUserSnapshot_FailsClosedForBannedUser(t *testing.T) {
 		t.Fatalf("GetUserByID: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := newClient(hub, nil, user, "", 0, ctx)
 
 	// The ban commits AFTER authenticateConn passed (c.user is still the

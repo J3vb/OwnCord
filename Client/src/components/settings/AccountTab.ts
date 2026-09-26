@@ -4,13 +4,29 @@
  * and separated field rows.
  */
 
-import { createElement, appendChildren, setText } from "@lib/dom";
+import { createElement, appendChildren, setText, focusIsOurs } from "@lib/dom";
 import type { UserStatus } from "@lib/types";
+import { ApiClientError, errorText } from "@lib/api";
+import type { SessionInfo } from "@lib/api";
+import { createLogger } from "@lib/logger";
+import { showToast } from "@lib/toast";
+import { sessionDeviceLabel } from "@lib/session-notice";
+import { formatMessageTimestamp } from "@components/message-list/formatting";
 import { authStore } from "@stores/auth.store";
+import { uiStore } from "@stores/ui.store";
 import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
 import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
-import { fetchImageAsDataUrl, resolveServerUrl } from "@components/message-list/attachments";
+import {
+  fetchImageAsDataUrl,
+  recoverEvictedImage,
+  resolveServerUrl,
+} from "@components/message-list/attachments";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
+import { buildRecoveryKitSection, buildRegenerateCodes, buildShownOnce } from "./RecoverySections";
+import { outcomeEl, showOutcome } from "./helpers";
+import { accountText as t } from "../../i18n/account";
+
+const log = createLogger("AccountTab");
 
 /** Mirrors the server's caps so the form can bound itself instead of learning
  *  about the limits from a rejected request. */
@@ -56,17 +72,29 @@ function buildProfileCard(displayName: string, username: string): ProfileCardRes
   // Header row
   const accountHeader = createElement("div", { class: "account-header" });
   const headerName = createElement("div", { class: "account-header-name" }, displayName);
-  const editUserProfileBtn = createElement("button", { class: "ac-btn" }, "Edit User Profile");
+  const editUserProfileBtn = createElement(
+    "button",
+    { class: "ac-btn" },
+    t("profile.editUserProfile"),
+  );
   appendChildren(accountHeader, headerName, editUserProfileBtn);
 
   // Username field row
   const fieldsContainer = createElement("div", { class: "account-fields" });
   const usernameField = createElement("div", { class: "account-field" });
   const usernameLeft = createElement("div", {});
-  const usernameLabel = createElement("div", { class: "account-field-label" }, "Username");
+  const usernameLabel = createElement(
+    "div",
+    { class: "account-field-label" },
+    t("profile.username"),
+  );
   const usernameValue = createElement("div", { class: "account-field-value" }, username);
   appendChildren(usernameLeft, usernameLabel, usernameValue);
-  const editUsernameBtn = createElement("button", { class: "account-field-edit" }, "Edit");
+  const editUsernameBtn = createElement(
+    "button",
+    { class: "account-field-edit" },
+    t("profile.edit"),
+  );
   appendChildren(usernameField, usernameLeft, editUsernameBtn);
   fieldsContainer.appendChild(usernameField);
 
@@ -101,6 +129,7 @@ function paintAvatar(
   void fetchImageAsDataUrl(url).then((dataUrl) => {
     if (dataUrl === null || !target.isConnected) return;
     const img = createElement("img", { class: "avatar-img", src: dataUrl, alt });
+    recoverEvictedImage(img, { url });
     target.replaceChildren(img);
     target.style.background = "transparent";
   });
@@ -141,16 +170,19 @@ export function validateAvatarFile(
   dimensions: { width: number; height: number } | null,
 ): string | null {
   if (!ACCEPTED_AVATAR_TYPES.split(",").includes(file.type)) {
-    return "Avatar must be a PNG, JPEG or WebP image.";
+    return t("avatar.notImage");
   }
   if (file.size > MAX_AVATAR_BYTES) {
-    return `Avatar must be at most ${MAX_AVATAR_BYTES / 1024} KB.`;
+    return t("avatar.tooLarge", { kb: String(MAX_AVATAR_BYTES / 1024) });
   }
   if (dimensions === null) {
-    return "That file could not be read as an image.";
+    return t("avatar.unreadable");
   }
   if (dimensions.width > MAX_AVATAR_DIMENSION || dimensions.height > MAX_AVATAR_DIMENSION) {
-    return `Avatar must be at most ${MAX_AVATAR_DIMENSION}x${MAX_AVATAR_DIMENSION} pixels.`;
+    return t("avatar.tooWide", {
+      width: String(MAX_AVATAR_DIMENSION),
+      height: String(MAX_AVATAR_DIMENSION),
+    });
   }
   return null;
 }
@@ -170,12 +202,9 @@ function buildAvatarUploader(
   const uploadBtn = createElement(
     "button",
     { class: "ac-btn", "data-testid": "avatar-upload-btn" },
-    "Change Avatar",
+    t("profile.changeAvatar"),
   );
-  const errorEl = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-top:6px",
-    "data-testid": "avatar-error",
-  });
+  const errorEl = outcomeEl("error", "avatar-error");
 
   uploadBtn.addEventListener("click", () => input.click(), { signal });
 
@@ -194,7 +223,7 @@ function buildAvatarUploader(
           return;
         }
         uploadBtn.disabled = true;
-        setText(uploadBtn, "Uploading...");
+        setText(uploadBtn, t("profile.uploading"));
         try {
           const url = await options.onUploadAvatar(file);
           const user = authStore.getState().user;
@@ -208,11 +237,11 @@ function buildAvatarUploader(
             }),
           );
         } catch (err) {
-          setText(errorEl, err instanceof Error ? err.message : "Failed to upload avatar.");
+          setText(errorEl, errorText(err, t("profile.uploadFailed")));
         } finally {
           input.value = "";
           uploadBtn.disabled = false;
-          setText(uploadBtn, "Change Avatar");
+          setText(uploadBtn, t("profile.changeAvatar"));
         }
       })();
     },
@@ -234,40 +263,46 @@ function buildProfileFields(
 ): HTMLDivElement {
   const wrapper = createElement("div", {});
   const separator = createElement("div", { class: "settings-separator" });
-  const header = createElement("div", { class: "settings-section-title" }, "Profile");
+  const header = createElement(
+    "div",
+    { class: "settings-section-title" },
+    t("profile.sectionTitle"),
+  );
 
   const user = authStore.getState().user;
 
-  const nameLabel = createElement("div", { class: "account-field-label" }, "Display Name");
+  const nameLabel = createElement(
+    "div",
+    { class: "account-field-label" },
+    t("profile.displayName"),
+  );
   const nameInput = createElement("input", {
     class: "form-input",
     type: "text",
-    placeholder: "Shown instead of your username",
+    placeholder: t("profile.displayNamePlaceholder"),
     maxlength: String(MAX_DISPLAY_NAME_LEN),
     style: "margin-bottom:12px",
     "data-testid": "display-name-input",
   });
   nameInput.value = user?.display_name ?? "";
 
-  const aboutLabel = createElement("div", { class: "account-field-label" }, "About Me");
+  const aboutLabel = createElement("div", { class: "account-field-label" }, t("profile.about"));
   const aboutInput = createElement("textarea", {
     class: "form-input",
     rows: "3",
-    placeholder: "A little about you",
+    placeholder: t("profile.aboutPlaceholder"),
     maxlength: String(MAX_ABOUT_LEN),
     style: "margin-bottom:8px;resize:vertical",
     "data-testid": "about-input",
   });
   aboutInput.value = user?.about ?? "";
 
-  const statusEl = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-bottom:8px",
-    "data-testid": "profile-error",
-  });
+  const statusEl = outcomeEl("error", "profile-error");
+  statusEl.style.marginBottom = "8px";
   const saveBtn = createElement(
     "button",
     { class: "ac-btn", "data-testid": "profile-save-btn" },
-    "Save Profile",
+    t("profile.save"),
   );
 
   saveBtn.addEventListener(
@@ -277,25 +312,24 @@ function buildProfileFields(
       const about = aboutInput.value.trim();
       // Both are sent unconditionally, empty string included: "" is how the
       // API says "clear it", and omitting a field means "leave it alone".
-      statusEl.style.color = "var(--red)";
-      setText(statusEl, "");
+      showOutcome(statusEl, "error", "");
       saveBtn.disabled = true;
-      setText(saveBtn, "Saving...");
+      setText(saveBtn, t("profile.saving"));
       void options
         .onUpdateProfile({ display_name: displayName, about })
         .then(() => {
-          statusEl.style.color = "var(--green)";
-          setText(statusEl, "Profile saved.");
+          showOutcome(statusEl, "success", t("profile.saved"));
           onSaved(
             displayName.length > 0 ? displayName : (authStore.getState().user?.username ?? ""),
           );
         })
         .catch((err: unknown) => {
-          setText(statusEl, err instanceof Error ? err.message : "Failed to save profile.");
+          showOutcome(statusEl, "error", errorText(err, t("profile.saveFailed")));
         })
         .finally(() => {
           saveBtn.disabled = false;
-          setText(saveBtn, "Save Profile");
+          setText(saveBtn, t("profile.save"));
+          if (focusIsOurs(saveBtn)) saveBtn.focus();
         });
     },
     { signal },
@@ -319,6 +353,25 @@ function buildProfileFields(
 // Password section builder
 // ---------------------------------------------------------------------------
 
+/** A labelled password field for the password-change form. */
+function passwordField(
+  id: string,
+  label: string,
+  placeholder: string,
+): { wrapper: HTMLDivElement; input: HTMLInputElement } {
+  const wrapper = createElement("div", {});
+  const labelEl = createElement("label", { class: "form-label", for: id }, label);
+  const input = createElement("input", {
+    class: "form-input",
+    type: "password",
+    id,
+    placeholder,
+    style: "margin:4px 0 12px",
+  });
+  appendChildren(wrapper, labelEl, input);
+  return { wrapper, input };
+}
+
 function buildPasswordSection(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
@@ -329,31 +382,18 @@ function buildPasswordSection(
   const pwHeader = createElement(
     "div",
     { class: "settings-section-title" },
-    "Password and Authentication",
+    t("password.sectionTitle"),
   );
 
-  const oldPw = createElement("input", {
-    class: "form-input",
-    type: "password",
-    placeholder: "Old password",
-    style: "margin-bottom:12px",
-  });
-  const newPw = createElement("input", {
-    class: "form-input",
-    type: "password",
-    placeholder: "New password",
-    style: "margin-bottom:12px",
-  });
-  const confirmPw = createElement("input", {
-    class: "form-input",
-    type: "password",
-    placeholder: "Confirm new password",
-    style: "margin-bottom:12px",
-  });
-  const pwError = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-bottom:8px",
-  });
-  const pwBtn = createElement("button", { class: "ac-btn" }, "Change Password");
+  const oldField = passwordField("pw-old", t("password.old"), t("password.old"));
+  const newField = passwordField("pw-new", t("password.new"), t("password.new"));
+  const confirmField = passwordField("pw-confirm", t("password.confirm"), t("password.confirm"));
+  const oldPw = oldField.input;
+  const newPw = newField.input;
+  const confirmPw = confirmField.input;
+  const pwError = outcomeEl("error", "pw-change-status");
+  pwError.style.marginBottom = "8px";
+  const pwBtn = createElement("button", { class: "ac-btn" }, t("password.change"));
   let pwSuccessTimer: ReturnType<typeof setTimeout> | null = null;
 
   pwBtn.addEventListener(
@@ -363,53 +403,73 @@ function buildPasswordSection(
       const newVal = newPw.value;
       const confirmVal = confirmPw.value;
 
-      pwError.style.color = "var(--red)";
+      showOutcome(pwError, "error", "");
       if (oldVal.length === 0) {
-        setText(pwError, "Enter your current password.");
+        setText(pwError, t("password.enterCurrent"));
         return;
       }
       if (newVal.length < 8) {
-        setText(pwError, "New password must be at least 8 characters.");
+        setText(pwError, t("password.tooShort"));
         return;
       }
       if (newVal !== confirmVal) {
-        setText(pwError, "Passwords do not match.");
+        setText(pwError, t("password.mismatch"));
         return;
       }
       setText(pwError, "");
       // In-flight state: a second click would burn an attempt against the
       // server's lockout counter with the same credentials.
       pwBtn.disabled = true;
-      setText(pwBtn, "Changing...");
+      setText(pwBtn, t("password.changing"));
       const finish = (): void => {
         pwBtn.disabled = false;
-        setText(pwBtn, "Change Password");
+        setText(pwBtn, t("password.change"));
+        if (focusIsOurs(pwBtn)) pwBtn.focus();
       };
       void options
         .onChangePassword(oldVal, newVal)
-        .then(() => {
+        .then((outcome) => {
           oldPw.value = "";
           newPw.value = "";
           confirmPw.value = "";
-          if (pwSuccessTimer !== null) clearTimeout(pwSuccessTimer);
-          pwError.style.color = "var(--green)";
-          setText(pwError, "Password changed successfully.");
-          pwSuccessTimer = setTimeout(() => {
-            setText(pwError, "");
-            pwError.style.color = "var(--red)";
+          if (pwSuccessTimer !== null) {
+            clearTimeout(pwSuccessTimer);
             pwSuccessTimer = null;
-          }, 3000);
+          }
+          const warning = outcome?.warning;
+          if (warning !== undefined && warning !== "") {
+            // A partial success (OC-0314): the password changed, but the
+            // other sessions could not be revoked. The warning is the
+            // instruction to revoke them by hand, so it stays in the form
+            // — no green "changed successfully", no three-second fade.
+            showOutcome(pwError, "warning", warning);
+          } else {
+            showOutcome(pwError, "success", t("password.changed"));
+            pwSuccessTimer = setTimeout(() => {
+              showOutcome(pwError, "error", "");
+              pwSuccessTimer = null;
+            }, 3000);
+          }
           finish();
         })
         .catch((err: unknown) => {
-          setText(pwError, err instanceof Error ? err.message : "Failed to change password.");
+          showOutcome(pwError, "error", errorText(err, t("password.changeFailed")));
           finish();
         });
     },
     { signal },
   );
 
-  appendChildren(wrapper, separator, pwHeader, oldPw, newPw, confirmPw, pwError, pwBtn);
+  appendChildren(
+    wrapper,
+    separator,
+    pwHeader,
+    oldField.wrapper,
+    newField.wrapper,
+    confirmField.wrapper,
+    pwError,
+    pwBtn,
+  );
   return wrapper;
 }
 
@@ -429,7 +489,7 @@ function buildTotpEnrollForm(
     {
       style: "color:var(--text-muted);font-size:13px;margin-bottom:12px",
     },
-    "Add an extra layer of security to your account.",
+    t("totp.description"),
   );
 
   const enableBtn = createElement(
@@ -438,22 +498,20 @@ function buildTotpEnrollForm(
       class: "ac-btn",
       "data-testid": "totp-enable-btn",
     },
-    "Enable 2FA",
+    t("totp.enable"),
   );
 
   const formArea = createElement("div", { style: "display:none" });
   const pwInput = createElement("input", {
     class: "form-input",
     type: "password",
-    placeholder: "Enter your password",
+    placeholder: t("totp.passwordPlaceholder"),
     style: "margin-bottom:12px",
     "data-testid": "totp-password-input",
   });
-  const errorEl = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-bottom:8px",
-    "data-testid": "totp-error",
-  });
-  const submitBtn = createElement("button", { class: "ac-btn" }, "Submit");
+  const errorEl = outcomeEl("error", "totp-error");
+  errorEl.style.marginBottom = "8px";
+  const submitBtn = createElement("button", { class: "ac-btn" }, t("totp.submit"));
 
   appendChildren(formArea, pwInput, errorEl, submitBtn);
 
@@ -476,26 +534,29 @@ function buildTotpEnrollForm(
     () => {
       const pw = pwInput.value;
       if (pw.length === 0) {
-        setText(errorEl, "Password is required.");
+        setText(errorEl, t("password.required"));
         return;
       }
       setText(errorEl, "");
       submitBtn.disabled = true;
-      setText(submitBtn, "Requesting...");
+      setText(submitBtn, t("totp.requesting"));
 
       void options
         .onEnableTotp(pw)
         .then((result) => {
+          const restoreFocus = focusIsOurs(formArea);
           formArea.style.display = "none";
           buildTotpConfirmArea(enrollArea, options, pw, result, signal, onEnrolled);
           enrollArea.style.display = "block";
           submitBtn.disabled = false;
-          setText(submitBtn, "Submit");
+          setText(submitBtn, t("totp.submit"));
+          if (restoreFocus) enrollArea.querySelector<HTMLElement>("button, input")?.focus();
         })
         .catch((err: unknown) => {
-          setText(errorEl, err instanceof Error ? err.message : "Failed to enable 2FA.");
+          setText(errorEl, errorText(err, t("totp.enableFailed")));
           submitBtn.disabled = false;
-          setText(submitBtn, "Submit");
+          setText(submitBtn, t("totp.submit"));
+          if (focusIsOurs(submitBtn)) submitBtn.focus();
         });
     },
     { signal },
@@ -523,7 +584,7 @@ function buildTotpConfirmArea(
     {
       style: "color:var(--text-muted);font-size:13px;margin-bottom:8px",
     },
-    "Scan this URI with your authenticator app, or copy it manually:",
+    t("totp.scanUri"),
   );
 
   const qrUri = createElement(
@@ -543,69 +604,30 @@ function buildTotpConfirmArea(
   if (result.backup_codes.length > 0) {
     // These codes are shown exactly once — the confirm step replaces this view.
     // Say so, and give a one-click way to keep them.
-    const backupLabel = createElement(
-      "div",
+    const reveal = buildShownOnce(
       {
-        style: "color:var(--yellow, #faa61a);font-size:13px;margin-bottom:8px;font-weight:600",
+        warning: t("totp.backupWarning"),
+        text: result.backup_codes.join("\n"),
+        codeTestId: "totp-backup-codes",
+        copyTestId: "totp-copy-backup-codes",
+        copyLabel: t("totp.copyCodes"),
       },
-      "Save these backup codes now — you won't see them again:",
+      signal,
     );
-    const codesText = result.backup_codes.join("\n");
-    const backupList = createElement(
-      "code",
-      {
-        style:
-          "display:block;background:var(--bg-active);padding:8px 12px;border-radius:6px;" +
-          "font-family:monospace;font-size:12px;white-space:pre-wrap;margin-bottom:8px;" +
-          "color:var(--text-primary);user-select:all",
-        "data-testid": "totp-backup-codes",
-      },
-      codesText,
-    );
-    const copyBtn = createElement(
-      "button",
-      {
-        class: "ac-btn",
-        style: "margin-bottom:12px",
-        "data-testid": "totp-copy-backup-codes",
-      },
-      "Copy Codes",
-    );
-    let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
-    copyBtn.addEventListener(
-      "click",
-      () => {
-        const restore = (label: string): void => {
-          setText(copyBtn, label);
-          if (copyResetTimer !== null) clearTimeout(copyResetTimer);
-          copyResetTimer = setTimeout(() => {
-            setText(copyBtn, "Copy Codes");
-            copyResetTimer = null;
-          }, 1500);
-        };
-        void navigator.clipboard
-          .writeText(codesText)
-          .then(() => restore("Copied!"))
-          .catch(() => restore("Copy failed"));
-      },
-      { signal },
-    );
-    elements.push(backupLabel, backupList, copyBtn);
+    elements.push(reveal.element);
   }
 
   const codeInput = createElement("input", {
     class: "form-input",
     type: "text",
-    placeholder: "6-digit code",
+    placeholder: t("totp.codePlaceholder"),
     maxlength: "6",
     style: "margin-bottom:12px",
     "data-testid": "totp-code-input",
   });
 
-  const confirmError = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-bottom:8px",
-    "data-testid": "totp-error",
-  });
+  const confirmError = outcomeEl("error", "totp-error");
+  confirmError.style.marginBottom = "8px";
 
   const confirmBtn = createElement(
     "button",
@@ -613,7 +635,7 @@ function buildTotpConfirmArea(
       class: "ac-btn",
       "data-testid": "totp-confirm-btn",
     },
-    "Verify & Activate",
+    t("totp.verify"),
   );
 
   confirmBtn.addEventListener(
@@ -621,12 +643,12 @@ function buildTotpConfirmArea(
     () => {
       const code = codeInput.value.trim();
       if (!/^\d{6}$/.test(code)) {
-        setText(confirmError, "Please enter a valid 6-digit code.");
+        setText(confirmError, t("totp.codeInvalid"));
         return;
       }
       setText(confirmError, "");
       confirmBtn.disabled = true;
-      setText(confirmBtn, "Verifying...");
+      setText(confirmBtn, t("totp.verifying"));
 
       void options
         .onConfirmTotp(password, code)
@@ -634,9 +656,10 @@ function buildTotpConfirmArea(
           onEnrolled();
         })
         .catch((err: unknown) => {
-          setText(confirmError, err instanceof Error ? err.message : "Invalid verification code.");
+          setText(confirmError, errorText(err, t("totp.enableFailed")));
           confirmBtn.disabled = false;
-          setText(confirmBtn, "Verify & Activate");
+          setText(confirmBtn, t("totp.verify"));
+          if (focusIsOurs(confirmBtn)) confirmBtn.focus();
         });
     },
     { signal },
@@ -658,7 +681,7 @@ function buildTotpDisableView(
     {
       style: "color:var(--text-muted);font-size:13px;margin-bottom:12px",
     },
-    "Your account is protected with 2FA.",
+    t("totp.protected"),
   );
 
   const disableBtn = createElement(
@@ -667,26 +690,24 @@ function buildTotpDisableView(
       class: "ac-btn account-delete-btn",
       "data-testid": "totp-disable-btn",
     },
-    "Disable 2FA",
+    t("totp.disable"),
   );
 
   const confirmArea = createElement("div", { style: "display:none" });
   const pwInput = createElement("input", {
     class: "form-input",
     type: "password",
-    placeholder: "Enter your password",
+    placeholder: t("totp.passwordPlaceholder"),
     style: "margin-bottom:12px",
     "data-testid": "totp-password-input",
   });
-  const errorEl = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-bottom:8px",
-    "data-testid": "totp-error",
-  });
+  const errorEl = outcomeEl("error", "totp-error");
+  errorEl.style.marginBottom = "8px";
   const btnRow = createElement("div", { style: "display:flex;gap:8px" });
   const confirmBtn = createElement(
     "button",
     { class: "ac-btn account-delete-btn" },
-    "Confirm Disable",
+    t("totp.confirmDisable"),
   );
   const cancelBtn = createElement(
     "button",
@@ -694,7 +715,7 @@ function buildTotpDisableView(
       class: "ac-btn",
       style: "background:var(--bg-active)",
     },
-    "Cancel",
+    t("recovery.cancel"),
   );
   appendChildren(btnRow, confirmBtn, cancelBtn);
   appendChildren(confirmArea, pwInput, errorEl, btnRow);
@@ -718,6 +739,7 @@ function buildTotpDisableView(
       disableBtn.style.display = "";
       pwInput.value = "";
       setText(errorEl, "");
+      if (focusIsOurs(confirmArea)) disableBtn.focus();
     },
     { signal },
   );
@@ -727,12 +749,12 @@ function buildTotpDisableView(
     () => {
       const pw = pwInput.value;
       if (pw.length === 0) {
-        setText(errorEl, "Password is required.");
+        setText(errorEl, t("password.required"));
         return;
       }
       setText(errorEl, "");
       confirmBtn.disabled = true;
-      setText(confirmBtn, "Disabling...");
+      setText(confirmBtn, t("totp.disabling"));
 
       void options
         .onDisableTotp(pw)
@@ -740,14 +762,14 @@ function buildTotpDisableView(
           onDisabled();
         })
         .catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : "Failed to disable 2FA.";
-          const is403Required = msg.toLowerCase().includes("required");
+          const requiredByServer = err instanceof ApiClientError && err.code === "FORBIDDEN";
           setText(
             errorEl,
-            is403Required ? "2FA is required by this server and cannot be disabled" : msg,
+            requiredByServer ? t("totp.requiredByServer") : errorText(err, t("totp.disableFailed")),
           );
           confirmBtn.disabled = false;
-          setText(confirmBtn, "Confirm Disable");
+          setText(confirmBtn, t("totp.confirmDisable"));
+          if (focusIsOurs(confirmBtn)) confirmBtn.focus();
         });
     },
     { signal },
@@ -770,7 +792,7 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
       class: "settings-section-title",
       style: "margin-bottom:0",
     },
-    "Two-Factor Authentication",
+    t("totp.sectionTitle"),
   );
 
   const statusBadge = createElement("span", {
@@ -782,31 +804,50 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
 
   const contentArea = createElement("div", {});
 
-  function render(): void {
+  function render(afterSubmit = false): void {
     const enabled = authStore.getState().user?.totp_enabled === true;
+    // The control the user just activated is being replaced, and removing it
+    // drops focus to <body> (B9-23). Unless the user has moved focus
+    // elsewhere, move it to the first rebuilt control instead.
+    const restoreFocus = afterSubmit && focusIsOurs(contentArea);
 
-    if (enabled) {
-      statusBadge.textContent = "Enabled";
-      statusBadge.style.background = "var(--green, #3ba55d)";
-      statusBadge.style.color = "#fff";
-    } else {
-      statusBadge.textContent = "Disabled";
-      statusBadge.style.background = "var(--bg-active)";
-      statusBadge.style.color = "var(--text-muted)";
-    }
+    // Status text uses the qualified --text-* tokens, not white on the
+    // --green fill (3.2:1, below Q1's 4.5:1 for this 12px bold text); the
+    // words "Enabled"/"Disabled" carry the state, colour is not the signal.
+    statusBadge.textContent = enabled ? t("totp.enabled") : t("totp.disabled");
+    statusBadge.style.background = "var(--bg-tertiary)";
+    statusBadge.style.color = enabled ? "var(--text-positive)" : "var(--text-muted)";
 
     while (contentArea.firstChild) {
       contentArea.removeChild(contentArea.firstChild);
     }
 
     if (enabled) {
-      contentArea.appendChild(buildTotpDisableView(options, signal, render));
+      contentArea.appendChild(buildTotpDisableView(options, signal, () => render(true)));
+      contentArea.appendChild(buildRegenerateCodes(options, signal));
     } else {
-      contentArea.appendChild(buildTotpEnrollForm(options, signal, render));
+      contentArea.appendChild(buildTotpEnrollForm(options, signal, () => render(true)));
+    }
+    if (restoreFocus) {
+      contentArea.querySelector<HTMLElement>("button, [tabindex]")?.focus();
     }
   }
 
   render();
+
+  // auth_ok never carries totp_enabled, so the store's value can be a stale
+  // default until the profile has been read (OC-0354). Refresh when the
+  // section opens; rebuild only if the answer differs from what is shown,
+  // so a form the user already started is not thrown away.
+  const shownEnabled = authStore.getState().user?.totp_enabled === true;
+  void options
+    .onRefreshTotpStatus()
+    .then(() => {
+      if ((authStore.getState().user?.totp_enabled === true) !== shownEnabled) render();
+    })
+    .catch((err) => {
+      log.warn("Failed to refresh TOTP status — showing cached state", err);
+    });
 
   appendChildren(wrapper, separator, headerRow, contentArea);
   return wrapper;
@@ -824,20 +865,20 @@ interface StatusOption {
 }
 
 const STATUS_OPTIONS: readonly StatusOption[] = [
-  { value: "online", label: "Online", description: "", color: "#3ba55d" },
-  { value: "idle", label: "Idle", description: "You will appear as idle", color: "#faa61a" },
+  { value: "online", label: t("status.online"), description: "", color: "#3ba55d" },
+  { value: "idle", label: t("status.idle"), description: t("status.idleDesc"), color: "#faa61a" },
   {
     value: "dnd",
-    label: "Do Not Disturb",
-    description: "You will not receive desktop notifications",
+    label: t("status.dnd"),
+    description: t("status.dndDesc"),
     color: "#ed4245",
   },
   {
     // Its own status now, not "offline" relabeled: the server stores it as
     // chosen, shows everyone else offline, and honours it across reconnects.
     value: "invisible",
-    label: "Invisible",
-    description: "You will appear offline but still have full access",
+    label: t("status.invisible"),
+    description: t("status.invisibleDesc"),
     color: "#747f8d",
   },
 ];
@@ -845,7 +886,11 @@ const STATUS_OPTIONS: readonly StatusOption[] = [
 function buildStatusSelector(options: SettingsOverlayOptions, signal: AbortSignal): HTMLDivElement {
   const wrapper = createElement("div", {});
   const separator = createElement("div", { class: "settings-separator" });
-  const sectionTitle = createElement("div", { class: "settings-section-title" }, "Status");
+  const sectionTitle = createElement(
+    "div",
+    { class: "settings-section-title" },
+    t("status.sectionTitle"),
+  );
   const optionsList = createElement("div", { class: "settings-status-options" });
 
   const currentStatus = loadUserStatus();
@@ -905,6 +950,209 @@ function buildStatusSelector(options: SettingsOverlayOptions, signal: AbortSigna
 }
 
 // ---------------------------------------------------------------------------
+// Devices (sessions) builder
+// ---------------------------------------------------------------------------
+
+function buildSessionRow(
+  s: SessionInfo,
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const row = createElement("div", {
+    class: "session-row",
+    "data-testid": "session-row",
+    "data-session-id": String(s.id),
+  });
+  const info = createElement("div", { class: "session-info" });
+  const name = createElement("div", { class: "session-device" }, sessionDeviceLabel(s.device));
+  if (s.is_current) {
+    name.appendChild(createElement("span", { class: "session-current" }, t("devices.thisDevice")));
+  }
+  const detail = createElement(
+    "div",
+    { class: "session-detail" },
+    t("devices.detail", {
+      ip: s.ip === "" ? t("devices.unknownIp") : s.ip,
+      time: formatMessageTimestamp(s.last_used),
+    }),
+  );
+  appendChildren(info, name, detail);
+  row.appendChild(info);
+
+  // The current device has no per-row action: "Sign out everywhere" covers it.
+  if (s.is_current) return row;
+
+  const revokeBtn = createElement(
+    "button",
+    { class: "ac-btn", "data-testid": "session-revoke" },
+    t("devices.signOut"),
+  );
+  revokeBtn.addEventListener(
+    "click",
+    () => {
+      const list = row.parentElement;
+      const next = row.nextSibling;
+      row.remove();
+      void options
+        .onRevokeSession(s.id)
+        .then(() => {
+          showToast(
+            uiStore.getState().sessionReplaced
+              ? t("devices.signedOutReplaced")
+              : t("devices.signedOut"),
+            "success",
+          );
+        })
+        .catch((err: unknown) => {
+          // The server kept the session, so the row comes back.
+          if (next?.parentNode === list) list?.insertBefore(row, next);
+          else list?.appendChild(row);
+          showToast(errorText(err, t("devices.signOutFailed")), "error");
+        });
+    },
+    { signal },
+  );
+  row.appendChild(revokeBtn);
+  return row;
+}
+
+function buildSessionsSection(
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const wrapper = createElement("div", { "data-testid": "sessions-section" });
+  const separator = createElement("div", { class: "settings-separator" });
+  const header = createElement(
+    "div",
+    { class: "settings-section-title" },
+    t("devices.sectionTitle"),
+  );
+  const description = createElement(
+    "div",
+    { style: "color:var(--text-muted);font-size:13px;margin-bottom:12px" },
+    t("devices.description"),
+  );
+  const list = createElement("div", { class: "session-list", "data-testid": "sessions-list" });
+  const status = createElement(
+    "div",
+    { style: "color:var(--text-muted);font-size:13px" },
+    t("devices.loading"),
+  );
+
+  function load(): void {
+    list.replaceChildren(status);
+    setText(status, t("devices.loading"));
+    void options
+      .onListSessions()
+      .then((sessions) => {
+        if (signal.aborted) return;
+        list.replaceChildren(...sessions.map((s) => buildSessionRow(s, options, signal)));
+      })
+      .catch((err: unknown) => {
+        if (signal.aborted) return;
+        log.warn("Failed to list sessions", err);
+        setText(status, t("devices.loadFailed"));
+      });
+  }
+
+  const revokeAllBtn = createElement(
+    "button",
+    {
+      class: "ac-btn account-delete-btn",
+      style: "margin-top:12px",
+      "data-testid": "sessions-revoke-all",
+    },
+    t("devices.signOutEverywhere"),
+  );
+  const confirmArea = createElement("div", {
+    style: "display:none;margin-top:12px",
+    "data-testid": "sessions-revoke-all-confirm-area",
+  });
+  const warning = createElement(
+    "div",
+    { style: "color:var(--text-danger);font-size:13px;margin-bottom:12px;line-height:1.4" },
+    t("devices.signOutEverywhereWarning"),
+  );
+  const errorEl = outcomeEl("error");
+  errorEl.style.marginBottom = "8px";
+  const btnRow = createElement("div", { style: "display:flex;gap:8px" });
+  const confirmBtn = createElement(
+    "button",
+    { class: "ac-btn account-delete-btn", "data-testid": "sessions-revoke-all-confirm" },
+    t("devices.signOutEverywhere"),
+  );
+  const cancelBtn = createElement(
+    "button",
+    { class: "ac-btn", style: "background:var(--bg-active)" },
+    t("recovery.cancel"),
+  );
+  appendChildren(btnRow, confirmBtn, cancelBtn);
+  appendChildren(confirmArea, warning, errorEl, btnRow);
+
+  const closeConfirm = (): void => {
+    confirmArea.style.display = "none";
+    revokeAllBtn.style.display = "";
+    setText(errorEl, "");
+    if (focusIsOurs(confirmArea)) revokeAllBtn.focus();
+  };
+  revokeAllBtn.addEventListener(
+    "click",
+    () => {
+      revokeAllBtn.style.display = "none";
+      confirmArea.style.display = "block";
+      cancelBtn.focus();
+    },
+    { signal },
+  );
+  cancelBtn.addEventListener("click", closeConfirm, { signal });
+  confirmBtn.addEventListener(
+    "click",
+    () => {
+      confirmBtn.disabled = true;
+      setText(errorEl, "");
+      void options
+        .onRevokeAllSessions()
+        .then((result) => {
+          // A revoked current session is handled by the page: auth is
+          // cleared and the app leaves. Otherwise refresh what is left.
+          if (result.current_session_revoked || signal.aborted) return;
+          closeConfirm();
+          load();
+        })
+        .catch((err: unknown) => {
+          setText(errorEl, errorText(err, t("devices.signOutEverywhereFailed")));
+          confirmBtn.disabled = false;
+          if (focusIsOurs(confirmBtn)) confirmBtn.focus();
+        })
+        .finally(() => {
+          confirmBtn.disabled = false;
+        });
+    },
+    { signal },
+  );
+
+  appendChildren(wrapper, separator, header, description, list, revokeAllBtn, confirmArea);
+  load();
+  return wrapper;
+}
+
+// ---------------------------------------------------------------------------
+// Message retention (B7-15c)
+// ---------------------------------------------------------------------------
+
+/** The server-default retention window, when the server reported one. */
+function buildRetentionSection(notice: string): HTMLDivElement {
+  const wrapper = createElement("div", { "data-testid": "account-retention" });
+  appendChildren(
+    wrapper,
+    createElement("div", { class: "settings-separator" }),
+    createElement("div", { class: "settings-section-title" }, t("retention.sectionTitle")),
+    createElement("div", { style: "color:var(--text-muted);font-size:13px" }, notice),
+  );
+  return wrapper;
+}
+
+// ---------------------------------------------------------------------------
 // Delete account (danger zone) builder
 // ---------------------------------------------------------------------------
 
@@ -919,9 +1167,9 @@ function buildDeleteAccountSection(
     "div",
     {
       class: "settings-section-title",
-      style: "color:var(--red)",
+      style: "color:var(--text-danger)",
     },
-    "Danger Zone",
+    t("delete.sectionTitle"),
   );
 
   const description = createElement(
@@ -929,7 +1177,7 @@ function buildDeleteAccountSection(
     {
       style: "color:var(--text-muted);font-size:13px;margin-bottom:12px",
     },
-    "Permanently delete your account and all associated data.",
+    t("delete.description"),
   );
 
   const deleteBtn = createElement(
@@ -938,7 +1186,7 @@ function buildDeleteAccountSection(
       class: "ac-btn account-delete-btn",
       "data-testid": "delete-account-trigger",
     },
-    "Delete Account",
+    t("delete.button"),
   );
 
   // Inline confirmation area (hidden by default)
@@ -951,23 +1199,34 @@ function buildDeleteAccountSection(
   const warningText = createElement(
     "div",
     {
-      style: "color:var(--red);font-size:13px;margin-bottom:12px;line-height:1.4",
+      style: "color:var(--text-danger);font-size:13px;margin-bottom:12px;line-height:1.4",
     },
-    "This action is permanent and cannot be undone. All your data will be deleted. Enter your password to confirm.",
+    // B7-15c owner decision: no retention window here. Erasure hard-deletes
+    // the account's messages and attachments at once (Server/db/erasure.go),
+    // so a "kept N days" line would imply a grace period that does not exist.
+    t("delete.warning"),
   );
 
+  const passwordLabel = createElement(
+    "label",
+    { class: "form-label", for: "delete-account-password" },
+    // Same text as the placeholder, so the field's accessible name is
+    // unchanged by gaining a real <label> (B9-23).
+    t("totp.passwordPlaceholder"),
+  );
   const passwordInput = createElement("input", {
     class: "form-input",
     type: "password",
-    placeholder: "Enter your password",
-    style: "margin-bottom:12px",
+    id: "delete-account-password",
+    placeholder: t("totp.passwordPlaceholder"),
+    style: "margin:4px 0 12px",
     "data-testid": "delete-account-password",
+    "aria-describedby": "delete-account-error",
   });
 
-  const errorEl = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-bottom:8px",
-    "data-testid": "delete-account-error",
-  });
+  const errorEl = outcomeEl("error", "delete-account-error");
+  errorEl.id = "delete-account-error";
+  errorEl.style.marginBottom = "8px";
 
   const btnRow = createElement("div", { style: "display:flex;gap:8px" });
   const confirmBtn = createElement(
@@ -976,7 +1235,7 @@ function buildDeleteAccountSection(
       class: "ac-btn account-delete-btn",
       "data-testid": "delete-account-confirm",
     },
-    "Confirm Delete",
+    t("delete.confirm"),
   );
   const cancelBtn = createElement(
     "button",
@@ -984,11 +1243,11 @@ function buildDeleteAccountSection(
       class: "ac-btn",
       style: "background:var(--bg-active)",
     },
-    "Cancel",
+    t("recovery.cancel"),
   );
 
   appendChildren(btnRow, confirmBtn, cancelBtn);
-  appendChildren(confirmArea, warningText, passwordInput, errorEl, btnRow);
+  appendChildren(confirmArea, warningText, passwordLabel, passwordInput, errorEl, btnRow);
 
   // Show confirmation area
   deleteBtn.addEventListener(
@@ -1011,6 +1270,7 @@ function buildDeleteAccountSection(
       deleteBtn.style.display = "";
       passwordInput.value = "";
       setText(errorEl, "");
+      if (focusIsOurs(confirmArea)) deleteBtn.focus();
     },
     { signal },
   );
@@ -1021,12 +1281,12 @@ function buildDeleteAccountSection(
     () => {
       const pw = passwordInput.value;
       if (pw.length === 0) {
-        setText(errorEl, "Password is required.");
+        setText(errorEl, t("password.required"));
         return;
       }
       setText(errorEl, "");
       confirmBtn.disabled = true;
-      setText(confirmBtn, "Deleting...");
+      setText(confirmBtn, t("delete.deleting"));
 
       void options
         .onDeleteAccount(pw)
@@ -1034,9 +1294,10 @@ function buildDeleteAccountSection(
           // Success — cleanup is handled by the callback (clears auth, navigates away)
         })
         .catch((err: unknown) => {
-          setText(errorEl, err instanceof Error ? err.message : "Failed to delete account.");
+          setText(errorEl, errorText(err, t("delete.failed")));
           confirmBtn.disabled = false;
-          setText(confirmBtn, "Confirm Delete");
+          setText(confirmBtn, t("delete.confirm"));
+          if (focusIsOurs(confirmBtn)) confirmBtn.focus();
         });
     },
     { signal },
@@ -1058,7 +1319,7 @@ export function buildAccountTab(
 ): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   const user = authStore.getState().user;
-  const username = user?.username ?? "Unknown";
+  const username = user?.username ?? t("profile.unknown");
   const displayName = resolveDisplayName({
     username,
     displayName: user?.display_name ?? null,
@@ -1102,46 +1363,48 @@ export function buildAccountTab(
   const editInput = createElement("input", {
     class: "form-input",
     type: "text",
-    placeholder: "New username",
+    placeholder: t("profile.newUsername"),
     "data-testid": "username-edit-input",
+    "aria-label": t("profile.newUsername"),
+    "aria-describedby": "username-edit-error",
   });
-  const saveBtn = createElement("button", { class: "ac-btn" }, "Save");
+  const saveBtn = createElement("button", { class: "ac-btn" }, t("common.save"));
   const cancelBtn = createElement(
     "button",
     { class: "ac-btn", style: "background:var(--bg-active)" },
-    "Cancel",
+    t("recovery.cancel"),
   );
   appendChildren(editForm, editInput, saveBtn, cancelBtn);
 
-  const usernameError = createElement("div", {
-    style: "color:var(--red);font-size:13px;margin-top:4px",
-  });
+  const usernameError = outcomeEl("error");
+  usernameError.id = "username-edit-error";
+  usernameError.style.marginTop = "4px";
   editForm.appendChild(usernameError);
 
-  const openEditForm = () => {
+  let editOpener: HTMLElement = editUsernameBtn;
+  const openEditForm = (e: Event) => {
+    editOpener = e.currentTarget as HTMLElement;
     editForm.style.display = "flex";
     editInput.value = authStore.getState().user?.username ?? "";
     editInput.focus();
+  };
+  const closeEditForm = () => {
+    editForm.style.display = "none";
+    setText(usernameError, "");
+    if (focusIsOurs(editForm)) editOpener.focus();
   };
 
   editUserProfileBtn.addEventListener("click", openEditForm, { signal });
   editUsernameBtn.addEventListener("click", openEditForm, { signal });
 
-  cancelBtn.addEventListener(
-    "click",
-    () => {
-      editForm.style.display = "none";
-      setText(usernameError, "");
-    },
-    { signal },
-  );
+  cancelBtn.addEventListener("click", closeEditForm, { signal });
 
   saveBtn.addEventListener(
     "click",
     () => {
       const newName = editInput.value.trim();
       if (newName.length < 2 || newName.length > MAX_USERNAME_LEN) {
-        setText(usernameError, `Username must be 2\u2013${MAX_USERNAME_LEN} characters.`);
+        setText(usernameError, t("profile.usernameInvalid", { max: MAX_USERNAME_LEN }));
         return;
       }
       setText(usernameError, "");
@@ -1161,10 +1424,10 @@ export function buildAccountTab(
             }),
           );
           setText(usernameValue, newName);
-          editForm.style.display = "none";
+          closeEditForm();
         })
         .catch((err: unknown) => {
-          setText(usernameError, err instanceof Error ? err.message : "Failed to update username.");
+          setText(usernameError, errorText(err, t("profile.usernameSaveFailed")));
         });
     },
     { signal },
@@ -1177,6 +1440,15 @@ export function buildAccountTab(
 
   // Two-factor authentication section
   section.appendChild(buildTotpSection(options, signal));
+
+  // Recovery kit
+  section.appendChild(buildRecoveryKitSection(options, signal));
+
+  // Signed-in devices
+  section.appendChild(buildSessionsSection(options, signal));
+
+  const retention = options.getRetentionNotice?.() ?? null;
+  if (retention !== null) section.appendChild(buildRetentionSection(retention));
 
   // Delete account (danger zone)
   section.appendChild(buildDeleteAccountSection(options, signal));

@@ -14,6 +14,18 @@ import { expect } from "@playwright/test";
 // Mock data — basic
 // ---------------------------------------------------------------------------
 
+declare global {
+  interface Window {
+    /** Every `login_with_saved_password` the client issued, in order. Lets a
+     *  test assert the saved-password path ran rather than a typed-password
+     *  login, which is otherwise indistinguishable from the outside. */
+    __mockSavedPasswordLogins?: Array<{ host?: string; username?: string }>;
+    /** Hosts the client asked to delete a credential for. The delete stays a
+     *  no-op on the stored value, so this records intent, not effect. */
+    __mockDeletedCredentials?: Array<string | undefined>;
+  }
+}
+
 export const MOCK_TOKEN = "mock-session-token-abc123";
 
 export const MOCK_LOGIN_RESPONSE = {
@@ -258,6 +270,7 @@ function buildReadyPayload(overrides?: {
   voice_states?: unknown[];
   roles?: unknown[];
   dm_channels?: unknown[];
+  notices?: unknown[];
 }): unknown {
   return {
     type: "ready",
@@ -267,6 +280,7 @@ function buildReadyPayload(overrides?: {
       voice_states: overrides?.voice_states ?? [],
       roles: overrides?.roles ?? MOCK_ROLES,
       dm_channels: overrides?.dm_channels ?? [],
+      notices: overrides?.notices ?? [],
     },
   };
 }
@@ -429,8 +443,11 @@ export function voiceJoinFailureHandler(): { type: string; handler: string } {
 // ---------------------------------------------------------------------------
 
 export function buildTauriMockScript(opts: {
-  httpRoutes: Array<{ pattern: string; status: number; body: unknown }>;
+  /** `method`, when set, restricts a route to that HTTP method — for one path
+   *  that answers GET and DELETE differently. */
+  httpRoutes: Array<{ pattern: string; status: number; body: unknown; method?: string }>;
   simulateWsFlow: boolean;
+  deferReady?: boolean;
   echoChatSend?: boolean;
   wsHandlers?: Array<{ type: string; handler: string }>;
   readyOverrides?: {
@@ -438,6 +455,7 @@ export function buildTauriMockScript(opts: {
     members?: unknown[];
     voice_states?: unknown[];
     dm_channels?: unknown[];
+    notices?: unknown[];
   };
   /** Pinned peer identity keys served by get_identity_pin, keyed by userId
    *  (string). Absent key = null = "never pinned". */
@@ -452,9 +470,36 @@ export function buildTauriMockScript(opts: {
   /** Seeds `load_credential`. Default null = nothing stored. `delete_credential`
    *  stays a no-op, so a test can assert behaviour that must hold even when the
    *  credential is still readable. */
-  storedCredential?: { username: string; token: string } | null;
+  storedCredential?: { username: string; token: string; has_password?: boolean } | null;
+  /** Seeds `login_with_saved_password` — the relay the client uses when the
+   *  password box holds the saved-password placeholder. Rust returns the
+   *  server's raw status and body, so this mirrors that shape exactly. Every
+   *  call is recorded on `window.__mockSavedPasswordLogins` so a test can
+   *  assert the saved-password path ran instead of a typed-password login. */
+  savedPasswordLogin?: { status: number; body: unknown };
+  /** Stub the external-content broker (B7-16) so link previews, oEmbed titles
+   *  and external images can be exercised. Without it every broker call is
+   *  refused as "unavailable" (the mocked suite has no external network).
+   *  `preview` keys on the requested URL; `image` keys on `url:<url>` or
+   *  `handle:<handle>`. A preview or image value that is a bare failure-class
+   *  string refuses just that request; a request with no entry keeps the
+   *  refusing default. */
+  externalContent?: {
+    preview?: Record<string, Record<string, unknown> | string>;
+    image?: Record<string, number[] | string>;
+  };
 }): string {
   const readyPayload = buildReadyPayload(opts.readyOverrides);
+  // A profile read is GET /auth/me; /users/me only supports PATCH. Keep the
+  // authenticated default explicit, with scenario-provided routes taking priority.
+  const httpRoutes = [
+    ...opts.httpRoutes,
+    {
+      pattern: "/api/v1/auth/me",
+      status: 200,
+      body: { ...MOCK_AUTH_OK.payload.user, totp_enabled: false },
+    },
+  ];
 
   // Merge explicit wsHandlers with auto-generated chat echo handlers
   const allWsHandlers: Array<{ type: string; handler: string }> = [
@@ -488,7 +533,7 @@ export function buildTauriMockScript(opts: {
     // -----------------------------------------------------------------------
     // HTTP mock state
     // -----------------------------------------------------------------------
-    const HTTP_ROUTES = ${JSON.stringify(opts.httpRoutes)};
+    const HTTP_ROUTES = ${JSON.stringify(httpRoutes)};
     let __nextRid = 1;
     const __pendingFetch = {};   // rid → { url, route }
     const __pendingBody = {};    // responseRid → Uint8Array (body bytes)
@@ -497,9 +542,9 @@ export function buildTauriMockScript(opts: {
     // Sort routes by pattern length (longest first) to match most specific route
     HTTP_ROUTES.sort((a, b) => b.pattern.length - a.pattern.length);
 
-    function matchRoute(url) {
+    function matchRoute(url, method) {
       for (const route of HTTP_ROUTES) {
-        if (url.includes(route.pattern)) return route;
+        if (url.includes(route.pattern) && (!route.method || route.method === method)) return route;
       }
       return null;
     }
@@ -507,7 +552,14 @@ export function buildTauriMockScript(opts: {
     // -----------------------------------------------------------------------
     // __TAURI_INTERNALS__
     // -----------------------------------------------------------------------
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+      unregisterListener(event, id) {
+        __eventListeners[event] = (__eventListeners[event] || []).filter(entry => entry.id !== id);
+        delete window["__tcb_" + id];
+      },
+    };
     window.__TAURI_INTERNALS__ = {
+      unregisterCallback(id) { delete window["__tcb_" + id]; },
       metadata: {
         currentWindow: { label: "main" },
         currentWebview: { label: "main" },
@@ -537,13 +589,17 @@ export function buildTauriMockScript(opts: {
           }
           return handlerId || 0;
         }
-        if (cmd === "plugin:event|unlisten") return;
+        if (cmd === "plugin:event|unlisten") {
+          const listeners = __eventListeners[args?.event] || [];
+          __eventListeners[args?.event] = listeners.filter((entry) => entry.id !== args?.eventId);
+          return;
+        }
 
         // ---- HTTP: fetch (step 1 — register request, return rid) ----
         if (cmd === "plugin:http|fetch") {
           const url = args?.clientConfig?.url || args?.url || "";
           const rid = __nextRid++;
-          const route = matchRoute(url);
+          const route = matchRoute(url, args?.clientConfig?.method || "GET");
           __pendingFetch[rid] = { url, route };
           return rid;
         }
@@ -630,7 +686,7 @@ export function buildTauriMockScript(opts: {
               setTimeout(function() {
                 __tauriEmitEvent("ws-message", JSON.stringify(${JSON.stringify(MOCK_AUTH_OK)}));
               }, 100);
-              setTimeout(function() {
+              if (!${!!opts.deferReady}) setTimeout(function() {
                 __tauriEmitEvent("ws-message", JSON.stringify(${JSON.stringify(readyPayload)}));
               }, 200);
             }
@@ -641,7 +697,7 @@ export function buildTauriMockScript(opts: {
                 (new Function('parsed', '__tauriEmitEvent', h.handler))(parsed, __tauriEmitEvent);
               }
             }
-          } catch (e) {}
+          } catch (e) { console.error("[tauri-mock] WS handler error", e); throw e; }
           `
               : ""
           }
@@ -666,15 +722,38 @@ export function buildTauriMockScript(opts: {
         if (cmd === "stop_livekit_proxy") return;
 
         // ---- Credentials ----
-        if (cmd === "save_credential" || cmd === "delete_credential") return null;
+        window.__mockDeletedCredentials ??= [];
+        // Still a no-op on the stored credential (load_credential keeps
+        // returning it) — only the call is recorded, so a test can assert the
+        // client asked for a delete without that delete winning a race.
+        if (cmd === "delete_credential") { window.__mockDeletedCredentials.push(args?.host); return null; }
+        if (cmd === "save_credential") return null;
         if (cmd === "load_credential") return ${JSON.stringify(opts.storedCredential ?? null)};
+        window.__mockSavedPasswordLogins ??= [];
+        if (cmd === "login_with_saved_password") {
+          window.__mockSavedPasswordLogins.push({ host: args?.host, username: args?.username });
+          ${
+            opts.savedPasswordLogin
+              ? `return ${JSON.stringify({
+                  status: opts.savedPasswordLogin.status,
+                  body: JSON.stringify(opts.savedPasswordLogin.body),
+                })};`
+              : `throw new Error("no saved password for this host");`
+          }
+        }
+
+        window.__mockPendingMessages ??= {};
+        const pendingOwner = JSON.stringify([args?.host, args?.userId]);
+        if (cmd === "save_pending_messages") { window.__mockPendingMessages[pendingOwner] = args.value; return; }
+        if (cmd === "load_pending_messages") return window.__mockPendingMessages[pendingOwner] ?? null;
+        if (cmd === "delete_pending_messages") { delete window.__mockPendingMessages[pendingOwner]; return; }
 
         // ---- Settings ----
         if (cmd === "get_settings") return ${JSON.stringify(opts.storedSettings ?? {})};
         if (cmd === "save_settings") return;
 
         // ---- Certs ----
-        if (cmd === "store_cert_fingerprint" || cmd === "get_cert_fingerprint") return null;
+        if (cmd === "get_cert_fingerprint") return null;
         if (cmd === "accept_cert_fingerprint") return null;
 
         // ---- E2EE identity (keyring blob + TOFU pins) ----
@@ -683,7 +762,10 @@ export function buildTauriMockScript(opts: {
         // exercises the fresh-key path. Pins are configurable per test:
         // identityPins seeds get_identity_pin per userId, identityPinError
         // makes the read REJECT (the DC-08 "store unreadable" path).
-        if (cmd === "save_identity_key" || cmd === "load_identity_key" || cmd === "delete_identity_key") return null;
+        window.__mockIdentityKeys ??= {};
+        if (cmd === "save_identity_key") { window.__mockIdentityKeys[args.host] = args.key; return; }
+        if (cmd === "load_identity_key") return window.__mockIdentityKeys[args.host] ?? null;
+        if (cmd === "delete_identity_key") { delete window.__mockIdentityKeys[args.host]; return; }
         if (cmd === "get_identity_pin") {
           ${
             opts.identityPinError === true
@@ -704,11 +786,53 @@ export function buildTauriMockScript(opts: {
           return null;
         }
 
+        if (cmd === "plugin:path|resolve_directory") return "/test-logs";
+        if (cmd === "plugin:path|join") return (args?.paths || []).join("/");
+        if (cmd === "plugin:fs|read_dir" || cmd === "plugin:window|available_monitors") return [];
+        if (cmd === "plugin:fs|exists") return false;
+
         // ---- Window/webview plugin stubs ----
         if (cmd.startsWith("plugin:window|") || cmd.startsWith("plugin:webview|")) return null;
 
-        console.log("[tauri-mock] unhandled invoke:", cmd);
-        return null;
+        // Explicit desktop-only no-ops. Unknown commands are never success.
+        if (["plugin:process|restart", "plugin:app|version", "plugin:app|name",
+             "plugin:deep-link|get_current", "plugin:deep-link|register", "plugin:fs|mkdir", "plugin:fs|write_text_file", "plugin:fs|remove", "plugin:autostart|is_enabled",
+             "plugin:notification|is_permission_granted", "plugin:notification|notify",
+             "plugin:opener|open_url", "ptt_set_key", "ptt_start", "ptt_stop",
+             "open_devtools"].includes(cmd)) return null;
+        if (cmd === "ptt_polling_supported") return false;
+        if (cmd === "check_client_update") return { available: false, version: null, body: null };
+        // ---- External-content broker (B7-16) ----
+        // No external network here: refuse the way the native broker does,
+        // with a bare failure-class string. Teardown also names a fresh
+        // partition with an empty-URL preview, which the broker refuses.
+        // A test can opt in to a canned answer per URL/handle via the
+        // externalContent option; anything unmatched stays refused.
+        window.__mockExternalPreview ??= ${JSON.stringify(opts.externalContent?.preview ?? {})};
+        window.__mockExternalImage ??= ${JSON.stringify(opts.externalContent?.image ?? {})};
+        if (cmd === "external_preview") {
+          var preview = window.__mockExternalPreview[args?.url];
+          if (preview !== undefined) {
+            if (typeof preview === "string") throw preview;
+            return preview;
+          }
+          throw "unavailable";
+        }
+        if (cmd === "external_image") {
+          var source = args?.handle !== undefined ? "handle:" + args.handle : "url:" + args.url;
+          var bytes = window.__mockExternalImage[source];
+          if (bytes !== undefined) {
+            // A string names a broker refusal class (blocked-destination,
+            // oversized, wrong-type, ...), exactly like the preview mock; an
+            // array is the image's bytes.
+            if (typeof bytes === "string") throw bytes;
+            return new Uint8Array(bytes).buffer;
+          }
+          throw "unavailable";
+        }
+        const error = new Error("Unexpected IPC command: " + cmd);
+        console.error("[tauri-mock]", error.message);
+        throw error;
       },
 
       convertFileSrc: (path) => path,
@@ -720,39 +844,59 @@ export function buildTauriMockScript(opts: {
 // Public API — mock injection
 // ---------------------------------------------------------------------------
 
-export async function mockTauriConnect(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      ],
-      simulateWsFlow: false,
-    }),
-  );
-}
+/** Route literals the presets below share. `buildTauriMockScript` only reads
+ *  its options (spread + `JSON.stringify`), so one copy per route is safe. */
+const ROUTE_HEALTH = {
+  pattern: "/api/v1/health",
+  status: 200,
+  body: { status: "ok", version: "1.0.0" },
+};
+const ROUTE_LOGIN = { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE };
+const ROUTE_LOGIN_2FA = {
+  pattern: "/api/v1/auth/login",
+  status: 200,
+  body: MOCK_LOGIN_2FA_RESPONSE,
+};
+const ROUTE_MESSAGES = { pattern: "/messages", status: 200, body: MOCK_MESSAGES };
+const ROUTE_MESSAGES_RICH = { pattern: "/messages", status: 200, body: MOCK_MESSAGES_RICH };
+const ROUTE_PINS = { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES };
+const ROUTE_INVITES = { pattern: "/api/v1/invites", status: 200, body: MOCK_INVITES };
 
-export async function mockTauriConnectWith2FA(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_2FA_RESPONSE },
-      ],
-      simulateWsFlow: false,
-    }),
-  );
-}
+/** The category/member ready state most presets share. */
+const READY_MULTI_ROLE = {
+  channels: MOCK_CHANNELS_WITH_CATEGORIES,
+  members: MOCK_MEMBERS_MULTI_ROLE,
+};
+const READY_VOICE = { ...READY_MULTI_ROLE, voice_states: MOCK_VOICE_STATE };
 
-export async function mockTauriFullSession(page: Page): Promise<void> {
+/** A nullary preset: `mock(opts)` returns the `(page) => inject` helper the
+ *  suites import. `voiceWsHandlers()` and `voiceJoinFailureHandler()` return
+ *  fresh literals, so calling them once here changes nothing. */
+const mock =
+  (opts: Parameters<typeof buildTauriMockScript>[0]) =>
+  async (page: Page): Promise<void> => {
+    await page.addInitScript(buildTauriMockScript(opts));
+  };
+
+export const mockTauriConnect = mock({
+  httpRoutes: [ROUTE_HEALTH],
+  simulateWsFlow: false,
+});
+
+export const mockTauriConnectWith2FA = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN_2FA],
+  simulateWsFlow: false,
+});
+
+export async function mockTauriFullSession(
+  page: Page,
+  options: { deferReady?: boolean } = {},
+): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-        { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-      ],
+      httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES, ROUTE_PINS],
       simulateWsFlow: true,
+      deferReady: options.deferReady,
     }),
   );
 }
@@ -764,161 +908,133 @@ export async function mockTauriFullSession(page: Page): Promise<void> {
  * the client refuses to auto-login on its own account rather than relying on
  * the credential delete having already won a race.
  */
-export async function mockTauriFullSessionWithAutoConnect(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-        { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-      ],
-      simulateWsFlow: true,
-      storedCredential: { username: "testuser", token: "stored-token" },
-      storedSettings: {
-        "owncord:profiles": {
-          schemaVersion: 1,
-          profiles: [
-            {
-              id: "p1",
-              name: "Local",
-              host: "localhost:8443",
-              username: "testuser",
-              autoConnect: true,
-              rememberPassword: true,
-              color: "#5865f2",
-              lastConnected: null,
-            },
-          ],
-        },
-      },
-    }),
-  );
-}
-
-export async function mockTauriFullSessionWithMessages(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES_RICH },
-        { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-        { pattern: "/api/v1/invites", status: 200, body: MOCK_INVITES },
-      ],
-      simulateWsFlow: true,
-      readyOverrides: {
-        channels: MOCK_CHANNELS_WITH_CATEGORIES,
-        members: MOCK_MEMBERS_MULTI_ROLE,
-      },
-    }),
-  );
-}
-
-export async function mockTauriFullSessionWithVoice(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-      ],
-      simulateWsFlow: true,
-      wsHandlers: voiceWsHandlers(),
-      readyOverrides: {
-        channels: MOCK_CHANNELS_WITH_CATEGORIES,
-        members: MOCK_MEMBERS_MULTI_ROLE,
-        voice_states: MOCK_VOICE_STATE,
-      },
-    }),
-  );
-}
-
-export async function mockTauriFullSessionWithVoiceFailure(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-      ],
-      simulateWsFlow: true,
-      wsHandlers: [voiceJoinFailureHandler()],
-      readyOverrides: {
-        channels: MOCK_CHANNELS_WITH_CATEGORIES,
-        members: MOCK_MEMBERS_MULTI_ROLE,
-        voice_states: MOCK_VOICE_STATE,
-      },
-    }),
-  );
-}
-
-export async function mockTauriFullSessionWithEcho(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-      ],
-      simulateWsFlow: true,
-      echoChatSend: true,
-    }),
-  );
-}
-
-export async function mockTauriFullSessionWithMessagesAndEcho(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES_RICH },
-        { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-        { pattern: "/api/v1/invites", status: 200, body: MOCK_INVITES },
-      ],
-      simulateWsFlow: true,
-      echoChatSend: true,
-      readyOverrides: {
-        channels: MOCK_CHANNELS_WITH_CATEGORIES,
-        members: MOCK_MEMBERS_MULTI_ROLE,
-      },
-    }),
-  );
-}
-
-export async function mockTauriFullSessionWithFailingMessages(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+export const mockTauriFullSessionWithAutoConnect = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES, ROUTE_PINS],
+  simulateWsFlow: true,
+  storedCredential: { username: "testuser", token: "stored-token" },
+  storedSettings: {
+    "owncord:profiles": {
+      schemaVersion: 1,
+      profiles: [
         {
-          pattern: "/messages",
-          status: 500,
-          body: { error: "INTERNAL_ERROR", message: "Failed to load messages" },
+          id: "p1",
+          name: "Local",
+          host: "localhost:8443",
+          username: "testuser",
+          autoConnect: true,
+          rememberPassword: true,
+          color: "#5865f2",
+          lastConnected: null,
         },
       ],
-      simulateWsFlow: true,
-    }),
-  );
-}
+    },
+  },
+});
 
-export async function mockTauriLoginError(page: Page): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        {
-          pattern: "/api/v1/auth/login",
-          status: 401,
-          body: { error: "INVALID_CREDENTIALS", message: "Invalid username or password" },
-        },
-      ],
-      simulateWsFlow: false,
-    }),
-  );
-}
+/** This device and one other desktop, whose sign-in nobody has reviewed. */
+export const MOCK_SESSIONS = [
+  {
+    id: 9,
+    device: "tauri-plugin-http/2.6.0",
+    ip: "198.51.100.2",
+    created_at: "2026-09-21 08:00:00",
+    last_used: "2026-09-21 08:30:00",
+    is_current: false,
+    unseen: true,
+  },
+  {
+    id: 7,
+    device: "OwnCord-Client/1.4.0",
+    ip: "203.0.113.5",
+    created_at: "2026-09-20 10:00:00",
+    last_used: "2026-09-21 09:00:00",
+    is_current: true,
+    unseen: true,
+  },
+];
+
+/** Full session with the device list: GET lists, DELETE {id} signs one out,
+ *  DELETE on the collection signs out everywhere (this device included). */
+export const mockTauriFullSessionWithSessions = mock({
+  httpRoutes: [
+    ROUTE_HEALTH,
+    ROUTE_LOGIN,
+    ROUTE_MESSAGES,
+    ROUTE_PINS,
+    {
+      pattern: "/api/v1/users/me/sessions",
+      method: "GET",
+      status: 200,
+      body: { sessions: MOCK_SESSIONS },
+    },
+    { pattern: "/api/v1/users/me/sessions/9", method: "DELETE", status: 204, body: null },
+    {
+      pattern: "/api/v1/users/me/sessions",
+      method: "DELETE",
+      status: 200,
+      body: { sessions_revoked: 2, current_session_revoked: true },
+    },
+  ],
+  simulateWsFlow: true,
+});
+
+export const mockTauriFullSessionWithMessages = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES_RICH, ROUTE_PINS, ROUTE_INVITES],
+  simulateWsFlow: true,
+  readyOverrides: READY_MULTI_ROLE,
+});
+
+export const mockTauriFullSessionWithVoice = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES],
+  simulateWsFlow: true,
+  wsHandlers: voiceWsHandlers(),
+  readyOverrides: READY_VOICE,
+});
+
+export const mockTauriFullSessionWithVoiceFailure = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES],
+  simulateWsFlow: true,
+  wsHandlers: [voiceJoinFailureHandler()],
+  readyOverrides: READY_VOICE,
+});
+
+export const mockTauriFullSessionWithEcho = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES],
+  simulateWsFlow: true,
+  echoChatSend: true,
+});
+
+export const mockTauriFullSessionWithMessagesAndEcho = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES_RICH, ROUTE_PINS, ROUTE_INVITES],
+  simulateWsFlow: true,
+  echoChatSend: true,
+  readyOverrides: READY_MULTI_ROLE,
+});
+
+export const mockTauriFullSessionWithFailingMessages = mock({
+  httpRoutes: [
+    ROUTE_HEALTH,
+    ROUTE_LOGIN,
+    {
+      pattern: "/messages",
+      status: 500,
+      body: { error: "INTERNAL_ERROR", message: "Failed to load messages" },
+    },
+  ],
+  simulateWsFlow: true,
+});
+
+export const mockTauriLoginError = mock({
+  httpRoutes: [
+    ROUTE_HEALTH,
+    {
+      pattern: "/api/v1/auth/login",
+      status: 401,
+      body: { error: "INVALID_CREDENTIALS", message: "Invalid username or password" },
+    },
+  ],
+  simulateWsFlow: false,
+});
 
 // ---------------------------------------------------------------------------
 // Public API — page actions
@@ -929,6 +1045,20 @@ export async function submitLogin(page: Page): Promise<void> {
   await page.locator("#username").fill("testuser");
   await page.locator("#password").fill("password123");
   await page.locator("button.btn-primary[type='submit']").click();
+}
+
+/**
+ * Pre-grant "Load automatically" external-content consent (B9-8) for the
+ * mocked server, so a spec about rendering media is not stopped at the
+ * concealed stand-in. Call before `page.goto`.
+ */
+export async function grantExternalConsent(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "owncord:settings:externalContentConsent",
+      JSON.stringify({ "localhost:8443": "auto" }),
+    );
+  });
 }
 
 /**
@@ -961,10 +1091,35 @@ export async function switchSettingsTab(page: Page, tabName: string): Promise<vo
 }
 
 /**
+ * Wait until the transport's Tauri listener for `eventName` is registered.
+ *
+ * `setupEventListeners()` (platform/desktop/socket.ts) registers ws-message /
+ * ws-state / ws-error through an async `tauriListen` invoke roundtrip, so an
+ * event emitted straight after login can land before the listener exists and
+ * be dropped silently. Tests that emit a synthetic frame must wait for the
+ * listener instead of racing it.
+ */
+export async function waitForWsListeners(
+  page: Page,
+  eventName = "ws-message",
+  timeout = 10_000,
+): Promise<void> {
+  await page.waitForFunction(
+    (name) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((window as any).__tauriEventListeners?.[name]?.length ?? 0) > 0,
+    eventName,
+    { timeout },
+  );
+}
+
+/**
  * Emit a WebSocket event from the mock server to the client.
- * Must be called after the page has loaded and WS listeners are registered.
+ * Waits for the transport listener first so the frame cannot be dropped by
+ * a listener-registration race (see waitForWsListeners).
  */
 export async function emitWsEvent(page: Page, eventName: string, payload: unknown): Promise<void> {
+  await waitForWsListeners(page, eventName);
   await page.evaluate(
     ({ event, data }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -1,0 +1,864 @@
+# B7-0 client baseline
+
+**Measured:** 2026-09-19
+**Base commit:** `058fbabb` (`dev`, after PR #1625)
+**Branch:** `feat/b7-0-verify-and-baseline`
+**Plan:** `.claude/plans/b7-0-verify-and-baseline.plan.md`, Task 1
+**Supersedes, for the client only:** the client rows and the bundle table in
+[b0-baseline-2026-08-25.md](b0-baseline-2026-08-25.md)
+
+Every number below was produced in this session by the command printed next to
+it, on the tree at the base commit plus this branch's own changes (the
+`probe_credential_store` deletion is the only change that moves a number, and
+it is called out where it does). Nothing is copied from B0; B0's figure is
+shown beside each row only for comparison. This is the baseline B7-1 (gates),
+B7-7 (budgets) and B7-8 (mutation) ratchet against.
+
+## Environment
+
+| Tool                       | Version                 | Note                                                                                          |
+| -------------------------- | ----------------------- | --------------------------------------------------------------------------------------------- |
+| Node / npm                 | 24.21.0 / 11.19.0       | Installed with nvm for this session; matches the CI pin (24). The container default is 22.    |
+| Vitest / Vite / TypeScript | 4.1.11 / 8.2.2 / 6.0.3  | Unchanged from B0.                                                                            |
+| oxlint / eslint / prettier | 1.80.0 / 10.9.1 / 3.9.6 | oxlint and eslint moved one patch since B0 (1.79.0 / 10.9.0).                                 |
+| Playwright                 | 1.62.1                  | Browsers from `/opt/pw-browsers`; nothing downloaded.                                         |
+| cargo / rustc              | 1.94.1                  | Tauri system libraries installed with the same `apt-get` line as CI's `rust-tests` job.       |
+| Client version             | 1.2.0-alpha.4           | `Client/package.json`.                                                                        |
+| Machine                    | 4 vCPU, 15 GB, x86_64   | A cloud container; timings below are not comparable to a developer machine and are not gated. |
+
+## Measured results
+
+| Measure                                                 | Value                                                         | B0 (2026-08-25)                   | Provenance |
+| ------------------------------------------------------- | ------------------------------------------------------------- | --------------------------------- | ---------- |
+| Unit + integration tests                                | **5501 passed / 205 files, 0 failed**                         | 5257 / 192                        | measured   |
+| All vitest suites (unit+int+contract)                   | **5524 passed / 212 files, 0 failed**                         | —                                 | measured   |
+| Coverage — statements                                   | **93.99 %** (15843/16855)                                     | never recorded                    | measured   |
+| Coverage — lines                                        | **95.55 %** (14891/15583)                                     | never recorded                    | measured   |
+| Coverage — functions                                    | **91.97 %** (2669/2902)                                       | never recorded                    | measured   |
+| Coverage — branches                                     | **86.49 %** (7003/8096)                                       | never recorded                    | measured   |
+| Coverage floor gate                                     | ok — statements 93.99 % against floor 70 %                    | —                                 | measured   |
+| oxlint warnings (`oxlint src/`)                         | **547**, exit 0                                               | 471                               | measured   |
+| knip hints                                              | **0** (empty output, exit 0)                                  | "four configuration hints" (C-05) | measured   |
+| Production import cycles (madge)                        | **22**                                                        | "four" (C-11, no tool)            | measured   |
+| Playwright — default config                             | 292 tests in 41 files                                         | 293 passed (full suite)           | measured   |
+| Playwright — `prod` config                              | 292 tests in 41 files                                         | —                                 | measured   |
+| Playwright — `native` config                            | 82 tests in 14 files                                          | —                                 | measured   |
+| Playwright — `fullstack` config                         | 16 tests in 5 files                                           | —                                 | measured   |
+| Playwright — `admin` config                             | 1 test in 1 file                                              | —                                 | measured   |
+| Stryker dry run                                         | 76 files, 12 822 mutants, initial run 5412 tests in 2 m 48 s  | 67.04 % score, stale (C-16)       | measured   |
+| Mutation score                                          | **not measured** — B7-8's milestone (PRD open question 5)     | 67.04 % (stale)                   | deferred   |
+| Files importing `@tauri-apps`                           | **21**                                                        | 20 claimed in `Client/CLAUDE.md`  | measured   |
+| Distinct `invoke` names                                 | **29**                                                        | 29                                | measured   |
+| `#[tauri::command]` attributes                          | **33** (34 before the `probe_credential_store` deletion)      | 34                                | measured   |
+| `generate_handler!` entries                             | **31** (30 unconditional + `open_devtools` behind `devtools`) | 32 before the deletion            | measured   |
+| Rust tests                                              | 152 passed, 0 failed; `cargo clippy --all-targets` clean      | 115, carried                      | measured   |
+| Colocated `src/**/*.test.ts`                            | 0 (glob already in `vitest.config.ts`)                        | —                                 | measured   |
+| Test files: unit / contract / int / browser / e2e specs | 203 / 7 / 2 / 1 / 61                                          | —                                 | measured   |
+| Startup time                                            | **not measurable here** — see "Startup and memory"            | never recorded                    | unverified |
+| Memory                                                  | **not measurable here** — see "Startup and memory"            | never recorded                    | unverified |
+
+### Bundle sizes (measured)
+
+`cd Client && npm run build`, then for each `dist/assets/*` file:
+`wc -c < FILE` (minified) and `gzip -9 -c FILE | wc -c` (gzip). Vite's own
+report uses a lower gzip level, so its numbers differ by a few percent; the
+`wc`/`gzip -9` figures are the ones this file records, and the B0 column is
+Vite's report at B0.
+
+| Chunk                        |    Minified |        Gzip | B0 gzip (Vite report) |
+| ---------------------------- | ----------: | ----------: | --------------------: |
+| `livekitSession`             | 2,003,590 B | 1,358,532 B |           1,344.96 kB |
+| `livekit`                    |   516,588 B |   131,982 B |             127.88 kB |
+| `index`                      |   213,502 B |    67,575 B |              59.07 kB |
+| `MainPage`                   |   185,879 B |    56,644 B |              58.92 kB |
+| `style` (css)                |   103,751 B |    18,349 B |                     — |
+| `livekit-client.e2ee.worker` |    94,339 B |    28,759 B |                     — |
+| `SettingsOverlay`            |    49,561 B |    14,854 B |              13.98 kB |
+| `window`                     |    13,339 B |     3,222 B |                     — |
+| `screenShare`                |     6,895 B |     2,388 B |                     — |
+
+Startup path (everything loaded before the connect page renders) is `index`
+plus `style`: about 86 kB gzip. `MainPage` and `SettingsOverlay` are
+route-level lazy chunks; `livekitSession` (which statically pulls in RNNoise,
+`Client/src/lib/noise-suppression.ts:13`) and `livekit` are loaded on the
+first voice action. The `index` chunk grew from 59 kB to 68 kB gzip since B0.
+
+## Commands and notes per measure
+
+### Tests and coverage
+
+```bash
+cd Client && npx vitest run tests/unit tests/integration    # 5501 / 205 files
+cd Client && npm run test:coverage                          # 5524 / 212 files, writes coverage/coverage-summary.json
+node -e "const s=require('./Client/coverage/coverage-summary.json').total; console.log(s.statements.pct, s.lines.pct, s.functions.pct, s.branches.pct)"
+cd Client && bash scripts/coverage-floor.sh                 # coverage-floor: ok statements 93.99% (floor 70%)
+```
+
+The B0 figure (5257 / 192) was unit + integration, so the first command is the
+comparable one. The coverage percentages are the first ever recorded for the
+client; the floor (`Client/coverage-floor.json`, 70.0) sits 24 points below the
+measured value, which is what B7-1's ratchet (PRD open question 9) starts from.
+`vitest.config.ts` excludes `src/**/*.d.ts`, `src/main.ts`,
+`src/pages/MainPage.ts` and `src/lib/noise-suppression.ts` from the
+denominator; the numbers above are with those exclusions in place.
+
+### Lint and static gates
+
+```bash
+cd Client && npx oxlint src/     # "Found 547 warnings and 0 errors", exit 0
+cd Client && npx knip            # no output, exit 0
+```
+
+oxlint rose from 471 to 547 warnings since B0 with the same
+`Client/.oxlintrc.json` (suspicious and perf categories at `warn`). Nothing
+gates the count. The knip row in the register (C-05, "four configuration
+hints") is stale: `knip.json` produces no hints today.
+
+### Import cycles
+
+```bash
+cd Client && npx --yes madge --circular --extensions ts --ts-config tsconfig.json src
+```
+
+22 circular dependencies across 166 files. `--ts-config` is required: without
+it madge drops every `@lib/*`, `@stores/*`, `@components/*`, `@pages/*` edge
+and undercounts. The register's C-11 row says "four production import cycles";
+that figure had no tool behind it and is superseded by this measurement. The
+cycles fall into four families: `stores/auth.store.ts` → `lib/livekitSession.ts`
+→ (`audioElements`, `livekitE2EE`, `livekitDiagnostics`, `roomEventHandlers`)
+→ back into the stores; `message-list/attachments.ts` → `media.ts` →
+`content-parser.ts` → (`custom-emoji`, `embeds`, `mentions`,
+`channel-navigation` → `SidebarDmHelpers` → `DmSidebar`); `auth.store.ts` →
+`notifications.ts` → `avatar.ts` → `attachments.ts`; and four
+component-to-subcomponent back-edges (`ChannelSidebar`/`drag-reorder`,
+`MessageList`/`renderers`/`reactions`, `SettingsOverlay`/`AccountTab`,
+`SettingsOverlay`/`LogsTab`) plus `logger.ts` ↔ `preferences.ts`. No tool in
+this repo gates import cycles; madge was run as a one-off measurement and is
+not added to `package.json` or CI here (B7-1 decides the gate).
+
+### Playwright
+
+```bash
+cd Client && npx playwright test --list | tail -1
+cd Client && npx playwright test --list --config playwright.config.prod.ts | tail -1
+cd Client && npx playwright test --list --config playwright.config.native.ts | tail -1
+cd Client && npx playwright test --list --config playwright.config.fullstack.ts | tail -1
+cd Client && npx playwright test --list --config playwright.config.admin.ts | tail -1
+```
+
+Counts are listed, not run: the E2E suites need a server and, for `native`, a
+desktop build, neither of which this container has. CI runs them on every PR.
+B0's "293 passed" was one run of the default config at that time.
+
+### Mutation
+
+```bash
+cd Client && npm run test:mutate:dry
+```
+
+The dry run instruments 76 of 734 files (`src/lib/**`, `src/stores/**`) into
+12 822 mutants and completes its initial test run (5412 tests, 2 m 48 s, two
+runner processes). The mutation score itself is not measured here: the full run
+is B7-8's deliverable and its CI placement is PRD open question 5. C-16's
+67.04 % remains the last recorded score and remains stale.
+
+### Lifecycle sites
+
+```bash
+cd Client && grep -rl 'new AbortController' src --include=*.ts | grep -v '\.test\.ts' | wc -l            # 45
+cd Client && grep -rlE 'new AbortController|AbortSignal' src --include=*.ts | grep -v '\.test\.ts' | wc -l  # 68
+cd Client && for p in 'setTimeout(' 'setInterval(' 'clearTimeout(' 'clearInterval(' 'addEventListener(' 'removeEventListener('; do printf '%s %s\n' "$p" "$(grep -rF "$p" src --include=*.ts | grep -v '\.test\.ts' | wc -l)"; done
+# setTimeout( 69, setInterval( 7, clearTimeout( 67, clearInterval( 7, addEventListener( 392, removeEventListener( 28
+cd Client && grep -rl 'lib/disposable\|/disposable"' src --include=*.ts | grep -v '\.test\.ts' | grep -v 'lib/disposable.ts' | wc -l   # 4
+```
+
+76 timer-creation sites, 74 explicit clears; 392 listener registrations against
+28 explicit removals (the rest rely on `AbortSignal`); `lib/disposable.ts` has
+four consumers. `Client/tests/setup.ts` still has no `afterEach` and asserts no
+leaks. These are B7-11's starting numbers.
+
+### Native seam
+
+```bash
+git grep -l "@tauri-apps" -- 'Client/src/**' | wc -l                                   # 21
+grep -rc '#\[tauri::command' Client/src-tauri/src | awk -F: '{s+=$2} END {print s}'   # 33 (34 before Task 3)
+sed -n '/generate_handler!\[/,/\]/p' Client/src-tauri/src/lib.rs | grep -c '::'       # 31 (32 before Task 3)
+cd Client && npx vitest run tests/unit/platform-contracts-counts.test.ts               # 3 passed
+```
+
+`docs/architecture/platform-contracts.md` now carries the corrected inventory
+(Task 2): the native-proxy sites are `lib/httpProxy.ts` and
+`lib/livekitUrlResolver.ts`, `lib/pendingMessages.ts` joins the secret-storage
+cluster, `store_cert_fingerprint` and `ptt_get_key` never existed, and
+`get_cert_fingerprint` is the one registered handler without a production
+caller (kept, PRD open question 11).
+
+### Rust
+
+```bash
+cd Client/src-tauri && cargo fmt --check && cargo clippy --all-targets && cargo test   # 152 passed
+```
+
+Run after deleting `probe_credential_store` (Task 3); the deletion also removed
+the now-unused `Backend` import from `credentials.rs`.
+
+### Startup and memory
+
+**Amended 2026-09-20 (owner decision): startup and memory measured on a real desktop.**
+
+Measured on a Windows 11 developer desktop with `cd Client && npm run tauri dev`
+(Vite dev server, not a production build): time-to-connect-page was **598 ms**,
+navigation start to the connect form's first paint, read from the WebView2
+devtools Performance timeline. Largest contentful paint landed in the same frame
+(0.60 s), so the connect form is what paints first and no splash precedes it.
+The WebView held **380 MB** RSS across its six processes after 60 s idle on the
+connect page; `owncord-client.exe` itself, a seventh process, held 42 MB. One
+correction to the method above: `tauri dev` runs `cargo run
+--no-default-features`, and the devtools entry point is the `open_devtools`
+command behind the `devtools` cargo feature, so `npm run tauri dev -- --features
+devtools` is required — without it F12, Ctrl+Shift+I and the in-app DevTools
+button all fail silently. Roadmap entry gate item 3 ("desktop behavior, bundle,
+startup, memory, and test baselines are recorded") is therefore satisfied; every
+half is recorded above.
+
+## What this changes for later milestones
+
+- **B7-1** ratchets from 547 oxlint warnings (not 471), 0 knip hints, 22 import
+  cycles (not four) and a 93.99 % statement coverage against a 70 % floor.
+- **B7-7** budgets against the gzip column above; the `index` chunk already grew
+  9 kB gzip since B0, which is the kind of drift a budget exists to catch.
+- **B7-8** owns the mutation score; the dry run proves the harness runs.
+- **B7-11** starts from 45 ad-hoc `AbortController` owners and 392/28
+  listener add/remove sites.
+- **HP-7** cannot cite a startup or memory baseline until someone runs the
+  method above on a real desktop and appends the numbers to this file.
+
+## B7-7 bundle-budget baseline (2026-09-20)
+
+**Amended 2026-09-20 (owner decision): the gzip tool is Node
+`zlib.gzipSync` at level 9, not the `gzip -9` CLI.** Decision 10 named
+`gzip -9`; this keeps the level and format but pins the implementation —
+the CLI differs between GNU, macOS and busybox, and a gate people first
+meet in CI is a bad gate for a Windows-first desktop app. Node's zlib is
+pinned by the repo's own Node ^26 policy and runs identically everywhere,
+so `bundle-budget.mjs` needs no `optional()` probe. Both figures for the
+same pre-fix `livekitSession` chunk, recorded once as a bridge to the
+gzip-CLI column above: CLI `gzip -9 -c` 1,358,542 B, Node zlib-9
+1,344,534 B — the spread is well inside the budget headroom.
+
+Measured at `dev` `4c45d26a` (B7-7 base) with
+`cd Client && npm run build:budget` — the scratch `--manifest` build whose
+`dist-budget/.vite/manifest.json` names every chunk, so the startup payload
+is the entry's **static closure** (entry file + static imports + linked
+CSS), not a fixed file list:
+
+| Measure                       | Before (barrel import)              | After (deep import, B7-7) | Budget          |
+| ----------------------------- | ----------------------------------- | ------------------------- | --------------- |
+| Startup closure (zlib-9)      | 87,982 B                            | 87,974 B                  | 90,000 B        |
+| `livekitSession` (zlib-9)     | 1,344,534 B (CLI gzip-9: 1,358,542) | 20,192 B                  | 800,000 B       |
+| `livekitSession` minified     | 2,003,591 B                         | 78,194 B                  | —               |
+| `livekit` (zlib-9)            | 132,225 B                           | 132,225 B                 | 135,000 B, lazy |
+| `MainPage` (zlib-9)           | 56,853 B                            | 56,855 B                  | 60,000 B        |
+| `AGFzbQ` embedded-Wasm marker | present in `livekitSession`         | absent everywhere         | forbidden       |
+
+The before/after gap is the RNNoise barrel fix (C-07): the barrel re-exported
+`createRNNWasmModuleSync`, whose module embeds ~1.9 MB of WASM as base64, and
+the package has no `sideEffects` field so it shipped in `livekitSession`
+though nothing called it. The deep import keeps the same async factory and the
+same runtime `locateFile`/fetch paths — only the import specifier changed.
+
+The startup closure's ~2 kB headroom under the 90 kB ceiling is deliberate
+per the ratchet rule (decision 9): thresholds move only with a decomposition
+milestone, and B7-9 sets the real ceiling from measurement. The
+`livekitSession` budget is the owner's own decision-10 post-decomposition
+figure (800 kB) adopted now — 1,400 kB would pass the very barrel regression
+this milestone fixes (1,358,542 B CLI gzip-9), and the no-embedded-WASM
+marker assertion catches that regression exactly rather than by size.
+
+"Runtime" in the milestone name is bundle-size-only: startup time and memory
+have a defined method above and are measured on a real desktop; no
+runtime-timing gate is added in CI.
+
+## B7-11 long-session baseline (Task 0 and Task 3, 2026-09-22)
+
+This section is B7-11's PR 11a (instruments, no production file changed) evidence
+append: the recount at the 11a base, the ownership classification, the guard
+baseline, and the soak calibration. It is an evidence append, not a status row.
+
+### Task 0 recount at the pre-rebase 11a base (`27d3d47d`, from `dev` `e5eb4b19`)
+
+The plan's Verify rows re-derive unchanged at the 11a base:
+
+- `addEventListener(` 409 calls: 288 with `signal`, 28 `once: true`, 93 with
+  neither, in 31 files. `removeEventListener(` 29.
+- Timers: `setTimeout(` 69 (17 discarded handles), `setInterval(` 7 (all cleared
+  in their own file), `clearTimeout(` 68, `clearInterval(` 7.
+- `new AbortController` 55 constructions in 45 files. `AbortController` or
+  `AbortSignal` named in 71 files.
+- Lifecycle primitives: 2 (`lib/disposable.ts`, `lib/sessionScope.ts`).
+  `Disposable` is imported by 3 files, `SessionScope` by 2.
+- Suite: 274 files, 6 124 passed + 140 expected fail; statements coverage
+  94.33 % (16 937 / 17 955). Startup closure 85 678 / 91 000 B, `MainPage`
+  57 263 / 60 000 B. (Verify row 11's statement count is unchanged; the row's
+  row 6/7/8 numbers are the ones above.)
+
+### Ownership classification (the R1/R3/R4 allowlists)
+
+`tests/unit/lifecycle-ownership.test.ts` pins exact, shrink-only allowlists at
+the base:
+
+- **R1** (long-lived-target listeners without `signal`/`once`): 22 sites — 16
+  app-lifetime singletons (module-load preference/storage/visibility listeners,
+  the `main.ts` bootstrap singletons, `safe-render`'s global handlers) and 6
+  per-mount sites paired with a hand-written `removeEventListener`
+  (`MemberList`/`MessageInput` outside-click, `deviceManager` devicechange,
+  `GlobalKeybinds`, `OverlayManagers`).
+- **R3** (discarded `setTimeout` handles): 17 sites, all self-bounded (a
+  button-label or error-class reset on a node the caller owns: `AdvancedTab`
+  ×5, `LogsTab` ×4, `content-parser` ×2, and one each in `MemberList`, `Toast`,
+  `channel-sidebar/context-menu`, `volume-menu`, `lib/context-menu`,
+  `LoginForm`).
+- **R4** (`new AbortController` outside the two primitives): 53 sites — 8
+  cancellation tokens with a named owner (`api.ts` ×3, `profiles.ts`,
+  `roomEventHandlers.ts`, `SearchOverlay.ts`, `ConnectionDiagnosticsPanel.ts`,
+  `ChannelController.ts`), 5 per-render children, and 40 component/overlay
+  lifetimes. 11b moves the lifetimes and children onto `Disposable`, leaving
+  the 8 tokens.
+- **R2** (intervals): 0 sites fail — every `setInterval` keeps its handle and
+  clears it in its own file.
+
+Informational counts printed by the test: 93 bare listeners in 31 files,
+`requestAnimationFrame` 16 / `cancelAnimationFrame` 6, 3 observer files
+(`MessageList`, `VideoGrid`, `media-visibility`), and 3 native `listen(` sites
+under `src/platform/desktop/`.
+
+### Unit lifecycle guard baseline
+
+`tests/helpers/lifecycle.ts` records every non-`once` `window`/`document`
+registration and releases each when its signal aborts, so a component that was
+never destroyed stays red even though every listener it carries has a signal
+(the OC-0335 class). At the base, **14 files** leak and are listed in
+`tests/lifecycle-guard-baseline.json`; 11b adds each file's missing teardown and
+empties the list. The plan's row 10 counted 20 files with a throwaway probe that
+did not release signal-owned listeners, and it also counted jsdom's own
+`requestAnimationFrame` timer (jsdom implements rAF on an internal
+`setInterval`); the real guard excludes both. Full suite with the guard on: 276
+files, 6 139 passed + 140 expected fail.
+
+### Soak calibration
+
+Command: `cd Client && OWNCORD_SOAK_CYCLES=20 OWNCORD_E2E_LIVEKIT_BINARY=tests/e2e/.bin/livekit-server npm run test:e2e:fullstack -- long-session`,
+Linux x86_64 Chromium, ~2.3 minutes for the 20-cycle test (the whole
+`client-fullstack` suite is 6.0 minutes, inside the config's 20-minute
+`globalTimeout`, so no `playwright.config.fullstack.ts` change was needed).
+
+**Pre-rebase history.** Every run below up to "At the rebased head" was made
+before the branch was rebased from base `9f2d92eb` onto `b252d0ea`. The commits
+those runs cite (`03570460`, `7eaa1570`, `fa8c72a3`, `80f1dcbb`, `e02ef7ec`,
+`0c343204`, `c9a2204f`) are pre-rebase SHAs that the branch history no longer
+contains. They are kept as history. The rebase brought in production changes on
+the soak's per-cycle path (`VoiceAudioTab.ts`, `roomLifecycle.ts`,
+`livekitSession.ts`, `deviceManager.ts`) and a `userAgent` override in
+`playwright.config.fullstack.ts`. The at-head evidence is the "At the rebased
+head" runs.
+
+**Bars and why they are phase-grouped.** The plan's cycle logs out and back in
+every 10 cycles and samples every 5, so the raw sample series alternates between
+the settled mid-session state and the torn-down post-logout state. A single
+least-squares slope over that would read the reset, not the app, and give the
+mid-session sample no weight (review finding `soak-mid-session-blind`). The bars
+therefore group samples like-for-like by their phase in the 10-cycle login
+generation (`cycle % 10`): the 5/15/25 series is one mid-session line, the
+10/20 series the post-logout line. A metric passes only when every series' slope
+is within its ceiling; `documents` and `intervals` must be exactly flat in every
+series; heap uses the same per-series last ≤ first × 1.10 with a 25 KB/cycle
+slope. Slopes are regressed on the cycle number, so the "per cycle" label is
+literal (review finding `slope-units`).
+
+**Ceilings.** `nodes` and `listeners` carry the known logout-path leak (below),
+so rather than leaving them at the plan's 0.05 they are ratcheted a small margin
+above their measured per-cycle slopes: listeners 0.15/cycle and nodes 2/cycle
+(measured 0.1 and 1.6, run-to-run spread 0). Any growth past that fails the PR
+soak; 11c's Task 12 fixes the leak and removes the ceilings, returning both to
+0.05.
+
+**Five 20-cycle calibration runs** on the uncommitted working tree that became
+pre-rebase `7eaa1570` (on top of `03570460`), under the earlier 0.5/8 ceilings. Their
+numbers are the committed phase-grouped evaluation's output (the ceilings do not
+change what is measured). All five passed; every count metric was identical
+across them (run-to-run spread 0 on all counts):
+
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
+| --- | -------------------------- | ------------------------------ | ---------------- | ---------- |
+| 1   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 464      |
+| 2   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 788      |
+| 3   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 391      |
+| 4   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 560      |
+| 5   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 12 431     |
+
+`documents` 1, `intervals` 1, `timeouts` 1, and sockets/peerConnections/tracks/
+audioContexts 0 in every run, all flat. The **LiveKit `error reading from signal
+stream … WS closed unexpectedly`** console line did **not** appear in any of the
+five runs: it is intermittent, emitted when the every-5th-cycle application
+reconnect drops the socket LiveKit's signaling connection rides on, and it is
+expected because that step deliberately severs the transport. It has been seen
+with close code 1006 and, in a later run, 1000; the pattern accepts
+either code. It is on
+the named expected-line list (with `[ws] ws_send failed {error: WS is not open}`)
+so a run that does see it still passes, while any other `console.error` fails.
+
+**The known leak.** Over 40 cycles with post-reset sampling, the post-logout
+series grows monotonically while the mid-session series is flat:
+
+| Cycle (phase)     | nodes                     | listeners             |
+| ----------------- | ------------------------- | --------------------- |
+| 5 / 15 / 25 / 35  | 3453                      | 211                   |
+| 10 / 20 / 30 / 40 | 2102 → 2118 → 2134 → 2150 | 192 → 193 → 194 → 195 |
+
+That is about one listener and 1.6 nodes per logout/login. The soak (and the
+ratchet ceilings) are the finding's evidence; 11c writes the regression test and
+fixes it.
+
+Two measurement fixes the calibration needed, both in the probe: quiesce drains
+one second before sampling (leaving a voice room and closing a socket finish on
+microtasks/timers after their synchronous call returns), and `AbortController`s
+are counted by `!signal.aborted` rather than reachability (the media probe keeps
+every peer, track and socket it sees, so "reachable" never falls — the plan's
+own trap).
+
+**Runs at the 0.15/2 ceilings** (pre-rebase `7eaa1570` plus the working-tree change that
+sets these ceilings; nothing else differs):
+
+- **Planted control, failed as intended, but on nodes only.** A throwaway
+  `window.addEventListener("resize", () => void section)` in the Account tab's
+  mount (added on every settings visit, so every cycle) failed the soak on the
+  nodes bar (`phase 5: 6087→6207`, 12/cycle against the 2/cycle ceiling). The
+  **listeners bar stayed green** (phase 5 `217→217`, worst slope 0.1): the samples
+  were c0 191, c5 217, c10 193, c15 217, c20 194. The plant grows listeners
+  within a login generation (c5 is +6 over the clean 211), but the soak's
+  re-login goes through `login()` in `tests/e2e/fullstack/fixtures.ts`, which
+  calls `page.goto("/")`. That is a full navigation, so every 10-cycle generation
+  starts on a fresh page and the plant's listeners are dropped. The phase-grouped
+  bars compare c5 against c15, both 5 cycles into a fresh page, so a leak that
+  only lives within one page cannot move them. Only growth that outlives the
+  navigation is visible (see the owner decision below). The plant was then
+  removed; no production file is changed in 11a.
+- **Clean 20-cycle soak, passed.** nodes 3489 → 3453 (−3.6), listeners 192 → 193
+  (0.1), AbortControllers 20, heap slope 11 762; documents, intervals and timeouts
+  1, and sockets/peerConnections/tracks/audioContexts 0, all flat. These match
+  the five calibration runs.
+
+**Trial: a within-page series** (pre-rebase `fa8c72a3` plus a working-tree change, later
+committed as `80f1dcbb`, that added a cycle-9 sample and regressed each page's
+cycle-5/9 pair for nodes and listeners; ceilings still 0.15/2). The clean run
+failed, so the trial was reverted (below).
+
+- **Planted control, failed on both bars.** The same Account-tab resize plant
+  failed listeners (`page 0: 217→261; page 1: 217→261`, 11/cycle) and nodes
+  (`page 0: 6087→8728; page 1: 6207→8952`, plus `phase 5` and `phase 9`). The
+  plant was then removed; no production file is changed in 11a.
+- **Clean 20-cycle soak, failed.** With no plant, the within-page series grow
+  on every page: listeners `211→251` (10/cycle) and nodes `3489→4398` and
+  `3453→4362` (about 227/cycle). The samples were:
+
+  | Cycle | nodes | listeners | AbortControllers | timeouts |
+  | ----- | ----- | --------- | ---------------- | -------- |
+  | 0     | 2072  | 190       | 20               | 2        |
+  | 5     | 3489  | 211       | 39               | 1        |
+  | 9     | 4398  | 251       | 55               | 1        |
+  | 10    | 2102  | 192       | 20               | 1        |
+  | 15    | 3453  | 211       | 39               | 1        |
+  | 19    | 4362  | 251       | 55               | 1        |
+  | 20    | 2118  | 193       | 20               | 1        |
+
+  The growth is identical on both pages, and AbortControllers (not
+  page-regressed) rise the same way (39 → 55). So the client does accumulate per
+  cycle within one page, and the navigation at every re-login had been hiding
+  it from the phase series. The ceilings were not loosened. The cycle-5 sample
+  follows the every-5th-cycle reconnect and the cycle-9 sample does not, so
+  some of the rise may be state the reconnect resets rather than a leak.
+
+**Owner decision: deviation from plan Task 3.** Task 3 asks to observe the
+listener bar go red on the PR soak. In 11a it does not: the cycle-9 sample and
+the within-page series were reverted, and the soak keeps the phase-only
+evaluation with ceilings listeners 0.15 and nodes 2 per cycle. The planted
+control is caught by the nodes bar only. A listener leak that accumulates within
+one page lifetime and is released by the re-login navigation is **not covered**
+by the 11a soak; by owner decision that coverage is deferred to B7-11c.
+
+**Open question for 11c.** Between c5 and c9 of one page the clean client grew
+listeners about 211 → 251 (10/cycle), nodes about 227/cycle and live
+AbortControllers 39 → 55, identically on both pages. The comparison is not
+like-for-like (c5 follows a reconnect, c9 does not), so whether this is a leak
+or state the reconnect resets is unanswered. 11c answers it before it adds
+within-page coverage.
+
+**Clean runs after the revert** (pre-rebase `80f1dcbb` plus the working-tree change
+that reverts its spec and probe to the phase-only evaluation, with only comments
+differing from `fa8c72a3`). **Needs a decision: neither run passed.** Neither
+failure comes from the bars, and nothing was tuned.
+
+1. **Timed out** at the 13-minute test timeout in a cycle's DM step. The
+   `upp-message-btn` in Bob's profile popup kept going unstable and detaching,
+   so `click()` never landed. The bars were never evaluated.
+2. **Every bar passed** (nodes 3489 → 3453, −3.6; listeners 192 → 193, 0.1;
+   AbortControllers 20; heap slope 11 771; documents, intervals and timeouts 1;
+   sockets/peerConnections/tracks/audioContexts 0), matching the calibration
+   runs. The run still failed the console check: LiveKit logged
+   `error reading from signal stream … WS closed unexpectedly with code 1000`,
+   and the expected-line pattern accepts only code 1006.
+
+Both failures came from the soak's interaction and console steps, not from the
+leak bars.
+
+**Stabilised soak, two consecutive clean runs** (pre-rebase `e02ef7ec`, which retries the
+DM step as one unit and accepts close code 1000; bars and ceilings unchanged).
+The DM step closes any popup, clicks Bob's row, waits for the popup's `.open`
+card and clicks its Message button, retrying the whole sequence until the DM
+header shows. No step uses a fixed sleep. The LiveKit
+expected-line pattern accepts close code 1000 as well as 1006. Both runs passed:
+
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
+| --- | -------------------------- | ------------------------------ | ---------------- | ---------- |
+| 1   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 10 828     |
+| 2   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 10 896     |
+
+`documents`, `intervals` and `timeouts` were 1 and sockets/peerConnections/
+tracks/audioContexts 0 in both runs, all flat, matching the calibration runs.
+
+**Idempotent DM retry**, run once on pre-rebase `0c343204` and passed with the same bars
+(nodes −3.6, listeners 0.1, AbortControllers 20, heap slope 11 350). That
+version waited for the DM view outside the retry, so a Message click that
+silently did nothing was not retried.
+
+**DM open fully inside the retry** (pre-rebase `c9a2204f`). Each attempt returns at once if the DM header is
+already visible. So a retry after Message has switched the sidebar to DMs no
+longer waits for Bob's member row, which that switch removes. Otherwise the
+attempt opens the popup, clicks Message and waits up to the config's default
+15 s for the DM header, so a click that silently does nothing is retried. No
+step uses a fixed sleep. Two consecutive clean 20-cycle runs both passed:
+
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
+| --- | -------------------------- | ------------------------------ | ---------------- | ---------- |
+| 1   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 11 735     |
+| 2   | 3489 → 3453 (−3.6)         | 192 → 193 (0.1)                | 20               | 10 962     |
+
+**At the rebased head** (`0823d20f`, on base `b252d0ea`; spec and ceilings
+unchanged). The server and client were rebuilt at this commit. Two consecutive
+clean 20-cycle runs both passed, with every count bar as before and the nodes
+count one node higher at both ends:
+
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | AbortControllers | heap slope |
+| --- | -------------------------- | ------------------------------ | ---------------- | ---------- |
+| 1   | 3490 → 3454 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 250      |
+| 2   | 3490 → 3454 (−3.6)         | 192 → 193 (0.1)                | 20               | 9 984      |
+
+`documents`, `intervals` and `timeouts` were 1 and sockets/peerConnections/
+tracks/audioContexts 0 in both runs, all flat.
+
+**Owner decision: the five-run at-head calibration moves to B7-11c.** The
+intent asks for the 20-cycle soak to be run at least five times locally to show
+it is not flaky. The five recorded calibration runs are pre-rebase and predate
+the DM-step and console-pattern changes. For 11a the at-head evidence is the two
+consecutive passing runs at the rebased head, and 11c re-runs the five at its
+head.
+
+## B7-11b ownership move (Tasks 5–11, 2026-09-22)
+
+PR 11b's evidence append: a behaviour-preserving move of the ad-hoc owners onto
+`Disposable` (and, where a signal already owns the work, `setOwnedTimeout` in
+`lib/dom.ts`). Base is `dev` `e73b9223` (11a merged). It is an evidence append,
+not a status row.
+
+### Allowlists and counts, base → 11b head
+
+| Measure                                         | Base | 11b | Floor reached                                                                                                                                   |
+| ----------------------------------------------- | ---: | --: | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1 long-lived-target listeners allowlisted      |   22 |  17 | 16 app-lifetime + 1 per-mount (`deviceManager`, see below)                                                                                      |
+| R3 discarded `setTimeout` handles allowlisted   |   17 |   3 | self-bounded only: `Toast` fallback removal, `content-parser` ×2                                                                                |
+| R4 `new AbortController` outside the primitives |   53 |   8 | the 8 named cancellation tokens                                                                                                                 |
+| Files constructing their own `AbortController`  |   45 |   8 | the 2 primitives + `api.ts`, `profiles.ts`, `roomEventHandlers.ts`, `SearchOverlay.ts`, `ConnectionDiagnosticsPanel.ts`, `ChannelController.ts` |
+| Files importing `Disposable`                    |    3 |  42 |                                                                                                                                                 |
+| `tests/lifecycle-guard-baseline.json` files     |   16 |   1 | `media-visibility.test.ts` (singleton under test, no release)                                                                                   |
+
+Inventory script (the plan's appendix) at base →
+`{ add: 409, signal: 288, once: 28, bare: 93, remove: 29, setTimeout: 69, discarded: 17, setInterval: 7, ac: 55, acFiles: 45, bareFiles: 31 }`;
+at the 11b head →
+`{ add: 410, signal: 293, once: 29, bare: 88, remove: 23, setTimeout: 56, discarded: 3, setInterval: 7, ac: 10, acFiles: 8, bareFiles: 28 }`.
+`setTimeout` falls by 13 because 14 discarded sites now go through
+`setOwnedTimeout`, which holds the one kept `setTimeout`.
+
+### Sites that stay, and why
+
+- **`deviceManager.ts:102` devicechange (R1, per-mount).** It keeps its
+  hand-paired start/stop. `device-manager.test.ts:136-156` pins the bare
+  `addEventListener("devicechange", fn)` call shape and the explicit
+  `removeEventListener` in three assertions. A signal-owned listener would need
+  those assertions edited, and 11b edits no assertion. By owner decision the
+  plan's never-edit-an-assertion rule outranks this one move, so Task 5's "R1's
+  allowlist is down to 16" is met at 17, and 17 is the 11b floor. **Task 12
+  (11c) candidate.**
+- **`ChannelController.ts` `channelAbort` (R4, token).** It is not forked from the
+  `SessionScope`. A fork would also cancel in-flight channel loads at logout,
+  where today they run to a guarded no-op. That is behaviour, so it stays a token
+  owned by the next channel switch. **Task 12 candidate.**
+- **`content-parser.ts` copy-button resets (R3).** `renderMessageContent` takes no
+  owner, so nothing can clear them. They only relabel a button the code block
+  owns.
+- **`media-visibility.test.ts` (guard baseline).** `ensureVisibilityListener` is a
+  once-guarded app-lifetime singleton and the unit under test. It has no release.
+
+### Guard baseline teardown
+
+Every other listed file now releases what it opened (a `destroy()`, a dismissal,
+or the page signal's abort). Six files (`e2eeWorker`, `voice-audio-tab`, which
+are the two Linux voice 1b leaks, `updater`, `voice.store`, `channel-mutes` and
+`settings-overlay`'s re-import test) leaked because `vi.resetModules()`
+re-evaluated the modules that install an app-lifetime window listener at load
+(`logger`, `channel-mutes`, the message-list renderers). They now re-import
+against the already-loaded instances of those modules. No assertion changed. The
+one removed `expect` line in `tests/**` is the inventory's per-mount count,
+tightened from 6 to 1.
+
+### Gates
+
+- Unit suite: 282 files, 6 195 passed + 147 expected fail (base 6 191 + 147; the
+  4 new cases are `setOwnedTimeout`'s). `typecheck`, `typecheck:build`,
+  `typecheck:e2e`, `lint` and `knip` are clean. The mutation shard union is exact
+  (104 files; no new `src/` file).
+- Bundle: startup closure 85 654 → 85 918 B (budget 91 000); `MainPage`
+  57 289 → 57 164 B (budget 60 000).
+- **PR soak, 20 cycles**, Linux Chromium, one run each at base `e73b9223` and at
+  the 11b head:
+
+| Metric (warm → final, slope) | Base               | 11b head           |
+| ---------------------------- | ------------------ | ------------------ |
+| nodes                        | 3490 → 3454 (−3.6) | 3490 → 3454 (−3.6) |
+| listeners                    | 192 → 193 (0.1)    | 192 → 193 (0.1)    |
+| abortControllers             | 20 → 20 (0)        | 22 → 22 (0)        |
+| heap slope (B/cycle)         | 10 320             | 10 840             |
+
+`documents`, `intervals` and `timeouts` were 1 and sockets, peerConnections,
+tracks and audioContexts 0 in both runs, all flat. Nothing grows faster. The
+one level change is live `AbortController`s, +2 and flat. `GlobalKeybinds` and
+`OverlayManagers` each own their `document` keydown listener through a
+page-lifetime `Disposable` now, where before they hand-paired a
+`removeEventListener`. The heap slope is inside 11a's recorded run-to-run range
+(9 250–12 431).
+
+## B7-11c long-session evidence (Tasks 12–16, 2026-09-23)
+
+PR 11c's evidence append: what the soak found and the fixes, the within-page
+coverage, the at-head calibration, and the recorded long run, based on `dev`
+after 11b merged. Each run is identified by the subject of the commit it ran
+on: the runs were taken on pre-rebase heads of this branch, and its later
+rebases changed no measured code. It is an evidence append, not a status row.
+
+### Findings and fixes (Task 12)
+
+11a's open question was whether the within-page growth it measured (listeners
+about 211 → 251, nodes about 227 per cycle, between cycles 5 and 9 of one page)
+was a leak or state a reconnect resets. It was real, and the reconnect did not
+reset it: sampling every cycle showed a straight line, about +216 nodes, +10
+listeners and +4 live `AbortController`s per cycle. Bisecting the cycle's steps
+and tracing retainers in heap snapshots split it into:
+
+| Source                                                                                                                                                                                                                    | Per cycle                                  | Resolution                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| livekit-client 2.22's `Room` constructor registers a `navigator.mediaDevices` `devicechange` listener whose closure still captures the Room, so its FinalizationRegistry cleanup never runs: every voice join kept a Room | +1 listener, +4 live controllers, a Room   | **Fixed** (`roomLifecycle.ts`): `Room.cleanupRegistry = false`, so the Room registers `handleDeviceChange`, which `disconnect()` removes from a Room that connected and `releaseRoom()` from one discarded before it connected. Regression tests in `roomLifecycle.test.ts` and `joinOrchestration.test.ts` |
+| The audio pipeline closed its `AudioContext` in the same task that told the VAD worklet to stop, so the processor never returned `false` and Chromium kept the node, and the closed context, for the page's life          | +1 closed `AudioContext` and worklet node  | **Fixed** (`audioPipeline.ts`, `public/vad-worklet.js`): the worklet acknowledges `stop` from its last `process()`, and teardown closes on that (1 s fallback). Tests in both suites                                                                                                                        |
+| The Account tab's session list gained a row per logout/login (11a's cross-login growth, about one listener and 1.6 nodes per logout)                                                                                      | +1 row per login                           | **Fixed** (`api.ts`): the logout revocation is sent outside the ending session's scope. Regression test in `api-session.test.ts`                                                                                                                                                                            |
+| The Logs tab renders the logger's ring buffer and stayed mounted, since the settings tour ended on it                                                                                                                     | about +72 elements until the 500-entry cap | Bounded, not a leak. The tour ends on Account                                                                                                                                                                                                                                                               |
+| V8 keeps console arguments alive while an inspector is attached (livekit logs its E2EE worker, which reaches the Room), and the media probe keeps every peer, socket and track                                            | +7 listeners and more, observer-only       | Measurement: the probe discards console entries and prunes the media probe's dead entries before GC; the media probe forgets a terminated worker                                                                                                                                                            |
+| The reconnect banner's text node, created by a page's first reconnect                                                                                                                                                     | +1 once per page                           | Bounded; the within-page pair samples after it                                                                                                                                                                                                                                                              |
+| The first login in a fresh browser has no saved profile, so the Account tab's retention notice is absent on page 0 only                                                                                                   | +10 nodes, page 0 only                     | Not a leak; the run relogs once before cycle 0                                                                                                                                                                                                                                                              |
+
+After the fixes every count is exactly flat within a page (listeners 163, live
+`AbortController`s 24 at every cycle). Within-page heap still rises as a page
+ages; a heap-snapshot diff between cycles 4 and 9 is about 1 MB of V8 compiled
+code, so heap is compared only at equal page age. `PENDING_METRICS` is empty:
+every count holds the plan's 0.05 per cycle in every series.
+
+The two Task 12 candidates 11b recorded stay as they are, and neither leaks:
+the `deviceManager` `devicechange` pair was kept by firstmate decision during
+11c (B1): hand-paired per-mount site; moving it would require editing
+`device-manager.test.ts` assertions. That is a deviation from the plan's
+acceptance criterion: R1 ends at 17 (16 app-lifetime singletons + this pair),
+not the plan's floor of 16. `ChannelController`'s channel token was kept by
+firstmate decision during 11c (C1): a session fork would change when channel
+loads are cancelled at logout, and MainPage teardown already aborts it.
+
+One "misbehave" finding is outside lifecycle scope and recorded open as
+**OC-0452**: in 2 of the 3 recorded long runs (three times at "test(b7-11): re-submit the soak's edit
+until it lands", once at "test(b7-11): state the soak run's measured seconds per
+cycle") a receive-side E2EE key race at voice join logged
+`InvalidKey: Decryption failed`, which the client reports as a possibly
+unsecured call. The soak's console check stays strict.
+
+### Within-page coverage and the planted control (Task 3, owed by 11a)
+
+Every tenth cycle ends with a logout, which navigates, so each page is ten
+cycles. Every fifth cycle starts with the application reconnect. Samples are
+taken at cycle 0, every five cycles, and at cycles 6 and 9 of every page; the 6/9
+pair is like-for-like within a page (both after that page's reconnect, neither
+directly after one). The planted unowned `window` `resize` listener in the
+Account tab's mount fails the listener bar at "test(b7-11): start the soak's
+reconnect cycles with the reconnect"
+(`page 0: 176→182; page 1: 176→182`, 2 per cycle) and the node bar. Timers are
+read twice a second apart and the lower read counts, so a timer the app is
+running at that instant is not read as accumulation.
+
+### At-head calibration: five 20-cycle runs
+
+At "test(b7-11): start the soak's reconnect cycles with the reconnect".
+
+Linux x86_64 Chromium, `OWNCORD_SOAK_CYCLES=20`, about 2.5 minutes each. All
+five passed; every count was identical across them:
+
+| Run | nodes warm → final (slope) | listeners warm → final (slope) | live AbortControllers | heap slope (B/cycle) |
+| --- | -------------------------- | ------------------------------ | --------------------- | -------------------: |
+| 1   | 2693 → 2693 (0)            | 163 → 163 (0)                  | 24                    |               10 484 |
+| 2   | 2693 → 2693 (0)            | 163 → 163 (0)                  | 24                    |                8 534 |
+| 3   | 2693 → 2693 (0)            | 163 → 163 (0)                  | 24                    |                4 591 |
+| 4   | 2693 → 2693 (0)            | 163 → 163 (0)                  | 24                    |               11 399 |
+| 5   | 2693 → 2693 (0)            | 163 → 163 (0)                  | 24                    |                7 132 |
+
+`documents`, `intervals` and `timeouts` were 1 and sockets, peer connections,
+tracks and `AudioContext`s 0 in every run. Two earlier five-run attempts (at
+"test(b7-11): ratchet the client coverage floor to 93" and "chore(b7-11): record
+the soak's E2EE over-warning at voice join (OC-0451)") each failed one run on something that was not a
+leak, and each changed the soak, not the bars: a two-point heap series at cycle 9 (V8 tier-up;
+heap now compares only at the reset phases) and one extra node read seconds
+after a reconnect (the reconnect now starts its cycle).
+
+### The recorded long run (Tasks 13 and 15)
+
+Command: `cd Client && OWNCORD_E2E_LIVEKIT_BINARY=tests/e2e/.bin/livekit-server npm run test:e2e:soak`
+(`playwright.config.soak.ts`: 200 cycles, then 30 idle-connected minutes sampled
+every 5 minutes; one attempt, no trace). Commit "test(b7-11): state the soak run's measured seconds per cycle", Linux x86_64
+Chromium on a 16-core developer machine. Wall time 52.5 minutes: 200 cycles in
+22.3 minutes (6.7 s per cycle including sampling), then the idle phase. 300
+cycles plus the idle phase would not fit the 60 minutes the run is sized to, so
+it runs the plan's floor of 200.
+
+| Metric                 | Cycle 0 | Warm (c5) |    c199 | c200 (post-logout) | Worst slope, all series | Bar                                          |
+| ---------------------- | ------: | --------: | ------: | -----------------: | ----------------------: | -------------------------------------------- |
+| documents              |       1 |         1 |       1 |                  1 |                       0 | exactly flat                                 |
+| nodes                  |     789 |      1355 |    1355 |                796 |                       0 | ≤ 0.05/cycle                                 |
+| listeners              |     187 |       160 |     160 |                188 |                       0 | ≤ 0.05/cycle                                 |
+| live AbortControllers  |      22 |        24 |      24 |                 22 |                       0 | ≤ 0.05/cycle                                 |
+| intervals              |       1 |         1 |       1 |                  1 |                       0 | exactly flat                                 |
+| timeouts               |       3 |         1 |       1 |                  1 |                       0 | ≤ 0.05/cycle                                 |
+| sockets, peers, tracks |       0 |         0 |       0 |                  0 |                       0 | exactly 0 outside a call                     |
+| open AudioContexts     |       0 |         0 |       0 |                  0 |                       0 | ≤ warm                                       |
+| heap used (B)          | 4155672 |   7643624 | 8295952 |            4364592 |             395 B/cycle | ≤ 1.10 × and ≤ 25 KB/cycle at equal page age |
+
+Idle phase (after c200, logged in, no activity): the samples at 5 and 10
+minutes precede the app's own auto-idle status change (ten quiet minutes) and are
+recorded only; the four from 15 to 30 minutes held every count exactly (nodes 796,
+listeners 188, live controllers 22, intervals 1, timeouts 1, and 0 sockets, peers,
+tracks and contexts), and heap moved about 5 B per minute (4 330 328 → 4 330 416; the bar is a slope of at most 100 KB per minute).
+
+**Every lifecycle bar passed.** The run as a whole reported a failure, by design:
+the soak's strict console check caught one more occurrence of OC-0452 (the E2EE
+over-warning at voice join, about seven seconds after the cycle-180 sample).
+OC-0452 was fixed after this run by a follow-up PR (branch
+`fm/e2ee-join-false-warning`): a remote sender's `InvalidKey` now degrades only
+once it outlasts a short grace window, and the soak excuses livekit-client's own
+bare log line while still failing on the app's degraded-call error.
+
+The absolute node and listener levels are lower here than in the 20-cycle runs
+(1355 against 2693 nodes, 160 against 163 listeners), and equally flat. The long
+run's config turns Playwright's trace recorder off, and that recorder adds its
+own listeners and nodes to the page (`__playwright_snapshotter_*` listeners show in
+the live-listener dump); the bars compare within a run.
+
+Earlier long runs on this branch, each at a head since superseded:
+
+- "test(b7-11): let a local fullstack run choose its preview port": every count flat for 200 cycles except one extra pending timeout in
+  one of 80 samples (timers are now read twice), and one node in the idle phase
+  from the auto-idle change (idle samples now start after it); its 926 MB failure
+  trace overran teardown (the long run now records none).
+- "test(b7-11): read soak timers twice and wait out the idle transition": stopped at cycle 10 when the composer's 200 ms double-send guard
+  swallowed the cycle's edit (the soak now presses Enter until the edit lands).
+- "test(b7-11): re-submit the soak's edit until it lands": every lifecycle bar passed (heap 480 B/cycle, idle counts equal);
+  the console check caught OC-0452 three times.
+
+### Native soak (Task 14)
+
+`tests/e2e/native/long-session.spec.ts` soaks the Windows desktop shell over
+WebView2 in the `native-core` project of `client-native`: 10 cycles over the
+real Rust transport (message send, edit and reaction, the settings tour,
+overlays, a voice join and leave, a reconnect through the fixture's TCP gate at
+cycles 5 and 10), held to the same bars on the within-page pair. It is one user,
+so decoded two-party media stays the fullstack soak's, and timers are the
+fullstack soak's too (the persistent page loads before an init script could).
+The job's measured added time is recorded in the PR.
+
+### Ratchet and gates (Task 16)
+
+- Coverage: 94.3 % statements (284 files, 6 225 passed + 148 expected fail), so
+  `Client/coverage-floor.json` moves 92.0 → 93.0 (decision 9).
+- Bundle: startup closure 85 970 / 91 000 B; `MainPage` 57 165 / 60 000 B.
+- Inventory: R1 17 (16 app-lifetime + the `deviceManager` pair, against the
+  plan's 16; see Task 12), R3 3, R4 8, all unchanged from 11b; the guard baseline is 1 file.
+- `typecheck`, `typecheck:build`, `typecheck:e2e`, `lint`, `knip`, the mutation
+  shard union (106 files), `actionlint` and `zizmor` on the nightly workflow,
+  `check:docs` and `check:hygiene` are clean.
+
+## B7 voice-join budget baseline (2026-09-23)
+
+Closes item 2 of the
+[B7-18 reconciliation](b7-shared-client-platform-desktop-parity.prd.md#b7-18-reconciliation-2026-09-23):
+the exit gate asked for a client voice-join budget, and no B7 milestone had
+recorded one.
+
+**Measure.** Wall clock from clicking a voice channel to the widget reading
+"Voice Connected" with the peer's remote audio decoding and advancing. This is
+the bar `expectDecodedMedia` sets, so a connected badge or RTP bytes alone do
+not count. It covers the `voice_join` → `voice_token` round trip, the lazy
+LiveKit chunk on the first join, the room connect, the E2EE key exchange and
+the first decoded audio. `Client/tests/e2e/fullstack/voice-join-budget.spec.ts`
+has bob join first and publish. Alice then joins seven times, polled every
+50 ms, and every sample is attached to the report. Each join is the first on a
+fresh application socket: after the first, alice disconnects, the fixture
+drops and restores her socket (as `media.spec.ts`'s reconnect test does), and
+she joins again. The spec runs in the `client-fullstack` job
+(`npm run test:e2e:fullstack`) on every PR that runs that job, so it needs no
+job of its own.
+
+Why a fresh socket: the server handles one socket's messages in order, and
+`handleVoiceLeave` ends with a best-effort LiveKit `RemoveParticipant` call
+(`Server/ws/voice_leave.go`). A first draft rejoined on the same socket
+straight after leaving. About one rejoin in six waited 3–6 s, because the
+`voice_join` queued behind a `RemoveParticipant` that LiveKit answered slowly
+or with `twirp error unavailable` (CI run
+[35850743720](https://github.com/J3vb/OwnCord/actions/runs/35850743720),
+confirmed in the server log locally). That measures a server leave, not a
+client join. A user who joins after opening the app, or after a reconnect,
+does not wait behind it.
+
+**Baseline.** Measured at `dev` `56055d86` on `ubuntu-latest` in the
+`client-fullstack` job's setup (headless Chromium, real server, LiveKit
+1.13.5, E2EE on). The CI calibration run is
+[35852239736](https://github.com/J3vb/OwnCord/actions/runs/35852239736),
+`--repeat-each=4`, 28 samples:
+
+| Run | Samples (ms)                       | Median (ms) |
+| --- | ---------------------------------- | ----------- |
+| 1   | 533, 337, 487, 420, 434, 462, 534  | 462         |
+| 2   | 607, 677, 680, 598, 670, 2406, 434 | 670         |
+| 3   | 615, 667, 692, 312, 329, 421, 726  | 615         |
+| 4   | 680, 634, 657, 443, 330, 678, 425  | 634         |
+
+The first join of each run, which also loads the lazy LiveKit chunk, took
+533–680 ms. 27 of the 28 samples fell between 312 and 726 ms. Locally, three
+runs had medians of 358–452 ms.
+
+**Budget.** The median of seven joins must be 1,500 ms or less
+(`Client/voice-join-budget.json`). That is the worst run median, 670 ms, × 2.2,
+rounded up to the next 500 ms. The headroom is wider than the bundle budgets'
+10 % because runner timing noise is wider. The median of seven fails only when
+four joins are over budget, so one slow join (one in 28 here) does not trip it,
+while a regression that slows every join does. Change the budget only with a
+new CI measurement recorded here.

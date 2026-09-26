@@ -27,7 +27,7 @@ func seedMentionFixture(t *testing.T, database *db.DB) {
 }
 
 func TestCreateMessageWithMentions_StoresRowsAndFlag(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -60,7 +60,7 @@ func TestCreateMessageWithMentions_StoresRowsAndFlag(t *testing.T) {
 // TestCreateMessageWithMentions_CapsStoredRows locks the storage-side backstop:
 // a caller cannot widen the fan-out past storageMentionCap.
 func TestCreateMessageWithMentions_CapsStoredRows(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -87,7 +87,7 @@ func TestCreateMessageWithMentions_CapsStoredRows(t *testing.T) {
 }
 
 func TestReplaceMessageMentions(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -116,7 +116,7 @@ func TestReplaceMessageMentions(t *testing.T) {
 }
 
 func TestIncrementMentionCounts_AndReadStateClear(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -153,7 +153,7 @@ func TestIncrementMentionCounts_AndReadStateClear(t *testing.T) {
 // it landed in — the batching must not drop or double-count a row at the
 // boundary.
 func TestIncrementMentionCounts_BatchesAcrossChunkBoundary(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 	if _, err := database.CreateChannel(ctx, "everyone-chan", "text", "", "", 0); err != nil {
 		t.Fatalf("CreateChannel: %v", err)
@@ -193,7 +193,7 @@ func TestIncrementMentionCounts_BatchesAcrossChunkBoundary(t *testing.T) {
 }
 
 func TestIncrementMentionCounts_EmptyIsNoop(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	if err := database.IncrementMentionCounts(context.Background(), 1, 1, nil); err != nil {
 		t.Fatalf("IncrementMentionCounts(nil): %v", err)
@@ -208,7 +208,7 @@ func TestIncrementMentionCounts_EmptyIsNoop(t *testing.T) {
 // badge is stuck at 1 forever on a channel with zero unread, since nothing
 // else ever zeroes it again.
 func TestIncrementMentionCounts_NoOpWhenReaderAlreadyPastMessage(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -236,7 +236,7 @@ func TestIncrementMentionCounts_NoOpWhenReaderAlreadyPastMessage(t *testing.T) {
 // the guard must not turn every increment into a no-op — a reader who has NOT
 // read up to msgID still gets the badge.
 func TestIncrementMentionCounts_StillAppliesWhenReaderIsBehind(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -272,7 +272,7 @@ func TestIncrementMentionCounts_StillAppliesWhenReaderIsBehind(t *testing.T) {
 // never made -- wiping out an unrelated, genuine mention badge sitting on the
 // same read_states row.
 func TestDecrementMentionCounts_SkipsNeverCountedBlockedMention(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -314,7 +314,7 @@ func TestDecrementMentionCounts_SkipsNeverCountedBlockedMention(t *testing.T) {
 }
 
 func TestGetUserIDsByUsernames_CaseInsensitive(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 
 	got, err := database.GetUserIDsByUsernames(context.Background(), []string{"BOB", "carol", "ghost"})
@@ -341,7 +341,7 @@ func TestGetUserIDsByUsernames_CaseInsensitive(t *testing.T) {
 // 'é' here and desync the key from the caller's (equally ASCII-folded)
 // lookup spelling, making the row permanently unreachable by name.
 func TestGetUserIDsByUsernames_NonASCIIUppercase(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -366,7 +366,7 @@ func TestGetUserIDsByUsernames_NonASCIIUppercase(t *testing.T) {
 // unresolvable as an @mention target even though they can log in and post
 // again.
 func TestGetUserIDsByUsernames_LapsedTempBan_StillResolves(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -387,7 +387,7 @@ func TestGetUserIDsByUsernames_LapsedTempBan_StillResolves(t *testing.T) {
 // TestGetUserIDsByUsernames_ActiveTempBan_Excluded is the complement: a temp
 // ban that has NOT yet lapsed must still exclude the user, same as today.
 func TestGetUserIDsByUsernames_ActiveTempBan_Excluded(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -414,7 +414,7 @@ func TestGetUserIDsByUsernames_ActiveTempBan_Excluded(t *testing.T) {
 // the fan-out. The expiry here is deliberately later on the *same UTC day* so
 // only the separator, not the date, can decide the comparison.
 func TestGetUserIDsByUsernames_ActiveTempBan_SQLiteTimeFormat_Excluded(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -444,7 +444,7 @@ func TestGetUserIDsByUsernames_ActiveTempBan_SQLiteTimeFormat_Excluded(t *testin
 // TestGetUserIDsByUsernames_PermanentBan_Excluded locks the nil-expiry case:
 // a permanent ban (ban_expires NULL) must keep excluding the user forever.
 func TestGetUserIDsByUsernames_PermanentBan_Excluded(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -464,7 +464,7 @@ func TestGetUserIDsByUsernames_PermanentBan_Excluded(t *testing.T) {
 // TestListMentionTargetsByRoles_LapsedTempBan_Included covers the same
 // expiry-aware fix on the @everyone/@here fan-out path.
 func TestListMentionTargetsByRoles_LapsedTempBan_Included(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -489,7 +489,7 @@ func TestListMentionTargetsByRoles_LapsedTempBan_Included(t *testing.T) {
 }
 
 func TestListMentionTargetsByRoles(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -517,7 +517,7 @@ func TestListMentionTargetsByRoles(t *testing.T) {
 }
 
 func TestListBlockersOf(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -534,7 +534,7 @@ func TestListBlockersOf(t *testing.T) {
 }
 
 func TestGetChannelOverrides(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -553,7 +553,7 @@ func TestGetChannelOverrides(t *testing.T) {
 // TestMessagesForAPI_CarryMentions locks that REST history hands back the
 // resolved mention list and the everyone flag.
 func TestMessagesForAPI_CarryMentions(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
@@ -576,7 +576,7 @@ func TestMessagesForAPI_CarryMentions(t *testing.T) {
 }
 
 func TestSearchMessages_CarryMentions(t *testing.T) {
-	database := newMigratedTestDB(t)
+	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 

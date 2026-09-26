@@ -17,7 +17,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/ws"
-	"github.com/go-chi/chi/v5"
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
 )
@@ -141,7 +140,7 @@ func TestGenerateToken_ValidToken(t *testing.T) {
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
 
-	token, err := client.GenerateToken(123, "testuser", 456, "join-token-1", true, true, true, true)
+	token, err := client.GenerateToken(123, "testuser", 456, "join-token-1", true, true, true)
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
@@ -176,7 +175,7 @@ func TestGenerateToken_DifferentPermissions(t *testing.T) {
 	}
 
 	// Subscribe-only token (canPublish=false).
-	token, err := client.GenerateToken(1, "listener", 10, "join-token-2", false, true, false, false)
+	token, err := client.GenerateToken(1, "listener", 10, "join-token-2", false, false, false)
 	if err != nil {
 		t.Fatalf("GenerateToken(subscribe-only): %v", err)
 	}
@@ -209,7 +208,7 @@ func TestGenerateToken_VideoAndScreenShareGrantedWithoutSpeakVoice(t *testing.T)
 	}
 
 	// canPublish=false (SPEAK_VOICE denied), canVideo=true, canScreenShare=true.
-	token, err := client.GenerateToken(1, "presenter", 10, "join-token-3", false, true, true, true)
+	token, err := client.GenerateToken(1, "presenter", 10, "join-token-3", false, true, true)
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
@@ -1383,36 +1382,5 @@ func TestWebhookHandler_SignedRequestRejections(t *testing.T) {
 				t.Errorf("expected 401, got %d", rec.Code)
 			}
 		})
-	}
-}
-
-// ---------------------------------------------------------------------------
-// livekit_webhook.go – MountWebhookRoute tests
-// ---------------------------------------------------------------------------
-
-func TestMountWebhookRoute_RegistersRoute(t *testing.T) {
-	t.Parallel()
-
-	hub := ws.NewHubForTest()
-	handler := ws.MountWebhookRoute(hub, "key", "secret")
-
-	if handler == nil {
-		t.Fatal("MountWebhookRoute returned nil handler")
-	}
-
-	r := chi.NewRouter()
-	r.Post("/livekit/webhook", handler)
-
-	req := httptest.NewRequest(http.MethodPost, "/livekit/webhook",
-		strings.NewReader(`{}`))
-	rec := httptest.NewRecorder()
-
-	r.ServeHTTP(rec, req)
-
-	if rec.Code == http.StatusNotFound {
-		t.Error("expected route to be registered, got 404")
-	}
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 from mounted webhook handler, got %d", rec.Code)
 	}
 }

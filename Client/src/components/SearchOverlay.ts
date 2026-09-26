@@ -4,10 +4,13 @@
  * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { SearchResultItem } from "@lib/types";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { parseTimestamp } from "@components/message-list/formatting";
+import { messagingText } from "../i18n/messaging";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,8 +41,8 @@ const MIN_SEARCH_INTERVAL_MS = 500;
 // ---------------------------------------------------------------------------
 
 export function createSearchOverlay(options: SearchOverlayOptions): MountableComponent {
-  const ac = new AbortController();
-  const signal = ac.signal;
+  const disposable = new Disposable();
+  const signal = disposable.signal;
 
   let root: HTMLDivElement | null = null;
   let resultsDiv: HTMLDivElement;
@@ -54,7 +57,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   // oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
   function formatTimestamp(ts: string): string {
     try {
-      const d = new Date(ts);
+      const d = parseTimestamp(ts);
       return (
         d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
         " " +
@@ -75,6 +78,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
 
       const item = createElement("div", {
         class: isActive ? "search-result-item search-result-item--active" : "search-result-item",
+        id: `search-result-option-${i}`,
         role: "option",
         "aria-selected": isActive ? "true" : "false",
         "data-testid": `search-result-${i}`,
@@ -96,6 +100,16 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       appendChildren(item, header, content);
 
       resultsDiv.appendChild(item);
+    }
+
+    // Re-point aria-activedescendant on every render — arrow keys, filtering
+    // and a fresh result set all funnel through here, so a screen reader tracks
+    // the highlighted option while the input keeps DOM focus, and it can never
+    // go stale. An empty set clears it (pointing at a missing id is worse).
+    if (results.length > 0) {
+      input.setAttribute("aria-activedescendant", `search-result-option-${activeIndex}`);
+    } else {
+      input.removeAttribute("aria-activedescendant");
     }
   }
 
@@ -122,7 +136,9 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     if (query.length < MIN_QUERY_LEN) {
       results = [];
       renderResults();
-      setStatus(query.length > 0 ? `Type at least ${MIN_QUERY_LEN} characters` : "");
+      setStatus(
+        query.length > 0 ? messagingText("search.minChars", { count: String(MIN_QUERY_LEN) }) : "",
+      );
       return;
     }
 
@@ -132,7 +148,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     }
     searchAbort = new AbortController();
 
-    setStatus("Searching...");
+    setStatus(messagingText("search.searching"));
 
     options
       .onSearch(query, options.currentChannelId, searchAbort.signal)
@@ -140,11 +156,11 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
         results = items;
         activeIndex = 0;
         renderResults();
-        setStatus(items.length === 0 ? "No results found" : "");
+        setStatus(items.length === 0 ? messagingText("search.empty") : "");
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setStatus("Search failed");
+        setStatus(messagingText("search.failed"));
       });
   }
 
@@ -224,18 +240,27 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     input = createElement("input", {
       class: "search-overlay-input",
       type: "text",
-      placeholder: "Search messages...",
-      "aria-label": "Search messages",
+      placeholder: messagingText("search.placeholder"),
+      "aria-label": messagingText("search.label"),
+      // Combobox over the results listbox: the input keeps DOM focus while
+      // aria-activedescendant (set in renderResults) names the highlighted row,
+      // matching the quick switcher's pattern.
+      role: "combobox",
+      "aria-expanded": "true",
+      "aria-autocomplete": "list",
+      "aria-controls": "search-overlay-results",
       "data-testid": "search-overlay-input",
     });
 
     statusEl = createElement("div", {
       class: "search-overlay-status",
+      role: "status",
       style: "display:none",
     });
 
     resultsDiv = createElement("div", {
       class: "search-overlay-results",
+      id: "search-overlay-results",
       role: "listbox",
       "data-testid": "search-overlay-results",
     });
@@ -261,7 +286,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       searchAbort.abort();
       searchAbort = null;
     }
-    ac.abort();
+    disposable.destroy();
     root?.remove();
     root = null;
   }

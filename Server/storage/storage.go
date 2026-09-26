@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ErrIO marks a Save failure caused by the server's own filesystem — disk
@@ -113,6 +114,16 @@ func (s *Storage) resolvedPath(name string) (string, error) {
 // and scripts) before writing the full content to disk.
 // The caller is responsible for generating a UUID filename.
 func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
+	if s.maxSizeMB < 0 {
+		// A negative limit must never reach io.LimitReader: it treats a
+		// negative N as "read nothing", so io.Copy would report a clean
+		// (0, nil) and the over-size probe below (gated on
+		// written == maxBytes) would never fire for a negative maxBytes —
+		// silently discarding every uploaded byte while claiming success.
+		// Config validation should never hand this function a negative
+		// value, but fail loudly here rather than trust that invariant.
+		return 0, fmt.Errorf("invalid storage max size: %d MB", s.maxSizeMB)
+	}
 	if err := sanitizeFilename(uuid); err != nil {
 		return 0, err
 	}
@@ -124,7 +135,7 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 	// Read the first 8 bytes to check magic bytes without consuming the stream.
 	var header [8]byte
 	n, err := io.ReadFull(r, header[:])
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return 0, fmt.Errorf("reading file header: %w", err)
 	}
 	headerSlice := header[:n]
@@ -189,6 +200,39 @@ func (s *Storage) Delete(uuid string) error {
 		return err
 	}
 	return os.Remove(dst)
+}
+
+// Entry is one regular file in the storage directory, as List reports it.
+type Entry struct {
+	Name    string
+	ModTime time.Time
+}
+
+// List returns every regular file in the storage directory with its
+// modification time, in name order. Subdirectories and anything that is
+// not a plain file are skipped. It is the storage side of the reconciliation
+// pass (docs/architecture/data-lifecycle.md, O3 A3): a file no database row
+// names is stranded, and only a directory listing can find it.
+func (s *Storage) List() ([]Entry, error) {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return nil, fmt.Errorf("listing storage dir: %w: %w", ErrIO, err)
+	}
+	out := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue // removed between the listing and the stat
+			}
+			return nil, fmt.Errorf("stat %s: %w: %w", e.Name(), ErrIO, err)
+		}
+		out = append(out, Entry{Name: e.Name(), ModTime: info.ModTime()})
+	}
+	return out, nil
 }
 
 // File is what serving a stored blob requires of an opened file. Seeking is

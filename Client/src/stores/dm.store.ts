@@ -5,6 +5,7 @@
 
 import { createStore } from "@lib/store";
 import { channelsStore, removeChannel } from "@stores/channels.store";
+import { connectText } from "../i18n/connect";
 
 export interface DmUser {
   readonly id: number;
@@ -146,6 +147,7 @@ export function updateDmLastMessage(
     if (updated === undefined) return prev;
     const rest = prev.channels.filter((c) => c.channelId !== channelId);
     const isReplay = updated.lastMessageId !== null && messageId <= updated.lastMessageId;
+    if (isReplay) return prev;
     return {
       channels: [
         {
@@ -153,8 +155,8 @@ export function updateDmLastMessage(
           lastMessageId: messageId,
           lastMessage: content,
           lastMessageAt: timestamp,
-          unreadCount: isReplay ? updated.unreadCount : updated.unreadCount + 1,
-          mentionCount: isMention && !isReplay ? updated.mentionCount + 1 : updated.mentionCount,
+          unreadCount: updated.unreadCount + 1,
+          mentionCount: isMention ? updated.mentionCount + 1 : updated.mentionCount,
         },
         ...rest,
       ],
@@ -223,12 +225,12 @@ export function dmDisplayName(dm: DmChannel): string {
     return dm.recipient.username !== ""
       ? dm.recipient.username
       : dm.isGroup
-        ? "Empty group"
-        : "Unknown user";
+        ? connectText("dm.emptyGroup")
+        : connectText("dm.unknownUser");
   }
   if (!dm.isGroup) return names[0]!;
   if (names.length <= 3) return names.join(", ");
-  return `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
+  return `${names.slice(0, 3).join(", ")} ${connectText("dm.more", { count: names.length - 3 })}`;
 }
 
 /**

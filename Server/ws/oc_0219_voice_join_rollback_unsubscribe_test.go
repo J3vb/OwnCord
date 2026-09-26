@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -49,8 +48,7 @@ func TestVoiceJoin_GetChannelVoiceStatesError_UnsubscribesVoiceTopic(t *testing.
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
-	h.SetLiveKit(lk)
+	h := newTestHubWith(t, HubOptions{DB: database, LiveKit: lk})
 
 	send := make(chan []byte, 8)
 	c := NewTestClient(h, uid, send)

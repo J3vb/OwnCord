@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"payload\":{\"encrypted_key\":\"ZW5jcnlwdGVkLXJvb20ta2V5LWZpeHR1cmU=\",\"iv\":\"aXYtZml4dHVyZS0xMg==\",\"target_user_id\":1},\"type\":\"voice_e2ee_offer\"}")

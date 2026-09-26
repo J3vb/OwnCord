@@ -20,6 +20,8 @@ import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
+import { resetSafetyStore, safetyStore, setActiveTimeout } from "../../src/features/safety/store";
+import { expectConsole } from "../helpers/console";
 
 function resetStores(): void {
   messagesStore.setState(() => ({
@@ -620,6 +622,34 @@ describe("MessageList", () => {
     expect(container.querySelector(".messages-container")).toBeNull();
   });
 
+  it("disables every reaction control inline while timed out, and re-enables on lift (B9-15)", () => {
+    setMessages(1, [makeMessage({ id: 1, reactions: [{ emoji: "🔥", count: 2, me: false }] })]);
+    msgList.mount(container);
+    const controls = (): HTMLElement[] => [
+      ...container.querySelectorAll<HTMLElement>(
+        "[data-testid='message-1'] .reaction-chip, [data-testid='msg-react-1']",
+      ),
+    ];
+    expect(controls()).toHaveLength(3);
+
+    setActiveTimeout(new Date(Date.now() + 60_000).toISOString());
+    safetyStore.flush();
+    for (const el of controls()) {
+      expect(el.getAttribute("aria-disabled")).toBe("true");
+      expect(el.title).toMatch(/^You can't add reactions until /);
+      el.click();
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    }
+    expect(options.onReactionClick).not.toHaveBeenCalled();
+
+    setActiveTimeout(null);
+    safetyStore.flush();
+    for (const el of controls()) expect(el.hasAttribute("aria-disabled")).toBe(false);
+    controls()[0]!.click();
+    expect(options.onReactionClick).toHaveBeenCalledWith(1, "🔥");
+    resetSafetyStore();
+  });
+
   it("does not re-render when a DIFFERENT channel's messages update", () => {
     setMessages(1, [makeMessage({ id: 1, content: "Mine" })]);
     msgList.mount(container);
@@ -755,6 +785,12 @@ describe("MessageList", () => {
         setMessages(1, [makeMessage({ id: 1, content: `v${i}` })]);
         messagesStore.flush();
       }
+      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
 
       const rowDuringBurst = container.querySelector("[data-testid='message-1']");
       expect(rowDuringBurst).not.toBeNull();
@@ -807,6 +843,7 @@ describe("MessageList", () => {
         // or touching the DOM, so the target (far outside the last rendered
         // window) never actually renders.
         const result = msgList.scrollToMessage(90);
+        expectConsole("error", /\[MessageList\] renderWindow REBUILD called >30 times in 2s/);
 
         // The rebuild did not happen — the row is not in the DOM — so this must
         // be reported as a failed jump (matching the "false if the message is

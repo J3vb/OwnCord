@@ -1,8 +1,12 @@
 package config_test
 
 import (
+	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/config"
@@ -427,6 +431,9 @@ func TestIsDefaultVoiceCredentials(t *testing.T) {
 		{"only secret default", "custom-key", config.DefaultLiveKitAPISecret, true},
 		{"neither default", "custom-key", "custom-secret-long-enough-32chars", false},
 		{"both empty", "", "", false},
+		{"env.example placeholders", "change-me-api-key", "change-me-api-secret-must-be-at-least-32-characters", true},
+		{"only key placeholder", "change-me-api-key", "custom-secret-long-enough-32chars", true},
+		{"only secret placeholder", "custom-key", "change-me-api-secret-must-be-at-least-32-characters", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -481,6 +488,32 @@ func TestLoadUploadBoundaryValues(t *testing.T) {
 	}
 }
 
+// TestLoadUploadNegativeMaxSizeMB pins OC-0425: upload.max_size_mb was never
+// range-checked, so a negative value reached storage.Save's
+// int64(maxSizeMB)*1024*1024 unchanged. There, a negative N makes
+// io.LimitReader read nothing, so io.Copy writes 0 bytes with a nil error and
+// the over-size probe (gated on written == maxBytes) never fires for a
+// negative maxBytes — the upload is silently discarded and acknowledged as a
+// 0-byte success. A negative value must instead fall back to the compiled
+// default, the same way every other bounded key does.
+func TestLoadUploadNegativeMaxSizeMB(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := "upload:\n  max_size_mb: -1\n"
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+		t.Fatalf("failed to write yaml: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Upload.MaxSizeMB != 100 {
+		t.Errorf("Upload.MaxSizeMB = %d, want 100 (the compiled default)", cfg.Upload.MaxSizeMB)
+	}
+}
+
 func TestLoadEnvOverride_EventPersistence(t *testing.T) {
 	// event_persistence is the only multi-word config section; cutting the
 	// env key at the first underscore produces the dead path
@@ -509,7 +542,7 @@ func TestLoadEnvOverride_EventPersistence(t *testing.T) {
 func TestLoadRestartMode(t *testing.T) {
 	// server.restart_mode drives the self-restart handoff (see main.go's
 	// resolveRestartMode): default "auto", overridable via YAML and via
-	// OWNCORD_SERVER_RESTART_MODE — the env case pins envKeyToKoanf's
+	// OWNCORD_SERVER_RESTART_MODE — the env case pins envKeyToPath's
 	// server_restart_mode -> server.restart_mode mapping.
 	t.Run("default", func(t *testing.T) {
 		cfg, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"))
@@ -546,4 +579,332 @@ func TestLoadRestartMode(t *testing.T) {
 			t.Errorf("Server.RestartMode = %q, want %q", cfg.Server.RestartMode, "spawn")
 		}
 	})
+}
+
+// TestLoadBrowserClientHostingDisabledByDefault pins BG-01's first closure
+// clause at the configuration boundary: a fresh install hosts no browser
+// client unless the owner opts in. Load writes defaultYAML and then loads it
+// back, so this covers the shipped template too — an accidentally
+// uncommented `browser_client_enabled: true` line fails here, which a test
+// that only built defaults() in Go could not see.
+func TestLoadBrowserClientHostingDisabledByDefault(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Server.BrowserClientEnabled {
+		t.Error("server.browser_client_enabled is true on a fresh install; browser hosting must be owner opt-in (BG-01)")
+	}
+
+	written, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	for line := range strings.Lines(string(written)) {
+		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "browser_client_enabled:") {
+			t.Errorf("the shipped template sets the key live: %q — keep it commented so the compiled default wins", trimmed)
+		}
+	}
+}
+
+// TestLoadPushDisabledByDefault pins B5-4's owner gate: a fresh install
+// stores no Web Push subscriptions until the owner opts in, modelled on
+// TestLoadBrowserClientHostingDisabledByDefault.
+func TestLoadPushDisabledByDefault(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Push.Enabled {
+		t.Error("push.enabled is true on a fresh install; Web Push must be owner opt-in")
+	}
+	if cfg.Push.SubscriptionTTLDays != 90 {
+		t.Errorf("push.subscription_ttl_days = %d, want 90", cfg.Push.SubscriptionTTLDays)
+	}
+
+	written, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	for line := range strings.Lines(string(written)) {
+		if strings.TrimSpace(line) == "push:" {
+			t.Error("the shipped template sets the push: section live — keep it commented so the compiled default wins")
+		}
+	}
+}
+
+// TestLoadPushDispatchDisabledByDefault pins B5-11's own gate: dispatch is
+// off on a fresh install even independently of push.enabled (HP-5 scorecard
+// Question 6, decision 1 — an operator who enabled storage in the B5-4 era
+// must not acquire dispatch by upgrade), and the shipped template keeps both
+// new keys commented so the compiled defaults win.
+func TestLoadPushDispatchDisabledByDefault(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Push.DispatchEnabled {
+		t.Error("push.dispatch_enabled is true on a fresh install; dispatch must be its own owner opt-in")
+	}
+	if cfg.Push.Contact != "" {
+		t.Errorf("push.contact = %q, want empty by default", cfg.Push.Contact)
+	}
+
+	written, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	for line := range strings.Lines(string(written)) {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "dispatch_enabled:") || strings.HasPrefix(trimmed, "contact:") {
+			t.Errorf("the shipped template sets %q live — keep it commented so the compiled default wins", trimmed)
+		}
+	}
+}
+
+// TestLoadPushDispatchEnvOverride proves OWNCORD_PUSH_DISPATCH_ENABLED and
+// OWNCORD_PUSH_CONTACT reach config.Push — run, not read.
+func TestLoadPushDispatchEnvOverride(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("OWNCORD_PUSH_DISPATCH_ENABLED", "true")
+	t.Setenv("OWNCORD_PUSH_CONTACT", "ops@example.invalid")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if !cfg.Push.DispatchEnabled {
+		t.Error("push.dispatch_enabled = false, want true from OWNCORD_PUSH_DISPATCH_ENABLED")
+	}
+	if cfg.Push.Contact != "ops@example.invalid" {
+		t.Errorf("push.contact = %q, want the environment value", cfg.Push.Contact)
+	}
+}
+
+// ─── B5-2: the two bounded storage keys and the applyBounds seam ───────────
+
+// TestLoadStorageBoundsDefaults pins the compiled defaults through a fresh
+// Load, the way TestLoadBrowserClientHostingDisabledByDefault does: the
+// per-user quota is unlimited (decision 11 — no install changes on upgrade)
+// and the headroom floor is the 256 MiB the banner and /health always used.
+// The shipped template must keep both keys commented so those defaults win.
+func TestLoadStorageBoundsDefaults(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Upload.UserQuotaMB != 0 || cfg.Upload.UserQuotaBytes() != 0 {
+		t.Errorf("upload.user_quota_mb = %d (bytes %d), want 0 = unlimited", cfg.Upload.UserQuotaMB, cfg.Upload.UserQuotaBytes())
+	}
+	if cfg.Server.MinFreeDiskMB != 256 || cfg.Server.MinFreeDiskBytes() != 256<<20 {
+		t.Errorf("server.min_free_disk_mb = %d (bytes %d), want 256", cfg.Server.MinFreeDiskMB, cfg.Server.MinFreeDiskBytes())
+	}
+	written, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	for line := range strings.Lines(string(written)) {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "user_quota_mb:") || strings.HasPrefix(trimmed, "min_free_disk_mb:") {
+			t.Errorf("the shipped template sets a storage bound live: %q — keep it commented so the compiled default wins", trimmed)
+		}
+	}
+}
+
+// TestLoadStorageBoundsEnvOverride proves the generic env binding reaches both
+// keys — run, not read (B5-3's rule for a new key).
+func TestLoadStorageBoundsEnvOverride(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("OWNCORD_UPLOAD_USER_QUOTA_MB", "512")
+	t.Setenv("OWNCORD_SERVER_MIN_FREE_DISK_MB", "1024")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Upload.UserQuotaMB != 512 {
+		t.Errorf("upload.user_quota_mb = %d, want 512 from the environment", cfg.Upload.UserQuotaMB)
+	}
+	if cfg.Server.MinFreeDiskMB != 1024 {
+		t.Errorf("server.min_free_disk_mb = %d, want 1024 from the environment", cfg.Server.MinFreeDiskMB)
+	}
+}
+
+// TestLoadPushEnvOverride proves OWNCORD_PUSH_ENABLED and
+// OWNCORD_PUSH_SUBSCRIPTION_TTL_DAYS reach config.Push — run, not read
+// (server-configuration.md documents both; this is what verifies the claim).
+func TestLoadPushEnvOverride(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("OWNCORD_PUSH_ENABLED", "true")
+	t.Setenv("OWNCORD_PUSH_SUBSCRIPTION_TTL_DAYS", "30")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if !cfg.Push.Enabled {
+		t.Error("push.enabled = false, want true from OWNCORD_PUSH_ENABLED")
+	}
+	if cfg.Push.SubscriptionTTLDays != 30 {
+		t.Errorf("push.subscription_ttl_days = %d, want 30 from the environment", cfg.Push.SubscriptionTTLDays)
+	}
+}
+
+// TestLoadStorageBoundsAreClamped is the validation seam's contract: an
+// out-of-range value is brought into range and Load still succeeds
+// (warn-only — a bad number must not brick a working install). A negative
+// headroom falls back to the DEFAULT floor, not to 0: clamping it to 0 would
+// silently turn the floor off, which is the fail-open the floor exists to
+// prevent (an operator who wants it off writes 0). A value past
+// MaxInt64>>20 lands on that bound so the byte helper cannot overflow.
+func TestLoadStorageBoundsAreClamped(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	yaml := "server:\n  min_free_disk_mb: -5\nupload:\n  user_quota_mb: 9223372036854775807\npush:\n  subscription_ttl_days: 0\n"
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v — out-of-range values must warn and clamp, never fail", err)
+	}
+	if cfg.Server.MinFreeDiskMB != 256 || cfg.Server.MinFreeDiskBytes() == 0 {
+		t.Errorf("server.min_free_disk_mb = %d after -5, want the default 256 (a negative floor must not fail open)", cfg.Server.MinFreeDiskMB)
+	}
+	if cfg.Push.SubscriptionTTLDays != 90 {
+		t.Errorf("push.subscription_ttl_days = %d after 0 (below the minimum of 1), want the default 90", cfg.Push.SubscriptionTTLDays)
+	}
+	pushHigh := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(pushHigh, []byte("push:\n  subscription_ttl_days: 5000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if high, err := config.Load(pushHigh); err != nil || high.Push.SubscriptionTTLDays != 3650 {
+		t.Errorf("push.subscription_ttl_days after 5000 = %v, %v; want clamped to 3650", high, err)
+	}
+	explicitOff := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(explicitOff, []byte("server:\n  min_free_disk_mb: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if off, err := config.Load(explicitOff); err != nil || off.Server.MinFreeDiskMB != 0 {
+		t.Errorf("an explicit 0 must stay 0 (the operator's opt-out): got %v, err %v", off, err)
+	}
+	const maxMiB = 9223372036854775807 >> 20
+	if cfg.Upload.UserQuotaMB != maxMiB {
+		t.Errorf("upload.user_quota_mb = %d, want clamped to %d", cfg.Upload.UserQuotaMB, maxMiB)
+	}
+	if cfg.Upload.UserQuotaBytes() <= 0 {
+		t.Errorf("UserQuotaBytes() = %d after the clamp; the byte helper overflowed", cfg.Upload.UserQuotaBytes())
+	}
+}
+
+// TestLoadReachabilityReportDisabledByDefault pins B6-6's owner gate, modelled
+// on TestLoadBrowserClientHostingDisabledByDefault.
+//
+// The reachability block enumerates every address on every interface. H-8
+// already restricted the diagnostics endpoint to admins because it reveals
+// network topology; this is the owner's second switch over the most
+// topology-revealing part of it, and it is off until they ask for it.
+func TestLoadReachabilityReportDisabledByDefault(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Server.ReachabilityReportEnabled {
+		t.Error("server.reachability_report_enabled is true on a fresh install; the interface enumeration must be owner opt-in (B6-6)")
+	}
+
+	written, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	for line := range strings.Lines(string(written)) {
+		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "reachability_report_enabled:") {
+			t.Errorf("the shipped template sets the key live: %q — keep it commented so the compiled default wins", trimmed)
+		}
+	}
+}
+
+// recordingHandler collects the message text of every record emitted through
+// it, so a test can assert on what an operator would have been warned about.
+type recordingHandler struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func (h *recordingHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.messages = append(h.messages, r.Message)
+	return nil
+}
+
+func (h *recordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *recordingHandler) WithGroup(string) slog.Handler      { return h }
+
+// warned reports whether any collected message mentions substr.
+func (h *recordingHandler) warned(substr string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, m := range h.messages {
+		if strings.Contains(m, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// adminPerimeterWarning is a distinctive phrase from the empty-allowlist
+// warning. Asserting on the message rather than on the key name is what keeps
+// the test off warnOnServerConfig's neighbouring warning, which also fires for
+// this config (an emptied list is "customized") and names the same key — in an
+// attribute, so a key-name assertion would match either one and pass for the
+// wrong reason.
+const adminPerimeterWarning = "the /admin IP perimeter is disabled"
+
+// TestLoadWarnsOnEmptyAdminCIDRs pins the warning that fires when
+// server.admin_allowed_cidrs is empty.
+//
+// An empty list is legal YAML but is not the compiled default (private
+// networks), and api.AdminIPRestrict admits every address when the list is
+// empty — so an operator who empty-lists the key has switched the /admin IP
+// perimeter off with nothing to say so. The second half of the test is the
+// mirror case: the shipped default must stay silent, or the warning is noise
+// on every install and an operator learns to ignore it.
+func TestLoadWarnsOnEmptyAdminCIDRs(t *testing.T) {
+	rec := &recordingHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(rec))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	// Defaults first: nothing was configured open, so there is nothing to warn
+	// about. This is also the assertion that would catch the check being
+	// written the other way round (warning on the default instead of on empty).
+	if _, err := config.Load(filepath.Join(t.TempDir(), "config.yaml")); err != nil {
+		t.Fatalf("Load() with defaults returned error: %v", err)
+	}
+	if rec.warned(adminPerimeterWarning) {
+		t.Error("Load() warned about the /admin IP perimeter on a fresh install; the compiled default is private networks")
+	}
+
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("server:\n  admin_allowed_cidrs: []\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if len(cfg.Server.AdminAllowedCIDRs) != 0 {
+		t.Fatalf("config.yaml did not clear the allowlist: got %v", cfg.Server.AdminAllowedCIDRs)
+	}
+	if !rec.warned(adminPerimeterWarning) {
+		t.Error("Load() did not warn that an empty server.admin_allowed_cidrs disables the /admin IP perimeter")
+	}
 }

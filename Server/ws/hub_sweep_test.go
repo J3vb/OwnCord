@@ -20,11 +20,14 @@ func TestStartSweep_NeverRunsConcurrentlyWithItself(t *testing.T) {
 	release := make(chan struct{})
 
 	sweep := func() {
+		// runs first, then active: the test waits on active, so by the time
+		// it sees the sweep in flight the run is already counted — counting
+		// after would let a preemption between the two stores read runs = 0.
+		runs.Add(1)
 		cur := active.Add(1)
 		if cur > maxActive.Load() {
 			maxActive.Store(cur)
 		}
-		runs.Add(1)
 		<-release
 		active.Add(-1)
 	}
@@ -105,8 +108,9 @@ func TestUnregisterNow_ReplacedClientIsReportedAsReplaced(t *testing.T) {
 // failure on the CONNECT_VOICE check (as opposed to a genuine revocation) must
 // leave the client in voice, mirroring sweepRevokedSessions' own guard against
 // treating a transient batch-lookup error as a mass disconnect. Before the
-// fix, hasChannelPerm collapsed any GetChannelPermissions error to "denied",
-// so a read-path fault alone evicted every in-voice participant.
+// fix, the old hasChannelPerm probe (since deleted) collapsed any
+// GetChannelPermissions error to "denied", so a read-path fault alone
+// evicted every in-voice participant.
 func TestSweepStaleVoiceStates_TransientPermissionErrorDoesNotEvict(t *testing.T) {
 	ctx := context.Background()
 	database := newHarvestVoiceDB(t)
@@ -116,15 +120,15 @@ func TestSweepStaleVoiceStates_TransientPermissionErrorDoesNotEvict(t *testing.T
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
 	c.setVoiceState(chID, "tok")
 	h.clients[uid] = c
 
 	// Fault-inject exactly the permission read: harvestVoiceRoleID grants
-	// CONNECT_VOICE directly on the role, so hasChannelPermChecked must reach
-	// GetChannelPermissions (channel_overrides) before it can resolve —
-	// nobody's permissions actually changed.
+	// CONNECT_VOICE directly on the role, so the sweep's permission lookup
+	// (voiceStillAllowed) must reach GetChannelPermissions (channel_overrides)
+	// before it can resolve — nobody's permissions actually changed.
 	if _, err := database.ExecContext(ctx, `ALTER TABLE channel_overrides RENAME TO channel_overrides_offline`); err != nil {
 		t.Fatalf("rename channel_overrides: %v", err)
 	}
@@ -170,7 +174,7 @@ func TestSweepStaleVoiceStates_GhostRemovalReelectsKeyHolder(t *testing.T) {
 		t.Fatalf("JoinVoiceChannel(ghost): %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	survivor := NewTestClient(h, survivorUID, make(chan []byte, 8))
 	survivor.setVoiceState(chID, "tok-survivor")
 	h.clients[survivorUID] = survivor
@@ -225,7 +229,7 @@ func TestCleanupVoiceForChannel_ConcurrentJoinNotClobbered(t *testing.T) {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
 	h.clients[uid] = c
 	c.setVoiceState(chA, "tok-a")

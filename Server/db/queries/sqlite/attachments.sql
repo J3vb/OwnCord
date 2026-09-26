@@ -7,8 +7,11 @@ SELECT id, message_id, filename, stored_as, mime_type, size, uploaded_at, upload
 FROM attachments WHERE id = ?;
 
 -- name: GetAttachmentWithChannel :one
+-- c.nsfw is the channel's label (B5-7's read gate, UploadService.Authorize):
+-- NULL when the attachment is unlinked or its message/channel is gone, same
+-- as c.type, so both are read through the caller's nil-safe mapping.
 SELECT a.id, a.message_id, a.filename, a.stored_as, a.mime_type, a.size,
-       a.uploaded_at, a.uploader_id, m.channel_id, c.type
+       a.uploaded_at, a.uploader_id, m.channel_id, c.type, c.nsfw
 FROM attachments a
 LEFT JOIN messages m ON m.id = a.message_id
 LEFT JOIN channels c ON c.id = m.channel_id

@@ -155,6 +155,79 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("refuses a send past the server's 4000 code point limit", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "a".repeat(4001);
+
+    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+    sendBtn.click();
+
+    expect(opts.onSend).not.toHaveBeenCalled();
+    expect(opts.onEditMessage).not.toHaveBeenCalled();
+    const errEl = container.querySelector(".attachment-upload-error");
+    expect(errEl).not.toBeNull();
+    expect(errEl?.textContent).toContain("4000");
+
+    comp.destroy?.();
+  });
+
+  it("refuses an over-long edit through the same guard", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    comp.startEdit(77, "x");
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "a".repeat(4001);
+
+    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+    sendBtn.click();
+
+    expect(opts.onEditMessage).not.toHaveBeenCalled();
+    expect(opts.onSend).not.toHaveBeenCalled();
+    expect(container.querySelector(".attachment-upload-error")).not.toBeNull();
+
+    comp.destroy?.();
+  });
+
+  it("accepts content of exactly 4000 code points", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "a".repeat(4000);
+
+    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+    sendBtn.click();
+
+    expect(opts.onSend).toHaveBeenCalledTimes(1);
+
+    comp.destroy?.();
+  });
+
+  it("counts astral characters as one code point, not two UTF-16 units", () => {
+    // 2001 astral code points is 4002 UTF-16 units: the server's
+    // utf8.RuneCountInString accepts it, a `.length` guard would wrongly refuse it.
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "\u{1F600}".repeat(2001);
+
+    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+    sendBtn.click();
+
+    expect(opts.onSend).toHaveBeenCalledTimes(1);
+
+    comp.destroy?.();
+  });
+
   it("setReplyTo shows reply bar", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
@@ -626,7 +699,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("preview bar loses 'visible' again once the error auto-dismisses with nothing else queued", async () => {
+  it("keeps the error until the user edits, then clears and hides the preview bar (A11Y-05)", async () => {
     vi.useFakeTimers();
     const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
     const opts = makeOptions({ onUploadFile });
@@ -643,7 +716,15 @@ describe("MessageInput", () => {
     const previewBar = container.querySelector(".attachment-preview-bar");
     expect(previewBar!.classList.contains("visible")).toBe(true);
 
-    await vi.advanceTimersByTimeAsync(4000);
+    // A refusal is not a 4s toast: it survives well past the old window so
+    // the user can read it.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(container.querySelector(".attachment-upload-error")).not.toBeNull();
+    expect(previewBar!.classList.contains("visible")).toBe(true);
+
+    // Editing the textarea is the user acting on it -- the line clears.
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
     expect(container.querySelector(".attachment-upload-error")).toBeNull();
     expect(previewBar!.classList.contains("visible")).toBe(false);
 
@@ -926,6 +1007,48 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  // ── Accessible names for icon-only composer controls (B9-22) ──
+
+  it("names the reply and edit close buttons (B9-22)", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    comp.setReplyTo(1, "x");
+    comp.startEdit(2, "draft");
+
+    const bars = container.querySelectorAll(".reply-bar");
+    const replyClose = (bars[0] as HTMLElement).querySelector(".reply-close")!;
+    const editClose = (bars[1] as HTMLElement).querySelector(".reply-close")!;
+    expect(replyClose.getAttribute("aria-label")).toBe("Cancel reply");
+    expect(editClose.getAttribute("aria-label")).toBe("Cancel editing");
+
+    comp.destroy?.();
+  });
+
+  it("names the attachment remove button with its filename (B9-22)", async () => {
+    const onUploadFile = vi.fn(async () => ({
+      id: "srv-1",
+      url: "http://x/f.png",
+      filename: "f.png",
+    }));
+    const comp = createMessageInput(makeOptions({ onUploadFile }));
+    comp.mount(container);
+
+    const file = new File(["x"], "photo.png", { type: "image/png" });
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    await vi.waitFor(() => {
+      const btn = container.querySelector('[data-testid="attachment-remove"]');
+      expect(btn).not.toBeNull();
+      expect(btn!.getAttribute("aria-label")).toBe("Remove attachment photo.png");
+    });
+
+    comp.destroy?.();
+  });
+
   // ── Textarea auto-resize ──
 
   it("textarea height adjusts on input (auto-resize)", () => {
@@ -1057,6 +1180,27 @@ describe("MessageInput", () => {
     // GIF picker should be present
     expect(container.querySelector(".gif-picker")).not.toBeNull();
 
+    comp.destroy?.();
+  });
+
+  it("a mousedown inside a modal dialog keeps the GIF picker open", async () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    (container.querySelector(".gif-btn") as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 0));
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay visible";
+    const choice = document.createElement("button");
+    overlay.appendChild(choice);
+    document.body.appendChild(overlay);
+    choice.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(container.querySelector(".gif-picker")).not.toBeNull();
+
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(container.querySelector(".gif-picker")).toBeNull();
+
+    overlay.remove();
     comp.destroy?.();
   });
 

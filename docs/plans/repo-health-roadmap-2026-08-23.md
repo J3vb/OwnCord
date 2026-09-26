@@ -3,7 +3,43 @@
 **Prepared:** 2026-08-23  
 **Audited head:** 5cc0888964e26276d1aca145e83270a2c1b9febd on dev  
 **Release target:** first public beta after the 1.2.0-alpha line  
-**Status:** proposed implementation sequence; no phase is complete yet  
+**Status:** B0–B4 complete (HP-0 accepted 2026-08-25, HP-1 accepted
+2026-08-27, HP-2 accepted 2026-08-29, HP-3 accepted 2026-08-30, HP-4 accepted
+2026-09-03; B3 exit signed 2026-09-01 — the "B3 exit" section of
+[hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)). **B4 executed
+2026-09-01 to 2026-09-03**, all twelve steps merged to `dev`; its **exit was
+accepted 2026-09-03** — the "B4 exit" section of
+[hp-4-scorecard-2026-09-02.md](hp-4-scorecard-2026-09-02.md), measured at
+`dev` `1133a26` and accepted at `0a14554`. **B5 is built and its exit was
+accepted by the owner 2026-09-24** at exit SHA `dev` `458301fd` (prepared in
+[#1792](https://github.com/J3vb/OwnCord/pull/1792)) — the plan's [exit-SHA
+measurement](b5-community-content-moderation-2026-09-04.md#exit-sha-measurement-2026-09-24)
+records the seven conditions and roadmap rule 2 met with the gate re-run there.
+**Audit update, 2026-09-06, at
+`dev` `61ac2b959cc4592ee5291637ac36f22acab89631`: B5 was then in progress.**
+B5-0 through B5-9, B5-11, and B5-12's initial reconciliation were merged; HP-5
+was accepted 2026-09-06; B5-10 was still being finished. _Reconciled
+2026-09-24 (see the exit status above):_ B5-0 through B5-12 are merged
+(B5-10 as [#1555](https://github.com/J3vb/OwnCord/pull/1555)) and B5's exit
+was accepted by the owner 2026-09-24. Its execution plan is
+[b5-community-content-moderation-2026-09-04.md](b5-community-content-moderation-2026-09-04.md),
+drafted 2026-09-04 at `e1781086`, which schedules **HP-5 as B5's mid-phase
+hold point** between B5-5 and B5-6 — in front of every step whose topics HP-5
+names, and behind only the work that exposes no new surface. Amended 2026-08-28 — see the `_(added 2026-08-28)_` lines
+in B3–B10 and the "Phase execution pattern" section. Amended 2026-08-29 —
+[developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md)
+is the implementation supplement for the B3, B7 and B9 structural workstreams
+(see the `_(added 2026-08-29)_` lines); it is not a phase and adds no gate.
+**Audit update, 2026-09-23, at `dev` `8df46055` (B7-18): B7 has built
+everything and HP-7 is signed, but the phase exit is open.** B7-0 through B7-17
+are merged, and the owner signed HP-7 on 2026-09-23. Three items kept the exit
+open: C-10's B7 half, the client voice-join budget, and the decision on
+`tauri-build` for PRs into `dev`. C-10's B7 half closed and the voice-join
+budget was recorded and enforced on 2026-09-23, so one remains. The
+[B7 PRD](b7-shared-client-platform-desktop-parity.prd.md#b7-18-reconciliation-2026-09-23)
+records them, and the B7 section below summarizes them.
+[README.md](README.md) is the status authority when this header and a README
+row disagree.  
 **Planning model:** quality-gated, with no calendar deadline
 
 Primary inputs:
@@ -35,6 +71,13 @@ The best route is an ordered server-first program:
 8. finish cross-client experience, accessibility, and polish;
 9. qualify one release candidate against the complete matrix.
 
+_(amended 2026-09-18, owner decision: B8 deferred to post-beta — the beta
+ships desktop-only (Windows x64/ARM64, Linux x64/ARM64); step 7 does not run
+before the beta, and step 9 qualifies desktop, server, and Docker, not
+browser/PWA/phone/tablet. Steps 6 and 8 keep their client-platform and
+accessibility scope in full. See B8's deferral block for re-entry
+conditions.)_
+
 This is deliberately not a wholesale rewrite. Existing server packages,
 desktop behavior, release asset names, updater contracts, and the shared
 client application remain stable unless a phase has evidence for a narrower
@@ -43,6 +86,9 @@ change.
 ## Current evidence snapshot
 
 This is audit evidence, not a release claim. It must be refreshed in B0.
+_Superseded 2026-08-25 by
+[b0-baseline-2026-08-25.md](b0-baseline-2026-08-25.md), which holds the
+measured numbers. The table below is kept for the audit trail._
 
 | Area               | Evidence at the audited head                                                                                                                                    | Consequence                                                                          |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -136,10 +182,22 @@ must map to one canonical OC issue or one private advisory before remediation.
     B9 Unified experience, moderation UX, accessibility, and polish
       ↓
     B10 Beta qualification and public release
+      ↓
+    B11 Beta-to-stable
 
 The phase exits are serial. Parallelism is allowed only inside the active phase
 or for non-mutating preparation of the next phase. Server behavior and
 operations are therefore stable through B6 before browser feature work begins.
+
+_(amended 2026-09-18, owner decision: B8 deferred to post-beta — the beta
+publishes as B7 → B9 → B10, desktop-only. Phase ids are unchanged; B8 keeps
+its position and id in this chain and reopens after B10 under the re-entry
+conditions in its section below.)_
+
+_(amended 2026-09-25, owner decision: the beta publishes once B9's exit gate
+and B10's shortened release checklist are green — see B10's opening block for
+what that checklist keeps and what moves to B11, the beta-to-stable gate. This
+was the 2026-09-18 direction, confirmed at HP-9 on 2026-09-25.)_
 
 ## Common entry and exit contract
 
@@ -160,6 +218,29 @@ An item is done only when:
 - the exact integration commit has CI evidence;
 - tracker, requirement map, and phase scorecard agree;
 - rollback, compatibility, and data-migration notes exist where applicable.
+
+## Phase execution pattern
+
+_Added 2026-08-28._ What B0 and B1 proved, written once so later phases do not
+rediscover it.
+
+1. Each phase gets an execution plan, `docs/plans/bN-<slug>-<date>.md`, at its
+   start, and a scorecard, `docs/plans/hp-N-scorecard-<date>.md`, at its hold
+   point. The plan re-verifies this roadmap's claims against HEAD before
+   implementing anything — B1 refuted several audit findings on contact — and
+   records each verdict. [README.md](README.md) rows are the status authority;
+   a plan header that disagrees with its README row is stale.
+2. A phase cannot exit while any `OC-*` finding tagged to it in the
+   [issue register](repo-health-issue-register-2026-08-23.md) is open, unless
+   the finding is re-tagged to a later phase with a written reason in the
+   scorecard. The tags exist today; this rule is what enforces them, and it is
+   what makes "zero open P0/P1 at B10" a measured fact rather than a hope.
+3. Record pre-squash pull-request SHAs at merge time whenever a hold point
+   reviews commit structure. `dev` is squash-only, so a pure-move/rewrite or
+   fixture/behaviour split survives only on `refs/pull/<n>/head`
+   ([hp-1-scorecard-2026-08-27.md](hp-1-scorecard-2026-08-27.md)).
+4. `dev` requires branches to be up to date before merging (`strict: true`,
+   applied in B2-0). One pull request per plan step, branched from `dev`.
 
 ## B0 — Restore truth, freeze scope, and reconcile the audit
 
@@ -297,7 +378,22 @@ the structural review.
   reviewable and active path references are complete.
 - Generated sources and analysis artifacts have explicit reproducible owners.
 - The protocol schema generates and verifies both consumers from the root.
-- Every dev integration commit has exact-SHA CI.
+- Every dev integration commit carries full-matrix evidence: the required
+  matrix runs on the pull-request head, and `strict: true` makes the squash
+  commit's tree the tree that matrix tested.
+  `scripts/verify-integration-tree.sh` proves it per squash SHA;
+  `verify-gate-evidence.mjs --selftest` pins the strict flag in the recorded
+  configuration (`b0-dev-branch-protection.sh`, the apply artifact). GitHub's
+  live setting is admin-scoped and unreadable from CI, so nothing here
+  detects a flipped live flag as such: what the milestone tree-identity run
+  detects is any stale merge such a flip has let land — after the fact, and
+  only if one lands. Closing that window is an owner action, not a check:
+  the owner re-runs `b0-dev-branch-protection.sh` at each hold point, which
+  reasserts the recorded configuration over any live drift. _(Reworded
+  2026-08-31, owner decision — previously "exact-SHA CI", which dev pushes
+  never ran; PR-head evidence with enforced tree identity is the accepted
+  form. Precision and the reapply step added the same day, from Codex's P1
+  on the follow-up PR.)_
 - Issues, Discussions, pull requests, and private security reporting match the
   approved community model.
 - Full B0 evidence remains green after the migration.
@@ -309,7 +405,8 @@ the structural review.
 - root-command output and direct server-command parity;
 - docs link checker and repository lint results;
 - generated-source drift check;
-- exact-SHA workflow and protected-release evidence.
+- identical-tree integration evidence (see the exit gate) and
+  protected-release evidence.
 
 ### Safe parallelism
 
@@ -326,6 +423,9 @@ server services and clients must obey.
 **Primary requirements:** BPR-031, BPR-032, BPR-040, BPR-050, BPR-051, and
 BPR-080 through BPR-083.
 
+**Execution plan** _(added 2026-08-28)_:
+[b2-protocol-trust-compat-2026-08-28.md](b2-protocol-trust-compat-2026-08-28.md).
+
 ### Entry gate
 
 - B1 is complete and protocol source has one owner.
@@ -334,10 +434,13 @@ BPR-080 through BPR-083.
 
 ### Workstreams
 
-1. Define explicit protocol-epoch and capability negotiation. The upgraded
-   server accepts epochs N, N-1, and N-2 and rejects older epochs with a safe
-   actionable response. Patch releases within an epoch remain compatible, and
-   prerelease/release metadata declares its epoch.
+1. Define explicit protocol-epoch negotiation. _(Reconciled 2026-09-06 to
+   the owner-approved B2-2 decision of 2026-08-29 and amended BPR-032.)_
+   The server accepts the current epoch and rejects unsupported epochs with
+   a safe actionable response; legacy epoch-1 authentication follows the
+   captured fixture contract. Patch releases within an epoch remain
+   compatible, and prerelease/release metadata declares its epoch. A wider
+   compatibility window is introduced only by a later explicit decision.
 2. Define server-first update ordering and signed update metadata contracts.
    A new client is not required to speak to an old server.
 3. Add version fixtures and compatibility tests that survive later code
@@ -368,9 +471,12 @@ service expansion. Security details remain in private review.
 
 ### Exit gate
 
-- Clients from epochs N, N-1, and N-2 pass the server compatibility matrix;
-  N-3 fails safely and actionably. The server-bundled browser client matches
-  the server epoch rather than becoming an independent generation.
+- Accepted-epoch fixtures pass and unsupported epochs fail safely and
+  actionably. The server-bundled browser client matches the server epoch
+  rather than becoming an independent generation. _(Reconciled 2026-09-06:
+  HP-2 accepted the slim one-epoch scope — owner decision 2026-08-29,
+  formalized 2026-08-31 in BPR-032 as amended. This does not add a new
+  compatibility window or reopen HP-2.)_
 - Protocol and update metadata changes are generated, documented, and
   downgrade-tested.
 - Effective permission and resource-existence sibling cases have parity tests.
@@ -435,6 +541,31 @@ for every later requirement.
 11. Establish performance baselines for permission invalidation, read-state
     writes, broadcast/replay, database waits, reconnect storms, and upload
     admission.
+12. _(added 2026-08-28)_ Build the alpha-shaped test dataset: a deterministic
+    alpha-shape profile in `Server/cmd/seed` plus one anonymised
+    `v1.2.0-alpha.4` database snapshot at a documented path. B4's HP-4 drills,
+    B6's upgrade rehearsal and B10's in-place upgrade all consume it; until B3
+    builds it, nobody owns it.
+13. _(added 2026-08-28)_ Workstreams 2 and 3 are the design already written in
+    [bug-detection-improvements.md](bug-detection-improvements.md), Tiers 3a,
+    3b and 3c. Execute that design; do not write another.
+14. _(added 2026-08-28)_ Workstream 1's coverage floor starts at B0's measured
+    74.6% CI aggregate and ratchets from there.
+15. _(added 2026-08-28)_ Adopt an `authz-chokepoint` rule in
+    `Server/invariants` only if B2-5's predicate inventory shows a mechanical
+    shape. The rule was dropped once for lack of evidence; B2-5 produces it.
+16. _(added 2026-08-28)_ Run the Docker smoke nightly on `dev`. The CI job is
+    `main`-gated, so `dev` never proves the image.
+17. _(added 2026-08-29)_ Workstreams 4–9 execute from
+    [developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md),
+    Phases 1–3 and its "First actionable slice": the database-call and
+    lifecycle inventory first (Phase 1 is this phase's entry-gate item 3),
+    then the authentication route→service→storage slice (`S-10`) as the HP-3
+    subject, then `internal/app/` lifecycle extraction and the in-package `ws`
+    split. Keep `ws` one package while its lock invariants need shared private
+    state; keep `main.go` the `go build .` entry. That plan's Phase 8
+    exact-SHA matrix is the evidence checklist for every structural change
+    here. Its Phase 7 change map lands its server rows in B3.
 
 ### Hold point HP-3 — First vertical-slice review
 
@@ -507,6 +638,13 @@ retained, and erasable without central services or misleading privacy claims.
     policies and attachment cleanup.
 12. Keep diagnostics local, make support-bundle export user initiated, and
     prevent automatic product or usage telemetry.
+13. _(added 2026-08-28)_ HP-4's destructive drills run against the B3
+    alpha-shaped dataset, not ad-hoc copies.
+14. _(added 2026-08-28)_ OC-0321 is a must-close: a TOTP key-file read error is
+    treated as absence and the key is replaced. Data-loss class.
+15. _(added 2026-08-28)_ Workstream 7 is smaller than written: per-session
+    listing and individual revocation already exist server-side. B4 adds the
+    new-login event and sign-out-everywhere only.
 
 ### Hold point HP-4 — Irreversible-data review
 
@@ -526,7 +664,11 @@ Run the destructive tests against disposable copies of real-shaped alpha data.
 - Retention removes messages and attachments consistently without bypassing
   legal/operator holds if such a mechanism is explicitly introduced.
 - Support bundles are user initiated, reviewed for secrets, and no automatic
-  telemetry traffic occurs.
+  telemetry traffic occurs. _Amended 2026-09-02 (B4 owner decision 10): B4
+  delivers the no-telemetry proof and the support-bundle data contract —
+  user initiation and secret review as binding rules; the bundle export
+  itself, and the runtime evidence that it obeys those rules, complete at
+  B6/B9 under BG-15, where this bullet's bundle half is re-checked._
 - Alpha-shaped data migrates forward and rolls back according to the declared
   boundary.
 
@@ -566,7 +708,7 @@ operation before building their full cross-client experience.
    a server-local trusted-sender relationship.
 2. Retain and polish the existing link-preview, GIF-search, YouTube/media
    embed, and rich-content set behind privacy-preserving bounded retrieval.
-   Provider expansion is optional and otherwise post-beta.
+   Provider expansion is optional and otherwise post-beta — see item 12.
 3. Enforce redirect, resolved-address, type, size, duration, streaming,
    concurrency, cache, and offline policies for every external fetch. Avoid
    residual full-body buffering.
@@ -586,6 +728,22 @@ operation before building their full cross-client experience.
    rotation, and stale-subscription cleanup. There is no OwnCord relay.
 10. Keep automation optional. Human moderation authority and audit remain core
     even if automation becomes a post-beta plugin candidate.
+11. _(added 2026-08-28; re-tagged here by B2-9 on 2026-08-29)_ SEC-03 (bounded
+    per-response and aggregate preview/media reads) is first in line. It is P1
+    and confirmed. Shape: the C-09 contract in `docs/trust-model.md` clause 6
+    (time, streaming byte ceiling, content-type list, concurrency cap) plus
+    aggregate budgets and byte-weighted cache eviction; implement the byte
+    accounting once, at the boundary B7's native broker will own.
+    _(amended 2026-09-05 by B5-12)_ The split — server boundary B5, aggregate
+    budgets and the desktop broker B7 — is recorded once, in
+    `docs/trust-model.md`'s C-09 `Status:` line and the register's SEC-03 row;
+    this item defers to them.
+12. _(amended 2026-09-05 by B5-12, under the owner's 2026-09-04 delegation,
+    decisions 1 and 3)_ Workstream 2 is an **inventory plus the server path**:
+    B5 delivers `docs/architecture/rich-content-inventory.md` (B5-5) and the
+    GIF proxy behind `Server/safefetch` (B5-1); the link-preview, YouTube and
+    media set stays client-fetched and unchanged, its bounded retrieval is
+    B7's broker (C-09) and its journeys are B9's (BPR-061).
 
 ### Hold point HP-5 — Abuse and privacy review
 
@@ -598,9 +756,14 @@ before exposing the endpoints.
 
 - Message Requests cannot bypass block, permission, retention, or deletion
   rules.
-- External retrieval passes address, redirect, streaming-size, timeout,
-  concurrency, media-type, and offline adversarial tests.
-- NSFW content and third-party fetches remain unavailable before consent.
+- External retrieval **on server-side fetch paths** passes address, redirect,
+  streaming-size, timeout, concurrency, media-type, and offline adversarial
+  tests _(amended 2026-09-05 by B5-12, decision 14: the desktop preview path
+  is C-09/B7; the owner's written acceptance is carried by the HP-5
+  scorecard)_.
+- NSFW content and third-party fetches remain unavailable before consent **on
+  every server path** _(amended 2026-09-05 by B5-12, decision 14: the client
+  render gate is B9; owner acceptance at HP-5)_.
 - Report, moderation, and appeal state machines enforce least privilege and
   immutable safe audit.
 - Storage quotas and disk headroom fail safely under concurrency and restart.
@@ -651,25 +814,91 @@ service.
    - stable public IPv4/IPv6 with an eligible public-CA flow;
    - private LAN/offline with an OwnCord local CA and explicit device trust;
    - manual certificate mode for advanced owners.
+     _(deferred 2026-09-11 by owner decision; recorded at HP-6 as an accepted
+     limitation and moved to B11 by D-01, 2026-09-25: B6-3 – B6-5 were not built
+     for the beta. `tls.mode: "acme"` stays in the code, implemented but
+     unqualified, with renewal the owner's responsibility; a reverse proxy is the
+     recommended HTTPS path for a public domain, and no public-IP or offline TLS
+     story is claimed for the beta. The exit bullet and evidence below carry the
+     same narrowing.)_
 4. Keep reverse proxies optional. Validate direct port-forwarded operation and
    document blocked-port, CGNAT, hairpin-NAT, dynamic-IP, and firewall limits
    honestly.
 5. Protect certificate/account keys, persist renewal state, hot-reload
    certificates, renew with ample margin, and exercise expiry/rotation.
+   _(deferred 2026-09-11 by owner decision; moved to B11 by D-01, 2026-09-25 —
+   B6-5 was not built for the beta, and certificate rotation is exercised
+   against the supported self-signed mode only.)_
 6. Add the disabled-by-default optional browser-hosting switch and stable
    origin/path contract. B8 supplies the final signed client bundle.
 7. Rehearse alpha-to-beta database, attachment, configuration, credential, and
    backup upgrade/rollback on Docker and standalone deployments.
+   _(Audit carryover, 2026-09-06, B3-7.)_ Complete the metadata-only alpha
+   snapshot with matching attachment bytes and representative configuration
+   and credential fixtures. Prove authenticated downloads and recovery after
+   upgrade/restore; attachment-row counts alone do not qualify the deployment.
 8. Publish hardware-specific measurements proving at least 250 registered
    users, 100 simultaneous connections, and 25 concurrent voice participants.
 9. Measure reconnect storms, database waits, message fan-out, voice control,
    upload/download pressure, TLS overhead, and graceful shutdown.
+   _(Audit carryover, 2026-09-06, B3 performance evidence.)_ Distinguish sender
+   acknowledgement latency from actual recipient delivery, assert recipient
+   receipt under fan-out, report database-pool wait count/duration deltas, and
+   measure authenticated upload admission through quota and storage. Keep
+   filename/MIME microbenchmarks labelled as such; these measurements close
+   the existing capacity promise, not a new performance target.
 10. Exercise backup/restore, deletion-marker restore, disk-full, low-headroom,
     corrupt input, unhealthy dependency, interrupted migration, and rollback.
+    _(Audit carryover, 2026-09-06, B4-9.)_ Qualify the declared physical-erasure
+    boundary with database/WAL byte-level evidence under active readers,
+    failed checkpoints and restart. Record pending-completion/retry behavior
+    or an explicit limitation, and align privacy claims with the measured
+    result before HP-6. Logical row/FTS absence is a separate assertion.
 11. Pin or automatically review containers and build inputs; produce signed
     SBOM, provenance, checksums, and source-snapshot evidence.
 12. Document local logs, support-bundle generation, capacity limits, ports,
     storage growth, certificate trust, recovery, updates, and safe failure.
+13. _(added 2026-08-28)_ Must-close before any ARM64 server asset ships:
+    OC-0320 (self-update selects linux-amd64 regardless of architecture),
+    OC-0332 (a bare IPv6 address breaks the updater URL), OC-0344 (the
+    HTTP→HTTPS redirect assumes port 443) and OC-0339 (an empty configuration
+    section is reported as unknown).
+    _(amended 2026-09-18 by B6-16: all four are `fixed` in
+    `.superpowers/findings-ledger.json` — OC-0320, OC-0344 and OC-0339 closed
+    by the 2026-09-03 post-merge review (#1530, `1edd777f`); OC-0332 closed by
+    #1532 (`39b2423f`, 2026-09-04) — a satisfied precondition, not an open
+    milestone)_
+14. _(added 2026-08-28)_ The 250/100/25 run starts from
+    `Server/scripts/k6/ws-load.js`. k6 cannot drive voice; a 25-participant
+    LiveKit load harness is a real gap and needs a named owner before HP-6.
+    _(amended 2026-09-18 by B6-16: closed by `Server/scripts/voice-load.sh`
+    wrapping `lk load-test`, B6-9 (#1592) — the gap was k6's, not the SFU's;
+    `prd.md`'s risk table already records this row `Closed`)_
+15. _(added 2026-08-28)_ R-09: the exact-SHA gate already runs at tag time
+    (the `gate-evidence` job in `release.yml`, B1-7); `environment: release`
+    lands in B2-0. B6 rehearses one tag against both before HP-6.
+    _(amended 2026-09-25 by B6-16: both are wired — `gate-evidence` verifies
+    the exact-SHA record and `environment: release` gates the docker push and
+    publish jobs behind the required reviewer, so R-09's phase is now
+    `B1/B6/B10`. The rehearsal itself is the first beta tag run, which is still
+    owed, and B6-12 stays in-progress until that run exists.)_
+16. _(added 2026-08-28; amended 2026-08-31)_ Add `GET /api/v1/server-info`
+    with the browser-hosting flag alongside workstream 6's default-off
+    hosting switch, so one endpoint answers "what is this server, and is
+    the browser client on". B2-2's slim decision (2026-08-29) dropped the
+    endpoint from B2 — this workstream introduces it, it does not extend it.
+17. _(Audit carryover, 2026-09-06, B3-0/B3-8.)_ Reconcile direct database-handle
+    use as well as imports with the service-boundary inventory. Give each
+    access an explicit service, adapter or transaction-boundary owner, and
+    extend the guard to reject unclassified handle access. Preserve replay
+    locking and persister ordering when assigning ownership; an import-only
+    pass is insufficient evidence that later phases preserved B3's boundary.
+18. _(Audit carryover, 2026-09-06, B4-10.)_ Before HP-6, reconcile BPR-053,
+    requirement traceability and privacy acceptance evidence with the
+    HP-4-approved retained audit-token design and the disclosure in
+    `docs/trust-model.md`. Record the accepted correlation/key-holder limits
+    consistently. Do not silently substitute a different erasure design;
+    changing the agreed guarantee requires an explicit owner decision.
 
 Public IP certificates are feasible only for eligible stable public addresses
 and currently require short-lived certificate handling. Private or reserved IP
@@ -686,11 +915,21 @@ documentation, understand unavoidable network/trust limitations, recover a
 backup, rotate trust, and interpret failure. The reference load profile must
 meet its budgets on stated hardware before client expansion begins.
 
+_Owner decision 2026-09-25 (deferral):_ HP-6 is deferred, not cancelled. It runs
+with an unfamiliar operator against B6-12's rehearsed tag (the first beta tag is
+the rehearsal, per D-02), after B9's exit. The TLS exit bullet and evidence were
+narrowed by the 2026-09-20 accepted limitation (D-01): the public-CA and
+guided-local-CA rows move to B11, so HP-6 signs around the self-signed and
+reverse-proxy paths.
+
 ### Exit gate
 
 - Every server artifact installs or starts, migrates, becomes healthy, serves
   WSS/API traffic, drains, restarts, and restores data.
 - Domain, public-IP, LAN, and offline TLS modes pass their owned matrix.
+  _(amended 2026-09-25, D-01: the built-in public-CA domain lifecycle is an
+  accepted beta limitation and the public-IP/guided-LAN modes move to B11; HP-6
+  signs around the self-signed and recommended-reverse-proxy paths.)_
 - Direct port forwarding works where the network permits it; limitations are
   actionable and never disguised as application success.
 - Browser hosting is disabled by default and cannot accidentally expose an
@@ -699,12 +938,19 @@ meet its budgets on stated hardware before client expansion begins.
   latency, resource, and failure measurements.
 - Backup/restore, disk pressure, certificate rotation, update, and rollback
   drills pass.
+  _(amended 2026-09-25, D-01: certificate rotation is exercised against the
+  supported self-signed mode; the public-CA/ACME rotation half moves to B11 with
+  B6-3 – B6-5.)_
 - Release inputs and outputs are traceable and signed.
 
 ### Required evidence
 
 - artifact and container install/boot matrix;
 - ACME staging, public-IP, local-CA, expiry, and rotation reports;
+  _(deferred with B6-3 – B6-5 (owner decision 2026-09-11; D-01 accepted
+  limitation 2026-09-25): no public-CA, public-IP or guided local-CA report
+  exists for the beta; the self-signed lifecycle and the recommended
+  reverse-proxy path are what HP-6 signs around. These reports move to B11.)_
 - network-mode integration matrix;
 - load-test dataset and reproducible commands;
 - upgrade/rollback/restore drill;
@@ -725,6 +971,28 @@ without regressing the current application.
 
 **Primary requirements:** BPR-033 through BPR-035.
 
+_(B7-18 reconciliation, 2026-09-23.)_ The milestones behind workstreams 1–17
+are merged into `dev`. The
+[B7 PRD](b7-shared-client-platform-desktop-parity.prd.md)'s milestone table
+links the PR for each one. HP-7 was signed by the owner on 2026-09-23 with
+three stated limits, which carry forward:
+
+- the nightly schedule stays inert until it is carried to `main`;
+- the first release has no Windows ARM64 build to update from, so that update
+  leg is N/A;
+- the owner still has to run the real-desktop Linux device check.
+
+The exit gate is **not yet met**. C-10's B7 half closed on 2026-09-23 (the
+register's C-10 row), as did the client voice-join budget. One item is still
+open:
+
+- the 2026-09-19 decision to run `tauri-build` on PRs into `dev` was not
+  implemented.
+
+Every deferral to B8 is recorded against the artifact it leaves behind, both in
+that PRD's "B7-18 reconciliation" and in B8's "What already exists" list below.
+All B7-tagged `OC-*` findings are fixed, so rule 2 is met.
+
 ### Entry gate
 
 - The complete beta server is stable through B6.
@@ -738,8 +1006,15 @@ without regressing the current application.
    behavior.
 2. Move native Tauri use behind the desktop adapter one responsibility at a
    time. Add contract tests before implementing browser adapters.
+   _(amended 2026-09-18, owner decision: B8 deferred to post-beta — the
+   contract tests stay in scope; the browser adapters they gate are built with
+   B8.)_
 3. Split target-neutral Vite configuration from desktop packaging and create
    explicit desktop and web compile gates from one source tree.
+   _(amended 2026-09-18, owner decision: the target-neutral Vite split stays
+   in scope; the web compile gate is deferred with B8. The native-import check
+   named in B7's required evidence is what keeps the browser target buildable
+   later without rework.)_
 4. Clear the 471-warning Oxlint baseline, unexplained Knip hints, unexpected
    test logs, and unjustified coverage exclusions. Ratchet all gates.
 5. Add client startup, route, LiveKit, RNNoise, and feature bundle budgets.
@@ -758,17 +1033,48 @@ without regressing the current application.
     disclosure, and local support-bundle export.
 12. Build and smoke Windows x64/ARM64 and Linux x64/ARM64 desktop artifacts,
     using native Windows ARM64 evidence and declared Linux ARM64 evidence.
+13. _(added 2026-08-28)_ Delete the two Rust commands nothing invokes,
+    `probe_credential_store` and `ptt_get_key`
+    ([platform-contracts.md](../architecture/platform-contracts.md)).
+14. _(added 2026-08-28; amended 2026-08-31)_ Workstream 8 consumes B2's
+    `protocol_epoch_unsupported` frame and the `GET /api/v1/server-info`
+    endpoint B6 workstream 16 adds (B2-2 shipped without it); it defines no
+    new contract.
+15. _(added 2026-08-28)_ Re-run Stryker (C-16) before workstream 6 decomposes
+    modules, so the mutation baseline is honest.
+16. _(added 2026-08-29)_ Workstreams 1–3, 6 and 7 execute from
+    [developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md),
+    Phases 4–6: `platform/contracts` + `platform/desktop` first (the 20 native
+    import sites move one responsibility at a time, contract tests before
+    any browser adapter — _amended 2026-09-18, owner decision: "before any
+    browser adapter" now means before B8, post-beta_), then hotspot
+    decomposition (`dispatcher.ts`,
+    `livekitSession.ts`, `livekitE2EE.ts`, messaging, settings), with unit
+    tests colocated as `src/**/*.test.ts` only for modules being extracted.
+    `lib/` and `stores/` are transitional — shrink them, never bulk-move.
+    Do not create `Client/src/platform/` before this phase's entry gate is
+    met. The plan's Phase 7 change map lands its client rows here.
+17. _(Audit carryover, 2026-09-06, B1-2.)_ Reconcile the supported Node/npm
+    version policy across all three package roots, runtime pins, CI and
+    contributor documentation. Verify both an admitted version and a refused
+    unsupported major; `engine-strict` alone does not turn an open-ended
+    `>=` range into the documented major-version pin. Settle the intended
+    support range rather than choosing a new runtime during this audit.
 
 ### Hold point HP-7 — Desktop parity before browser behavior
 
 The desktop adapter must reproduce the existing app plus approved B2–B6 client
 flows with no direct Tauri imports outside owned adapter/bootstrap files.
 Review performance, accessibility foundations, and packaging before filling in
-browser implementations.
+browser implementations. _(amended 2026-09-18, owner decision: B8 deferred to
+post-beta — "before filling in browser implementations" now means post-beta;
+this hold point's desktop-parity text is otherwise unchanged.)_
 
 ### Exit gate
 
 - One application compiles through explicit desktop and web contract surfaces.
+  _(amended 2026-09-18, owner decision: the desktop contract surface is what
+  the beta requires; the web contract surface is deferred with B8.)_
 - Native APIs are isolated and contract-tested.
 - Required client checks are green with zero unapproved warnings and honest
   coverage.
@@ -778,13 +1084,19 @@ browser implementations.
 - Desktop artifacts pass install, boot, connect, update, rollback, media, and
   recovery smoke on the supported architecture matrix.
 - Startup, bundle, voice-join, and long-session budgets meet or improve the
-  accepted baseline.
+  accepted baseline. _(2026-09-23: the client voice-join budget, the one
+  missing, is the median of seven joins to decoded remote audio at 1,500 ms
+  or less, enforced in `client-fullstack`; baseline in
+  [b7-0-client-baseline-2026-09-19.md](b7-0-client-baseline-2026-09-19.md#b7-voice-join-budget-baseline-2026-09-23).)_
 
 ### Required evidence
 
 - adapter inventory and contract-test matrix;
 - import-cycle and native-import checks;
-- unit, browser-smoke, E2E, Rust, Clippy, build, and dependency reports;
+- unit, browser-smoke, E2E, Rust, Clippy, build, and dependency reports
+  (_amended 2026-09-18: "browser-smoke" here is the existing Playwright smoke
+  of the desktop app's frontend, not the deferred browser product — it stays
+  in the beta's required evidence unchanged_);
 - bundle manifest and runtime performance measurements;
 - signed desktop artifact smoke matrix;
 - server-version/session/recovery integration recordings.
@@ -797,6 +1109,54 @@ UI flows for updates, profiles, sessions, and recovery may run in parallel.
 Architecture extraction never shares a change with new feature behavior.
 
 ## B8 — Deliver browser, PWA, phone, and tablet support
+
+**Deferred to post-beta (owner decision, 2026-09-18).** The public beta ships
+desktop-only (Windows x64/ARM64, Linux x64/ARM64). B8 is not cancelled or
+renumbered — it keeps this id and reopens as a post-beta phase. The section
+below is preserved unchanged as the plan of record for when it is reopened.
+
+**Re-entry conditions:**
+
+- (a) the beta is published (B10 / HP-10);
+- (b) HP-7 has confirmed the platform contracts and the native-import
+  isolation still hold at that time;
+- (c) the TLS block (B6-3, B6-4, B6-5) is delivered — service workers, media
+  capture, and Web Push need a secure context, and workstream 7's local-CA
+  path depends on it;
+- (d) an explicit owner decision reopens the phase.
+
+**What already exists and stays in place so this remains possible:**
+
+- the default-off browser-hosting switch and `GET /api/v1/server-info`
+  (B6-7 / roadmap B6 workstreams 6 and 16, `Server/api/router.go`,
+  `Server/config/config.go`);
+- the per-server Web Push subscription storage and dispatch (B5 / roadmap B5
+  workstream 9, B5-11, `Server/service/push.go`, `Server/service/push_dispatch.go`,
+  `Server/migrations/045_push_subscriptions.sql`);
+- the browser origin/CORS posture (B5-3): the disabled-by-default hosting key
+  proven to mount no route and serve no asset while disabled, plus the
+  mount-order/CSP constraints it records for B8, in `Server/api/router.go`;
+- B7's typed platform contracts and the rule that no native Tauri import
+  lives outside the desktop adapter, as designed in
+  `docs/architecture/platform-contracts.md`. _(B7-18, 2026-09-23: built by
+  B7-3/B7-4/B7-5, #1630, #1635, #1646.)_ What B8 inherits:
+  - 21 type-only contracts in `Client/src/platform/contracts/`;
+  - the desktop implementations in `Client/src/platform/desktop/`;
+  - 23 behaviour suites in `Client/tests/unit/platform/*.suite.ts`, which
+    run against the desktop adapter through `*.desktop.test.ts`;
+  - the native-import rule in `Client/eslint.config.js`;
+  - `Client/tests/unit/platform-contracts-counts.test.ts`.
+
+  B8 adds `Client/src/platform/browser/` and runs the same suites against it
+  (L-02's browser half).
+
+- B7-6's build split (#1633): the shared `Client/vite.config.ts` and the
+  desktop overlay `Client/vite.config.desktop.ts`. `build:desktop` is the
+  desktop target, and plain `build` is an alias for it, so B8's `build:web`
+  can take the plain name (L-03's `build:web` half). C-10's browser-mode origin
+  allowlist and BG-04's browser parity are the other B8 halves. BG-04 is
+  measured against the desktop artifact smoke in
+  `.github/workflows/client-artifact-smoke.yml` (B7-17, #1737).
 
 **Objective:** implement the optional server-hosted browser client from the
 shared application, with honest secure-context, offline, push, and mobile
@@ -835,6 +1195,14 @@ behavior.
    real supported browsers/devices for release qualification.
 10. Preserve one active server connection and per-server account/profile
     isolation.
+11. _(added 2026-08-28)_ No certificate pinning in a browser. Workstream 7's
+    LAN/offline path uses publicly trusted or local-CA certificates only —
+    never a TOFU shim ([platform-contracts.md](../architecture/platform-contracts.md),
+    hard case one).
+12. _(added 2026-08-28; amended 2026-08-31)_ The browser client reads
+    `GET /api/v1/server-info` (endpoint and flag from B6 workstream 16 —
+    B2-2 shipped without it) for the hosting flag and epoch; no separate
+    discovery endpoint.
 
 Service workers, camera/microphone, Web Push, and screen capture require secure
 contexts in normal browser use. The plan follows the relevant
@@ -894,7 +1262,9 @@ the client experience for BPR-060 through BPR-063 and BPR-070 through BPR-073.
 
 ### Entry gate
 
-- Desktop and browser platform matrices are green.
+- Desktop and browser platform matrices are green. _(amended 2026-09-18, owner
+  decision: the desktop platform matrix gates the beta; the browser matrix
+  moves with B8.)_
 - B5 service contracts are stable and security-reviewed.
 - Design tokens, interaction patterns, and accessibility test rules are agreed.
 
@@ -920,25 +1290,43 @@ the client experience for BPR-060 through BPR-063 and BPR-070 through BPR-073.
    errors, virtual keyboard, and media controls.
 9. Clearly label desktop-only features, unsupported browser APIs, offline
    state, notification limitations, update state, and degraded media.
+   _(amended 2026-09-18, owner decision: the desktop-only labelling half stays
+   in beta scope; the unsupported-browser-API half moves with B8.)_
 10. Run privacy, moderation, deletion, retention, block, session, and
-    compatibility journeys across every client surface.
+    compatibility journeys across every client surface. _(amended 2026-09-18,
+    owner decision: "every client surface" is the desktop client for the
+    beta; browser, PWA, phone, and tablet surfaces move with B8.)_
+11. _(added 2026-08-29)_ Workstream 7's `app.css` split follows
+    [developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md),
+    Phase 5 item 6: move source sections into owned files with selectors and
+    built output preserved. Visual changes are separate changes with visual
+    and accessibility evidence, never mixed into the source split.
 
 ### Hold point HP-9 — Feature freeze and accessibility acceptance
 
 No new beta feature enters after this point. Review every requirement journey
 on all applicable surfaces, triage every accessibility defect, and freeze
 strings, protocol, migrations, and user-visible behavior for the release
-candidate.
+candidate. _(owner direction 2026-09-18; confirmed at HP-9 on 2026-09-25: HP-9
+is also the checkpoint at which the owner confirms or revises B10's cut list.)_
 
 ### Exit gate
 
 - Every approved feature has end-to-end desktop and browser evidence, with
-  documented browser exceptions.
+  documented browser exceptions. _(amended 2026-09-18, owner decision:
+  desktop evidence gates the beta; browser evidence moves with B8.)_
 - Message Requests, moderation, appeals, NSFW consent, and external content
   preserve server security and privacy rules.
 - Accessibility tests and manual assistive-technology checks have no release
-  blocker.
-- Phone/tablet layouts expose all required navigation and actions.
+  blocker. _(amended 2026-09-24, owner decision: the manual screen-reader check
+  is dropped; the automated accessibility evidence every B9 lane carries (ARIA
+  name/role and keyboard/focus tests) satisfies the screen-reader clause. The
+  remaining manual checks — keyboard, pointer, contrast, focus, zoom/reflow and
+  reduced motion — stay in full; "assistive-technology checks" no longer
+  includes a manual screen-reader pass.)_
+- Phone/tablet layouts expose all required navigation and actions. _(amended
+  2026-09-18, owner decision: deferred to post-beta with B8 — there is no
+  phone/tablet client in the beta.)_
 - English strings are centralized/structured for later translation.
 - No UI claims unsupported offline, media, push, update, or network behavior.
 - Performance budgets and OwnCord visual identity are preserved.
@@ -947,8 +1335,15 @@ candidate.
 
 - requirement-journey matrix and recordings;
 - automated accessibility reports and manual keyboard/screen-reader/touch
-  checklist;
-- visual regression and responsive evidence;
+  checklist (_amended 2026-09-18, owner decision: keyboard, screen reader,
+  zoom, reflow, contrast, and reduced-motion checks stay in full for the
+  desktop beta; the touch-device half moves with B8_); _(amended 2026-09-24,
+  owner decision: the manual screen-reader half of that checklist is dropped —
+  the automated accessibility evidence satisfies the screen-reader clause — so
+  the manual checklist keeps keyboard, pointer, contrast, focus, zoom/reflow
+  and reduced motion_);
+- visual regression and responsive evidence (_amended 2026-09-18: responsive
+  device evidence moves with B8; desktop visual regression stays_);
 - privacy/network inspection for consent-gated content;
 - moderation role matrix and audit walkthrough;
 - translation-readiness scan and bundle/performance report.
@@ -962,6 +1357,32 @@ global state changes are serialized.
 
 ## B10 — Qualify and publish the public beta
 
+**Owner direction, 2026-09-18; confirmed at HP-9 on 2026-09-25.** B10 becomes a
+release checklist that closes out B9, so the public beta ships when B9's
+coding is done — a public beta is itself the soak. The items below are
+preserved as written; each one's verdict is recorded here rather than in the
+item text. **B11 is the beta-to-stable gate** that receives the moved work
+(items 2, 3, 11's moved half, 13 and 14); it reopens after B10 publishes the
+beta.
+
+| Item  | Verdict             | Note                                                                                                                                                                                                                                                                                                                                                            |
+| ----- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | keep                | Required matrix on the RC SHA.                                                                                                                                                                                                                                                                                                                                  |
+| 2     | moved               | Thirty consecutive green integration runs move to B11, the beta-to-stable gate.                                                                                                                                                                                                                                                                                 |
+| 3     | moved               | The fourteen-day RC soak moves to B11, the beta-to-stable gate.                                                                                                                                                                                                                                                                                                 |
+| 4     | keep                | In-place upgrade from alpha data and rollback. B6-8's rehearsal already runs both legs in CI before anything is signed or pushed (the `upgrade-rehearsal` job in `.github/workflows/release.yml`).                                                                                                                                                              |
+| 5     | keep                | Protocol-epoch re-run; not discussed, unchanged.                                                                                                                                                                                                                                                                                                                |
+| 6, 7  | keep                | Already narrowed to desktop clients, server artifacts, and Docker by the 2026-09-18 B8 deferral above; what remains after that narrowing is kept.                                                                                                                                                                                                               |
+| 8     | reduced             | Reduced to one comparison run at the RC against B6-9's already-published 250/100/25 result, instead of reproducing the full profile.                                                                                                                                                                                                                            |
+| 9     | keep                | Zero open P0/P1, zero unresolved advisory.                                                                                                                                                                                                                                                                                                                      |
+| 10    | keep                | Version agreement, source snapshot, licenses, SBOM, provenance, checksums, signatures, update manifests, install/update/rollback; automated by B6-12 where true (`.github/workflows/release.yml`: the `verify-versions`, `release-server` SBOM, `release-server-docker` attestation, and `publish` source-snapshot/checksum/update-manifest/sign/attest steps). |
+| 11    | reduced             | Kept, reduced to setup, security, privacy, operator, and recovery documentation; moderation, accessibility, support, feedback, and contribution documentation move to B11, the beta-to-stable gate.                                                                                                                                                             |
+| 12    | keep                | Safe release notes and coordinated disclosure.                                                                                                                                                                                                                                                                                                                  |
+| 13    | moved (with item 2) | Exists only to make item 2 countable; moves with it.                                                                                                                                                                                                                                                                                                            |
+| 14    | moved (with item 3) | Soak hosts; moves with item 3.                                                                                                                                                                                                                                                                                                                                  |
+| 15    | keep as written     | BPR-051's non-developer comprehension read. Confirmed at HP-9 (2026-09-25): run against the release PR's CI artifacts before the tag (see Q11), and record it on the R-08 release scorecard.                                                                                                                                                                    |
+| HP-10 | keep                | Owner go/no-go.                                                                                                                                                                                                                                                                                                                                                 |
+
 **Objective:** prove one immutable release candidate satisfies the complete
 product, security, platform, upgrade, operations, and community contract before
 publishing it on GitHub.
@@ -972,29 +1393,53 @@ re-verifies every BPR.
 ### Entry gate
 
 - HP-9 freezes features, protocol, migrations, and strings.
-- All B0–B9 exit gates are green.
+- All B0–B7 and B9 exit gates are green. _(amended 2026-09-18, owner decision:
+  B8 is deferred to post-beta, so B8's exit gate is not a beta entry
+  requirement and is excluded from this list; it still governs B8 when B8
+  resumes.)_
 - One release-candidate commit and version are selected.
 - No unresolved security advisory or unverified release blocker exists.
 
 ### Qualification work
 
 1. Run the complete required matrix on the exact release-candidate SHA.
+   _(Audit carryover, 2026-09-06, B1/G-04.)_ Preserve dated baseline and signed
+   scorecard measurements independently of live ledger totals. Restrict live
+   count enforcement to explicitly current summaries, and recover altered
+   B0/B1/HP-0/HP-1 observations from their recorded source commits with a
+   dated correction. A green count check must not require rewriting history.
 2. Require 30 consecutive green integration runs, excluding only documented
-   external infrastructure cancellations.
+   external infrastructure cancellations. _(owner direction 2026-09-18;
+   confirmed at HP-9 on 2026-09-25: moved to B11, the beta-to-stable gate; see
+   B10's opening block.)_
 3. Hold a 14-day release-candidate soak with long sessions, reconnects,
    upgrades, restarts, media, push, retention, deletion, moderation, and
-   operator review.
+   operator review. _(owner direction 2026-09-18; confirmed at HP-9 on
+   2026-09-25: moved to B11, the same beta-to-stable gate; see B10's opening
+   block.)_
 4. Test in-place upgrade from representative 1.2.0-alpha data, attachments,
    configuration, credentials, and client settings, plus rollback within the
    declared boundary.
-5. Re-run protocol epochs N, N-1, and N-2 plus actionable N-3 rejection.
+5. Re-run the accepted protocol epochs plus actionable out-of-window
+   rejection — the slim scope of the 2026-08-29 B2-2 decision (BPR-032 as
+   amended 2026-08-31); the matrix widens only if a later epoch bump
+   reintroduces a window.
 6. Re-run the full Windows x64/ARM64 and Linux x64/ARM64 desktop matrix, server
    artifacts, multi-architecture Docker, browser engines, Android
-   phone/tablet, and iPhone/iPad matrix.
+   phone/tablet, and iPhone/iPad matrix. _(amended 2026-09-18, owner decision:
+   the beta matrix is desktop clients + server artifacts + Docker; browser
+   engines, Android, and iPhone/iPad leave the beta qualification and move
+   with B8.)_
 7. Re-run domain, public-IP, LAN, offline, optional browser hosting, PWA,
    Web Push, backup/restore, disk-full, certificate rotation, and update
-   scenarios.
+   scenarios. _(amended 2026-09-18, owner decision: optional browser hosting,
+   PWA, and Web Push leave the beta qualification and move with B8. The
+   domain/public-IP/LAN/offline TLS scenarios are unchanged — they remain
+   governed by the 2026-09-11 TLS deferral and the HP-6 decision.)_
 8. Reproduce the 250/100/25 reference capacity profile and compare it with B6.
+   _(owner direction 2026-09-18; confirmed at HP-9 on 2026-09-25: reduced to
+   one comparison run at the RC against B6-9's published result; see B10's
+   opening block.)_
 9. Confirm zero open P0/P1 defect, zero unresolved advisory, and explicit
    owner/rationale/review trigger for every accepted lower risk.
 10. Verify release version agreement, source snapshot, licenses, SBOM,
@@ -1002,26 +1447,56 @@ re-verifies every BPR.
     update, rollback, and download.
 11. Verify public setup, security, privacy, operator, recovery, moderation,
     accessibility, support, feedback, and contribution documentation.
+    _(owner direction 2026-09-18; confirmed at HP-9 on 2026-09-25: reduced to
+    setup, security, privacy, operator, and recovery documentation; moderation,
+    accessibility, support, feedback, and contribution documentation move to
+    B11, the beta-to-stable gate; see B10's opening block.)_
 12. Prepare safe release notes and coordinated fixed-vulnerability disclosure.
     Do not publish private exploit material by default.
+13. _(added 2026-08-28)_ `ci.yml` cancels in-progress runs on every ref,
+    `main` included, so item 2's thirty consecutive runs cannot be counted as
+    written. Exempt `main` from `cancel-in-progress` before the count starts.
+    _(owner direction 2026-09-18; confirmed at HP-9 on 2026-09-25: moves with
+    item 2 to B11, the beta-to-stable gate — it exists only to make item 2
+    countable; see B10's opening block.)_
+14. _(added 2026-08-28)_ The 14-day soak runs on named hosts: the owner's LAN
+    self-hosted instance and one Docker instance. _(owner direction
+    2026-09-18; confirmed at HP-9 on 2026-09-25: moves with item 3 to B11,
+    the beta-to-stable gate; see B10's opening block.)_
+15. _(added 2026-08-31)_ Record BPR-051's non-developer comprehension read on
+    the R-08 release scorecard: a non-developer reads `docs/trust-model.md`
+    §"The short answer" and their answer to "who can read my messages?" fills
+    the HP-2 Q3 blanks (and the B2-7 evidence block — both must agree).
+    Owner decision 2026-08-31: tracked as a release-gate row so a missing
+    reader blocks the beta, not B3–B9 work.
 
 ### Hold point HP-10 — Human go/no-go
 
 The owner reviews one final scorecard. Publication is allowed only when every
 required artifact points to the same commit, all evidence is green, the private
 security queue is empty, and rollback is rehearsed. A known blocker means
-no-go, regardless of elapsed time.
+no-go, regardless of elapsed time. _(owner direction 2026-09-18; confirmed at
+HP-9 on 2026-09-25: the scorecard HP-10 reviews is B10's shortened release
+checklist above.)_
 
 ### Exit gate
 
 - The exact release candidate passes all phase and requirement evidence.
-- Thirty consecutive integration runs and the 14-day soak are green.
+  _(amended 2026-09-18, owner decision: B8's phase evidence and BPR-020
+  through BPR-025 are non-applicable to the beta release gates rather than
+  outstanding — B8 is deferred to post-beta and its evidence moves with it.
+  Every other phase and requirement is unchanged.)_
+- Thirty consecutive integration runs and the 14-day soak are green. _(owner
+  direction 2026-09-18; confirmed at HP-9 on 2026-09-25: moved to B11, the
+  beta-to-stable gate; see B10's opening block.)_
 - Zero P0/P1 and zero unresolved security advisory remain.
 - All supported artifacts install, start, connect, update, roll back, and
   verify.
 - Upgrade preserves required server data and client settings.
 - Capacity, performance, accessibility, privacy, deletion, recovery,
-  moderation, browser/PWA, and operations budgets pass.
+  moderation, browser/PWA, and operations budgets pass. _(amended
+  2026-09-18, owner decision: browser/PWA leaves the beta budget list and
+  moves with B8; the rest is unchanged.)_
 - GitHub release assets, source, metadata, checksums, signatures, SBOM, and
   provenance agree.
 - Public documentation and community intake are ready.
@@ -1029,35 +1504,63 @@ no-go, regardless of elapsed time.
 ### Required evidence
 
 - immutable release scorecard linked to the exact commit and tag;
-- integration-run history and 14-day soak log;
+- integration-run history and 14-day soak log (_owner direction 2026-09-18;
+  confirmed at HP-9 on 2026-09-25: moved to B11, the beta-to-stable gate; see
+  B10's opening block_);
 - complete platform/deployment/device matrix;
 - migration, rollback, restore, and deletion proof;
 - security closure attestations;
 - signed artifact and metadata verification;
 - anonymous download/install smoke;
-- final requirements traceability export with no missing or failed row.
+- final requirements traceability export with no missing or failed row
+  (_amended 2026-09-18, owner decision: B8's rows — BPR-020 through BPR-025 —
+  are marked non-applicable in the export rather than missing, so no deferred
+  B8 row can read as an outstanding beta gap_).
 
 ### Safe parallelism
 
 Platform, deployment, browser/device, capacity, accessibility, and
 documentation qualification may run in parallel against the same immutable
-candidate. Tagging and publication are serialized after HP-10.
+candidate. Tagging and publication are serialized after HP-10. _(amended
+2026-09-18, owner decision: the browser/device lane moves with B8; the beta's
+platform lane is desktop-only.)_
+
+## B11 — Beta-to-stable
+
+**Owner decision, 2026-09-25 (Q12, confirmed at HP-9).** The "later
+beta-to-stable gate" the 2026-09-18 B10 direction left unnamed is B11. It opens
+after B10 publishes the beta and carries the work B10 moved, with the same
+retained RC gates B10 kept:
+
+- thirty consecutive green integration runs (B10 items 2 and 13), with `main`
+  exempt from `cancel-in-progress` before the count starts;
+- the fourteen-day release-candidate soak on the named hosts (items 3 and 14);
+- the moved documentation half of item 11 (moderation, accessibility, support,
+  feedback and contribution documentation), plus the one-page moderation guide
+  if it does not stay in the beta under Q12's item-11 re-examination;
+- post-beta TLS (B6-3..B6-5), the D-03 certificate-verifier change, the Linux
+  voice device test, the `chatserver restore` CLI (OP-10) and the setup-time
+  recovery kit (D-17).
+
+Nothing here waives an RC check, upgrade/rollback, advisory closure or HP-10.
+B11 has no entry date; it starts from the published beta.
 
 ## Safe parallelism summary
 
-| Phase | Work that may overlap                                                  | Work that stays serialized                                              |
-| ----- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| B0    | Read-only validation, requirement mapping, independent security review | Shared test-infrastructure fixes and baseline acceptance                |
-| B1    | Docs, command design, artifact investigation, community templates      | Each move/rename and its full verification                              |
-| B2    | Fixtures, threat review, plugin inventory, dependency audit            | Protocol, permission, and E2EE production changes                       |
-| B3    | Guardrail tooling and measurement                                      | First vertical slice; shared schema/lifecycle/permission work           |
-| B4    | Registration/session and local diagnostics                             | Recovery, deletion, retention data contracts until HP-4                 |
-| B5    | Requests, moderation, content, and push after shared contracts         | Shared authz/audit/rate-limit/retention integration                     |
-| B6    | Packaging, TLS, load, failure drills, supply chain                     | Final candidate convergence and operator acceptance                     |
-| B7    | Gate cleanup and contract design; later independent UI flows           | Adapter moves and architecture extractions                              |
-| B8    | PWA, responsive, push, and media adapters after contracts              | Final cache/permission/navigation integration                           |
-| B9    | Feature UIs behind stable services                                     | Navigation, design tokens, global state, final accessibility acceptance |
-| B10   | Qualification lanes on one immutable candidate                         | Tag, publication, and coordinated disclosure                            |
+| Phase | Work that may overlap                                                                                                           | Work that stays serialized                                              |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| B0    | Read-only validation, requirement mapping, independent security review                                                          | Shared test-infrastructure fixes and baseline acceptance                |
+| B1    | Docs, command design, artifact investigation, community templates                                                               | Each move/rename and its full verification                              |
+| B2    | Fixtures, threat review, plugin inventory, dependency audit                                                                     | Protocol, permission, and E2EE production changes                       |
+| B3    | Guardrail tooling and measurement                                                                                               | First vertical slice; shared schema/lifecycle/permission work           |
+| B4    | Registration/session and local diagnostics                                                                                      | Recovery, deletion, retention data contracts until HP-4                 |
+| B5    | Requests, moderation, content, and push after shared contracts                                                                  | Shared authz/audit/rate-limit/retention integration                     |
+| B6    | Packaging, TLS, load, failure drills, supply chain                                                                              | Final candidate convergence and operator acceptance                     |
+| B7    | Gate cleanup and contract design; later independent UI flows                                                                    | Adapter moves and architecture extractions                              |
+| B8    | _Deferred to post-beta (owner decision, 2026-09-18)._ Plan of record: PWA, responsive, push, and media adapters after contracts | Final cache/permission/navigation integration                           |
+| B9    | Feature UIs behind stable services                                                                                              | Navigation, design tokens, global state, final accessibility acceptance |
+| B10   | Qualification lanes on one immutable candidate                                                                                  | Tag, publication, and coordinated disclosure                            |
+| B11   | Post-beta TLS, documentation and soak lanes; the moved B10 rows overlap freely                                                  | Thirty-run count, 14-day soak, and post-beta feature work are serial    |
 
 Preparation for the next phase may include design notes, fixtures, and
 non-mutating research. It may not merge production behavior before the current
@@ -1084,36 +1587,92 @@ accessibility, platform parity, or completion of an approved requirement.
 
 Every hold point and phase exit records at least:
 
-| Metric                         |                     Baseline |          Target | Actual | Exact evidence |
-| ------------------------------ | ---------------------------: | --------------: | -----: | -------------- |
-| Required checks green          |                refresh in B0 |            100% |        |                |
-| Open P0 / P1                   |                refresh in B0 |           0 / 0 |        |                |
-| Unresolved security advisories |                private count |               0 |        |                |
-| Requirement rows passing       |            0 fully qualified | 100% applicable |        |                |
-| Server aggregate/core coverage |              74.6% aggregate |         ratchet |        |                |
-| Client honest coverage         |                refresh in B0 |         ratchet |        |                |
-| Static-analysis warnings       |                   471 Oxlint |    0 unapproved |        |                |
-| Unit/browser/E2E/Rust          | two unit failures; E2E hangs | green and exits |        |                |
-| Largest startup/lazy chunks    |                refresh in B0 |          budget |        |                |
-| Desktop/browser/device matrix  |                   incomplete |  100% supported |        |                |
-| Server 250/100/25 profile      |                     unproven |             met |        |                |
-| Upgrade/rollback/restore       |                     unproven |           green |        |                |
-| Generated/doc drift            |                refresh in B0 |               0 |        |                |
+| Metric                          |                     Baseline |          Target | Actual | Exact evidence |
+| ------------------------------- | ---------------------------: | --------------: | -----: | -------------- |
+| Required checks green           |                refresh in B0 |            100% |        |                |
+| Open P0 / P1                    |                refresh in B0 |           0 / 0 |        |                |
+| Unresolved security advisories  |                private count |               0 |        |                |
+| Requirement rows passing        |            0 fully qualified | 100% applicable |        |                |
+| Server aggregate/core coverage  |              74.6% aggregate |         ratchet |        |                |
+| Client honest coverage          |                refresh in B0 |         ratchet |        |                |
+| Static-analysis warnings        |                   471 Oxlint |    0 unapproved |        |                |
+| Unit/browser/E2E/Rust           | two unit failures; E2E hangs | green and exits |        |                |
+| Largest startup/lazy chunks     |                refresh in B0 |          budget |        |                |
+| Desktop/browser/device matrix\* |                   incomplete |  100% supported |        |                |
+| Server 250/100/25 profile       |                     unproven |             met |        |                |
+| Upgrade/rollback/restore        |                     unproven |           green |        |                |
+| Generated/doc drift             |                refresh in B0 |               0 |        |                |
 
 The actual values and links belong in phase evidence, not as optimistic edits
 to this plan.
 
-## First implementation slice
+\* _Amended 2026-09-18, owner decision: for the beta this row is the desktop
+client matrix (Windows x64/ARM64, Linux x64/ARM64) plus server artifacts and
+Docker images. Browser and device (Android, iPhone/iPad) rows move with B8
+and re-enter the scorecard when it does._
 
-Start with B0 only:
+## Current implementation slice
 
-1. repair the two failing Vitest contracts;
-2. make Playwright terminate reliably;
-3. collect matched server lint and Docker evidence;
-4. finish issue/security/requirement reconciliation;
-5. run the exact-SHA full matrix and publish the non-sensitive baseline
-   scorecard.
+_Current slice, 2026-09-25:_ B0–B5 are accepted; B6 is built with its exit open
+at HP-6; B7 is built with HP-7 signed and its exit open on `tauri-build` for PRs
+into `dev`; B8 is deferred post-beta; **B9 is complete through B9-27** (the B9
+row in [plans/README.md](README.md) is the status authority); B10 (beta
+qualification and publication) is next, and B11 is the beta-to-stable gate the
+moved B10 rows land in. The dated notes below are retained as historical
+execution evidence, not today's instruction to start B2/B3.
 
-Then execute the B1 structural work as isolated changes. Do not begin server
-feature implementation, client architecture extraction, or browser work before
-those two gates close.
+_B6-16 final pass, 2026-09-25:_ B6-16 reconciled the register, traceability and
+this roadmap against what B6 shipped. The TLS block (workstreams 3 and 5,
+B6-3 – B6-5) is the owner's **accepted limitation D-01** — the built-in
+public-CA lifecycle is implemented but unqualified, a reverse proxy is the
+recommended HTTPS path, and those rows plus their ACME/public-IP/local-CA
+evidence move to B11. B6-1 stays `in-progress` and B6-12 stays `in-progress`:
+both await the first beta tag run, which is also the HP-6 rehearsal (D-02).
+
+_Audit update, 2026-09-06, at `61ac2b9`:_ B0–B4 remain accepted; B5-0..B5-9
+and B5-11 are merged, with B5-12's initial reconciliation also merged.
+B5-10 is in progress. Complete the existing B5 exit follow-ups and final
+reconciliation before B6 entry. _Reconciled 2026-09-23 at `6fd8cc0c`:_ B5-10
+merged as #1555; B5 is not accepted — the plan's [exit-gate
+reconciliation](b5-community-content-moderation-2026-09-04.md#exit-gate-reconciliation-2026-09-23)
+names what remains. _Exit accepted by the owner 2026-09-24 at `458301fd`:_ the
+[exit-SHA
+measurement](b5-community-content-moderation-2026-09-04.md#exit-sha-measurement-2026-09-24)
+records the seven conditions and roadmap rule 2 met with the gate re-run there,
+and B5-12's final pass is done; **B5 is accepted.** The 2026-08-29 sequence below is retained
+as historical execution evidence, not today's instruction to start B3.
+
+_Updated 2026-08-29._ B0 and B1 are complete (HP-0 accepted 2026-08-25, HP-1
+accepted 2026-08-27). The active slice is B2, executed from
+[b2-protocol-trust-compat-2026-08-28.md](b2-protocol-trust-compat-2026-08-28.md)
+in this order:
+
+1. B2-0 — alpha.4 verified, `dev` synced with `main`, release hygiene, `dev`
+   set to `strict: true` — **done 2026-08-28**;
+2. B2-1 — epoch-1 fixtures captured **before** any protocol change — **done
+   2026-08-28**;
+3. B2-8 — the B2-tagged findings, because they touch the same replay/resume
+   files as B2-2 — **done 2026-08-28**;
+4. B2-2 — protocol epoch and negotiation, with B2-3 and B2-4 folded in
+   (one accepted epoch, so no matrix) — **done 2026-08-29**, PR #1438 =
+   `9c9b8be6`;
+5. B2-5 (PR #1440 = `67fdd18d`), B2-6 (PR #1441 = `2b2d58ab`), B2-7
+   (PR #1443 = `88c7a824`) and B2-9 — **done 2026-08-29**;
+6. HP-2 — **accepted 2026-08-29**
+   ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)); B2 is
+   closed;
+7. B3 — **started 2026-08-29**, execution plan
+   [b3-server-architecture-guardrails-2026-08-29.md](b3-server-architecture-guardrails-2026-08-29.md);
+   B3-0 (boundary inventory) is the first step, then the auth slice to HP-3.
+
+Do not begin B3 domain extraction, client platform extraction, or browser work
+before HP-2 closes. When it does, B3 opens with the "First actionable slice"
+of
+[developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md):
+inventory, before-state graph, auth characterization tests, the auth vertical
+slice, HP-3. Nothing from that plan touches the client before B7.
+
+The original 2026-08-23 slice (B0 only, then B1 as isolated changes) was
+executed as written; see
+[b0-baseline-2026-08-25.md](b0-baseline-2026-08-25.md) and
+[b1-repository-foundation-2026-08-25.md](b1-repository-foundation-2026-08-25.md).

@@ -13,8 +13,40 @@ import { Track, type Room, type LocalAudioTrack } from "livekit-client";
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { createRNNoiseProcessor } from "@lib/noise-suppression";
+import { voiceText } from "../i18n/voice";
 
 const log = createLogger("audioPipeline");
+
+/** Upper bound on waiting for the VAD processor's `stopped`; a context that
+ *  is not rendering (suspended) never calls process() again. */
+const VAD_STOP_CLOSE_TIMEOUT_MS = 1000;
+
+/**
+ * Close the pipeline's AudioContext once its VAD processor has stopped.
+ * Chromium keeps an AudioWorkletNode, and with it the AudioContext, alive until
+ * the processor's process() returns false. Closing in the same task as `stop`
+ * ends rendering before the processor sees it, which pinned one closed
+ * AudioContext per voice join for the page's lifetime.
+ */
+function closeAfterVadStops(ctx: AudioContext, vadNode: AudioWorkletNode | null): void {
+  if (vadNode === null) {
+    void ctx.close();
+    return;
+  }
+  const close = () => {
+    clearTimeout(timer);
+    // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
+    vadNode.port.onmessage = null;
+    void ctx.close();
+  };
+  const timer = setTimeout(close, VAD_STOP_CLOSE_TIMEOUT_MS);
+  // Only `stopped` is acted on: a late `gate` must not re-gate a torn-down
+  // pipeline (OC-0231).
+  // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
+  vadNode.port.onmessage = (event: MessageEvent) => {
+    if ((event.data as { type?: string }).type === "stopped") close();
+  };
+}
 
 export class AudioPipeline {
   private room: Room | null = null;
@@ -174,6 +206,7 @@ export class AudioPipeline {
   /** Tear down the audio pipeline and restore the original sender track. */
   teardownAudioPipeline(): void {
     this._pipelineGeneration++;
+    const vadNode = this.vadWorkletNode;
     this.stopVadPolling();
 
     // Restore original mic track on the WebRTC sender.
@@ -212,7 +245,7 @@ export class AudioPipeline {
       this.audioPipelineDest = null;
     }
     if (this.audioPipelineCtx !== null) {
-      void this.audioPipelineCtx.close();
+      closeAfterVadStops(this.audioPipelineCtx, vadNode);
       this.audioPipelineCtx = null;
     }
     this.vadGated = false;
@@ -430,6 +463,7 @@ export class AudioPipeline {
       // before it does. Leaving onmessage live would let that late message
       // re-gate the mic with no VAD left running to ever un-gate it again
       // (OC-0231).
+      // oxlint-disable-next-line prefer-add-event-listener -- the handler above is registered via onmessage, so removeEventListener cannot detach it
       this.vadWorkletNode.port.onmessage = null;
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       this.vadWorkletNode.port.postMessage({ type: "stop" });
@@ -483,7 +517,7 @@ export class AudioPipeline {
       }
     } catch (err) {
       log.error("Failed to reapply audio processing", err);
-      onError?.("Failed to update audio settings");
+      onError?.(voiceText("audio.settingsFailed"));
     }
   }
 }

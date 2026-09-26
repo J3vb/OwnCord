@@ -71,18 +71,30 @@ describe("syncOsMotionListener", () => {
     expect(document.documentElement.classList.contains("reduced-motion")).toBe(false);
   });
 
-  it("restores manual reduced-motion=true when sync is disabled", () => {
-    // User manually set reducedMotion=true
+  it("keeps manual reduced-motion=true while syncing with an OS that does not ask for it (B9-2, Q1)", () => {
+    // Q1: both the OS setting and the in-app toggle are honoured, so the OS
+    // saying "no preference" can no longer switch off the user's own choice.
     localStorage.setItem("owncord:settings:reducedMotion", "true");
 
-    // OS says NO reduce motion → sync removes the class
     matchMediaMatches = false;
     syncOsMotionListener(true);
-    expect(document.documentElement.classList.contains("reduced-motion")).toBe(false);
+    expect(document.documentElement.classList.contains("reduced-motion")).toBe(true);
 
-    // Turn off sync → should restore manual preference (true)
+    // An OS change back and forth does not override it either.
+    const changeHandler = matchMediaListeners.get("change")!;
+    changeHandler({ matches: true } as MediaQueryListEvent);
+    changeHandler({ matches: false } as MediaQueryListEvent);
+    expect(document.documentElement.classList.contains("reduced-motion")).toBe(true);
+
+    // Turn off sync → the manual preference (true) still holds
     syncOsMotionListener(false);
     expect(document.documentElement.classList.contains("reduced-motion")).toBe(true);
+  });
+
+  it("treats a corrupted manual preference as off", () => {
+    localStorage.setItem("owncord:settings:reducedMotion", "{not json");
+    syncOsMotionListener(false);
+    expect(document.documentElement.classList.contains("reduced-motion")).toBe(false);
   });
 
   it("responds to media query change events", () => {

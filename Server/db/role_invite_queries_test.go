@@ -8,7 +8,7 @@ import (
 // ─── GetRoleByID tests ────────────────────────────────────────────────────────
 
 func TestGetRoleByID_Found(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 
 	role, err := database.GetRoleByID(context.Background(), 4) // Member — inserted by migration
 	if err != nil {
@@ -26,7 +26,7 @@ func TestGetRoleByID_Found(t *testing.T) {
 }
 
 func TestGetRoleByID_NotFound(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 
 	role, err := database.GetRoleByID(context.Background(), 9999)
 	if err != nil {
@@ -38,7 +38,7 @@ func TestGetRoleByID_NotFound(t *testing.T) {
 }
 
 func TestGetRoleByID_OwnerHasAllPermissions(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 
 	role, err := database.GetRoleByID(context.Background(), 1) // Owner
 	if err != nil {
@@ -54,7 +54,7 @@ func TestGetRoleByID_OwnerHasAllPermissions(t *testing.T) {
 }
 
 func TestGetRoleByID_IsDefaultField(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 
 	owner, _ := database.GetRoleByID(context.Background(), 1)
 	member, _ := database.GetRoleByID(context.Background(), 4)
@@ -71,7 +71,7 @@ func TestGetRoleByID_IsDefaultField(t *testing.T) {
 // ─── ListRoles tests ──────────────────────────────────────────────────────────
 
 func TestListRoles_ReturnsFourDefaultRoles(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 
 	roles, err := database.ListRoles(context.Background())
 	if err != nil {
@@ -83,7 +83,7 @@ func TestListRoles_ReturnsFourDefaultRoles(t *testing.T) {
 }
 
 func TestListRoles_OrderedByPositionDesc(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 
 	roles, err := database.ListRoles(context.Background())
 	if err != nil {
@@ -101,7 +101,7 @@ func TestListRoles_OrderedByPositionDesc(t *testing.T) {
 // ─── GetUserWithRole tests ────────────────────────────────────────────────────
 
 func TestGetUserWithRole_Found(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, err := database.CreateUser(context.Background(), "joinuser", "hash", 4) // Member role
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -132,7 +132,7 @@ func TestGetUserWithRole_Found(t *testing.T) {
 }
 
 func TestGetUserWithRole_NotFound(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 
 	user, role, err := database.GetUserWithRole(context.Background(), 9999)
 	if err != nil {
@@ -144,7 +144,7 @@ func TestGetUserWithRole_NotFound(t *testing.T) {
 }
 
 func TestGetUserWithRole_BoolConversions(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "booluser", "hash", 4)
 
 	user, role, err := database.GetUserWithRole(context.Background(), uid)
@@ -164,7 +164,7 @@ func TestGetUserWithRole_BoolConversions(t *testing.T) {
 // ─── ListInvites tests ────────────────────────────────────────────────────────
 
 func TestListInvites_Empty(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 
 	invites, err := database.ListInvites(context.Background())
 	if err != nil {
@@ -176,7 +176,7 @@ func TestListInvites_Empty(t *testing.T) {
 }
 
 func TestListInvites_Multiple(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "listowner", "hash", 4)
 
 	_, _ = database.CreateInvite(context.Background(), uid, 1, nil)
@@ -193,7 +193,7 @@ func TestListInvites_Multiple(t *testing.T) {
 }
 
 func TestListInvites_IncludesRevokedInvites(t *testing.T) {
-	database := newTestDB(t)
+	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "revokelistowner", "hash", 4)
 
 	code, _ := database.CreateInvite(context.Background(), uid, 1, nil)

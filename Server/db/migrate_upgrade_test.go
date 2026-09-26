@@ -24,53 +24,35 @@ import (
 	"context"
 	"io/fs"
 	"testing"
+	"testing/fstest"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/migrations"
 )
 
-// migrationCutoffFS presents a filtered view of an underlying migrations FS
-// that only exposes files sorting lexicographically before cutoff. Migration
-// filenames are zero-padded ("019_perf_indexes.sql", "020_..."), so a string
-// cutoff of "020_" exposes exactly 001..019 and hides 020 and everything
-// after it. It implements fs.ReadDirFS and fs.ReadFileFS directly so
-// fs.ReadDir/fs.ReadFile use the filtered listing without needing Open to be
-// exercised.
-type migrationCutoffFS struct {
-	underlying fs.FS
-	cutoff     string
-}
-
-func (m migrationCutoffFS) included(name string) bool {
-	return name < m.cutoff
-}
-
-func (m migrationCutoffFS) Open(name string) (fs.File, error) {
-	if name != "." && !m.included(name) {
-		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
-	}
-	return m.underlying.Open(name)
-}
-
-func (m migrationCutoffFS) ReadDir(name string) ([]fs.DirEntry, error) {
-	entries, err := fs.ReadDir(m.underlying, name)
+// migrationsUpTo exposes only the embedded migrations whose filenames sort
+// lexicographically before cutoff. Migration filenames are zero-padded
+// ("019_perf_indexes.sql", "020_..."), so a string cutoff of "020_" exposes
+// exactly 001..019 and hides 020 and everything after it. fstest.MapFS
+// satisfies MigrateFS's fs.FS, the same shape migrationsBefore uses.
+func migrationsUpTo(t *testing.T, cutoff string) fstest.MapFS {
+	t.Helper()
+	entries, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {
-		return nil, err
+		t.Fatalf("ReadDir: %v", err)
 	}
-	out := make([]fs.DirEntry, 0, len(entries))
+	out := fstest.MapFS{}
 	for _, e := range entries {
-		if m.included(e.Name()) {
-			out = append(out, e)
+		if e.Name() >= cutoff {
+			continue
 		}
+		data, err := fs.ReadFile(migrations.FS, e.Name())
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", e.Name(), err)
+		}
+		out[e.Name()] = &fstest.MapFile{Data: data}
 	}
-	return out, nil
-}
-
-func (m migrationCutoffFS) ReadFile(name string) ([]byte, error) {
-	if !m.included(name) {
-		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
-	}
-	return fs.ReadFile(m.underlying, name)
+	return out
 }
 
 // columnExists reports whether a table has a column with the given name,
@@ -163,8 +145,7 @@ func TestMigrate_UpgradeFromMigration019PreservesData(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
 
-	oldFS := migrationCutoffFS{underlying: migrations.FS, cutoff: "020_"}
-	if err := db.MigrateFS(database, oldFS); err != nil {
+	if err := db.MigrateFS(database, migrationsUpTo(t, "020_")); err != nil {
 		t.Fatalf("MigrateFS() building pre-020 schema: %v", err)
 	}
 

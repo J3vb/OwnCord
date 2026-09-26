@@ -19,6 +19,21 @@ type ApiToken struct {
 	RevokedAt  *string `json:"revokedAt"`
 }
 
+type Appeal struct {
+	ID             int64   `json:"id"`
+	PublicID       string  `json:"publicId"`
+	ActionID       int64   `json:"actionId"`
+	AppellantID    int64   `json:"appellantId"`
+	Body           string  `json:"body"`
+	State          string  `json:"state"`
+	AssigneeID     int64   `json:"assigneeId"`
+	DecidedBy      int64   `json:"decidedBy"`
+	DecidedByToken *string `json:"decidedByToken"`
+	DecisionNote   string  `json:"decisionNote"`
+	CreatedAt      string  `json:"createdAt"`
+	DecidedAt      *string `json:"decidedAt"`
+}
+
 type Attachment struct {
 	ID         string `json:"id"`
 	MessageID  *int64 `json:"messageId"`
@@ -33,13 +48,15 @@ type Attachment struct {
 }
 
 type AuditLog struct {
-	ID         int64  `json:"id"`
-	ActorID    int64  `json:"actorId"`
-	Action     string `json:"action"`
-	TargetType string `json:"targetType"`
-	TargetID   int64  `json:"targetId"`
-	Detail     string `json:"detail"`
-	CreatedAt  string `json:"createdAt"`
+	ID           int64   `json:"id"`
+	ActorID      int64   `json:"actorId"`
+	Action       string  `json:"action"`
+	TargetType   string  `json:"targetType"`
+	TargetID     int64   `json:"targetId"`
+	Detail       string  `json:"detail"`
+	CreatedAt    string  `json:"createdAt"`
+	SubjectToken *string `json:"subjectToken"`
+	ActorToken   *string `json:"actorToken"`
 }
 
 type Channel struct {
@@ -68,6 +85,13 @@ type ChannelOverride struct {
 	Deny      int64 `json:"deny"`
 }
 
+type ChannelRetention struct {
+	ChannelID int64  `json:"channelId"`
+	Days      int64  `json:"days"`
+	UpdatedBy int64  `json:"updatedBy"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
 type ChannelUserOverride struct {
 	ChannelID int64 `json:"channelId"`
 	UserID    int64 `json:"userId"`
@@ -93,6 +117,20 @@ type Emoji struct {
 	UploadedBy int64  `json:"uploadedBy"`
 	CreatedAt  string `json:"createdAt"`
 	MimeType   string `json:"mimeType"`
+}
+
+type ErasureJob struct {
+	ID           int64   `json:"id"`
+	UserID       int64   `json:"userId"`
+	State        string  `json:"state"`
+	Files        string  `json:"files"`
+	FilesRemoved int64   `json:"filesRemoved"`
+	Attempts     int64   `json:"attempts"`
+	LastError    *string `json:"lastError"`
+	CreatedAt    string  `json:"createdAt"`
+	UpdatedAt    string  `json:"updatedAt"`
+	FinishedAt   *string `json:"finishedAt"`
+	ReplayPurged int64   `json:"replayPurged"`
 }
 
 type Event struct {
@@ -136,13 +174,70 @@ type Message struct {
 	MentionsEveryone int64   `json:"mentionsEveryone"`
 }
 
+type MessageDeliveryReceipt struct {
+	UserID          int64  `json:"userId"`
+	ClientMessageID string `json:"clientMessageId"`
+	ChannelID       int64  `json:"channelId"`
+	PayloadHash     []byte `json:"payloadHash"`
+	MessageID       int64  `json:"messageId"`
+	Timestamp       string `json:"timestamp"`
+	ExpiresAtMs     int64  `json:"expiresAtMs"`
+}
+
 type MessageMention struct {
 	MessageID       int64 `json:"messageId"`
 	MentionedUserID int64 `json:"mentionedUserId"`
 }
 
+type MessageRequest struct {
+	ID             int64   `json:"id"`
+	SenderID       int64   `json:"senderId"`
+	RecipientID    int64   `json:"recipientId"`
+	ChannelID      int64   `json:"channelId"`
+	FirstMessageID *int64  `json:"firstMessageId"`
+	State          string  `json:"state"`
+	CreatedAt      string  `json:"createdAt"`
+	DecidedAt      *string `json:"decidedAt"`
+}
+
 type MessagesFt struct {
 	Content string `json:"content"`
+}
+
+type ModerationAction struct {
+	ID             int64   `json:"id"`
+	Kind           string  `json:"kind"`
+	TargetID       int64   `json:"targetId"`
+	ActorID        int64   `json:"actorId"`
+	ActorToken     *string `json:"actorToken"`
+	ReportID       *int64  `json:"reportId"`
+	Reason         string  `json:"reason"`
+	ExpiresAt      *string `json:"expiresAt"`
+	AcknowledgedAt *string `json:"acknowledgedAt"`
+	LiftedAt       *string `json:"liftedAt"`
+	LiftedBy       int64   `json:"liftedBy"`
+	CreatedAt      string  `json:"createdAt"`
+}
+
+type NsfwAcknowledgement struct {
+	UserID         int64  `json:"userId"`
+	ChannelID      int64  `json:"channelId"`
+	AcknowledgedAt string `json:"acknowledgedAt"`
+}
+
+type PartialAuthChallenge struct {
+	TokenHash string `json:"tokenHash"`
+	UserID    int64  `json:"userId"`
+	Device    string `json:"device"`
+	IpAddress string `json:"ipAddress"`
+	Failures  int64  `json:"failures"`
+	ExpiresAt string `json:"expiresAt"`
+}
+
+type PendingTotpEnrollment struct {
+	UserID    int64  `json:"userId"`
+	SecretEnc string `json:"secretEnc"`
+	ExpiresAt string `json:"expiresAt"`
 }
 
 type Plugin struct {
@@ -158,6 +253,18 @@ type PluginKv struct {
 	PluginID int64  `json:"pluginId"`
 	Key      string `json:"key"`
 	Value    []byte `json:"value"`
+}
+
+type PushSubscription struct {
+	ID         int64  `json:"id"`
+	UserID     int64  `json:"userId"`
+	Endpoint   string `json:"endpoint"`
+	P256dh     string `json:"p256dh"`
+	Auth       string `json:"auth"`
+	DeviceName string `json:"deviceName"`
+	VapidKeyID string `json:"vapidKeyId"`
+	CreatedAt  string `json:"createdAt"`
+	LastSeenAt string `json:"lastSeenAt"`
 }
 
 type RateLockout struct {
@@ -179,6 +286,90 @@ type ReadState struct {
 	MentionCount  int64 `json:"mentionCount"`
 }
 
+type RecoveryAssist struct {
+	UserID       int64  `json:"userId"`
+	Verifier     string `json:"verifier"`
+	IssuedBy     int64  `json:"issuedBy"`
+	Verification string `json:"verification"`
+	CreatedAt    string `json:"createdAt"`
+	ExpiresAt    string `json:"expiresAt"`
+}
+
+type RecoveryKit struct {
+	UserID    int64   `json:"userId"`
+	Verifier  string  `json:"verifier"`
+	CreatedAt string  `json:"createdAt"`
+	UsedAt    *string `json:"usedAt"`
+}
+
+type Report struct {
+	ID            int64   `json:"id"`
+	PublicID      string  `json:"publicId"`
+	ReporterID    int64   `json:"reporterId"`
+	ReporterToken *string `json:"reporterToken"`
+	SubjectID     int64   `json:"subjectId"`
+	SubjectToken  *string `json:"subjectToken"`
+	TargetType    string  `json:"targetType"`
+	TargetRef     string  `json:"targetRef"`
+	ChannelID     *int64  `json:"channelId"`
+	Reason        string  `json:"reason"`
+	Detail        string  `json:"detail"`
+	State         string  `json:"state"`
+	AssigneeID    int64   `json:"assigneeId"`
+	Outcome       string  `json:"outcome"`
+	CreatedAt     string  `json:"createdAt"`
+	UpdatedAt     string  `json:"updatedAt"`
+	ClosedAt      *string `json:"closedAt"`
+	SourceNsfw    *int64  `json:"sourceNsfw"`
+}
+
+type ReportEvent struct {
+	ID         int64   `json:"id"`
+	ReportID   int64   `json:"reportId"`
+	ActorID    int64   `json:"actorId"`
+	ActorToken *string `json:"actorToken"`
+	Action     string  `json:"action"`
+	Detail     string  `json:"detail"`
+	CreatedAt  string  `json:"createdAt"`
+}
+
+type ReportEvidence struct {
+	ReportID    int64   `json:"reportId"`
+	Seq         int64   `json:"seq"`
+	MessageID   *int64  `json:"messageId"`
+	AuthorID    int64   `json:"authorId"`
+	AuthorToken *string `json:"authorToken"`
+	Content     string  `json:"content"`
+	Attachments string  `json:"attachments"`
+	CapturedAt  string  `json:"capturedAt"`
+}
+
+type ReportNote struct {
+	ID          int64   `json:"id"`
+	ReportID    int64   `json:"reportId"`
+	AuthorID    int64   `json:"authorId"`
+	AuthorToken *string `json:"authorToken"`
+	Body        string  `json:"body"`
+	CreatedAt   string  `json:"createdAt"`
+}
+
+type RetentionRevision struct {
+	ID       int64 `json:"id"`
+	Revision int64 `json:"revision"`
+}
+
+type RetentionRun struct {
+	ID              int64   `json:"id"`
+	StartedAt       string  `json:"startedAt"`
+	FinishedAt      *string `json:"finishedAt"`
+	Channels        int64   `json:"channels"`
+	MessagesDeleted int64   `json:"messagesDeleted"`
+	Files           string  `json:"files"`
+	FilesRemoved    int64   `json:"filesRemoved"`
+	PurgePending    string  `json:"purgePending"`
+	LastError       *string `json:"lastError"`
+}
+
 type Role struct {
 	ID          int64   `json:"id"`
 	Name        string  `json:"name"`
@@ -197,6 +388,7 @@ type Session struct {
 	CreatedAt string  `json:"createdAt"`
 	LastUsed  string  `json:"lastUsed"`
 	ExpiresAt string  `json:"expiresAt"`
+	Unseen    int64   `json:"unseen"`
 }
 
 type Setting struct {
@@ -204,29 +396,56 @@ type Setting struct {
 	Value string `json:"value"`
 }
 
+type TotpRecoveryCode struct {
+	ID        int64   `json:"id"`
+	UserID    int64   `json:"userId"`
+	CodeHash  string  `json:"codeHash"`
+	CreatedAt string  `json:"createdAt"`
+	UsedAt    *string `json:"usedAt"`
+}
+
+type TotpUsedCode struct {
+	UserID    int64  `json:"userId"`
+	CodeHash  string `json:"codeHash"`
+	ExpiresAt string `json:"expiresAt"`
+}
+
+type TrustedSender struct {
+	RecipientID int64  `json:"recipientId"`
+	SenderID    int64  `json:"senderId"`
+	Source      string `json:"source"`
+	CreatedAt   string `json:"createdAt"`
+}
+
 type User struct {
-	ID                int64   `json:"id"`
-	Username          string  `json:"username"`
-	Password          string  `json:"password"`
-	Avatar            *string `json:"avatar"`
-	RoleID            int64   `json:"roleId"`
-	TotpSecret        *string `json:"totpSecret"`
-	Status            string  `json:"status"`
-	CreatedAt         string  `json:"createdAt"`
-	LastSeen          *string `json:"lastSeen"`
-	Banned            int64   `json:"banned"`
-	BanReason         *string `json:"banReason"`
-	BanExpires        *string `json:"banExpires"`
-	IdentityPublicKey *string `json:"identityPublicKey"`
-	DisplayName       *string `json:"displayName"`
-	About             *string `json:"about"`
-	CustomStatus      *string `json:"customStatus"`
+	ID                 int64   `json:"id"`
+	Username           string  `json:"username"`
+	Password           string  `json:"password"`
+	Avatar             *string `json:"avatar"`
+	RoleID             int64   `json:"roleId"`
+	TotpSecret         *string `json:"totpSecret"`
+	Status             string  `json:"status"`
+	CreatedAt          string  `json:"createdAt"`
+	LastSeen           *string `json:"lastSeen"`
+	Banned             int64   `json:"banned"`
+	BanReason          *string `json:"banReason"`
+	BanExpires         *string `json:"banExpires"`
+	IdentityPublicKey  *string `json:"identityPublicKey"`
+	DisplayName        *string `json:"displayName"`
+	About              *string `json:"about"`
+	CustomStatus       *string `json:"customStatus"`
+	RegistrationStatus string  `json:"registrationStatus"`
 }
 
 type UserBlock struct {
 	BlockerID int64  `json:"blockerId"`
 	BlockedID int64  `json:"blockedId"`
 	CreatedAt string `json:"createdAt"`
+}
+
+type UserStorage struct {
+	UserID    int64 `json:"userId"`
+	BytesUsed int64 `json:"bytesUsed"`
 }
 
 type VoiceState struct {
@@ -240,4 +459,5 @@ type VoiceState struct {
 	Screenshare    int64  `json:"screenshare"`
 	ServerMuted    int64  `json:"serverMuted"`
 	ServerDeafened int64  `json:"serverDeafened"`
+	ServerMutedBy  *int64 `json:"serverMutedBy"`
 }

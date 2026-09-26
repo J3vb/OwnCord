@@ -73,6 +73,31 @@ func TestOwnerRolePosition(t *testing.T) {
 	}
 }
 
+// TestIsOwner locks the single "is the owner" predicate (OC-0405): true by
+// position, true by the seeded owner ID even at a lower position (a database
+// whose positions were edited by hand), false otherwise.
+func TestIsOwner(t *testing.T) {
+	tests := []struct {
+		name     string
+		roleID   int64
+		position int
+		want     bool
+	}{
+		{"owner id at owner position", permissions.OwnerRoleID, permissions.OwnerRolePosition, true},
+		{"owner id at a lower position", permissions.OwnerRoleID, 10, true},
+		{"non-owner id at owner position", permissions.AdminRoleID, permissions.OwnerRolePosition, true},
+		{"non-owner id below owner position", permissions.AdminRoleID, 99, false},
+		{"non-owner id far below", permissions.MemberRoleID, 0, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := permissions.IsOwner(tc.roleID, tc.position); got != tc.want {
+				t.Errorf("IsOwner(%d, %d) = %v, want %v", tc.roleID, tc.position, got, tc.want)
+			}
+		})
+	}
+}
+
 // ─── HasPerm tests ────────────────────────────────────────────────────────────
 
 func TestHasPerm_MatchingBitReturnsTrue(t *testing.T) {
@@ -516,5 +541,39 @@ func TestMentionEveryone_BitIsFreeAndNamed(t *testing.T) {
 	}
 	if got := permissions.Name(permissions.MentionEveryone); got != "MENTION_EVERYONE" {
 		t.Errorf("Name(MentionEveryone) = %q", got)
+	}
+}
+
+// TestModerateMembersIsOutsideTheAdminPerimeter locks B5-8's new bit: 22 was
+// unassigned, it is part of AllPerms so an externally supplied mask keeps
+// it, and — the plan's trap — it stays OUT of AdminPerimeter: a
+// warning-only moderator must not inherit the perimeter's read surface
+// (/stats, the /users list, /me). Revert-proof (g): adding it to
+// AdminPerimeter must turn this test red.
+func TestModerateMembersIsOutsideTheAdminPerimeter(t *testing.T) {
+	if permissions.ModerateMembers != 0x400000 {
+		t.Errorf("ModerateMembers = 0x%X, want 0x400000 (bit 22)", permissions.ModerateMembers)
+	}
+	for _, other := range []int64{
+		permissions.SendMessages, permissions.ReadMessages, permissions.AttachFiles,
+		permissions.AddReactions, permissions.ConnectVoice, permissions.SpeakVoice,
+		permissions.UseVideo, permissions.ShareScreen, permissions.ManageMessages,
+		permissions.ManageChannels, permissions.KickMembers, permissions.BanMembers,
+		permissions.MuteMembers, permissions.MentionEveryone, permissions.ManageRoles,
+		permissions.ManageServer, permissions.ManageInvites, permissions.ViewAuditLog,
+		permissions.Administrator,
+	} {
+		if other&permissions.ModerateMembers != 0 {
+			t.Errorf("bit 22 collides with 0x%X", other)
+		}
+	}
+	if permissions.AllPerms&permissions.ModerateMembers == 0 {
+		t.Error("AllPerms must include ModerateMembers")
+	}
+	if permissions.AdminPerimeter&permissions.ModerateMembers != 0 {
+		t.Error("ModerateMembers must not admit to the admin perimeter")
+	}
+	if got := permissions.Name(permissions.ModerateMembers); got != "MODERATE_MEMBERS" {
+		t.Errorf("Name(ModerateMembers) = %q", got)
 	}
 }

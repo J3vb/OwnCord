@@ -13,12 +13,24 @@ import (
 
 // ─── DM test helpers ────────────────────────────────────────────────────────
 
-// seedDMChannel creates a DM channel between two users and returns the channel ID.
+// seedDMChannel creates a DM channel between two users and returns the
+// channel ID. Every caller's premise is an established, ongoing 1:1
+// conversation — the shape migration 046 grandfathers for a pre-existing
+// installation — so both directions are marked trusted here too (B5-6):
+// without it, a fresh post-migration GetOrCreateDMChannel call is
+// indistinguishable from a stranger's first contact, and the pair's first
+// chat_send would stage a message request instead of delivering live.
 func seedDMChannel(t *testing.T, database *db.DB, user1ID, user2ID int64) int64 {
 	t.Helper()
 	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1ID, user2ID)
 	if err != nil {
 		t.Fatalf("seedDMChannel: %v", err)
+	}
+	if err := database.TrustSender(context.Background(), user1ID, user2ID, "grandfathered"); err != nil {
+		t.Fatalf("seedDMChannel: TrustSender(%d,%d): %v", user1ID, user2ID, err)
+	}
+	if err := database.TrustSender(context.Background(), user2ID, user1ID, "grandfathered"); err != nil {
+		t.Fatalf("seedDMChannel: TrustSender(%d,%d): %v", user2ID, user1ID, err)
 	}
 	return ch.ID
 }

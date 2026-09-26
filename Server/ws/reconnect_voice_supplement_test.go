@@ -72,7 +72,7 @@ func TestReconnect_ReplaysOwnVoiceRoomOutsideReadableChannels(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -107,7 +107,7 @@ func TestReconnect_ReplaysOwnVoiceRoomOutsideReadableChannels(t *testing.T) {
 	push(102, MsgTypeVoiceState)
 	push(103, MsgTypeVoiceLeaveBC)
 
-	srv := httptest.NewServer(ServeWS(hub, database, []string{"*"}, 0))
+	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
 
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

@@ -5,18 +5,22 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, applyTheme, THEMES, createToggle } from "./helpers";
 import type { ThemeName } from "./helpers";
-import { setTheme } from "@stores/ui.store";
-import { getActiveThemeName, loadCustomTheme, restoreTheme } from "@lib/themes";
+import { applyAccent, getActiveThemeName, restoreTheme } from "@lib/themes";
+import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
+import {
+  applyFontSize,
+  effectiveFontSize,
+  MIN_FONT_SIZE_PX,
+  MAX_FONT_SIZE_PX,
+} from "@lib/appearance";
+import { settingsText as t } from "../../i18n/settings";
 
 const FALLBACK_ACCENT = "#5865f2";
 
 function getDefaultAccent(themeName: string): string {
   if (themeName === "neon-glow") return "#00c8ff";
-  if (themeName in THEMES) return FALLBACK_ACCENT;
-
-  const customTheme = loadCustomTheme(themeName);
-  const accent = customTheme?.colors["--accent"];
-  return typeof accent === "string" && /^#[\da-fA-F]{3,8}$/.test(accent) ? accent : FALLBACK_ACCENT;
+  // Light's own accent (B9 Q13): white on it reads at 5.54:1.
+  return themeName === "light" ? "#4f5bd5" : FALLBACK_ACCENT;
 }
 
 export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
@@ -29,7 +33,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const defaultAccent = getDefaultAccent(activeThemeName);
 
   // Theme selector
-  const themeHeader = createElement("h3", {}, "Theme");
+  const themeHeader = createElement("h3", {}, t("appearance.theme"));
   const themeRow = createElement("div", { class: "theme-options", role: "radiogroup" });
   for (const name of Object.keys(THEMES) as ThemeName[]) {
     const isActive = name === currentTheme;
@@ -38,7 +42,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
       {
         class: `theme-opt ${name}${isActive ? " active" : ""}`,
         role: "radio",
-        tabindex: "0",
+        tabindex: isActive ? "0" : "-1",
         "aria-checked": isActive ? "true" : "false",
         "aria-label": name.charAt(0).toUpperCase() + name.slice(1),
       },
@@ -47,7 +51,6 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
     const activateTheme = (): void => {
       applyTheme(name);
-      setTheme(name);
       for (const child of themeRow.children) {
         child.classList.remove("active");
         child.setAttribute("aria-checked", "false");
@@ -79,26 +82,39 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
     themeRow.appendChild(btn);
   }
+  // One Tab stop with arrow-key movement (contract Keyboard table). The theme
+  // tiles are a horizontal row, so ArrowLeft/Right is the stepping axis.
+  setRovingTabindex(themeRow, "[role='radio']");
+  enableRovingNavigation(themeRow, "[role='radio']", signal);
   appendChildren(section, themeHeader, themeRow);
 
   // Font size slider
-  const fontHeader = createElement("h3", {}, "Font Size");
+  const fontHeader = createElement("h3", {}, t("appearance.fontSize"));
   const fontRow = createElement("div", { class: "slider-row" });
   const fontSlider = createElement("input", {
     class: "settings-slider",
     type: "range",
-    min: "12",
-    max: "20",
+    min: String(MIN_FONT_SIZE_PX),
+    max: String(MAX_FONT_SIZE_PX),
     value: String(currentFontSize),
+    "aria-label": t("appearance.fontSize"),
   });
-  const fontLabel = createElement("span", { class: "slider-val" }, `${currentFontSize}px`);
+  // The EFFECTIVE size, not the raw slider position: Large Font can floor it
+  // above where the slider sits, and a label that disagrees with the rendered
+  // text is the same "control that lies" bug in a different place (OC-0319).
+  const fontLabel = createElement(
+    "span",
+    { class: "slider-val" },
+    t("appearance.fontSize.value", { size: effectiveFontSize() }),
+  );
   fontSlider.addEventListener(
     "input",
     () => {
       const size = Number(fontSlider.value);
-      setText(fontLabel, `${size}px`);
-      document.documentElement.style.setProperty("--font-size", `${size}px`);
       savePref("fontSize", size);
+      // Both read the pref back, so save first (OC-0319).
+      applyFontSize();
+      setText(fontLabel, t("appearance.fontSize.value", { size: effectiveFontSize() }));
     },
     { signal },
   );
@@ -107,9 +123,14 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
   // Compact mode toggle
   const compactRow = createElement("div", { class: "setting-row" });
-  const compactLabel = createElement("span", { class: "setting-label" }, "Compact Mode");
+  const compactLabel = createElement(
+    "span",
+    { class: "setting-label" },
+    t("appearance.compactMode"),
+  );
   const compactToggle = createToggle(currentCompact, {
     signal,
+    label: t("appearance.compactMode"),
     onChange: (isNowCompact) => {
       savePref("compactMode", isNowCompact);
       document.documentElement.classList.toggle("compact-mode", isNowCompact);
@@ -134,21 +155,13 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
   const currentAccent = loadPref<string>("accentColor", defaultAccent);
 
-  // oxlint-disable-next-line consistent-function-scoping -- co-located with saveAccent for readability
-  function applyAccent(color: string): void {
-    // Set on both documentElement and body so the accent wins over
-    // theme class specificity (body.theme-neon-glow sets --accent)
-    document.documentElement.style.setProperty("--accent", color);
-    document.body.style.setProperty("--accent", color);
-  }
-
   function saveAccent(color: string): void {
     hasStoredAccent = true;
     savePref("accentColor", color);
     applyAccent(color);
   }
 
-  const accentHeader = createElement("h3", {}, "Accent Color");
+  const accentHeader = createElement("h3", {}, t("appearance.accentColor"));
   const swatchesRow = createElement("div", { class: "accent-swatches" });
 
   // Declare hexInput early so swatch closures can reference it after construction
@@ -161,7 +174,15 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     placeholder: defaultAccent.replace("#", ""),
     value: currentAccent.replace("#", ""),
     style: "width:120px",
+    "aria-label": t("appearance.accentAria"),
+    "aria-describedby": "accent-contrast-note",
   });
+  // Owner decision Q8 (B9-2): disclose the readable-colour fallback.
+  const accentNote = createElement(
+    "p",
+    { class: "setting-desc", id: "accent-contrast-note" },
+    t("appearance.accentNote"),
+  );
 
   function syncDisplayedAccent(color: string): void {
     for (const child of swatchesRow.children) {
@@ -178,7 +199,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
       class: `accent-swatch${color === currentAccent ? " active" : ""}`,
       title: color,
       role: "radio",
-      tabindex: "0",
+      tabindex: color === currentAccent ? "0" : "-1",
       "aria-label": color,
       "aria-checked": color === currentAccent ? "true" : "false",
     });
@@ -205,6 +226,9 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
     swatchesRow.appendChild(swatch);
   }
+  // Same roving behaviour as the theme tiles (A11Y-09).
+  setRovingTabindex(swatchesRow, "[role='radio']");
+  enableRovingNavigation(swatchesRow, "[role='radio']", signal);
 
   hexInput.addEventListener(
     "input",
@@ -221,7 +245,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   );
 
   appendChildren(hexInputRow, hexPrefix, hexInput);
-  appendChildren(section, accentHeader, swatchesRow, hexInputRow);
+  appendChildren(section, accentHeader, swatchesRow, hexInputRow, accentNote);
 
   // Apply stored preferences on render
   if (currentTheme === null) {
@@ -229,7 +253,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   } else {
     applyTheme(currentTheme);
   }
-  document.documentElement.style.setProperty("--font-size", `${currentFontSize}px`);
+  applyFontSize();
   document.documentElement.classList.toggle("compact-mode", currentCompact);
   if (hasStoredAccent) {
     applyAccent(currentAccent);

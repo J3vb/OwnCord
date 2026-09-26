@@ -2,7 +2,7 @@
  * Logs settings tab — log viewer with filtering, level control, live updates.
  */
 
-import { createElement, appendChildren, clearChildren } from "@lib/dom";
+import { createElement, appendChildren, clearChildren, setOwnedTimeout } from "@lib/dom";
 import {
   getLogBuffer,
   clearLogBuffer,
@@ -14,6 +14,9 @@ import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "../SettingsOverlay";
 import { getSessionDebugInfo } from "@lib/livekitSession";
 import { savePref, readMigratedStringPref } from "./helpers";
+import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
+import { desktop } from "../../platform/desktop";
+import { settingsText as t } from "../../i18n/settings";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -44,7 +47,7 @@ function formatLogEntry(entry: LogEntry): HTMLDivElement {
   const textEl = createElement(
     "span",
     {
-      style: `color: ${LOG_LEVEL_COLORS[entry.level]}`,
+      style: `color: ${LOG_LEVEL_COLORS[entry.level]}; overflow-wrap: anywhere;`,
     },
     text,
   );
@@ -92,6 +95,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     LOG_FILTER_LEVELS,
   );
   let unsubLogListener: (() => void) | null = null;
+  let cleanupConnectionDiagnostics: (() => void) | null = null;
 
   // Single point of truth for both the list and the "N entries" counter above
   // it, so every render path (filter change, Clear, Refresh, live entry)
@@ -99,7 +103,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
   function renderLogEntries(): void {
     const entries = getLogBuffer();
     if (countEl !== null) {
-      countEl.textContent = `${entries.length} entries`;
+      countEl.textContent = t("logs.entries", { count: entries.length });
     }
 
     if (logListEl === null) return;
@@ -116,6 +120,10 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
 
   function build(buildSignal: AbortSignal = signal): HTMLDivElement {
     const section = createElement("div", { class: "settings-pane active" });
+    cleanupConnectionDiagnostics?.();
+    const diagnostics = createConnectionDiagnosticsPanel(buildSignal);
+    cleanupConnectionDiagnostics = diagnostics.cleanup;
+    section.appendChild(diagnostics.element);
 
     // Version display
     const versionEl = createElement(
@@ -123,31 +131,31 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       {
         style: "font-size: 12px; color: var(--text-muted); margin: -8px 0 12px 0;",
       },
-      "Client version: loading...",
+      t("logs.version.loading"),
     );
     section.appendChild(versionEl);
-    void import("@tauri-apps/api/app")
-      .then(({ getVersion }) =>
-        getVersion().then((v) => {
-          versionEl.textContent = `Client version: v${v}`;
-        }),
-      )
+    void desktop.appMetadata
+      .getVersion()
+      .then((v) => {
+        versionEl.textContent = t("logs.version.known", { version: v });
+      })
       .catch(() => {
-        versionEl.textContent = "Client version: unknown";
+        versionEl.textContent = t("logs.version.unknown");
       });
 
     // Controls row
     const controls = createElement("div", {
-      style: "display: flex; gap: 8px; margin-bottom: 8px; align-items: center;",
+      style: "display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; align-items: center;",
     });
 
     // Filter dropdown
     const filterLabel = createElement(
       "span",
       { class: "setting-label", style: "margin: 0;" },
-      "Filter:",
+      t("logs.filter"),
     );
     const filterSelect = createElement("select", {
+      "aria-label": t("logs.filterLabel"),
       style:
         "background: var(--bg-tertiary); color: var(--text-normal); border: 1px solid var(--bg-active); border-radius: 4px; padding: 4px 8px; font-size: 13px;",
     });
@@ -171,9 +179,10 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     const levelLabel = createElement(
       "span",
       { class: "setting-label", style: "margin: 0 0 0 16px;" },
-      "Min Level:",
+      t("logs.minLevel"),
     );
     const levelSelect = createElement("select", {
+      "aria-label": t("logs.minLevelLabel"),
       style:
         "background: var(--bg-tertiary); color: var(--text-normal); border: 1px solid var(--bg-active); border-radius: 4px; padding: 4px 8px; font-size: 13px;",
     });
@@ -212,7 +221,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
         class: "ac-btn",
         style: "margin-left: auto;",
       },
-      "Copy All",
+      t("logs.copyAll"),
     );
     copyBtn.addEventListener(
       "click",
@@ -233,23 +242,31 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
         void navigator.clipboard
           .writeText(text)
           .then(() => {
-            copyBtn.textContent = "Copied!";
-            setTimeout(() => {
-              copyBtn.textContent = "Copy All";
-            }, 1500);
+            copyBtn.textContent = t("logs.copied");
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                copyBtn.textContent = t("logs.copyAll");
+              },
+              1500,
+            );
           })
           .catch(() => {
-            copyBtn.textContent = "Failed to copy";
-            setTimeout(() => {
-              copyBtn.textContent = "Copy All";
-            }, 1500);
+            copyBtn.textContent = t("logs.copyFailed");
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                copyBtn.textContent = t("logs.copyAll");
+              },
+              1500,
+            );
           });
       },
       { signal: buildSignal },
     );
 
     // Clear button
-    const clearBtn = createElement("button", { class: "ac-btn" }, "Clear Logs");
+    const clearBtn = createElement("button", { class: "ac-btn" }, t("logs.clear"));
     clearBtn.addEventListener(
       "click",
       () => {
@@ -260,7 +277,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     );
 
     // Refresh button
-    const refreshBtn = createElement("button", { class: "ac-btn" }, "Refresh");
+    const refreshBtn = createElement("button", { class: "ac-btn" }, t("logs.refresh"));
     refreshBtn.addEventListener("click", () => renderLogEntries(), { signal: buildSignal });
 
     appendChildren(
@@ -276,7 +293,11 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     section.appendChild(controls);
 
     // Voice diagnostics panel
-    const diagHeader = createElement("h3", { style: "margin: 12px 0 6px 0;" }, "Voice Diagnostics");
+    const diagHeader = createElement(
+      "h3",
+      { style: "margin: 12px 0 6px 0;" },
+      t("logs.voiceDiagnostics"),
+    );
     section.appendChild(diagHeader);
 
     const diagPanel = createElement("div", {
@@ -293,14 +314,14 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     const diagRefresh = createElement(
       "button",
       { class: "ac-btn", style: "margin-top: 6px;" },
-      "Refresh Diagnostics",
+      t("logs.refreshDiagnostics"),
     );
     diagRefresh.addEventListener("click", refreshDiag, { signal: buildSignal });
 
     const diagCopy = createElement(
       "button",
       { class: "ac-btn", style: "margin: 6px 0 0 6px;" },
-      "Copy Diagnostics",
+      t("logs.copyDiagnostics"),
     );
     diagCopy.addEventListener(
       "click",
@@ -308,16 +329,63 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
         void navigator.clipboard
           .writeText(diagPanel.textContent ?? "")
           .then(() => {
-            diagCopy.textContent = "Copied!";
-            setTimeout(() => {
-              diagCopy.textContent = "Copy Diagnostics";
-            }, 1500);
+            diagCopy.textContent = t("logs.copied");
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                diagCopy.textContent = t("logs.copyDiagnostics");
+              },
+              1500,
+            );
           })
           .catch(() => {
-            diagCopy.textContent = "Failed to copy";
-            setTimeout(() => {
-              diagCopy.textContent = "Copy Diagnostics";
-            }, 1500);
+            diagCopy.textContent = t("logs.copyFailed");
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                diagCopy.textContent = t("logs.copyDiagnostics");
+              },
+              1500,
+            );
+          });
+      },
+      { signal: buildSignal },
+    );
+
+    // Support bundle (B7-15c): lazily loaded so the zip writer stays off the
+    // startup path. Everything is read and written on this machine.
+    const bundleBtn = createElement(
+      "button",
+      { class: "ac-btn", style: "margin: 6px 0 0 6px;", "data-testid": "export-support-bundle" },
+      t("logs.exportBundle"),
+    );
+    const bundleNote = createElement(
+      "div",
+      { style: "font-size: 12px; color: var(--text-muted); margin-top: 6px;" },
+      t("logs.bundleNote"),
+    );
+    const bundleStatus = createElement("div", {
+      style: "font-size: 12px; margin-top: 4px;",
+      role: "status",
+      "data-testid": "support-bundle-status",
+    });
+    bundleBtn.addEventListener(
+      "click",
+      () => {
+        bundleBtn.disabled = true;
+        bundleStatus.textContent = "";
+        void import("@lib/supportBundle")
+          .then(({ exportSupportBundle }) => exportSupportBundle(desktop, getSessionDebugInfo()))
+          .then((saved) => {
+            bundleStatus.textContent = saved ? t("logs.bundleSaved") : "";
+          })
+          .catch((err: unknown) => {
+            bundleStatus.textContent = t("logs.exportFailed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          })
+          .finally(() => {
+            bundleBtn.disabled = false;
           });
       },
       { signal: buildSignal },
@@ -325,8 +393,9 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
 
     section.appendChild(diagPanel);
     const diagBtns = createElement("div", { style: "display: flex; flex-wrap: wrap;" });
-    appendChildren(diagBtns, diagRefresh, diagCopy);
+    appendChildren(diagBtns, diagRefresh, diagCopy, bundleBtn);
     section.appendChild(diagBtns);
+    appendChildren(section, bundleNote, bundleStatus);
 
     // Log count
     countEl = createElement(
@@ -334,7 +403,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       {
         style: "font-size: 12px; color: #888; margin: 12px 0 4px 0;",
       },
-      `${getLogBuffer().length} entries`,
+      t("logs.entries", { count: getLogBuffer().length }),
     );
     section.appendChild(countEl);
 
@@ -360,6 +429,8 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
   }
 
   function cleanup(): void {
+    cleanupConnectionDiagnostics?.();
+    cleanupConnectionDiagnostics = null;
     unsubLogListener?.();
     unsubLogListener = null;
     logListEl = null;

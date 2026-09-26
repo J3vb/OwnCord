@@ -5,6 +5,7 @@
  * Step 6.50
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon, createSignalIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
@@ -23,6 +24,7 @@ import {
   type QualityLevel,
 } from "@lib/connectionStats";
 import { getRoomForStats, retryMicPermission } from "@lib/livekitSession";
+import { voiceText as t } from "../i18n/voice";
 
 export interface VoiceWidgetOptions {
   onDisconnect(): void;
@@ -32,11 +34,14 @@ export interface VoiceWidgetOptions {
   onScreenshareToggle(): void;
 }
 
+/** Connection-quality colour, used both for the signal bars (a fill, where
+ *  --green/--yellow/--red are fine) and for the ping text beside them (text,
+ *  which Q1 requires at 4.5:1). The qualified text tokens carry both roles. */
 const QUALITY_COLORS: Record<QualityLevel, string> = {
-  excellent: "var(--green, #23a559)",
-  fair: "var(--yellow, #f0b232)",
-  poor: "var(--red, #f23f43)",
-  bad: "var(--red, #f23f43)",
+  excellent: "var(--text-positive, #62c28c)",
+  fair: "var(--text-warning, #f2b84b)",
+  poor: "var(--text-danger, #ff9a9c)",
+  bad: "var(--text-danger, #ff9a9c)",
 };
 
 const QUALITY_BARS: Record<QualityLevel, number> = {
@@ -48,13 +53,10 @@ const QUALITY_BARS: Record<QualityLevel, number> = {
 
 /** Header status text per voice-session lifecycle state
  *  (docs/architecture/ux/voice-and-e2ee.md §2). */
-const STATUS_LABELS: Record<VoiceStatus, string> = {
-  idle: "Voice Connected",
-  joining: "Connecting…",
-  securing: "Securing…",
-  connected: "Voice Connected",
-  reconnecting: "Reconnecting voice…",
-};
+function headerStatusText(status: VoiceStatus): string {
+  // i18n-exempt: catalog key assembled from the VoiceStatus wire value
+  return t(`status.${status}`);
+}
 
 /** Format milliseconds elapsed into HH:MM:SS or MM:SS. */
 function formatElapsed(ms: number): string {
@@ -67,8 +69,14 @@ function formatElapsed(ms: number): string {
   return h > 0 ? `${String(h).padStart(2, "0")}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+function swapIcon(btn: HTMLButtonElement, name: IconName): void {
+  const existing = btn.querySelector("svg");
+  if (existing) existing.remove();
+  btn.appendChild(createIcon(name, 18));
+}
+
 export function createVoiceWidget(options: VoiceWidgetOptions): MountableComponent {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
   let channelNameEl: HTMLSpanElement | null = null;
   let statusLabel: HTMLSpanElement | null = null;
@@ -79,12 +87,26 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let cameraBtn: HTMLButtonElement | null = null;
   let shareBtn: HTMLButtonElement | null = null;
   let disconnectBtn: HTMLButtonElement | null = null;
+  /** Persistent polite status for a moderator-imposed mute/deafen. The
+   *  disabled controls carry only a `title`, which a screen reader never
+   *  reaches (a disabled button cannot take focus), so the reason is announced
+   *  here instead — once, when it appears. */
+  let modStatusEl: HTMLDivElement | null = null;
 
-  // Listen-only mode: "Grant Microphone" button
+  // Listen-only mode: "Grant Microphone" button + its persistent explanation.
   let grantMicBtn: HTMLButtonElement | null = null;
+  /**
+   * Whether the user has retried the microphone in this session and it is
+   * still unavailable. The widget cannot see *why* the OS refused (the
+   * notifier contract is a boolean), but it can honestly report the outcome
+   * of its own retry — so the guidance stops promising a grant that the retry
+   * just failed to obtain.
+   */
+  let micRetryFailed = false;
+  let micNoticeEl: HTMLDivElement | null = null;
 
   // Connection stats
-  let signalWrap: HTMLDivElement | null = null;
+  let signalWrap: HTMLButtonElement | null = null;
   let pingLabel: HTMLSpanElement | null = null;
   let statsPane: HTMLDivElement | null = null;
   let statsPoller: ConnectionStatsPoller | null = null;
@@ -104,12 +126,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let totalDownEl: HTMLSpanElement | null = null;
 
   const unsubs: Array<() => void> = [];
-
-  function swapIcon(btn: HTMLButtonElement, name: IconName): void {
-    const existing = btn.querySelector("svg");
-    if (existing) existing.remove();
-    btn.appendChild(createIcon(name, 18));
-  }
 
   function updateSignalIcon(stats: ConnectionStats): void {
     if (signalWrap === null || pingLabel === null) return;
@@ -131,6 +147,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       setText(outRateEl, `${formatRate(stats.outRate)} (${formatBitrate(stats.outRate)})`);
     if (outPacketsEl) setText(outPacketsEl, String(stats.outPackets));
     if (rttEl) {
+      // i18n-exempt: numeric RTT value with its unit, not translatable prose
       setText(rttEl, stats.rtt > 0 ? `${stats.rtt.toFixed(1)} ms` : "—");
       rttEl.style.color = color;
     }
@@ -194,7 +211,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
    *  distinct, still-visible not-secured warning instead of just hiding. */
   function updateStatus(status: VoiceStatus, encryptionDegraded: boolean): void {
     if (statusLabel !== null) {
-      setText(statusLabel, STATUS_LABELS[status]);
+      setText(statusLabel, headerStatusText(status));
       statusLabel.classList.toggle("vw-securing", status === "securing");
       statusLabel.classList.toggle("vw-reconnecting", status === "reconnecting");
     }
@@ -203,24 +220,24 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       const degraded = connected && encryptionDegraded;
       securedBadge.classList.toggle("vw-secured--degraded", degraded);
       if (degraded) {
-        setText(securedBadge, "⚠️ Unsecured");
-        securedBadge.title = "End-to-end encryption failed — this call may not be protected";
+        setText(securedBadge, t("encryption.unsecured"));
+        securedBadge.title = t("encryption.unsecuredLabel");
       } else {
-        setText(securedBadge, "🔒 Secured");
-        securedBadge.title = "End-to-end encrypted";
+        setText(securedBadge, t("encryption.secured"));
+        securedBadge.title = t("encryption.securedLabel");
       }
       securedBadge.style.display = connected ? "inline-flex" : "none";
     }
   }
 
-  /** Freeze voice controls while the WS socket is not live — the controls would
-   *  otherwise send over a down socket (docs/architecture/ux/README.md §3).
-   *  LiveKit's own reconnect keeps retrying underneath; we only gate the UI. */
+  /** Freeze controls that need WS signaling, while keeping local hangup
+   *  available: the LiveKit call may still be live when chat is disconnected. */
   function updateFrozen(status: "connected" | "reconnecting" | "disconnected"): void {
     const frozen = status !== "connected";
-    const reason = status === "reconnecting" ? "Reconnecting…" : "Not connected";
+    const reason =
+      status === "reconnecting" ? t("status.reconnectingShort") : t("status.notConnected");
     controlsRow?.classList.toggle("vw-controls--frozen", frozen);
-    for (const btn of [muteBtn, deafenBtn, cameraBtn, shareBtn, disconnectBtn, grantMicBtn]) {
+    for (const btn of [muteBtn, deafenBtn, cameraBtn, shareBtn, grantMicBtn]) {
       if (btn === null) continue;
       btn.disabled = frozen;
       btn.title = frozen ? reason : "";
@@ -255,7 +272,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
     setText(
       channelNameEl,
-      dm !== undefined ? dmDisplayName(dm) : (channel?.name ?? "Voice Channel"),
+      dm !== undefined ? dmDisplayName(dm) : (channel?.name ?? t("widget.channelFallback")),
     );
 
     // Toggle button active states, swap icons, and update aria-pressed
@@ -275,7 +292,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       // disable, which must not be relaxed here.
       if (serverMuted) {
         muteBtn.disabled = true;
-        muteBtn.title = "You were muted by a moderator";
+        muteBtn.title = t("widget.mutedByModerator");
       }
     }
     if (deafenBtn) {
@@ -283,12 +300,26 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       deafenBtn.setAttribute("aria-pressed", String(voice.localDeafened));
       if (serverDeafened) {
         deafenBtn.disabled = true;
-        deafenBtn.title = "You were deafened by a moderator";
+        deafenBtn.title = t("widget.deafenedByModerator");
       }
     }
     if (cameraBtn) {
       swapIcon(cameraBtn, voice.localCamera ? "camera-off" : "camera");
       cameraBtn.setAttribute("aria-pressed", String(voice.localCamera));
+    }
+    // Announce a moderator-imposed state once (render runs on every store
+    // change; the text only changes when the state actually does, so a
+    // screen reader does not re-read it on unrelated updates).
+    if (modStatusEl !== null) {
+      const text =
+        serverMuted && serverDeafened
+          ? t("widget.moderatedMutedDeafened")
+          : serverMuted
+            ? t("widget.mutedByModerator")
+            : serverDeafened
+              ? t("widget.deafenedByModerator")
+              : "";
+      if (modStatusEl.textContent !== text) setText(modStatusEl, text);
     }
     shareBtn?.classList.toggle("active-ctrl", voice.localScreenshare);
     shareBtn?.classList.toggle("sharing-active", voice.localScreenshare);
@@ -298,14 +329,34 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       // Update button label to show "Sharing" when active
       const labelSpan = shareBtn.querySelector(".vw-share-label");
       if (labelSpan !== null) {
-        labelSpan.textContent = voice.localScreenshare ? "Sharing" : "";
+        labelSpan.textContent = voice.localScreenshare ? t("widget.sharing") : "";
         (labelSpan as HTMLElement).style.display = voice.localScreenshare ? "inline" : "none";
       }
     }
 
+    // Leaving listen-only clears the "retry failed" memory, so a later join
+    // that lands here again starts from the helpful hint rather than a stale
+    // claim about the permission.
+    if (!voice.listenOnly) micRetryFailed = false;
     // Show/hide "Grant Microphone" button based on listen-only state
     if (grantMicBtn) {
       grantMicBtn.style.display = voice.listenOnly ? "block" : "none";
+    }
+    // The persistent mic notice: how to change the state, and — once a retry
+    // has failed — that it is the system permission, not this app, that has to
+    // change. The wording never claims the mic is denied when the real cause
+    // (no device, in use by another app) is something a permission grant
+    // cannot fix.
+    if (micNoticeEl) {
+      const text = !voice.listenOnly
+        ? ""
+        : micRetryFailed
+          ? t("widget.listenOnlyBlocked")
+          : t("widget.listenOnlyHint");
+      // Set only on change: render() runs on unrelated store updates, and a
+      // screen reader can re-read a replaced text node even when identical,
+      // which would break the "announced once" goal.
+      if (micNoticeEl.textContent !== text) setText(micNoticeEl, text);
     }
   }
 
@@ -320,7 +371,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       "aria-label": label,
     });
     btn.appendChild(createIcon(icon, 18));
-    btn.addEventListener("click", handler, { signal: ac.signal });
+    btn.addEventListener("click", handler, { signal: disposable.signal });
     return btn;
   }
 
@@ -333,50 +384,67 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       class: "vw-connected",
       "data-testid": "vw-status",
     });
-    setText(statusLabel, STATUS_LABELS.connected);
+    setText(statusLabel, t("status.connected"));
     // Persistent E2EE affirmation, shown only once the room key is ready.
     securedBadge = createElement("span", {
       class: "vw-secured",
       "data-testid": "vw-secured",
-      title: "End-to-end encrypted",
+      title: t("encryption.securedLabel"),
     });
-    setText(securedBadge, "🔒 Secured");
+    setText(securedBadge, t("encryption.secured"));
     securedBadge.style.display = "none";
     timerEl = createElement("span", { class: "vw-timer" }, "00:00");
-    channelNameEl = createElement("span", { class: "vw-channel" }, "Voice Channel");
+    channelNameEl = createElement("span", { class: "vw-channel" }, t("widget.channelFallback"));
 
-    signalWrap = createElement("div", { class: "vw-signal", "aria-label": "Connection quality" });
+    // A button, not a clickable div: the quality readout toggles the transport
+    // stats pane, and a pointer-only control is unreachable by keyboard (Q1).
+    // aria-expanded reflects the pane it owns.
+    signalWrap = createElement("button", {
+      type: "button",
+      class: "vw-signal",
+      "aria-label": t("widget.quality"),
+      "aria-expanded": "false",
+      "data-testid": "vw-signal",
+    });
     signalWrap.appendChild(createSignalIcon(4, QUALITY_COLORS.excellent, 14));
     pingLabel = createElement("span", { class: "vw-ping" }, "—");
     pingLabel.style.color = QUALITY_COLORS.excellent;
     signalWrap.appendChild(pingLabel);
-    signalWrap.addEventListener(
-      "click",
-      () => {
-        statsPane?.classList.toggle("visible");
-      },
-      { signal: ac.signal },
-    );
+
+    function toggleStatsPane(): void {
+      if (statsPane === null || signalWrap === null) return;
+      const open = statsPane.classList.toggle("visible");
+      signalWrap.setAttribute("aria-expanded", String(open));
+    }
+    signalWrap.addEventListener("click", toggleStatsPane, { signal: disposable.signal });
 
     appendChildren(header, statusLabel, securedBadge, timerEl, channelNameEl, signalWrap);
 
     // Expanded stats pane (hidden by default)
     statsPane = createElement("div", { class: "vw-stats" });
-    const statsTitle = createElement("div", { class: "vw-stats-title" }, "Transport Statistics");
+    const statsTitle = createElement(
+      "div",
+      { class: "vw-stats-title" },
+      t("widget.transportStatistics"),
+    );
     const statsGrid = createElement("div", { class: "vw-stats-grid" });
 
     // Outgoing column
     const outCol = createElement("div", {});
-    const outLabel = createElement("div", { class: "vw-stats-col-label out" }, "Outgoing");
-    outRateEl = createElement("span", {}, "0 B/s");
+    const outLabel = createElement(
+      "div",
+      { class: "vw-stats-col-label out" },
+      t("widget.outgoing"),
+    );
+    outRateEl = createElement("span", {}, t("widget.zeroRate"));
     outPacketsEl = createElement("span", {}, "0");
     rttEl = createElement("span", {}, "—");
     rttEl.style.fontWeight = "600";
     const outBody = createElement("div", { class: "vw-stats-row" });
     for (const [label, el] of [
-      ["Rate: ", outRateEl],
-      ["Packets: ", outPacketsEl],
-      ["RTT: ", rttEl],
+      [t("widget.rate"), outRateEl],
+      [t("widget.packets"), outPacketsEl],
+      [t("widget.rtt"), rttEl],
     ] as const) {
       outBody.appendChild(document.createTextNode(label));
       outBody.appendChild(el);
@@ -386,13 +454,13 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     // Incoming column
     const inCol = createElement("div", {});
-    const inLabel = createElement("div", { class: "vw-stats-col-label in" }, "Incoming");
-    inRateEl = createElement("span", {}, "0 B/s");
+    const inLabel = createElement("div", { class: "vw-stats-col-label in" }, t("widget.incoming"));
+    inRateEl = createElement("span", {}, t("widget.zeroRate"));
     inPacketsEl = createElement("span", {}, "0");
     const inBody = createElement("div", { class: "vw-stats-row" });
     for (const [label, el] of [
-      ["Rate: ", inRateEl],
-      ["Packets: ", inPacketsEl],
+      [t("widget.rate"), inRateEl],
+      [t("widget.packets"), inPacketsEl],
     ] as const) {
       inBody.appendChild(document.createTextNode(label));
       inBody.appendChild(el);
@@ -404,10 +472,14 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     // Session totals
     const totals = createElement("div", { class: "vw-stats-totals" });
-    const totalsLabel = createElement("div", { class: "vw-stats-totals-label" }, "Session Totals");
+    const totalsLabel = createElement(
+      "div",
+      { class: "vw-stats-totals-label" },
+      t("widget.sessionTotals"),
+    );
     const totalsRow = createElement("div", { class: "vw-stats-totals-row" });
-    totalUpEl = createElement("span", {}, "0 B");
-    totalDownEl = createElement("span", {}, "0 B");
+    totalUpEl = createElement("span", {}, t("widget.zeroBytes"));
+    totalDownEl = createElement("span", {}, t("widget.zeroBytes"));
     const upWrap = createElement("span", {});
     upWrap.appendChild(document.createTextNode("\u2191 "));
     upWrap.appendChild(totalUpEl);
@@ -422,11 +494,15 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     // Controls row
     const controls = createElement("div", { class: "vw-controls" });
     controlsRow = controls;
-    muteBtn = createControlButton("Mute", "mic", options.onMuteToggle);
-    deafenBtn = createControlButton("Deafen", "headphones", options.onDeafenToggle);
-    cameraBtn = createControlButton("Camera", "camera", options.onCameraToggle);
+    muteBtn = createControlButton(t("widget.control.mute"), "mic", options.onMuteToggle);
+    deafenBtn = createControlButton(
+      t("widget.control.deafen"),
+      "headphones",
+      options.onDeafenToggle,
+    );
+    cameraBtn = createControlButton(t("widget.control.camera"), "camera", options.onCameraToggle);
     shareBtn = createControlButton(
-      "Screenshare",
+      t("widget.control.screenshare"),
       "monitor",
       options.onScreenshareToggle,
       "vw-share-btn",
@@ -434,7 +510,12 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     const shareLabelSpan = createElement("span", { class: "vw-share-label" });
     shareLabelSpan.style.display = "none";
     shareBtn.appendChild(shareLabelSpan);
-    disconnectBtn = createControlButton("Disconnect", "phone", options.onDisconnect, "disconnect");
+    disconnectBtn = createControlButton(
+      t("widget.control.disconnect"),
+      "phone",
+      options.onDisconnect,
+      "disconnect",
+    );
     appendChildren(controls, muteBtn, deafenBtn, cameraBtn, shareBtn, disconnectBtn);
 
     // "Grant Microphone" button for listen-only mode
@@ -442,9 +523,9 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       "button",
       {
         class: "vw-grant-mic",
-        "aria-label": "Grant microphone permission",
+        "aria-label": t("widget.grantMicLabel"),
       },
-      "Grant Microphone",
+      t("widget.grantMic"),
     );
     grantMicBtn.style.display = "none";
     grantMicBtn.addEventListener(
@@ -452,11 +533,16 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       () => {
         if (grantMicBtn) {
           grantMicBtn.disabled = true;
-          setText(grantMicBtn, "Requesting...");
+          setText(grantMicBtn, t("widget.requesting"));
         }
         void retryMicPermission().finally(() => {
+          // The retry swallowed its own error and only reports via store state,
+          // so read the state it left: still listen-only means the attempt did
+          // not acquire the mic, and the persistent notice should stop
+          // implying a permission grant is all that stands in the way.
+          micRetryFailed = voiceStore.getState().listenOnly;
           if (grantMicBtn) {
-            setText(grantMicBtn, "Grant Microphone");
+            setText(grantMicBtn, t("widget.grantMic"));
             // Delegate the disabled/title state back to render(), which
             // re-runs updateFrozen() — the single authority for the
             // socket-down freeze. Hardcoding `disabled = false` here would
@@ -467,10 +553,33 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           }
         });
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
-    appendChildren(root, header, statsPane, grantMicBtn, controls);
+    // A persistent line beside the Grant Microphone button: the button is
+    // hidden while nothing is wrong, but when the user is in listen-only mode
+    // the state needs a reason and a next step (BPR-092), not just a button.
+    micNoticeEl = createElement("div", {
+      // No `setting-desc`: its margin/font would apply even while this live
+      // region is empty (it stays rendered but empty outside listen-only mode
+      // so a screen reader hears it fill, not appear filled), adding a stray
+      // gap to every voice session. `.vw-mic-notice` owns its own type.
+      class: "vw-mic-notice",
+      "data-testid": "vw-mic-notice",
+      role: "status",
+      "aria-live": "polite",
+    });
+
+    // A live region present from mount (screen readers skip one inserted
+    // already filled) that only fills when a moderator-imposed state lands.
+    modStatusEl = createElement("div", {
+      class: "vw-mod-status sr-only",
+      role: "status",
+      "aria-live": "polite",
+      "data-testid": "vw-mod-status",
+    });
+
+    appendChildren(root, header, statsPane, modStatusEl, grantMicBtn, micNoticeEl, controls);
 
     render();
 
@@ -515,6 +624,15 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
         () => render(),
       ),
     );
+    // render() reads the DM call's header name from dmStore, but nothing above
+    // fires when it changes — a DM rename/nickname update only touches dmStore,
+    // so the header went stale for the whole call (OC-0347).
+    unsubs.push(
+      dmStore.subscribeSelector(
+        (s) => s.channels,
+        () => render(),
+      ),
+    );
 
     container.appendChild(root);
   }
@@ -522,7 +640,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   function destroy(): void {
     stopStatsPoller();
     stopElapsedTimer();
-    ac.abort();
+    disposable.destroy();
     for (const unsub of unsubs) {
       unsub();
     }
@@ -538,6 +656,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     cameraBtn = null;
     shareBtn = null;
     disconnectBtn = null;
+    modStatusEl = null;
     grantMicBtn = null;
     signalWrap = null;
     pingLabel = null;

@@ -52,7 +52,7 @@ func TestReconnect_FullReadyFallbackDoesNotLeakRevokedChannelSubscription(t *tes
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -96,7 +96,7 @@ func TestReconnect_FullReadyFallbackDoesNotLeakRevokedChannelSubscription(t *tes
 	}
 	defer func() { handleReconnectPreRegisterRaceHook = nil }()
 
-	srv := httptest.NewServer(ServeWS(hub, database, []string{"*"}, 0))
+	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
 
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

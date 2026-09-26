@@ -14,6 +14,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // contextKey is an unexported type for context keys in this package.
@@ -67,58 +68,67 @@ func (t *touchThrottle) shouldTouch(hash string, now time.Time) bool {
 	return true
 }
 
+// principal returns the caller AuthMiddleware resolved for r as the shape
+// the service layer takes. ok is false when the request carries no
+// authenticated user; Session is nil for an API-token principal.
+func principal(r *http.Request) (service.Principal, bool) {
+	user, ok := r.Context().Value(UserKey).(*db.User)
+	if !ok || user == nil {
+		return service.Principal{}, false
+	}
+	sess, _ := r.Context().Value(SessionKey).(*db.Session)
+	return service.Principal{User: user, Session: sess}, true
+}
+
+// requireUser resolves the authenticated user for a handler on a route mounted
+// behind AuthMiddleware, refusing the request with the same 401
+// writeNotAuthenticated sends when there is no usable one.
+func requireUser(w http.ResponseWriter, r *http.Request) (*db.User, bool) {
+	user, ok := r.Context().Value(UserKey).(*db.User)
+	if !ok || user == nil {
+		writeNotAuthenticated(w)
+		return nil, false
+	}
+	return user, true
+}
+
 // AuthMiddleware reads the "Authorization: Bearer <token>" header, validates
 // the session, and injects the user and session into the request context.
 // Returns 401 if the token is missing, invalid, or the session is expired.
-func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
+func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Handler {
 	touches := &touchThrottle{seen: make(map[string]time.Time)}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, ok := auth.ExtractBearerToken(r)
 			if !ok {
-				writeJSON(w, http.StatusUnauthorized, errorResponse{
-					Error:   "UNAUTHORIZED",
-					Message: "missing or invalid authorization header",
-				})
+				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid authorization header")
 				return
 			}
 
 			hash := auth.HashToken(token)
 			// Resolve the bearer token to a principal. A login session is matched
 			// first (existing behavior unchanged); an API token is the fallback.
-			user, role, sess, err := auth.ResolveTokenHash(r.Context(), database, hash)
+			user, role, sess, err := sessions.ResolveBearer(r.Context(), hash)
 			switch {
 			case errors.Is(err, auth.ErrTokenExpired):
 				// Clean up the expired login session in the background. The request
 				// ctx is cancelled once the 401 is written, so detach cancellation.
 				cleanupCtx := context.WithoutCancel(r.Context())
 				go func(h string) {
-					if err := database.DeleteSession(cleanupCtx, h); err != nil {
+					if err := sessions.DiscardSession(cleanupCtx, h); err != nil {
 						slog.WarnContext(cleanupCtx, "expired session cleanup failed", "error", err)
 					}
 				}(hash)
-				writeJSON(w, http.StatusUnauthorized, errorResponse{
-					Error:   "UNAUTHORIZED",
-					Message: "session has expired",
-				})
+				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "session has expired")
 				return
 			case errors.Is(err, auth.ErrUserNotFound):
-				writeJSON(w, http.StatusUnauthorized, errorResponse{
-					Error:   "UNAUTHORIZED",
-					Message: "user not found",
-				})
+				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "user not found")
 				return
 			case errors.Is(err, auth.ErrRoleNotFound):
-				writeJSON(w, http.StatusUnauthorized, errorResponse{
-					Error:   "UNAUTHORIZED",
-					Message: "role not found",
-				})
+				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "role not found")
 				return
 			case errors.Is(err, auth.ErrTokenNotFound):
-				writeJSON(w, http.StatusUnauthorized, errorResponse{
-					Error:   "UNAUTHORIZED",
-					Message: "invalid or expired session",
-				})
+				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
 				return
 			case err != nil:
 				// A wrapped DB error, not one of the sentinels above. A DB outage
@@ -127,19 +137,13 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 				// disconnects the WS, and deletes the stored credential. Log it
 				// and report the failure as a server-side fault instead.
 				slog.ErrorContext(r.Context(), "auth: token resolution failed", "error", err)
-				writeJSON(w, http.StatusServiceUnavailable, errorResponse{
-					Error:   "SERVICE_UNAVAILABLE",
-					Message: "authentication service temporarily unavailable",
-				})
+				writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "authentication service temporarily unavailable")
 				return
 			}
 
 			// Reject effectively-banned users before any further processing.
 			if auth.IsEffectivelyBanned(user) {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "your account has been suspended",
-				})
+				writeErr(w, http.StatusForbidden, "FORBIDDEN", "your account has been suspended")
 				return
 			}
 
@@ -150,14 +154,14 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			// to bot/CI traffic.
 			if sess != nil {
 				if touches.shouldTouch(hash, time.Now()) {
-					if err := database.TouchSession(r.Context(), hash); err != nil {
+					if err := sessions.TouchSession(r.Context(), hash); err != nil {
 						slog.Warn("failed to touch session", "error", err, "user_id", user.ID)
 					}
 				}
 			} else {
 				touchCtx := context.WithoutCancel(r.Context())
 				go func(h string) {
-					if err := database.TouchAPIToken(touchCtx, h); err != nil {
+					if err := sessions.TouchAPIToken(touchCtx, h); err != nil {
 						slog.WarnContext(touchCtx, "failed to touch api token", "error", err)
 					}
 				}(hash)
@@ -190,18 +194,12 @@ func RequirePermission(perm int64) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			role, ok := r.Context().Value(RoleKey).(*db.Role)
 			if !ok || role == nil {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "insufficient permissions",
-				})
+				writeErr(w, http.StatusForbidden, "FORBIDDEN", "insufficient permissions")
 				return
 			}
 
 			if !permissions.HasServerPerm(role.Permissions, perm) {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "insufficient permissions",
-				})
+				writeErr(w, http.StatusForbidden, "FORBIDDEN", "insufficient permissions")
 				return
 			}
 
@@ -221,10 +219,6 @@ func RequirePermission(perm int64) func(http.Handler) http.Handler {
 // MINIMUM limit of any of them (ordinary profile edits 429ing the password
 // endpoint, NAT'd logins blocking register).
 func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, window time.Duration, trustedProxies ...[]string) func(http.Handler) http.Handler {
-	return rateLimitMiddlewareWithPrefix(limiter, prefix, limit, window, trustedProxies...)
-}
-
-func rateLimitMiddlewareWithPrefix(limiter *auth.RateLimiter, prefix string, limit int, window time.Duration, trustedProxies ...[]string) func(http.Handler) http.Handler {
 	var proxies []string
 	if len(trustedProxies) > 0 {
 		proxies = trustedProxies[0]
@@ -237,10 +231,7 @@ func rateLimitMiddlewareWithPrefix(limiter *auth.RateLimiter, prefix string, lim
 
 			if !limiter.Allow(key, limit, window) {
 				w.Header().Set("Retry-After", fmt.Sprintf("%d", int(window.Seconds())))
-				writeJSON(w, http.StatusTooManyRequests, errorResponse{
-					Error:   "RATE_LIMITED",
-					Message: "too many requests, please slow down",
-				})
+				writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests, please slow down")
 				return
 			}
 
@@ -375,8 +366,9 @@ func ipInNets(ipStr string, nets []*net.IPNet) bool {
 }
 
 // AdminIPRestrict returns middleware that blocks requests from IPs not in the
-// allowed CIDR list. Returns 403 Forbidden for disallowed IPs. If the CIDR
-// list is empty, all requests are allowed (no restriction).
+// allowed CIDR list. Returns 403 Forbidden for disallowed IPs, naming
+// settingName (the config key the list came from). If the CIDR list is empty,
+// all requests are allowed (no restriction).
 //
 // trustedProxyCIDRs specifies which connecting IPs are trusted reverse proxies.
 // When the connecting IP matches a trusted proxy, the real client IP is read
@@ -386,7 +378,7 @@ func ipInNets(ipStr string, nets []*net.IPNet) bool {
 // skipped with a warning. A non-empty allowedCIDRs list whose entries are all
 // invalid yields zero networks — nothing matches, so access is denied (fail
 // closed), same as before the hoist.
-func AdminIPRestrict(allowedCIDRs, trustedProxyCIDRs []string) func(http.Handler) http.Handler {
+func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []string) func(http.Handler) http.Handler {
 	allowedNets := parseCIDRList(allowedCIDRs)
 	proxyNets := parseCIDRList(trustedProxyCIDRs)
 	restrict := len(allowedCIDRs) > 0
@@ -399,10 +391,14 @@ func AdminIPRestrict(allowedCIDRs, trustedProxyCIDRs []string) func(http.Handler
 
 			ip := clientIPWithProxies(r, proxyNets)
 			if !ipInNets(ip, allowedNets) {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "access denied",
-				})
+				// Name the setting so a self-hoster can fix it without reading
+				// the source: the default allowlist is private networks only,
+				// so a remote or VPS operator is refused until they add their
+				// address or reach the panel over an SSH tunnel. The reply
+				// deliberately says nothing about which IP was seen or which
+				// CIDRs are configured (no topology disclosure).
+				writeErr(w, http.StatusForbidden, "FORBIDDEN",
+					"access denied by "+settingName+" — this address is not in its allowlist")
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -486,4 +482,8 @@ func MaxBodySizeUnless(maxBytes int64, exemptPrefixes ...string) func(http.Handl
 type errorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
+}
+
+func writeErr(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, errorResponse{Error: code, Message: msg})
 }

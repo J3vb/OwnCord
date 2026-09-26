@@ -51,6 +51,16 @@ type ServerMetrics struct {
 
 	// DiskFreeMB is free space on the data volume; omitted when unknown.
 	DiskFreeMB *float64 `json:"disk_free_mb,omitempty"`
+	// DiskMinFreeMB is the reserved-headroom floor (server.min_free_disk_mb)
+	// the banner, /health and the upload path share; DiskLow is free < floor,
+	// present when free is known and a floor is set (B5-2 pressure signal).
+	DiskMinFreeMB float64 `json:"disk_min_free_mb"`
+	DiskLow       *bool   `json:"disk_low,omitempty"`
+	// UploadStorageUsedMB is every attachment row's size summed — a storage
+	// total, not the per-user quota counters (which skip legacy rows with no
+	// uploader). Emoji, a bounded exclusion, are not in it. Omitted when the
+	// query fails.
+	UploadStorageUsedMB *float64 `json:"upload_storage_used_mb,omitempty"`
 
 	// SQLite writer-pool saturation: time spent queueing for the single write
 	// connection. The most direct signal for the documented single-writer
@@ -58,9 +68,22 @@ type ServerMetrics struct {
 	DBWriterWaitCount   int64   `json:"db_writer_wait_count"`
 	DBWriterWaitSeconds float64 `json:"db_writer_wait_seconds"`
 
+	// SQLite reader-pool saturation: time spent queueing for a reader
+	// connection (max_readers per pool). On in-memory databases reader ==
+	// writer, so this duplicates the writer pair there.
+	DBReaderWaitCount   int64   `json:"db_reader_wait_count"`
+	DBReaderWaitSeconds float64 `json:"db_reader_wait_seconds"`
+
 	// Permission cache effectiveness.
 	PermCacheHits   uint64 `json:"perm_cache_hits"`
 	PermCacheMisses uint64 `json:"perm_cache_misses"`
+
+	// Web Push dispatch (B5-11, behind HP-5) — aggregate counters only,
+	// never per user. Zero on a server with dispatch off, which is the
+	// compiled default.
+	PushDispatched uint64 `json:"push_dispatched"`
+	PushFailed     uint64 `json:"push_failed"`
+	PushPruned     uint64 `json:"push_pruned"`
 
 	EventPersister *EventPersisterMetrics `json:"event_persister,omitempty"`
 }
@@ -78,8 +101,14 @@ type MetricsSources struct {
 	ConnRejects    func() uint64
 	PersisterStats func() (persisted, dropped, flushes, errs uint64, ok bool)
 	DBStats        func() sql.DBStats // writer pool
+	DBReaderStats  func() sql.DBStats // reader pool
 	PermCache      func() (hits, misses uint64)
 	DiskFree       func() (uint64, error)
+	DiskMinFree    uint64
+	UploadBytes    func(context.Context) (int64, error)
+	// PushCounters is nil when dispatch is off (the compiled default); the
+	// three fields stay at their zero value then.
+	PushCounters func() (dispatched, failed, pruned uint64)
 }
 
 // handleMetrics returns an HTTP handler that reports runtime server metrics.
@@ -132,17 +161,36 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 			metrics.DBWriterWaitCount = st.WaitCount
 			metrics.DBWriterWaitSeconds = st.WaitDuration.Seconds()
 		}
+		if src.DBReaderStats != nil {
+			st := src.DBReaderStats()
+			metrics.DBReaderWaitCount = st.WaitCount
+			metrics.DBReaderWaitSeconds = st.WaitDuration.Seconds()
+		}
 		if src.PermCache != nil {
 			metrics.PermCacheHits, metrics.PermCacheMisses = src.PermCache()
 		}
 		if src.ConnRejects != nil {
 			metrics.WSConnRejects = src.ConnRejects()
 		}
+		metrics.DiskMinFreeMB = float64(src.DiskMinFree) / 1024 / 1024
 		if src.DiskFree != nil {
 			if free, err := src.DiskFree(); err == nil {
 				mb := float64(free) / 1024 / 1024
 				metrics.DiskFreeMB = &mb
+				if src.DiskMinFree > 0 {
+					low := free < src.DiskMinFree
+					metrics.DiskLow = &low
+				}
 			}
+		}
+		if src.UploadBytes != nil {
+			if n, err := src.UploadBytes(r.Context()); err == nil {
+				mb := float64(n) / 1024 / 1024
+				metrics.UploadStorageUsedMB = &mb
+			}
+		}
+		if src.PushCounters != nil {
+			metrics.PushDispatched, metrics.PushFailed, metrics.PushPruned = src.PushCounters()
 		}
 
 		writeJSON(w, http.StatusOK, metrics)

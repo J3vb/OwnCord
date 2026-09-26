@@ -4,6 +4,8 @@
 // Source of truth: docs/protocol.md, docs/api.md, docs/schema.md
 // =============================================================================
 
+import { connectText } from "../i18n/connect";
+
 // -----------------------------------------------------------------------------
 // Common / Shared Types
 // -----------------------------------------------------------------------------
@@ -62,9 +64,13 @@ export type WsErrorCode =
   | "INVALID_JSON"
   | "UNKNOWN_TYPE"
   | "SLOW_MODE"
+  // A send, reaction or voice join refused by an active moderator timeout.
+  | "TIMED_OUT"
   | "CONFLICT"
   | "BAD_PAYLOAD"
   | "NOT_KEY_HOLDER"
+  // The same account connected from another device and displaced this socket.
+  | "SESSION_REPLACED"
   // Kept for older servers / existing call sites.
   | "INVALID_INPUT"
   | "SERVER_ERROR";
@@ -153,6 +159,14 @@ export interface ReadyChannel {
    */
   readonly can_send?: boolean;
   /**
+   * Whether the current user may mute, deafen, move or disconnect voice
+   * participants in this channel — server-computed from the same authorizer
+   * voice moderation enforces (base MUTE_MEMBERS, then effective
+   * READ|MUTE_MEMBERS after channel overrides). Target rank and move capacity
+   * stay server-side refusals. Absent from older servers.
+   */
+  readonly can_moderate_voice?: boolean;
+  /**
    * Per-channel cooldown in seconds (0 = off). Drives the composer's
    * slow-mode countdown; the server still enforces. Absent from older servers.
    */
@@ -163,13 +177,18 @@ export interface ReadyChannel {
    */
   readonly mention_count?: number;
   /**
-   * Whether the channel is flagged as possibly carrying sensitive content.
-   * A pure label: the server stores and ships it but applies no content
-   * behaviour of its own, so what it means is entirely this client's choice
-   * (a one-time-per-session age gate and a sidebar marker). Absent from older
-   * servers, which is read as "not flagged".
+   * Whether the channel is labelled age-restricted. The server enforces it
+   * (B5-7): none of its content reaches a caller without their own
+   * acknowledgement. Absent from older servers, which is read as "not
+   * labelled".
    */
   readonly nsfw?: boolean;
+  /**
+   * Whether the CALLER has acknowledged this labelled channel (B5-7) — per
+   * account, so every device inherits it. Always false for an unlabelled
+   * channel. Absent reads as "not acknowledged": the gate fails closed.
+   */
+  readonly nsfw_acknowledged?: boolean;
   /**
    * Voice capacity limits (0 = unlimited), the same values the server enforces
    * on join with CHANNEL_FULL / VIDEO_LIMIT. Shipped so the sidebar can show
@@ -244,6 +263,7 @@ export enum Permission {
   BAN_MEMBERS = 0x80000,
   MUTE_MEMBERS = 0x100000,
   MENTION_EVERYONE = 0x200000,
+  MODERATE_MEMBERS = 0x400000,
   MANAGE_ROLES = 0x1000000,
   MANAGE_SERVER = 0x2000000,
   MANAGE_INVITES = 0x4000000,
@@ -282,17 +302,75 @@ export interface AuthOkPayload {
 
 export interface AuthErrorPayload {
   readonly message: string;
+  /**
+   * Set only when the server refused this client's protocol epoch
+   * (`"protocol_epoch_unsupported"`); the epochs say which side is older.
+   * Absent on every other refusal.
+   */
+  readonly code?: "protocol_epoch_unsupported";
+  readonly client_epoch?: number;
+  readonly server_epoch?: number;
+  readonly min_epoch?: number;
 }
 
 export interface ReadyPayload {
+  readonly capabilities?: {
+    readonly message_deduplication?: boolean;
+    readonly message_retry_window_seconds?: number;
+    readonly message_retry_floor_ms?: number;
+  };
   readonly channels: readonly ReadyChannel[];
   readonly members: readonly ReadyMember[];
   readonly voice_states: readonly ReadyVoiceState[];
   readonly roles: readonly ReadyRole[];
   readonly dm_channels?: readonly DmChannelPayload[];
+  /** The caller's unacknowledged warnings (B5-9). Absent from older servers. */
+  readonly notices?: readonly ReadyNotice[];
+}
+
+/** One of ready's notices: never the actor or the report link (Server/ws/serve_ready.go). */
+export interface ReadyNotice {
+  readonly id: number;
+  readonly kind: "warning";
+  readonly reason: string;
+  readonly created_at: string;
+}
+
+/**
+ * mod_action (B5-9): a warning or timeout applied to this user, targeted and
+ * not replayed. A lifted timeout arrives as id 0, kind "timeout" and a null
+ * expires_at (Server/ws/moderation_actions.go).
+ */
+export interface ModActionPayload {
+  readonly id: number;
+  readonly kind: "warning" | "timeout";
+  readonly reason: string;
+  readonly expires_at: string | null;
+}
+
+/**
+ * appeal_status (B5-10): the caller's own appeal changed state, targeted and
+ * not replayed (Server/ws/appeal_status.go). decision_note is null until decided.
+ */
+export interface AppealStatusPayload {
+  readonly id: string;
+  readonly state: "assigned" | "upheld" | "overturned" | "withdrawn";
+  readonly decision_note: string | null;
+}
+
+/**
+ * mod_queue (B5-8/B5-10): a report or appeal queue changed, to MODERATE_MEMBERS
+ * holders only, unsequenced and never replayed. Exactly one id is set; it is
+ * an invalidation signal, never the report itself.
+ */
+export interface ModQueuePayload {
+  readonly report_id?: string;
+  readonly appeal_id?: string;
+  readonly state: string;
 }
 
 export interface ChatMessagePayload {
+  readonly client_message_id?: string;
   readonly id: number;
   readonly channel_id: number;
   readonly user: MessageUser;
@@ -324,6 +402,8 @@ export interface ChatMessagePayload {
 }
 
 export interface ChatSendOkPayload {
+  readonly client_message_id?: string;
+  readonly deduplicated?: boolean;
   readonly message_id: number;
   readonly timestamp: string;
 }
@@ -382,7 +462,7 @@ export interface ChannelCreatePayload {
   readonly topic?: string;
   readonly position: number;
   readonly slow_mode?: number;
-  /** See ReadyChannel.nsfw — a label the server never acts on. */
+  /** See ReadyChannel.nsfw — the age-restriction label the server enforces. */
   readonly nsfw?: boolean;
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
@@ -390,13 +470,19 @@ export interface ChannelCreatePayload {
   /**
    * This viewer's composer affordance — see ReadyChannel.can_send.
    *
-   * Present only on the per-client channel_create the server sends when a
-   * role or override edit changes who may post (RefreshChannelVisibility);
-   * absent on the shared-buffer broadcast, which encodes one frame for many
-   * recipients, and absent from older servers. Treat absent as "unchanged",
+   * Every channel_create is addressed to one client — at channel creation
+   * and when a role or override edit changes who may post
+   * (RefreshChannelVisibility) — and carries this viewer's verdict. Older
+   * servers sent a shared broadcast without it. Treat absent as "unchanged",
    * never as false.
    */
   readonly can_send?: boolean;
+  /**
+   * This viewer's voice-moderation affordance — see
+   * ReadyChannel.can_moderate_voice. Same targeted-only, absent-means-
+   * unchanged rules as can_send.
+   */
+  readonly can_moderate_voice?: boolean;
 }
 
 export interface ChannelUpdatePayload {
@@ -411,11 +497,17 @@ export interface ChannelUpdatePayload {
   readonly category?: string | null;
   readonly position?: number;
   readonly slow_mode?: number;
-  /** See ReadyChannel.nsfw — a label the server never acts on. */
+  /** See ReadyChannel.nsfw — the age-restriction label the server enforces. */
   readonly nsfw?: boolean;
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+}
+
+/** nsfw_ack — the caller acknowledged or revoked a labelled channel on another device (B5-7). */
+export interface NsfwAckPayload {
+  readonly channel_id: number;
+  readonly acknowledged: boolean;
 }
 
 export interface ChannelDeletePayload {
@@ -464,7 +556,9 @@ export interface VoiceConfigPayload {
   readonly max_users: number;
 }
 
-/** CRITICAL: uses threshold_mode, NOT mode. */
+/** Argument shape for `voice.store.setSpeakers` — fed by LiveKit's
+ *  ActiveSpeakersChanged, not by a wire message.
+ *  CRITICAL: uses threshold_mode, NOT mode. */
 export interface VoiceSpeakersPayload {
   readonly channel_id: number;
   readonly speakers: readonly number[];
@@ -506,10 +600,6 @@ export interface MemberJoinPayload {
    *  missing value as "offline", not assume "online", so a hidden user does
    *  not render visible just because the field wasn't sent yet. */
   readonly status?: UserStatus;
-}
-
-export interface MemberLeavePayload {
-  readonly user_id: number;
 }
 
 /**
@@ -616,6 +706,38 @@ export interface DmChannelClosePayload {
   readonly channel_id: number;
 }
 
+/** A Message Request's sender (B5-6). `avatar` may be a stranger-controlled URL: never fetch it. */
+export interface DmRequestSender {
+  readonly id: number;
+  readonly username: string;
+  readonly display_name: string;
+  readonly avatar: string;
+}
+
+/** The held first message, as plain text. Null when it has no text. */
+export interface DmRequestPreview {
+  readonly message_id: number;
+  readonly content: string;
+  readonly timestamp: string;
+}
+
+/** One pending entry of GET /api/v1/dm-requests. */
+export interface DmRequestListItem {
+  readonly id: number;
+  readonly channel_id: number;
+  readonly sender: DmRequestSender;
+  readonly preview: DmRequestPreview | null;
+  readonly created_at: string;
+}
+
+export type DmRequestState = "pending" | "accepted" | "ignored" | "deleted" | "blocked";
+
+/** dm_request: sent to the recipient on creation (preview set) and on every transition (preview null). */
+export interface DmRequestPayload extends DmRequestListItem {
+  readonly state: DmRequestState;
+  readonly decided_at: string | null;
+}
+
 export interface ServerRestartPayload {
   readonly reason: string;
   readonly delay_seconds: number;
@@ -633,6 +755,8 @@ export interface ErrorPayload {
 export interface AuthPayload {
   readonly token: string;
   readonly last_seq?: number;
+  /** The wire epoch this client speaks — always `PROTOCOL_EPOCH`. */
+  readonly epoch: number;
   /**
    * The channel this client had open when it disconnected, sent only on a
    * resume (`last_seq > 0`).
@@ -648,6 +772,7 @@ export interface AuthPayload {
 }
 
 export interface ChatSendPayload {
+  readonly client_message_id?: string;
   readonly channel_id: number;
   readonly content: string;
   readonly reply_to: number | null;
@@ -762,24 +887,27 @@ export type ServerMessage =
   | (WsEnvelope<ChannelCreatePayload> & { readonly type: "channel_create" })
   | (WsEnvelope<ChannelUpdatePayload> & { readonly type: "channel_update" })
   | (WsEnvelope<ChannelDeletePayload> & { readonly type: "channel_delete" })
+  | (WsEnvelope<NsfwAckPayload> & { readonly type: "nsfw_ack" })
   | (WsEnvelope<VoiceStatePayload> & { readonly type: "voice_state" })
   | (WsEnvelope<VoiceLeavePayload> & { readonly type: "voice_leave" })
   | (WsEnvelope<VoiceConfigPayload> & { readonly type: "voice_config" })
-  | (WsEnvelope<VoiceSpeakersPayload> & { readonly type: "voice_speakers" })
   | (WsEnvelope<VoiceTokenPayload> & { readonly type: "voice_token" })
   | (WsEnvelope<VoiceMovedPayload> & { readonly type: "voice_moved" })
   | (WsEnvelope<VoiceDisconnectedPayload> & { readonly type: "voice_disconnected" })
   | (WsEnvelope<VoiceE2EEAnnouncePayload> & { readonly type: "voice_e2ee_announce" })
   | (WsEnvelope<VoiceE2EEOfferPayload> & { readonly type: "voice_e2ee_offer" })
   | (WsEnvelope<MemberJoinPayload> & { readonly type: "member_join" })
-  | (WsEnvelope<MemberLeavePayload> & { readonly type: "member_leave" })
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
   | (WsEnvelope<UserUpdatePayload> & { readonly type: "user_update" })
   | (WsEnvelope<MemberBanPayload> & { readonly type: "member_ban" })
+  | (WsEnvelope<ModActionPayload> & { readonly type: "mod_action" })
+  | (WsEnvelope<AppealStatusPayload> & { readonly type: "appeal_status" })
+  | (WsEnvelope<ModQueuePayload> & { readonly type: "mod_queue" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
   | (WsEnvelope<DmChannelClosePayload> & { readonly type: "dm_channel_close" })
+  | (WsEnvelope<DmRequestPayload> & { readonly type: "dm_request" })
   | (WsEnvelope<CallSignalPayload> & { readonly type: "call_incoming" })
   | (WsEnvelope<CallSignalPayload> & { readonly type: "call_declined" })
   | (WsEnvelope<ServerRestartPayload> & { readonly type: "server_restart" })
@@ -833,8 +961,23 @@ export interface AuthResponse {
 
 /** POST /api/auth/register response. */
 export interface RegisterResponse {
-  readonly user: { readonly id: number; readonly username: string };
-  readonly token: string;
+  readonly user?: { readonly id: number; readonly username: string };
+  readonly token?: string;
+  /** Approval-mode registration (B4-1): the server answered 202 — the
+   *  account exists but cannot sign in until an admin approves it. */
+  readonly status?: "pending_approval";
+}
+
+/**
+ * Body of the credential-change endpoints (PUT /users/me/password,
+ * POST /users/me/totp/confirm, DELETE /users/me/totp) when the change
+ * committed but the other sessions could not be revoked: the server answers
+ * 200 with this instead of the plain 204, and the warning is the one signal
+ * telling the user to revoke those sessions by hand.
+ */
+export interface PartialSuccessResponse {
+  readonly warning?: string;
+  readonly sessions_revoked?: number;
 }
 
 /** GET /api/health response. */
@@ -844,6 +987,66 @@ export interface HealthResponse {
   readonly version?: string;
   readonly uptime: number;
   readonly online_users: number;
+}
+
+/** Registration mode reported by `server-info` (B4-1, B7-15a). */
+export type RegistrationMode = "closed" | "invite" | "approval" | "open";
+
+/**
+ * Narrow an unknown `registration_mode` value to the union, or null for
+ * anything else. The field is optional on an older server and a hand-edited
+ * one can hold any string, so callers must treat null as "unknown" and fall
+ * back to the invite-required behaviour — never as "open".
+ */
+export function parseRegistrationMode(value: unknown): RegistrationMode | null {
+  switch (value) {
+    case "closed":
+    case "invite":
+    case "approval":
+    case "open":
+      return value;
+    default:
+      return null;
+  }
+}
+
+/**
+ * The server-default retention sentence from a `server-info` snapshot, or null
+ * when the server did not report a usable window (older server, failed read,
+ * malformed value) — callers then say nothing rather than guess. Attachments
+ * have no window of their own: they are deleted with their messages.
+ */
+export function retentionNotice(info: ServerInfoResponse | undefined): string | null {
+  const days: unknown = info?.retention?.messages_days;
+  if (typeof days !== "number" || !Number.isInteger(days) || days < 0) return null;
+  const window =
+    days === 0
+      ? connectText("retention.kept")
+      : connectText("retention.deleted", { count: days, days: String(days) });
+  return connectText("retention.notice", { window });
+}
+
+/**
+ * GET /api/v1/server-info response (B6-7).
+ *
+ * `protocol_epoch` is the wire epoch this server speaks; the client compares it
+ * with `PROTOCOL_EPOCH` to know whether it can connect before opening a
+ * WebSocket. There is deliberately no version field (C-2).
+ *
+ * B7-15 adds `registration_mode` and a retention summary; both are optional so
+ * an older server (or a failed read) leaves them undefined and consumers fall
+ * back to today's invite-required behaviour. `registration_mode` is parsed
+ * through `parseRegistrationMode` at the point of use — an unknown string is
+ * unavailable, not a licence to widen registration.
+ */
+export interface ServerInfoResponse {
+  readonly name: string;
+  readonly protocol_epoch: number;
+  readonly browser_client_enabled: boolean;
+  /** Unknown/missing is treated as unavailable; see `parseRegistrationMode`. */
+  readonly registration_mode?: RegistrationMode;
+  /** Server-default message retention window; `messages_days: 0` = indefinitely. */
+  readonly retention?: { readonly messages_days: number };
 }
 
 /** Single channel object from REST API. */
@@ -923,9 +1126,32 @@ export interface MemberResponse {
   readonly avatar: string | null;
   readonly role: string;
   readonly status: UserStatus;
+  /** Whether 2FA is enrolled. Present on the caller's own GET /users/me
+   *  response — the only place the server states it (OC-0354). */
+  readonly totp_enabled?: boolean;
   readonly display_name?: string | null;
   readonly about?: string | null;
   readonly custom_status?: string | null;
+}
+
+/**
+ * One user row from the admin API (`GET /admin/api/users`), the shape
+ * `toAdminUserResponse` writes (Server/admin/types.go). Distinct from
+ * `MemberResponse`: this one carries the ban state the moderation surface
+ * needs, and the list is paged server-side.
+ */
+export interface AdminUser {
+  readonly id: number;
+  readonly username: string;
+  readonly avatar?: string | null;
+  readonly role_id: number;
+  readonly role_name: string;
+  readonly status: UserStatus;
+  readonly created_at: string;
+  readonly last_seen?: string;
+  readonly banned: boolean;
+  readonly ban_reason?: string;
+  readonly ban_expires?: string;
 }
 
 /** Search result item. */
@@ -1017,6 +1243,11 @@ export interface CreateDmResponse {
 /** POST /api/v1/dms/group and PATCH /api/v1/dms/{id} both answer with the
  *  same DM summary shape the list and the ready payload use. */
 export type GroupDmResponse = DmChannelPayload;
+
+/** GET /api/v1/dm-requests response: the caller's pending inbox, newest first. */
+export interface DmRequestListResponse {
+  readonly requests: readonly DmRequestListItem[];
+}
 
 /** GET /api/v1/blocks response. */
 export interface BlockedUsersResponse {

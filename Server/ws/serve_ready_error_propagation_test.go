@@ -81,3 +81,24 @@ func TestBuildReady_PropagatesDMChannelsError(t *testing.T) {
 		t.Fatal("buildReady must fail the handshake when GetUserDMChannels errors, not silently ship dm_channels: [] as if the user genuinely has none")
 	}
 }
+
+// TestBuildReady_PropagatesNoticesError (B5-9) drops `moderation_actions`,
+// which only ListUnacknowledgedWarnings reads, and proves buildReady fails
+// the handshake instead of shipping notices: [] as if the user genuinely
+// has no unacknowledged warnings.
+func TestBuildReady_PropagatesNoticesError(t *testing.T) {
+	hub, database := newServeHub(t)
+	user := seedServeUser(t, database, "ready-err-notices")
+	role, err := database.GetRoleByID(context.Background(), user.RoleID)
+	if err != nil || role == nil {
+		t.Fatalf("GetRoleByID: %v", err)
+	}
+
+	if _, err := database.ExecContext(context.Background(), `DROP TABLE moderation_actions`); err != nil {
+		t.Fatalf("drop moderation_actions: %v", err)
+	}
+
+	if _, err := hub.BuildReadyWithRoleForTest(database, user.ID, role); err == nil {
+		t.Fatal("buildReady must fail the handshake when ListUnacknowledgedWarnings errors, not silently ship notices: [] as if the user genuinely has none")
+	}
+}

@@ -2,43 +2,23 @@
  * Theme manager for OwnCord.
  *
  * Built-in themes are applied via body CSS class (e.g. `theme-dark`).
- * Custom themes override CSS variables inline on document.body.
  * The active theme name is persisted to localStorage.
  */
 
+import { deriveAccentTokens, parseColor, type Rgb } from "./color-contrast";
+
 const STORAGE_KEY_ACTIVE = "owncord:theme:active";
 const STORAGE_KEY_LEGACY = "owncord:settings:theme";
-const STORAGE_KEY_CUSTOM_PREFIX = "owncord:theme:custom:";
 
-export interface OwnCordTheme {
-  readonly name: string;
-  readonly author: string;
-  readonly version: string;
-  readonly colors: Readonly<Record<string, string>>;
-}
-
-const BUILT_IN_THEMES: readonly string[] = ["dark", "neon-glow", "midnight", "light"];
+const BUILT_IN_THEMES: ReadonlySet<string> = new Set(["dark", "neon-glow", "midnight", "light"]);
 
 function isKnownThemeName(name: string): boolean {
-  return BUILT_IN_THEMES.includes(name) || loadCustomTheme(name) !== null;
-}
-
-/** Returns all known theme names: built-ins first, then any saved custom themes. */
-export function listThemeNames(): readonly string[] {
-  const custom: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key !== null && key.startsWith(STORAGE_KEY_CUSTOM_PREFIX)) {
-      custom.push(key.slice(STORAGE_KEY_CUSTOM_PREFIX.length));
-    }
-  }
-  return [...BUILT_IN_THEMES, ...custom];
+  return BUILT_IN_THEMES.has(name);
 }
 
 /**
- * Apply a theme by name.
- * - Built-in themes: adds `theme-<name>` class to document.body.
- * - Custom themes: adds `theme-custom` class and sets inline CSS variables.
+ * Apply a built-in theme by name.
+ * - Adds `theme-<name>` class to document.body.
  * - Persists the active theme name to localStorage.
  */
 export function applyThemeByName(name: string): void {
@@ -49,7 +29,8 @@ export function applyThemeByName(name: string): void {
       document.body.classList.remove(cls);
     }
   }
-  // Remove any previously injected inline CSS variable overrides
+  // Remove any previously injected inline CSS variable overrides (e.g. the
+  // accent color AppearanceTab sets on body via applyAccent).
   const style = document.body.style;
   for (let i = style.length - 1; i >= 0; i--) {
     const prop = style.item(i);
@@ -58,32 +39,12 @@ export function applyThemeByName(name: string): void {
     }
   }
 
-  if (BUILT_IN_THEMES.includes(name)) {
+  if (BUILT_IN_THEMES.has(name)) {
     document.body.classList.add(`theme-${name}`);
-  } else {
-    const theme = loadCustomTheme(name);
-    if (theme !== null) {
-      document.body.classList.add("theme-custom");
-      for (const [prop, value] of Object.entries(theme.colors)) {
-        // Validate: property must be a CSS custom property with a spec-compliant
-        // ident name; value must only contain safe CSS value characters to
-        // prevent CSS injection from untrusted theme JSON files.
-        if (!prop.startsWith("--") || !/^[a-zA-Z_][\w-]*$/.test(prop.slice(2))) continue;
-        if (typeof value !== "string") continue;
-        // Reject any value containing ( or ) — no CSS functions allowed.
-        // Also reject { and } to block any injection attempts.
-        if (/[(){}]/.test(value)) continue;
-        // Allowlist: only permit characters found in typical CSS color/sizing values.
-        // No parentheses — colors must use #hex format, not rgb()/hsl().
-        if (!/^[\w\s#.,%+\-/]+$/.test(value)) continue;
-        // Deny-list: block dangerous CSS keywords that slip through the allowlist.
-        if (/\b(url|expression|import|image|cross-fade|element)\b/i.test(value)) continue;
-        style.setProperty(prop, value);
-      }
-    }
   }
 
   localStorage.setItem(STORAGE_KEY_ACTIVE, name);
+  reclampRoleColors();
 }
 
 /** Returns the currently active theme name, defaulting to "neon-glow". */
@@ -113,68 +74,121 @@ export function getActiveThemeName(): string {
   return "neon-glow";
 }
 
-/** Persists a custom theme to localStorage. */
-export function saveCustomTheme(theme: OwnCordTheme): void {
-  localStorage.setItem(STORAGE_KEY_CUSTOM_PREFIX + theme.name, JSON.stringify(theme));
+/** Every surface an accent can sit on as text or as a focus ring. */
+const SURFACE_TOKENS = ["--bg-primary", "--bg-secondary", "--bg-tertiary", "--bg-input"] as const;
+
+function themeSurfaces(): Rgb[] {
+  const cs = getComputedStyle(document.body);
+  const surfaces: Rgb[] = [];
+  for (const token of SURFACE_TOKENS) {
+    const rgb = parseColor(cs.getPropertyValue(token));
+    // One unreadable surface means the accent's contrast is unknown, and
+    // deriveAccentTokens falls back to the theme colour on an empty list.
+    if (rgb === null) return [];
+    surfaces.push(rgb);
+  }
+  return surfaces;
 }
 
-/** Loads a custom theme by name, or null if not found / parse error / invalid shape. */
-export function loadCustomTheme(name: string): OwnCordTheme | null {
-  const raw = localStorage.getItem(STORAGE_KEY_CUSTOM_PREFIX + name);
-  if (raw === null) return null;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      typeof (parsed as Record<string, unknown>).name !== "string" ||
-      typeof (parsed as Record<string, unknown>).colors !== "object"
-    ) {
-      return null;
-    }
-    return parsed as OwnCordTheme;
-  } catch {
-    return null;
+/** Clamped role colours by requested colour, for the current theme's surfaces. */
+const roleTextCache = new Map<string, string>();
+
+/**
+ * A role colour used as text, e.g. a username (B9 Q13 role clamp).
+ *
+ * Role colours are server-set, so nothing else stands between an admin's
+ * `#ff0000` and a name that cannot be read. The rule and the math are the
+ * custom accent's `--accent-text` (deriveAccentTokens): the colour is used only
+ * where it reads at 4.5:1 on every theme surface, otherwise the name is
+ * `--text-normal`. `color` may be any CSS colour, including a `var(--role-*)`
+ * fallback; the result is a normalised `#rrggbb` or `var(--text-normal)`, never
+ * the raw string. Render the element with `data-role-color` holding `color`
+ * so a theme switch can clamp it again.
+ */
+export function readableRoleColor(color: string): string {
+  let out = roleTextCache.get(color);
+  if (out === undefined) {
+    const probe = document.createElement("span");
+    probe.style.color = color;
+    document.body.appendChild(probe);
+    const rgb = parseColor(getComputedStyle(probe).color);
+    probe.remove();
+    const text = rgb === null ? null : deriveAccentTokens(rgb, themeSurfaces()).text;
+    out = text ?? "var(--text-normal)";
+    roleTextCache.set(color, out);
+  }
+  return out;
+}
+
+/** Re-clamp every rendered role colour against the theme now applied. */
+function reclampRoleColors(): void {
+  roleTextCache.clear();
+  for (const el of document.querySelectorAll<HTMLElement>("[data-role-color]")) {
+    el.style.color = readableRoleColor(el.dataset["roleColor"] ?? "");
   }
 }
 
 /**
- * Removes a custom theme from localStorage.
- * If it was the active theme, falls back to "dark".
+ * Apply a custom accent: the single writer of the accent's inline tokens.
+ *
+ * Must run after the theme is applied, both so it wins over the theme's
+ * --accent via inline-style specificity and so the contrast check reads the
+ * theme's surfaces. Fills take the user's colour; --on-accent, --accent-hover
+ * and --accent-active are derived from it; --accent-text takes it only at 4.5:1
+ * or better and --focus-ring only at 3:1 or better, otherwise each keeps the
+ * theme's tested colour (B9-2, owner decision Q8 as aligned with Q1). High Contrast overrides those two
+ * again from app/accessibility.css. An unparseable colour applies nothing.
  */
-export function deleteCustomTheme(name: string): void {
-  const wasActive = getActiveThemeName() === name;
-  localStorage.removeItem(STORAGE_KEY_CUSTOM_PREFIX + name);
-  if (wasActive) {
-    applyThemeByName("dark");
+export function applyAccent(color: string): void {
+  const accent = parseColor(color);
+  if (accent === null) return;
+  const html = document.documentElement.style;
+  const body = document.body.style;
+  // Set on both documentElement and body: :root derives --accent-primary and
+  // --accent-secondary from these, and body.theme-neon-glow sets its own.
+  html.setProperty("--accent", color);
+  body.setProperty("--accent", color);
+  const tokens = deriveAccentTokens(accent, themeSurfaces());
+  for (const [prop, value] of [
+    ["--on-accent", tokens.onAccent],
+    ["--accent-hover", tokens.hover],
+    ["--accent-active", tokens.active],
+  ] as const) {
+    html.setProperty(prop, value);
+    body.setProperty(prop, value);
+  }
+  // Body only: the light theme writes its tested --accent-text/--focus-ring
+  // inline on documentElement, and removing them here must not erase those.
+  for (const [prop, value] of [
+    ["--accent-text", tokens.text],
+    ["--focus-ring", tokens.focus],
+  ] as const) {
+    if (value === null) body.removeProperty(prop);
+    else body.setProperty(prop, value);
   }
 }
 
-/** Serialises a theme to a JSON string suitable for file export/import. */
-export function exportTheme(theme: OwnCordTheme): string {
-  return JSON.stringify(theme, null, 2);
-}
-
 /**
- * Restores the previously persisted theme and accent color on application startup.
- * Call once from the app entry point.
+ * Restore the user's accent color override (saved by AppearanceTab).
+ * Must run after the theme is applied; see applyAccent.
  */
-export function restoreTheme(): void {
-  applyThemeByName(getActiveThemeName());
-
-  // Restore the user's accent color override (saved by AppearanceTab).
-  // The accent must be applied after the theme so it wins over the theme's
-  // --accent value via inline style specificity.
+export function restoreAccent(): void {
   try {
     const raw = localStorage.getItem("owncord:settings:accentColor");
     if (raw !== null) {
-      const accent = JSON.parse(raw);
-      if (typeof accent === "string" && /^#[\da-fA-F]{3,8}$/.test(accent)) {
-        document.documentElement.style.setProperty("--accent", accent);
-        document.body.style.setProperty("--accent", accent);
-      }
+      const accent: unknown = JSON.parse(raw);
+      if (typeof accent === "string") applyAccent(accent);
     }
   } catch {
     // Corrupted localStorage — ignore, theme default will apply.
   }
+}
+
+/**
+ * Restores the previously persisted theme and accent color.
+ * Used by the Appearance tab when there is no explicit theme selected.
+ */
+export function restoreTheme(): void {
+  applyThemeByName(getActiveThemeName());
+  restoreAccent();
 }

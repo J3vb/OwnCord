@@ -43,7 +43,7 @@ func TestRefreshUserSnapshot_FailsClosedWhenNewRoleLookupFails(t *testing.T) {
 		t.Fatalf("GetUserByID: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := newClient(hub, nil, user, "", 0, ctx)
 	c.roleName = "member"
 

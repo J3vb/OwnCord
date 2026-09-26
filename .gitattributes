@@ -6,5 +6,6 @@
 *.png binary
 *.ico binary
 *.wasm binary
+*.woff2 binary
 *.exe binary
 

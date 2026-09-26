@@ -8,7 +8,7 @@
  */
 
 import { test, expect } from "../native-fixture-persistent";
-import { SKIP_SERVER, hasCredentials, ensureLoggedIn, countTextChannels } from "./helpers";
+import { SKIP_SERVER, hasCredentials, ensureLoggedIn } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -46,17 +46,32 @@ test.describe("Channel Navigation", () => {
 });
 
 test.describe("Channel Switching", () => {
-  test.beforeEach(async ({ nativePage }) => {
+  // The seed creates one text channel ("general") and two voice channels, so
+  // the count-based skip this suite used to carry left every switching test
+  // permanently skipped. Create a second text channel once through the real
+  // admin route; the WS channel_create fan-out adds it to the open app.
+  let seededSecondTextChannel = false;
+
+  test.beforeEach(async ({ nativePage, nativeServer }) => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
     await ensureLoggedIn(nativePage);
 
-    // Conditional skip: need at least 2 text channels for switching tests
-    const textCount = await countTextChannels(nativePage);
-    test.skip(
-      textCount < 2,
-      `Need at least 2 text channels to test switching (found ${textCount})`,
-    );
+    if (!seededSecondTextChannel) {
+      await nativeServer.api(
+        "/admin/api/channels",
+        { name: "switching-two", type: "text" },
+        nativeServer.owner!.token,
+      );
+      seededSecondTextChannel = true;
+    }
+
+    // At least two text channels, so nth(1) below is a real second channel.
+    // Do not assert an exact count: the worker-scoped server is shared with
+    // other spec files in this project, and they may have added their own.
+    await expect
+      .poll(() => nativePage.locator(".channel-item:not(.voice)").count(), { timeout: 10_000 })
+      .toBeGreaterThanOrEqual(2);
   });
 
   test("clicking a text channel makes it active", async ({ nativePage }) => {
@@ -72,16 +87,21 @@ test.describe("Channel Switching", () => {
     const textChannels = nativePage.locator(".channel-item").filter({
       has: nativePage.locator(".ch-icon", { hasText: "#" }),
     });
-    const firstChannel = textChannels.first();
-    const firstName = await firstChannel.locator(".ch-name").textContent();
     const header = nativePage.locator("[data-testid='chat-header-name']");
-    const headerText = await header.textContent();
-    expect(headerText?.trim()).toBe(firstName?.trim());
+
+    // A prior serial test left some channel active; explicitly select the
+    // first, then assert the header follows the click rather than assuming the
+    // first channel was already active.
+    const firstChannel = textChannels.first();
+    const firstName = (await firstChannel.locator(".ch-name").textContent())?.trim() ?? "";
+    await firstChannel.click();
+    await expect(header).toHaveText(firstName, { timeout: 5_000 });
 
     const secondChannel = textChannels.nth(1);
-    const secondName = await secondChannel.locator(".ch-name").textContent();
+    const secondName = (await secondChannel.locator(".ch-name").textContent())?.trim() ?? "";
+    expect(secondName).not.toBe(firstName);
     await secondChannel.click();
-    await expect(header).toHaveText(secondName?.trim() ?? "", { timeout: 5_000 });
+    await expect(header).toHaveText(secondName, { timeout: 5_000 });
   });
 
   test("switching text channels loads new messages", async ({ nativePage }) => {

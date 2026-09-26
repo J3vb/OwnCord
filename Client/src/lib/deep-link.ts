@@ -16,12 +16,9 @@
  *
  * Cold starts are handled via getCurrent(); while the app is already running,
  * the single-instance plugin (built with the "deep-link" feature) forwards the
- * link and onOpenUrl() fires.
+ * link and onOpenUrl() fires. That native wiring is `platform/desktop/deepLinks.ts`
+ * (B7-5); the parsers here are pure and need no native seam.
  */
-
-import { createLogger } from "./logger";
-
-const log = createLogger("deep-link");
 
 const SCHEME = "owncord";
 const PREFIX = `${SCHEME}://`;
@@ -111,53 +108,4 @@ export function parseInviteLink(url: string): InviteLink | null {
   if (!code) return null;
 
   return host ? { code, host } : { code };
-}
-
-/**
- * Wire owncord:// deep links. No-op outside Tauri. `onInvite` is called once per
- * recognized invite link and `onMessage` once per message permalink, on both
- * cold start and warm launches.
- */
-export async function initDeepLinks(
-  onInvite: (code: string, host?: string) => void,
-  onMessage?: (channelId: number, messageId: number) => void,
-): Promise<void> {
-  let plugin: typeof import("@tauri-apps/plugin-deep-link");
-  try {
-    plugin = await import("@tauri-apps/plugin-deep-link");
-  } catch {
-    return; // not running under Tauri (e.g. dev browser / tests)
-  }
-
-  function dispatch(urls: readonly string[] | null): void {
-    for (const url of urls ?? []) {
-      const message = parseMessageLink(url);
-      if (message !== null) {
-        log.info("Deep-link message permalink received");
-        onMessage?.(message.channelId, message.messageId);
-        continue;
-      }
-      const invite = parseInviteLink(url);
-      if (invite) {
-        log.info("Deep-link invite received", { hasHost: invite.host !== undefined });
-        onInvite(invite.code, invite.host);
-      } else {
-        log.warn("Ignoring unrecognized deep link");
-      }
-    }
-  }
-
-  try {
-    // Runtime registration is idempotent and needed for dev + some Linux/Windows
-    // setups; the installer also registers the scheme from tauri.conf.json.
-    try {
-      await plugin.register(SCHEME);
-    } catch {
-      // Already registered, or not permitted on this platform — ignore.
-    }
-    dispatch(await plugin.getCurrent());
-    await plugin.onOpenUrl((urls) => dispatch(urls));
-  } catch (err) {
-    log.warn("Failed to initialize deep links", { error: String(err) });
-  }
 }

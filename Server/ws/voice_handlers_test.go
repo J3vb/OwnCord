@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS voice_states (
     camera      INTEGER NOT NULL DEFAULT 0,
     screenshare INTEGER NOT NULL DEFAULT 0,
     server_muted    INTEGER NOT NULL DEFAULT 0,
+    server_muted_by INTEGER,
     server_deafened INTEGER NOT NULL DEFAULT 0,
     joined_at   TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -56,9 +57,8 @@ func newVoiceHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openVoiceTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter, nil)
 
-	// Inject a test LiveKit client with non-default credentials.
+	// A test LiveKit client with non-default credentials.
 	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
 		LiveKitAPIKey:    "test-api-key-12345",
 		LiveKitAPISecret: "test-api-secret-67890abcdef",
@@ -67,7 +67,7 @@ func newVoiceHub(t *testing.T) (*ws.Hub, *db.DB) {
 	if err != nil {
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
-	hub.SetLiveKit(lk)
+	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, LiveKit: lk})
 
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
@@ -327,7 +327,7 @@ func TestVoice_Join_NoPermission_SendsError(t *testing.T) {
 	chanID := seedVoiceChan(t, database, "vc-noperm")
 
 	send := make(chan []byte, 16)
-	c := ws.NewTestClient(hub, 9999, send) // no user set → hasChannelPerm returns false
+	c := ws.NewTestClient(hub, 9999, send) // no user row → zero permissions.Subject, CanJoinVoice denies
 	hub.Register(c)
 	waitRegistered(t, hub, c)
 
@@ -1050,6 +1050,83 @@ func TestVoice_Join_ChannelFull(t *testing.T) {
 	}
 	if state2 != nil {
 		t.Error("user2 voice state should be nil after CHANNEL_FULL rejection")
+	}
+}
+
+// TestVoice_Join_SwitchToFullChannel_KeepsOldCall locks OC-0351: switching
+// from a live voice channel to one that is already full must not tear the
+// caller out of the old channel first. Before the fix, voiceJoinLeaveCurrent
+// ran the destructive leave unconditionally and only voiceJoinPersist's
+// capacity check refused the join, so a click on a full channel ended the
+// caller's existing call for nothing. The pre-flight in voiceJoinPrecheck
+// must refuse before any leave happens, leaving the caller still in chanA.
+func TestVoice_Join_SwitchToFullChannel_KeepsOldCall(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	chanA := seedVoiceChan(t, database, "vc-switchfull-a")
+	chanB := seedVoiceChanMaxUsers(t, database, "vc-switchfull-b", 1)
+
+	// Fill channel B to capacity with a second user.
+	filler := seedVoiceOwner(t, database, "switchfull-filler")
+	fillerSend := make(chan []byte, 32)
+	fillerClient := ws.NewTestClientWithUser(hub, filler, chanB, fillerSend)
+	hub.Register(fillerClient)
+	waitRegistered(t, hub, fillerClient)
+	hub.HandleMessageForTest(fillerClient, voiceJoinMsg(chanB))
+	drainChanTimeout(fillerSend, 30*time.Millisecond)
+
+	// The switcher is live in channel A.
+	switcher := seedVoiceOwner(t, database, "switchfull-user")
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, switcher, chanA, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+	hub.HandleMessageForTest(c, voiceJoinMsg(chanA))
+	drainChanTimeout(send, 30*time.Millisecond)
+
+	stateA, err := database.GetVoiceState(context.Background(), switcher.ID)
+	if err != nil || stateA == nil || stateA.ChannelID != chanA {
+		t.Fatalf("switcher should be in channel A before attempting the switch: state=%+v err=%v", stateA, err)
+	}
+	drainChan(send)
+
+	// Attempt to switch to the full channel B.
+	hub.HandleMessageForTest(c, voiceJoinMsg(chanB))
+
+	msgs := drainChanTimeout(send, 50*time.Millisecond)
+	foundFull := false
+	sawLeave := false
+	for _, msg := range msgs {
+		switch extractType(t, msg) {
+		case "error":
+			var env struct {
+				Payload struct {
+					Code string `json:"code"`
+				} `json:"payload"`
+			}
+			if errU := json.Unmarshal(msg, &env); errU == nil && env.Payload.Code == "CHANNEL_FULL" {
+				foundFull = true
+			}
+		case "voice_leave":
+			sawLeave = true
+		}
+	}
+	if !foundFull {
+		t.Error("expected CHANNEL_FULL error when switching into a full voice channel")
+	}
+	if sawLeave {
+		t.Error("switch into a full channel must not tear the caller out of their current channel")
+	}
+
+	// The switcher must still be in channel A, not evicted from voice.
+	stateAfter, err := database.GetVoiceState(context.Background(), switcher.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState after refused switch: %v", err)
+	}
+	if stateAfter == nil {
+		t.Fatal("switcher was torn out of voice entirely by a refused switch to a full channel")
+	}
+	if stateAfter.ChannelID != chanA {
+		t.Errorf("switcher ended up in channel %d, want to remain in channel A (%d)", stateAfter.ChannelID, chanA)
 	}
 }
 

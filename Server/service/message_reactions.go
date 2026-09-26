@@ -149,7 +149,7 @@ func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID
 	// lookup failure must not fall through to the non-DM permission branch
 	// below. That branch passes on the base role mask alone
 	// (READ_MESSAGES|ADD_REACTIONS, no per-channel override exists for a DM),
-	// skipping both IsDMParticipant and requireDMNotBlocked entirely.
+	// skipping both IsDMParticipant and RequireDMNotBlocked entirely.
 	ch, chErr := s.st.GetChannel(ctx, channelID)
 	if chErr != nil || ch == nil {
 		return nil, false, fmt.Errorf("%w: cannot react to this message", ErrForbidden)
@@ -164,14 +164,21 @@ func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID
 		return nil, false, err
 	}
 
+	// permissions.CanAddReaction (B5-9) is the one predicate every reaction
+	// gate — DM and non-DM alike — routes through now, so a timeout's
+	// restriction applies here the same way it applies to a send.
+	sub, subErr := channelSubject(ctx, s.st, s.perms, userID, ch, true)
+	if subErr != nil {
+		return nil, false, fmt.Errorf("%w: cannot react to this message", ErrForbidden)
+	}
+
 	var participantIDs []int64
 	if isDM {
-		ok, dmErr := s.st.IsDMParticipant(ctx, userID, channelID)
-		if dmErr != nil || !ok {
+		if !sub.DMParticipant {
 			return nil, false, fmt.Errorf("%w: not a DM participant", ErrBadRequest)
 		}
-		if blkErr := requireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
-			return nil, false, blkErr
+		if err := denial(permissions.CanAddReaction(sub)); err != nil {
+			return nil, false, err
 		}
 		// Resolve the fan-out audience before mutating anything. Participants
 		// are unaffected by the reaction itself, so failing here is cheap;
@@ -179,17 +186,14 @@ func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID
 		// used to) risked a reaction persisted with no participant list to
 		// broadcast it to, which reactionV2Handler would then fan out to
 		// nobody while reporting success to the caller.
-		ids, pErr := s.st.GetDMParticipantIDs(ctx, channelID)
+		ids, pErr := s.DMAudience(ctx, channelID, userID)
 		if pErr != nil {
-			slog.Error("MessageService.handleReaction GetDMParticipantIDs", "err", pErr, "channel_id", channelID)
+			slog.Error("MessageService.handleReaction DMAudience", "err", pErr, "channel_id", channelID)
 			return nil, false, fmt.Errorf("%w: failed to resolve DM participants", ErrInternal)
 		}
 		participantIDs = ids
-	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages|permissions.AddReactions) {
-		// Require READ_MESSAGES in addition to ADD_REACTIONS so a user cannot
-		// react in a channel they cannot read. Mirrors checkSendPermission,
-		// which requires ReadMessages|SendMessages for non-DM sends.
-		return nil, false, fmt.Errorf("%w: missing ADD_REACTIONS permission", ErrForbidden)
+	} else if err := denial(permissions.CanAddReaction(sub)); err != nil {
+		return nil, false, err
 	}
 
 	return participantIDs, isDM, nil

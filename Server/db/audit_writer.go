@@ -14,9 +14,12 @@ package db
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // AuditStore is the minimal batch-write surface AuditWriter needs. *DB
@@ -25,22 +28,25 @@ type AuditStore interface {
 	PersistAudits(ctx context.Context, entries []AuditEntry) (int, error)
 }
 
-// pendingAudit is a single audit entry waiting to be flushed to the store.
-// Fields mirror LogAudit's parameters.
-type pendingAudit struct {
-	actorID    int64
-	action     string
-	targetType string
-	targetID   int64
-	detail     string
-}
-
 // AuditWriter batches audit entries and writes them to an AuditStore.
 type AuditWriter struct {
 	store      AuditStore
-	queue      chan pendingAudit
+	queue      chan AuditEntry
 	batchSize  int
 	flushEvery time.Duration
+
+	// flushReq carries Flush's barrier requests to run(): each is answered
+	// once everything queued before it has been handed to the store.
+	flushReq chan chan struct{}
+
+	// unlinked is the erasure's rule set (B4-10): the erased subjects, by
+	// user id, whose entries are written unlinked — id 0, detail cleared,
+	// the deletion marker's token in place — because the erasure
+	// transaction can rewrite only the rows already persisted. Written by
+	// Unlink once an erasure has committed; read by the store at insert
+	// time, under the writer connection (DB.PersistAudits, DB.LogAuditEntry).
+	unlinkMu syncutil.Mutex
+	unlinked map[int64]string
 
 	startOnce sync.Once
 	started   atomic.Bool
@@ -83,11 +89,12 @@ func NewAuditWriter(s AuditStore, queueSize, batchSize int, flushEvery time.Dura
 	}
 	return &AuditWriter{
 		store:      s,
-		queue:      make(chan pendingAudit, queueSize),
+		queue:      make(chan AuditEntry, queueSize),
 		batchSize:  batchSize,
 		flushEvery: flushEvery,
 		stop:       make(chan struct{}),
 		done:       make(chan struct{}),
+		flushReq:   make(chan chan struct{}),
 	}
 }
 
@@ -106,6 +113,11 @@ func (w *AuditWriter) Start(ctx context.Context) {
 // and logged with the same identifying fields WriteAudit uses for a
 // synchronous failure. The detail string is intentionally not logged.
 func (w *AuditWriter) Enqueue(actorID int64, action, targetType string, targetID int64, detail string) {
+	w.EnqueueEntry(AuditEntry{ActorID: actorID, Action: action, TargetType: targetType, TargetID: targetID, Detail: detail})
+}
+
+// EnqueueEntry is Enqueue for a whole entry, subject token included (B4-10).
+func (w *AuditWriter) EnqueueEntry(e AuditEntry) {
 	if w == nil {
 		return
 	}
@@ -118,23 +130,23 @@ func (w *AuditWriter) Enqueue(actorID int64, action, targetType string, targetID
 	case <-w.done:
 		w.dropped.Add(1)
 		slog.Error("audit log dropped: writer stopped",
-			"action", action,
-			"actor_id", actorID,
-			"target_type", targetType,
-			"target_id", targetID,
+			"action", e.Action,
+			"actor_id", e.ActorID,
+			"target_type", e.TargetType,
+			"target_id", e.TargetID,
 		)
 		return
 	default:
 	}
 	select {
-	case w.queue <- pendingAudit{actorID: actorID, action: action, targetType: targetType, targetID: targetID, detail: detail}:
+	case w.queue <- e:
 	default:
 		w.dropped.Add(1)
 		slog.Error("audit log dropped: queue full",
-			"action", action,
-			"actor_id", actorID,
-			"target_type", targetType,
-			"target_id", targetID,
+			"action", e.Action,
+			"actor_id", e.ActorID,
+			"target_type", e.TargetType,
+			"target_id", e.TargetID,
 		)
 	}
 }
@@ -176,13 +188,13 @@ func (w *AuditWriter) Stop(ctx context.Context) {
 	// dropped loudly (D8) instead of silently.
 	for {
 		select {
-		case a := <-w.queue:
+		case e := <-w.queue:
 			w.dropped.Add(1)
 			slog.Error("audit log dropped: writer stopped",
-				"action", a.action,
-				"actor_id", a.actorID,
-				"target_type", a.targetType,
-				"target_id", a.targetID,
+				"action", e.Action,
+				"actor_id", e.ActorID,
+				"target_type", e.TargetType,
+				"target_id", e.TargetID,
 			)
 		default:
 			return
@@ -195,33 +207,116 @@ func (w *AuditWriter) Stats() (persisted, dropped, flushes, errs uint64) {
 	return w.persisted.Load(), w.dropped.Load(), w.flushes.Load(), w.errors.Load()
 }
 
+// Unlink installs the erasure's unlinking rule for userID (B4-10): from now
+// on every entry the store inserts that names userID — as actor, or as a
+// user target — is written the way the erasure transaction rewrote the
+// rows already persisted (erasureUnlinkAudit): id 0, detail cleared, the
+// deletion marker's token in place. The erasure installs it once its
+// transaction has committed, while it still holds the writer connection
+// (DB.eraseAccount), and the store reads it under that connection at
+// insert time, so an entry queued before the transaction lands raw ahead
+// of the UPDATE that rewrites it, and one a request enqueues after it is
+// written unlinked; a refused erasure installs nothing. The rule is
+// permanent: an erased id is never handed out again (DB.RaiseSequences),
+// so nothing but a late entry about the subject can match it.
+func (w *AuditWriter) Unlink(userID int64, token string) {
+	if w == nil {
+		return
+	}
+	w.unlinkMu.Lock()
+	defer w.unlinkMu.Unlock()
+	if w.unlinked == nil {
+		w.unlinked = make(map[int64]string)
+	}
+	w.unlinked[userID] = token
+}
+
+// unlinkRules snapshots the rule set for one insert batch; nil when empty,
+// so the common case costs one lock and no allocation.
+func (w *AuditWriter) unlinkRules() map[int64]string {
+	w.unlinkMu.Lock()
+	defer w.unlinkMu.Unlock()
+	if len(w.unlinked) == 0 {
+		return nil
+	}
+	rules := make(map[int64]string, len(w.unlinked))
+	maps.Copy(rules, w.unlinked)
+	return rules
+}
+
+// unlinkEntry applies the rule set to one entry: the same rewrite
+// erasureUnlinkAudit makes to a persisted row — the actor's token on the
+// actor side, the subject's on the target side, so an entry naming two
+// erased subjects keeps both.
+func unlinkEntry(e AuditEntry, rules map[int64]string) AuditEntry {
+	if len(rules) == 0 {
+		return e
+	}
+	if token, ok := rules[e.ActorID]; ok && e.ActorID != 0 {
+		e.ActorID, e.Detail, e.ActorToken = 0, "", token
+	}
+	if token, ok := rules[e.TargetID]; ok && e.TargetID != 0 && e.TargetType == "user" {
+		e.TargetID, e.Detail, e.SubjectToken = 0, "", token
+	}
+	return e
+}
+
+// Flush is a barrier: it returns once every entry enqueued before the call
+// has been handed to the store — the erasure's audit-writer barrier
+// (B4-10), taken before the erasure transaction so an entry queued about
+// the subject is on disk, with its ids, for the transaction's UPDATE to
+// rewrite; a refused transaction then leaves it as it was. A writer that
+// was never started, or has stopped, has nothing in flight to wait for:
+// its queue is drained by Start or swept by Stop.
+func (w *AuditWriter) Flush(ctx context.Context) error {
+	if w == nil || !w.started.Load() {
+		return nil
+	}
+	reply := make(chan struct{})
+	select {
+	case w.flushReq <- reply:
+	case <-w.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-reply:
+		return nil
+	case <-w.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// drainQueued moves everything currently in the queue into batch.
+func (w *AuditWriter) drainQueued(batch []AuditEntry) []AuditEntry {
+	for {
+		select {
+		case a := <-w.queue:
+			batch = append(batch, a)
+		default:
+			return batch
+		}
+	}
+}
+
 func (w *AuditWriter) run(ctx context.Context) {
 	defer close(w.done)
 	tick := time.NewTicker(w.flushEvery)
 	defer tick.Stop()
 
-	batch := make([]pendingAudit, 0, w.batchSize)
-	// Scratch slice reused across flushes for the store's batch shape.
-	rows := make([]AuditEntry, 0, w.batchSize)
+	batch := make([]AuditEntry, 0, w.batchSize)
 	flush := func() {
 		if len(batch) == 0 {
 			return
 		}
 		w.flushes.Add(1)
-		rows = rows[:0]
-		for _, a := range batch {
-			rows = append(rows, AuditEntry{
-				ActorID:    a.actorID,
-				Action:     a.action,
-				TargetType: a.targetType,
-				TargetID:   a.targetID,
-				Detail:     a.detail,
-			})
-		}
 		// One transaction per flush instead of one autocommit write per entry.
 		// PersistAudits keeps the best-effort contract: on tx failure it
 		// retries per-row so a single bad entry doesn't drop the batch.
-		persisted, err := w.store.PersistAudits(ctx, rows)
+		persisted, err := w.store.PersistAudits(ctx, batch)
 		if persisted > 0 {
 			w.persisted.Add(uint64(persisted))
 		}
@@ -268,6 +363,12 @@ func (w *AuditWriter) run(ctx context.Context) {
 			if len(batch) >= w.batchSize {
 				flush()
 			}
+		case reply := <-w.flushReq:
+			// Everything sent before the request is already in the queue;
+			// take it all, write it, then answer.
+			batch = w.drainQueued(batch)
+			flush()
+			close(reply)
 		case <-tick.C:
 			flush()
 		}
@@ -285,13 +386,44 @@ func (d *DB) SetAuditWriter(w *AuditWriter) {
 	d.auditWriter.Store(w)
 }
 
-// EnqueueAudit implements AsyncAuditor. It reports false when no writer is
-// installed so WriteAudit falls back to the synchronous path.
-func (d *DB) EnqueueAudit(actorID int64, action, targetType string, targetID int64, detail string) bool {
+// EnqueueAuditEntry implements AsyncEntryAuditor: WriteAudit's asynchronous
+// fast path, carrying the subject token (B4-10).
+func (d *DB) EnqueueAuditEntry(e AuditEntry) bool {
 	w := d.auditWriter.Load()
 	if w == nil {
 		return false
 	}
-	w.Enqueue(actorID, action, targetType, targetID, detail)
+	w.EnqueueEntry(e)
 	return true
+}
+
+// FlushAudits is the erasure's audit-writer barrier (B4-10): everything
+// the installed writer holds is on disk when it returns, with its ids, so
+// the erasure transaction's UPDATE rewrites it and a refused transaction
+// leaves it untouched. Without a writer every audit write was synchronous
+// and nothing is queued.
+func (d *DB) FlushAudits(ctx context.Context) error {
+	w := d.auditWriter.Load()
+	if w == nil {
+		return nil
+	}
+	return w.Flush(ctx)
+}
+
+// unlinkAuditsFor installs the writer's unlinking rule for an erased
+// subject (AuditWriter.Unlink); called by eraseAccount after its
+// transaction committed, while it still holds the writer connection.
+func (d *DB) unlinkAuditsFor(userID int64, token string) {
+	if w := d.auditWriter.Load(); w != nil {
+		w.Unlink(userID, token)
+	}
+}
+
+// auditUnlinkRules is the installed writer's rule set, nil without one.
+func (d *DB) auditUnlinkRules() map[int64]string {
+	w := d.auditWriter.Load()
+	if w == nil {
+		return nil
+	}
+	return w.unlinkRules()
 }

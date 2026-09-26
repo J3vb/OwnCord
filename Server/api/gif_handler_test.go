@@ -1,10 +1,15 @@
 package api_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +17,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -23,7 +29,7 @@ func buildGIFRouter(database *db.DB, apiKey string) http.Handler {
 	limiter := auth.NewRateLimiter()
 	cfg := &config.Config{}
 	cfg.GIF.APIKey = apiKey
-	api.MountGIFRoutes(r, database, limiter, cfg)
+	api.MountGIFRoutes(r, service.NewSessionService(database), limiter, cfg)
 	return r
 }
 
@@ -40,9 +46,13 @@ func stubKlipy(t *testing.T, body string, status int) *lastRequest {
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
-	// The production transport uses the SSRF-guarded dialer, which refuses the
-	// loopback address httptest binds to — supply a plain client for the stub.
-	restore := api.SetGIFUpstreamForTest(srv.URL, srv.Client())
+	// The production policy refuses loopback and plain http, which is what
+	// httptest binds to; the helper relaxes exactly those two and keeps every
+	// ceiling as production has them.
+	restore, err := api.SetGIFUpstreamForTest(srv.URL)
+	if err != nil {
+		t.Fatalf("SetGIFUpstreamForTest: %v", err)
+	}
 	t.Cleanup(restore)
 	return rec
 }
@@ -168,6 +178,37 @@ func TestGIFResponseNeverLeaksAPIKey(t *testing.T) {
 	}
 	if strings.Contains(rr.Body.String(), "server-side-key") {
 		t.Fatalf("response leaked the API key: %s", rr.Body.String())
+	}
+}
+
+// A result URL forwarded to the client must be well-formed https with a
+// hostname and no embedded credentials — the client loads these directly,
+// unproxied. One good result and four malformed ones: http scheme, a
+// javascript: URL, embedded userinfo, and a port with no host (Host is
+// ":443", non-empty, but Hostname() is ""). Only the good one must survive.
+func TestGIFResultURLsAreHTTPSWithoutCredentials(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	stubKlipy(t, `{"results":[
+		{"id":"good","media_formats":{"tinygif":{"url":"https://media.klipy.com/good_tiny.gif"},"gif":{"url":"https://media.klipy.com/good.gif"}}},
+		{"id":"http","media_formats":{"tinygif":{"url":"http://media.klipy.com/bad_tiny.gif"},"gif":{"url":"https://media.klipy.com/bad.gif"}}},
+		{"id":"js","media_formats":{"tinygif":{"url":"https://media.klipy.com/js_tiny.gif"},"gif":{"url":"javascript:alert(1)"}}},
+		{"id":"cred","media_formats":{"tinygif":{"url":"https://user:pw@media.klipy.com/cred_tiny.gif"},"gif":{"url":"https://media.klipy.com/cred.gif"}}},
+		{"id":"portonly","media_formats":{"tinygif":{"url":"https://:443/portonly_tiny.gif"},"gif":{"url":"https://media.klipy.com/portonly.gif"}}}
+	]}`, http.StatusOK)
+	router := buildGIFRouter(database, "server-side-key")
+
+	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+	}
+
+	results := decodeGIFResults(t, rr)
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1 (only the well-formed https result): %v", len(results), results)
+	}
+	if results[0]["id"] != "good" {
+		t.Errorf("result id = %v, want good", results[0]["id"])
 	}
 }
 
@@ -340,7 +381,7 @@ func TestGIFRateLimitBucketIsSeparate(t *testing.T) {
 	r := chi.NewRouter()
 	cfg := &config.Config{}
 	cfg.GIF.APIKey = "server-side-key"
-	api.MountGIFRoutes(r, database, limiter, cfg)
+	api.MountGIFRoutes(r, service.NewSessionService(database), limiter, cfg)
 
 	for range 31 {
 		gifGET(t, r, "/api/v1/gif/trending", token)
@@ -349,5 +390,165 @@ func TestGIFRateLimitBucketIsSeparate(t *testing.T) {
 	// untouched by the GIF traffic above.
 	if !limiter.Allow("127.0.0.1", 5, time.Minute) {
 		t.Error("GIF traffic consumed the shared rate-limit bucket")
+	}
+}
+
+// ─── The bounded boundary is actually in the path (B5-1) ─────────────────────
+
+// stubKlipyHandler is stubKlipy for a case that needs to control the upstream
+// response itself rather than just its body and status.
+func stubKlipyHandler(t *testing.T, h http.HandlerFunc) {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	restore, err := api.SetGIFUpstreamForTest(srv.URL)
+	if err != nil {
+		t.Fatalf("SetGIFUpstreamForTest: %v", err)
+	}
+	t.Cleanup(restore)
+}
+
+// An upstream that streams far past the ceiling is a 502, not an OOM: the
+// GIF proxy's Fetcher carries the byte limit, so this proves the adoption and
+// not only the package.
+func TestGIFOversizedUpstreamBecomesBadGateway(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	var written atomic.Int64
+	stubKlipyHandler(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		chunk := bytes.Repeat([]byte("A"), 64<<10)
+		for written.Load() < 64<<20 {
+			n, err := w.Write(chunk)
+			written.Add(int64(n))
+			if err != nil {
+				return
+			}
+		}
+	})
+	router := buildGIFRouter(database, "server-side-key")
+
+	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rr.Code)
+	}
+	if got := decodeGIFError(t, rr); got != "BAD_GATEWAY" {
+		t.Errorf("error = %q, want BAD_GATEWAY", got)
+	}
+	// The ceiling is 2 MiB; some slack for socket buffers, nothing like 64 MiB.
+	if got := written.Load(); got > 16<<20 {
+		t.Fatalf("upstream wrote %d bytes — the body was buffered before the ceiling applied", got)
+	}
+}
+
+// An upstream that answers HTML while claiming JSON is refused before the
+// decoder sees it.
+func TestGIFWrongContentTypeBecomesBadGateway(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	stubKlipyHandler(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("<!DOCTYPE html><html><body>captive portal</body></html>"))
+	})
+	router := buildGIFRouter(database, "server-side-key")
+
+	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (body=%s)", rr.Code, rr.Body.String())
+	}
+}
+
+// A redirect is not followed at all: the upstream host is a constant, so a
+// 302 is either a provider change or somebody moving the destination.
+func TestGIFUpstreamRedirectIsRefused(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	var hits atomic.Int64
+	stubKlipyHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		if hits.Add(1) == 1 {
+			http.Redirect(w, r, "/moved", http.StatusFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(gifUpstreamBody))
+	})
+	router := buildGIFRouter(database, "server-side-key")
+
+	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rr.Code)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("upstream saw %d requests, want exactly 1 — the redirect must not be followed", got)
+	}
+}
+
+// The production Fetcher, not the test one, refuses the loopback stub: the
+// address policy is on by default and the test helper is the only thing that
+// relaxes it.
+func TestGIFProductionPolicyRefusesLoopback(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("the production policy must not reach a loopback upstream")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(gifUpstreamBody))
+	}))
+	t.Cleanup(srv.Close)
+	// Point only the base URL at the stub; the Fetcher stays the production one.
+	restore := api.SetGIFBaseURLForTest(srv.URL)
+	t.Cleanup(restore)
+	router := buildGIFRouter(database, "server-side-key")
+
+	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rr.Code)
+	}
+}
+
+// An upstream host that does not resolve — the server has no network route to
+// it, or the operator misconfigured the base URL — must answer 502 quickly
+// and generically: no upstream host, no "no such host", and no API key in the
+// body. The Resolve seam is stubbed to fail immediately (SetGIFResolveForTest,
+// the same shape as safefetch's own TestFetch_OfflineResolveFailure) rather
+// than resolving a real .invalid name: a DNS-impaired CI runner can retry a
+// live query for several seconds and flake the elapsed-time assertion. Every
+// other ceiling — scheme, port, deadline, byte limits, content types,
+// concurrency — is identical to production, and no real DNS is ever touched.
+func TestGIFOfflineUpstreamIsBadGatewayWithoutLeak(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	restore, err := api.SetGIFResolveForTest(func(context.Context, string) ([]netip.Addr, error) {
+		return nil, &net.DNSError{Err: "no such host", Name: "api.klipy.com", IsNotFound: true}
+	})
+	if err != nil {
+		t.Fatalf("SetGIFResolveForTest: %v", err)
+	}
+	t.Cleanup(restore)
+	router := buildGIFRouter(database, "server-side-key")
+
+	start := time.Now()
+	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
+	elapsed := time.Since(start)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (body=%s)", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "api.klipy.com") {
+		t.Errorf("response leaked the upstream host: %s", body)
+	}
+	if strings.Contains(body, "no such host") {
+		t.Errorf("response leaked the resolver error: %s", body)
+	}
+	if strings.Contains(body, "server-side-key") {
+		t.Errorf("response leaked the API key: %s", body)
+	}
+	// 10s matches gifUpstreamTimeout, the production deadline; a stubbed
+	// Resolve returns instantly, so this only catches a regression that makes
+	// the failure block for the whole deadline instead of failing fast.
+	if elapsed >= 10*time.Second {
+		t.Errorf("offline resolve took %v, want well under the 10s deadline", elapsed)
 	}
 }

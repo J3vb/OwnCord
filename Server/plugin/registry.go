@@ -14,6 +14,7 @@ package plugin
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -75,8 +76,9 @@ type Instance struct {
 	module any //nolint:unused // assigned by wazero-tagged build
 
 	// compiled is the wazero CompiledModule behind module. Retained so
-	// teardown can close it — the shared runtime otherwise keeps every
-	// compile from every re-activation cycle until process exit.
+	// teardown can close it, and so a module closed by a CPU-budget overrun
+	// or a trap re-instantiates from it instead of compiling again; it can
+	// therefore be non-nil while module is nil.
 	compiled any //nolint:unused // assigned by wazero-tagged build
 }
 
@@ -148,8 +150,9 @@ func (r *Registry) Sink() *EventSink {
 	return r.sink
 }
 
-// LoadAll scans cfg.Directory and persists every plugin.json found into the
-// PluginStore. In the wazero-tagged build it then compiles each entrypoint
+// LoadAll scans cfg.Directory and persists every plugin manifest found
+// (plugin.json, via loadManifestFromDir) into the PluginStore. In the
+// wazero-tagged build it then compiles each entrypoint
 // into a runnable module; the default build stops at the persistence step.
 func (r *Registry) LoadAll(ctx context.Context) error {
 	if r == nil {
@@ -231,7 +234,8 @@ func (r *Registry) installFromDisk(ctx context.Context, found foundPlugin) error
 // then renames it into the plugin directory and registers it via
 // installFromDisk. Returns the new plugin name on success.
 //
-// The zip must contain a top-level plugin.json. The plugin's directory name
+// The zip must contain a top-level plugin.json, resolved via the same loader
+// scanPluginDirectory applies on every restart. The plugin's directory name
 // is taken from manifest.Name (validated by Manifest.Validate to a strict
 // charset). Re-installing an existing plugin replaces it.
 const (
@@ -246,7 +250,7 @@ func (r *Registry) InstallFromZip(ctx context.Context, zipBytes []byte) (string,
 	if int64(len(zipBytes)) > maxZipBytes {
 		return "", fmt.Errorf("plugin zip exceeds %d bytes", maxZipBytes)
 	}
-	zr, err := zip.NewReader(bytesReaderAt(zipBytes), int64(len(zipBytes)))
+	zr, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
 	if err != nil {
 		return "", fmt.Errorf("invalid zip: %w", err)
 	}
@@ -406,7 +410,7 @@ func installZipWriteEntry(f *zip.File, destAbs string, remaining int64) (int64, 
 	n, copyErr := io.CopyN(out, rc, remaining+1)
 	_ = rc.Close()
 	_ = out.Close()
-	if copyErr != nil && copyErr != io.EOF {
+	if copyErr != nil && !errors.Is(copyErr, io.EOF) {
 		return 0, copyErr
 	}
 	if n > remaining {
@@ -415,17 +419,16 @@ func installZipWriteEntry(f *zip.File, destAbs string, remaining int64) (int64, 
 	return n, nil
 }
 
-// installZipStagedManifest parses the staged plugin.json and holds the staged
-// tree to the same rules scanPluginDirectory applies to an on-disk plugin (no
+// installZipStagedManifest resolves the staged plugin's manifest via the same
+// loadManifestFromDir call scanPluginDirectory uses, and holds the staged tree
+// to the same rules scanPluginDirectory applies to an on-disk plugin (no
 // symlinks anywhere, entrypoint present and not a symlink).
 func installZipStagedManifest(stageAbs string) (*Manifest, error) {
-	manifestPath := filepath.Join(stageAbs, "plugin.json")
-	raw, err := os.ReadFile(manifestPath)
+	manifest, err := loadManifestFromDir(stageAbs)
 	if err != nil {
-		return nil, fmt.Errorf("plugin zip: missing plugin.json at root: %w", err)
-	}
-	manifest, err := ParseManifest(raw)
-	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("plugin zip: missing plugin.json at root: %w", err)
+		}
 		return nil, err
 	}
 	// Validate the staged contents the same way scanPluginDirectory does.
@@ -536,22 +539,6 @@ func (r *Registry) installZipReactivate(ctx context.Context, name string) {
 	r.mu.Unlock()
 	slog.Info("plugin: runtime unavailable, enabled flag preserved across upgrade",
 		"name", name)
-}
-
-// bytesReaderAt is a tiny wrapper that satisfies io.ReaderAt for a byte
-// slice. archive/zip needs ReaderAt; bytes.Reader provides it but importing
-// "bytes" alongside the existing "io" surface keeps the import block tight.
-type bytesReaderAt []byte
-
-func (b bytesReaderAt) ReadAt(p []byte, off int64) (int, error) {
-	if off < 0 || off >= int64(len(b)) {
-		return 0, io.EOF
-	}
-	n := copy(p, b[off:])
-	if n < len(p) {
-		return n, io.EOF
-	}
-	return n, nil
 }
 
 // activateAll attempts to compile + register host-API hooks for every plugin

@@ -3,23 +3,21 @@
 // module carries no JavaScript engine, so nothing under Server/ can execute
 // this SPA. See docs/contributing.md#testing for the membership rule.
 //
-// Loads the real Server/admin/static/index.html (the Go admin panel's
-// single-file SPA) into a scripted jsdom window and drives its inline
-// channel-permissions logic directly, the same way a browser would.
+// Loads the real admin panel (Server/admin/static, the Go admin panel's SPA)
+// into a scripted jsdom window and drives its channel-permissions logic
+// directly, the same way a browser would.
 //
-// There is no bundler or module system for this file — it is one inline
-// <script> executed as a classic script — so the only faithful way to test
+// There is no bundler or module system for the panel — its scripts are
+// classic scripts sharing one global scope — so the only faithful way to test
 // it is to actually run it, not to re-implement its logic in TypeScript.
 // A text-level assertion is not a substitute: Server/admin/perm_grid_test.go
-// greps the same file, but flipping the guard at index.html:1182 to `false`
+// greps the same file, but flipping the guard in saveChannelPerms to `false`
 // reintroduces the bug while leaving every greppable identifier intact.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { readFileSync } from "node:fs";
-import path from "node:path";
+import { adminPanelHtml } from "../helpers/admin-panel";
 
-const ADMIN_HTML_PATH = path.resolve(__dirname, "../../../Server/admin/static/index.html");
-const ADMIN_HTML_SOURCE = readFileSync(ADMIN_HTML_PATH, "utf8");
+const ADMIN_HTML_SOURCE = adminPanelHtml();
 
 // The page's own <script> is a classic (non-module) script, so its top-level
 // `const`/`function` declarations live in the window's shared global script
@@ -79,7 +77,7 @@ function loadAdminPanel(fetchCalls: FetchCall[]): JSDOM {
   });
 }
 
-describe("Server/admin/static/index.html — channel permissions save (OC-0154)", () => {
+describe("Server/admin/static — channel permissions save (OC-0154)", () => {
   let dom: JSDOM | undefined;
 
   afterEach(() => {
@@ -146,5 +144,68 @@ describe("Server/admin/static/index.html — channel permissions save (OC-0154)"
     if (!last) throw new Error("expected a /channels/42/permissions/5 call to assert on");
     expect(last.method).not.toBe("DELETE");
     expect((last.body as { deny: number }).deny & 0x2).toBe(0x2);
+  });
+
+  it("keeps the override matrix's write for an already-hidden role the quick toggle left unchanged (OC-0421)", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    fetchCalls.length = 0;
+
+    const bridge = (
+      window as unknown as {
+        __test: {
+          state: any;
+          renderChannelPermsModal: () => void;
+          renderPermMatrix: () => void;
+          saveChannelPerms: () => Promise<void>;
+        };
+      }
+    ).__test;
+    expect(bridge).toBeTruthy();
+
+    // "Moderator" is already hidden from #staff: deny carries
+    // READ_MESSAGES|CONNECT_VOICE (0x202) — exactly DENY_PRIVATE — so the
+    // quick "Can access" box renders unchecked, and the operator leaves it
+    // alone: only the override matrix is touched.
+    bridge.state.permChannel = {
+      id: 42,
+      name: "staff",
+      roles: [{ role_id: 5, role_name: "Moderator", permissions: 0, allow: 0, deny: 0x202 }],
+      users: [],
+      allUsers: [],
+    };
+    bridge.renderChannelPermsModal();
+
+    const accessBox = window.document.getElementById("permRole5") as HTMLInputElement;
+    expect(accessBox).toBeTruthy();
+    expect(accessBox.checked).toBe(false); // already hidden — nothing to toggle
+
+    // In the override matrix for that same role, additionally deny Manage
+    // Messages (0x10000).
+    const targetSelect = window.document.getElementById("permTarget") as HTMLSelectElement;
+    targetSelect.value = "r:5";
+    bridge.renderPermMatrix();
+    const manageMessagesDeny = window.document.querySelector(
+      'input[data-ovrbit="65536"][value="deny"]',
+    ) as HTMLInputElement;
+    expect(manageMessagesDeny).toBeTruthy();
+    manageMessagesDeny.checked = true;
+
+    await bridge.saveChannelPerms();
+
+    const rolePermCalls = fetchCalls.filter((c) => c.path === "/channels/42/permissions/5");
+    expect(rolePermCalls.length).toBeGreaterThan(0);
+    const last = rolePermCalls.at(-1);
+    if (!last) throw new Error("expected a /channels/42/permissions/5 call to assert on");
+    // The Manage Messages deny picked in the override matrix must survive the
+    // save — not be discarded because the quick-toggle loop unconditionally
+    // rewrote this role's row (and marked it touched) even though nothing
+    // about its quick-toggle state changed.
+    expect((last.body as { deny: number }).deny & 0x10000).toBe(0x10000);
+    // The pre-existing hidden bits must still be present too.
+    expect((last.body as { deny: number }).deny & 0x202).toBe(0x202);
   });
 });

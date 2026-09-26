@@ -15,7 +15,7 @@ import (
 // would (which also works on Windows, where a process cannot signal itself),
 // and only after run() has fully torn down either spawn the replacement
 // binary or exit for the process supervisor to relaunch, per
-// server.restart_mode (see Server/restart.go).
+// server.restart_mode (see Server/internal/app/restart.go).
 
 // restartSelf is the process-restart request hook. Swapped by
 // SetRestartHandoff at startup and by tests (StubRestart); the default logs

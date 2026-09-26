@@ -1,5 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
+// The modules in SettingsOverlay's graph that install an app-lifetime window
+// listener at load. The re-import below reuses these instances, so the
+// vi.resetModules() does not install a second copy of each listener.
+import * as attachments from "@components/message-list/attachments";
+import * as formatting from "@components/message-list/formatting";
+import * as media from "@components/message-list/media";
+import * as channelMutes from "@lib/channel-mutes";
+
+const APP_LIFETIME_MODULES = [
+  ["@components/message-list/attachments", attachments],
+  ["@components/message-list/formatting", formatting],
+  ["@components/message-list/media", media],
+  ["@lib/channel-mutes", channelMutes],
+] as const;
 
 // Mock logger
 vi.mock("@lib/logger", () => ({
@@ -17,9 +31,13 @@ vi.mock("@lib/logger", () => ({
 
 // Mock stores
 const mockSetTheme = vi.fn();
+const mockUiState = vi.hoisted(() => ({
+  settingsOpen: false,
+  settingsTab: null as "Safety" | null,
+}));
 vi.mock("@stores/ui.store", () => ({
   uiStore: {
-    getState: () => ({ settingsOpen: false }),
+    getState: () => mockUiState,
     subscribe: () => () => {},
     subscribeSelector: vi.fn((_sel: unknown, _listener: unknown) => () => {}),
   },
@@ -82,6 +100,15 @@ describe("SettingsOverlay", () => {
     onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "otpauth://test", backup_codes: [] }),
     onConfirmTotp: vi.fn().mockResolvedValue(undefined),
     onDisableTotp: vi.fn().mockResolvedValue(undefined),
+    onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
+    onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
+    onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
+    onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
+    onListSessions: vi.fn().mockResolvedValue([]),
+    onRevokeSession: vi.fn().mockResolvedValue(undefined),
+    onRevokeAllSessions: vi
+      .fn()
+      .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
   };
 
   beforeEach(() => {
@@ -90,6 +117,8 @@ describe("SettingsOverlay", () => {
     localStorage.clear();
     vi.clearAllMocks();
     mockAuthState.user = { id: 1, username: "testuser", totp_enabled: false, display_name: null };
+    mockUiState.settingsOpen = false;
+    mockUiState.settingsTab = null;
   });
 
   afterEach(() => {
@@ -183,7 +212,6 @@ describe("SettingsOverlay", () => {
     // Theme persists only via themes.ts (owncord:theme:active), not via savePref
     expect(localStorage.getItem("owncord:theme:active")).toBe("midnight");
     expect(localStorage.getItem("owncord:settings:theme")).toBeNull();
-    expect(mockSetTheme).toHaveBeenCalledWith("midnight");
 
     overlay.destroy?.();
   });
@@ -414,8 +442,8 @@ describe("SettingsOverlay", () => {
     let resolveChange: (() => void) | null = null;
     const onChangePassword = vi.fn(
       () =>
-        new Promise<void>((resolve) => {
-          resolveChange = resolve;
+        new Promise<undefined>((resolve) => {
+          resolveChange = () => resolve(undefined);
         }),
     );
     const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
@@ -474,6 +502,45 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("keeps a partial-success warning in the form instead of the green success (OC-0314)", async () => {
+    // The server answers 200 + warning when the password changed but the
+    // other sessions could not be revoked; the form must carry that
+    // instruction, not clear the fields under an unqualified green
+    // "changed successfully" beside the warning toast.
+    const warning =
+      "password changed, but other sessions could not be revoked; revoke them from the sessions list";
+    const onChangePassword = vi.fn().mockResolvedValue({ warning, sessions_revoked: 0 });
+    const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
+    overlay.mount(container);
+
+    const inputs = container.querySelectorAll("input[type='password']");
+    (inputs[0] as HTMLInputElement).value = "oldpass123";
+    (inputs[1] as HTMLInputElement).value = "newpassword123";
+    (inputs[2] as HTMLInputElement).value = "newpassword123";
+    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Change Password",
+    ) as HTMLElement;
+    changePwBtn.click();
+
+    const status = container.querySelector<HTMLElement>('[data-testid="pw-change-status"]');
+    expect(status).not.toBeNull();
+    await vi.waitFor(() => {
+      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123");
+      expect(status!.textContent).toBe(warning);
+    });
+    // B9-23: the warning is the qualified .form-warning class, not an inline
+    // --yellow (which reads 1.89:1 on light), and keeps the live role it was
+    // created with so the swap to the warning text is announced.
+    expect(status!.classList.contains("form-warning")).toBe(true);
+    expect(status!.getAttribute("role")).toBe("alert");
+    // The password did change, so the fields are cleared like any success.
+    expect((inputs[0] as HTMLInputElement).value).toBe("");
+    expect((inputs[1] as HTMLInputElement).value).toBe("");
+    expect(container.textContent).not.toContain("Password changed successfully.");
+
+    overlay.destroy?.();
+  });
+
   it("shows error when password change fails", async () => {
     const onChangePassword = vi.fn().mockRejectedValue(new Error("Incorrect old password"));
     const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
@@ -490,12 +557,11 @@ describe("SettingsOverlay", () => {
     changePwBtn.click();
 
     await vi.waitFor(() => {
-      // Find the error element near the password fields
-      const errorEls = container.querySelectorAll("div[style*='color:var(--red)']");
-      const pwError = Array.from(errorEls).find(
-        (el) => el.textContent === "Incorrect old password",
-      );
-      expect(pwError).not.toBeUndefined();
+      // B9-23: the error is the shared .form-error class with role=alert.
+      const pwError = container.querySelector('[data-testid="pw-change-status"]');
+      expect(pwError?.textContent).toBe("Incorrect old password");
+      expect(pwError?.classList.contains("form-error")).toBe(true);
+      expect(pwError?.getAttribute("role")).toBe("alert");
     });
 
     overlay.destroy?.();
@@ -520,9 +586,9 @@ describe("SettingsOverlay", () => {
     saveBtn.click();
 
     await vi.waitFor(() => {
-      const errorEls = container.querySelectorAll("div[style*='color:var(--red)']");
-      const nameError = Array.from(errorEls).find((el) => el.textContent === "Username taken");
-      expect(nameError).not.toBeUndefined();
+      const nameError = container.querySelector<HTMLElement>("#username-edit-error");
+      expect(nameError?.textContent).toBe("Username taken");
+      expect(nameError?.getAttribute("role")).toBe("alert");
     });
 
     overlay.destroy?.();
@@ -617,6 +683,50 @@ describe("SettingsOverlay", () => {
     expect(confirmArea.style.display).toBe("none");
     expect(triggerBtn.style.display).toBe("");
 
+    overlay.destroy?.();
+  });
+
+  // B7-15c owner decision: the dialog states immediacy, backups and cached
+  // images, and never a retention window — erasure hard-deletes at once.
+  it("delete warning discloses immediacy, backups and cached images, and no retention window", () => {
+    const overlay = createSettingsOverlay({
+      ...defaultOptions,
+      getRetentionNotice: () => "By default this server deletes messages after 30 days.",
+    });
+    overlay.mount(container);
+    (container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement).click();
+
+    const warning = container.querySelector(
+      "[data-testid='delete-account-confirm-area']",
+    )!.textContent!;
+    expect(warning).toContain("immediate and permanent");
+    expect(warning).toContain("backups made before you delete keep a copy until they rotate out");
+    expect(warning).toContain("your deletion is applied again");
+    expect(warning).toContain("cached on other people's devices");
+    expect(warning).not.toMatch(/\bdays?\b/);
+    expect(warning).not.toContain("By default this server");
+
+    overlay.destroy?.();
+  });
+
+  it("shows the retention window in its own Account section when the server reported one", () => {
+    const notice = "By default this server deletes messages after 30 days.";
+    const overlay = createSettingsOverlay({ ...defaultOptions, getRetentionNotice: () => notice });
+    overlay.mount(container);
+
+    const section = container.querySelector("[data-testid='account-retention']")!;
+    expect(section.textContent).toContain(notice);
+    expect(
+      section.contains(container.querySelector("[data-testid='delete-account-confirm-area']")),
+    ).toBe(false);
+
+    overlay.destroy?.();
+  });
+
+  it("omits the retention section when the server did not report one", () => {
+    const overlay = createSettingsOverlay({ ...defaultOptions, getRetentionNotice: () => null });
+    overlay.mount(container);
+    expect(container.querySelector("[data-testid='account-retention']")).toBeNull();
     overlay.destroy?.();
   });
 
@@ -1095,6 +1205,8 @@ describe("SettingsOverlay", () => {
     expect(secondPane).not.toBe(firstPane);
     // Exactly one pane — the old one was replaced, not appended to.
     expect(container.querySelectorAll(".settings-content .settings-pane").length).toBe(1);
+
+    overlay.destroy?.();
   });
 
   it("re-reads preferences when reopened", () => {
@@ -1116,6 +1228,8 @@ describe("SettingsOverlay", () => {
 
     slider = container.querySelector(".settings-slider") as HTMLInputElement;
     expect(slider.value).toBe("20");
+
+    overlay.destroy?.();
   });
 
   // --- Listener retention across tab switches (OC-0268) ---
@@ -1162,6 +1276,97 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
     expect(container.querySelector(".settings-overlay")).toBeNull();
   });
+
+  // B9-4 (Q2): the Safety tab is a seam. It shows only once a feature passes
+  // its builder, and a Q4 notice can open Settings straight onto it.
+  describe("Safety tab", () => {
+    const safetyBody = (): HTMLDivElement => {
+      const el = document.createElement("div");
+      el.dataset["testid"] = "inert-safety";
+      return el;
+    };
+
+    function tabNames(): (string | null)[] {
+      return Array.from(
+        container.querySelectorAll(".settings-sidebar > button.settings-nav-item[role='tab']"),
+      ).map((t) => t.textContent);
+    }
+
+    it("is absent until its feature ships", () => {
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      expect(tabNames()).not.toContain("Safety");
+      overlay.destroy?.();
+    });
+
+    it("sits under User Settings after Account and renders the feature's tab", () => {
+      const signals: AbortSignal[] = [];
+      const overlay = createSettingsOverlay({
+        ...defaultOptions,
+        safetyTab: (signal) => {
+          signals.push(signal);
+          return safetyBody();
+        },
+      });
+      overlay.mount(container);
+      expect(tabNames().slice(0, 3)).toEqual(["Account", "Safety", "Appearance"]);
+
+      const tab = container.querySelector<HTMLButtonElement>("#settings-tab-safety")!;
+      tab.click();
+
+      expect(tab.getAttribute("aria-selected")).toBe("true");
+      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Safety");
+      expect(container.querySelector("[data-testid='inert-safety']")).not.toBeNull();
+      expect(container.querySelector(".settings-content")?.getAttribute("aria-labelledby")).toBe(
+        "settings-tab-safety",
+      );
+
+      // Leaving the tab aborts the build that owned its listeners.
+      getTab(container, 0).click();
+      expect(signals.at(-1)?.aborted).toBe(true);
+      overlay.destroy?.();
+    });
+
+    it("is reachable with the arrow keys like every other tab", () => {
+      const overlay = createSettingsOverlay({ ...defaultOptions, safetyTab: safetyBody });
+      overlay.mount(container);
+      const account = container.querySelector<HTMLButtonElement>("#settings-tab-account")!;
+      account.focus();
+      account.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      expect(document.activeElement?.id).toBe("settings-tab-safety");
+      overlay.destroy?.();
+    });
+
+    it("is not offered on the connect page", () => {
+      const overlay = createSettingsOverlay({
+        ...defaultOptions,
+        isAuthenticated: false,
+        safetyTab: safetyBody,
+      });
+      overlay.mount(container);
+      expect(tabNames()).not.toContain("Safety");
+      overlay.destroy?.();
+    });
+
+    it("opens straight onto Safety when asked", () => {
+      mockUiState.settingsOpen = true;
+      mockUiState.settingsTab = "Safety";
+      const overlay = createSettingsOverlay({ ...defaultOptions, safetyTab: safetyBody });
+      overlay.mount(container);
+      expect(container.querySelector(".settings-nav-item.active")?.id).toBe("settings-tab-safety");
+      expect(container.querySelector("[data-testid='inert-safety']")).not.toBeNull();
+      overlay.destroy?.();
+    });
+
+    it("ignores a request for a tab it does not show", () => {
+      mockUiState.settingsOpen = true;
+      mockUiState.settingsTab = "Safety";
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      expect(container.querySelector(".settings-nav-item.active")?.textContent).toBe("Account");
+      overlay.destroy?.();
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1183,11 +1388,13 @@ describe("SettingsOverlay", () => {
 describe("SettingsOverlay - mount() with settingsOpen already true", () => {
   afterEach(() => {
     vi.doUnmock("@stores/ui.store");
+    for (const [id] of APP_LIFETIME_MODULES) vi.doUnmock(id);
     vi.resetModules();
   });
 
   it("moves focus into the dialog when the store is already open at mount time", async () => {
     vi.resetModules();
+    for (const [id, mod] of APP_LIFETIME_MODULES) vi.doMock(id, () => mod);
     vi.doMock("@stores/ui.store", () => ({
       uiStore: {
         getState: () => ({ settingsOpen: true }),
@@ -1219,6 +1426,15 @@ describe("SettingsOverlay - mount() with settingsOpen already true", () => {
       onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "otpauth://test", backup_codes: [] }),
       onConfirmTotp: vi.fn().mockResolvedValue(undefined),
       onDisableTotp: vi.fn().mockResolvedValue(undefined),
+      onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
+      onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
+      onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
+      onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
+      onListSessions: vi.fn().mockResolvedValue([]),
+      onRevokeSession: vi.fn().mockResolvedValue(undefined),
+      onRevokeAllSessions: vi
+        .fn()
+        .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
     });
 
     overlay.mount(localContainer);

@@ -2,7 +2,6 @@ use serde_json::Value;
 use tauri_plugin_store::StoreExt;
 
 use crate::constants::{CERTS_STORE, IDENTITY_PINS_STORE, SETTINGS_STORE};
-use crate::ws_proxy::is_valid_cert_fingerprint;
 
 /// Maximum length for a settings key to prevent denial-of-service.
 const MAX_SETTINGS_KEY_LEN: usize = 128;
@@ -78,74 +77,6 @@ pub fn save_settings(app: tauri::AppHandle, key: String, value: Value) -> Result
 // ---------------------------------------------------------------------------
 // Certificate fingerprint commands
 // ---------------------------------------------------------------------------
-
-/// Validate the arguments of a cert-pin write.
-///
-/// Split out of `store_cert_fingerprint` so the guard — the only thing standing
-/// between a caller and a trusted cert pin — is reachable from unit tests
-/// without a Tauri runtime. The fingerprint half is the same check the
-/// `accept_cert_fingerprint` path uses, so the two pin writers cannot drift.
-fn validate_cert_pin(host: &str, fingerprint: &str) -> Result<(), String> {
-    if host.is_empty() || host.len() > 253 {
-        return Err("host must be 1-253 characters".into());
-    }
-    // Validate host format: alphanumeric, dots, hyphens, colons (port), brackets (IPv6)
-    if !host
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
-    {
-        return Err("host contains invalid characters".into());
-    }
-    if fingerprint.is_empty() {
-        return Err("fingerprint must not be empty".into());
-    }
-    // SHA-256 colon-hex format: "aa:bb:cc:..." (95 chars, 32 hex pairs)
-    if !is_valid_cert_fingerprint(fingerprint) {
-        return Err("fingerprint must be a SHA-256 colon-hex string (95 chars)".into());
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub fn store_cert_fingerprint(
-    app: tauri::AppHandle,
-    host: String,
-    fingerprint: String,
-) -> Result<(), String> {
-    // Normalize to lowercase for consistent comparison with ws_proxy fingerprints
-    let fingerprint = fingerprint.to_lowercase();
-
-    validate_cert_pin(&host, &fingerprint)?;
-
-    let store = app.store(CERTS_STORE).map_err(|e| {
-        log_cmd_err(
-            "store_cert_fingerprint",
-            format!("failed to open certs store: {e}"),
-        )
-    })?;
-
-    // Capture old value before mutating so we can restore it if save fails.
-    let old_value = store.get(&host);
-    store.set(&host, Value::String(fingerprint));
-    if let Err(e) = store.save() {
-        // Restore previous in-memory state: put back old fingerprint if one
-        // existed, or delete if there was none. Without this, a failed save
-        // during cert rotation would silently lose the previously trusted cert.
-        match old_value {
-            Some(v) => {
-                store.set(&host, v);
-            }
-            None => {
-                let _ = store.delete(&host);
-            }
-        }
-        return Err(log_cmd_err(
-            "store_cert_fingerprint",
-            format!("failed to persist cert fingerprint: {e}"),
-        ));
-    }
-    Ok(())
-}
 
 #[tauri::command]
 pub fn get_cert_fingerprint(app: tauri::AppHandle, host: String) -> Result<Option<String>, String> {
@@ -334,65 +265,6 @@ mod tests {
     fn rejected_key_partial_prefix_match() {
         // "owncord" without colon should not match "owncord:" prefix
         assert!(!is_settings_key_allowed("owncordNOCOLON"));
-    }
-
-    /// A well-formed SHA-256 colon-hex fingerprint (32 pairs, 95 chars).
-    const VALID_FP: &str =
-        "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99";
-
-    #[test]
-    fn cert_pin_accepts_well_formed_args() {
-        assert!(validate_cert_pin("chat.example.com", VALID_FP).is_ok());
-        // Uppercase hex is accepted (the command lowercases before validating).
-        assert!(validate_cert_pin("chat.example.com", &VALID_FP.to_uppercase()).is_ok());
-        // Host with a port, and a bracketed IPv6 literal.
-        assert!(validate_cert_pin("192.168.1.10:8443", VALID_FP).is_ok());
-        assert!(validate_cert_pin("[fe80::1]:8443", VALID_FP).is_ok());
-    }
-
-    #[test]
-    fn cert_pin_rejects_malformed_fingerprints() {
-        // Same length and charset, colon one position off.
-        let mut misplaced_colon = VALID_FP.to_owned();
-        misplaced_colon.replace_range(2..4, "a:");
-        // Still 95 chars, but padded with whitespace instead of hex.
-        let leading_space = format!(" {}", &VALID_FP[..94]);
-        let trailing_space = format!("{} ", &VALID_FP[1..]);
-
-        let cases: &[(&str, &str)] = &[
-            ("empty", ""),
-            ("too short", &VALID_FP[..92]),
-            ("too long", "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:00"),
-            ("non-hex digit", "zz:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"),
-            ("dash separator", "aa-bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"),
-            ("misplaced colon", &misplaced_colon),
-            ("leading space", &leading_space),
-            ("trailing space", &trailing_space),
-        ];
-        for (name, fp) in cases {
-            assert!(
-                validate_cert_pin("chat.example.com", fp).is_err(),
-                "expected {name} fingerprint to be rejected: {fp:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn cert_pin_rejects_malformed_hosts() {
-        let cases: &[(&str, String)] = &[
-            ("empty", String::new()),
-            ("too long", "a".repeat(254)),
-            ("space", "chat example.com".into()),
-            ("path traversal", "chat.example.com/../evil".into()),
-            ("underscore", "chat_example.com".into()),
-            ("newline", "chat.example.com\n".into()),
-        ];
-        for (name, host) in cases {
-            assert!(
-                validate_cert_pin(host, VALID_FP).is_err(),
-                "expected {name} host to be rejected: {host:?}"
-            );
-        }
     }
 
     #[test]

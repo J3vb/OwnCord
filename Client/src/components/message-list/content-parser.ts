@@ -23,6 +23,7 @@ import {
 } from "@lib/mentions";
 import { isSafeUrl } from "./attachments";
 import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode, isEmojiOnlyMessage } from "./custom-emoji";
+import { messagingText } from "../../i18n/messaging";
 import {
   parseInline,
   parseBlocks,
@@ -97,7 +98,7 @@ function buildSpoiler(
     role: "button",
     tabindex: "0",
     "aria-pressed": "false",
-    "aria-label": "Spoiler — click to reveal",
+    "aria-label": messagingText("spoiler.reveal"),
   });
   appendInline(span, node.children, info);
 
@@ -109,7 +110,7 @@ function buildSpoiler(
     e.stopPropagation();
     span.classList.add("revealed");
     span.setAttribute("aria-pressed", "true");
-    span.setAttribute("aria-label", "Spoiler — revealed");
+    span.setAttribute("aria-label", messagingText("spoiler.revealed"));
   };
   span.addEventListener("click", reveal);
   span.addEventListener("keydown", (e: KeyboardEvent) => {
@@ -254,7 +255,7 @@ function buildChannelNode(name: string): HTMLSpanElement | null {
     role: "link",
     tabindex: "0",
     "data-channel-id": String(channel.id),
-    title: `Go to #${channel.name}`,
+    title: messagingText("channel.goTo", { channel: channel.name }),
   });
   setText(chip, `#${channel.name}`);
   // Listeners are attached per node with no signal, matching the code-block
@@ -286,12 +287,12 @@ function buildMessageLinkNode(url: string): HTMLSpanElement | null {
     tabindex: "0",
     "data-channel-id": String(link.channelId),
     "data-message-id": String(link.messageId),
-    title: `Jump to message in #${channel.name}`,
+    title: messagingText("message.jumpIn", { channel: channel.name }),
   });
   const label = createElement("span", { class: "mlc-channel" });
   setText(label, `#${channel.name}`);
   const action = createElement("span", { class: "mlc-action" });
-  setText(action, "Jump");
+  setText(action, messagingText("message.jump"));
   chip.appendChild(label);
   chip.appendChild(action);
 
@@ -502,17 +503,17 @@ function renderCodeBlock(code: string, lang: string | null): HTMLDivElement {
   }
 
   const copyBtn = createElement("button", { class: "msg-codeblock-copy" });
-  setText(copyBtn, "Copy");
+  setText(copyBtn, messagingText("code.copy"));
   copyBtn.addEventListener("click", () => {
     void navigator.clipboard
       .writeText(code)
       .then(() => {
-        setText(copyBtn, "Copied!");
-        setTimeout(() => setText(copyBtn, "Copy"), 2000);
+        setText(copyBtn, messagingText("code.copied"));
+        setTimeout(() => setText(copyBtn, messagingText("code.copy")), 2000);
       })
       .catch(() => {
-        setText(copyBtn, "Failed");
-        setTimeout(() => setText(copyBtn, "Copy"), 2000);
+        setText(copyBtn, messagingText("code.copyFailed"));
+        setTimeout(() => setText(copyBtn, messagingText("code.copy")), 2000);
       });
   });
 

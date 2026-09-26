@@ -4,12 +4,13 @@ package ws
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os/exec"
+	"sync/atomic"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/livekit/protocol/livekit"
 )
@@ -43,11 +44,6 @@ func SetClientLastActivityForTest(c *Client, t time.Time) {
 // GetLastActivityForTest exposes Client.getLastActivity for external tests.
 func GetLastActivityForTest(c *Client) time.Time {
 	return c.getLastActivity()
-}
-
-// ClearVoiceChIDForTest exposes Client.clearVoiceChID for external tests.
-func ClearVoiceChIDForTest(c *Client) int64 {
-	return c.clearVoiceChID()
 }
 
 // SetVoiceChIDForTest sets the voice channel ID atomically, clearing the join
@@ -243,12 +239,15 @@ func (p *LiveKitProcess) SetProcessStoppedForTest() {
 	p.stopped = true
 }
 
-// NewHubForTest creates a minimal Hub with no DB or limiter for webhook testing.
+// NewHubForTest creates a minimal Hub with no DB for webhook testing. limiter
+// is real (not nil): deliverBroadcast's channel-scoped path consults it for
+// the topic rate limit unconditionally.
 func NewHubForTest() *Hub {
 	return &Hub{
-		clients:      make(map[int64]*Client),
-		pubsub:       NewPubSub(),
-		topicLimiter: NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
+		clients:  make(map[int64]*Client),
+		pubsub:   NewPubSub(),
+		limiter:  auth.NewRateLimiter(),
+		voiceMod: newVoiceModLocks(),
 	}
 }
 
@@ -288,6 +287,13 @@ func (h *Hub) ComputeAllowedChannelsForTest(database *db.DB, user *db.User) (map
 	return h.computeAllowedChannels(context.Background(), database, user)
 }
 
+// ComputeReadableChannelsForTest exposes Hub.computeReadableChannels for
+// external tests (the REST/WS/replay READABILITY agreement test, B5-7's
+// parallel to the visibility one above).
+func (h *Hub) ComputeReadableChannelsForTest(database *db.DB, user *db.User, allowed map[int64]bool) (map[int64]bool, error) {
+	return h.computeReadableChannels(context.Background(), database, user, allowed)
+}
+
 // GetCachedSettingsForTest exposes Hub.getCachedSettings for external tests.
 func (h *Hub) GetCachedSettingsForTest() (string, string) {
 	return h.getCachedSettings(context.Background())
@@ -321,11 +327,6 @@ func (h *Hub) ExpireSettingsCacheForTest() {
 	h.settingsMu.Lock()
 	defer h.settingsMu.Unlock()
 	h.settingsLastUpdate = time.Time{} // zero time — always older than any TTL
-}
-
-// ParseChannelIDForTest exposes parseChannelID for external tests.
-func ParseChannelIDForTest(payload json.RawMessage) (int64, error) {
-	return parseChannelID(payload)
 }
 
 // BuildJSONForTest exposes buildJSON for external tests.
@@ -457,19 +458,126 @@ func (h *Hub) MustFullResyncForTest(lastSeq uint64) bool {
 	return h.mustFullResync(lastSeq)
 }
 
-// HasChannelPermForTest exposes Hub.hasChannelPerm for external tests.
-func (h *Hub) HasChannelPermForTest(c *Client, channelID, perm int64) bool {
-	return h.hasChannelPerm(context.Background(), c, channelID, perm)
-}
-
 // BroadcastVoiceEventForTest exposes Hub.broadcastVoiceEvent for external
 // tests so a load/soak test can drive the channelReadAudience-resolved
 // voice_state/voice_leave fan-out directly, without a full LiveKit join
 // round-trip.
-func (h *Hub) BroadcastVoiceEventForTest(channelID int64, msg []byte) {
-	h.broadcastVoiceEvent(context.Background(), channelID, msg)
+func (h *Hub) BroadcastVoiceEventForTest(channelID, subjectID int64, msg []byte) {
+	h.broadcastVoiceEvent(context.Background(), channelID, subjectID, msg)
 }
 
 // MaxColdReplayForTest exposes the cold-tier replay row cap so tests can seed
 // exactly enough events to hit it.
 const MaxColdReplayForTest = maxColdReplay
+
+// ─── hub simulation helpers (hub_sim_test.go, B3-6) ────────────────────────
+
+// NewSimClientForTest builds a headless client the way newClient does for a
+// real socket — separate normal/high/low queues and a resume watermark — minus
+// the conn. channelID is the auth-frame active_channel_id handleReconnect
+// promotes after checking it against the allowed set (0 = none).
+func NewSimClientForTest(hub *Hub, user *db.User, channelID int64, lastSeq uint64, send, sendHigh, sendLow chan []byte) *Client {
+	return &Client{
+		hub:       hub,
+		ctx:       context.Background(),
+		userID:    user.ID,
+		user:      user,
+		channelID: channelID,
+		lastSeq:   lastSeq,
+		send:      send,
+		sendHigh:  sendHigh,
+		sendLow:   sendLow,
+	}
+}
+
+// DeliverBroadcastForTest runs deliverBroadcast synchronously on the caller's
+// goroutine — the dispatch loop's critical section without the dispatch loop —
+// and returns the seq it allocated, or 0 when the topic limiter shed the
+// frame. A non-nil recipients selects the visibility-filtered branch
+// (voice_state's path). The seq is read off h.seq before and after, so it is
+// exact only while the caller is the sole allocator, which the simulation
+// guarantees.
+func (h *Hub) DeliverBroadcastForTest(channelID int64, recipients []int64, msg []byte) uint64 {
+	before := atomic.LoadUint64(&h.seq)
+	h.deliverBroadcast(broadcastMsg{channelID: channelID, recipients: recipients, msg: msg})
+	if after := atomic.LoadUint64(&h.seq); after != before {
+		return after
+	}
+	return 0
+}
+
+// SendSequencedToUsersForTest exposes sendSequencedToUsers (the sequenced DM
+// path) and returns the seq it allocated, under the same sole-allocator caveat
+// as DeliverBroadcastForTest.
+func (h *Hub) SendSequencedToUsersForTest(channelID int64, userIDs []int64, msg []byte) uint64 {
+	before := atomic.LoadUint64(&h.seq)
+	h.sendSequencedToUsers(channelID, userIDs, msg)
+	if after := atomic.LoadUint64(&h.seq); after != before {
+		return after
+	}
+	return 0
+}
+
+// ReconnectRegisterForTest exposes reconnectRegister's buffer-tier path: the
+// replay snapshot and registerNow inside ONE h.seqMu critical section, exactly
+// as handleReconnect runs it. ok=false means the ring no longer covers lastSeq
+// and production would fall through to a full ready.
+func (h *Hub) ReconnectRegisterForTest(c *Client, lastSeq uint64, allowed map[int64]bool) ([][]byte, bool) {
+	return h.reconnectRegister(context.Background(), c, lastSeq, allowed, allowed, "buffer", nil, 0)
+}
+
+// UnregisterNowForTest exposes unregisterNow; the return is its "replaced"
+// verdict (true when a newer connection holds the slot).
+func (h *Hub) UnregisterNowForTest(c *Client) bool {
+	return h.unregisterNow(c)
+}
+
+// SeqForTest reads the hub's monotonic seq counter.
+func (h *Hub) SeqForTest() uint64 {
+	return atomic.LoadUint64(&h.seq)
+}
+
+// IsSendClosedForTest exposes Client.isSendClosed.
+func IsSendClosedForTest(c *Client) bool {
+	return c.isSendClosed()
+}
+
+// CloseSendForTest exposes Client.closeSend, the pump teardown's last step.
+func CloseSendForTest(c *Client) {
+	c.closeSend()
+}
+
+// NewFaultConnForTest builds the fault-injecting frame transport of
+// faultconn_test.go over preface (delivered first, e.g. a replay burst) and
+// then in (a client's outbound queue; nil for a preface-only source). seed
+// and stream are the PCG's two words.
+func NewFaultConnForTest(seed, stream uint64, sched FaultSchedule, preface [][]byte, in <-chan []byte) *FaultConn {
+	return newFaultConn(seed, stream, sched, preface, in)
+}
+
+// EventNamesUserForTest exposes eventNamesUser to the external test package.
+func EventNamesUserForTest(data []byte, userID int64) bool { return eventNamesUser(data, userID) }
+
+// EventNamesMessageForTest exposes eventNamesMessage to the external test
+// package.
+func EventNamesMessageForTest(data []byte, ids map[int64]struct{}) bool {
+	return eventNamesMessage(data, ids)
+}
+
+// AllFramesForTest returns every frame still held in the ring buffer, oldest
+// first, including the oldest slot EventsSince can never return.
+func (rb *EventRingBuffer) AllFramesForTest() [][]byte {
+	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+	out := make([][]byte, 0, rb.count)
+	for i := 0; i < rb.count; i++ {
+		idx := (rb.pos - rb.count + rb.size + i) % rb.size
+		if rb.entries[idx].data != nil {
+			out = append(out, rb.entries[idx].data)
+		}
+	}
+	return out
+}
+
+// CurrentSeqForTest returns the hub's sequence counter.
+func (h *Hub) CurrentSeqForTest() uint64 { return atomic.LoadUint64(&h.seq) }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -154,15 +153,10 @@ func resolveOptional(patch *string, existing *string) *string {
 // the nullable display name and about text. Returns the updated user for
 // response building.
 func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch ProfilePatch) (*db.User, error) {
-	ctx, span := telemetry.GlobalTracer("service/user").Start(ctx, "UserService.UpdateProfile",
+	ctx, done := traceCall(ctx, "service/user", "UserService.UpdateProfile",
 		telemetry.Int64("user_id", userID),
 	)
-	start := time.Now()
-	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
-			telemetry.String("method", "UpdateProfile"))
-		span.End()
-	}()
+	defer done()
 
 	// OC-0192: bound the raw bytes before either reaches cleanText
 	// (sanitizeToFixpoint) below — its cost is quadratic in input length,
@@ -225,7 +219,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		if db.IsUniqueConstraintError(err) {
 			return nil, fmt.Errorf("%w: username is already taken", ErrConflict)
 		}
-		return nil, fmt.Errorf("%w: failed to update profile: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to update profile: %w", ErrInternal, err)
 	}
 	// This re-read, like the audit write below, must survive a request ctx
 	// canceled after the write above committed — otherwise a client that
@@ -273,7 +267,7 @@ func (s *UserService) SetCustomStatus(ctx context.Context, userID int64, text st
 		return err
 	}
 	if err := s.st.UpdateUserCustomStatus(ctx, userID, nullable(cleaned)); err != nil {
-		return fmt.Errorf("%w: failed to update custom status: %v", ErrInternal, err)
+		return fmt.Errorf("%w: failed to update custom status: %w", ErrInternal, err)
 	}
 	return nil
 }
@@ -283,7 +277,7 @@ func (s *UserService) SetCustomStatus(ctx context.Context, userID int64, text st
 // user signed out states something about them that is no longer true.
 func (s *UserService) ClearCustomStatus(ctx context.Context, userID int64) error {
 	if err := s.st.UpdateUserCustomStatus(ctx, userID, nil); err != nil {
-		return fmt.Errorf("%w: failed to clear custom status: %v", ErrInternal, err)
+		return fmt.Errorf("%w: failed to clear custom status: %w", ErrInternal, err)
 	}
 	return nil
 }
@@ -324,7 +318,7 @@ type ChangePasswordResult struct {
 // ChangePassword updates the user's password and revokes other sessions.
 func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPasswordHash string, keepSessionID int64) (ChangePasswordResult, error) {
 	if err := s.st.UpdateUserPassword(ctx, userID, newPasswordHash); err != nil {
-		return ChangePasswordResult{}, fmt.Errorf("%w: failed to update password: %v", ErrInternal, err)
+		return ChangePasswordResult{}, fmt.Errorf("%w: failed to update password: %w", ErrInternal, err)
 	}
 
 	// The password is committed from here on: every path below reports
@@ -352,13 +346,64 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPassw
 	return res, nil
 }
 
+// ListPendingRegistrations is the approval queue (B4-1), oldest first.
+func (s *UserService) ListPendingRegistrations(ctx context.Context, limit, offset int) ([]db.PendingUser, error) {
+	pending, err := s.st.ListPendingUsers(ctx, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to list pending registrations: %w", ErrInternal, err)
+	}
+	return pending, nil
+}
+
+// ApproveRegistration unlocks an approval-mode application so the account
+// can sign in. ErrNotFound when the id is not a pending application.
+func (s *UserService) ApproveRegistration(ctx context.Context, actorID, userID int64) error {
+	if err := s.st.ApprovePendingUser(ctx, userID); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return fmt.Errorf("%w: no pending registration with that id", ErrNotFound)
+		}
+		return fmt.Errorf("%w: failed to approve registration: %w", ErrInternal, err)
+	}
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "registration_approve", "user", userID, "application approved")
+	slog.Info("registration approved", "actor_id", actorID, "user_id", userID)
+	return nil
+}
+
+// DenyRegistration refuses an approval-mode application: the row is
+// anonymised and locked for good and its username released. Only a row that
+// is still pending is touched; an approved account never goes through here.
+func (s *UserService) DenyRegistration(ctx context.Context, actorID, userID int64) error {
+	if err := s.st.DenyPendingUser(ctx, userID); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return fmt.Errorf("%w: no pending registration with that id", ErrNotFound)
+		}
+		return fmt.Errorf("%w: failed to deny registration: %w", ErrInternal, err)
+	}
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "registration_deny", "user", userID, "application denied")
+	slog.Info("registration denied", "actor_id", actorID, "user_id", userID)
+	return nil
+}
+
 // ListSessions returns all active sessions for a user.
 func (s *UserService) ListSessions(ctx context.Context, userID int64) ([]db.Session, error) {
 	sessions, err := s.st.ListUserSessions(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list sessions: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to list sessions: %w", ErrInternal, err)
 	}
 	return sessions, nil
+}
+
+// MarkSessionsSeen acknowledges the account's unseen logins from the
+// caller's session (B4-7's new-login signal, BG-08 server half): every other
+// session's flag clears; the caller's own stays, so the device that just
+// signed in never acknowledges itself. An API-token principal passes 0 and
+// acknowledges them all. Nothing security-sensitive changes, so no audit
+// row is written.
+func (s *UserService) MarkSessionsSeen(ctx context.Context, userID, callerSessionID int64) error {
+	if _, err := s.st.MarkSessionsSeen(ctx, userID, callerSessionID); err != nil {
+		return fmt.Errorf("%w: failed to acknowledge sessions: %w", ErrInternal, err)
+	}
+	return nil
 }
 
 // RevokeSession deletes a specific session owned by the user.
@@ -367,10 +412,139 @@ func (s *UserService) RevokeSession(ctx context.Context, userID, sessionID int64
 		if errors.Is(err, db.ErrNotFound) {
 			return fmt.Errorf("%w: session not found", ErrNotFound)
 		}
-		return fmt.Errorf("%w: failed to revoke session: %v", ErrInternal, err)
+		return fmt.Errorf("%w: failed to revoke session: %w", ErrInternal, err)
 	}
 	// Audit rows must survive a request canceled after the delete committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "session_revoke", "session", sessionID, "session revoked")
 	slog.Info("session revoked", "user_id", userID, "session_id", sessionID)
+	return nil
+}
+
+// RevokeAllSessions is sign-out-everywhere (B4-7, BG-08): every session of
+// the user goes, the caller's own included, so a stolen token anywhere stops
+// working now and the caller re-authenticates. Returns how many were
+// revoked; zero is not an error (an API-token principal has none).
+func (s *UserService) RevokeAllSessions(ctx context.Context, userID int64) (int64, error) {
+	n, err := s.st.DeleteUserSessions(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("%w: failed to revoke sessions: %w", ErrInternal, err)
+	}
+	if n == 0 {
+		// Nothing changed, so there is nothing to audit: an API-token
+		// principal keeps its (session-less) credential and could otherwise
+		// grow the audit log one row per call (Codex P2 on PR #1500).
+		slog.Debug("sign-out-everywhere found no session to revoke", "user_id", userID)
+		return 0, nil
+	}
+	// Audit rows must survive a request canceled after the delete committed.
+	// The row names the account and the count, never a token or a device.
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "session_revoke_all", "user", userID,
+		fmt.Sprintf("signed out everywhere (%d sessions revoked)", n))
+	slog.Info("all sessions revoked", "user_id", userID, "sessions_revoked", n)
+	return n, nil
+}
+
+// ─── Admin-panel reads (B3-8 user family) ────────────────────────────────────
+//
+// The admin panel's user section reads through these rather than the handle:
+// the server-stats tile, the paginated member table, and the single-user
+// lookups the PATCH flow does before and after its mutations. The mutations
+// themselves already belong to ModerationService and RoleService, so what is
+// left here is exactly the reads.
+
+// ServerStats returns the counters the admin dashboard renders. The live
+// connection count is not among them — that is hub state, not a row, and the
+// caller stamps it after this returns.
+func (s *UserService) ServerStats(ctx context.Context) (*db.ServerStats, error) {
+	stats, err := s.st.GetServerStats(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to get stats: %w", ErrInternal, err)
+	}
+	return stats, nil
+}
+
+// ListAll returns one page of the users matching f with their role names, in
+// id order. The caller bounds limit and offset; this does not re-bound them, so
+// an unbounded caller stays the caller's bug rather than becoming a silent
+// truncation here.
+func (s *UserService) ListAll(ctx context.Context, f db.UserListFilter, limit, offset int) ([]db.UserWithRole, error) {
+	users, err := s.st.ListAllUsers(ctx, f, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to list users: %w", ErrInternal, err)
+	}
+	return users, nil
+}
+
+// Get resolves one user, reporting a missing row as ErrNotFound rather than
+// (nil, nil) — every admin caller has to distinguish "no such user" (404) from
+// "the lookup failed" (500), and the raw wrapper's nil-nil made that the
+// caller's job to remember.
+func (s *UserService) Get(ctx context.Context, id int64) (*db.User, error) {
+	user, err := s.st.GetUserByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to fetch user: %w", ErrInternal, err)
+	}
+	if user == nil {
+		return nil, fmt.Errorf("user not found%.0w", ErrNotFound)
+	}
+	return user, nil
+}
+
+// GetWithRoleName is Get plus the display name of the user's role, which the
+// admin user response carries. The role name is best-effort on purpose: a user
+// whose role row is missing or unreadable is still a user the panel must be
+// able to show and act on, so the name comes back empty rather than failing
+// the whole read — the same posture the response builder had when it made this
+// lookup itself.
+func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, string, error) {
+	user, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, "", err
+	}
+	roleName := ""
+	if role, roleErr := s.st.GetRoleByID(ctx, user.RoleID); roleErr == nil && role != nil {
+		roleName = role.Name
+	}
+	return user, roleName, nil
+}
+
+// ── Connection lifecycle stamps (B3-8 connection family) ────────────────────
+//
+// The two writes a WebSocket session makes about itself: the status it comes
+// online as, and the offline stamp when its last pump exits. They are a pair
+// on purpose — the second is only correct because of what the first chose to
+// preserve.
+
+// StampConnect writes the status this session comes online as and returns it.
+//
+// It is db.ConnectStatus(saved), not a flat "online": stamping online on every
+// connect is what made a saved Do Not Disturb — and, before this phase, an
+// "appear offline" — flash back to online on every reconnect, with the client
+// racing to re-assert its choice afterwards. idle/dnd/invisible are deliberate
+// choices and survive; anything else becomes online. The write still happens
+// when the status is unchanged, because it also refreshes last_seen.
+//
+// The caller must not cache the returned status unless the error is nil: a
+// value the users row disagrees with is exactly the divergence OC-0298 is
+// about.
+func (s *UserService) StampConnect(ctx context.Context, userID int64, savedStatus string) (string, error) {
+	status := db.ConnectStatus(savedStatus)
+	if err := s.st.UpdateUserStatus(ctx, userID, status); err != nil {
+		return "", fmt.Errorf("%w: failed to stamp connect status: %w", ErrInternal, err)
+	}
+	return status, nil
+}
+
+// StampDisconnect records that the user has no live connection left.
+//
+// It clears only the non-choice "online" and refreshes last_seen; a chosen
+// idle/dnd/invisible is left standing, which is what StampConnect reads back
+// on the next connect. The stale-choice that leaves behind is handled at read
+// time instead: a member with no live connection renders offline whatever the
+// column says.
+func (s *UserService) StampDisconnect(ctx context.Context, userID int64) error {
+	if err := s.st.MarkUserDisconnected(ctx, userID); err != nil {
+		return fmt.Errorf("%w: failed to stamp disconnect: %w", ErrInternal, err)
+	}
 	return nil
 }

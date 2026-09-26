@@ -96,6 +96,32 @@ describe("PinnedMessages", () => {
     panel.destroy?.();
   });
 
+  it("formats a bare SQLite timestamp (no timezone) the same as its Z-suffixed equivalent (OC-0326)", () => {
+    // GetPinnedMessages returns the raw "YYYY-MM-DD HH:MM:SS" column, i.e.
+    // UTC with no zone designator. `new Date(iso)` would read that as local
+    // wall-clock, mislabelling the date near the UTC day boundary.
+    const pins: PinnedMessage[] = [
+      {
+        id: 1,
+        content: "a",
+        author: "Alice",
+        timestamp: "2024-01-02 23:30:00",
+        avatarColor: "#5865f2",
+      },
+      {
+        id: 2,
+        content: "b",
+        author: "Bob",
+        timestamp: "2024-01-02T23:30:00Z",
+        avatarColor: "#e74c3c",
+      },
+    ];
+    const { panel } = makePanel({ pinnedMessages: pins });
+    const times = container.querySelectorAll(".pinned-msg__time");
+    expect(times[0]!.textContent).toBe(times[1]!.textContent);
+    panel.destroy?.();
+  });
+
   it("Jump button calls onJumpToMessage with message id", () => {
     const onJumpToMessage = vi.fn();
     const { panel } = makePanel({ onJumpToMessage });

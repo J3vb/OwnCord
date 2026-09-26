@@ -59,7 +59,7 @@ func String(k, v string) Attr { return Attr{Key: k, Value: v} }
 func Int64(k string, v int64) Attr { return Attr{Key: k, Value: v} }
 
 // Float64 constructs a float64 attribute.
-func Float64(k string, v float64) Attr { return Attr{Key: k, Value: v} }
+func Float64(k string, v float64) Attr { return Attr{Key: k, Value: v} } //nolint:unused // called by the otel-tagged test only
 
 // Span is a single tracing span.
 type Span interface {
@@ -163,10 +163,4 @@ func TimeSince(ctx context.Context, h Histogram, start time.Time, attrs ...Attr)
 		return
 	}
 	h.Record(ctx, time.Since(start).Seconds(), attrs...)
-}
-
-// init installs a no-op provider as the package default. The real
-// telemetry_otel.go (build tag `otel`) overrides this via Init.
-func init() {
-	SetGlobal(noopProvider{})
 }

@@ -5,10 +5,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"slices"
 	"time"
 
@@ -17,6 +17,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/diskutil"
+	"github.com/J3vb/OwnCord/Server/netclass"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -30,13 +31,89 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// NewRouter builds and returns the fully configured HTTP handler, the
-// WebSocket hub (so the caller can call hub.GracefulStop on shutdown), and a
-// cleanup function that stops background goroutines (e.g. rate-limiter cleanup).
+// Runtime holds the process-level collaborators NewRouter mounts its routes
+// over. Until B3-3 NewRouter built all of them itself and returned the hub,
+// while main.go set the hub's event persister and event store after it
+// returned — two owners of one hub. internal/app builds them now
+// (app.StartRuntime), applies every pre-Run setter from that one place, and
+// hands the result in here; B3-4 turns the required setters into validated
+// constructor options at the same single call site.
+type Runtime struct {
+	// Hub is already wired and running: StartRuntime starts its dispatch
+	// goroutine after the last pre-Run setter, exactly where NewRouter used
+	// to. Stopping it is the caller's job (App.Close's "hub" step).
+	Hub *ws.Hub
+	// Limiter backs both the hub and every rate-limited route. One instance:
+	// it persists auth lockouts, so a second copy would split that state.
+	Limiter *auth.RateLimiter
+	// Services is the shared service layer — the same instance the hub holds,
+	// so the permission cache the hub invalidates is the one the handlers read.
+	Services *service.Services
+	// VoiceEnabled is whether StartRuntime's LiveKit client was built. The
+	// webhook, LiveKit health and signalling-proxy routes are mounted only
+	// then — the `lkErr == nil` guard that used to live in this package.
+	VoiceEnabled bool
+	// SetupToken is required on the first-run setup request when non-empty
+	// (admin.SetupOptions.SetupToken). The app generates it per start.
+	SetupToken string
+}
+
+// warnOnServerConfig logs the settings that are legal but rarely what an
+// operator meant. Warnings only: config.Load is warn-never-fail by design, so
+// a questionable value must not stop a server that was working yesterday.
+func warnOnServerConfig(cfg *config.Config) {
+	// Issue 15: a wildcard origin accepts every browser page on the internet.
+	if slices.Contains(cfg.Server.AllowedOrigins, "*") {
+		slog.Warn("AllowedOrigins contains wildcard '*' — consider restricting to specific origins for production use")
+	}
+	// BG-01: browser-client hosting is an owner opt-in and this build ships no
+	// browser assets, so the key mounts nothing yet. Say so rather than let an
+	// operator who turned it on conclude the server is broken; the bundle, its
+	// route and its own CSP arrive with B8.
+	if cfg.Server.BrowserClientEnabled {
+		slog.Warn("server.browser_client_enabled is set, but this build hosts no browser client — " +
+			"the key has no effect yet: no route is mounted and no asset is served")
+	}
+	warnOnVoiceNodeIP(cfg)
+	warnOnAdminPeerAddress(cfg)
+}
+
+// warnOnVoiceNodeIP reports a voice.node_ip that remote clients cannot route
+// to (B6-6).
+//
+// The value is written into livekit.yaml as the external address LiveKit
+// advertises in its ICE candidates, and Server/ws/livekit_process.go validates
+// it only for YAML-unsafe characters. Point it at a private, CGNAT or
+// loopback address and the failure is invisible from the server's side: voice
+// joins succeed, because signalling goes through OwnCord's own port, and then
+// no media ever arrives. That is a network limit wearing application success.
+//
+// It warns and never refuses: a LAN-only or tailnet-only deployment has a
+// legitimate reason to advertise a private address.
+func warnOnVoiceNodeIP(cfg *config.Config) {
+	if cfg.Voice.LiveKitURL == "" || cfg.Voice.NodeIP == "" {
+		return
+	}
+	kind := classifyIP(cfg.Voice.NodeIP)
+	if kind == netclass.KindGlobal {
+		return
+	}
+	slog.Warn("voice.node_ip is not a public address — remote clients will join voice and then hear no audio",
+		"node_ip", cfg.Voice.NodeIP,
+		"address_class", kind,
+		"why", "node_ip is the address LiveKit advertises in ICE candidates. A client outside this "+
+			"network cannot route to it, so the call connects over signalling and carries no media",
+		"fix", "set voice.node_ip to this server's public address and forward UDP 50000-60000 — "+
+			"see docs/port-forwarding.md. Ignore this if every client is on the LAN or your tailnet")
+}
+
+// NewRouter builds and returns the fully configured HTTP handler and a
+// cleanup function that stops background goroutines (e.g. rate-limiter
+// cleanup).
 //
 // pluginRegistry may be nil — in that case the plugin admin endpoints respond
 // with 503 on lifecycle calls and an empty list on read.
-func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.RingBuffer, pluginRegistry *plugin.Registry) (http.Handler, *ws.Hub, func()) {
+func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.RingBuffer, pluginRegistry *plugin.Registry, rt Runtime) (http.Handler, func()) {
 	// Install the auth rate multiplier before any route mounts read it.
 	setAuthRateScale(cfg.Security.AuthRateLimitMultiplier)
 
@@ -59,25 +136,22 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	healthHandler := handleHealth(routerHealthDeps(cfg, database, &getOnlineUsers, &hubAlive))
 	r.Get("/health", healthHandler)
 
-	// Shared rate limiter for auth endpoints. Lockouts are persisted to the
-	// database so they survive server restarts (M2 security hardening).
-	limiter := auth.NewPersistentRateLimiter(database)
+	// Shared rate limiter for auth endpoints, built by internal/app so the
+	// hub and these routes share one instance (its lockouts are persisted to
+	// the database and survive restarts — M2 security hardening).
+	limiter := rt.Limiter
 
 	// Start background cleanup of stale rate-limiter entries to prevent
 	// unbounded memory growth. The goroutine exits when stopCh is closed.
 	limiterStopCh := make(chan struct{})
-	go limiter.StartCleanup(rateLimiterCleanupInterval, rateLimiterCleanupMaxWindow, limiterStopCh)
+	go limiter.StartCleanup(rateLimiterCleanupInterval, limiterStopCh)
 
 	// Versioned API routes.
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/health", healthHandler)
-		r.Get("/info", handleInfo(cfg))
-	})
+	mountPublicV1(r, cfg, healthHandler, routerServerInfoDeps(rt.Services))
 
 	// Service layer — centralizes business logic for REST and WS handlers.
-	// *db.DB satisfies service.Store directly (the store abstraction was
-	// removed in D3).
-	svc := service.New(database, limiter)
+	// Built by internal/app alongside the hub, which holds the same instance.
+	svc := rt.Services
 
 	// Auth routes are mounted after hub creation (below) so self-service
 	// account deletion can broadcast member_ban like the admin ban path does.
@@ -91,35 +165,40 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// GIF proxy — keeps the Klipy API key server-side. Mounted unconditionally;
 	// with no key configured the endpoints answer 503 GIF_DISABLED so the
 	// client can hide the picker rather than discover a 404.
-	MountGIFRoutes(r, database, limiter, cfg)
+	MountGIFRoutes(r, svc.Sessions, limiter, cfg)
 	if cfg.GIF.APIKey == "" {
 		slog.Info("gif.api_key not set — GIF picker disabled (clients will hide it)")
 	}
+
+	// Web Push subscription storage (B5-4) — nothing dispatches yet.
+	// Mounted unconditionally; with push.enabled false every route answers
+	// 503 PUSH_DISABLED after authentication.
+	MountPushRoutes(r, svc.Sessions, svc.Push, cfg.Push.Enabled)
 
 	// DM REST routes are mounted after hub creation (below) so the hub can
 	// be passed as a DMBroadcaster for real-time close events.
 
 	// File upload and serving routes.
-	store, storeErr := routerUploadRoutes(r, database, limiter, cfg, svc.Permissions)
+	store, storeErr := routerUploadRoutes(r, svc.Sessions, limiter, cfg, svc.Uploads)
 
-	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
-	hub := ws.NewHub(database, limiter, svc)
-	// Replay budget knobs must land before hub.Run starts (below).
-	hub.ConfigureReplay(cfg.EventPersistence.ReplayRingSize, cfg.EventPersistence.ReplayColdLimit)
+	// WebSocket hub — built, wired and started by internal/app; WS does its
+	// own in-band auth, so no AuthMiddleware here.
+	hub := rt.Hub
 	getOnlineUsers = func() int { return hub.ClientCount() }
 	hubAlive = func() bool { return hub.DispatchAlive() }
 
-	// Auth routes: register, login, logout, me. Mounted with the hub as the
-	// AuthBroadcaster so DELETE /api/v1/auth/account (self-service account
-	// deletion) fans out member_ban and force-disconnects the deleted user's
-	// own socket, exactly like the admin ban path does for the same
-	// anonymise-and-ban DB state.
-	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies, totpKey, hub)
+	// Auth routes. The service is built after the hub, with the hub as its
+	// AuthBroadcaster, so DELETE /api/v1/auth/account fans out member_ban and
+	// force-disconnects the deleted user's own socket exactly like the admin
+	// ban path does for the same DB state.
+	authSvc := service.NewAuthService(database, limiter, totpKey, hub)
+	wireAuth(svc, authSvc, store, hub)
+	MountAuthRoutes(r, authSvc, AuthMiddleware(svc.Sessions), limiter, cfg.Server.TrustedProxies)
 
-	routerPluginWiring(hub, pluginRegistry)
-
-	// Voice: LiveKit client, optional companion process, webhook and proxy routes.
-	routerVoiceRoutes(r, cfg, limiter, hub)
+	// Voice: webhook, LiveKit health and signalling-proxy routes. The client
+	// and the companion process are built by internal/app, which reports
+	// through rt.VoiceEnabled whether there is anything to mount.
+	routerVoiceRoutes(r, cfg, limiter, hub, rt.VoiceEnabled)
 
 	// Profile routes: update profile, change password, session management.
 	// Mounted after hub creation so the hub can broadcast user_update events.
@@ -134,13 +213,15 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	}
 	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub)
 
-	// DM (direct message) REST routes — mounted after hub creation so the
-	// hub can send real-time dm_channel_close events to WebSocket clients.
-	MountDMRoutes(r, database, svc, hub)
+	// DM (direct message) REST routes, and the message request inbox (B5-6)
+	// beside them — mounted after hub creation so real-time
+	// dm_channel_close/dm_channel_open/dm_request events reach WebSocket
+	// clients.
+	routerDMRoutes(r, database, svc, hub)
 
-	// Channel and message REST routes — mounted after hub creation so a
-	// message purge can broadcast chat_bulk_deleted to the channel.
-	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
+	// Channel, message and NSFW-acknowledgement REST routes — mounted after hub
+	// creation so a message purge or an nsfw_ack can broadcast through it.
+	routerChannelRoutes(r, database, svc, limiter, cfg, hub)
 
 	// Custom emoji REST routes — mounted after hub creation so an upload or a
 	// delete can fan the new set out as an emoji_update. Requires the same file
@@ -150,26 +231,30 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		MountEmojiRoutes(r, database, svc, store, limiter, hub)
 	}
 
+	// Report intake, moderator actions and appeals (B5-8/B5-9/B5-10) —
+	// mounted after hub creation so a filed report, an assignment, a
+	// decision or an action can notify connected clients.
+	routerReportRoutes(r, svc, hub)
+
 	// H-8: Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
-	r.With(AuthMiddleware(database),
+	r.With(AuthMiddleware(svc.Sessions),
 		RequirePermission(permissions.Administrator),
 		RateLimitMiddleware(limiter, "diag:", 5, time.Minute, cfg.Server.TrustedProxies)).
 		Get("/api/v1/diagnostics/connectivity",
 			handleDiagnosticsConnectivity(cfg, ver, hub))
 
-	go hub.Run()
-	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
+	r.Get("/api/v1/ws", ws.ServeWS(hub, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
 
 	routerMetricsRoutes(r, cfg, database, svc, hub)
 
 	// Admin panel: static files + REST API (Phase 6).
 	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo)
-	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc.Moderation, svc.Roles,
-		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg})
+	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
+		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg, SetupToken: rt.SetupToken})
 	r.Group(func(r chi.Router) {
-		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
+		r.Use(AdminIPRestrict("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)
 
 		// Phase C Step 9 — plugin admin REST surface. The IP gate above is
@@ -180,8 +265,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		// constructed in main.go (nil when plugin support is disabled, in
 		// which case lifecycle calls return 503 and list returns []).
 		r.Group(func(r chi.Router) {
-			r.Use(admin.RequireAdminAuth(database))
-			r.Mount("/api/v1/admin/plugins", NewPluginAdminHandler(pluginRegistry, database))
+			r.Use(admin.RequireAdminAuth(svc.Sessions))
+			r.Mount("/api/v1/admin/plugins", NewPluginAdminHandler(pluginRegistry, database, database))
 		})
 	})
 
@@ -192,20 +277,17 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// and the other sensitive endpoints, so a client's 30/min auto-poll could
 	// 429 its user's own 2FA or password change.
 	MountClientUpdateRoute(
-		r.With(rateLimitMiddlewareWithPrefix(limiter, "client_update:", clientUpdateRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)),
+		r.With(RateLimitMiddleware(limiter, "client_update:", clientUpdateRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)),
 		u,
 	)
 
-	// Issue 15: Warn if AllowedOrigins contains wildcard.
-	if slices.Contains(cfg.Server.AllowedOrigins, "*") {
-		slog.Warn("AllowedOrigins contains wildcard '*' — consider restricting to specific origins for production use")
-	}
+	warnOnServerConfig(cfg)
 
 	cleanup := func() {
 		close(limiterStopCh)
 	}
 
-	return r, hub, cleanup
+	return r, cleanup
 }
 
 // routerTOTPKey loads (or auto-generates) the AES-256 key NewRouter hands to the
@@ -268,11 +350,13 @@ func routerHealthDeps(cfg *config.Config, database *db.DB, getOnlineUsers *func(
 		freeDiskBytes: func() (uint64, error) {
 			return diskutil.FreeBytes(cfg.Server.DataDir)
 		},
+		minFreeDiskBytes: cfg.Server.MinFreeDiskBytes(),
 	}
 }
 
 // routerMiddleware installs NewRouter's global middleware stack. The order is a
-// security property (request-id binding before the logger reads it, security
+// security property (request-id binding before the logger reads it, tracing
+// before panic recovery so the panic log carries the trace id, security
 // headers and the body cap before any handler runs) — keep it exactly as
 // written.
 func routerMiddleware(r chi.Router, cfg *config.Config) {
@@ -283,12 +367,14 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 	// NOTE: middleware.RealIP is intentionally omitted — trusting X-Real-IP from
 	// any source allows IP spoofing for rate-limit bypass. IP header trust is now
 	// handled explicitly in clientIPWithProxies using the trusted_proxies config.
-	r.Use(recoverer)     // slog-routing panic recovery (replaces chi's stderr-only Recoverer)
-	r.Use(requestLogger) // structured request/response logging
 	// Phase B Step 8 — OpenTelemetry HTTP tracing. No-op when telemetry is
 	// disabled or the otel build tag is not set, so this is safe to mount
-	// unconditionally.
+	// unconditionally. Mounted ahead of recoverer, which snapshots the trace
+	// id before dispatch: the span must already exist for the panic record to
+	// carry trace_id (OC-0346).
 	r.Use(telemetry.HTTPMiddleware())
+	r.Use(recoverer)     // slog-routing panic recovery (replaces chi's stderr-only Recoverer)
+	r.Use(requestLogger) // structured request/response logging
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
 	r.Use(MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPrefixes...))
 
@@ -298,10 +384,64 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 	}
 }
 
+// wireAuth shares the auth service with the bundle (the admin panel's
+// owner-only recovery issuance, B4-6, uses it) and gives the bundle's erasure
+// runner (B4-9) the upload storage the routes serve from — it is what
+// removes an erased account's files — and the hub, which broadcasts the
+// member_ban and purges the replay pipeline behind an erasure; then makes
+// the self-service route run through that same runner, as the admin route
+// and the maintenance loop's resume already do. A nil store (upload storage failed to open) leaves the
+// file half journaled for the maintenance loop's fallback storage. svc.Erasure
+// and svc.Retention are guarded independently — one being absent from the
+// bundle must not also leave the other unwired — and a missing svc.Erasure is
+// logged rather than left for AuthService's private per-instance runner to
+// swallow quietly (see UseErasure).
+func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storage.Storage, hub *ws.Hub) {
+	svc.Auth = authSvc
+	if store != nil {
+		if svc.Erasure != nil {
+			svc.Erasure.SetFiles(store)
+		}
+		if svc.Retention != nil {
+			svc.Retention.SetFiles(store)
+		}
+	}
+	if hub != nil {
+		if svc.Erasure != nil {
+			svc.Erasure.SetHub(hub)
+		}
+		if svc.Retention != nil {
+			svc.Retention.SetHub(hub)
+		}
+		if svc.Moderation != nil {
+			// B5-9: a live target gets the mod_action frame, and a timeout's
+			// voice half applies through the same mechanism voice_mod_mute
+			// uses.
+			svc.Moderation.SetNotifier(hub)
+			svc.Moderation.SetVoiceMuter(hub)
+		}
+		if svc.Appeals != nil {
+			// B5-10: a live appellant gets the appeal_status frame on
+			// assignment, decision and withdrawal. F4 review: the mod_queue
+			// broadcaster is wired here too, so Assign/Decide/Withdraw issue
+			// BOTH live frames themselves, under the same per-appeal lock —
+			// the handler no longer calls BroadcastAppealQueue for these
+			// three after the fact, once the lock has already been released.
+			svc.Appeals.SetNotifier(hub)
+			svc.Appeals.SetQueueBroadcaster(hub)
+		}
+	}
+	if svc.Erasure != nil {
+		authSvc.UseErasure(svc.Erasure)
+	} else {
+		slog.Error("wireAuth: bundle has no erasure runner; account deletion will run through AuthService's private runner, which records no deletion marker — a restore can resurrect an erased account")
+	}
+}
+
 // routerUploadRoutes mounts the file upload and serving routes and returns the
 // shared file storage (and its construction error) for the profile-avatar and
 // emoji mounts, which reuse the same store.
-func routerUploadRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, cfg *config.Config, permSvc *service.PermissionService) (*storage.Storage, error) {
+func routerUploadRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config, uploads *service.UploadService) (*storage.Storage, error) {
 	// L12: verify config upload size fits within the HTTP body limit.
 	if int64(cfg.Upload.MaxSizeMB)<<20 > uploadMaxBodySize {
 		slog.Warn("upload.max_size_mb exceeds HTTP body limit, capping",
@@ -312,69 +452,60 @@ func routerUploadRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter
 	if storeErr != nil {
 		slog.Error("failed to create file storage", "error", storeErr)
 	} else {
-		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins, permSvc)
+		configureStorageLimits(uploads, cfg)
+		MountUploadRoutes(r, sessions, store, limiter, cfg.Server.AllowedOrigins, uploads)
 	}
 	return store, storeErr
 }
 
-// routerPluginWiring wires the plugin registry and its event sink into the hub.
-func routerPluginWiring(hub *ws.Hub, pluginRegistry *plugin.Registry) {
-	// Phase C Step 9 — wire plugin registry and event sink into the hub.
-	// nil pluginRegistry means plugins are disabled; the hub no-ops cleanly.
-	if pluginRegistry != nil {
-		hub.SetPluginRegistry(pluginRegistry)
-		sink := pluginRegistry.Sink()
-		sink.SetBroadcaster(hub.BroadcastToChannel)
-		hub.SetPluginEventSink(sink)
-	}
+// configureStorageLimits installs B5-2's two bounds on the upload service:
+// the per-user quota (upload.user_quota_mb, 0 = unlimited) and the headroom
+// floor (server.min_free_disk_mb) probed on the upload volume, which may not
+// be the data volume /health watches.
+func configureStorageLimits(uploads *service.UploadService, cfg *config.Config) {
+	uploads.SetStorageLimits(service.StorageLimits{
+		UserQuotaBytes: cfg.Upload.UserQuotaBytes(),
+		MinFreeBytes:   cfg.Server.MinFreeDiskBytes(),
+		Dir:            cfg.Upload.StorageDir,
+		MaxUploadBytes: int64(cfg.Upload.MaxSizeMB) << 20,
+	})
 }
 
-// routerVoiceRoutes creates the LiveKit client, optionally starts the companion
-// LiveKit process, and mounts the webhook, LiveKit health and signaling-proxy
-// routes. Voice is disabled — and none of those routes are mounted — when the
-// client fails to build.
-func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimiter, hub *ws.Hub) {
-	// Create LiveKit client if voice config is present; voice is disabled on failure.
-	lk, lkErr := ws.NewLiveKitClient(&cfg.Voice)
-	if lkErr != nil {
-		slog.Warn("failed to create LiveKit client, voice disabled", "error", lkErr)
-	} else {
-		hub.SetLiveKit(lk)
+// routerChannelRoutes mounts the channel/message REST surface and B5-7's NSFW
+// acknowledgement toggle beside it — both need the hub to fan out real-time
+// events (chat_bulk_deleted, nsfw_ack).
+func routerDMRoutes(r chi.Router, database *db.DB, svc *service.Services, hub *ws.Hub) {
+	MountDMRoutes(r, database, svc, hub)
+	MountDMRequestRoutes(r, svc, hub)
+}
 
-		// Optionally start a companion LiveKit process — either from a
-		// configured binary or via checksum-verified auto-download (the
-		// download happens in the background inside Start).
-		if cfg.Voice.LiveKitBinaryPath != "" || cfg.Voice.AutoDownloadLiveKit {
-			proc := ws.NewLiveKitProcess(&cfg.Voice, &cfg.TLS, cfg.Server.DataDir)
-			// Register the process with the hub BEFORE calling Start(), and
-			// keep it registered even if Start() fails (OC-0019). The only
-			// consumer of h.lkProcess is the voice_join guard
-			// (`h.lkProcess != nil && !h.lkProcess.IsRunning()`), which reads
-			// a nil process as "LiveKit is externally managed, don't check".
-			// That is the wrong reading here: OwnCord was told to manage
-			// LiveKit and failed to launch it, so joins must fail closed via
-			// IsRunning() == false, not be waved through with no SFU
-			// running. IsRunning() is false for a proc whose Start() never
-			// got as far as spawning cmd, and Hub.Stop's lkProcess.Stop() is
-			// safe to call on a never-started proc.
-			hub.SetLiveKitProcess(proc)
-			if startErr := proc.Start(); startErr != nil {
-				slog.Error("failed to start LiveKit process", "error", startErr)
-			}
-		}
-	}
+func routerChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, limiter *auth.RateLimiter, cfg *config.Config, hub *ws.Hub) {
+	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
+	MountNSFWRoutes(r, svc, hub)
+}
 
-	// Warn if LiveKit is externally managed and webhook may be blocked by admin CIDRs.
-	if lkErr == nil && cfg.Voice.LiveKitBinaryPath == "" && !cfg.Voice.AutoDownloadLiveKit {
-		lkHost := ""
-		if u, parseErr := url.Parse(cfg.Voice.LiveKitURL); parseErr == nil {
-			lkHost = u.Hostname()
-		}
-		if lkHost != "" && lkHost != "localhost" && lkHost != "127.0.0.1" && lkHost != "::1" {
-			slog.Warn("LiveKit is externally managed but webhook endpoint is admin-IP-restricted — "+
-				"add the LiveKit server's IP to livekit_webhook_allowed_cidrs or webhooks will be silently dropped",
-				"livekit_host", lkHost)
-		}
+// routerReportRoutes mounts report intake, the reporter's own status view,
+// the moderation queue (B5-8), warning/timeout/notice-ack (B5-9), and
+// appeals (B5-10) beside them since all gate on the same MODERATE_MEMBERS
+// bit and all can notify a connected client — the hub is the
+// mod_queue/mod_action/appeal_status broadcaster for a filed report, an
+// assignment, a close, an action, or an appeal decision.
+func routerReportRoutes(r chi.Router, svc *service.Services, hub *ws.Hub) {
+	MountReportRoutes(r, svc, hub)
+	MountModerationQueueRoutes(r, svc, hub)
+	MountModerationRoutes(r, svc)
+	MountAppealRoutes(r, svc)
+	MountModerationAppealRoutes(r, svc)
+}
+
+// routerVoiceRoutes mounts the LiveKit webhook, health and signalling-proxy
+// routes. voiceEnabled is internal/app's report that the LiveKit client was
+// built (StartRuntime); voice is disabled — and none of these routes are
+// mounted — when it was not. Until B3-3 this function also created the client
+// and the companion process, which is what gave the hub a second owner.
+func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimiter, hub *ws.Hub, voiceEnabled bool) {
+	if !voiceEnabled {
+		return
 	}
 
 	// LiveKit webhook endpoint (no auth middleware — uses LiveKit JWT
@@ -383,28 +514,28 @@ func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimit
 	// externally-hosted LiveKit can be admitted WITHOUT widening the admin
 	// panel's perimeter to the SFU's network. Falls back to
 	// admin_allowed_cidrs when unset.
-	if lkErr == nil {
-		webhookCIDRs := cfg.Server.LiveKitWebhookCIDRs()
-		r.With(AdminIPRestrict(webhookCIDRs, cfg.Server.TrustedProxies)).
-			Post("/api/v1/livekit/webhook",
-				ws.MountWebhookRoute(hub, cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
+	webhookCIDRs := cfg.Server.LiveKitWebhookCIDRs()
+	r.With(AdminIPRestrict("server.livekit_webhook_allowed_cidrs", webhookCIDRs, cfg.Server.TrustedProxies)).
+		Post("/api/v1/livekit/webhook",
+			hub.NewLiveKitWebhookHandler(cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
 
-		// LiveKit health check — same perimeter as the webhook.
-		r.With(AdminIPRestrict(webhookCIDRs, cfg.Server.TrustedProxies)).
-			Get("/api/v1/livekit/health", handleLiveKitHealth(hub))
+	// LiveKit health check — same perimeter as the webhook.
+	r.With(AdminIPRestrict("server.livekit_webhook_allowed_cidrs", webhookCIDRs, cfg.Server.TrustedProxies)).
+		Get("/api/v1/livekit/health", handleLiveKitHealth(hub))
 
-		// Reverse proxy LiveKit signaling through OwnCord's HTTPS server.
-		// This avoids mixed-content blocks (secure page → insecure WS).
-		// Client connects to wss://server:8443/livekit/* → ws://localhost:7880/*
-		//
-		// NOTE: AuthMiddleware is intentionally omitted. The LiveKit JS SDK's
-		// signal requests don't carry OwnCord session tokens — authentication
-		// is handled by the LiveKit JWT (access_token query param) which the
-		// LiveKit server validates. Users can only obtain a valid JWT through
-		// the authenticated voice_join WS flow. Rate limiting prevents abuse.
-		r.With(rateLimitMiddlewareWithPrefix(limiter, "livekit_proxy:", livekitProxyRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)).
-			Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
-	}
+	// Reverse proxy LiveKit signaling through OwnCord's HTTPS server.
+	// This avoids mixed-content blocks (secure page → insecure WS).
+	// Client connects to wss://server:8443/livekit/* → ws://localhost:7880/*
+	//
+	// NOTE: AuthMiddleware is intentionally omitted. LiveKit signal requests
+	// don't carry OwnCord session tokens — authentication is handled by the
+	// LiveKit JWT, which the LiveKit server validates. It arrives either as
+	// the access_token query param (JS SDK) or as an Authorization: Bearer
+	// header (Rust SDK, the Linux client's native voice), which the proxy
+	// forwards. Users can only obtain a valid JWT through
+	// the authenticated voice_join WS flow. Rate limiting prevents abuse.
+	r.With(RateLimitMiddleware(limiter, "livekit_proxy:", livekitProxyRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)).
+		Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 }
 
 // routerMetricsRoutes mounts the JSON metrics endpoint and, when an OTel
@@ -414,7 +545,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 	// admin_allowed_cidrs) so a central scraper can be admitted without
 	// widening /admin. The shape is documented in docs/deployment.md — keep
 	// the two in sync.
-	r.With(AdminIPRestrict(cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
+	r.With(AdminIPRestrict("server.metrics_allowed_cidrs", cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
 		Get("/api/v1/metrics", handleMetrics(MetricsSources{
 			ConnectedUsers: hub.ClientCount,
 			VoiceSessions:  hub.VoiceSessionCount,
@@ -425,8 +556,12 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 			ConnRejects:    hub.ConnRejectCount,
 			PersisterStats: hub.EventPersisterStats,
 			DBStats:        func() sql.DBStats { return database.SQLDb().Stats() },
+			DBReaderStats:  func() sql.DBStats { return database.SQLReaderDB().Stats() },
 			PermCache:      svc.Permissions.CacheStats,
 			DiskFree:       func() (uint64, error) { return diskutil.FreeBytes(cfg.Server.DataDir) },
+			DiskMinFree:    cfg.Server.MinFreeDiskBytes(),
+			UploadBytes:    database.TotalAttachmentBytes,
+			PushCounters:   pushCountersSource(svc),
 		}))
 
 	// Phase B Step 8 — OpenTelemetry Prometheus exporter. Mounted alongside
@@ -434,9 +569,20 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 	// build, exporter == "prometheus"). Returns 404 in the default no-op build
 	// because telemetry.PrometheusHandler() returns nil.
 	if promH := telemetry.PrometheusHandler(); promH != nil {
-		r.With(AdminIPRestrict(cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
+		r.With(AdminIPRestrict("server.metrics_allowed_cidrs", cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
 			Mount("/metrics", promH)
 	}
+}
+
+// pushCountersSource returns nil when dispatch was never constructed (both
+// push.enabled and push.dispatch_enabled were not true at start-up — the
+// compiled default), so handleMetrics leaves the three push_* fields at
+// zero rather than calling into a nil *service.PushDispatcher.
+func pushCountersSource(svc *service.Services) func() (dispatched, failed, pruned uint64) {
+	if svc == nil || svc.PushDispatch == nil {
+		return nil
+	}
+	return svc.PushDispatch.Counters
 }
 
 // serverStartTime records when the process started; used for uptime in /health.
@@ -459,6 +605,12 @@ type healthDeps struct {
 	dbPing        func(context.Context) error
 	dispatchAlive func() bool
 	freeDiskBytes func() (uint64, error)
+	// minFreeDiskBytes is the free-space floor under which health reports
+	// degraded: server.min_free_disk_mb, the same number the start-up banner
+	// and the upload path use (B5-2, decision 11). SQLite WAL growth,
+	// uploads, and backups all share the data volume, so running dry
+	// corrupts more than one thing at once. 0 disables the check.
+	minFreeDiskBytes uint64
 }
 
 const (
@@ -469,11 +621,20 @@ const (
 	// healthDBPingTimeout bounds the SELECT 1 so a wedged writer degrades the
 	// health report instead of hanging it.
 	healthDBPingTimeout = 1 * time.Second
-	// healthMinFreeDiskBytes is the free-space floor under which health
-	// reports degraded. SQLite WAL growth, uploads, and backups all share the
-	// data volume, so running dry corrupts more than one thing at once.
-	healthMinFreeDiskBytes = 256 << 20 // 256 MiB
 )
+
+// mountPublicV1 registers the unauthenticated /api/v1 routes.
+//
+// Every route here is reachable without a session, so each one must also be
+// declared in publicSurface (auth_posture_test.go) and must honour C-2: no
+// version, build or commit on an unauthenticated endpoint.
+func mountPublicV1(r chi.Router, cfg *config.Config, healthHandler http.HandlerFunc, infoDeps serverInfoDeps) {
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/health", healthHandler)
+		r.Get("/info", handleInfo(cfg))
+		r.Get("/server-info", handleServerInfo(cfg, infoDeps))
+	})
+}
 
 // infoResponse is the JSON shape returned by GET /api/v1/info.
 type infoResponse struct {
@@ -535,8 +696,8 @@ func runHealthChecks(ctx context.Context, deps healthDeps) (status, reason strin
 			return "degraded", "database"
 		}
 	}
-	if deps.freeDiskBytes != nil {
-		if free, err := deps.freeDiskBytes(); err == nil && free < healthMinFreeDiskBytes {
+	if deps.freeDiskBytes != nil && deps.minFreeDiskBytes > 0 {
+		if free, err := deps.freeDiskBytes(); err == nil && free < deps.minFreeDiskBytes {
 			return "degraded", "disk"
 		}
 	}
@@ -651,7 +812,7 @@ func recoverer(next http.Handler) http.Handler {
 		defer func() {
 			if rec := recover(); rec != nil {
 				// Preserve chi's behaviour of not swallowing the abort sentinel.
-				if rec == http.ErrAbortHandler {
+				if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 					panic(rec)
 				}
 				attrs := []any{

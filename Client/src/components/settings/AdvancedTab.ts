@@ -3,16 +3,18 @@
  * and cache management.
  */
 
-import { createElement, appendChildren } from "@lib/dom";
-import { invoke } from "@tauri-apps/api/core";
-import { appLogDir, join } from "@tauri-apps/api/path";
-import { readDir, remove } from "@tauri-apps/plugin-fs";
+import { createElement, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { clearPendingPersistedLogs } from "@lib/logPersistence";
-import { clearAttachmentCaches } from "@components/message-list/attachments";
+import { desktop } from "../../platform/desktop";
+import {
+  clearAttachmentCaches,
+  clearExternalImageCache,
+} from "@components/message-list/attachments";
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches } from "@components/message-list/media";
-import { loadPref, savePref, createToggle } from "./helpers";
+import { appendToggleRows, createToggle } from "./helpers";
+import { settingsText as t } from "../../i18n/settings";
 
 const log = createLogger("AdvancedTab");
 const IMAGE_CACHE_DELETE_BLOCK_TIMEOUT_MS = 1000;
@@ -30,30 +32,13 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   const toggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
     {
       key: "developerMode",
-      label: "Developer Mode",
-      desc: "Show message IDs, user IDs, and channel IDs on context menus",
+      label: t("advanced.developerMode.label"),
+      desc: t("advanced.developerMode.desc"),
       fallback: false,
     },
   ];
 
-  for (const item of toggles) {
-    const row = createElement("div", { class: "setting-row" });
-    const info = createElement("div", {});
-    const label = createElement("div", { class: "setting-label" }, item.label);
-    const desc = createElement("div", { class: "setting-desc" }, item.desc);
-    appendChildren(info, label, desc);
-
-    const isOn = loadPref<boolean>(item.key, item.fallback);
-    const toggle = createToggle(isOn, {
-      signal,
-      onChange: (nowOn) => {
-        savePref(item.key, nowOn);
-      },
-    });
-
-    appendChildren(row, info, toggle);
-    section.appendChild(row);
-  }
+  appendToggleRows(section, toggles, signal);
 
   // Launch on login — OS-level state via the autostart plugin, not a stored pref.
   section.appendChild(buildAutostartRow(signal));
@@ -65,26 +50,30 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
 
   // ---- Debug section ---------------------------------------------------------
 
-  const debugTitle = createElement("div", { class: "settings-section-title" }, "Debug");
+  const debugTitle = createElement("div", { class: "settings-section-title" }, t("advanced.debug"));
   section.appendChild(debugTitle);
 
   if (import.meta.env.DEV) {
     // DevTools button row
     const devtoolsRow = createElement("div", { class: "setting-row" });
     const devtoolsInfo = createElement("div", {});
-    const devtoolsLabel = createElement("div", { class: "setting-label" }, "Open DevTools");
+    const devtoolsLabel = createElement(
+      "div",
+      { class: "setting-label" },
+      t("advanced.devtools.label"),
+    );
     const devtoolsDesc = createElement(
       "div",
       { class: "setting-desc" },
-      "Open the browser developer tools for debugging",
+      t("advanced.devtools.desc"),
     );
     appendChildren(devtoolsInfo, devtoolsLabel, devtoolsDesc);
 
-    const devtoolsBtn = createElement("button", { class: "ac-btn" }, "Open DevTools");
+    const devtoolsBtn = createElement("button", { class: "ac-btn" }, t("advanced.devtools.button"));
     devtoolsBtn.addEventListener(
       "click",
       () => {
-        void invoke("open_devtools").catch((err: unknown) => {
+        void desktop.devTools.open().catch((err: unknown) => {
           log.warn("DevTools not available", {
             error: err instanceof Error ? err.message : String(err),
           });
@@ -102,33 +91,45 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   const cacheSep = createElement("div", { class: "settings-separator" });
   section.appendChild(cacheSep);
 
-  const cacheTitle = createElement("div", { class: "settings-section-title" }, "Storage & Cache");
+  const cacheTitle = createElement(
+    "div",
+    { class: "settings-section-title" },
+    t("advanced.storageCache"),
+  );
   section.appendChild(cacheTitle);
 
   // Clear Image Cache
   section.appendChild(
     buildCacheRow(
-      "Clear Image Cache",
-      "Remove cached images and link previews. They will be re-downloaded as needed.",
-      "Clear",
+      t("advanced.clearImages.label"),
+      t("advanced.clearImages.desc"),
+      t("advanced.button.clear"),
       signal,
       async (btn) => {
-        btn.textContent = "Clearing...";
+        btn.textContent = t("advanced.button.clearing");
         btn.setAttribute("disabled", "");
         try {
           await clearImageCache();
-          btn.textContent = "Cleared!";
-          setTimeout(() => {
-            btn.textContent = "Clear";
-            btn.removeAttribute("disabled");
-          }, 2000);
+          btn.textContent = t("advanced.button.cleared");
+          setOwnedTimeout(
+            signal,
+            () => {
+              btn.textContent = t("advanced.button.clear");
+              btn.removeAttribute("disabled");
+            },
+            2000,
+          );
         } catch (err) {
           log.error("Failed to clear image cache", err);
-          btn.textContent = "Failed";
-          setTimeout(() => {
-            btn.textContent = "Clear";
-            btn.removeAttribute("disabled");
-          }, 2000);
+          btn.textContent = t("advanced.button.failed");
+          setOwnedTimeout(
+            signal,
+            () => {
+              btn.textContent = t("advanced.button.clear");
+              btn.removeAttribute("disabled");
+            },
+            2000,
+          );
         }
       },
     ),
@@ -137,27 +138,39 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   // Clear Log Files
   section.appendChild(
     buildCacheRow(
-      "Clear Log Files",
-      "Remove persisted client log files from disk.",
-      "Clear",
+      t("advanced.clearLogs.label"),
+      t("advanced.clearLogs.desc"),
+      t("advanced.button.clear"),
       signal,
       async (btn) => {
-        btn.textContent = "Clearing...";
+        btn.textContent = t("advanced.button.clearing");
         btn.setAttribute("disabled", "");
         try {
-          await clearLogFiles();
-          btn.textContent = "Cleared!";
-          setTimeout(() => {
-            btn.textContent = "Clear";
-            btn.removeAttribute("disabled");
-          }, 2000);
+          // The button's own test (tests/unit/advanced-tab.test.ts) asserts the
+          // pending buffer is drained here, through this module's export;
+          // clearAll() drains it again, which is a no-op.
+          await clearPendingPersistedLogs();
+          await desktop.logFiles.clearAll();
+          btn.textContent = t("advanced.button.cleared");
+          setOwnedTimeout(
+            signal,
+            () => {
+              btn.textContent = t("advanced.button.clear");
+              btn.removeAttribute("disabled");
+            },
+            2000,
+          );
         } catch (err) {
           log.error("Failed to clear log files", err);
-          btn.textContent = "Failed";
-          setTimeout(() => {
-            btn.textContent = "Clear";
-            btn.removeAttribute("disabled");
-          }, 2000);
+          btn.textContent = t("advanced.button.failed");
+          setOwnedTimeout(
+            signal,
+            () => {
+              btn.textContent = t("advanced.button.clear");
+              btn.removeAttribute("disabled");
+            },
+            2000,
+          );
         }
       },
     ),
@@ -166,20 +179,19 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   // Clear All Cache (nuclear option)
   section.appendChild(
     buildCacheRow(
-      "Clear All Cache & Restart",
-      "Remove all cached data (images, logs, WebView storage) and restart the app. " +
-        "Server profiles and credentials are preserved.",
-      "Clear & Restart",
+      t("advanced.clearAll.label"),
+      t("advanced.clearAll.desc"),
+      t("advanced.button.clearRestart"),
       signal,
       async (btn) => {
         // Two-step confirmation: first click shows warning, second click confirms
         if (btn.dataset.confirmPending !== "true") {
           btn.dataset.confirmPending = "true";
-          btn.textContent = "Are you sure? Click again";
+          btn.textContent = t("advanced.button.confirmAgain");
           btn.classList.add("ac-btn-danger");
           const resetTimer = setTimeout(() => {
             btn.dataset.confirmPending = "";
-            btn.textContent = "Clear & Restart";
+            btn.textContent = t("advanced.button.clearRestart");
             btn.classList.remove("ac-btn-danger");
           }, 3000);
           // Store timer ID so it can be cleared if the button is clicked again
@@ -190,23 +202,30 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
         const pendingTimer = btn.dataset.resetTimer;
         if (pendingTimer) clearTimeout(Number(pendingTimer));
         btn.dataset.confirmPending = "";
-        btn.textContent = "Clearing...";
+        btn.textContent = t("advanced.button.clearing");
         btn.setAttribute("disabled", "");
         try {
           await clearImageCache();
-          await clearLogFiles();
+          // The button's own test (tests/unit/advanced-tab.test.ts) asserts the
+          // pending buffer is drained here, through this module's export;
+          // clearAll() drains it again, which is a no-op.
+          await clearPendingPersistedLogs();
+          await desktop.logFiles.clearAll();
           clearLocalStoragePreservingUserData();
           sessionStorage.clear();
           log.info("All cache cleared, restarting app");
-          const { relaunch } = await import("@tauri-apps/plugin-process");
-          await relaunch();
+          await desktop.appProcess.relaunch();
         } catch (err) {
           log.error("Failed to clear all cache", err);
-          btn.textContent = "Failed";
-          setTimeout(() => {
-            btn.textContent = "Clear & Restart";
-            btn.removeAttribute("disabled");
-          }, 2000);
+          btn.textContent = t("advanced.button.failed");
+          setOwnedTimeout(
+            signal,
+            () => {
+              btn.textContent = t("advanced.button.clearRestart");
+              btn.removeAttribute("disabled");
+            },
+            2000,
+          );
         }
       },
     ),
@@ -228,12 +247,8 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
 function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
   const row = createElement("div", { class: "setting-row" });
   const info = createElement("div", {});
-  const label = createElement("div", { class: "setting-label" }, "Launch on Login");
-  const desc = createElement(
-    "div",
-    { class: "setting-desc" },
-    "Start OwnCord automatically when you sign in to your computer",
-  );
+  const label = createElement("div", { class: "setting-label" }, t("advanced.launchOnLogin.label"));
+  const desc = createElement("div", { class: "setting-desc" }, t("advanced.launchOnLogin.desc"));
   appendChildren(info, label, desc);
 
   // Starts off; corrected to the real OS state once the plugin answers.
@@ -245,13 +260,13 @@ function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
   let touched = false;
   const toggle = createToggle(false, {
     signal,
+    label: t("advanced.launchOnLogin.label"),
     onChange: (nowOn) => {
       touched = true;
       void (async () => {
         try {
-          const { enable, disable } = await import("@tauri-apps/plugin-autostart");
-          if (nowOn) await enable();
-          else await disable();
+          if (nowOn) await desktop.autostart.enable();
+          else await desktop.autostart.disable();
           enabled = nowOn;
         } catch (err) {
           // The OS change didn't take — revert the visual state.
@@ -266,8 +281,7 @@ function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
 
   void (async () => {
     try {
-      const { isEnabled } = await import("@tauri-apps/plugin-autostart");
-      const initialEnabled = await isEnabled();
+      const initialEnabled = await desktop.autostart.isEnabled();
       // If the user already toggled this before the read-back resolved,
       // their change (and whatever it settles to) wins — don't overwrite it
       // with the value read before that change was applied.
@@ -333,9 +347,9 @@ async function clearImageCache(): Promise<void> {
     req.onblocked = () => {
       if (blockedTimer !== null) return;
       blockedTimer = setTimeout(() => {
-        finish(() =>
-          reject(new Error("Image cache is still in use. Close active media and try again.")),
-        );
+        // The caller shows only the generic "Failed" button state, never this text.
+        const blocked = new Error("Image cache is still in use. Close active media and try again."); // i18n-exempt: internal error, only the button state is shown
+        finish(() => reject(blocked));
       }, IMAGE_CACHE_DELETE_BLOCK_TIMEOUT_MS);
     };
   });
@@ -343,6 +357,9 @@ async function clearImageCache(): Promise<void> {
   clearAttachmentCaches();
   clearEmbedCaches();
   clearMediaCaches();
+  // Also moves the external-content broker to a fresh partition, which drops
+  // the native cache of the previous one on its next request.
+  clearExternalImageCache();
 }
 
 /**
@@ -366,30 +383,4 @@ function clearLocalStoragePreservingUserData(): void {
   for (const key of keysToRemove) {
     localStorage.removeItem(key);
   }
-}
-
-/** Delete all JSONL log files from the app log directory. */
-async function clearLogFiles(): Promise<void> {
-  try {
-    await clearPendingPersistedLogs();
-    const baseDir = await appLogDir();
-    const logDir = await join(baseDir, "client-logs");
-    const entries = await readDir(logDir);
-    for (const entry of entries) {
-      if (entry.name?.endsWith(".jsonl") && !entry.isDirectory) {
-        // oxlint-disable-next-line no-await-in-loop -- sequential file deletion to avoid overwhelming the filesystem
-        await remove(`${logDir}/${entry.name}`);
-      }
-    }
-  } catch (err) {
-    if (isMissingPathError(err)) {
-      return;
-    }
-    throw err;
-  }
-}
-
-function isMissingPathError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return /not found|no such file|cannot find the path|os error 2|enoent/i.test(message);
 }

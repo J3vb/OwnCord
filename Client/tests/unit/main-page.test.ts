@@ -11,6 +11,20 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// jsdom has no matchMedia; the lazily-loaded sidebar drawer reads its
+// breakpoint from it. Wide: the drawer stays out of the way.
+vi.stubGlobal(
+  "matchMedia",
+  vi.fn(() => Object.assign(new EventTarget(), { matches: false, media: "" })),
+);
+
+// B9-8: this suite exercises content the viewer has already consented to;
+// the consent gate itself is proven in src/features/content-consent/external.test.ts.
+vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
+  externalAllowed: () => true,
+}));
+
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({
     debug: vi.fn(),
@@ -52,6 +66,7 @@ vi.mock("@lib/livekitSession", () => ({
 vi.mock("@lib/notifications", () => ({
   startRingChime: vi.fn(),
   stopRingChime: vi.fn(),
+  cleanupNotificationAudio: vi.fn(),
 }));
 
 const { mockSetAudioVolumeHost } = vi.hoisted(() => ({
@@ -61,6 +76,13 @@ const { mockSetAudioVolumeHost } = vi.hoisted(() => ({
 // Real audioElements.ts pulls in livekit-client (unmocked elsewhere in this
 // file's graph) purely to hold the AudioElements class this page never
 // touches directly — mock out the one export MainPage actually calls.
+const { mockCreateUpdateNotifier } = vi.hoisted(() => ({
+  mockCreateUpdateNotifier: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
+}));
+vi.mock("@components/UpdateNotifier", () => ({
+  createUpdateNotifier: mockCreateUpdateNotifier,
+}));
+
 vi.mock("@lib/audioElements", () => ({
   setAudioVolumeHost: mockSetAudioVolumeHost,
 }));
@@ -96,6 +118,7 @@ const {
   // tests get at the actual slots/dmProfileSlot MainPage is wiring against.
   capturedChatAreaRef: {
     current: null as null | {
+      chatArea: HTMLDivElement;
       slots: {
         messagesSlot: HTMLDivElement;
         typingSlot: HTMLDivElement;
@@ -116,6 +139,14 @@ const {
   },
 }));
 
+const { mockPruneAttachmentCacheScope } = vi.hoisted(() => ({
+  mockPruneAttachmentCacheScope: vi.fn(async () => {}),
+}));
+vi.mock("../../src/components/message-list/attachments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/components/message-list/attachments")>()),
+  pruneAttachmentCacheScope: mockPruneAttachmentCacheScope,
+}));
+
 vi.mock("../../src/pages/main-page/ChannelController", () => ({
   createChannelController: (...args: unknown[]) => {
     mockCreateChannelController(...args);
@@ -129,6 +160,12 @@ vi.mock("../../src/pages/main-page/ChannelController", () => ({
   },
 }));
 
+const { mockReturnToChannel, mockRememberChannel, inertModeration } = vi.hoisted(() => ({
+  mockReturnToChannel: vi.fn(),
+  mockRememberChannel: vi.fn(),
+  inertModeration: { signals: [] as AbortSignal[] },
+}));
+
 vi.mock("../../src/pages/main-page/SidebarArea", () => ({
   createSidebarArea: (...args: unknown[]) => {
     mockCreateSidebarArea(...args);
@@ -137,7 +174,24 @@ vi.mock("../../src/pages/main-page/SidebarArea", () => ({
       children: [],
       unsubscribers: [],
       openQuickSwitch: vi.fn(),
+      rememberChannel: mockRememberChannel,
+      forgetChannel: vi.fn(),
+      returnToChannel: mockReturnToChannel,
     };
+  },
+}));
+
+// B9-4: one inert destination, so the page's navigation wiring can be driven.
+vi.mock("../../src/features/navigation/destinations", () => ({
+  NAVIGATION_DESTINATIONS: {
+    moderation: {
+      build: (ctx: { signal: AbortSignal }) => {
+        inertModeration.signals.push(ctx.signal);
+        const el = document.createElement("div");
+        el.dataset["testid"] = "inert-moderation";
+        return el;
+      },
+    },
   },
 }));
 
@@ -162,9 +216,10 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       mount: vi.fn(),
       destroy: vi.fn(),
     };
-    capturedChatAreaRef.current = { slots, dmProfileSlot, videoGrid };
+    const chatArea = document.createElement("div");
+    capturedChatAreaRef.current = { chatArea, slots, dmProfileSlot, videoGrid };
     return {
-      chatArea: document.createElement("div"),
+      chatArea,
       slots,
       videoGrid,
       chatHeaderName: document.createElement("span"),
@@ -173,7 +228,10 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        sidebarToggle: document.createElement("button"),
       },
+      sidebarToggle: document.createElement("button"),
+      closePinnedPanel: vi.fn(),
       searchCtrl: { open: vi.fn(), cleanup: vi.fn() },
       dmProfileSlot,
       children: [],
@@ -186,14 +244,24 @@ import { createMainPage } from "../../src/pages/MainPage";
 import { channelsStore, setChannels, setActiveChannel } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
+import { wireConnectionStatus } from "../../src/lib/dispatcher";
+import { createMockWsClient } from "../helpers/mock-ws";
 import { voiceStore, updateVoiceUserProfile } from "../../src/stores/voice.store";
 import { dmStore, updateDmParticipant } from "../../src/stores/dm.store";
 import { membersStore, updateMemberProfile } from "../../src/stores/members.store";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ApiClient } from "../../src/lib/api";
 import type { ServerMessage } from "../../src/lib/types";
-import { openImageLightbox } from "../../src/components/message-list/media";
+import { Permission } from "../../src/lib/types";
+import { openImageLightbox, renderYouTubeEmbed } from "../../src/components/message-list/media";
+import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
+import {
+  externalPartition,
+  fetchExternalImage,
+} from "../../src/components/message-list/attachments";
+import { desktop } from "../../src/platform/desktop";
 import { saveUserStatus } from "../../src/lib/userStatus";
+import { markAllRead } from "../../src/lib/read-state";
 
 function resetStores(): void {
   channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
@@ -229,6 +297,7 @@ type FakeWsClient = WsClient & {
 function fakeWs(): FakeWsClient {
   const listeners = new Map<string, Set<WsListener<ServerMessage["type"]>>>();
   return {
+    ping: vi.fn(async () => {}),
     connect: vi.fn(),
     disconnect: vi.fn(),
     send: vi.fn(() => "id"),
@@ -255,10 +324,12 @@ function fakeWs(): FakeWsClient {
   };
 }
 
-function fakeApi(): ApiClient {
+function fakeApi(host = ""): ApiClient {
   return {
-    getConfig: () => ({ host: "" }),
+    getConfig: () => ({ host }),
     getReactionUsers: vi.fn(async () => ({ users: [] })),
+    getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
+    getSessions: vi.fn(async () => []),
   } as unknown as ApiClient;
 }
 
@@ -575,6 +646,88 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(videoGrid.setLabel).toHaveBeenCalledWith(200, "Robert");
   });
 
+  it('keeps "(You)" on the self-view tile when the server echoes our own voice_state (OC-0375)', () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    // resetStores authenticates user 1 ("alice"). This is the server's own
+    // voice_state echo landing in voiceUsers for the local user — updateVoiceState
+    // writes self into the roster exactly like any other member.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([
+        [
+          9,
+          new Map([
+            [
+              1,
+              {
+                userId: 1,
+                username: "alice",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: true,
+                screenshare: false,
+              },
+            ],
+          ]),
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+
+    const videoGrid = capturedChatAreaRef.current!.videoGrid;
+    // VideoModeController registers the self tile under the local user id with
+    // "alice (You)". The relabel loop walks the whole roster, self included, so
+    // it must produce the same self label — not the bare remote form, which
+    // would leave your own tile indistinguishable from a participant's.
+    expect(videoGrid.setLabel).not.toHaveBeenCalledWith(1, "alice");
+    expect(videoGrid.setLabel).toHaveBeenCalledWith(1, "alice (You)");
+  });
+
+  it("brackets a bare IPv6 host when building the auto-updater URL (OC-0332)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi("2001:db8::1") });
+    page.mount(container);
+
+    // A bare IPv6 literal spliced into a URL authority is not parseable — the
+    // host parser enters the port state at the first colon — so build_updater
+    // rejects it and checkForUpdate reports "no update available" forever.
+    // Every other URL-building site brackets it (ws.ts, admin-panel.ts,
+    // attachments.ts); this one did not.
+    expect(mockCreateUpdateNotifier).toHaveBeenCalledWith({
+      serverUrl: "https://[2001:db8::1]",
+    });
+  });
+
+  it("leaves a DNS host unbracketed in the auto-updater URL (OC-0332)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi("chat.example.com:8443") });
+    page.mount(container);
+
+    expect(mockCreateUpdateNotifier).toHaveBeenCalledWith({
+      serverUrl: "https://chat.example.com:8443",
+    });
+  });
+
   it("does not open the 1:1 profile panel for a group DM header click", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
@@ -844,7 +997,65 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(document.body.querySelector(".image-lightbox")).toBeNull();
   });
 
-  it("scopes DM profile notes to the connected host, like channel mutes and the NSFW gate (OC-0143)", () => {
+  it("clears every external-content cache on destroy so one server's previews never reach the next (B7-16)", async () => {
+    const preview = vi.spyOn(desktop.externalContent!, "preview").mockResolvedValue({
+      ok: true,
+      value: { title: "T", description: null, siteName: null, image: null },
+    });
+    const image = vi
+      .spyOn(desktop.externalContent!, "image")
+      .mockResolvedValue({ ok: true, value: new Blob(["x"]) });
+    const createObjectURL = URL.createObjectURL;
+    const revokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:teardown");
+    URL.revokeObjectURL = vi.fn();
+    const pageUrl = "https://news.example.com/teardown";
+    const imageUrl = "https://img.example.com/teardown.png";
+    const asked = (url: string): number => preview.mock.calls.filter((c) => c[1] === url).length;
+    const fetched = (url: string): number =>
+      image.mock.calls.filter((c) => "url" in c[1] && c[1].url === url).length;
+    const oembed = (): number =>
+      preview.mock.calls.filter((c) => c[1].includes("oembed") && c[1].includes("tdvid")).length;
+    try {
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+
+      // Fill each external cache once, and prove a re-render is served from it.
+      renderGenericLinkPreview(pageUrl);
+      renderYouTubeEmbed("tdvid", "https://youtu.be/tdvid");
+      await fetchExternalImage({ url: imageUrl });
+      await vi.waitFor(() => expect(asked(pageUrl) + oembed()).toBe(2));
+      await new Promise((r) => setTimeout(r, 0));
+      renderGenericLinkPreview(pageUrl);
+      renderYouTubeEmbed("tdvid", "https://youtu.be/tdvid");
+      await fetchExternalImage({ url: imageUrl });
+      expect(asked(pageUrl)).toBe(1);
+      expect(oembed()).toBe(1);
+      expect(fetched(imageUrl)).toBe(1);
+      const partitionBefore = externalPartition();
+
+      page.destroy?.();
+
+      // Every one of them is asked for again, under a fresh broker partition.
+      expect(externalPartition()).not.toBe(partitionBefore);
+      renderGenericLinkPreview(pageUrl);
+      renderYouTubeEmbed("tdvid", "https://youtu.be/tdvid");
+      await fetchExternalImage({ url: imageUrl });
+      await vi.waitFor(() => {
+        expect(asked(pageUrl)).toBe(2);
+        expect(oembed()).toBe(2);
+      });
+      expect(fetched(imageUrl)).toBe(2);
+      expect(image).toHaveBeenLastCalledWith(externalPartition(), { url: imageUrl });
+    } finally {
+      preview.mockRestore();
+      image.mockRestore();
+      URL.createObjectURL = createObjectURL;
+      URL.revokeObjectURL = revokeObjectURL;
+    }
+  });
+
+  it("scopes DM profile notes to the connected host, like channel mutes and the NSFW gate (OC-0143)", async () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(60, dmChannel(60, "dm-carol"));
@@ -870,6 +1081,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
       getReactionUsers: vi.fn(async () => ({ users: [] })),
+      getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
+      getSessions: vi.fn(async () => []),
     } as unknown as ApiClient;
 
     page = createMainPage({ ws: fakeWs(), api: hostedApi });
@@ -877,6 +1090,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
     chatAreaOpts.onToggleDmProfile();
+    // The panel loads on demand; wait for its import to mount it.
+    await vi.waitFor(() => {
+      expect(
+        capturedChatAreaRef.current!.dmProfileSlot.querySelector('[data-testid="dps-note"]'),
+      ).not.toBeNull();
+    });
 
     const noteEl = capturedChatAreaRef.current!.dmProfileSlot.querySelector(
       '[data-testid="dps-note"]',
@@ -886,9 +1105,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     try {
       // Server A's note about user 5 must land under a key scoped to server A
-      // — the same host scoping already applied to channel mutes, the NSFW
-      // gate and per-user volume (setChannelMutesHost/setNsfwGateHost/
-      // setAudioVolumeHost, all called with apiConfig.host above).
+      // — the same host scoping already applied to channel mutes and
+      // per-user volume (setChannelMutesHost/setAudioVolumeHost, both called
+      // with apiConfig.host above).
       expect(localStorage.getItem("owncord:dm-note:chat.example.com:5")).toBe("owes me money");
       // And it must not have gone to the legacy unscoped key, which server
       // B's unrelated user 5 would also read from.
@@ -899,7 +1118,300 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     }
   });
 
-  it("keeps the open DM profile panel's status and name live, like the chat header does (OC-0309)", () => {
+  it("surfaces the server's partial-success warning on a password change instead of an unqualified success (OC-0314)", async () => {
+    // PUT /users/me/password answers 200 + warning (not 204) when the
+    // password changed but the other sessions could not be revoked. The
+    // warning is the only thing telling the user to revoke them by hand,
+    // so a green "changed successfully" toast here would hide a live
+    // stolen session.
+    const warning =
+      "password changed, but other sessions could not be revoked; revoke them from the sessions list";
+    const hostedApi = {
+      getConfig: () => ({ host: "chat.example.com" }),
+      changePassword: vi.fn(async () => ({ warning, sessions_revoked: 0 })),
+      getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
+      getSessions: vi.fn(async () => []),
+    } as unknown as ApiClient;
+
+    page = createMainPage({ ws: fakeWs(), api: hostedApi });
+    page.mount(container);
+    uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
+    // The store notifies on the next tick, and opening rebuilds the live
+    // Account tab then — drive the form a user would see, not the
+    // placeholder built at mount.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const inputs = [...container.querySelectorAll<HTMLInputElement>("input[type='password']")];
+    const byPlaceholder = (placeholder: string): HTMLInputElement => {
+      const el = inputs.find((i) => i.placeholder === placeholder);
+      if (el === undefined) throw new Error(`no password input with placeholder ${placeholder}`);
+      return el;
+    };
+    byPlaceholder("Old password").value = "old-password";
+    byPlaceholder("New password").value = "new-password-1";
+    byPlaceholder("Confirm new password").value = "new-password-1";
+    const changeBtn = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+      (b) => b.textContent === "Change Password",
+    );
+    if (changeBtn === undefined) throw new Error("no Change Password button");
+    changeBtn.click();
+
+    await vi.waitFor(() => {
+      expect(hostedApi.changePassword).toHaveBeenCalledWith("old-password", "new-password-1");
+      const toast = container.querySelector('[data-testid="toast"]');
+      expect(toast).not.toBeNull();
+      expect(toast!.classList.contains("toast-warning")).toBe(true);
+      expect(toast!.textContent).toBe(warning);
+    });
+    expect(container.querySelector(".toast-success")).toBeNull();
+    // The form carries the same warning inline (Codex P2 on PR #1503): no
+    // green "changed successfully" beside the warning toast.
+    // The toast is shown before the callback resolves, so the form's own
+    // update lands a microtask later.
+    const status = container.querySelector<HTMLElement>('[data-testid="pw-change-status"]');
+    expect(status).not.toBeNull();
+    await vi.waitFor(() => {
+      expect(status!.textContent).toBe(warning);
+    });
+    // B9-23: the inline warning is the qualified .form-warning class, not an
+    // inline --yellow (1.89:1 on light), and keeps the live role it was
+    // created with so the swap to the warning text is announced.
+    expect(status!.classList.contains("form-warning")).toBe(true);
+    expect(status!.getAttribute("role")).toBe("alert");
+    expect(container.textContent).not.toContain("Password changed successfully.");
+  });
+
+  it("shows Signed in elsewhere on SESSION_REPLACED, and Use here reconnects this device (B7-14)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    uiStore.setState((prev) => ({
+      ...prev,
+      sessionReplaced: true,
+      connectionStatus: "disconnected",
+    }));
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toBe("Signed in elsewhere Use here");
+    });
+    banner.querySelector("button")!.click();
+
+    expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
+    expect(uiStore.getState().sessionReplaced).toBe(false);
+  });
+
+  it("shows an actionable connection notice on disconnect and Retry redials (B9-25)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    uiStore.setState((prev) => ({
+      ...prev,
+      sessionReplaced: false,
+      connectionStatus: "disconnected",
+    }));
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toContain("Can't reach this server");
+    });
+
+    const retry = banner.querySelector("button")!;
+    expect(retry.textContent).toBe("Retry");
+    retry.click();
+    expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
+  });
+
+  it("keeps Reconnecting... until a dial fails, then offers Retry (B9-25)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    uiStore.setState((prev) => ({
+      ...prev,
+      sessionReplaced: false,
+      connectionStatus: "reconnecting",
+      connectionDialFailed: false,
+    }));
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toBe("Reconnecting...");
+    });
+    expect(banner.querySelector("button")).toBeNull();
+
+    // Same 3-state status: only the dial outcome changed.
+    uiStore.setState((prev) => ({ ...prev, connectionDialFailed: true }));
+    await vi.waitFor(() => {
+      expect(banner.textContent).toContain("Can't reach this server");
+    });
+    banner.querySelector("button")!.click();
+    expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
+    uiStore.setState((prev) => ({ ...prev, connectionDialFailed: false }));
+  });
+
+  it("holds one unreachable notice and Retry across repeated failed dials (B9-25)", async () => {
+    const socket = createMockWsClient();
+    const unwire = wireConnectionStatus(socket);
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    socket.simulateStateChange("connecting");
+    socket.simulateStateChange("authenticating");
+    socket.simulateStateChange("connected");
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    const live = container.querySelector<HTMLElement>("[data-testid='banner-announce']")!;
+    const unreachable =
+      "Can't reach this server right now. It may be down or blocked on this network.";
+    const announced: string[] = [];
+    const observer = new MutationObserver(() => announced.push(live.textContent ?? ""));
+    observer.observe(live, { childList: true, characterData: true, subtree: true });
+    const settle = async (): Promise<void> => {
+      uiStore.flush();
+      await Promise.resolve();
+    };
+
+    try {
+      socket.simulateStateChange("reconnecting");
+      await settle();
+      expect(banner.textContent).toBe("Reconnecting...");
+
+      socket.simulateStateChange("connecting");
+      socket.simulateStateChange("reconnecting");
+      await settle();
+      expect(banner.textContent).toBe(`${unreachable} Retry`);
+
+      for (let cycle = 0; cycle < 2; cycle++) {
+        socket.simulateStateChange("connecting");
+        await settle();
+        expect(banner.textContent).toBe(`${unreachable} Retry`);
+        expect(banner.querySelector("button")).not.toBeNull();
+        socket.simulateStateChange("reconnecting");
+        await settle();
+        expect(banner.textContent).toBe(`${unreachable} Retry`);
+        expect(banner.querySelector("button")).not.toBeNull();
+      }
+
+      expect(announced.filter((text) => text === unreachable)).toHaveLength(1);
+    } finally {
+      observer.disconnect();
+      unwire();
+      uiStore.setState((prev) => ({
+        ...prev,
+        connectionStatus: "disconnected",
+        connectionDialFailed: false,
+      }));
+    }
+  });
+
+  it("re-renders the notice on network loss and return without redialing (B9-25)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    uiStore.setState((prev) => ({
+      ...prev,
+      sessionReplaced: false,
+      connectionStatus: "disconnected",
+    }));
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toContain("Can't reach this server");
+    });
+
+    const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    try {
+      window.dispatchEvent(new Event("offline"));
+      expect(banner.textContent).toContain("Your device reports no network connection");
+
+      onLine.mockReturnValue(true);
+      window.dispatchEvent(new Event("online"));
+      expect(banner.textContent).toContain("Can't reach this server");
+    } finally {
+      onLine.mockRestore();
+    }
+    expect(ws.connect).not.toHaveBeenCalled();
+  });
+
+  it("does not clear a pending restart countdown on a network flap (B9-25)", () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    // The server announces a restart while the socket is live.
+    ws.emit("server_restart", { reason: "update", delay_seconds: 30 });
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    expect(banner.textContent).toBe("Server restarting in 30 seconds...");
+
+    // A network interface flaps (VPN toggle / Wi-Fi blip) during the
+    // countdown. The socket never dropped, so the countdown must survive.
+    window.dispatchEvent(new Event("offline"));
+    window.dispatchEvent(new Event("online"));
+    expect(banner.textContent).toBe("Server restarting in 30 seconds...");
+    expect(banner.classList.contains("visible")).toBe(true);
+  });
+
+  it("clears local auth when sign-out-everywhere revoked this device's session (B7-14)", async () => {
+    const hostedApi = {
+      getConfig: () => ({ host: "chat.example.com" }),
+      getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
+      getSessions: vi.fn(async () => []),
+      revokeAllSessions: vi.fn(async () => ({
+        sessions_revoked: 2,
+        current_session_revoked: true,
+      })),
+    } as unknown as ApiClient;
+    authStore.setState((prev) => ({ ...prev, isAuthenticated: true, token: "tok" }));
+    page = createMainPage({ ws: fakeWs(), api: hostedApi });
+    page.mount(container);
+    uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    container.querySelector<HTMLButtonElement>('[data-testid="sessions-revoke-all"]')!.click();
+    container
+      .querySelector<HTMLButtonElement>('[data-testid="sessions-revoke-all-confirm"]')!
+      .click();
+
+    await vi.waitFor(() => {
+      expect(hostedApi.revokeAllSessions).toHaveBeenCalledOnce();
+    });
+    await vi.waitFor(() => {
+      expect(authStore.getState().isAuthenticated).toBe(false);
+    });
+  });
+
+  it("toasts a sign-in not yet reviewed from the listing made on mount (B7-14)", async () => {
+    const hostedApi = {
+      getConfig: () => ({ host: "chat.example.com" }),
+      getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
+      getSessions: vi.fn(async () => [
+        {
+          id: 9,
+          device: "OwnCord-Client/1.4.0",
+          ip: "198.51.100.2",
+          created_at: "2026-09-21 08:00:00",
+          last_used: "2026-09-21 08:00:00",
+          is_current: false,
+          unseen: true,
+        },
+      ]),
+    } as unknown as ApiClient;
+    page = createMainPage({ ws: fakeWs(), api: hostedApi });
+    page.mount(container);
+
+    await vi.waitFor(() => {
+      const toast = container.querySelector('[data-testid="toast"]');
+      expect(toast?.textContent).toContain("OwnCord desktop from 198.51.100.2");
+    });
+  });
+
+  it("keeps the open DM profile panel's status and name live, like the chat header does (OC-0309)", async () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(70, dmChannel(70, "dm-bob"));
@@ -929,6 +1441,10 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     chatAreaOpts.onToggleDmProfile();
 
     const slot = capturedChatAreaRef.current!.dmProfileSlot;
+    // The panel loads on demand; wait for its import to mount it.
+    await vi.waitFor(() => {
+      expect(slot.querySelector('[data-testid="dps-status"]')).not.toBeNull();
+    });
     const statusEl = slot.querySelector('[data-testid="dps-status"]') as HTMLElement;
     const nameEl = slot.querySelector('[data-testid="dps-username"]') as HTMLElement;
     expect(statusEl.textContent).toContain("Online");
@@ -944,6 +1460,70 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     expect(statusEl.textContent).toContain("Offline");
     expect(nameEl.textContent).toBe("Bobby");
+  });
+
+  /** Mount the page on a DM with bob and return its profile toggle and slot. */
+  function mountOnDm(): { toggle: () => void; slot: HTMLElement } {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(70, dmChannel(70, "dm-bob"));
+      return { ...prev, channels: ch, activeChannelId: 70 };
+    });
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 70,
+          recipient: { id: 7, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 7, username: "bob", avatar: "", status: "online" }],
+          name: "bob",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
+    return {
+      toggle: () => chatAreaOpts.onToggleDmProfile(),
+      slot: capturedChatAreaRef.current!.dmProfileSlot,
+    };
+  }
+
+  /** Let the panel's lazy import (and anything it schedules) settle. */
+  async function settleDmProfileImport(): Promise<void> {
+    await import("@components/DmProfileSidebar");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  it("a close click while the DM profile panel is still loading leaves it closed", async () => {
+    const { toggle, slot } = mountOnDm();
+    toggle();
+    toggle();
+    await settleDmProfileImport();
+    expect(slot.querySelector('[data-testid="dps-status"]')).toBeNull();
+
+    // The dropped load does not wedge the toggle: the next click opens it.
+    toggle();
+    await vi.waitFor(() => {
+      expect(slot.querySelectorAll('[data-testid="dps-status"]')).toHaveLength(1);
+    });
+  });
+
+  it("the last of several quick DM profile clicks wins, with one panel at most", async () => {
+    const { toggle, slot } = mountOnDm();
+    toggle();
+    toggle();
+    toggle();
+    await settleDmProfileImport();
+    expect(slot.querySelectorAll('[data-testid="dps-status"]')).toHaveLength(1);
+
+    toggle();
+    expect(slot.querySelector('[data-testid="dps-status"]')).toBeNull();
   });
 });
 
@@ -1000,10 +1580,12 @@ describe("MainPage — presence", () => {
     onStatusChange("online");
     expect(ws.send).not.toHaveBeenCalled();
 
-    // Once the limiter's 10s window reopens, the deferred "online" frame must
-    // still go out — without a retry the server and every other client stay
-    // stuck on "idle" forever with no further trigger to correct it.
-    vi.advanceTimersByTime(10_000);
+    // Once the limiter's 10s window reopens (plus the OC-0451 margin that
+    // clears the server's receipt-measured window), the deferred "online"
+    // frame must still go out — without a retry the server and every other
+    // client stay stuck on "idle" forever with no further trigger to correct
+    // it.
+    vi.advanceTimersByTime(11_000);
 
     expect(ws.send).toHaveBeenCalledWith({
       type: "presence_update",
@@ -1058,5 +1640,200 @@ describe("MainPage — server restart banner", () => {
     vi.advanceTimersByTime(2000);
     expect(banner.textContent).not.toBe("Reconnecting...");
     expect(banner.classList.contains("visible")).toBe(false);
+  });
+});
+
+describe("MainPage — mark-all-read teardown (OC-0418)", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  beforeEach(() => {
+    resetStores();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    page?.destroy?.();
+    container.remove();
+    vi.useRealTimers();
+  });
+
+  it("cancels a queued Mark All as Read burst on destroy instead of letting it fire after the page is torn down", () => {
+    // Five unread channels: read-state.ts paces sends in bursts of 4 per
+    // 1100ms, so the 5th send is queued behind a timer instead of going out
+    // synchronously.
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, { ...textChannel(1, "c1"), unreadCount: 1 });
+      ch.set(2, { ...textChannel(2, "c2"), unreadCount: 1 });
+      ch.set(3, { ...textChannel(3, "c3"), unreadCount: 1 });
+      ch.set(4, { ...textChannel(4, "c4"), unreadCount: 1 });
+      ch.set(5, { ...textChannel(5, "c5"), unreadCount: 1 });
+      return { ...prev, channels: ch, activeChannelId: null };
+    });
+
+    const ws = fakeWs();
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    // Mount can itself send (e.g. a presence re-sync) — clear those so the
+    // counts below track only the mark_read burst.
+    (ws.send as ReturnType<typeof vi.fn>).mockClear();
+
+    markAllRead();
+
+    // Only the first burst (4 channels) goes out synchronously; channel 5's
+    // send is still sitting in the paced tail.
+    const sendCallsAtClick = (ws.send as ReturnType<typeof vi.fn>).mock.calls.length;
+    expect(sendCallsAtClick).toBe(4);
+    expect(channelsStore.getState().channels.get(5)?.unreadCount).toBe(1);
+
+    // The user logs out / switches server before the paced tail fires. With
+    // no next MainPage having mounted yet to re-register the mark-read
+    // sender, this connection has been abandoned and the queued send has
+    // nowhere legitimate to go.
+    page.destroy?.();
+
+    vi.advanceTimersByTime(2000);
+
+    // The stale timer must not have fired a mark_read for channel 5 against
+    // this (now-torn-down) connection, and must not have wiped its local
+    // unread badge either.
+    expect((ws.send as ReturnType<typeof vi.fn>).mock.calls.length).toBe(sendCallsAtClick);
+    expect(
+      (ws.send as ReturnType<typeof vi.fn>).mock.calls.some(
+        (call) =>
+          (call[0] as { type: string; payload: { channel_id: number } }).type === "mark_read" &&
+          call[0].payload.channel_id === 5,
+      ),
+    ).toBe(false);
+    expect(channelsStore.getState().channels.get(5)?.unreadCount).toBe(1);
+  });
+});
+
+// B7-15c: a successful self-deletion drops that account's cached server
+// images from disk, keyed by the same host#userId scope B7-13 caches under.
+describe("MainPage — account deletion", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  beforeEach(() => {
+    resetStores();
+    mockPruneAttachmentCacheScope.mockClear();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    page?.destroy?.();
+    container.remove();
+  });
+
+  async function deleteAccount(api: ApiClient): Promise<void> {
+    page = createMainPage({ ws: fakeWs(), api });
+    page.mount(container);
+    (document.querySelector("[data-testid='delete-account-trigger']") as HTMLElement).click();
+    (document.querySelector("[data-testid='delete-account-password']") as HTMLInputElement).value =
+      "pw";
+    (document.querySelector("[data-testid='delete-account-confirm']") as HTMLElement).click();
+    await vi.waitFor(() => expect(api.deleteAccount).toHaveBeenCalledWith("pw"));
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  it("prunes the deleted account's image cache scope after the server confirms", async () => {
+    const api = Object.assign(fakeApi("chat.example"), {
+      deleteAccount: vi.fn(async () => {}),
+    }) as ApiClient;
+    await deleteAccount(api);
+
+    await vi.waitFor(() =>
+      expect(mockPruneAttachmentCacheScope).toHaveBeenCalledWith("chat.example#1"),
+    );
+    expect(authStore.getState().isAuthenticated).toBe(false);
+  });
+
+  it("prunes nothing when the server refuses the deletion", async () => {
+    const api = Object.assign(fakeApi("chat.example"), {
+      deleteAccount: vi.fn(async () => {
+        throw new Error("Wrong password");
+      }),
+    }) as ApiClient;
+    await deleteAccount(api);
+
+    expect(mockPruneAttachmentCacheScope).not.toHaveBeenCalled();
+    expect(authStore.getState().isAuthenticated).toBe(true);
+  });
+});
+
+describe("MainPage — B9-4 content view wiring", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  type OpenView = (id: "requests" | "moderation", opener: HTMLElement) => void;
+  const openView = (): OpenView =>
+    (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenView: OpenView }).onOpenView;
+
+  beforeEach(() => {
+    resetStores();
+    mockMountChannel.mockClear();
+    mockDestroyChannel.mockClear();
+    mockReturnToChannel.mockClear();
+    mockRememberChannel.mockClear();
+    inertModeration.signals.length = 0;
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[1, textChannel(1, "general")]]),
+      activeChannelId: 1,
+      roles: [{ id: 3, name: "Moderator", color: null, permissions: Permission.MODERATE_MEMBERS }],
+    }));
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 1, username: "alice", avatar: null, role: "Moderator" },
+    }));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+  });
+
+  afterEach(() => {
+    page.destroy?.();
+    container.remove();
+  });
+
+  it("places the view column between the chat column and the DM profile slot", () => {
+    const view = container.querySelector("[data-testid='feature-view']");
+    const chat = capturedChatAreaRef.current!;
+    expect(view?.previousElementSibling).toBe(chat.chatArea);
+    expect(view?.nextElementSibling).toBe(chat.dmProfileSlot);
+  });
+
+  it("opens in place of the chat, whose channel is torn down, and closes back", () => {
+    const opener = document.createElement("button");
+    container.appendChild(opener);
+    openView()("moderation", opener);
+
+    expect(mockRememberChannel).toHaveBeenCalled();
+    expect(container.querySelector("[data-testid='inert-moderation']")).not.toBeNull();
+    expect(capturedChatAreaRef.current!.chatArea.style.display).toBe("none");
+    channelsStore.flush();
+    expect(mockDestroyChannel).toHaveBeenCalled();
+
+    container.querySelector<HTMLButtonElement>("[data-testid='feature-view-close']")!.click();
+    expect(mockReturnToChannel).toHaveBeenCalledTimes(1);
+    expect(inertModeration.signals[0]?.aborted).toBe(true);
+    expect(capturedChatAreaRef.current!.chatArea.style.display).toBe("");
+  });
+
+  it("page teardown clears the view so the next page starts with none", () => {
+    openView()("moderation", document.createElement("button"));
+    expect(uiStore.getState().activeView).toBe("moderation");
+
+    page.destroy?.();
+
+    expect(inertModeration.signals[0]?.aborted).toBe(true);
+    expect(uiStore.getState().activeView).toBeNull();
   });
 });

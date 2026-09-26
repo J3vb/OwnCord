@@ -4,6 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { connectText } from "../i18n/connect";
 import type {
   ReadyChannel,
   ReadyRole,
@@ -30,17 +31,28 @@ export interface Channel {
   readonly lastMessageId: number | null;
   /** Whether the current user may post here (drives the composer affordance). */
   readonly canSend: boolean;
+  /**
+   * Whether the current user may mute, deafen, move or disconnect voice
+   * participants here, as the server computed it (ReadyChannel.can_moderate_voice).
+   * Absent when the server never said, which offers no voice moderation.
+   */
+  readonly canModerateVoice?: boolean | undefined;
   /** Per-channel cooldown in seconds (0 = off). Drives the composer countdown. */
   readonly slowMode: number;
   /**
-   * Flagged as possibly carrying sensitive content.
-   *
-   * The server stores and broadcasts this and does nothing else with it — no
-   * filtering, no restriction on who may read or post — so every consequence
-   * is this client's: a one-time-per-session age gate before the channel's
-   * messages are shown, and a marker on the sidebar row.
+   * Labelled age-restricted. The server withholds the channel's content from
+   * anyone who has not acknowledged it (B5-7); this client shows a consent
+   * gate instead of the channel and marks the sidebar row.
    */
   readonly nsfw: boolean;
+  /**
+   * The current account's own acknowledgement of the label, as the server
+   * last confirmed it (ready, a 204 from the acknowledgement route, or
+   * nsfw_ack). Absent or false means content stays gated; it is only ever
+   * true while `nsfw` is, because the server drops acknowledgements when the
+   * label is cleared.
+   */
+  readonly nsfwAcknowledged?: boolean;
   /**
    * Voice capacity limits (0 = unlimited). The server enforces both on join
    * (CHANNEL_FULL / VIDEO_LIMIT); these copies exist so the sidebar can show
@@ -101,10 +113,12 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       // The current server always sends can_send; older servers omit it, in
       // which case we default permissive (no gating) rather than guessing.
       canSend: ch.can_send ?? true,
+      canModerateVoice: ch.can_moderate_voice,
       slowMode: ch.slow_mode ?? 0,
       // Older servers omit these; "absent" reads as unflagged / unlimited,
       // which is also what an unconfigured channel sends.
       nsfw: ch.nsfw ?? false,
+      nsfwAcknowledged: (ch.nsfw ?? false) && ch.nsfw_acknowledged === true,
       voiceMaxUsers: ch.voice_max_users ?? 0,
       voiceMaxVideo: ch.voice_max_video ?? 0,
     });
@@ -149,8 +163,8 @@ export function getRoleIdByName(name: string): number | undefined {
 
 /** Add a single channel from a channel_create event. The server re-sends
  *  channel_create to still-visible clients on role/override edits, so the add
- *  must be idempotent: the broadcast carries no per-user data, and a re-add
- *  must preserve the existing row's per-user fields instead of resetting them. */
+ *  must be idempotent: a re-add must preserve the existing row's per-user
+ *  fields the frame does not carry instead of resetting them. */
 export function addChannel(channel: ChannelCreatePayload): void {
   channelsStore.setState((prev) => {
     const existing = prev.channels.get(channel.id);
@@ -165,15 +179,19 @@ export function addChannel(channel: ChannelCreatePayload): void {
       unreadCount: existing?.unreadCount ?? 0,
       mentionCount: existing?.mentionCount ?? 0,
       lastMessageId: existing?.lastMessageId ?? null,
-      // A targeted channel_create from RefreshChannelVisibility carries this
-      // viewer's own can_send, so a live role/override edit updates the
-      // composer without waiting for a reconnect. The field is absent on the
-      // shared-buffer broadcasts (one frame, many recipients) and on older
-      // servers — keep the existing verdict there, and default permissive for
-      // a genuinely new channel. The server enforces regardless.
+      // Every channel_create carries this viewer's own can_send, so a live
+      // role/override edit updates the composer without waiting for a
+      // reconnect. Older servers omit it — keep the existing verdict there,
+      // and default permissive for a genuinely new channel. The server
+      // enforces regardless.
       canSend: channel.can_send ?? existing?.canSend ?? true,
+      // Same targeted, absent-means-unchanged rule; a new channel stays unknown.
+      canModerateVoice: channel.can_moderate_voice ?? existing?.canModerateVoice,
       slowMode: channel.slow_mode ?? 0,
       nsfw: channel.nsfw ?? false,
+      // channel_create never carries the per-viewer acknowledgement; keep the
+      // known one while the label stays on.
+      nsfwAcknowledged: (channel.nsfw ?? false) && existing?.nsfwAcknowledged === true,
       voiceMaxUsers: channel.voice_max_users ?? 0,
       voiceMaxVideo: channel.voice_max_video ?? 0,
     });
@@ -204,12 +222,31 @@ export function updateChannel(update: ChannelUpdatePayload): void {
       ...(update.category !== undefined ? { category: update.category } : {}),
       ...(update.position !== undefined ? { position: update.position } : {}),
       ...(update.slow_mode !== undefined ? { slowMode: update.slow_mode } : {}),
-      ...(update.nsfw !== undefined ? { nsfw: update.nsfw } : {}),
+      // Clearing the label deletes every acknowledgement server-side, so a
+      // later relabel starts gated again.
+      ...(update.nsfw !== undefined
+        ? { nsfw: update.nsfw, nsfwAcknowledged: update.nsfw && existing.nsfwAcknowledged === true }
+        : {}),
       ...(update.voice_max_users !== undefined ? { voiceMaxUsers: update.voice_max_users } : {}),
       ...(update.voice_max_video !== undefined ? { voiceMaxVideo: update.voice_max_video } : {}),
     };
     const next = new Map(prev.channels);
     next.set(update.id, updated);
+    return { ...prev, channels: next };
+  });
+}
+
+/**
+ * Record the server-confirmed acknowledgement of a labelled channel (B5-7).
+ * Ignored for an unknown or unlabelled channel, which has nothing to consent to.
+ */
+export function setNsfwAcknowledged(id: number, acknowledged: boolean): void {
+  channelsStore.setState((prev) => {
+    const existing = prev.channels.get(id);
+    if (existing === undefined || !existing.nsfw) return prev;
+    if ((existing.nsfwAcknowledged === true) === acknowledged) return prev;
+    const next = new Map(prev.channels);
+    next.set(id, { ...existing, nsfwAcknowledged: acknowledged });
     return { ...prev, channels: next };
   });
 }
@@ -287,7 +324,15 @@ export function getActiveChannel(): Channel | null {
  * category at all needs somewhere to go, and mixing it into the unnamed group
  * next to uncategorized text channels reads as a bug, so it gets this group.
  */
+// i18n-exempt: stable group key, not rendered directly; categoryLabel() maps it to the channel.voiceCategory catalog entry
 export const UNCATEGORIZED_VOICE_CATEGORY = "Voice";
+
+/** The header text for a category; the synthetic voice group reads through the catalog. */
+export function categoryLabel(category: string): string {
+  return category === UNCATEGORIZED_VOICE_CATEGORY
+    ? connectText("channel.voiceCategory")
+    : category;
+}
 
 /** The category header a channel is displayed under. */
 export function displayCategoryOf(channel: Channel): string | null {
@@ -381,6 +426,51 @@ export function incrementMention(channelId: number, evenIfActive = false): void 
     const updated: Channel = {
       ...existing,
       mentionCount: existing.mentionCount + 1,
+    };
+    const next = new Map(prev.channels);
+    next.set(channelId, updated);
+    return { ...prev, channels: next };
+  });
+}
+
+/**
+ * Record an incoming channel message: bumps unread (and mention, when
+ * `isMention`) unless `messageId` is already reflected in the channel's
+ * watermark — mirrors dm.store's `updateDmLastMessage` (OC-0242).
+ *
+ * OC-0328: a message delivered between the server's registerNow and
+ * buildReady is both counted in `ready`'s snapshot (unread_count/
+ * last_message_id already advanced) AND redelivered as a queued
+ * chat_message once the socket drains. Both counters must sit behind the
+ * SAME watermark read in one setState — splitting the guard across
+ * incrementUnread/incrementMention can't work, since the first call would
+ * already have advanced lastMessageId before the second one checked it.
+ *
+ * `evenIfActive` mirrors incrementUnread's escape hatch — see its doc.
+ */
+export function noteChannelMessage(
+  channelId: number,
+  messageId: number,
+  isMention: boolean,
+  evenIfActive = false,
+): void {
+  channelsStore.setState((prev) => {
+    if (prev.activeChannelId === channelId && !evenIfActive) {
+      return prev;
+    }
+    const existing = prev.channels.get(channelId);
+    if (existing === undefined) {
+      return prev;
+    }
+    const isReplay = existing.lastMessageId !== null && messageId <= existing.lastMessageId;
+    if (isReplay) {
+      return prev;
+    }
+    const updated: Channel = {
+      ...existing,
+      unreadCount: existing.unreadCount + 1,
+      mentionCount: isMention ? existing.mentionCount + 1 : existing.mentionCount,
+      lastMessageId: messageId,
     };
     const next = new Map(prev.channels);
     next.set(channelId, updated);

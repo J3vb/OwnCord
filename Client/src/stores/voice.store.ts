@@ -12,7 +12,7 @@ import type {
   VoiceSpeakersPayload,
 } from "@lib/types";
 import { membersStore } from "@stores/members.store";
-import { authStore } from "@stores/auth.store";
+import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
 
 export interface VoiceUser {
   readonly userId: number;
@@ -157,6 +157,8 @@ export function resetVoiceStore(): void {
     peerVerifications: new Map(),
   }));
 }
+
+registerVoiceLogoutTeardown({ snapshot: () => voiceStore.getState(), reset: resetVoiceStore });
 
 /** Bulk set voice states from the ready payload. */
 export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
@@ -442,25 +444,6 @@ export function setListenOnly(listenOnly: boolean): void {
   }));
 }
 
-/** Update the current user's speaking state for local VAD feedback. */
-export function setLocalSpeaking(speaking: boolean): void {
-  const currentUserId = authStore.getState().user?.id ?? 0;
-  if (currentUserId === 0) return;
-  voiceStore.setState((prev) => {
-    const channelId = prev.currentChannelId;
-    if (channelId === null) return prev;
-    const channelUsers = prev.voiceUsers.get(channelId);
-    if (!channelUsers) return prev;
-    const user = channelUsers.get(currentUserId);
-    if (!user || user.speaking === speaking) return prev;
-    const nextUsers = new Map(channelUsers);
-    nextUsers.set(currentUserId, { ...user, speaking });
-    const nextChannels = new Map(prev.voiceUsers);
-    nextChannels.set(channelId, nextUsers);
-    return { ...prev, voiceUsers: nextChannels };
-  });
-}
-
 /** Store voice config for a channel from a voice_config event. */
 export function setVoiceConfig(payload: VoiceConfigPayload): void {
   voiceStore.setState((prev) => {
@@ -477,9 +460,9 @@ export function setVoiceConfig(payload: VoiceConfigPayload): void {
   });
 }
 
-/** Update speaking state for users from a voice_speakers event or
- *  LiveKit's ActiveSpeakersChanged. Updates ALL users including local
- *  (LiveKit is now the sole authority for speaking detection). */
+/** Update speaking state for users from LiveKit's ActiveSpeakersChanged.
+ *  Updates ALL users including local (LiveKit is the sole authority for
+ *  speaking detection). */
 export function setSpeakers(payload: VoiceSpeakersPayload): void {
   voiceStore.setState((prev) => {
     const existingChannel = prev.voiceUsers.get(payload.channel_id);

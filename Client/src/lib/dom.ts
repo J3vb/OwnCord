@@ -3,19 +3,6 @@
 // All user content must go through these helpers.
 
 /**
- * Escape HTML special characters to prevent XSS.
- * Use this when building HTML strings that include user data.
- */
-export function escapeHtml(unsafe: string): string {
-  return unsafe
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-/**
  * Create an element with optional attributes and text content.
  * Text is set via textContent (safe from XSS).
  */
@@ -84,8 +71,28 @@ export function qs(selector: string, parent?: Element): Element | null {
 }
 
 /**
- * Query all matching elements as an array.
+ * A deferred UI step (a label reset, a deferred listener) owned by `signal`:
+ * aborting clears it, so a torn-down owner never runs it against detached
+ * nodes. The abort registration is dropped when the timer fires, so re-arming
+ * never accumulates cleanups. Nothing is scheduled once `signal` has aborted.
  */
-export function qsa(selector: string, parent?: Element): Element[] {
-  return Array.from((parent ?? document).querySelectorAll(selector));
+export function setOwnedTimeout(signal: AbortSignal, fn: () => void, ms: number): void {
+  if (signal.aborted) return;
+  const clear = (): void => clearTimeout(timer);
+  const timer = setTimeout(() => {
+    signal.removeEventListener("abort", clear);
+    fn();
+  }, ms);
+  signal.addEventListener("abort", clear, { once: true });
+}
+
+/**
+ * Whether focus is still ours to move after a control was disabled, hidden or
+ * rebuilt: it fell to `<body>` (Chromium blurs a disabled or hidden focused
+ * control) or is still inside `owner`. False once the user has moved it
+ * elsewhere, so an async result never pulls focus out of the field they are in.
+ */
+export function focusIsOurs(owner: Element): boolean {
+  const active = document.activeElement;
+  return active === null || active === document.body || owner.contains(active);
 }

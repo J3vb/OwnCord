@@ -117,7 +117,7 @@ describe("settings/helpers", () => {
       applyTheme("light");
       const root = document.documentElement;
       expect(root.style.getPropertyValue("--bg-primary")).toBe("#ffffff");
-      expect(root.style.getPropertyValue("--text-normal")).toBe("#313338");
+      expect(root.style.getPropertyValue("--text-normal")).toBe("#2a2c31");
     });
 
     it("overwrites previous theme variables", () => {

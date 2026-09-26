@@ -31,8 +31,9 @@ default-build pass proves nothing about the others:
 go build ./... && go build -tags otel ./... && go build -tags wazero ./... && go build -tags otel,wazero ./...
 go vet ./...
 go test -race ./...
-go test -tags deadlock -count=1 ./ws/    # deadlock detector; ws is where lock order actually varies
-golangci-lint run                        # CI pins v2.11.3
+go test -tags deadlock -count=1 ./...     # CI runs the WHOLE tree here (ci.yml), not just ./ws/
+go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/...  # plain leg: logstream_alloc_test.go is !race && !deadlock
+golangci-lint run                        # CI pins v2.11.3 — check `golangci-lint --version` first
 
 # Generated output must not be stale. These are what `make sqlc-verify` and
 # `make protocol-verify` reduce to — make is not on PATH on a stock Windows box.
@@ -41,6 +42,30 @@ go run ./cmd/genprotocol && git diff --exit-code ws/message_types.go ../Client/s
 ```
 
 Add `-tags wazero` to `go vet`/`go test` when you touched `plugin/`.
+
+**The deadlock leg is the whole tree, not `./ws/`.** This line used to say `./ws/` —
+"where lock order actually varies" — and a B6-8 branch that touched no `Server/admin`
+file still went red on `Server Build & Test (windows-latest)` in that leg, on an
+`admin` test the narrower local command never ran. `ci.yml`'s step is
+`go test -tags deadlock -count=1 ./...`; mirror it or the local run is not a mirror.
+`./ws/` alone is still the right quick check while iterating on lock order — just not
+the thing to call green before pushing.
+
+**A `golangci-lint` already on PATH may be the wrong one, and says so
+confusingly.** A build older than this module's Go target refuses outright:
+
+```
+can't load config: the Go language version (go1.25) used to build
+golangci-lint is lower than the targeted Go version (1.26.7)
+```
+
+That is the binary's age, not a missing gate — it reads like "cannot run
+here" and is not. Fetch the pinned version rather than skipping the step:
+
+```bash
+curl -sSfL -o /tmp/glci.tgz https://github.com/golangci/golangci-lint/releases/download/v2.11.3/golangci-lint-2.11.3-linux-amd64.tar.gz
+tar xzf /tmp/glci.tgz -C /tmp && /tmp/golangci-lint-2.11.3-linux-amd64/golangci-lint --version
+```
 
 A `windows-latest` `-race` failure inside `ws` that matches `runtime.scanstack`
 or `runtime.(*unwinder).next` is a Go 1.26.5 runtime GC fault, not your change.
@@ -54,18 +79,42 @@ still in progress.
 ## Client (from `Client/`)
 
 ```bash
+node --test ../scripts/check-tauri-versions.test.mjs
+node ../scripts/check-tauri-versions.mjs
 npm test
 npm run typecheck
+npm run typecheck:build   # tsconfig.build.json — the shipped app graph
+npm run typecheck:e2e     # tsconfig.e2e.json — tests/e2e, EXCLUDED from the main tsconfig
 npm run lint
+npm run build:budget && npm run check:budgets   # B7-7 gzip budgets; see bundle-budgets.json
 ```
+
+**`npm run typecheck` does not cover `tests/e2e/`.** The main tsconfig excludes
+it from the app graph, so a Playwright spec can fail `Client Static Checks`
+while the local typecheck is clean — CI runs `tsc -p tsconfig.e2e.json` as its
+own step. A branch adding or editing an e2e spec has not been checked until
+`typecheck:e2e` has run.
+
+The Tauri check reads resolved npm/Cargo lockfile versions without installing
+or building. Paired core/API and official plugin packages must have matching
+major/minor versions; independent npm and Cargo dependency updates must update
+the other side when that pair moves to a new minor release. CI runs this in
+Client Static Checks and before the Windows native build.
 
 Formatting is no longer a client gate — Prettier is configured once at the
 repository root and checked by `check:hygiene` below.
 
-`NODE_OPTIONS=--no-experimental-webstorage` used to be required here. It is not
-any more: `tests/setup.ts` installs an in-memory `localStorage` shim, CI runs
-Node 24 without the flag (`ci.yml`), and the full suite was measured passing
-without it — 192 files / 5257 tests, identical to the flagged run.
+`NODE_OPTIONS=--no-experimental-webstorage` used to be required on the command
+line. It is not any more: `vitest.config.ts` appends the flag to
+`process.env.NODE_OPTIONS` in vitest's parent process, and every forked worker
+inherits it (`poolOptions.forks.execArgv` does not work — vitest replaces
+execArgv with its own list). jsdom's own `localStorage` and `Storage` are then
+the only ones present, and `tests/setup.ts` throws if the flag did not reach
+the worker (OC-0415). There is no shim; an earlier in-memory shim was
+removed because it left Node's `Storage` class shadowing jsdom's and twelve
+storage tests asserting nothing. CI runs Node 26 without setting the variable
+(`ci.yml`), and the full suite was measured passing that way — 192 files / 5257
+tests, identical to the flagged run.
 
 `npm audit --audit-level=high` and `knip` also run in CI but are advisory.
 

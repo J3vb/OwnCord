@@ -17,6 +17,7 @@
  * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, clearChildren, appendChildren } from "@lib/dom";
 
 export interface InlineAutocompleteConfig<T> {
@@ -82,8 +83,8 @@ const COMBOBOX_ATTRS = [
 export function createInlineAutocomplete<T>(
   cfg: InlineAutocompleteConfig<T>,
 ): InlineAutocompleteComponent {
-  const ac = new AbortController();
-  const signal = ac.signal;
+  const disposable = new Disposable();
+  const signal = disposable.signal;
 
   let suggestions: T[] = [];
   let activeIndex = 0;
@@ -150,6 +151,14 @@ export function createInlineAutocomplete<T>(
         input.removeAttribute("aria-activedescendant");
       }
     }
+    // .ma-list is a fixed-height scroller (app.css) showing fewer rows than
+    // MAX_MENTION_SUGGESTIONS can return — arrow keys must drag the active
+    // row into view, or the highlight can land off-screen.
+    if (suggestions.length > 0) {
+      (list.children[activeIndex] as HTMLElement | undefined)?.scrollIntoView({
+        block: "nearest",
+      });
+    }
   }
 
   function setQuery(query: string): boolean {
@@ -187,7 +196,7 @@ export function createInlineAutocomplete<T>(
   }
 
   function destroy(): void {
-    ac.abort();
+    disposable.destroy();
     // Another popup may have claimed the input between this one's open and
     // close (the composer opens the mention popup before closing the emoji
     // one), so only strip the combobox state while it still points here.

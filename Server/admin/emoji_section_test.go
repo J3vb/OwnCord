@@ -2,23 +2,36 @@ package admin_test
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 )
 
-// The panel's Emoji section is plain JS inside static/index.html, so nothing
+// The panel's Emoji section is plain JS under static/js, so nothing
 // compiles it. These tests tie the three places that have to agree — the NAV
 // entry, the renderContent dispatch map, and the permission gate — so a
 // half-wired section fails here rather than as a blank page for an operator.
 
+// adminPanelSource is the whole panel as one string: index.html followed by
+// every script under static/js. The pins grep for code wherever it lives, so a
+// function moving between page files does not break them.
 func adminPanelSource(t *testing.T) string {
 	t.Helper()
-	source, err := os.ReadFile("static/index.html")
-	if err != nil {
-		t.Fatalf("read admin panel: %v", err)
+	files, err := filepath.Glob("static/js/*.js")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no admin panel scripts under static/js: %v", err)
 	}
-	return string(source)
+	var b strings.Builder
+	for _, f := range append([]string{"static/index.html"}, files...) {
+		source, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read admin panel: %v", err)
+		}
+		b.Write(source)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 func TestAdminPanelEmojiSectionIsWired(t *testing.T) {

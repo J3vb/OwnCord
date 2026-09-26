@@ -20,9 +20,12 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // deafenRaceRoleAdmin / deafenRaceRoleMember reuse the default seeded roles
@@ -90,22 +93,23 @@ func TestVoiceModDeafen_RollbackFollowsTargetChannelMove(t *testing.T) {
 	var hookRan bool
 	voiceModDeafenPreMuteRaceHook = func(ctx context.Context, d VoiceDeps, targetID int64) {
 		hookRan = true
-		if err := d.DB.JoinVoiceChannel(ctx, targetID, chanB); err != nil {
-			t.Fatalf("hook: JoinVoiceChannel to chanB: %v", err)
+		if err := d.Voice.Join(ctx, targetID, chanB, 0); err != nil {
+			t.Fatalf("hook: joining chanB: %v", err)
 		}
 	}
 	defer func() { voiceModDeafenPreMuteRaceHook = nil }()
 
-	cmd := VoiceModDeafenCmd{userID: actorID, channelID: chanA, targetID: targetID, deafened: true}
+	cmd := VoiceModDeafenCmd{userID: actorID, ChannelID: chanA, TargetID: targetID, Deafened: true}
 	info := ClientInfo{UserID: actorID}
-	deps := VoiceDeps{DB: database}
+	deps := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
 	result := handleVoiceModDeafenV2(ctx, cmd, info, deps)
 
 	if !hookRan {
 		t.Fatal("voiceModDeafenPreMuteRaceHook never fired — test setup is broken, not exercising the race window")
 	}
-	clientErr, ok := result.Error.(ClientError)
+	var clientErr ClientError
+	ok := errors.As(result.Error, &clientErr)
 	if !ok {
 		t.Fatalf("result error = %#v (%T), want a ClientError", result.Error, result.Error)
 	}
@@ -171,24 +175,25 @@ func TestVoiceModDeafen_UndeafenRollbackDoesNotApplyOnUnauthorizedChannel(t *tes
 	var hookRan bool
 	voiceModDeafenPreMuteRaceHook = func(ctx context.Context, d VoiceDeps, targetID int64) {
 		hookRan = true
-		if err := d.DB.JoinVoiceChannel(ctx, targetID, chanB); err != nil {
-			t.Fatalf("hook: JoinVoiceChannel to chanB: %v", err)
+		if err := d.Voice.Join(ctx, targetID, chanB, 0); err != nil {
+			t.Fatalf("hook: joining chanB: %v", err)
 		}
 	}
 	defer func() { voiceModDeafenPreMuteRaceHook = nil }()
 
 	// deafened: false -- an UNDEAFEN, the opposite direction from the sibling
 	// test above.
-	cmd := VoiceModDeafenCmd{userID: actorID, channelID: chanA, targetID: targetID, deafened: false}
+	cmd := VoiceModDeafenCmd{userID: actorID, ChannelID: chanA, TargetID: targetID, Deafened: false}
 	info := ClientInfo{UserID: actorID}
-	deps := VoiceDeps{DB: database}
+	deps := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
 	result := handleVoiceModDeafenV2(ctx, cmd, info, deps)
 
 	if !hookRan {
 		t.Fatal("voiceModDeafenPreMuteRaceHook never fired — test setup is broken, not exercising the race window")
 	}
-	clientErr, ok := result.Error.(ClientError)
+	var clientErr ClientError
+	ok := errors.As(result.Error, &clientErr)
 	if !ok {
 		t.Fatalf("result error = %#v (%T), want a ClientError", result.Error, result.Error)
 	}

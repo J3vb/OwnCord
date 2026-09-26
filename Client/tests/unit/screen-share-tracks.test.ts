@@ -13,9 +13,11 @@
  */
 
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import process from "node:process";
 import { Track } from "livekit-client";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
+import { expectConsole } from "../helpers/console";
 
 const createLocalVideoTrack = vi.fn();
 const createLocalScreenTracks = vi.fn();
@@ -36,6 +38,7 @@ vi.mock("@components/settings/helpers", () => ({
 }));
 
 const {
+  bumpGeneration,
   disableCamera,
   disableScreenshare,
   enableCamera,
@@ -57,7 +60,11 @@ const { voiceStore } = await import("@stores/voice.store");
 function fakeMediaStreamTrack(): MediaStreamTrack {
   const listeners = new Map<string, EventListener>();
   return {
+    readyState: "live",
     addEventListener: (type: string, cb: EventListener) => listeners.set(type, cb),
+    removeEventListener: (type: string, cb: EventListener) => {
+      if (listeners.get(type) === cb) listeners.delete(type);
+    },
     dispatch: (type: string) => listeners.get(type)?.(new Event(type)),
   } as unknown as MediaStreamTrack;
 }
@@ -243,6 +250,7 @@ describe("enableCamera", () => {
 
     await enableCamera({ manualCameraTrack: null }, deps);
 
+    expectConsole("warn", /\[screenShare\] Cannot enable camera: no active voice session/);
     expect(deps.onError).toHaveBeenCalledWith("Join a voice channel first");
     expect(createLocalVideoTrack).not.toHaveBeenCalled();
     expect(voiceStore.getState().localCamera).toBe(false);
@@ -254,6 +262,7 @@ describe("enableCamera", () => {
 
     await enableCamera({ manualCameraTrack: null }, deps);
 
+    expectConsole("warn", /\[screenShare\] Cannot enable camera: no active voice session/);
     expect(deps.onError).toHaveBeenCalledWith("Join a voice channel first");
   });
 
@@ -267,6 +276,7 @@ describe("enableCamera", () => {
 
     await enableCamera(state, deps);
 
+    expectConsole("error", /\[screenShare\] Failed to enable camera/);
     // Without this the camera indicator light stays on with nothing published.
     expect(track.stop).toHaveBeenCalled();
     expect(state.manualCameraTrack).toBeNull();
@@ -285,6 +295,7 @@ describe("enableCamera", () => {
 
     await enableCamera({ manualCameraTrack: null }, deps);
 
+    expectConsole("error", /\[screenShare\] Failed to enable camera/);
     expect(deps.onError).toHaveBeenCalledWith(message);
   });
 
@@ -392,6 +403,7 @@ describe("enableCamera", () => {
     rejectA(new DOMException("busy", "NotReadableError"));
     await enablingA;
 
+    expectConsole("warn", /\[screenShare\] Superseded camera enable failed/);
     expect(trackB.stop).not.toHaveBeenCalled();
     expect(state.manualCameraTrack).toBe(trackB);
     expect(voiceStore.getState().localCamera).toBe(true);
@@ -426,6 +438,7 @@ describe("disableCamera", () => {
 
     await disableCamera({ manualCameraTrack: null }, deps);
 
+    expectConsole("warn", /\[screenShare\] Failed to disable camera track \(non-fatal\)/);
     // The finally block matters: a failed teardown must not leave the UI
     // showing a camera that is not publishing.
     expect(voiceStore.getState().localCamera).toBe(false);
@@ -574,6 +587,7 @@ describe("enableScreenshare", () => {
 
     await enableScreenshare({ manualScreenTracks: [] }, deps);
 
+    expectConsole("warn", /\[screenShare\] Cannot enable screenshare: no active voice session/);
     expect(deps.onError).toHaveBeenCalledWith("Join a voice channel first");
     expect(createLocalScreenTracks).not.toHaveBeenCalled();
   });
@@ -588,6 +602,7 @@ describe("enableScreenshare", () => {
 
     await enableScreenshare(state, deps);
 
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
     // Otherwise the OS keeps showing "screen is being shared" forever.
     expect(video.stop).toHaveBeenCalled();
     expect(state.manualScreenTracks).toEqual([]);
@@ -602,6 +617,7 @@ describe("enableScreenshare", () => {
 
     await enableScreenshare({ manualScreenTracks: [] }, deps);
 
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
     expect(deps.onError).toHaveBeenCalledWith("Screen sharing permission denied");
   });
 
@@ -630,6 +646,7 @@ describe("enableScreenshare", () => {
 
     await enableScreenshare(state, deps);
 
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
     // track.stop() is programmatic and never fires the DOM "ended" event, so
     // LiveKit's ended-driven auto-unpublish never runs — without an explicit
     // unpublish the video track stays live in the room while nothing in this
@@ -737,6 +754,7 @@ describe("enableScreenshare", () => {
     rejectA(new Error("capture failed"));
     await enablingA;
 
+    expectConsole("warn", /\[screenShare\] Superseded screenshare enable failed/);
     expect(videoB.stop).not.toHaveBeenCalled();
     expect(state.manualScreenTracks).toEqual([videoB]);
     expect(voiceStore.getState().localScreenshare).toBe(true);
@@ -769,6 +787,7 @@ describe("disableScreenshare", () => {
 
     await disableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
 
+    expectConsole("warn", /\[screenShare\] Failed to disable screenshare track \(non-fatal\)/);
     expect(voiceStore.getState().localScreenshare).toBe(false);
   });
 
@@ -929,4 +948,135 @@ describe("getRemoteVideoStream", () => {
 
     expect(getRemoteVideoStream(room, 42, "camera")).toBeNull();
   });
+});
+
+describe("video lifecycle across pending publication and session changes", () => {
+  it.each(["camera", "screen"])(
+    "does not let an old %s disable clear a new session",
+    async (kind) => {
+      const old = fakeRoom();
+      const next = fakeRoom();
+      let finishDisable!: () => void;
+      (kind === "camera" ? old.setCameraEnabled : old.setScreenShareEnabled).mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishDisable = resolve;
+        }),
+      );
+      let activeRoom = old.room;
+      const deps = { ...fakeDeps(old.room), getRoom: () => activeRoom };
+      const state = {
+        generation: 0,
+        manualCameraTrack: null,
+        manualScreenTracks: [] as LocalTrack[],
+      };
+      const stopping =
+        kind === "camera" ? disableCamera(state, deps) : disableScreenshare(state, deps);
+      // leaveVoice bumps generations before a fresh session takes ownership.
+      bumpGeneration(state);
+      activeRoom = next.room;
+      const track = fakeVideoTrack();
+      createLocalVideoTrack.mockResolvedValue(track);
+      createLocalScreenTracks.mockResolvedValue([track]);
+      await (kind === "camera" ? enableCamera(state, deps) : enableScreenshare(state, deps));
+      deps.wsSend.mockClear();
+      finishDisable();
+      await stopping;
+      expect(
+        kind === "camera"
+          ? voiceStore.getState().localCamera
+          : voiceStore.getState().localScreenshare,
+      ).toBe(true);
+      expect(deps.wsSend).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not start screen audio after OS stops video while publish is pending", async () => {
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    const audio = fakeAudioTrack();
+    Object.defineProperty(video.mediaStreamTrack, "readyState", { value: "live", writable: true });
+    createLocalScreenTracks.mockResolvedValue([video, audio]);
+    let finishPublish!: () => void;
+    rig.publishTrack.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishPublish = resolve;
+        }),
+    );
+    const deps = fakeDeps(rig.room);
+    const state = { manualScreenTracks: [] as LocalTrack[] };
+    const enabling = enableScreenshare(state, deps);
+    await Promise.resolve();
+    expect(rig.publishTrack).toHaveBeenCalledTimes(1);
+    Object.defineProperty(video.mediaStreamTrack, "readyState", { value: "ended" });
+    (video.mediaStreamTrack as unknown as { dispatch: (name: string) => void }).dispatch("ended");
+    finishPublish();
+    await enabling;
+    expect(rig.publishTrack).not.toHaveBeenCalledWith(audio, expect.anything());
+    expect(voiceStore.getState().localScreenshare).toBe(false);
+    expect(audio.stop).toHaveBeenCalled();
+  });
+});
+
+it.each(["camera", "screen"])(
+  "stops %s tracks and contains asynchronous unpublish failures",
+  async (kind) => {
+    const rig = fakeRoom();
+    rig.unpublishTrack.mockRejectedValue(new Error("renegotiation failed after disconnect"));
+    const video = fakeVideoTrack();
+    const audio = fakeAudioTrack();
+    const state = { manualCameraTrack: video, manualScreenTracks: [video, audio] as LocalTrack[] };
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      if (kind === "camera") stopManualCameraTrack(state, rig.room);
+      else stopManualScreenTracks(state, rig.room);
+      expect(video.stop).toHaveBeenCalled();
+      if (kind === "screen") expect(audio.stop).toHaveBeenCalled();
+      // Let a rejected unpublish reach the host's unhandled-rejection turn.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expectConsole("warn", /\[screenShare\] Failed to unpublish stopped video track/);
+      if (kind === "screen") {
+        expectConsole("warn", /\[screenShare\] Failed to unpublish stopped video track/);
+      }
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+  },
+);
+
+it("does not publish capture that already ended before acquisition returned", async () => {
+  const rig = fakeRoom();
+  const video = fakeVideoTrack();
+  const audio = fakeAudioTrack();
+  Object.defineProperty(video.mediaStreamTrack, "readyState", { value: "ended" });
+  createLocalScreenTracks.mockResolvedValue([video, audio]);
+  const deps = fakeDeps(rig.room);
+  await enableScreenshare({ manualScreenTracks: [] }, deps);
+  expect(rig.publishTrack).not.toHaveBeenCalled();
+  expect(video.stop).toHaveBeenCalled();
+  expect(audio.stop).toHaveBeenCalled();
+  expect(voiceStore.getState().localScreenshare).toBe(false);
+});
+
+it("detaches the previous share's ended listener before a replacement becomes live", async () => {
+  const rig = fakeRoom();
+  const old = fakeVideoTrack();
+  const next = fakeVideoTrack();
+  createLocalScreenTracks.mockResolvedValueOnce([old]).mockResolvedValueOnce([next]);
+  const removeListener = vi.spyOn(old.mediaStreamTrack, "removeEventListener");
+  const deps = fakeDeps(rig.room);
+  const state = { manualScreenTracks: [] as LocalTrack[] };
+  await enableScreenshare(state, deps);
+  await disableScreenshare(state, deps);
+  expect(removeListener).toHaveBeenCalledWith("ended", expect.any(Function));
+  await enableScreenshare(state, deps);
+  deps.wsSend.mockClear();
+  (old.mediaStreamTrack as unknown as { dispatch: (name: string) => void }).dispatch("ended");
+  await Promise.resolve();
+  expect(state.manualScreenTracks).toEqual([next]);
+  expect(next.stop).not.toHaveBeenCalled();
+  expect(voiceStore.getState().localScreenshare).toBe(true);
+  expect(deps.wsSend).not.toHaveBeenCalled();
 });

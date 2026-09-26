@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("%PDF-1.7\n%\xe2\xe3\xcf\xd3")

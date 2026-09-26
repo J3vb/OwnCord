@@ -42,6 +42,9 @@ type EventPersister struct {
 	stopOnce  sync.Once
 	stop      chan struct{}
 	done      chan struct{}
+	// flushReq carries Flush's barrier requests to run(): each is answered
+	// once everything queued before it has been written to the store.
+	flushReq chan chan struct{}
 	// stopCtxDone is the Done channel of the context passed to Stop. run's
 	// drain-on-stop loop reads it only after observing stop closed — the
 	// close/receive pair provides the happens-before, so there is no data
@@ -84,6 +87,37 @@ func NewEventPersister(s EventStore, queueSize, batchSize int, flushEvery time.D
 		flushEvery: flushEvery,
 		stop:       make(chan struct{}),
 		done:       make(chan struct{}),
+		flushReq:   make(chan chan struct{}),
+	}
+}
+
+// Flush is a barrier: it returns once every event enqueued before the call
+// has been written to the store (or dropped by a failed write, which is
+// logged as usual). Enqueue's send is synchronous into the FIFO queue, so
+// draining that queue before the flush is what makes the guarantee. A
+// persister that is not running, or has stopped, returns immediately: a
+// stopped one has already drained on Stop. Bounded by ctx. The account
+// erasure calls it before deleting an erased user's rows, so a frame
+// queued before the erasure cannot be written back after it.
+func (p *EventPersister) Flush(ctx context.Context) error {
+	if p == nil || !p.started.Load() {
+		return nil
+	}
+	reply := make(chan struct{})
+	select {
+	case p.flushReq <- reply:
+	case <-p.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-reply:
+		return nil
+	case <-p.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -120,12 +154,7 @@ func (p *EventPersister) Enqueue(seq int64, eventType string, channelID int64, p
 	// run() has actually exited, so this is exact, not a best guess.
 	select {
 	case <-p.done:
-		p.dropped.Add(1)
-		slog.Error("event dropped: persister stopped",
-			"seq", seq,
-			"event_type", eventType,
-			"channel_id", channelID,
-		)
+		p.dropStopped(seq, eventType, channelID)
 		return
 	default:
 	}
@@ -169,6 +198,45 @@ func (p *EventPersister) Stop(ctx context.Context) {
 	}
 	// Always wait for the goroutine to exit — never race it against ctx.
 	<-p.done
+
+	// A concurrent Enqueue can win the race between run()'s last drain
+	// attempt and the close of p.done above: it observes p.done not yet
+	// closed and sends into p.queue just as run() is exiting, so nothing
+	// ever reads that entry. Sweep whatever the race stranded here so it is
+	// dropped loudly instead of silently (mirrors db.AuditWriter.Stop).
+	for {
+		select {
+		case evt := <-p.queue:
+			p.dropStopped(evt.seq, evt.eventType, evt.channelID)
+		default:
+			return
+		}
+	}
+}
+
+// dropStopped counts and loudly logs an event that reached the queue after
+// run() had already exited, so it is never lost silently.
+func (p *EventPersister) dropStopped(seq int64, eventType string, channelID int64) {
+	p.dropped.Add(1)
+	slog.Error("event dropped: persister stopped",
+		"seq", seq,
+		"event_type", eventType,
+		"channel_id", channelID,
+	)
+}
+
+// drainQueued appends every event already sitting in the queue to batch
+// without blocking and returns it; the caller flushes. A barrier drain can
+// exceed batchSize — PersistEvents takes any size in one transaction.
+func (p *EventPersister) drainQueued(batch []pendingEvent) []pendingEvent {
+	for {
+		select {
+		case evt := <-p.queue:
+			batch = append(batch, evt)
+		default:
+			return batch
+		}
+	}
 }
 
 // Stats returns lifetime counters.
@@ -261,6 +329,12 @@ func (p *EventPersister) run(ctx context.Context) {
 			if len(batch) >= p.batchSize {
 				flush()
 			}
+		case reply := <-p.flushReq:
+			// Everything sent before the request is already in the queue;
+			// take it all, write it, then answer.
+			batch = p.drainQueued(batch)
+			flush()
+			close(reply)
 		case <-tick.C:
 			flush()
 			syncDropped()

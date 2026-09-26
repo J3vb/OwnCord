@@ -92,6 +92,7 @@ describe("VoiceWidget", () => {
 
   beforeEach(() => {
     resetStores();
+    mockRetryMicPermission.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -507,6 +508,67 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  it("shows an actionable mic notice in listen-only mode and hides it otherwise", () => {
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    const notice = container.querySelector("[data-testid='vw-mic-notice']") as HTMLDivElement;
+    expect(notice.getAttribute("role")).toBe("status");
+    // No `setting-desc`: its `margin-top`/font rules apply even while this live
+    // region is empty (it stays rendered), adding a stray gap to every voice
+    // session and clobbering `.vw-mic-notice`'s own type.
+    expect(notice.classList.contains("setting-desc")).toBe(false);
+    expect(notice.textContent).toContain("Grant microphone access");
+
+    // The state clears: the text goes, but the live region stays rendered so
+    // a later listen-only join fills a region already in the a11y tree.
+    voiceStore.setState((prev) => ({ ...prev, listenOnly: false }));
+    voiceStore.flush();
+    expect(notice.textContent).toBe("");
+    expect(notice.style.display).not.toBe("none");
+    expect(notice.isConnected).toBe(true);
+
+    widget.destroy?.();
+  });
+
+  it("stops promising a permission grant once a retry leaves the mic unavailable", async () => {
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    const notice = container.querySelector("[data-testid='vw-mic-notice']") as HTMLDivElement;
+    expect(notice.textContent).toContain("Grant microphone access");
+
+    const grantBtn = container.querySelector(".vw-grant-mic") as HTMLButtonElement;
+    grantBtn.click();
+
+    // retryMicPermission is a no-op mock, so the store stays listen-only —
+    // exactly the "retry failed" state. The notice must not keep implying
+    // that clicking Grant Microphone is all that stands in the way.
+    await vi.waitFor(() => {
+      expect(notice.textContent).toContain("still unavailable");
+    });
+
+    widget.destroy?.();
+  });
+
   it("clicking 'Grant Microphone' calls retryMicPermission", async () => {
     setVoiceChannel(1, []);
     voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
@@ -779,11 +841,11 @@ describe("VoiceWidget", () => {
 
   // --- Freeze controls during WS reconnect (docs/architecture/ux/README.md §3) ---
 
-  it("disables voice controls with a reason while the WS socket is reconnecting", () => {
+  it("keeps local hangup available while freezing WS controls during reconnect", () => {
     setVoiceChannel(1, []);
-
+    const onDisconnect = vi.fn();
     const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
+      onDisconnect,
       onMuteToggle: vi.fn(),
       onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
@@ -798,7 +860,9 @@ describe("VoiceWidget", () => {
     const disconnectBtn = container.querySelector('[aria-label="Disconnect"]') as HTMLButtonElement;
     expect(muteBtn.disabled).toBe(true);
     expect(muteBtn.title).toBe("Reconnecting…");
-    expect(disconnectBtn.disabled).toBe(true);
+    expect(disconnectBtn.disabled).toBe(false);
+    disconnectBtn.click();
+    expect(onDisconnect).toHaveBeenCalledOnce();
 
     widget.destroy?.();
   });

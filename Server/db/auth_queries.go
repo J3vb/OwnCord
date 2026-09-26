@@ -28,6 +28,34 @@ func (d *DB) CreateUser(ctx context.Context, username, passwordHash string, role
 	return res.LastInsertId()
 }
 
+// The durable first-run gate (migration 043). SetupCompletedKey is written
+// in the same transaction as the first owner and never cleared by the
+// server; an operator re-opens the wizard by setting it back to SetupOpen
+// with filesystem access to the database (docs/security.md, "First-run
+// setup"). Any other value is treated as closed, this being the gate in
+// front of an unauthenticated endpoint.
+const (
+	SetupCompletedKey = "setup_completed"
+	SetupOpen         = "0"
+	SetupClosed       = "1"
+)
+
+// CloseSetupGate records that this installation has been set up, whatever
+// the users table says. The erasure markers call it at start-up: a marker
+// proves an account existed here, it lives outside the database a restore
+// overwrites, and a backup taken before the first owner rolls both the users
+// table and the flag back to their fresh state — which would otherwise
+// reopen the unauthenticated setup endpoint. Idempotent.
+func (d *DB) CloseSetupGate(ctx context.Context) error {
+	if _, err := d.writer.ExecContext(ctx,
+		`INSERT INTO settings (key, value) VALUES (?1, ?2)
+		 ON CONFLICT(key) DO UPDATE SET value = ?2 WHERE settings.value <> ?2`,
+		SetupCompletedKey, SetupClosed); err != nil {
+		return fmt.Errorf("CloseSetupGate: %w", err)
+	}
+	return nil
+}
+
 // CreateOwnerIfEmpty atomically checks that no users exist and inserts the
 // first owner in a single transaction. Returns ErrConflict if any user already
 // exists, closing the TOCTOU race in the setup endpoint (BUG-119).
@@ -36,12 +64,30 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	if err != nil {
 		return 0, fmt.Errorf("CreateOwnerIfEmpty begin: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	defer tx.Rollback() //nolint:errcheck
+
+	// The durable gate (migration 043): setup_completed is set by the first
+	// owner's creation below and never cleared by the server, so an emptied
+	// users table — an erasure, or a marker replay past the last-admin guard
+	// on a restored backup — cannot reopen the unauthenticated setup
+	// endpoint. Read inside this transaction, like the count it backs up, so
+	// two concurrent requests cannot both pass.
+	//
+	// Only SetupOpen lets the count decide. The server writes SetupClosed and
+	// the documented re-open writes SetupOpen, so any other value is
+	// corruption or someone's guess at the schema, and this gate stands in
+	// front of an unauthenticated endpoint: an unrecognised value refuses. A
+	// missing row is the one exception, being what every pre-migration
+	// database looks like.
+	var completed string
+	switch err := tx.QueryRow(`SELECT value FROM settings WHERE key = ?`, SetupCompletedKey).Scan(&completed); {
+	case errors.Is(err, sql.ErrNoRows):
+		// A database from before the migration: the count is the gate.
+	case err != nil:
+		return 0, fmt.Errorf("CreateOwnerIfEmpty setup flag: %w", err)
+	case completed != SetupOpen:
+		return 0, ErrConflict
+	}
 
 	var count int64
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
@@ -64,26 +110,32 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 		return 0, fmt.Errorf("CreateOwnerIfEmpty last_id: %w", err)
 	}
 
+	// Setup is closed from this commit on, in the same transaction as the
+	// owner it belongs to.
+	if _, err := tx.Exec(
+		`INSERT INTO settings (key, value) VALUES (?1, ?2)
+		 ON CONFLICT(key) DO UPDATE SET value = ?2`, SetupCompletedKey, SetupClosed); err != nil {
+		return 0, fmt.Errorf("CreateOwnerIfEmpty setup flag: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("CreateOwnerIfEmpty commit: %w", err)
 	}
-	committed = true
 	return uid, nil
 }
 
-// CreateUserWithInvite atomically consumes an invite and creates the user in
-// the same transaction so a failed registration does not burn the invite.
-func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode string) (int64, error) {
+// CreateUserWithInvite atomically consumes an invite, creates the user and
+// inserts the account's first session in one transaction, so a failure at any
+// step — the session insert included (OC-0376) — leaves no half-registered
+// account and does not burn the invite. sessionTokenHash must already be
+// hashed. The H-6 session cap needs no eviction here: the user has no sessions
+// yet.
+func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite begin: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	defer tx.Rollback() //nolint:errcheck
 
 	result, err := tx.Exec(
 		`UPDATE invites SET use_count = use_count + 1
@@ -114,11 +166,165 @@ func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash st
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite last insert id: %w", err)
 	}
+	if _, err := insertSession(ctx, d.q.WithTx(tx), uid, sessionTokenHash, device, ip, false); err != nil {
+		return 0, fmt.Errorf("CreateUserWithInvite create session: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite commit: %w", err)
 	}
-	committed = true
 	return uid, nil
+}
+
+// CreateUserWithSession creates the account and its first session in one
+// transaction — open-mode registration (B4-1), where no invite is consumed.
+// Like CreateUserWithInvite, a failure at any step leaves no half-registered
+// account (OC-0376). sessionTokenHash must already be hashed.
+func (d *DB) CreateUserWithSession(ctx context.Context, username, passwordHash string, roleID int, sessionTokenHash, device, ip string) (int64, error) {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("CreateUserWithSession begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	result, err := tx.Exec(
+		`INSERT INTO users (username, password, role_id) VALUES (?, ?, ?)`,
+		username, passwordHash, roleID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("CreateUserWithSession create user: %w", err)
+	}
+	uid, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("CreateUserWithSession last insert id: %w", err)
+	}
+	if _, err := insertSession(ctx, d.q.WithTx(tx), uid, sessionTokenHash, device, ip, false); err != nil {
+		return 0, fmt.Errorf("CreateUserWithSession create session: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("CreateUserWithSession commit: %w", err)
+	}
+	return uid, nil
+}
+
+// ErrPendingQueueFull is CreatePendingUser refusing the application because
+// the approval queue already holds maxPending rows.
+var ErrPendingQueueFull = errors.New("approval queue is full")
+
+// CreatePendingUser records an approval-mode application (B4-1): the account
+// row exists, holding the username, as registration_status = 'pending' with
+// no session, so it cannot sign in until ApprovePendingUser. The queue cap is
+// enforced by the insert itself (one serialized statement), so concurrent
+// applications cannot overshoot it; ErrPendingQueueFull when it is full.
+func (d *DB) CreatePendingUser(ctx context.Context, username, passwordHash string, roleID, maxPending int) (int64, error) {
+	res, err := d.q.CreatePendingUser(ctx, dbgen.CreatePendingUserParams{
+		Username:   username,
+		Password:   passwordHash,
+		RoleID:     int64(roleID),
+		MaxPending: int64(maxPending),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("CreatePendingUser: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("CreatePendingUser rows: %w", err)
+	}
+	if n == 0 {
+		return 0, ErrPendingQueueFull
+	}
+	return res.LastInsertId()
+}
+
+// PendingUser is one approval-mode application as the admin queue lists it.
+type PendingUser struct {
+	ID        int64
+	Username  string
+	CreatedAt string
+}
+
+// ListPendingUsers returns the approval queue, oldest application first.
+func (d *DB) ListPendingUsers(ctx context.Context, limit, offset int) ([]PendingUser, error) {
+	rows, err := d.q.ListPendingUsers(ctx, dbgen.ListPendingUsersParams{Limit: int64(limit), Offset: int64(offset)})
+	if err != nil {
+		return nil, fmt.Errorf("ListPendingUsers: %w", err)
+	}
+	out := make([]PendingUser, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, PendingUser{ID: r.ID, Username: r.Username, CreatedAt: r.CreatedAt})
+	}
+	return out, nil
+}
+
+// CountPendingUsers returns the approval queue's length.
+func (d *DB) CountPendingUsers(ctx context.Context) (int64, error) {
+	n, err := d.q.CountPendingUsers(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("CountPendingUsers: %w", err)
+	}
+	return n, nil
+}
+
+// ApprovePendingUser unlocks an application. ErrNotFound when the id is not a
+// pending application (already decided, or never one).
+func (d *DB) ApprovePendingUser(ctx context.Context, userID int64) error {
+	res, err := d.q.ApprovePendingUser(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("ApprovePendingUser: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ApprovePendingUser rows: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// anonymiseNameAttempts is how many names DenyPendingUser will try: the
+// canonical "[denied-<id>]" plus randomly suffixed variants. Exhausting it
+// means the generator collided repeatedly, which is not something an
+// attacker can force.
+const anonymiseNameAttempts = 4
+
+// DenyPendingUser denies an application: the row is anonymised (the username
+// is released as "[denied-{id}]", the password and profile cleared) and locked
+// as 'denied' for good — the convention the pre-B4-9 account deletion used,
+// because audit rows reference the id. Only a still-pending row is touched;
+// an approved account never goes through here. ErrNotFound when nothing
+// pending matches.
+func (d *DB) DenyPendingUser(ctx context.Context, userID int64) error {
+	// users.username is UNIQUE COLLATE NOCASE and the "[denied-…]" namespace
+	// is reserved at registration (auth.ValidateUsername), but a row from
+	// before the reservation could hold the plain name; fall back to randomly
+	// suffixed variants rather than leave the application pending.
+	var lastErr error
+	for attempt := range anonymiseNameAttempts {
+		name := fmt.Sprintf("[denied-%d]", userID)
+		if attempt > 0 {
+			suffix := make([]byte, 6)
+			if _, err := rand.Read(suffix); err != nil {
+				return fmt.Errorf("DenyPendingUser suffix: %w", err)
+			}
+			name = fmt.Sprintf("[denied-%d-%s]", userID, hex.EncodeToString(suffix))
+		}
+		res, err := d.q.DenyPendingUser(ctx, dbgen.DenyPendingUserParams{Username: name, ID: userID})
+		if err == nil {
+			n, err := res.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("DenyPendingUser rows: %w", err)
+			}
+			if n == 0 {
+				return ErrNotFound
+			}
+			return nil
+		}
+		if !IsUniqueConstraintError(err) {
+			return fmt.Errorf("DenyPendingUser: %w", err)
+		}
+		lastErr = err
+	}
+	return fmt.Errorf("DenyPendingUser: %w", lastErr)
 }
 
 // GetUserByUsername returns the user with the given username (case-insensitive),
@@ -254,14 +460,27 @@ func (d *DB) CreateSession(ctx context.Context, userID int64, tokenHash, device,
 			"user_id", userID, "err", err)
 	}
 
+	return insertSession(ctx, d.q, userID, tokenHash, device, ip, true)
+}
+
+// insertSession inserts one session row through q — d.q, or d.q.WithTx(tx)
+// when the row must commit with other writes (CreateUserWithInvite).
+// unseen marks the row as a new login the account has not acknowledged yet
+// (B4-7); a registration's first session has no other device to tell.
+func insertSession(ctx context.Context, q *dbgen.Queries, userID int64, tokenHash, device, ip string, unseen bool) (int64, error) {
 	expiresAt := time.Now().Add(sessionTTL).UTC().Format(sessionTimeLayout)
 	deviceCopy, ipCopy := device, ip
-	res, err := d.q.InsertSession(ctx, dbgen.InsertSessionParams{
+	var unseenFlag int64
+	if unseen {
+		unseenFlag = 1
+	}
+	res, err := q.InsertSession(ctx, dbgen.InsertSessionParams{
 		UserID:    userID,
 		Token:     tokenHash,
 		Device:    &deviceCopy,
 		IpAddress: &ipCopy,
 		ExpiresAt: expiresAt,
+		Unseen:    unseenFlag,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("CreateSession: %w", err)

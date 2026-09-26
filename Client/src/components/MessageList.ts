@@ -3,6 +3,7 @@
  * role-colored usernames, @mention highlighting, infinite scroll, and
  * virtual scrolling (DOM windowing) for performance with large message counts.
  */
+import { Disposable } from "@lib/disposable";
 import { createElement, clearChildren } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
@@ -15,6 +16,7 @@ import {
 } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
+import { safetyStore } from "../features/safety/store";
 import { unobserveMedia } from "@lib/media-visibility";
 
 const log = createLogger("message-list");
@@ -28,6 +30,7 @@ import {
 import { getUnreadOnOpen } from "@stores/channels.store";
 import { isAudioMime, isVideoMime } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
+import { messagingText } from "../i18n/messaging";
 
 // -- Options ------------------------------------------------------------------
 
@@ -44,6 +47,8 @@ export interface MessageListOptions {
   readonly onDeleteClick: (messageId: number) => void;
   readonly onReactionClick: (messageId: number, emoji: string) => void;
   readonly onPinClick: (messageId: number, channelId: number, currentlyPinned: boolean) => void;
+  /** Report someone else's message or one of its attachments (B9-10). No button without it. */
+  readonly onReportClick?: (messageId: number) => void;
   /** Retry a failed optimistic send (by its correlation id). */
   readonly onRetry?: (correlationId: string) => void;
   /** Discard a failed optimistic send without retrying. */
@@ -70,6 +75,9 @@ const SCROLL_BOTTOM_THRESHOLD = 100;
 
 /** Number of items to render beyond visible viewport in each direction. */
 const OVERSCAN = 20;
+
+/** Controls a keyboard user can land on inside a rendered row. */
+const ROW_FOCUSABLE_SELECTOR = "button, [tabindex='0'], a[href]";
 
 /** Regex for direct image URLs in message content. */
 const IMAGE_URL_RE = /\.(?:png|jpe?g|gif|webp)(?:\?[^\s]*)?(?:\s|$)/i;
@@ -192,12 +200,14 @@ function renderEmptyState(channelName: string, channelType?: string): HTMLDivEle
   icon.textContent = isDm ? "@" : "#";
 
   const title = createElement("h2", { class: "channel-welcome-title" });
-  title.textContent = isDm ? channelName : `Welcome to #${channelName}!`;
+  title.textContent = isDm
+    ? channelName
+    : messagingText("welcome.channel", { channel: channelName });
 
   const text = createElement("p", { class: "channel-welcome-text" });
   text.textContent = isDm
-    ? `This is the beginning of your direct message history with ${channelName}.`
-    : `This is the start of the #${channelName} channel.`;
+    ? messagingText("welcome.dmIntro", { name: channelName })
+    : messagingText("welcome.channelIntro", { channel: channelName });
 
   const wrapper = createElement("div", { class: "channel-welcome" });
   wrapper.appendChild(icon);
@@ -212,7 +222,7 @@ function renderLoadingState(): HTMLDivElement {
   const wrapper = createElement("div", { class: "messages-loading" });
   wrapper.appendChild(createElement("div", { class: "spinner" }));
   const text = createElement("p", { class: "messages-loading-text" });
-  text.textContent = "Loading messages…";
+  text.textContent = messagingText("loading");
   wrapper.appendChild(text);
   return wrapper;
 }
@@ -221,13 +231,13 @@ function renderLoadingState(): HTMLDivElement {
 function renderLoadErrorState(onRetryLoad?: () => void): HTMLDivElement {
   const wrapper = createElement("div", { class: "messages-load-error" });
   const text = createElement("p", { class: "messages-load-error-text" });
-  text.textContent = "Couldn't load messages";
+  text.textContent = messagingText("loadFailed");
   wrapper.appendChild(text);
   const retry = createElement("button", {
     class: "messages-retry-btn",
     "data-testid": "messages-retry",
   });
-  retry.textContent = "Retry";
+  retry.textContent = messagingText("retry");
   retry.addEventListener("click", () => onRetryLoad?.());
   wrapper.appendChild(retry);
   return wrapper;
@@ -241,25 +251,25 @@ export type MessageListComponent = MountableComponent & {
 };
 
 export function createMessageList(options: MessageListOptions): MessageListComponent {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   const unsubscribers: Array<() => void> = [];
   /**
    * Scopes the *current* rendered window's row listeners (react/reply/pin/
    * edit/delete/copy-link, reply-ref, reaction chips, ...). `renderWindow`
    * aborts and replaces this before every full rebuild, so a discarded row's
-   * listeners are dropped immediately instead of accumulating on `ac` for
+   * listeners are dropped immediately instead of accumulating on `disposable` for
    * the whole component lifetime — every row used to register against
-   * `ac.signal` directly, and nothing aborted a stale render's registrations
+   * `disposable.signal` directly, and nothing aborted a stale render's registrations
    * short of `destroy()`, retaining a full window of detached rows (and
    * everything they reference: videos, images, embeds, tooltips) per rebuild
-   * (OC-0286). Mirrors ChannelSidebar's `renderAc` (OC-0229) and
-   * SettingsOverlay's `renderAC`.
+   * (OC-0286). Mirrors ChannelSidebar's `renderOwner` (OC-0229) and
+   * SettingsOverlay's `renderOwner`.
    */
-  let rowAc: AbortController | null = null;
-  /** Signal handed to row renderers — combines `ac.signal` (component
-   *  lifetime) with `rowAc.signal` (current window) so either one aborts a
-   *  row's listeners. Starts as plain `ac.signal` before the first render. */
-  let rowSignal: AbortSignal = ac.signal;
+  let rowOwner: Disposable | null = null;
+  /** Signal handed to row renderers — combines `disposable.signal` (component
+   *  lifetime) with `rowOwner.signal` (current window) so either one aborts a
+   *  row's listeners. Starts as plain `disposable.signal` before the first render. */
+  let rowSignal: AbortSignal = disposable.signal;
   /** Non-scrolling frame around the scroller; what is actually appended to
    *  the parent. The floating controls anchor to this box — an absolutely
    *  positioned box whose containing block is the scroller itself sits in
@@ -505,6 +515,52 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
   }
 
+  /**
+   * Stable identity of the focused control inside the rendered window, so a
+   * virtualized rebuild can put focus back on its replacement (Q1 focus:
+   * stable location through async update/removal). The row's own key survives
+   * the rebuild because rows are keyed by message id; a control with its own
+   * `data-testid` (the action buttons) is restored exactly, and a focusable
+   * without one (a reaction chip, a reply bar, a link) is restored by its
+   * position among the row's focusable controls. Null when focus is outside
+   * the rendered window, so an unrelated rebuild never pulls focus back into
+   * the list. Restoring never scrolls, so a reader scrolling away from the
+   * focused row or a history-prepend anchor is not pulled back to it.
+   */
+  function captureRowFocus(): { own: string | null; row: string | null; index: number } | null {
+    const active = document.activeElement;
+    if (
+      !(active instanceof HTMLElement) ||
+      contentContainer === null ||
+      !contentContainer.contains(active)
+    ) {
+      return null;
+    }
+    const row = active.closest<HTMLElement>("[data-testid]");
+    const index =
+      row === null ? -1 : [...row.querySelectorAll(ROW_FOCUSABLE_SELECTOR)].indexOf(active);
+    return { own: active.dataset.testid ?? null, row: row?.dataset.testid ?? null, index };
+  }
+
+  function restoreRowFocus(
+    captured: { own: string | null; row: string | null; index: number } | null,
+  ): void {
+    if (captured === null || contentContainer === null) return;
+    if (captured.own !== null) {
+      contentContainer
+        .querySelector<HTMLElement>(`[data-testid="${captured.own}"]`)
+        ?.focus({ preventScroll: true });
+      return;
+    }
+    if (captured.row !== null && captured.index >= 0) {
+      contentContainer
+        .querySelector<HTMLElement>(`[data-testid="${captured.row}"]`)
+        ?.querySelectorAll<HTMLElement>(ROW_FOCUSABLE_SELECTOR)
+        .item(captured.index)
+        ?.focus({ preventScroll: true });
+    }
+  }
+
   /** Abort the previous window's row-scoped listeners and start a fresh
    *  signal for the rows about to replace them. Must run before every
    *  `clearChildren(contentContainer)` that discards rendered rows, so a
@@ -513,9 +569,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    *  call this, since it appends to rows that stay live until the next
    *  rebuild and must keep using the current window's signal. */
   function beginRowRender(): void {
-    rowAc?.abort();
-    rowAc = new AbortController();
-    rowSignal = AbortSignal.any([ac.signal, rowAc.signal]);
+    rowOwner?.destroy();
+    rowOwner = new Disposable();
+    rowSignal = AbortSignal.any([disposable.signal, rowOwner.signal]);
   }
 
   let renderWindowCount = 0;
@@ -590,7 +646,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       renderedStart = start;
       renderedEnd = end;
 
-      // Rebuild content
+      // Rebuild content. The focused row's control is about to be detached by
+      // clearChildren; capture its identity so it can be restored on its
+      // replacement row (Q1: focus stays put through a virtualized rebuild).
+      const focusedRow = captureRowFocus();
       releaseTrackedMedia();
       beginRowRender();
       clearChildren(contentContainer);
@@ -603,6 +662,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // Measure newly rendered elements and update spacers
       measureRendered();
       updateSpacers();
+      restoreRowFocus(focusedRow);
     } else {
       // Target range already fully rendered: no-op. The ResizeObserver
       // handles measurement and spacer updates when element sizes change.
@@ -916,7 +976,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     bottomSpacer = createElement("div", { class: "virtual-spacer-bottom" });
     const scrollAnchor = createElement("div", { class: "scroll-anchor" });
 
-    scrollToBottomBtn = createElement("button", { class: "scroll-to-bottom-btn" });
+    scrollToBottomBtn = createElement("button", {
+      class: "scroll-to-bottom-btn",
+      "aria-label": messagingText("scrollToBottom"),
+    });
     scrollToBottomBtn.textContent = "↓";
     scrollToBottomBtn.addEventListener(
       "click",
@@ -924,16 +987,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         scrollToBottom();
         updateScrollToBottomBtn();
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
 
     jumpToPresentPill = createElement("button", {
       class: "jump-to-present-pill",
       "data-testid": "jump-to-present",
     });
-    jumpToPresentPill.textContent = "Jump to Present ↓";
+    jumpToPresentPill.textContent = messagingText("jumpToPresent");
     jumpToPresentPill.addEventListener("click", () => options.onJumpToPresent?.(), {
-      signal: ac.signal,
+      signal: disposable.signal,
     });
 
     root.appendChild(topSpacer);
@@ -945,7 +1008,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     region.appendChild(jumpToPresentPill);
 
     root.addEventListener("scroll", handleScroll, {
-      signal: ac.signal,
+      signal: disposable.signal,
       passive: true,
     });
 
@@ -987,7 +1050,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     updateJumpToPresentPill();
     scrollToBottom();
     const initialScrollRaf = requestAnimationFrame(() => scrollToBottom());
-    ac.signal.addEventListener("abort", () => cancelAnimationFrame(initialScrollRaf));
+    disposable.signal.addEventListener("abort", () => cancelAnimationFrame(initialScrollRaf));
 
     unsubscribers.push(
       messagesStore.subscribeSelector(
@@ -1035,6 +1098,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         },
       ),
     );
+
+    // A timeout starting or ending re-renders the reaction controls (B9-15).
+    unsubscribers.push(
+      safetyStore.subscribeSelector(
+        (s) => s.timeout,
+        () => {
+          renderAll();
+        },
+      ),
+    );
   }
 
   function destroy(): void {
@@ -1042,13 +1115,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       resizeObserver.disconnect();
       resizeObserver = null;
     }
-    ac.abort();
-    // rowSignal (AbortSignal.any([ac.signal, rowAc.signal])) already aborts
-    // as soon as ac does, but abort + drop the reference too so a stray
+    disposable.destroy();
+    // rowSignal (AbortSignal.any([disposable.signal, rowOwner.signal])) already aborts
+    // as soon as disposable does, but abort + drop the reference too so a stray
     // beginRowRender() after destroy (there shouldn't be one) can't resurrect
     // a live-looking controller.
-    rowAc?.abort();
-    rowAc = null;
+    rowOwner?.destroy();
+    rowOwner = null;
     if (scrollRafId !== 0) {
       cancelAnimationFrame(scrollRafId);
       scrollRafId = 0;

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/config"
 )
 
 func TestRunHealthChecks_AllHealthy(t *testing.T) {
@@ -42,10 +44,39 @@ func TestRunHealthChecks_DBError(t *testing.T) {
 
 func TestRunHealthChecks_LowDisk(t *testing.T) {
 	status, reason := runHealthChecks(context.Background(), healthDeps{
-		freeDiskBytes: func() (uint64, error) { return 1 << 20, nil }, // 1 MiB
+		freeDiskBytes:    func() (uint64, error) { return 1 << 20, nil }, // 1 MiB
+		minFreeDiskBytes: 256 << 20,
 	})
 	if status != "degraded" || reason != "disk" {
 		t.Fatalf("got (%q, %q), want (degraded, disk)", status, reason)
+	}
+}
+
+// TestRunHealthChecks_FloorIsTheConfiguredOne pins B5-2's decision 11: the
+// floor is server.min_free_disk_mb, not a constant of this package. A floor
+// above the old 256 MiB degrades at that higher number, and 0 disables the
+// check entirely.
+func TestRunHealthChecks_FloorIsTheConfiguredOne(t *testing.T) {
+	const free = 300 << 20
+	status, reason := runHealthChecks(context.Background(), healthDeps{
+		freeDiskBytes:    func() (uint64, error) { return free, nil },
+		minFreeDiskBytes: 512 << 20,
+	})
+	if status != "degraded" || reason != "disk" {
+		t.Fatalf("300 MiB free under a 512 MiB floor: got (%q, %q), want (degraded, disk)", status, reason)
+	}
+	status, _ = runHealthChecks(context.Background(), healthDeps{
+		freeDiskBytes:    func() (uint64, error) { return 1 << 20, nil },
+		minFreeDiskBytes: 0,
+	})
+	if status != "ok" {
+		t.Fatalf("a zero floor must disable the disk check: got %q, want ok", status)
+	}
+	var online func() int
+	var alive func() bool
+	deps := routerHealthDeps(&config.Config{Server: config.ServerConfig{MinFreeDiskMB: 512}}, nil, &online, &alive)
+	if deps.minFreeDiskBytes != 512<<20 {
+		t.Fatalf("routerHealthDeps carried floor %d, want server.min_free_disk_mb = 512 MiB", deps.minFreeDiskBytes)
 	}
 }
 

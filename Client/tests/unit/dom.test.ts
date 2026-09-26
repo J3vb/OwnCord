@@ -1,37 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
-  escapeHtml,
   createElement,
   setText,
   appendChildren,
   clearChildren,
   qs,
-  qsa,
+  setOwnedTimeout,
 } from "../../src/lib/dom";
-
-describe("escapeHtml", () => {
-  it("escapes all HTML special characters", () => {
-    expect(escapeHtml('<script>alert("xss")</script>')).toBe(
-      "&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;",
-    );
-  });
-
-  it("escapes ampersands", () => {
-    expect(escapeHtml("foo & bar")).toBe("foo &amp; bar");
-  });
-
-  it("escapes single quotes", () => {
-    expect(escapeHtml("it's")).toBe("it&#039;s");
-  });
-
-  it("returns empty string unchanged", () => {
-    expect(escapeHtml("")).toBe("");
-  });
-
-  it("leaves safe text unchanged", () => {
-    expect(escapeHtml("Hello world 123")).toBe("Hello world 123");
-  });
-});
 
 describe("createElement", () => {
   it("creates an element with the given tag", () => {
@@ -119,7 +94,7 @@ describe("clearChildren", () => {
   });
 });
 
-describe("qs and qsa", () => {
+describe("qs", () => {
   it("qs finds element by selector", () => {
     const container = document.createElement("div");
     const child = document.createElement("span");
@@ -146,22 +121,65 @@ describe("qs and qsa", () => {
     expect(qs(".scoped", other)).toBeNull();
     expect(qs(".scoped", parent)).toBe(child);
   });
+});
 
-  it("qsa returns array of matches", () => {
-    const container = document.createElement("div");
-    container.innerHTML = ""; // intentionally empty
-    const a = document.createElement("span");
-    a.className = "item";
-    const b = document.createElement("span");
-    b.className = "item";
-    container.appendChild(a);
-    container.appendChild(b);
-    document.body.appendChild(container);
+describe("setOwnedTimeout", () => {
+  it("runs the step after the delay while its owner is live", () => {
+    vi.useFakeTimers();
+    try {
+      const fn = vi.fn();
+      setOwnedTimeout(new AbortController().signal, fn, 100);
+      vi.advanceTimersByTime(99);
+      expect(fn).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(fn).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
-    const results = qsa(".item", container);
-    expect(results).toHaveLength(2);
-    expect(Array.isArray(results)).toBe(true);
+  it("clears the pending step when its owner aborts", () => {
+    vi.useFakeTimers();
+    try {
+      const owner = new AbortController();
+      const fn = vi.fn();
+      setOwnedTimeout(owner.signal, fn, 100);
+      owner.abort();
+      vi.advanceTimersByTime(100);
+      expect(fn).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
-    document.body.removeChild(container);
+  it("schedules nothing once its owner has aborted", () => {
+    vi.useFakeTimers();
+    try {
+      const owner = new AbortController();
+      owner.abort();
+      const fn = vi.fn();
+      setOwnedTimeout(owner.signal, fn, 0);
+      expect(vi.getTimerCount()).toBe(0);
+      vi.runAllTimers();
+      expect(fn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops its abort registration when it fires, so re-arming never accumulates", () => {
+    vi.useFakeTimers();
+    try {
+      const owner = new AbortController();
+      const remove = vi.spyOn(owner.signal, "removeEventListener");
+      const fn = vi.fn();
+      setOwnedTimeout(owner.signal, fn, 10);
+      vi.advanceTimersByTime(10);
+      expect(fn).toHaveBeenCalledTimes(1);
+      expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

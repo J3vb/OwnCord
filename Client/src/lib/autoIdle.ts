@@ -22,6 +22,7 @@
  * anything finer is pure cost.
  */
 
+import { Disposable } from "./disposable";
 import type { UserStatus } from "./types";
 import { loadUserStatus, loadUserStatusOrigin, saveUserStatus } from "./userStatus";
 
@@ -79,7 +80,7 @@ export function nextAutoStatus(
 export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
   const target = options.target ?? window;
   const delayMs = options.delayMs ?? AUTO_IDLE_DELAY_MS;
-  const ac = new AbortController();
+  const disposable = new Disposable();
 
   let timer: ReturnType<typeof setTimeout> | null = null;
   let lastActivityRun = 0;
@@ -143,7 +144,7 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
   }
 
   for (const evt of ACTIVITY_EVENTS) {
-    target.addEventListener(evt, onActivity, { passive: true, signal: ac.signal });
+    target.addEventListener(evt, onActivity, { passive: true, signal: disposable.signal });
   }
   arm();
 
@@ -153,7 +154,7 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
     },
     destroy(): void {
       destroyed = true;
-      ac.abort();
+      disposable.destroy();
       if (timer !== null) {
         clearTimeout(timer);
         timer = null;

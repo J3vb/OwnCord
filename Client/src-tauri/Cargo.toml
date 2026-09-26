@@ -1,12 +1,16 @@
 [package]
 name = "owncord-client"
-version = "1.2.0-alpha.4"
+version = "2.0.0-beta.1"
 edition = "2021"
 # Effective minimum: tauri 2.11 declares rust-version = "1.77.2", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
 # warning instead of silently following whatever toolchain is installed.
 rust-version = "1.77.2"
 description = "OwnCord Desktop Client"
+# Not published to any registry: this crate is built in place by `tauri build`.
+# cargo-deny reads this with licenses.private.ignore below, so its absent
+# `license` field is not an unlicensed-crate finding.
+publish = false
 
 # Crate-level lint policy so hardening ships with every build, not only the CI
 # `cargo clippy -- -D warnings` gate (which downstream/local builds don't run).
@@ -35,9 +39,18 @@ serde_json = "1"
 # Self-signed server certificates are handled by the Rust TOFU proxies
 # (ws_proxy, livekit_proxy, http_proxy), NOT by the plugin's dangerous-settings
 # feature — REST traffic is tunneled through http_proxy which pins the cert to
-# the trust-on-first-use fingerprint. The plugin therefore does default TLS
-# validation (used only for external hosts: image CDNs, OG previews, YouTube).
+# the trust-on-first-use fingerprint. The plugin's capability is scoped to
+# those loopback proxies only: external content (previews, images, YouTube) is
+# fetched by the external-content broker (external_content.rs), not the plugin.
 tauri-plugin-http = { version = "2.5.7", features = ["rustls-tls"] }
+# The external-content broker's client (external_content.rs). Already in the
+# tree via tauri-plugin-http with these same features, so this adds no build:
+# the broker needs it directly for what the plugin's fetch cannot do — a
+# resolver that answers only with classified addresses, and redirects off.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# The broker parses Open Graph in native code (B7-16 Decision 6) with the spec
+# tokenizer, not a regex. Already in Cargo.lock via tauri-utils.
+html5ever = "0.38"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -87,9 +100,6 @@ keyring = { version = "3", default-features = false, features = [
     "sync-secret-service",
     "crypto-rust",
 ] }
-# Scrubs the plaintext secret copies that the DPAPI fallback has to materialize
-# as `Vec<u8>` for the Win32 call.
-zeroize = "1"
 # Encodes the DPAPI ciphertext for the JSON fallback store. Already in the tree
 # via the tauri/rustls stack, so this costs no extra build.
 base64 = "0.22"
@@ -121,9 +131,39 @@ windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
 ] }
+# Scrubs the plaintext secret copies that the DPAPI fallback (dpapi.rs, itself
+# `#[cfg(windows)]`) has to materialize as `Vec<u8>` for the Win32 call.
+zeroize = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 device_query = "2"
+# Native LiveKit for Linux voice/video. No mainstream WebKitGTK build ships
+# WebRTC (the system webview's RTCPeerConnection is undefined on every distro),
+# so on Linux the LiveKit SDK runs in this Rust backend instead of the webview
+# and the webview stays the UI; the TS E2EE key exchange still runs in the
+# frontend and only the final room key crosses IPC. See
+# docs/architecture/voice-e2ee.md and Client/src-tauri/src/native_voice.rs.
+#
+# Exact-pinned on purpose: the SDK is 0.x, its API churns, and webrtc-sys
+# downloads a prebuilt libwebrtc (webrtc-89d790b) whose C++ ABI is tied to the
+# crate version, so a patch bump must be a deliberate, re-verified change.
+# Default features only — no TLS backend, because the native room dials the
+# plain ws:// loopback that livekit_proxy already exposes.
+livekit = "=0.9.1"
+# Encodes the screen picker's thumbnails (native_voice/screen.rs). Already in
+# the tree via tauri's tray-icon, so this costs no extra build.
+png = "0.18"
+# Audio I/O for native voice. The SDK's device module mixes every remote
+# track with no per-track gain and hands its capture to no processing hook, so
+# per-user volume needs our own mixer and output stream (native_voice/playout.rs)
+# and RNNoise needs our own input stream (native_voice/capture.rs). The
+# `pulseaudio` host is a pure-Rust client (no libpulse link) that lists the
+# same device descriptions the device module showed; plain ALSA is the fallback.
+cpal = { version = "0.18", features = ["pulseaudio"] }
+# RNNoise for the Enhanced Noise Suppression setting on the native capture
+# path (native_voice/capture.rs): a pure-Rust port of the RNNoise model the web
+# path runs as WASM. Default features only add its command-line tool.
+nnnoiseless = { version = "0.5", default-features = false }
 # Direct access to the WebKitGTK webview for voice/video support. WebKitGTK
 # denies getUserMedia/enumerateDevices permission requests by default (wry
 # installs no handler on Linux, unlike its macOS backend which auto-grants),

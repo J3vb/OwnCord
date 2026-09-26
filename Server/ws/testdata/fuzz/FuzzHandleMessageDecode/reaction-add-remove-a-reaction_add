@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"id\":\"req-1\",\"payload\":{\"emoji\":\"👍\",\"message_id\":1},\"type\":\"reaction_add\"}")

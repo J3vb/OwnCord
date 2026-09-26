@@ -7,6 +7,7 @@ import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { loadPref } from "@components/settings/helpers";
+import { messageStatusText } from "../../i18n/messageStatus";
 
 // -- Constants ----------------------------------------------------------------
 
@@ -83,10 +84,10 @@ export function formatMessageTimestamp(iso: string): string {
   const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
 
   if (date >= todayStart) {
-    return `Today at ${timeStr}`;
+    return messageStatusText("date.today", { time: timeStr });
   }
   if (date >= yesterdayStart) {
-    return `Yesterday at ${timeStr}`;
+    return messageStatusText("date.yesterday", { time: timeStr });
   }
 
   const mm = String(date.getMonth() + 1).padStart(2, "0");

@@ -1,0 +1,420 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/storage"
+)
+
+// maintenance is one maintenance pass's dependencies. Every sweep is a step
+// in steps(), run in that order by tick; a failing step is logged and counts
+// toward the loop's circuit breaker, and the rest of the pass still runs. A
+// new sweep is a method plus one row in steps() — B5-4 and B5-11 add theirs
+// there rather than growing tick.
+type maintenance struct {
+	log        *slog.Logger
+	database   *db.DB
+	files      *storage.Storage
+	settings   *service.SettingsService
+	erasure    *service.ErasureService
+	retention  *service.RetentionService
+	uploads    *service.UploadService
+	reports    *service.ReportService
+	moderation *service.ModerationService
+	// reportRetentionDays is moderation.report_retention_days (0 = never).
+	reportRetentionDays int
+	// actionRetentionDays is moderation.action_retention_days (0 = never).
+	actionRetentionDays int
+	push                *service.PushService
+	// attention records each step's outcome for the admin attention panel
+	// (RI-07); nil-safe, so partial wirings skip it.
+	attention *service.AttentionService
+}
+
+// maintenanceStep is one sweep: job is its name on the admin attention
+// panel, name is the warning logged when run fails.
+type maintenanceStep struct {
+	job  string
+	name string
+	run  func(ctx context.Context) error
+}
+
+// newMaintenance builds the pass over the composition root's services. svc
+// may be nil (a partial wiring in tests), which leaves every service-backed
+// step skipped.
+func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services) *maintenance {
+	m := &maintenance{
+		log: log, database: database,
+		reportRetentionDays: cfg.Moderation.ReportRetentionDays,
+		actionRetentionDays: cfg.Moderation.ActionRetentionDays,
+	}
+	if svc != nil {
+		m.settings, m.erasure, m.retention, m.uploads = svc.Settings, svc.Erasure, svc.Retention, svc.Uploads
+		m.reports = svc.Reports
+		m.moderation = svc.Moderation
+		m.push = svc.Push
+		m.attention = svc.Attention
+	}
+	// Periodically purge expired sessions and orphaned attachments.
+	files, err := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
+	if err != nil {
+		log.Warn("failed to create file storage for maintenance; orphan file cleanup disabled", "error", err)
+		return m
+	}
+	m.files = files
+	// The erasure runner removes files through whichever storage was
+	// installed first (the router's, normally); this one is the fallback so
+	// journaled jobs still finish when the upload routes did not mount.
+	if m.erasure != nil && !m.erasure.HasFiles() {
+		m.erasure.SetFiles(files)
+	}
+	if m.retention != nil {
+		m.retention.SetFiles(files)
+	}
+	return m
+}
+
+// startMaintenanceLoop starts the periodic maintenance loop and returns the
+// stop step the maintenance stage registers with App.Close.
+func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services) func() {
+	m := newMaintenance(log, cfg, database, svc)
+
+	// The attention panel (RI-07) lists every job, in step order, before the
+	// loop's start-up runs record the first outcomes.
+	for _, step := range m.steps() {
+		m.attention.RegisterJob(step.job, step.name)
+	}
+
+	stopMaintenance := make(chan struct{})
+	maintenanceDone := make(chan struct{})
+	go m.loop(bgCtx, stopMaintenance, maintenanceDone)
+
+	// The attention sampler samples on its own minute cadence, independent
+	// of a long tick.
+	attentionCtx, stopAttention := context.WithCancel(bgCtx)
+	attentionDone := make(chan struct{})
+	if m.attention != nil {
+		go func() {
+			defer close(attentionDone)
+			m.attention.Run(attentionCtx, service.AttentionInterval)
+		}()
+	} else {
+		close(attentionDone)
+	}
+
+	return func() {
+		stopAttention()
+		<-attentionDone
+		// Backstop for early returns below (see hub.GracefulStop defer above),
+		// and a bounded join so an in-flight tick (which can hold the writer —
+		// scheduled backups run VACUUM INTO) isn't still using the database
+		// while the LIFO-later Close defer tears it down.
+		close(stopMaintenance)
+		select {
+		case <-maintenanceDone:
+		case <-time.After(5 * time.Second):
+			log.Warn("maintenance loop did not exit before shutdown timeout")
+		}
+	}
+}
+
+// loop is the periodic maintenance goroutine started by startMaintenanceLoop.
+func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDone chan struct{}) {
+	defer close(maintenanceDone)
+	// Erasure jobs interrupted by the last shutdown (files journaled, not
+	// yet removed) finish now, not fifteen minutes from now (B4-9).
+	_ = m.runJob(bgCtx, "Account erasure")
+	// Deliberately NOT run here at start-up (round 5, Codex review): this
+	// runs AFTER initDatabase's ClearAllVoiceStates (database.go), which
+	// wipes every voice_states row on every restart regardless — a real
+	// voice session cannot survive the process dying anyway (the LiveKit
+	// participant is gone with it). There is nothing left here to repair by
+	// the time this loop starts, so reconcileOrphanedVoiceMutes runs only
+	// on the periodic tick (steps() below) — catching a crash between a
+	// lift's ledger commit and its own post-commit voice finalize, or a
+	// timeout that simply expired with nobody ever lifting it, within one
+	// 15-minute tick of it happening, same as every other tick-only sweep.
+	// Storage counters charged by a process that died between the charge
+	// and the write are settled now, so a restart is a repair point rather
+	// than fifteen minutes of a user seeing a phantom charge (B5-2).
+	_ = m.runJob(bgCtx, "Storage recount")
+	// A VAPID key rotation takes effect on the first boot with the new key,
+	// not fifteen minutes later (B5-4): rows the rotation orphaned stop
+	// being listed the instant the new key is installed, but the sweep is
+	// what actually removes them.
+	_ = m.runJob(bgCtx, "Push subscriptions")
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	consecutiveFailures := 0
+	const maxConsecutiveFailures = 5
+	for {
+		select {
+		case <-ticker.C:
+			if consecutiveFailures >= maxConsecutiveFailures {
+				m.log.Error("maintenance loop: circuit breaker open, skipping tick",
+					"consecutive_failures", consecutiveFailures)
+				// Reset after one skip to allow retry next tick.
+				consecutiveFailures = maxConsecutiveFailures - 1
+				continue
+			}
+
+			if m.tick(bgCtx) {
+				consecutiveFailures++
+			} else {
+				consecutiveFailures = 0
+			}
+		case <-stopMaintenance:
+			return
+		}
+	}
+}
+
+// steps is the pass, in order. Later steps depend on earlier ones having
+// run: the reconciliation pass at the end only sees what the orphan and
+// retention sweeps stranded this tick.
+func (m *maintenance) steps() []maintenanceStep {
+	return []maintenanceStep{
+		{"Expired sessions", "failed to delete expired sessions", m.sweepSessions},
+		{"Delivery receipts", "failed to delete expired message delivery receipts", m.sweepMessageDeliveryReceipts},
+		{"Second-factor cleanup", "failed to clean up expired second-factor state", m.sweepSecondFactor},
+		{"Push subscriptions", "push subscription sweep failed", m.sweepPushSubscriptions},
+		{service.AttentionBackupJob, "backup maintenance failed", m.maintainBackups},
+		{"Orphaned attachments", "failed to delete orphaned attachments", m.sweepOrphans},
+		{"Message retention", "retention sweep failed", m.sweepRetention},
+		{"Report content retention", "report content retention failed", m.pruneReportContent},
+		{"Moderation action retention", "moderation action retention failed", m.retireModerationActions},
+		{"Voice mute reconciliation", "orphaned voice mute reconciliation failed", m.reconcileOrphanedVoiceMutes},
+		{"Account erasure", "erasure jobs still pending", m.resumeErasure},
+		{"Storage reconciliation", "storage reconciliation failed", m.reconcileFiles},
+		// Last on purpose: every sweep above that deletes attachment rows
+		// (orphans, retention, erasure) has run, so this tick's recount
+		// already returns the bytes they freed.
+		{"Storage recount", "storage recount failed", m.recountStorage},
+	}
+}
+
+// tick runs one maintenance pass and reports whether any step of it failed.
+func (m *maintenance) tick(ctx context.Context) bool {
+	failed := false
+	for _, step := range m.steps() {
+		if m.runStep(ctx, step) != nil {
+			failed = true
+		}
+	}
+	return failed
+}
+
+// runStep runs one step, records its outcome on the attention panel and logs
+// a failure under the step's name.
+func (m *maintenance) runStep(ctx context.Context, step maintenanceStep) error {
+	err := step.run(ctx)
+	m.attention.RecordJob(step.job, err, time.Now())
+	if err != nil {
+		m.log.Warn(step.name, "error", err)
+	}
+	return err
+}
+
+// runJob runs the step named job outside a tick — the loop's start-up
+// runs — so its outcome reaches the attention panel too, not only fifteen
+// minutes later.
+func (m *maintenance) runJob(ctx context.Context, job string) error {
+	for _, step := range m.steps() {
+		if step.job == job {
+			return m.runStep(ctx, step)
+		}
+	}
+	panic("maintenance: no step for job " + job)
+}
+
+func (m *maintenance) sweepSessions(ctx context.Context) error {
+	return m.database.DeleteExpiredSessions(ctx)
+}
+
+func (m *maintenance) sweepMessageDeliveryReceipts(ctx context.Context) error {
+	return m.database.DeleteExpiredMessageDeliveryReceipts(ctx)
+}
+
+// sweepSecondFactor removes expired login challenges, staged enrolments and
+// spent TOTP codes (migration 032) — the persisted second-factor state's sweep.
+func (m *maintenance) sweepSecondFactor(ctx context.Context) error {
+	return m.database.CleanupExpiredSecondFactorState(ctx)
+}
+
+// sweepPushSubscriptions removes stale Web Push subscriptions and every
+// subscription a VAPID key rotation orphaned (B5-4, decisions 2 and 5). Nil
+// push means no service layer at all (a partial wiring in tests); a no-op
+// tick is the point, not a failure.
+func (m *maintenance) sweepPushSubscriptions(ctx context.Context) error {
+	if m.push == nil {
+		return nil
+	}
+	_, err := m.push.Sweep(ctx)
+	return err
+}
+
+// maintainBackups runs scheduled backups and retention pruning, driven by the
+// backup_schedule / backup_retention admin settings. No settings service
+// means no schedule to read, so the step skips rather than dereferencing nil
+// (admin.MaintainBackups reads the schedule through it unconditionally).
+func (m *maintenance) maintainBackups(ctx context.Context) error {
+	if m.settings == nil {
+		return nil
+	}
+	return admin.MaintainBackups(ctx, m.database, m.settings)
+}
+
+// sweepOrphans cleans up orphaned attachments (uploaded but never linked to
+// a message).
+//
+// Skipped entirely with no file storage configured: the delete is atomic
+// (row goes the instant it's selected, by design — see
+// db/attachment_queries.go), so with files nil the returned stored_as names
+// — the only remaining handle on those blobs — would just be discarded and
+// the files stranded on disk with no query left able to name them. Leaving
+// the rows in place keeps them reclaimable once storage is available again.
+func (m *maintenance) sweepOrphans(ctx context.Context) error {
+	if m.files == nil {
+		return nil
+	}
+	cutoff := time.Now().Add(-1 * time.Hour)
+	orphanFiles, err := m.database.DeleteOrphanedAttachments(ctx, cutoff)
+	if err != nil {
+		return err
+	}
+	if len(orphanFiles) == 0 {
+		return nil
+	}
+	// Best-effort file cleanup.
+	for _, filename := range orphanFiles {
+		if delErr := m.files.Delete(filename); delErr != nil {
+			m.log.Warn("failed to delete orphan file", "file", filename, "error", delErr)
+		}
+	}
+	m.log.Info("cleaned up orphaned attachments", "count", len(orphanFiles))
+	return nil
+}
+
+// sweepRetention is message retention (B4-11): one bounded sweep per tick
+// over every channel with an effective window; indefinite by default, so a
+// server without a policy does nothing here.
+func (m *maintenance) sweepRetention(ctx context.Context) error {
+	if m.retention == nil {
+		return nil
+	}
+	rep, err := m.retention.Tick(ctx)
+	if err != nil {
+		return fmt.Errorf("%w (messages=%d)", err, rep.Messages)
+	}
+	return nil
+}
+
+// pruneReportContent is B5-8's retention step (moderation.report_retention_days,
+// default 180, 0 = never): deletes the evidence and notes and clears the
+// detail of every report closed longer ago than the window. The reports row
+// itself is kept — content is bounded, the outcome is indefinite (S5-d).
+func (m *maintenance) pruneReportContent(ctx context.Context) error {
+	if m.reports == nil || m.reportRetentionDays <= 0 {
+		return nil
+	}
+	return m.reports.PruneClosedContent(ctx, time.Duration(m.reportRetentionDays)*24*time.Hour)
+}
+
+// retireModerationActions is B5-9's retention step (moderation.
+// action_retention_days, default 90, 0 = never), run right after report
+// content retention (TestMaintenance_StepOrderIsPinned): warning rows retire
+// after acknowledged_at, timeout rows after expires_at/lifted_at. Ban, kick
+// and removal rows are never touched — they stay with the account.
+func (m *maintenance) retireModerationActions(ctx context.Context) error {
+	if m.actionRetentionDays <= 0 {
+		return nil
+	}
+	_, err := m.database.RetireModerationActions(ctx, m.actionRetentionDays)
+	return err
+}
+
+// reconcileOrphanedVoiceMutes is the round-4 (B5-10 addendum) reconcile
+// sweep: every voice_states row whose server_muted_by now points at a
+// lifted or expired timeout gets the SAME post-commit finalize
+// (ModerationService.FinalizeTimeoutLift) a normal lift runs, with actor 0
+// (system-initiated, mirroring backup_maintenance.go's scheduled-backup
+// audit rows) — repairing a crash between a lift's ledger commit and its
+// own finalize call, and closing the gap that otherwise left a naturally
+// EXPIRED timeout's voice mute in effect forever (nothing else ever calls
+// UnmuteForTimeout for an expiry). Tick-only, NOT at loop start (round 5,
+// Codex review): by the time this loop starts, initDatabase's
+// ClearAllVoiceStates has already wiped every voice_states row this restart
+// — there is nothing left here for a start-up call to repair, and a
+// voice_states row is only ever real again once a live client re-joins
+// after the restart, which the next ordinary tick already covers.
+func (m *maintenance) reconcileOrphanedVoiceMutes(ctx context.Context) error {
+	if m.moderation == nil {
+		return nil
+	}
+	orphans, err := m.database.FindOrphanedVoiceMutes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, o := range orphans {
+		m.moderation.FinalizeTimeoutLift(ctx, o.UserID, []int64{o.ActionID}, 0)
+	}
+	if len(orphans) > 0 {
+		m.log.Info("reconciled orphaned voice mutes", "count", len(orphans))
+	}
+	return nil
+}
+
+// resumeErasure runs every unfinished erasure job once (no runner is a
+// success: nothing to do). It runs at loop start and again every tick.
+func (m *maintenance) resumeErasure(ctx context.Context) error {
+	if m.erasure == nil {
+		return nil
+	}
+	done, err := m.erasure.Resume(ctx)
+	if done > 0 {
+		m.log.Info("erasure jobs completed", "count", done)
+	}
+	return err
+}
+
+// reconcileFiles is the reconciliation pass: files in upload storage that no
+// row names — what the orphan sweep strands when it stops between its DELETE
+// and its unlinks (O3 A1), or a restore leaves behind (O3 A5) — bounded per
+// tick and only past the same one-hour grace an in-flight upload gets.
+func (m *maintenance) reconcileFiles(ctx context.Context) error {
+	if m.erasure == nil || m.files == nil {
+		return nil
+	}
+	removed, err := m.erasure.Reconcile(ctx, m.files, time.Now().Add(-1*time.Hour), reconcileFilesPerTick)
+	if err != nil {
+		return err
+	}
+	if removed > 0 {
+		m.log.Info("storage reconciliation removed stranded files", "count", removed)
+	}
+	return nil
+}
+
+// recountStorage sets every per-user upload byte counter to the rows that
+// name the user's files plus what is still in flight (B5-2). It is the
+// reconciliation decision 11 puts on the maintenance sweep: the counter is a
+// cache of the rows, and this is where erasure, retention and the orphan
+// sweep return bytes.
+func (m *maintenance) recountStorage(ctx context.Context) error {
+	if m.uploads == nil {
+		return nil
+	}
+	_, err := m.uploads.RecountStorage(ctx)
+	return err
+}
+
+// reconcileFilesPerTick bounds how many stranded files one maintenance tick
+// removes; the rest wait for the next tick.
+const reconcileFilesPerTick = 500

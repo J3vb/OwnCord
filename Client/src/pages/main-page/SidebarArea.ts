@@ -13,10 +13,11 @@ import type { ApiClient } from "@lib/api";
 import type { RateLimiterSet } from "@lib/rate-limiter";
 import type { PresenceSender } from "@lib/presence";
 import type { ToastContainer } from "@components/Toast";
+import { createLogger } from "@lib/logger";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
+import type { DmSidebar } from "@components/DmSidebar";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
-import { createEditChannelModal } from "@components/EditChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createUserBar } from "@components/UserBar";
 import { createVoiceWidget } from "@components/VoiceWidget";
@@ -48,8 +49,14 @@ import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { dmStore, closeDmLocally } from "@stores/dm.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
-import { canViewAuditLog } from "@lib/permissions";
+import { canModerateMembers, canViewAuditLog } from "@lib/permissions";
 import type { ProfileManager } from "@lib/profiles";
+import type { ContentViewId, NavigationDestinations } from "../../features/navigation/destinations";
+import { trackCurrentView } from "../../features/navigation/contentView";
+import { navigationText } from "../../i18n/navigation";
+import { shellText } from "../../i18n/shell";
+
+const log = createLogger("SidebarArea");
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,6 +74,10 @@ export interface SidebarAreaOptions {
   readonly getRoot: () => HTMLDivElement | null;
   readonly getToast: () => ToastContainer | null;
   readonly onWatchStream?: (userId: number) => void;
+  /** B9-4: the destinations this build ships. An absent one gets no entry. */
+  readonly destinations?: NavigationDestinations;
+  /** Open a content view; `opener` gets focus back when it closes. */
+  readonly onOpenView?: (id: ContentViewId, opener: HTMLElement) => void;
 }
 
 export interface SidebarAreaResult {
@@ -78,6 +89,12 @@ export interface SidebarAreaResult {
   readonly unsubscribers: readonly (() => void)[];
   /** Open the quick-switch overlay (used for disconnect flow). */
   readonly openQuickSwitch: () => void;
+  /** Remember the channel on screen as the one a content view returns to. */
+  readonly rememberChannel: () => void;
+  /** Drop the remembered channel. */
+  readonly forgetChannel: () => void;
+  /** The Q2 back path: leave DM mode for the channel the user came from. */
+  readonly returnToChannel: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +158,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   const sidebarWrapper = createElement("div", {
     class: "unified-sidebar",
+    id: "unified-sidebar",
     "data-testid": "unified-sidebar",
   });
 
@@ -149,17 +167,19 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // ---------------------------------------------------------------------------
 
   const serverHeader = createElement("div", { class: "unified-sidebar-header" });
-  const serverIcon = createElement("div", { class: "server-icon-sm" }, "OC");
-  const serverInfoCol = createElement("div", {
-    style: "display:flex;flex-direction:column;overflow:hidden;",
-  });
+  const serverIcon = createElement("div", { class: "server-icon-sm" }, "OC"); // i18n-exempt: logo monogram, not copy
+  const serverInfoCol = createElement("div", { class: "server-info" });
   const serverNameEl = createElement(
     "span",
     { class: "server-name" },
-    authStore.getState().serverName ?? "Server",
+    authStore.getState().serverName ?? shellText("common.serverFallback"),
   );
   const onlineCount = getOnlineMembers().length;
-  const serverOnlineEl = createElement("span", { class: "server-online" }, `${onlineCount} online`);
+  const serverOnlineEl = createElement(
+    "span",
+    { class: "server-online" },
+    shellText("common.online", { count: onlineCount }),
+  );
   serverInfoCol.appendChild(serverNameEl);
   serverInfoCol.appendChild(serverOnlineEl);
   serverHeader.appendChild(serverIcon);
@@ -171,10 +191,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     "button",
     {
       class: "sidebar-invite-btn",
-      title: "Invite people",
+      title: shellText("invite.invitePeople"),
       "data-testid": "invite-btn",
     },
-    "Invite",
+    shellText("invite.invite"),
   );
   headerInviteBtn.addEventListener("click", () => {
     void headerInviteCtrl.open();
@@ -201,27 +221,50 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     "button",
     {
       class: "sidebar-audit-btn",
-      title: "Open the audit log in the admin panel (opens in your browser)",
+      title: shellText("audit.hint"),
       "data-testid": "audit-log-btn",
     },
-    "Audit Log",
+    shellText("audit.label"),
   );
   auditBtn.addEventListener("click", () => {
     const host = api.getConfig().host ?? "";
     if (host === "") {
-      getToast()?.show("Not connected to a server", "error");
+      getToast()?.show(shellText("audit.notConnected"), "error");
       return;
     }
     void openAdminPanel(host, "audit").catch(() => {
-      getToast()?.show("Could not open the admin panel", "error");
+      getToast()?.show(shellText("audit.openFailed"), "error");
     });
   });
 
+  // The Moderation Center entry (B9-4, Q2): beside Audit Log, only with
+  // MODERATE_MEMBERS, and only once the Moderation Center ships.
+  let moderationBtn: HTMLButtonElement | null = null;
+  if (opts.destinations?.moderation !== undefined) {
+    const btn = createElement(
+      "button",
+      {
+        type: "button",
+        class: "sidebar-audit-btn",
+        title: navigationText("moderation.entryHint"),
+        "data-testid": "moderation-btn",
+      },
+      navigationText("moderation.title"),
+    );
+    btn.addEventListener("click", () => opts.onOpenView?.("moderation", btn));
+    unsubscribers.push(trackCurrentView(btn, "moderation"));
+    moderationBtn = btn;
+  }
+
   const syncAuditBtn = (): void => {
     auditBtn.style.display = canViewAuditLog() ? "" : "none";
+    if (moderationBtn !== null) {
+      moderationBtn.style.display = canModerateMembers() ? "" : "none";
+    }
   };
   syncAuditBtn();
   serverHeader.appendChild(auditBtn);
+  if (moderationBtn !== null) serverHeader.appendChild(moderationBtn);
   // The permission is derived from the signed-in user's role plus the role
   // list, so both have to be watched.
   unsubscribers.push(
@@ -241,7 +284,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   // Load per-server collapsed category state from localStorage, scoped to
   // the connected host (not the display name) — the same convention as
-  // setChannelMutesHost/setNsfwGateHost/setAudioVolumeHost. The display name
+  // setChannelMutesHost/setAudioVolumeHost. The display name
   // defaults to "OwnCord Server" on every unmodified install, so keying on
   // it would collapse two different servers' saved state onto one entry.
   loadCollapsedCategories(api.getConfig().host);
@@ -250,7 +293,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const unsubServerName = authStore.subscribeSelector(
     (s) => s.serverName,
     (name) => {
-      setText(serverNameEl, name ?? "Server");
+      setText(serverNameEl, name ?? shellText("common.serverFallback"));
     },
   );
   unsubscribers.push(unsubServerName);
@@ -260,7 +303,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     (s) => s.members,
     () => {
       const count = getOnlineMembers().length;
-      setText(serverOnlineEl, `${count} online`);
+      setText(serverOnlineEl, shellText("common.online", { count }));
     },
   );
   unsubscribers.push(unsubOnlineCount);
@@ -269,9 +312,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // Switchable content slot
   // ---------------------------------------------------------------------------
 
-  const contentSlot = createElement("div", {
-    style: "flex:1;display:flex;flex-direction:column;overflow:hidden;",
-  });
+  const contentSlot = createElement("div", { class: "sidebar-content" });
   sidebarWrapper.appendChild(contentSlot);
 
   // ---------------------------------------------------------------------------
@@ -295,7 +336,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
               modal.destroy?.();
               activeModal = null;
             } catch (err) {
-              const msg = err instanceof Error ? err.message : "Failed to create channel";
+              const msg = err instanceof Error ? err.message : shellText("channel.createFailed");
               getToast()?.show(msg, "error");
               // The modal's own catch re-enables its submit button and renders
               // the inline error, so the failure must propagate to it.
@@ -312,40 +353,54 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       },
       onEditChannel: (channel) => {
         if (activeModal !== null) return;
-        // Pre-fill from the store rather than from the sidebar's row: the store
-        // is what channel_update writes into, so the modal opens on the current
-        // values even if the row was rendered before the last edit landed.
-        const stored = channelsStore.getState().channels.get(channel.id);
-        const modal = createEditChannelModal({
-          channelId: channel.id,
-          channelName: channel.name,
-          channelType: channel.type,
-          channelTopic: stored?.topic ?? "",
-          channelCategory: stored?.category ?? "",
-          channelSlowMode: stored?.slowMode ?? 0,
-          channelNsfw: stored?.nsfw ?? false,
-          channelVoiceMaxUsers: stored?.voiceMaxUsers ?? 0,
-          channelVoiceMaxVideo: stored?.voiceMaxVideo ?? 0,
-          onSave: async (data) => {
-            try {
-              await api.adminUpdateChannel(channel.id, data);
-              modal.destroy?.();
-              activeModal = null;
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : "Failed to update channel";
-              getToast()?.show(msg, "error");
-              // Propagate so the modal re-enables its save button and shows
-              // the inline error.
-              throw err;
-            }
+        // The editor is admin-only and never on first paint, so it loads on
+        // demand. The placeholder holds the modal slot while it loads: a second
+        // click is refused, and a teardown in between drops the late modal.
+        const pending: MountableComponent = { mount: () => {} };
+        activeModal = pending;
+        void import("@components/EditChannelModal").then(
+          ({ createEditChannelModal }) => {
+            if (activeModal !== pending) return;
+            // Pre-fill from the store rather than from the sidebar's row: the store
+            // is what channel_update writes into, so the modal opens on the current
+            // values even if the row was rendered before the last edit landed.
+            const stored = channelsStore.getState().channels.get(channel.id);
+            const modal = createEditChannelModal({
+              channelId: channel.id,
+              channelName: channel.name,
+              channelType: channel.type,
+              channelTopic: stored?.topic ?? "",
+              channelCategory: stored?.category ?? "",
+              channelSlowMode: stored?.slowMode ?? 0,
+              channelNsfw: stored?.nsfw ?? false,
+              channelVoiceMaxUsers: stored?.voiceMaxUsers ?? 0,
+              channelVoiceMaxVideo: stored?.voiceMaxVideo ?? 0,
+              onSave: async (data) => {
+                try {
+                  await api.adminUpdateChannel(channel.id, data);
+                  modal.destroy?.();
+                  activeModal = null;
+                } catch (err) {
+                  const msg =
+                    err instanceof Error ? err.message : shellText("channel.updateFailed");
+                  getToast()?.show(msg, "error");
+                  // Propagate so the modal re-enables its save button and shows
+                  // the inline error.
+                  throw err;
+                }
+              },
+              onClose: () => {
+                modal.destroy?.();
+                activeModal = null;
+              },
+            });
+            activeModal = modal;
+            modal.mount(document.body);
           },
-          onClose: () => {
-            modal.destroy?.();
-            activeModal = null;
+          () => {
+            if (activeModal === pending) activeModal = null;
           },
-        });
-        activeModal = modal;
-        modal.mount(document.body);
+        );
       },
       onDeleteChannel: (channel) => {
         if (activeModal !== null) return;
@@ -358,7 +413,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
               modal.destroy?.();
               activeModal = null;
             } catch (err) {
-              const msg = err instanceof Error ? err.message : "Failed to delete channel";
+              const msg = err instanceof Error ? err.message : shellText("channel.deleteFailed");
               getToast()?.show(msg, "error");
               // Propagate so the modal re-enables its confirm button and shows
               // the inline error.
@@ -384,7 +439,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           reorders.map((r) => api.adminUpdateChannel(r.channelId, { position: r.newPosition })),
         ).then((results) => {
           if (results.some((r) => r.status === "rejected")) {
-            getToast()?.show("Failed to save channel order", "error");
+            getToast()?.show(shellText("channel.reorderFailed"), "error");
           }
         });
       },
@@ -395,12 +450,12 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           const result = await api.purgeMessages(channel.id, count);
           getToast()?.show(
             result.count === 0
-              ? `No messages to purge in #${channel.name}`
-              : `Purged ${result.count} message${result.count === 1 ? "" : "s"} from #${channel.name}`,
+              ? shellText("purge.none", { channel: channel.name })
+              : shellText("purge.done", { count: result.count, channel: channel.name }),
             result.count === 0 ? "info" : "success",
           );
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "Failed to purge messages";
+          const msg = err instanceof Error ? err.message : shellText("purge.failed");
           getToast()?.show(msg, "error");
         }
       },
@@ -467,7 +522,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       return;
     }
     setSidebarMode("channels");
-    if (channelBeforeDm !== null) {
+    if (channelBeforeDm !== null && channelsStore.getState().channels.has(channelBeforeDm)) {
       setActiveChannel(channelBeforeDm);
       return;
     }
@@ -492,7 +547,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   function closeOrLeaveDm(channelId: number): void {
     closeDmLocally(channelId, fallBackFromDm);
     void api.closeDm(channelId).catch(() => {
-      getToast()?.show("Could not leave that conversation", "error");
+      getToast()?.show(shellText("dm.leaveFailed"), "error");
     });
   }
 
@@ -501,17 +556,17 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
     if (dm === undefined || !dm.isGroup) return;
     const prompt = createPromptModal({
-      title: "Rename Group",
-      label: "Leave it empty to go back to listing the members.",
+      title: shellText("dm.renameGroup"),
+      label: shellText("dm.renameGroupHint"),
       initialValue: dm.name,
-      placeholder: "Group name",
+      placeholder: shellText("dm.groupNamePlaceholder"),
       maxLength: 100,
       testId: "dm-rename-input",
       onSubmit: (name) => {
         // The store is updated by the dm_channel_open the server fans out to
         // every participant, so the response is only used for the error path.
         void api.renameGroupDm(channelId, name).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : "Failed to rename group";
+          const msg = err instanceof Error ? err.message : shellText("dm.renameFailed");
           getToast()?.show(msg, "error");
         });
       },
@@ -522,16 +577,51 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     activePrompt = prompt;
   }
 
-  function buildDmSidebar(): MountableComponent {
-    const serverName = authStore.getState().serverName ?? "Server";
+  /**
+   * Leave DM mode for the channel the user came from. The DM sidebar's back
+   * arrow and a content view's Close/Escape (B9-4, Q2) both take this path.
+   */
+  function returnToChannel(): void {
+    setSidebarMode("channels");
+    const saved = channelBeforeDm;
+    channelBeforeDm = null;
+    if (saved !== null && channelsStore.getState().channels.has(saved)) {
+      setActiveChannel(saved);
+      return;
+    }
+    // No saved channel, or it was deleted. The former happens when DM mode
+    // was entered without going through selectDmConversation (e.g.
+    // SidebarDmSection's "View all messages" button, which does a bare
+    // setSidebarMode). If a real
+    // non-DM channel is already active, leave it alone instead of
+    // silently jumping to the first text channel in Map order.
+    const st = channelsStore.getState();
+    const current = st.activeChannelId !== null ? st.channels.get(st.activeChannelId) : undefined;
+    if (current !== undefined && current.type !== "dm") return;
+    for (const ch of channelsStore.getState().channels.values()) {
+      if (isTextLikeChannel(ch)) {
+        setActiveChannel(ch.id);
+        break;
+      }
+    }
+  }
+
+  /** Remember the channel on screen as the one returnToChannel goes back to. */
+  function rememberChannel(): void {
+    const st = channelsStore.getState();
+    const current = st.activeChannelId !== null ? st.channels.get(st.activeChannelId) : undefined;
+    if (current !== undefined && current.type !== "dm") channelBeforeDm = current.id;
+  }
+
+  function buildDmSidebar(): DmSidebar {
+    const serverName = authStore.getState().serverName ?? shellText("common.serverFallback");
     const activeChannelId = channelsStore.getState().activeChannelId;
-    const dmChannels = dmStore.getState().channels;
     const conversations = buildDmConversations(activeChannelId);
 
     return createDmSidebar({
       conversations,
       onSelectConversation: (channelId) => {
-        const dmChannel = dmChannels.find((c) => c.channelId === channelId);
+        const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
         if (dmChannel !== undefined) {
           selectDmConversation(dmChannel, dmDeps);
         }
@@ -546,29 +636,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       onNewDm: () => {
         showMemberPicker();
       },
-      onBack: () => {
-        setSidebarMode("channels");
-        if (channelBeforeDm !== null) {
-          setActiveChannel(channelBeforeDm);
-          channelBeforeDm = null;
-          return;
-        }
-        // No saved channel — this happens when DM mode was entered without
-        // going through selectDmConversation (e.g. SidebarDmSection's "View
-        // all messages" button, which does a bare setSidebarMode). If a real
-        // non-DM channel is already active, leave it alone instead of
-        // silently jumping to the first text channel in Map order.
-        const st = channelsStore.getState();
-        const current =
-          st.activeChannelId !== null ? st.channels.get(st.activeChannelId) : undefined;
-        if (current !== undefined && current.type !== "dm") return;
-        for (const ch of channelsStore.getState().channels.values()) {
-          if (isTextLikeChannel(ch)) {
-            setActiveChannel(ch.id);
-            break;
-          }
-        }
-      },
+      onBack: returnToChannel,
       serverName,
     });
   }
@@ -578,6 +646,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // ---------------------------------------------------------------------------
 
   function mountSidebarContent(mode: "channels" | "dms"): void {
+    const contentHadFocus = contentSlot.contains(document.activeElement);
     // Tear down the existing content
     if (activeSidebarContent !== null) {
       activeSidebarContent.destroy?.();
@@ -599,14 +668,13 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
     clearChildren(contentSlot);
 
-    const innerSlot = createElement("div", {
-      style: "flex:1;overflow:hidden;display:flex;flex-direction:column;",
-    });
+    const innerSlot = createElement("div", { class: "sidebar-content-inner" });
 
     if (mode === "channels") {
       // --- DM section (above channels, below server header) ---
       // --- DM section (above channels, below server header) ---
       const dmSectionResult = createSidebarDmSection({
+        pendingRequests: opts.destinations?.requests?.pending,
         onSelectDm: (dm) => {
           selectDmConversation(dm, dmDeps);
         },
@@ -628,12 +696,6 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       // Inject the channel sidebar content into contentSlot.
       contentSlot.appendChild(innerSlot);
 
-      // Hide the redundant channel-sidebar-header (server name + invite are now in the unified header)
-      const oldSidebarHeader = innerSlot.querySelector(".channel-sidebar-header");
-      if (oldSidebarHeader !== null) {
-        (oldSidebarHeader as HTMLElement).style.display = "none";
-      }
-
       // --- Member list (below DM section) ---
       // Same wiring lives in SidebarMemberSection; this used to be a private
       // copy of it, and a fix to one silently missed the other.
@@ -648,56 +710,55 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       channelModeExtras.push(memberSection.memberListComponent);
       channelModeUnsubs.push(memberSection.destroy);
     } else {
+      // "Message Requests (N)" at the top of DM mode (B9-4, Q2). N is the
+      // pending-request count and is never folded into unread.
+      const requests = opts.destinations?.requests;
+      if (requests !== undefined) {
+        const section = createElement("div", { class: "dm-requests-section" });
+        const entry = createElement("button", {
+          type: "button",
+          class: "sidebar-dm-view-all dm-requests-entry",
+          "data-testid": "dm-requests-entry",
+        });
+        const renderEntry = (): void => {
+          const count = requests.pending.get();
+          setText(
+            entry,
+            count > 0
+              ? navigationText("requests.entry", { count })
+              : navigationText("requests.title"),
+          );
+        };
+        renderEntry();
+        entry.addEventListener("click", () => opts.onOpenView?.("requests", entry));
+        channelModeUnsubs.push(requests.pending.subscribe(renderEntry));
+        channelModeUnsubs.push(trackCurrentView(entry, "requests"));
+        section.appendChild(entry);
+        contentSlot.appendChild(section);
+      }
+
       const dmSidebar = buildDmSidebar();
       dmSidebar.mount(innerSlot);
       activeSidebarContent = dmSidebar;
       contentSlot.appendChild(innerSlot);
+      if (contentHadFocus) {
+        contentSlot.querySelector<HTMLElement>("button, input, [tabindex='0']")?.focus();
+      }
 
       /**
        * Re-render the DM sidebar from fresh store data.
        *
-       * TODO(H16): This is an O(n) DOM thrash — it destroys and recreates the
-       * entire DM sidebar on every store change. For a small number of DMs this
-       * is acceptable, but should be optimized to diff/patch individual DM items
-       * once the DM list grows or store updates become more frequent.
-       *
-       * dmStore.channels changes far more often than "the DM list changed" —
-       * a DM partner's presence flip or a new message rebuilds it too — so the
-       * "Find a conversation" filter text and input focus (state that lives
-       * only in the destroyed subtree) are captured here and restored onto
-       * the freshly-mounted input rather than silently dropped (OC-0280).
+       * dmStore.channels changes far more often than "the DM list changed" — a
+       * DM partner's presence flip or a new message reaches it too. The sidebar
+       * updates its rows in place (keyed on the DM channel), so the "Find a
+       * conversation" filter text/focus and the list scroll position all
+       * survive an unrelated update (B9-21, replacing OC-0280's capture/restore
+       * of a full destroy+recreate).
        */
       function refreshDmSidebar(): void {
-        const oldSearchInput = contentSlot.querySelector<HTMLInputElement>(".dm-search");
-        const savedQuery = oldSearchInput?.value ?? "";
-        const hadFocus = oldSearchInput !== null && document.activeElement === oldSearchInput;
-        const savedCaret = oldSearchInput?.selectionStart ?? null;
-
-        if (activeSidebarContent !== null) {
-          activeSidebarContent.destroy?.();
-        }
-        clearChildren(contentSlot);
-        const freshSlot = createElement("div", {
-          style: "flex:1;overflow:hidden;display:flex;flex-direction:column;",
-        });
-        const freshDm = buildDmSidebar();
-        freshDm.mount(freshSlot);
-        activeSidebarContent = freshDm;
-        contentSlot.appendChild(freshSlot);
-
-        const newSearchInput = freshSlot.querySelector<HTMLInputElement>(".dm-search");
-        if (newSearchInput !== null) {
-          if (savedQuery !== "") {
-            newSearchInput.value = savedQuery;
-            newSearchInput.dispatchEvent(new Event("input"));
-          }
-          if (hadFocus) {
-            newSearchInput.focus();
-            if (savedCaret !== null) {
-              newSearchInput.setSelectionRange(savedCaret, savedCaret);
-            }
-          }
-        }
+        if (activeSidebarContent === null) return;
+        const conversations = buildDmConversations(channelsStore.getState().activeChannelId);
+        (activeSidebarContent as DmSidebar).update(conversations);
       }
 
       refreshDmSidebarRef = refreshDmSidebar;
@@ -773,8 +834,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
             name: p.name,
             host: p.host,
           }));
-        } catch {
-          // If profiles fail to load (e.g., outside Tauri), show empty list
+        } catch (err) {
+          log.warn("Failed to load profiles for quick-switch", err);
           profiles = [];
         }
 
@@ -788,13 +849,15 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
             closeQuickSwitch();
             // Store target for ConnectPage to auto-select after navigation
             sessionStorage.setItem("owncord:quick-switch-target", host);
-            // Trigger normal logout flow (clears auth -> ws disconnect -> navigate to connect)
-            clearAuth();
+            // Tear the session down (clears auth -> ws disconnect -> navigate
+            // to connect) but keep this server's saved sign-in (B7-13).
+            clearAuth("server_switch");
           },
           onAddServer: () => {
             closeQuickSwitch();
-            // Navigate to ConnectPage so the user can add a new server
-            clearAuth();
+            // Navigate to ConnectPage so the user can add a new server,
+            // keeping this server's saved sign-in like a switch (B7-13).
+            clearAuth("server_switch");
           },
           onClose: closeQuickSwitch,
         });
@@ -869,5 +932,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     children,
     unsubscribers,
     openQuickSwitch,
+    rememberChannel,
+    forgetChannel: () => {
+      channelBeforeDm = null;
+    },
+    returnToChannel,
   };
 }

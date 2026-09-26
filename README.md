@@ -1,6 +1,6 @@
 [![CI](https://github.com/J3vb/OwnCord/actions/workflows/ci.yml/badge.svg)](https://github.com/J3vb/OwnCord/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/J3vb/OwnCord?include_prereleases&label=release)](https://github.com/J3vb/OwnCord/releases/latest)
-![Status](https://img.shields.io/badge/status-alpha-orange)
+![Status](https://img.shields.io/badge/status-beta-orange)
 ![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)
 ![Tauri](https://img.shields.io/badge/tauri-v2-24C8DB?logo=tauri&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20x64%20%7C%20Linux%20x64%20%7C%20Linux%20ARM64-informational)
@@ -10,7 +10,7 @@
 
 A self-hosted chat app I build for me and my friends — text channels, voice and video, and a server you actually own.
 
-> **Alpha, and a hobby project.**
+> **Beta, and a hobby project.**
 > This is something I build for fun and run for a small group of friends. It isn't a product, it comes with no support commitment, and it isn't production-ready. Expect rough edges, rapid changes, and the occasional breaking change.
 >
 > Don't use it for anything sensitive.
@@ -36,18 +36,21 @@ That keeps iteration fast, and it also means behaviour can change quickly betwee
 
 | Area               | Status                                                                                                                          |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| Core chat flow     | Working in alpha                                                                                                                |
-| Voice/video        | Working in alpha                                                                                                                |
-| Admin panel        | Working in alpha                                                                                                                |
+| Core chat flow     | Working in beta                                                                                                                 |
+| Voice/video        | Working in beta                                                                                                                 |
+| Admin panel        | Working in beta                                                                                                                 |
 | Security hardening | Ongoing review passes; findings and their statuses are tracked in the dated audits in [docs/](docs/) (see the Docs Index below) |
 
 ## Platform Support (Current Releases)
 
-| Component      | Windows x64          | Linux x64                   | Linux ARM64          |
-| -------------- | -------------------- | --------------------------- | -------------------- |
-| Server binary  | Yes                  | Yes                         | Not yet              |
-| Desktop client | Yes (NSIS installer) | Yes (AppImage, .deb)        | Yes (AppImage, .deb) |
-| Docker server  | N/A                  | Build from source (compose) | Not yet              |
+| Component      | Windows x64          | Windows ARM64        | Linux x64              | Linux ARM64            |
+| -------------- | -------------------- | -------------------- | ---------------------- | ---------------------- |
+| Server binary  | Yes                  | Yes                  | Yes                    | Yes                    |
+| Desktop client | Yes (NSIS installer) | Yes (NSIS installer) | Yes (AppImage, .deb)   | Yes (AppImage, .deb)   |
+| Docker server  | N/A                  | N/A                  | Yes (multi-arch image) | Yes (multi-arch image) |
+
+Every server asset and the Docker image ship for both `amd64` and `arm64`
+(`ghcr.io/j3vb/owncord-server` is one multi-architecture tag).
 
 ## Start Here
 
@@ -60,20 +63,27 @@ That keeps iteration fast, and it also means behaviour can change quickly betwee
 
 ### Option A: Prebuilt binaries
 
-1. Download assets from [Releases](https://github.com/J3vb/OwnCord/releases) (binaries, checksums, signatures, and a full source snapshot per release).
+1. Download assets from [Releases](https://github.com/J3vb/OwnCord/releases) (binaries, checksums, signatures, SBOMs, a signed provenance attestation and a full source snapshot per release).
 2. Run the server binary:
-   - Windows: `chatserver.exe`
-   - Linux: `./chatserver`
-3. Open `https://localhost:8443/admin` and complete the setup wizard — it creates your Owner account and configures the server for you (settings are saved to `config.yaml` automatically).
+   - Windows: `chatserver.exe` (x64) or `chatserver-windows-arm64.exe` (ARM64)
+   - Linux: `./chatserver`, from the `amd64` or `arm64` archive
+3. Open `https://localhost:8443/admin` and complete the setup wizard, entering the setup token from the server's start-up output — it creates your Owner account and configures the server for you (settings are saved to `config.yaml` automatically).
 4. Generate invite codes in the admin panel and share them with friends.
 
 ### Option B: Docker (Linux server)
+
+The compose file and the `.example` files it needs are **not release assets** —
+take them from the source snapshot attached to a [release](https://github.com/J3vb/OwnCord/releases)
+(or the repository's `Server/` directory).
 
 ```bash
 cd Server
 cp .env.example .env
 cp livekit.yaml.example livekit.yaml
-# Edit both files before starting
+cp config.yaml.example config.yaml
+# Edit .env and livekit.yaml before starting, and in config.yaml set
+# voice.livekit_url to `ws://livekit:7880` (the copied default is localhost)
+# and voice.auto_download_livekit to false (LiveKit runs as its own container)
 docker compose up -d
 ```
 
@@ -83,12 +93,20 @@ The client uses TOFU (Trust On First Use) for self-signed certificates: it promp
 
 ## What OwnCord Already Has
 
-- Real-time channels and direct messages over WebSocket
-- Voice/video channels via LiveKit — the LiveKit server binary is downloaded and managed for you
-- Invite-only registration and role-based permissions
-- Web admin panel with logs, backups, and update tooling
-- File uploads and inline media rendering
-- TOTP 2FA support and API rate limiting
+- Real-time channels and direct messages over WebSocket, with durable history
+  and per-channel retention
+- Voice/video channels via LiveKit — the LiveKit server binary is downloaded and
+  managed for you, with end-to-end-encrypted media and key verification
+- Registration modes (`closed` / `invite` / `approval` / `open`), invite codes,
+  and role-based permissions
+- Moderation: reports, appeals, warnings and timeouts, the Moderation Center,
+  Message Requests and NSFW handling
+- Web admin panel with logs, backups, retention controls, an audit log and
+  update tooling
+- File uploads, inline media rendering and an external-content consent gate
+- TOTP 2FA with emergency recovery codes, a rotating local recovery kit for
+  account recovery, and API rate limiting
+- Multi-device sessions; every credential is stored in the OS keyring
 - Desktop client auto-update with signature verification
 - WASM plugin system (slash commands; sandboxed, default-disabled — enable via
   `plugins.enabled` and build with `-tags wazero`)
@@ -130,7 +148,8 @@ Two main components:
 ### Prerequisites
 
 - Go 1.26+
-- Node.js 24+ (see `Client/.nvmrc`)
+- Node.js 26.x and npm 11.x (see `Client/.nvmrc` — a different major fails
+  `npm ci`)
 - Rust stable (client builds)
 
 ### Build from source
@@ -184,7 +203,7 @@ On first run, the server generates `config.yaml` and a local `data/` directory:
 ```text
 data/
 ├── chatserver.db
-├── certs/
+├── cert.pem        # self-signed TLS certificate (key.pem beside it)
 ├── uploads/
 └── backups/
 ```
@@ -225,6 +244,13 @@ or a plan. The most-used entries:
 - [docs/architecture/ux/](docs/architecture/ux/README.md) — client UX specification (target-state flows, per-view states, event→reaction maps)
 - [docs/api.md](docs/api.md), [docs/protocol.md](docs/protocol.md), [docs/schema.md](docs/schema.md), [docs/server-configuration.md](docs/server-configuration.md) — reference contracts
 - [docs/plans/README.md](docs/plans/README.md) — plan index; records each plan's state and is the authority over a plan's own header
+
+Condensed context files for AI coding agents and new contributors, at the
+repository root (each lists its sources; on conflict the code wins, then those
+sources): [AGENTS.md](AGENTS.md), [PRD.md](PRD.md),
+[ARCHITECTURE.md](ARCHITECTURE.md), [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md),
+[CODE_STYLE.md](CODE_STYLE.md), [DATABASE.md](DATABASE.md), [API.md](API.md),
+[SECURITY.md](SECURITY.md).
 
 Audits are dated snapshots and are not maintained after the fact — read them as
 history. [docs/README.md](docs/README.md#audits--dated-not-maintained) lists all

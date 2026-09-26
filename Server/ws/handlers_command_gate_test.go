@@ -9,6 +9,8 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"slices"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -72,7 +74,7 @@ func newCommandTestDeps(t *testing.T, res *plugin.CommandResult) (deps PluginDep
 // request's req_id, and reaches nobody else.
 func TestHandleChatCommandV2_ReplyIsEphemeral(t *testing.T) {
 	deps, ownerID, _, chID := newCommandTestDeps(t, &plugin.CommandResult{Reply: "pong"})
-	cmd := ChatCommandCmd{userID: ownerID, channelID: chID, command: "/ping", reqID: "req-7"}
+	cmd := ChatCommandCmd{userID: ownerID, ChannelID: chID, Command: "/ping", ReqID: "req-7"}
 
 	result := handleChatCommandV2(context.Background(), cmd, ClientInfo{UserID: ownerID}, deps)
 
@@ -107,7 +109,7 @@ func TestHandleChatCommandV2_ReplyIsEphemeral(t *testing.T) {
 // invoking channel.
 func TestHandleChatCommandV2_BroadcastFansOutWhenAllowed(t *testing.T) {
 	deps, ownerID, _, chID := newCommandTestDeps(t, &plugin.CommandResult{Broadcast: "rolled a 6"})
-	cmd := ChatCommandCmd{userID: ownerID, channelID: chID, command: "/roll", reqID: "req-8"}
+	cmd := ChatCommandCmd{userID: ownerID, ChannelID: chID, Command: "/roll", ReqID: "req-8"}
 
 	result := handleChatCommandV2(context.Background(), cmd, ClientInfo{UserID: ownerID}, deps)
 
@@ -117,9 +119,12 @@ func TestHandleChatCommandV2_BroadcastFansOutWhenAllowed(t *testing.T) {
 	if len(result.Events) != 1 {
 		t.Fatalf("expected 1 broadcast event, got %d", len(result.Events))
 	}
-	ev, ok := result.Events[0].(PluginBroadcastEvent)
+	ev, ok := result.Events[0].(channelEvt)
 	if !ok {
-		t.Fatalf("expected PluginBroadcastEvent, got %T", result.Events[0])
+		t.Fatalf("expected channelEvt, got %T", result.Events[0])
+	}
+	if ev.evType != MsgTypePluginBroadcast {
+		t.Errorf("event type = %q, want %q", ev.evType, MsgTypePluginBroadcast)
 	}
 	if ev.ChannelID() != chID {
 		t.Errorf("event channel = %d, want %d", ev.ChannelID(), chID)
@@ -147,16 +152,80 @@ func TestHandleChatCommandV2_BroadcastFansOutWhenAllowed(t *testing.T) {
 	}
 }
 
+// TestHandleChatCommandV2_DMBroadcastExcludesUntrustedRecipient is B5-6's
+// Codex P1-2 fix: a plugin command invoked inside a one-to-one DM must use
+// the sender-aware DM audience (dmEvt), not the plain per-channel-topic
+// channelEvt — channel_focus subscribes any DM participant to the topic
+// regardless of message-request trust, so the plain shape would leak the
+// broadcast to a recipient who has not accepted.
+func TestHandleChatCommandV2_DMBroadcastExcludesUntrustedRecipient(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	ctx := context.Background()
+	senderID, err := database.CreateUser(ctx, "dmcmd-sender", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser sender: %v", err)
+	}
+	recipientID, err := database.CreateUser(ctx, "dmcmd-recipient", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser recipient: %v", err)
+	}
+	ch, _, err := database.GetOrCreateDMChannel(ctx, senderID, recipientID)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+
+	svc := service.New(database, auth.NewRateLimiter())
+	deps := PluginDeps{
+		Registry: func() CommandDispatcher {
+			return stubDispatcher{result: &plugin.CommandResult{Broadcast: "rolled a 6"}, handled: true}
+		},
+		MessageSvc: svc.Messages,
+	}
+	cmd := ChatCommandCmd{userID: senderID, ChannelID: ch.ID, Command: "/roll", ReqID: "req-dm-cmd"}
+
+	result := handleChatCommandV2(ctx, cmd, ClientInfo{UserID: senderID}, deps)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if len(result.Events) != 1 {
+		t.Fatalf("expected 1 broadcast event, got %d", len(result.Events))
+	}
+	ev, ok := result.Events[0].(dmEvt)
+	if !ok {
+		t.Fatalf("expected dmEvt, got %T", result.Events[0])
+	}
+	if ev.evType != MsgTypePluginBroadcast {
+		t.Errorf("event type = %q, want %q", ev.evType, MsgTypePluginBroadcast)
+	}
+	participants := ev.ParticipantIDs()
+	if slices.Contains(participants, recipientID) {
+		t.Errorf("participants %v include the untrusted recipient %d", participants, recipientID)
+	}
+	if !slices.Contains(participants, senderID) {
+		t.Errorf("participants %v must include the sender %d", participants, senderID)
+	}
+}
+
 // The CanPost gate: a user whose role cannot post gets FORBIDDEN and nothing
 // reaches the channel — even though the plugin returned a broadcast. The reply
 // is dropped with it (the denial is the security signal; see handlers_command.go).
 func TestHandleChatCommandV2_BroadcastDeniedWithoutPostPermission(t *testing.T) {
 	deps, _, mutedID, chID := newCommandTestDeps(t, &plugin.CommandResult{Reply: "ok", Broadcast: "rolled a 6"})
-	cmd := ChatCommandCmd{userID: mutedID, channelID: chID, command: "/roll", reqID: "req-9"}
+	cmd := ChatCommandCmd{userID: mutedID, ChannelID: chID, Command: "/roll", ReqID: "req-9"}
 
 	result := handleChatCommandV2(context.Background(), cmd, ClientInfo{UserID: mutedID}, deps)
 
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T (%v)", result.Error, result.Error)
 	}
@@ -175,11 +244,12 @@ func TestHandleChatCommandV2_BroadcastDeniedWithoutPostPermission(t *testing.T) 
 // FORBIDDEN — CanPost's missing-channel branch.
 func TestHandleChatCommandV2_BroadcastUnknownChannel(t *testing.T) {
 	deps, ownerID, _, _ := newCommandTestDeps(t, &plugin.CommandResult{Broadcast: "hi"})
-	cmd := ChatCommandCmd{userID: ownerID, channelID: 424242, command: "/roll"}
+	cmd := ChatCommandCmd{userID: ownerID, ChannelID: 424242, Command: "/roll"}
 
 	result := handleChatCommandV2(context.Background(), cmd, ClientInfo{UserID: ownerID}, deps)
 
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T (%v)", result.Error, result.Error)
 	}

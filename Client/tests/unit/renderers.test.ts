@@ -13,7 +13,6 @@ import {
   renderMessageContent,
   getUserRole,
   roleColorVar,
-  GROUP_THRESHOLD_MS,
   setServerHost,
 } from "../../src/components/message-list/renderers";
 import type { Message } from "../../src/stores/messages.store";
@@ -25,6 +24,41 @@ import {
   clearReactionUsersCache,
   setReactionUsersFetcher,
 } from "../../src/components/message-list/reaction-tooltip";
+import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
+import { expectConsole } from "../helpers/console";
+import {
+  clearExternalImageCache,
+  closeActiveLightbox,
+} from "../../src/components/message-list/attachments";
+
+// B7-16: every external image and oEmbed title comes from the native broker.
+const { previewMock, imageMock } = vi.hoisted(() => ({
+  previewMock: vi.fn(),
+  imageMock: vi.fn(),
+}));
+// B9-8: this suite exercises content the viewer has already consented to;
+// the consent gate itself is proven in src/features/content-consent/external.test.ts.
+vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
+  externalAllowed: () => true,
+}));
+
+vi.mock("../../src/platform/desktop/externalContent", () => ({
+  externalContent: { preview: previewMock, image: imageMock },
+}));
+
+let blobCounter = 0;
+const createObjectURLMock = vi.fn(() => `blob:test/${++blobCounter}`);
+
+/** Wait until `count` inline images carry a broker blob: src, and return them. */
+async function brokerImages(count: number): Promise<HTMLImageElement[]> {
+  let imgs: HTMLImageElement[] = [];
+  await vi.waitFor(() => {
+    imgs = [...document.querySelectorAll<HTMLImageElement>('.msg-image img[src^="blob:"]')];
+    expect(imgs.length).toBe(count);
+  });
+  return imgs;
+}
 
 function resetStores(): void {
   membersStore.setState(() => ({
@@ -95,11 +129,24 @@ describe("renderers", () => {
     // jsdom sets window.location.origin to "null", which breaks new URL(relativeUrl, origin).
     // Set a server host so resolveServerUrl converts relative paths to absolute URLs before isSafeUrl parses them.
     setServerHost("localhost:8080");
+    URL.createObjectURL = createObjectURLMock;
+    URL.revokeObjectURL = vi.fn();
+    imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/png" }) });
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: { title: null, description: null, siteName: null, image: null },
+    });
+    clearExternalImageCache();
+    imageMock.mockClear();
+    previewMock.mockClear();
+    createObjectURLMock.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
 
   afterEach(() => {
+    // Close a lightbox a test left open, releasing its document listeners.
+    closeActiveLightbox();
     setServerHost("");
     container.remove();
   });
@@ -122,11 +169,15 @@ describe("renderers", () => {
 
   describe("isSameDay", () => {
     it("returns true for timestamps on the same day", () => {
-      expect(isSameDay("2025-01-15T08:00:00Z", "2025-01-15T20:00:00Z")).toBe(true);
+      expect(
+        isSameDay(new Date(2025, 0, 15, 8).toISOString(), new Date(2025, 0, 15, 20).toISOString()),
+      ).toBe(true);
     });
 
     it("returns false for timestamps on different days", () => {
-      expect(isSameDay("2025-01-15T08:00:00Z", "2025-01-16T08:00:00Z")).toBe(false);
+      expect(
+        isSameDay(new Date(2025, 0, 15, 8).toISOString(), new Date(2025, 0, 16, 8).toISOString()),
+      ).toBe(false);
     });
   });
 
@@ -225,6 +276,36 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("offers Report on someone else's message only, and passes its id (B9-10)", () => {
+      const onReportClick = vi.fn();
+      const ac = new AbortController();
+      const theirs = renderMessage(
+        makeMessage({ id: 5, user: { id: 11, username: "Bob", avatar: null } }),
+        false,
+        [],
+        makeOpts({ onReportClick }),
+        ac.signal,
+      );
+      const btn = theirs.querySelector<HTMLButtonElement>("[data-testid='msg-report-5']");
+      expect(btn?.getAttribute("aria-label")).toBe("Report message");
+      expect(btn?.getAttribute("aria-haspopup")).toBe("dialog");
+      btn?.click();
+      expect(onReportClick).toHaveBeenCalledWith(5);
+
+      const mine = renderMessage(makeMessage(), false, [], makeOpts({ onReportClick }), ac.signal);
+      expect(mine.querySelector("[data-testid^='msg-report-']")).toBeNull();
+      // No handler, no dead button.
+      const unwired = renderMessage(
+        makeMessage({ id: 6, user: { id: 11, username: "Bob", avatar: null } }),
+        false,
+        [],
+        makeOpts(),
+        ac.signal,
+      );
+      expect(unwired.querySelector("[data-testid^='msg-report-']")).toBeNull();
+      ac.abort();
+    });
+
     it("renders grouped messages with grouped class", () => {
       const msg = makeMessage();
       const ac = new AbortController();
@@ -290,7 +371,28 @@ describe("renderers", () => {
 
       expect(el.classList.contains("failed")).toBe(true);
       expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
-        "Connection problem — message not sent",
+        "Connection problem — delivery not confirmed",
+      );
+
+      ac.abort();
+    });
+
+    it("says an unsaved offline message is lost at restart, not merely unconfirmed", () => {
+      // The row is failed and never handed to a socket: retrying is the only
+      // way to get the text out, so the reason must not read like the ordinary
+      // offline case where the saved copy still recovers it.
+      const msg = makeMessage({
+        status: "failed",
+        correlationId: "c3",
+        id: 0,
+        errorCode: "OFFLINE_NO_RECOVERY",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
+        "Could not save this message — retry now or it is lost on restart",
       );
 
       ac.abort();
@@ -475,7 +577,7 @@ describe("renderers", () => {
       setReactionUsersFetcher(null);
     });
 
-    it("renders attachments for image types", () => {
+    it("renders attachments for image types", async () => {
       const msg = makeMessage({
         attachments: [
           {
@@ -490,6 +592,9 @@ describe("renderers", () => {
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
+      await vi.waitFor(() => {
+        expectConsole("error", "[attachments] Failed to fetch attachment image");
+      });
 
       expect(container.querySelector(".msg-image")).not.toBeNull();
 
@@ -587,7 +692,7 @@ describe("renderers", () => {
     const imageExtensions = [".gif", ".png", ".jpg", ".jpeg", ".webp"] as const;
 
     for (const ext of imageExtensions) {
-      it(`produces a .msg-image embed for a ${ext} URL`, () => {
+      it(`produces a .msg-image embed for a ${ext} URL`, async () => {
         const url = `https://example.com/image${ext}`;
         const msg = makeMessage({ content: url });
         const ac = new AbortController();
@@ -595,12 +700,12 @@ describe("renderers", () => {
         container.appendChild(el);
 
         // renderUrlEmbeds calls isDirectImageUrl → renderInlineImage
-        // which produces a div.msg-image inside the message element
-        const imageEmbeds = container.querySelectorAll(".msg-image");
-        // There may be multiple .msg-image (attachments share the class),
-        // but at least one must exist and have an <img src="...ext">
-        const imgEl = container.querySelector(`.msg-image img[src="${url}"]`);
-        expect(imgEl).not.toBeNull();
+        // which produces a div.msg-image inside the message element.
+        // The image bytes come from the broker for exactly this URL and land
+        // on the embed's <img> as a blob: URL.
+        expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url });
+        const [imgEl] = await brokerImages(1);
+        expect(container.contains(imgEl!)).toBe(true);
 
         ac.abort();
       });
@@ -616,6 +721,7 @@ describe("renderers", () => {
       // A generic link card (.msg-embed-link) should appear instead
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
       expect(container.querySelector(".msg-embed-link")).not.toBeNull();
+      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
 
       ac.abort();
     });
@@ -629,11 +735,12 @@ describe("renderers", () => {
       container.appendChild(el);
 
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
 
       ac.abort();
     });
 
-    it("matches image extensions case-insensitively", () => {
+    it("matches image extensions case-insensitively", async () => {
       // Uppercase extensions must also be detected
       const url = "https://example.com/photo.PNG";
       const msg = makeMessage({ content: url });
@@ -641,8 +748,8 @@ describe("renderers", () => {
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      const imgEl = container.querySelector(`.msg-image img[src="${url}"]`);
-      expect(imgEl).not.toBeNull();
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url });
+      await brokerImages(1);
 
       ac.abort();
     });
@@ -657,6 +764,7 @@ describe("renderers", () => {
       // YouTube gets a player embed, not a .msg-image with that src
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
       expect(container.querySelector(".msg-embed-youtube")).not.toBeNull();
+      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
 
       ac.abort();
     });
@@ -667,7 +775,7 @@ describe("renderers", () => {
   // ---------------------------------------------------------------------------
 
   describe("renderInlineImage — img element and lightbox behaviour", () => {
-    it("creates an img element with the correct src attribute", () => {
+    it("creates an img element with the correct src attribute", async () => {
       const url = "https://example.com/photo.jpg";
       const msg = makeMessage({ content: url });
       const ac = new AbortController();
@@ -676,7 +784,11 @@ describe("renderers", () => {
 
       const img = container.querySelector(`.msg-image img`) as HTMLImageElement | null;
       expect(img).not.toBeNull();
-      expect(img!.getAttribute("src")).toBe(url);
+      // Never the remote URL: the broker fetches it, the img shows its blob.
+      expect(img!.getAttribute("src")).not.toBe(url);
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url });
+      await vi.waitFor(() => expect(img!.getAttribute("src")).toMatch(/^blob:/));
+      expect(createObjectURLMock).toHaveReturnedWith(img!.getAttribute("src"));
 
       ac.abort();
     });
@@ -695,15 +807,15 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("appends a lightbox overlay to document.body on img click", () => {
+    it("appends a lightbox overlay to document.body on img click", async () => {
       const url = "https://example.com/photo.png";
       const msg = makeMessage({ content: url });
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      const img = container.querySelector(`.msg-image img[src="${url}"]`) as HTMLElement | null;
-      expect(img).not.toBeNull();
+      const [img] = await brokerImages(1);
+      expect(img).toBeDefined();
 
       // No lightbox before click
       expect(document.body.querySelector(".image-lightbox")).toBeNull();
@@ -719,14 +831,14 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("lightbox contains a close button that removes the overlay", () => {
+    it("lightbox contains a close button that removes the overlay", async () => {
       const url = "https://example.com/photo.webp";
       const msg = makeMessage({ content: url });
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      const img = container.querySelector(`.msg-image img[src="${url}"]`) as HTMLElement | null;
+      const [img] = await brokerImages(1);
       img!.click();
 
       const lightbox = document.body.querySelector(".image-lightbox")!;
@@ -741,34 +853,35 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("lightbox contains an img element with the same src as the inline image", () => {
+    it("lightbox contains an img element with the same src as the inline image", async () => {
       const url = "https://example.com/pic.jpeg";
       const msg = makeMessage({ content: url });
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      const img = container.querySelector(`.msg-image img[src="${url}"]`) as HTMLElement | null;
+      const [img] = await brokerImages(1);
       img!.click();
 
       const lightbox = document.body.querySelector(".image-lightbox")!;
       const lbImg = lightbox.querySelector("img") as HTMLImageElement | null;
       expect(lbImg).not.toBeNull();
-      expect(lbImg!.getAttribute("src")).toBe(url);
+      expect(lbImg!.getAttribute("src")).toBe(img!.getAttribute("src"));
+      expect(lbImg!.getAttribute("src")).toMatch(/^blob:/);
 
       // Clean up
       lightbox.remove();
       ac.abort();
     });
 
-    it("closes lightbox when Escape key is pressed", () => {
+    it("closes lightbox when Escape key is pressed", async () => {
       const url = "https://example.com/escape-test.png";
       const msg = makeMessage({ content: url });
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      const img = container.querySelector(`.msg-image img[src="${url}"]`) as HTMLElement | null;
+      const [img] = await brokerImages(1);
       img!.click();
 
       expect(document.body.querySelector(".image-lightbox")).not.toBeNull();
@@ -1224,23 +1337,18 @@ describe("renderers", () => {
   });
 
   // Probe once, before the suite is even registered: `process.env.TZ`
-  // mutations only reach Date's local-time engine on the main thread/forks
-  // pool. A worker-thread pool (e.g. Stryker's vitest runner) spawns an
-  // isolate that never observes the change, even though the assignment
-  // itself succeeds. Skip the whole block there instead of failing on a pool
-  // limitation nothing in this file can fix; `npx vitest run` (forks, the
-  // documented way to run this suite) always honors the pin and runs it for
-  // real.
-  const dstProbeOriginalTZ = process.env.TZ;
-  process.env.TZ = "America/New_York";
-  const dstTZPinHonored =
-    new Date(2026, 0, 15).getTimezoneOffset() === 300 &&
-    new Date(2026, 6, 15).getTimezoneOffset() === 240;
-  if (dstProbeOriginalTZ === undefined) {
-    delete process.env.TZ;
-  } else {
-    process.env.TZ = dstProbeOriginalTZ;
-  }
+  // mutations only reach Date's local-time engine on a process main thread.
+  // A worker-thread pool spawns an isolate that never observes the change,
+  // even though the assignment itself succeeds — which used to skip this
+  // block silently. vitest.config.ts pins `pool: "forks"` and the probe now
+  // throws instead of skipping, except under the one sanctioned opt-out
+  // (Stryker, which hard-codes a thread pool). See helpers/tz-pin.ts.
+  const dstTZPinHonored = tzPinHonored(
+    "America/New_York",
+    () =>
+      new Date(2026, 0, 15).getTimezoneOffset() === 300 &&
+      new Date(2026, 6, 15).getTimezoneOffset() === 240,
+  );
 
   describe.skipIf(!dstTZPinHonored)("formatMessageTimestamp — DST day boundaries", () => {
     // These cases only exist in a DST-observing zone, so pin one for the
@@ -1253,13 +1361,12 @@ describe("renderers", () => {
       vi.useFakeTimers();
     });
 
+    // restoreTZ, not a bare delete: deleting TZ leaves Date pinned to New York
+    // for the rest of this forked worker's life, and vitest reuses a worker
+    // across test files. See helpers/tz-pin.ts.
     afterEach(() => {
       vi.useRealTimers();
-      if (originalTZ === undefined) {
-        delete process.env.TZ;
-      } else {
-        process.env.TZ = originalTZ;
-      }
+      restoreTZ(originalTZ);
     });
 
     function assertEasternTime(): void {
@@ -1581,7 +1688,7 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("does not duplicate embeds for the same URL appearing twice in content", () => {
+    it("does not duplicate embeds for the same URL appearing twice in content", async () => {
       const url = "https://example.com/img.gif";
       const msg = makeMessage({ content: `${url} and again ${url}` });
       const ac = new AbortController();
@@ -1589,8 +1696,10 @@ describe("renderers", () => {
       container.appendChild(el);
 
       // URL dedup inside renderUrlEmbeds — only one img embed produced
-      const imgEmbeds = container.querySelectorAll(`.msg-image img[src="${url}"]`);
-      expect(imgEmbeds.length).toBe(1);
+      expect(container.querySelectorAll(".msg-image img").length).toBe(1);
+      expect(imageMock).toHaveBeenCalledTimes(1);
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url });
+      await brokerImages(1);
 
       ac.abort();
     });
@@ -1604,6 +1713,7 @@ describe("renderers", () => {
 
       // URL inside a code block must not produce an embed
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
 
       ac.abort();
     });
@@ -1616,11 +1726,12 @@ describe("renderers", () => {
       container.appendChild(el);
 
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
 
       ac.abort();
     });
 
-    it("renders multiple different image URLs as separate .msg-image embeds", () => {
+    it("renders multiple different image URLs as separate .msg-image embeds", async () => {
       const url1 = "https://example.com/a.png";
       const url2 = "https://example.com/b.gif";
       const msg = makeMessage({ content: `${url1} and ${url2}` });
@@ -1628,8 +1739,10 @@ describe("renderers", () => {
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      expect(container.querySelector(`img[src="${url1}"]`)).not.toBeNull();
-      expect(container.querySelector(`img[src="${url2}"]`)).not.toBeNull();
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url: url1 });
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url: url2 });
+      const [a, b] = await brokerImages(2);
+      expect(a!.getAttribute("src")).not.toBe(b!.getAttribute("src"));
 
       ac.abort();
     });
@@ -1643,6 +1756,7 @@ describe("renderers", () => {
 
       expect(container.querySelector(".msg-embed-link")).not.toBeNull();
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
 
       ac.abort();
     });

@@ -48,24 +48,24 @@ func TestCommandTypeAndUserID(t *testing.T) {
 		wantUID  int64
 	}{
 		{"PingCmd", PingCmd{userID: 1}, MsgTypePing, 1},
-		{"ChatSendCmd", ChatSendCmd{userID: 2, channelID: 10}, MsgTypeChatSend, 2},
-		{"ChatEditCmd", ChatEditCmd{userID: 3, messageID: 20}, MsgTypeChatEdit, 3},
-		{"ChatDeleteCmd", ChatDeleteCmd{userID: 4, messageID: 30}, MsgTypeChatDelete, 4},
-		{"TypingStartCmd", TypingStartCmd{userID: 5, channelID: 11}, MsgTypeTypingStart, 5},
-		{"PresenceUpdateCmd", PresenceUpdateCmd{userID: 6, status: "online"}, MsgTypePresenceUpdate, 6},
-		{"ChannelFocusCmd", ChannelFocusCmd{userID: 7, channelID: 12}, MsgTypeChannelFocus, 7},
-		{"MarkReadCmd", MarkReadCmd{userID: 7, channelID: 12}, MsgTypeMarkRead, 7},
-		{"ReactionAddCmd", ReactionAddCmd{userID: 8, messageID: 40, emoji: "👍"}, MsgTypeReactionAdd, 8},
-		{"ReactionRemoveCmd", ReactionRemoveCmd{userID: 9, messageID: 41, emoji: "👎"}, MsgTypeReactionRemove, 9},
-		{"VoiceJoinCmd", VoiceJoinCmd{userID: 10, channelID: 13}, MsgTypeVoiceJoin, 10},
+		{"ChatSendCmd", ChatSendCmd{userID: 2, ChannelID: 10}, MsgTypeChatSend, 2},
+		{"ChatEditCmd", ChatEditCmd{userID: 3, MessageID: 20}, MsgTypeChatEdit, 3},
+		{"ChatDeleteCmd", ChatDeleteCmd{userID: 4, MessageID: 30}, MsgTypeChatDelete, 4},
+		{"TypingStartCmd", TypingStartCmd{userID: 5, ChannelID: 11}, MsgTypeTypingStart, 5},
+		{"PresenceUpdateCmd", PresenceUpdateCmd{userID: 6, Status: "online"}, MsgTypePresenceUpdate, 6},
+		{"ChannelFocusCmd", ChannelFocusCmd{userID: 7, ChannelID: 12}, MsgTypeChannelFocus, 7},
+		{"MarkReadCmd", MarkReadCmd{userID: 7, ChannelID: 12}, MsgTypeMarkRead, 7},
+		{"ReactionAddCmd", ReactionAddCmd{userID: 8, MessageID: 40, Emoji: "👍"}, MsgTypeReactionAdd, 8},
+		{"ReactionRemoveCmd", ReactionRemoveCmd{userID: 9, MessageID: 41, Emoji: "👎"}, MsgTypeReactionRemove, 9},
+		{"VoiceJoinCmd", VoiceJoinCmd{userID: 10, ChannelID: 13}, MsgTypeVoiceJoin, 10},
 		{"VoiceLeaveCmd", VoiceLeaveCmd{userID: 11}, MsgTypeVoiceLeave, 11},
 		{"VoiceTokenRefreshCmd", VoiceTokenRefreshCmd{userID: 12}, MsgTypeVoiceTokenRefresh, 12},
-		{"VoiceMuteCmd", VoiceMuteCmd{userID: 13, muted: true}, MsgTypeVoiceMute, 13},
-		{"VoiceDeafenCmd", VoiceDeafenCmd{userID: 14, deafened: true}, MsgTypeVoiceDeafen, 14},
-		{"VoiceCameraCmd", VoiceCameraCmd{userID: 15, enabled: true}, MsgTypeVoiceCamera, 15},
-		{"VoiceScreenshareCmd", VoiceScreenshareCmd{userID: 16, enabled: true}, MsgTypeVoiceScreenshare, 16},
-		{"VoiceE2EEAnnounceCmd", VoiceE2EEAnnounceCmd{userID: 17, publicKey: "abc"}, MsgTypeVoiceE2EEAnnounce, 17},
-		{"VoiceE2EEOfferCmd", VoiceE2EEOfferCmd{userID: 18, targetUserID: 99}, MsgTypeVoiceE2EEOffer, 18},
+		{"VoiceMuteCmd", VoiceMuteCmd{userID: 13, Muted: true}, MsgTypeVoiceMute, 13},
+		{"VoiceDeafenCmd", VoiceDeafenCmd{userID: 14, Deafened: true}, MsgTypeVoiceDeafen, 14},
+		{"VoiceCameraCmd", VoiceCameraCmd{userID: 15, Enabled: true}, MsgTypeVoiceCamera, 15},
+		{"VoiceScreenshareCmd", VoiceScreenshareCmd{userID: 16, Enabled: true}, MsgTypeVoiceScreenshare, 16},
+		{"VoiceE2EEAnnounceCmd", VoiceE2EEAnnounceCmd{userID: 17, PublicKey: "abc"}, MsgTypeVoiceE2EEAnnounce, 17},
+		{"VoiceE2EEOfferCmd", VoiceE2EEOfferCmd{userID: 18, TargetUserID: 99}, MsgTypeVoiceE2EEOffer, 18},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -74,35 +74,6 @@ func TestCommandTypeAndUserID(t *testing.T) {
 			}
 			if got := tt.cmd.UserID(); got != tt.wantUID {
 				t.Errorf("UserID() = %d, want %d", got, tt.wantUID)
-			}
-		})
-	}
-}
-
-func TestCommandChannelScoped(t *testing.T) {
-	tests := []struct {
-		name     string
-		cmd      Command
-		wantChID int64
-		isScoped bool
-	}{
-		{"ChatSendCmd", ChatSendCmd{channelID: 100}, 100, true},
-		{"TypingStartCmd", TypingStartCmd{channelID: 200}, 200, true},
-		{"ChannelFocusCmd", ChannelFocusCmd{channelID: 300}, 300, true},
-		{"MarkReadCmd", MarkReadCmd{channelID: 301}, 301, true},
-		{"VoiceJoinCmd", VoiceJoinCmd{channelID: 400}, 400, true},
-		{"PingCmd", PingCmd{userID: 1}, 0, false},
-		{"VoiceLeaveCmd", VoiceLeaveCmd{userID: 1}, 0, false},
-		{"PresenceUpdateCmd", PresenceUpdateCmd{userID: 1}, 0, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cs, ok := tt.cmd.(ChannelScoped)
-			if ok != tt.isScoped {
-				t.Errorf("ChannelScoped assertion = %v, want %v", ok, tt.isScoped)
-			}
-			if ok && cs.ChannelID() != tt.wantChID {
-				t.Errorf("ChannelID() = %d, want %d", cs.ChannelID(), tt.wantChID)
 			}
 		})
 	}
@@ -131,14 +102,14 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"channel_id": 42, "content": "hello", "reply_to": 10, "attachments": ["a1"]}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				cs := cmd.(ChatSendCmd)
-				if cs.ChannelID() != 42 {
-					t.Errorf("ChannelID() = %d, want 42", cs.ChannelID())
+				if cs.ChannelID != 42 {
+					t.Errorf("ChannelID() = %d, want 42", cs.ChannelID)
 				}
-				if cs.Content() != "hello" {
-					t.Errorf("Content() = %q, want %q", cs.Content(), "hello")
+				if cs.Content != "hello" {
+					t.Errorf("Content() = %q, want %q", cs.Content, "hello")
 				}
-				if cs.ReplyTo() == nil || *cs.ReplyTo() != 10 {
-					t.Errorf("ReplyTo() = %v, want 10", cs.ReplyTo())
+				if cs.ReplyTo == nil || *cs.ReplyTo != 10 {
+					t.Errorf("ReplyTo() = %v, want 10", cs.ReplyTo)
 				}
 				if len(cs.Attachments()) != 1 || cs.Attachments()[0] != "a1" {
 					t.Errorf("Attachments() = %v, want [a1]", cs.Attachments())
@@ -151,11 +122,11 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"message_id": 99, "content": "updated"}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				ce := cmd.(ChatEditCmd)
-				if ce.MessageID() != 99 {
-					t.Errorf("MessageID() = %d, want 99", ce.MessageID())
+				if ce.MessageID != 99 {
+					t.Errorf("MessageID() = %d, want 99", ce.MessageID)
 				}
-				if ce.Content() != "updated" {
-					t.Errorf("Content() = %q, want %q", ce.Content(), "updated")
+				if ce.Content != "updated" {
+					t.Errorf("Content() = %q, want %q", ce.Content, "updated")
 				}
 			},
 		},
@@ -165,8 +136,8 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"message_id": 55}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				cd := cmd.(ChatDeleteCmd)
-				if cd.MessageID() != 55 {
-					t.Errorf("MessageID() = %d, want 55", cd.MessageID())
+				if cd.MessageID != 55 {
+					t.Errorf("MessageID() = %d, want 55", cd.MessageID)
 				}
 			},
 		},
@@ -176,8 +147,8 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"channel_id": 7}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				ts := cmd.(TypingStartCmd)
-				if ts.ChannelID() != 7 {
-					t.Errorf("ChannelID() = %d, want 7", ts.ChannelID())
+				if ts.ChannelID != 7 {
+					t.Errorf("ChannelID() = %d, want 7", ts.ChannelID)
 				}
 			},
 		},
@@ -187,8 +158,8 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"status": "idle"}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				pu := cmd.(PresenceUpdateCmd)
-				if pu.Status() != "idle" {
-					t.Errorf("Status() = %q, want %q", pu.Status(), "idle")
+				if pu.Status != "idle" {
+					t.Errorf("Status() = %q, want %q", pu.Status, "idle")
 				}
 			},
 		},
@@ -198,8 +169,8 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"channel_id": 33}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				cf := cmd.(ChannelFocusCmd)
-				if cf.ChannelID() != 33 {
-					t.Errorf("ChannelID() = %d, want 33", cf.ChannelID())
+				if cf.ChannelID != 33 {
+					t.Errorf("ChannelID() = %d, want 33", cf.ChannelID)
 				}
 			},
 		},
@@ -209,8 +180,8 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"channel_id": 34}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				mr := cmd.(MarkReadCmd)
-				if mr.ChannelID() != 34 {
-					t.Errorf("ChannelID() = %d, want 34", mr.ChannelID())
+				if mr.ChannelID != 34 {
+					t.Errorf("ChannelID() = %d, want 34", mr.ChannelID)
 				}
 			},
 		},
@@ -220,11 +191,11 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"message_id": 77, "emoji": "🔥"}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				ra := cmd.(ReactionAddCmd)
-				if ra.MessageID() != 77 {
-					t.Errorf("MessageID() = %d, want 77", ra.MessageID())
+				if ra.MessageID != 77 {
+					t.Errorf("MessageID() = %d, want 77", ra.MessageID)
 				}
-				if ra.Emoji() != "🔥" {
-					t.Errorf("Emoji() = %q, want %q", ra.Emoji(), "🔥")
+				if ra.Emoji != "🔥" {
+					t.Errorf("Emoji() = %q, want %q", ra.Emoji, "🔥")
 				}
 			},
 		},
@@ -234,8 +205,8 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"message_id": 88, "emoji": "👎"}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				rr := cmd.(ReactionRemoveCmd)
-				if rr.MessageID() != 88 {
-					t.Errorf("MessageID() = %d, want 88", rr.MessageID())
+				if rr.MessageID != 88 {
+					t.Errorf("MessageID() = %d, want 88", rr.MessageID)
 				}
 			},
 		},
@@ -245,8 +216,8 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"channel_id": 50}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				vj := cmd.(VoiceJoinCmd)
-				if vj.ChannelID() != 50 {
-					t.Errorf("ChannelID() = %d, want 50", vj.ChannelID())
+				if vj.ChannelID != 50 {
+					t.Errorf("ChannelID() = %d, want 50", vj.ChannelID)
 				}
 			},
 		},
@@ -276,7 +247,7 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"muted": true}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				vm := cmd.(VoiceMuteCmd)
-				if !vm.Muted() {
+				if !vm.Muted {
 					t.Error("Muted() = false, want true")
 				}
 			},
@@ -287,7 +258,7 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"deafened": true}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				vd := cmd.(VoiceDeafenCmd)
-				if !vd.Deafened() {
+				if !vd.Deafened {
 					t.Error("Deafened() = false, want true")
 				}
 			},
@@ -298,7 +269,7 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"enabled": true}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				vc := cmd.(VoiceCameraCmd)
-				if !vc.Enabled() {
+				if !vc.Enabled {
 					t.Error("Enabled() = false, want true")
 				}
 			},
@@ -309,7 +280,7 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"enabled": false}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				vs := cmd.(VoiceScreenshareCmd)
-				if vs.Enabled() {
+				if vs.Enabled {
 					t.Error("Enabled() = true, want false")
 				}
 			},
@@ -320,8 +291,8 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"public_key": "dGVzdA=="}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				va := cmd.(VoiceE2EEAnnounceCmd)
-				if va.PublicKey() != "dGVzdA==" {
-					t.Errorf("PublicKey() = %q, want %q", va.PublicKey(), "dGVzdA==")
+				if va.PublicKey != "dGVzdA==" {
+					t.Errorf("PublicKey() = %q, want %q", va.PublicKey, "dGVzdA==")
 				}
 			},
 		},
@@ -331,14 +302,14 @@ func TestCommandConstructorParseValid(t *testing.T) {
 			payload: `{"target_user_id": 99, "encrypted_key": "abc", "iv": "def"}`,
 			checkFn: func(t *testing.T, cmd Command) {
 				vo := cmd.(VoiceE2EEOfferCmd)
-				if vo.TargetUserID() != 99 {
-					t.Errorf("TargetUserID() = %d, want 99", vo.TargetUserID())
+				if vo.TargetUserID != 99 {
+					t.Errorf("TargetUserID() = %d, want 99", vo.TargetUserID)
 				}
-				if vo.EncryptedKey() != "abc" {
-					t.Errorf("EncryptedKey() = %q, want %q", vo.EncryptedKey(), "abc")
+				if vo.EncryptedKey != "abc" {
+					t.Errorf("EncryptedKey() = %q, want %q", vo.EncryptedKey, "abc")
 				}
-				if vo.IV() != "def" {
-					t.Errorf("IV() = %q, want %q", vo.IV(), "def")
+				if vo.IV != "def" {
+					t.Errorf("IV() = %q, want %q", vo.IV, "def")
 				}
 			},
 		},
@@ -421,8 +392,8 @@ func TestCommandChatSendReqID(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	cs := cmd.(ChatSendCmd)
-	if cs.ReqID() != "abc-123" {
-		t.Errorf("ReqID() = %q, want %q", cs.ReqID(), "abc-123")
+	if cs.ReqID != "abc-123" {
+		t.Errorf("ReqID() = %q, want %q", cs.ReqID, "abc-123")
 	}
 }
 
@@ -433,8 +404,8 @@ func TestCommandChatSendNilReplyTo(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	cs := cmd.(ChatSendCmd)
-	if cs.ReplyTo() != nil {
-		t.Errorf("ReplyTo() = %v, want nil", cs.ReplyTo())
+	if cs.ReplyTo != nil {
+		t.Errorf("ReplyTo() = %v, want nil", cs.ReplyTo)
 	}
 }
 

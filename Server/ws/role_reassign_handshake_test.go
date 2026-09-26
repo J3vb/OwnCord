@@ -154,7 +154,7 @@ func TestRefreshUserSnapshot_PicksUpRoleReassignment(t *testing.T) {
 		t.Fatalf("GetUserByID: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := newClient(hub, nil, user, "", 0, ctx)
 	c.roleName = "harvest-voice"
 
@@ -191,7 +191,7 @@ func TestFreshConnectFallback_RoleReassignMidReconnect_ResolvesFreshRole(t *test
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -217,7 +217,7 @@ func TestFreshConnectFallback_RoleReassignMidReconnect_ResolvesFreshRole(t *test
 	}
 	defer func() { handleReconnectPreRegisterRaceHook = nil }()
 
-	srv := httptest.NewServer(ServeWS(hub, database, []string{"*"}, 0))
+	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
 
 	conn := dialAndAuth(t, ctx, srv.URL, token, 99, chID)
@@ -277,7 +277,7 @@ func TestFreshConnectFallback_RoleReassignPreRegister_PostRegisterVerifyRevokes(
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -289,9 +289,15 @@ func TestFreshConnectFallback_RoleReassignPreRegister_PostRegisterVerifyRevokes(
 
 	// First hook: force the full-ready fallback WITHOUT touching the role,
 	// so the auth-hint promotion into c.channelID survives into
-	// handleFreshConnect.
+	// handleFreshConnect. bumpVisibilityWatermark directly, not
+	// MarkVisibilityChanged: that method now takes h.seqMu (Codex round 4,
+	// item A) to serialize with reconnectRegister's own check-then-register,
+	// and this hook fires from inside that very critical section — calling
+	// the locking entry point here would deadlock on itself. This test
+	// doesn't care which unlocked internal writer trips mustFullResync, only
+	// that it does.
 	handleReconnectPreRegisterRaceHook = func() {
-		hub.MarkVisibilityChanged()
+		hub.bumpVisibilityWatermark()
 	}
 	defer func() { handleReconnectPreRegisterRaceHook = nil }()
 
@@ -309,7 +315,7 @@ func TestFreshConnectFallback_RoleReassignPreRegister_PostRegisterVerifyRevokes(
 	}
 	defer func() { freshConnectPreRegisterRaceHook = nil }()
 
-	srv := httptest.NewServer(ServeWS(hub, database, []string{"*"}, 0))
+	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
 
 	conn := dialAndAuth(t, ctx, srv.URL, token, 99, chID)
@@ -346,7 +352,7 @@ func TestRevokeUnreadableChannels_ActsOnReplacementClient(t *testing.T) {
 		t.Fatalf("GetUserByID: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c1 := newClient(hub, nil, user, "", 0, ctx)
 	c2 := newClient(hub, nil, user, "", 0, ctx)
 

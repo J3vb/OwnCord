@@ -20,7 +20,8 @@ func lockFilePath(dbPath string) string { return dbPath + ".lock" }
 //
 // The restart handoff no longer overlaps by design — the old process closes
 // the database (releasing this lock) and exits before its replacement is
-// started, in both spawn and supervised restart modes (Server/restart.go).
+// started, in both spawn and supervised restart modes
+// (Server/internal/app/restart.go).
 // The retry survives as a safety net for the cases that can still race: a
 // supervisor relaunching the service while a wedged predecessor is being
 // backstop-killed, and the final old-style update from a release that still

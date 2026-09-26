@@ -1,53 +1,27 @@
 /**
- * Credential storage — wraps Tauri IPC commands for Windows Credential Manager.
- * Falls back to no-op in non-Tauri environments (tests, browser).
+ * Credential storage — the app-side half of the OS credential manager.
+ * The native calls live behind `platform/desktop` (B7-4); these exports stay
+ * where their callers already import them.
  */
 
-import { createLogger } from "./logger";
+import { ApiClientError } from "./api";
+import { desktop } from "../platform/desktop";
+import type { SavedCredential, SavedLoginResponse } from "../platform/contracts/credentials";
+import type { AuthResponse } from "./types";
 import { authStore } from "@stores/auth.store";
+import { connectText } from "../i18n/connect";
 
-const log = createLogger("credentials");
+export type { SavedCredential, SavedLoginResponse };
 
-export interface SavedCredential {
-  readonly username: string;
-  readonly token: string;
-  readonly password?: string;
-}
-
-/** Dynamically import Tauri invoke to avoid errors in test/browser. */
-async function getInvoke(): Promise<
-  ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null
-> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Save a credential to Windows Credential Manager.
- * Target: OwnCord/{host}
- */
+/** Save a credential to the OS credential store for `host`. */
 export async function saveCredential(
   host: string,
   username: string,
   token: string,
   password?: string,
+  clearPassword = false,
 ): Promise<boolean> {
-  const invoke = await getInvoke();
-  if (!invoke) {
-    log.warn("Tauri not available — credential not saved");
-    return false;
-  }
-  try {
-    await invoke("save_credential", { host, username, token, password: password ?? null });
-    return true;
-  } catch (err) {
-    log.error("Failed to save credential", { host, error: String(err) });
-    return false;
-  }
+  return desktop.credentials.save(host, username, token, password, clearPassword);
 }
 
 /**
@@ -55,15 +29,16 @@ export async function saveCredential(
  * credential when the local user's own profile changes (a username edit, or
  * the identity-key PATCH) — mirroring the initial saveCredential call's
  * remember-password opt-out (BUG-135) so a later profile edit can't silently
- * persist a bearer token the user declined to store. Passes the session's
- * password through on every call: save_credential replaces the whole stored
- * blob, so omitting it (defaulting to null) would wipe out the password
- * saved at login for a user who DID opt in.
+ * persist a bearer token the user declined to store.
+ *
+ * It takes no password: `save_credential` preserves the stored one when none
+ * is supplied. This used to carry the session's plaintext password purely so
+ * that omitting it would not wipe the saved one — the reason the password was
+ * returned over IPC at all.
  */
 export function createUserUpdateCredentialSaver(
   host: string,
   rememberPassword: boolean,
-  password: string | undefined,
 ): (payload: { readonly user_id: number; readonly username: string }) => void {
   return (payload) => {
     if (!rememberPassword) return;
@@ -71,51 +46,63 @@ export function createUserUpdateCredentialSaver(
     if (payload.user_id !== currentUserId) return;
     const currentToken = authStore.getState().token;
     if (!currentToken) return;
-    void saveCredential(host, payload.username, currentToken, password);
+    void saveCredential(host, payload.username, currentToken);
   };
 }
 
 /**
- * Load a credential from Windows Credential Manager.
- * Returns null if not found or Tauri unavailable.
+ * Turn the backend's relayed `/auth/login` response into the same
+ * `AuthResponse` an ordinary `api.login` call produces.
+ *
+ * Rust returns status and raw body without interpreting either, so this is the
+ * single place the login contract is read for the saved-password path — it
+ * mirrors `api.ts`'s `parseError` + `ApiClientError` so a caller can narrow on
+ * `.status` / `.code` exactly as it can for a typed password.
+ *
+ * Throws `ApiClientError` for a non-2xx response. Throws a plain `Error` for a
+ * 2xx whose body does not parse: returning an empty object there would leave
+ * both the token and the 2FA branch unentered and strand the caller with no
+ * result and no error.
  */
-export async function loadCredential(host: string): Promise<SavedCredential | null> {
-  const invoke = await getInvoke();
-  if (!invoke) {
-    return null;
-  }
+export function parseRelayedLogin(relayed: SavedLoginResponse): AuthResponse {
+  let parsed: unknown;
   try {
-    const result = await invoke("load_credential", { host });
-    if (result && typeof result === "object") {
-      const cred = result as Record<string, unknown>;
-      if (typeof cred.username === "string" && typeof cred.token === "string") {
-        return {
-          username: cred.username,
-          token: cred.token,
-          password: typeof cred.password === "string" ? cred.password : undefined,
-        };
-      }
-    }
-    return null;
-  } catch (err) {
-    log.error("Failed to load credential", { host, error: String(err) });
-    return null;
+    parsed = JSON.parse(relayed.body) as unknown;
+  } catch {
+    parsed = null;
   }
+  const body =
+    parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+
+  if (relayed.status < 200 || relayed.status >= 300) {
+    const code = typeof body?.error === "string" ? body.error : "UNKNOWN";
+    const message =
+      typeof body?.message === "string"
+        ? body.message
+        : connectText("session.loginFailedStatus", { status: relayed.status });
+    throw new ApiClientError(relayed.status, code, message);
+  }
+
+  if (body === null) {
+    throw new Error(connectText("session.loginUnreadable"));
+  }
+  return body as unknown as AuthResponse;
 }
 
-/**
- * Delete a credential from Windows Credential Manager.
- */
+/** Log in to `host` using the password saved in the OS credential store. */
+export async function loginWithSavedPassword(
+  host: string,
+  username: string,
+): Promise<SavedLoginResponse | null> {
+  return desktop.credentials.loginWithSavedPassword(host, username);
+}
+
+/** Load the credential stored for `host`, or null when there is none. */
+export async function loadCredential(host: string): Promise<SavedCredential | null> {
+  return desktop.credentials.load(host);
+}
+
+/** Delete the credential stored for `host`. */
 export async function deleteCredential(host: string): Promise<boolean> {
-  const invoke = await getInvoke();
-  if (!invoke) {
-    return false;
-  }
-  try {
-    await invoke("delete_credential", { host });
-    return true;
-  } catch (err) {
-    log.error("Failed to delete credential", { host, error: String(err) });
-    return false;
-  }
+  return desktop.credentials.delete(host);
 }

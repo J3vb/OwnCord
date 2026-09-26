@@ -102,7 +102,7 @@ func (s *EmojiService) RequireManage(ctx context.Context, actorID int64) error {
 func (s *EmojiService) List(ctx context.Context) ([]*db.Emoji, error) {
 	list, err := s.st.ListEmoji(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list emoji: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to list emoji: %w", ErrInternal, err)
 	}
 	return list, nil
 }
@@ -125,7 +125,7 @@ func (s *EmojiService) Create(ctx context.Context, actorID int64, rawShortcode, 
 
 	existing, err := s.st.GetEmojiByShortcode(ctx, shortcode)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to check shortcode: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to check shortcode: %w", ErrInternal, err)
 	}
 	if existing != nil {
 		return nil, fmt.Errorf("%w: an emoji named :%s: already exists", ErrConflict, shortcode)
@@ -133,7 +133,7 @@ func (s *EmojiService) Create(ctx context.Context, actorID int64, rawShortcode, 
 
 	current, err := s.st.ListEmoji(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to count emoji: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to count emoji: %w", ErrInternal, err)
 	}
 	if len(current) >= MaxEmojiCount {
 		return nil, fmt.Errorf("%w: this server already has the maximum of %d emoji", ErrBadRequest, MaxEmojiCount)
@@ -147,7 +147,7 @@ func (s *EmojiService) Create(ctx context.Context, actorID int64, rawShortcode, 
 			// server fault.
 			return nil, fmt.Errorf("%w: an emoji named :%s: already exists", ErrConflict, shortcode)
 		}
-		return nil, fmt.Errorf("%w: failed to create emoji: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to create emoji: %w", ErrInternal, err)
 	}
 
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "emoji_create", "emoji", created.ID,
@@ -165,14 +165,14 @@ func (s *EmojiService) Delete(ctx context.Context, actorID, emojiID int64) (*db.
 	}
 	existing, err := s.st.GetEmoji(ctx, emojiID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to load emoji: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to load emoji: %w", ErrInternal, err)
 	}
 	if existing == nil {
 		return nil, fmt.Errorf("%w: emoji not found", ErrNotFound)
 	}
 	deleted, err := s.st.DeleteEmoji(ctx, emojiID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to delete emoji: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to delete emoji: %w", ErrInternal, err)
 	}
 	if !deleted {
 		// Lost a race with another delete -- report it as the 404 it now is.
@@ -189,7 +189,7 @@ func (s *EmojiService) Delete(ctx context.Context, actorID, emojiID int64) (*db.
 func (s *EmojiService) Get(ctx context.Context, emojiID int64) (*db.Emoji, error) {
 	e, err := s.st.GetEmoji(ctx, emojiID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to load emoji: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to load emoji: %w", ErrInternal, err)
 	}
 	if e == nil {
 		return nil, fmt.Errorf("%w: emoji not found", ErrNotFound)

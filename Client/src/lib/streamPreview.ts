@@ -13,6 +13,7 @@ import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { getRemoteVideoStream } from "@lib/livekitSession";
 import { voiceStore } from "@stores/voice.store";
+import { shellText } from "../i18n/shell";
 
 /** Internal state tracked per voice-user-item row for cleanup. */
 interface PreviewState {
@@ -125,7 +126,7 @@ function showPreview(
     video.playsInline = true;
     video.muted = true;
     video.className = isScreen ? "preview-screen" : "preview-camera";
-    video.setAttribute("aria-label", `Stream preview for ${username}`);
+    video.setAttribute("aria-label", shellText("stream.previewLabel", { username }));
     video.srcObject = stream;
 
     // Handle autoplay failure — swap to placeholder
@@ -183,7 +184,7 @@ function showPreview(
       "aria-live": "polite",
       class: "sr-only",
     },
-    `Showing stream preview for ${username}`,
+    shellText("stream.previewAnnouncement", { username }),
   );
   previewDiv.appendChild(announcement);
 
@@ -207,12 +208,12 @@ function createPlaceholder(onClickJoin?: () => void): HTMLElement {
   const placeholder = createElement("div", {
     class: "vu-preview-placeholder",
     role: "button",
-    "aria-label": "Join channel to preview stream",
+    "aria-label": shellText("stream.joinToPreviewLabel"),
   });
   const icon = createIcon("monitor", 14);
   icon.style.color = "var(--text-faint)";
   placeholder.appendChild(icon);
-  const text = createElement("span", {}, "Join to preview");
+  const text = createElement("span", {}, shellText("stream.joinToPreview"));
   placeholder.appendChild(text);
   if (onClickJoin !== undefined) {
     placeholder.addEventListener("click", (e) => {
@@ -227,12 +228,12 @@ function createUnavailablePlaceholder(onClickWatch?: () => void): HTMLElement {
   const placeholder = createElement("div", {
     class: "vu-preview-placeholder",
     role: "button",
-    "aria-label": "Stream unavailable",
+    "aria-label": shellText("stream.unavailable"),
   });
   const icon = createIcon("monitor-off", 14);
   icon.style.color = "var(--text-faint)";
   placeholder.appendChild(icon);
-  const text = createElement("span", {}, "Stream unavailable");
+  const text = createElement("span", {}, shellText("stream.unavailable"));
   placeholder.appendChild(text);
   if (onClickWatch !== undefined) {
     placeholder.addEventListener("click", (e) => {

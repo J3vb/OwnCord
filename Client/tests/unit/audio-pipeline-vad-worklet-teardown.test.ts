@@ -159,4 +159,23 @@ describe("AudioPipeline VAD worklet teardown (OC-0231)", () => {
     // And the pipeline gain must not have been driven to 0 by the stale message.
     mockGainNode.gain.setTargetAtTime.mockClear();
   });
+  it("closes the AudioContext only once the VAD processor acknowledges stop", async () => {
+    // Chromium keeps an AudioWorkletNode, and so its AudioContext, alive until
+    // its processor's process() returns false. Closing the context in the same
+    // task as `stop` ends rendering first, so every voice join pinned one
+    // closed AudioContext for the page's lifetime.
+    pipeline.setRoom(mockRoom);
+    pipeline.setupAudioPipeline();
+    await vi.waitFor(() => {
+      expect(pipeline.vadUsingWorklet).toBe(true);
+    });
+    const workletInstance = (globalThis as any).AudioWorkletNode.mock.results[0].value;
+    const ctx = (globalThis as any).AudioContext.mock.results[0].value;
+
+    pipeline.teardownAudioPipeline();
+    expect(ctx.close).not.toHaveBeenCalled();
+
+    workletInstance.port.onmessage?.({ data: { type: "stopped" } } as MessageEvent);
+    expect(ctx.close).toHaveBeenCalledOnce();
+  });
 });

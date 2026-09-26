@@ -1,0 +1,2 @@
+go test fuzz v1
+string("https://example.com:8443/a.png#f")

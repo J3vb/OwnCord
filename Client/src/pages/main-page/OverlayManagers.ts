@@ -5,6 +5,7 @@
 
 import type { MountableComponent } from "@lib/safe-render";
 import type { ApiClient } from "@lib/api";
+import { Disposable } from "@lib/disposable";
 import { createLogger } from "@lib/logger";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
 import { createInviteManager } from "@components/InviteManager";
@@ -16,6 +17,10 @@ import { createSearchOverlay } from "@components/SearchOverlay";
 import { showToast } from "@lib/toast";
 import { setActiveChannel } from "@stores/channels.store";
 import { setMessagePinned } from "@stores/messages.store";
+import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
+import { resolveAuthor } from "@components/message-list/formatting";
+import { resolveDisplayName } from "@lib/avatar";
+import { shellText } from "../../i18n/shell";
 
 const log = createLogger("overlays");
 
@@ -67,16 +72,23 @@ function pickPinAvatarColor(username: string): string {
 
 export function mapToPinnedMessage(msg: {
   readonly id: number;
-  readonly user: { readonly username: string };
+  readonly user: {
+    readonly id: number;
+    readonly username: string;
+    readonly avatar: string | null;
+    readonly display_name?: string | null;
+  };
   readonly content: string;
   readonly created_at?: string;
   readonly timestamp?: string;
 }): PinnedMessage {
   return {
     id: msg.id,
-    author: msg.user.username,
+    author: resolveDisplayName(resolveAuthor(msg.user)),
     content: msg.content,
     timestamp: msg.created_at ?? msg.timestamp ?? "",
+    // Hashed from the raw username (not the resolved display name) so the hue
+    // stays stable across renames — matches every other avatar-color surface.
     avatarColor: pickPinAvatarColor(msg.user.username),
   };
 }
@@ -132,14 +144,78 @@ export function createQuickSwitcherManager(
         open();
       }
     };
-    document.addEventListener("keydown", handler);
+    const owner = new Disposable();
+    document.addEventListener("keydown", handler, { signal: owner.signal });
     return () => {
-      document.removeEventListener("keydown", handler);
+      owner.destroy();
       close();
     };
   }
 
   return { attach };
+}
+
+// ---------------------------------------------------------------------------
+// Generic async overlay controller
+// ---------------------------------------------------------------------------
+
+/**
+ * Shared shape behind an overlay that opens by awaiting a fetch: an
+ * instance/opening guard against a double-click during the round trip,
+ * post-await `getRoot()` re-derivation (a page teardown during the fetch
+ * nulls the root MainPage handed out, but the pre-await root still points at
+ * the now-detached node — mounting on it would create an instance whose
+ * document-level listeners nothing ever tears down), catch -> log -> toast,
+ * and `finally opening = false`. A close() during the fetch cancels that
+ * open: its result is dropped rather than mounted.
+ */
+function createAsyncOverlayController<T>(opts: {
+  readonly getRoot: () => HTMLDivElement | null;
+  /** Extra precondition (besides instance/root/opening) checked before the
+   *  fetch starts; open() bails silently (no log, no toast) if it returns
+   *  false. Runs before `opening` is set. */
+  readonly canOpen?: () => boolean;
+  readonly load: () => Promise<T>;
+  readonly build: (data: T, root: HTMLDivElement, close: () => void) => MountableComponent;
+  readonly errorLog: string;
+  readonly errorToast: string;
+}): { open(): Promise<void>; close(): void; isOpen(): boolean } {
+  let instance: MountableComponent | null = null;
+  let opening = false;
+  let generation = 0;
+
+  function close(): void {
+    generation++;
+    opening = false;
+    if (instance !== null) {
+      instance.destroy?.();
+      instance = null;
+    }
+  }
+
+  async function open(): Promise<void> {
+    const root = opts.getRoot();
+    if (instance !== null || root === null || opening) return;
+    if (opts.canOpen?.() === false) return;
+    opening = true;
+    const gen = generation;
+    try {
+      const data = await opts.load();
+      if (gen !== generation) return;
+      const liveRoot = opts.getRoot();
+      if (liveRoot === null) return;
+      instance = opts.build(data, liveRoot, close);
+      instance.mount(liveRoot);
+    } catch (err) {
+      if (gen !== generation) return;
+      log.error(opts.errorLog, { error: String(err) });
+      showToast(opts.errorToast, "error");
+    } finally {
+      if (gen === generation) opening = false;
+    }
+  }
+
+  return { open, close, isOpen: () => instance !== null };
 }
 
 // ---------------------------------------------------------------------------
@@ -155,35 +231,12 @@ export function createInviteManagerController(opts: {
   readonly api: ApiClient;
   readonly getRoot: () => HTMLDivElement | null;
 }): InviteManagerController {
-  let instance: MountableComponent | null = null;
-  // Set for the duration of the getInvites() round trip. `instance` is only
-  // assigned after the await, so the synchronous `instance !== null` guard
-  // alone lets a double-click during the fetch mount two overlays — the
-  // second assignment orphans the first, which is then unreachable by its own
-  // close affordances. This flag closes that window.
-  let opening = false;
-
-  function close(): void {
-    if (instance !== null) {
-      instance.destroy?.();
-      instance = null;
-    }
-  }
-
-  async function open(): Promise<void> {
-    const root = opts.getRoot();
-    if (instance !== null || root === null || opening) return;
-    opening = true;
-    try {
-      const raw = await opts.api.getInvites();
-      // Re-derive liveness: a page teardown during the fetch nulls the root
-      // MainPage handed out, but the pre-await `root` const above still
-      // points at the now-detached node. Mounting on it anyway would create
-      // an instance whose document-level listeners nothing ever tears down.
-      const liveRoot = opts.getRoot();
-      if (liveRoot === null) return;
+  const controller = createAsyncOverlayController<InviteResponse[]>({
+    getRoot: opts.getRoot,
+    load: () => opts.api.getInvites(),
+    build: (raw, _root, close) => {
       const invites = raw.filter((r) => !isInviteRevoked(r)).map(mapInviteResponse);
-      instance = createInviteManager({
+      return createInviteManager({
         invites,
         onCreateInvite: async () => {
           const created = await opts.api.createInvite({});
@@ -201,8 +254,8 @@ export function createInviteManagerController(opts: {
           // No silent success: a copy the user can't see is indistinguishable
           // from a clipboard permission failure.
           void navigator.clipboard.writeText(code).then(
-            () => showToast("Invite code copied", "success"),
-            () => showToast("Couldn't copy the invite code", "error"),
+            () => showToast(shellText("invite.copied"), "success"),
+            () => showToast(shellText("invite.copyFailed"), "error"),
           );
         },
         onClose: close,
@@ -211,16 +264,12 @@ export function createInviteManagerController(opts: {
           showToast(message, "error");
         },
       });
-      instance.mount(liveRoot);
-    } catch (err) {
-      log.error("Failed to open invite manager", { error: String(err) });
-      showToast("Failed to load invites", "error");
-    } finally {
-      opening = false;
-    }
-  }
+    },
+    errorLog: "Failed to open invite manager", // i18n-exempt: developer log line, never shown
+    errorToast: shellText("invite.loadFailed"),
+  });
 
-  return { open, cleanup: close };
+  return { open: controller.open, cleanup: controller.close };
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +279,8 @@ export function createInviteManagerController(opts: {
 export interface PinnedPanelController {
   toggle(): Promise<void>;
   cleanup(): void;
+  /** Close the panel if it was opened for `channelId`. */
+  closeFor(channelId: number): void;
 }
 
 export function createPinnedPanelController(opts: {
@@ -247,71 +298,68 @@ export function createPinnedPanelController(opts: {
    */
   readonly onJumpToMessage?: (channelId: number, messageId: number) => void;
 }): PinnedPanelController {
-  let instance: MountableComponent | null = null;
-  // Same guard as InviteManagerController.open: `instance` is only assigned
-  // after the getPins() await, so a double-click during the fetch would
-  // otherwise mount two panels and orphan the first one permanently.
-  let opening = false;
+  // Set by canOpen() and read by load()/build() for the same open() attempt —
+  // safe because canOpen, load and build all run for one open() call before
+  // the next can start (the `opening` guard), same as the original toggle()
+  // capturing channelId once at the top and reusing it throughout.
+  let channelId: number | null = null;
 
-  function close(): void {
-    if (instance !== null) {
-      instance.destroy?.();
-      instance = null;
-    }
-  }
-
-  async function toggle(): Promise<void> {
-    if (instance !== null) {
-      close();
-      return;
-    }
-    if (opening) return;
-    const root = opts.getRoot();
-    const channelId = opts.getCurrentChannelId();
-    if (root === null || channelId === null) return;
-    opening = true;
-    try {
-      const resp = await opts.api.getPins(channelId);
-      // Re-derive liveness: a page teardown during the fetch nulls the root
-      // MainPage handed out, but the pre-await `root` const above still
-      // points at the now-detached node — see InviteManagerController.open.
-      const liveRoot = opts.getRoot();
-      if (liveRoot === null) return;
+  const controller = createAsyncOverlayController<Awaited<ReturnType<ApiClient["getPins"]>>>({
+    getRoot: opts.getRoot,
+    canOpen: () => {
+      channelId = opts.getCurrentChannelId();
+      // A gated NSFW channel's pins are its content (B9-7): the gate already
+      // says why nothing is shown, so the panel stays shut.
+      return channelId !== null && !nsfwContentBlocked(channelId);
+    },
+    load: () => opts.api.getPins(channelId as number),
+    build: (resp, _liveRoot, close) => {
+      const id = channelId as number;
       const pins = resp.messages.map(mapToPinnedMessage);
-      instance = createPinnedMessages({
-        channelId,
+      return createPinnedMessages({
+        channelId: id,
         pinnedMessages: pins,
         onJumpToMessage: (msgId: number) => {
-          opts.onJumpToMessage?.(channelId, msgId);
+          opts.onJumpToMessage?.(id, msgId);
           close();
         },
         onUnpin: (msgId: number) => {
           void opts.api
-            .unpinMessage(channelId, msgId)
+            .unpinMessage(id, msgId)
             .then(() => {
               // The server has no pin/unpin broadcast — this store write is
               // the row's only local authority for `pinned`. Without it the
               // row still says "Unpin" after this panel closes.
-              setMessagePinned(channelId, msgId, false);
+              setMessagePinned(id, msgId, false);
               close();
             })
             .catch((err: unknown) => {
               log.error("Failed to unpin message", { msgId, error: String(err) });
-              showToast("Failed to unpin message", "error");
+              showToast(shellText("pins.unpinFailed"), "error");
             });
         },
         onClose: close,
       });
-      instance.mount(liveRoot);
-    } catch (err) {
-      log.error("Failed to load pinned messages", { error: String(err) });
-      showToast("Failed to load pinned messages", "error");
-    } finally {
-      opening = false;
+    },
+    errorLog: "Failed to load pinned messages", // i18n-exempt: developer log line, never shown
+    errorToast: shellText("pins.loadFailed"),
+  });
+
+  async function toggle(): Promise<void> {
+    if (controller.isOpen()) {
+      controller.close();
+      return;
     }
+    await controller.open();
   }
 
-  return { toggle, cleanup: close };
+  return {
+    toggle,
+    cleanup: controller.close,
+    closeFor: (id: number) => {
+      if (channelId === id) controller.close();
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -348,7 +396,9 @@ export function createSearchOverlayController(opts: {
     const root = opts.getRoot();
     if (instance !== null || root === null) return;
 
-    const channelId = opts.getCurrentChannelId();
+    const current = opts.getCurrentChannelId();
+    // Behind the NSFW gate only a server-wide search is offered (B9-7).
+    const channelId = current !== null && nsfwContentBlocked(current) ? null : current;
 
     instance = createSearchOverlay({
       currentChannelId: channelId ?? undefined,
@@ -359,7 +409,7 @@ export function createSearchOverlayController(opts: {
         } catch (err) {
           if (err instanceof DOMException && err.name === "AbortError") throw err;
           log.error("Search failed", { query, error: String(err) });
-          showToast("Search failed", "error");
+          showToast(shellText("search.failed"), "error");
           throw err;
         }
       },

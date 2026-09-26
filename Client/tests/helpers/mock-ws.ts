@@ -39,6 +39,10 @@ export function createMockWsClient() {
   }
 
   return {
+    async ping(signal: AbortSignal): Promise<void> {
+      signal.throwIfAborted();
+      if (state !== "connected") throw new Error("Not connected");
+    },
     // ---------------------------------------------------------------
     // Public API — mirrors WsClient from @lib/ws
     // ---------------------------------------------------------------

@@ -1,12 +1,12 @@
 /**
  * Toast notification system — shows stacking notifications at bottom-right.
- * Supports info, error, and success types with auto-dismiss.
+ * Supports info, error, success and warning types with auto-dismiss.
  */
 
 import { createElement, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 
-export type ToastType = "info" | "error" | "success";
+export type ToastType = "info" | "error" | "success" | "warning";
 
 const MAX_TOASTS = 5;
 const DEFAULT_DURATION_MS = 5000;

@@ -4,11 +4,21 @@
 
 import { createElement } from "@lib/dom";
 import type { Message } from "@stores/messages.store";
+import { safetyStore } from "../../features/safety/store";
+import { formatUntil, safetyText } from "../../i18n/safety";
 import type { MessageListOptions } from "../MessageList";
 import { attachReactionTooltip } from "./reaction-tooltip";
 import { buildCustomEmojiNode } from "./custom-emoji";
 
 // -- Reaction rendering -------------------------------------------------------
+
+/** While timed out (B9-15, Q4): why reacting is disabled, with the server's expiry; else null. */
+export function reactionLockReason(): string | null {
+  const timeout = safetyStore.getState().timeout;
+  return timeout === null
+    ? null
+    : safetyText("timeout.react", { time: formatUntil(timeout.expiresAt) });
+}
 
 export function renderReactions(
   msg: Message,
@@ -16,6 +26,7 @@ export function renderReactions(
   signal: AbortSignal,
 ): HTMLDivElement {
   const container = createElement("div", { class: "msg-reactions" });
+  const locked = reactionLockReason();
   for (const reaction of msg.reactions) {
     const chip = createElement("span", {
       class: reaction.me ? "reaction-chip me" : "reaction-chip",
@@ -33,8 +44,7 @@ export function renderReactions(
     const count = createElement("span", { class: "rc-count" }, String(reaction.count));
     chip.appendChild(emoji);
     chip.appendChild(count);
-    chip.addEventListener("click", () => opts.onReactionClick(msg.id, reaction.emoji), { signal });
-    addKeyActivation(chip, () => opts.onReactionClick(msg.id, reaction.emoji), signal);
+    wireReactionControl(chip, () => opts.onReactionClick(msg.id, reaction.emoji), locked, signal);
     attachReactionTooltip(
       chip,
       {
@@ -52,10 +62,25 @@ export function renderReactions(
     { class: "reaction-chip add-reaction", tabindex: "0", role: "button" },
     "+",
   );
-  addBtn.addEventListener("click", () => opts.onReactionClick(msg.id, ""), { signal });
-  addKeyActivation(addBtn, () => opts.onReactionClick(msg.id, ""), signal);
+  wireReactionControl(addBtn, () => opts.onReactionClick(msg.id, ""), locked, signal);
   container.appendChild(addBtn);
   return container;
+}
+
+/** Wire a reaction control, or mark it disabled with the lock reason. */
+export function wireReactionControl(
+  el: HTMLElement,
+  onActivate: () => void,
+  locked: string | null,
+  signal: AbortSignal,
+): void {
+  if (locked !== null) {
+    el.setAttribute("aria-disabled", "true");
+    el.title = locked;
+    return;
+  }
+  el.addEventListener("click", onActivate, { signal });
+  if (el.tagName !== "BUTTON") addKeyActivation(el, onActivate, signal);
 }
 
 /**

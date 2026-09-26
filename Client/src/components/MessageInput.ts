@@ -3,6 +3,7 @@
  * Step 5.42 of the Tauri v2 migration.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -18,6 +19,7 @@ import {
   type EmojiAutocompleteComponent,
 } from "@components/EmojiAutocomplete";
 import { listCustomEmoji } from "@stores/emoji.store";
+import { messagingText } from "../i18n/messaging";
 import type { GifApi } from "@lib/gifProvider";
 
 export interface MessageInputOptions {
@@ -157,6 +159,11 @@ const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB matches server limit
 // the queue client-side so we never upload an attachment doomed to be
 // orphaned by a send that can never succeed.
 const MAX_ATTACHMENTS = 10;
+// Server/service/message.go's maxMessageLen refuses content past 4000 code
+// points (utf8.RuneCountInString). Mirror it here so an over-long send fails
+// visibly instead of producing an optimistic row whose retry fails identically.
+// Counted in code points, not UTF-16 units -- see the guard in handleSend.
+const MAX_MESSAGE_LEN = 4000;
 const ALLOWED_TYPES = [
   "image/",
   "video/",
@@ -178,8 +185,8 @@ const ALLOWED_TYPES = [
 const CARET_MOVE_KEYS: ReadonlySet<string> = new Set([
   "ArrowLeft",
   "ArrowRight",
-  "Home",
-  "End",
+  "Home", // i18n-exempt: KeyboardEvent.key value, a wire identifier, never displayed
+  "End", // i18n-exempt: KeyboardEvent.key value, a wire identifier, never displayed
   "PageUp",
   "PageDown",
 ]);
@@ -188,12 +195,12 @@ const CARET_MOVE_KEYS: ReadonlySet<string> = new Set([
 function markGifUnavailable(gifBtn: HTMLButtonElement, reason: string): void {
   gifBtn.setAttribute("disabled", "true");
   gifBtn.title = reason;
-  gifBtn.setAttribute("aria-label", `GIF — ${reason}`);
+  gifBtn.setAttribute("aria-label", messagingText("gif.ariaWithReason", { reason }));
 }
 
 export function createMessageInput(options: MessageInputOptions): MessageInputComponent {
-  const ac = new AbortController();
-  const signal = ac.signal;
+  const disposable = new Disposable();
+  const signal = disposable.signal;
   let root: HTMLDivElement | null = null;
   let state = {
     replyTo: null as { messageId: number; username: string } | null,
@@ -211,6 +218,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let gifUnavailable = options.gifApi === undefined;
   const controlButtons: HTMLButtonElement[] = [];
   let attachmentPreviewBar: HTMLDivElement | null = null;
+  /** The composer's single refusal line. It stays until the user edits or
+   *  sends rather than vanishing after a few seconds (A11Y-05), so it is one
+   *  reused node, not a fresh one per call. */
+  let uploadErrorEl: HTMLDivElement | null = null;
   /** Set by mount() when file uploads are wired; backs openFilePicker(). */
   let openPicker: (() => void) | null = null;
   let mentionPopup: MentionAutocompleteComponent | null = null;
@@ -402,7 +413,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
   function showReplyBar(username: string): void {
     if (replyBar === null || replyText === null) return;
-    setText(replyText, `Replying to @${username}`);
+    setText(replyText, messagingText("reply.replyingTo", { username }));
     replyBar.classList.add("visible");
   }
 
@@ -442,7 +453,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
   function showUploadError(message: string): void {
     if (attachmentPreviewBar === null) return;
-    const errEl = createElement(
+    // One persistent refusal line: the user needs to read it after the fact,
+    // so it is not removed on a timer (A11Y-05). It is cleared by the next
+    // edit or successful send (clearUploadError).
+    clearUploadError();
+    uploadErrorEl = createElement(
       "div",
       {
         class: "attachment-upload-error",
@@ -453,19 +468,22 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // error with no attachments already queued renders into a display:none
     // container and is never seen.
     attachmentPreviewBar.classList.add("visible");
-    attachmentPreviewBar.appendChild(errEl);
-    const t = setTimeout(() => {
-      activeTimers.delete(t);
-      errEl.remove();
-      if (
-        attachmentPreviewBar !== null &&
-        pendingAttachments.length === 0 &&
-        attachmentPreviewBar.childElementCount === 0
-      ) {
-        attachmentPreviewBar.classList.remove("visible");
-      }
-    }, 4000);
-    activeTimers.add(t);
+    attachmentPreviewBar.appendChild(uploadErrorEl);
+  }
+
+  /** Clear the composer's refusal line and collapse the preview bar when it
+   *  held nothing else. */
+  function clearUploadError(): void {
+    if (uploadErrorEl === null) return;
+    uploadErrorEl.remove();
+    uploadErrorEl = null;
+    if (
+      attachmentPreviewBar !== null &&
+      pendingAttachments.length === 0 &&
+      attachmentPreviewBar.childElementCount === 0
+    ) {
+      attachmentPreviewBar.classList.remove("visible");
+    }
   }
 
   /** Reflect the current disabledReason onto the DOM (textarea + controls). */
@@ -473,7 +491,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (textarea === null) return;
     const disabled = disabledReason !== null;
     textarea.disabled = disabled;
-    textarea.placeholder = disabled ? disabledReason! : `Message #${options.channelName}`;
+    textarea.placeholder = disabled
+      ? disabledReason!
+      : messagingText("composer.placeholder", { channel: options.channelName });
     for (const btn of controlButtons) {
       if (disabled) {
         btn.setAttribute("disabled", "true");
@@ -505,9 +525,18 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // send the host refuses anyway.
     if (content.length === 0 && (state.editing !== null || !hasAttachments)) return;
 
+    // The spread counts code points, which is what the server counts. A
+    // `.length` check here would count UTF-16 units and refuse ~2000 astral
+    // emoji the server accepts. Checked before the debounce stamp below so a
+    // refused send does not suppress the next one.
+    if ([...content].length > MAX_MESSAGE_LEN) {
+      showUploadError(messagingText("error.tooLong", { max: String(MAX_MESSAGE_LEN) }));
+      return;
+    }
+
     // Block send while uploads are still in flight
     if (pendingUploadCount > 0) {
-      showUploadError("Please wait for uploads to finish");
+      showUploadError(messagingText("error.uploadsPending"));
       return;
     }
 
@@ -532,6 +561,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.value = "";
     autoResize();
     textarea.focus();
+    clearUploadError();
   }
 
   /** Unique counter for preview items (before upload completes and we have a server ID). */
@@ -547,8 +577,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       }
       att.previewEl.remove();
       pendingAttachments.splice(idx, 1);
-      if (pendingAttachments.length === 0) {
-        attachmentPreviewBar?.classList.remove("visible");
+      if (pendingAttachments.length === 0 && attachmentPreviewBar?.childElementCount === 0) {
+        attachmentPreviewBar.classList.remove("visible");
       }
     }
   }
@@ -559,6 +589,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.addEventListener("load", () => resolve(reader.result as string));
+      // i18n-exempt: internal read failure, surfaced only as the caller's own upload toast
       reader.addEventListener("error", () => reject(new Error("Failed to read file")));
       reader.readAsDataURL(file);
     });
@@ -571,19 +602,19 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // never reads pendingAttachments) nor cleared -- they'd silently ride
     // along with the next ordinary message. Refuse at the single entry point.
     if (state.editing !== null) {
-      showUploadError("Can't attach files while editing a message");
+      showUploadError(messagingText("error.attachWhileEditing"));
       return;
     }
 
     // Validate file size
     if (file.size > MAX_FILE_SIZE) {
-      showUploadError(`File too large: ${file.name} exceeds 100 MB limit`);
+      showUploadError(messagingText("error.fileTooLarge", { filename: file.name }));
       return;
     }
 
     // Validate file type — reject files with unknown/empty MIME type
     if (file.type === "" || !ALLOWED_TYPES.some((t) => file.type.startsWith(t))) {
-      showUploadError(`${file.name} is not a supported file type`);
+      showUploadError(messagingText("error.unsupportedType", { filename: file.name }));
       return;
     }
 
@@ -591,13 +622,15 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // upload starts -- keeps the composer's state and the eventual send in
     // sync with what the server will actually accept.
     if (pendingAttachments.length >= MAX_ATTACHMENTS) {
-      showUploadError(`You can attach at most ${MAX_ATTACHMENTS} files to a message`);
+      showUploadError(messagingText("error.tooManyAttachments", { max: String(MAX_ATTACHMENTS) }));
       return;
     }
 
     const tempId = `pending-${++previewCounter}`;
     const isImage = file.type.startsWith("image/");
 
+    // A valid attachment is the user acting on any earlier refusal.
+    clearUploadError();
     attachmentPreviewBar.classList.add("visible");
 
     const item = createElement("div", { class: "attachment-preview-item uploading" });
@@ -635,6 +668,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const removeBtn = createElement("button", {
       class: "attachment-preview-remove",
       "data-testid": "attachment-remove",
+      "aria-label": messagingText("attach.remove", { filename: file.name }),
     });
     removeBtn.appendChild(createIcon("x", 14));
     removeBtn.addEventListener(
@@ -668,8 +702,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     } catch (err) {
       // Upload failed — remove preview and show error
       removePreviewItem(item);
-      const errMsg = err instanceof Error ? err.message : "Upload failed";
-      showUploadError(`Upload failed: ${errMsg}`);
+      const errMsg = err instanceof Error ? err.message : messagingText("error.uploadFailed");
+      showUploadError(messagingText("error.uploadFailedDetail", { detail: errMsg }));
     } finally {
       pendingUploadCount--;
     }
@@ -716,7 +750,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const replyInner = createElement("div", { class: "reply-bar-inner" });
     replyText = createElement("strong", {});
     replyInner.appendChild(replyText);
-    const replyClose = createElement("button", { class: "reply-close" });
+    const replyClose = createElement("button", {
+      class: "reply-close",
+      "aria-label": messagingText("reply.cancel"),
+    });
     replyClose.appendChild(createIcon("x", 14));
     replyClose.addEventListener("click", clearReply, { signal });
     replyInner.appendChild(replyClose);
@@ -724,9 +761,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     editBar = createElement("div", { class: "reply-bar" });
     const editInner = createElement("div", { class: "reply-bar-inner" });
-    const editText = createElement("strong", {}, "Editing message");
+    const editText = createElement("strong", {}, messagingText("edit.editing"));
     editInner.appendChild(editText);
-    const editClose = createElement("button", { class: "reply-close" });
+    const editClose = createElement("button", {
+      class: "reply-close",
+      "aria-label": messagingText("edit.cancel"),
+    });
     editClose.appendChild(createIcon("x", 14));
     editClose.addEventListener("click", () => cancelEdit(), { signal });
     editInner.appendChild(editClose);
@@ -737,7 +777,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const inputBox = createElement("div", { class: "message-input-box" });
     const attachBtn = createElement(
       "button",
-      { class: "input-btn attach-btn", "aria-label": "Attach file" },
+      { class: "input-btn attach-btn", "aria-label": messagingText("attach.label") },
       "+",
     );
 
@@ -767,30 +807,30 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       root?.appendChild(fileInput);
     } else {
       attachBtn.setAttribute("disabled", "true");
-      attachBtn.title = "File uploads not available";
+      attachBtn.title = messagingText("attach.unavailable");
     }
     textarea = createElement("textarea", {
       class: "msg-textarea",
-      placeholder: `Message #${options.channelName}`,
+      placeholder: messagingText("composer.placeholder", { channel: options.channelName }),
       rows: "1",
       "data-testid": "msg-textarea",
     });
     const emojiBtn = createElement("button", {
       class: "input-btn emoji-btn",
-      "aria-label": "Emoji",
+      "aria-label": messagingText("emoji.label"),
     });
     emojiBtn.appendChild(createIcon("smile", 20));
     const gifBtn = createElement(
       "button",
-      { class: "input-btn gif-btn", "aria-label": "GIF" },
-      "GIF",
+      { class: "input-btn gif-btn", "aria-label": messagingText("gif.button") },
+      messagingText("gif.button"),
     );
     if (gifUnavailable) {
-      markGifUnavailable(gifBtn, "GIFs are not enabled on this server");
+      markGifUnavailable(gifBtn, messagingText("gif.disabled"));
     }
     const sendBtn = createElement("button", {
       class: "input-btn send-btn",
-      "aria-label": "Send message",
+      "aria-label": messagingText("send.label"),
       "data-testid": "send-btn",
     });
     sendBtn.appendChild(createIcon("send", 20));
@@ -807,6 +847,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         autoResize();
         maybeEmitTyping();
         syncAutocomplete();
+        // An edit is the user acting on the refusal, so the line goes away.
+        clearUploadError();
       },
       { signal },
     );
@@ -892,13 +934,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Picker state (declared together so both toggle functions can cross-close)
     let emojiPicker: { element: HTMLDivElement; destroy(): void } | null = null;
     let gifPicker: { element: HTMLDivElement; destroy(): void } | null = null;
+    // One outside-click owner per open picker, destroyed when that picker closes.
+    let emojiDismiss: Disposable | null = null;
+    let gifDismiss: Disposable | null = null;
 
     function closeEmojiPicker(): void {
       if (emojiPicker !== null) {
         emojiPicker.element.remove();
         emojiPicker.destroy();
         emojiPicker = null;
-        document.removeEventListener("mousedown", handleClickOutside);
+        emojiDismiss?.destroy();
+        emojiDismiss = null;
       }
     }
 
@@ -945,11 +991,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         },
       });
       root?.appendChild(emojiPicker.element);
+      const dismiss = new Disposable();
+      emojiDismiss = dismiss;
       // Defer so this click doesn't immediately close it
       const t1 = setTimeout(() => {
         activeTimers.delete(t1);
         if (!signal.aborted) {
-          document.addEventListener("mousedown", handleClickOutside);
+          document.addEventListener("mousedown", handleClickOutside, { signal: dismiss.signal });
         }
       }, 0);
       activeTimers.add(t1);
@@ -963,13 +1011,15 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         gifPicker.element.remove();
         gifPicker.destroy();
         gifPicker = null;
-        document.removeEventListener("mousedown", handleGifClickOutside);
+        gifDismiss?.destroy();
+        gifDismiss = null;
       }
     }
 
     function handleGifClickOutside(e: MouseEvent): void {
       if (gifPicker === null) return;
       const target = e.target as Node;
+      if ((target as Element).closest?.(".modal-overlay")) return;
       if (!gifPicker.element.contains(target) && target !== gifBtn && !gifBtn.contains(target)) {
         closeGifPicker();
       }
@@ -1015,10 +1065,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         },
       });
       root?.appendChild(gifPicker.element);
+      const dismiss = new Disposable();
+      gifDismiss = dismiss;
       const t2 = setTimeout(() => {
         activeTimers.delete(t2);
         if (!signal.aborted) {
-          document.addEventListener("mousedown", handleGifClickOutside);
+          document.addEventListener("mousedown", handleGifClickOutside, { signal: dismiss.signal });
         }
       }, 0);
       activeTimers.add(t2);
@@ -1051,7 +1103,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Clear all pending timers
     for (const t of activeTimers) clearTimeout(t);
     activeTimers.clear();
-    ac.abort();
+    disposable.destroy();
     // Image previews now use data: URLs (via readFileAsDataUrl) which don't
     // require revocation — just clear the array and let GC reclaim them.
     pendingAttachments.length = 0;
@@ -1062,6 +1114,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     replyText = null;
     editBar = null;
     attachmentPreviewBar = null;
+    uploadErrorEl = null;
     openPicker = null;
   }
 

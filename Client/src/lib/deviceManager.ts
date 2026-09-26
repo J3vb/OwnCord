@@ -9,6 +9,8 @@ import { voiceStore } from "@stores/voice.store";
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import type { AudioPipeline } from "@lib/audioPipeline";
+import { nativeAudioDevices } from "../features/voice/native/devices";
+import { voiceText } from "../i18n/voice";
 
 const log = createLogger("deviceManager");
 
@@ -17,13 +19,15 @@ const DEVICE_CHANGE_DEBOUNCE_MS = 500;
 
 /** True when a mute/deafen/server-mute/push-to-talk gate means the mic must
  *  stay off regardless of a caller's own request to (re-)enable it.
- *  livekit-client's setMicrophoneEnabled(true) is a bare track.unmute() when
- *  a muted-but-published track survives a toggle (only ScreenShare actually
- *  unpublishes) — no LocalTrackPublished/TrackUnmuted event fires for
- *  anything downstream to catch and correct, so every re-enable path has to
- *  check this itself instead of relying on one. Exported so LiveKitSession's
- *  own re-enable paths (setDeafened's unmute branch, retryMicPermission)
- *  share the same gate instead of each re-deriving it. */
+ *  Re-enabling never re-publishes: setMicrophoneEnabled(true) on an existing
+ *  publication is a track.unmute() (only ScreenShare actually unpublishes),
+ *  and with the Room's stopMicTrackOnMute that same call re-acquires the
+ *  device the mute stopped rather than resuming a live one. Either way no
+ *  LocalTrackPublished/TrackUnmuted event fires for anything downstream to
+ *  catch and correct, so every re-enable path has to check this itself
+ *  instead of relying on one. Exported so LiveKitSession's own re-enable
+ *  paths (setDeafened's unmute branch, retryMicPermission) share the same
+ *  gate instead of each re-deriving it. */
 export function isMicPolicyGated(): boolean {
   const s = voiceStore.getState();
   return (
@@ -124,7 +128,8 @@ export class DeviceManager {
     log.info("Device change detected");
 
     try {
-      const devices = await Room.getLocalDevices("audioinput");
+      const nativeInputs = await nativeAudioDevices("audioinput");
+      const devices = nativeInputs ?? (await Room.getLocalDevices("audioinput"));
       if (this.room !== room) return;
       const savedInput = loadPref<string>("audioInputDevice", "");
 
@@ -141,24 +146,60 @@ export class DeviceManager {
             this.audioPipeline?.setupAudioPipeline();
           } catch (pipelineErr) {
             log.warn("Audio pipeline setup failed after device fallback", pipelineErr);
-            this.onToast?.("Audio pipeline error after device switch");
+            this.onToast?.(voiceText("device.pipelineError"));
           }
-          this.onToast?.("Audio device disconnected — switched to default");
+          this.onToast?.(voiceText("device.inputDisconnected"));
         } catch (err) {
           if (this.room !== room) return;
           log.error("Failed to fallback to default input device", err);
-          this.onErrorCallback?.("No audio input device available");
+          this.onErrorCallback?.(voiceText("device.noInput"));
         }
       }
 
       // Check output device
-      const outputDevices = await Room.getLocalDevices("audiooutput");
+      const outputDevices =
+        (await nativeAudioDevices("audiooutput")) ?? (await Room.getLocalDevices("audiooutput"));
       if (this.room !== room) return;
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput !== "" && !outputDevices.some((d) => d.deviceId === savedOutput)) {
         log.warn("Saved audio output device removed — falling back to default", { savedOutput });
-        savePref("audioOutputDevice", "");
-        this.onToast?.("Audio output device disconnected — switched to default");
+        try {
+          // Clearing the preference only affects a future join. Move the
+          // current room's attached audio away from the removed device too.
+          await room.switchActiveDevice("audiooutput", "");
+          if (this.room !== room || loadPref<string>("audioOutputDevice", "") !== savedOutput)
+            return;
+          savePref("audioOutputDevice", "");
+          this.onToast?.(voiceText("device.outputDisconnected"));
+        } catch (err) {
+          if (this.room !== room || loadPref<string>("audioOutputDevice", "") !== savedOutput)
+            return;
+          log.error("Failed to fallback to default output device", err);
+          this.onErrorCallback?.(voiceText("device.defaultSpeakerFailed"));
+        }
+      }
+
+      // The native backend opens its capture and playout streams on concrete
+      // devices, so the saved devices are re-applied after a hot-plug, a
+      // saved "System default" included: that moves capture and playout to a
+      // hot-plugged default (the backend leaves a stream on an unchanged
+      // device alone).
+      if (nativeInputs === null) return;
+      const saved = [
+        ["audioinput", "audioInputDevice", devices],
+        ["audiooutput", "audioOutputDevice", outputDevices],
+      ] as const;
+      for (const [kind, key, listed] of saved) {
+        const deviceId = loadPref<string>(key, "");
+        const reapply = deviceId === "" || listed.some((d) => d.deviceId === deviceId);
+        if (!reapply) continue;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- sequential by design: the room-supersession check must run between the two switches
+          await room.switchActiveDevice(kind, deviceId);
+        } catch (err) {
+          log.warn("Failed to re-apply saved device after change", { kind, err });
+        }
+        if (this.room !== room) return;
       }
     } catch (err) {
       log.warn("Failed to enumerate devices after change", err);
@@ -183,7 +224,7 @@ export class DeviceManager {
         this.audioPipeline?.setupAudioPipeline();
       } catch (pipelineErr) {
         log.warn("Audio pipeline setup failed after input device switch", pipelineErr);
-        this.onToast?.("Audio pipeline error after device switch");
+        this.onToast?.(voiceText("device.pipelineError"));
       }
       // Re-apply or remove RNNoise processor based on current setting
       const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
@@ -196,7 +237,7 @@ export class DeviceManager {
     } catch (err) {
       if (this.room !== room) return;
       log.error("Failed to switch input device", err);
-      this.onErrorCallback?.("Failed to switch microphone");
+      this.onErrorCallback?.(voiceText("device.micFailed"));
     }
   }
 
@@ -217,7 +258,7 @@ export class DeviceManager {
     } catch (err) {
       if (this.room !== room) return;
       log.error("Failed to switch output device", err);
-      this.onErrorCallback?.("Failed to switch speaker");
+      this.onErrorCallback?.(voiceText("device.speakerFailed"));
     }
   }
 }

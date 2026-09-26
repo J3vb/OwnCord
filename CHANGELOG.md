@@ -39,6 +39,592 @@ ownership, dependency automation — gets **at most a short block at the end**,
 and only when it changes something a contributor or fork holder must do
 (a moved directory, a renamed module, a new required command).
 
+## Unreleased
+
+## v2.0.0-beta.1
+
+User-visible: the first public beta. You can now recover your own account
+without an email server, two-factor sign-in survives a server restart, the
+operator chooses who may register, messages can be set to expire, deleting an
+account really deletes it, first-time DMs arrive as Message Requests, reports
+and appeals flow through a permission-gated Moderation Center, adult content
+and external links wait for your consent, and a zoomed desktop window can still
+reach navigation. Not user-visible: the protocol carries a version number, the
+server's internals were reorganised behind service boundaries, and the desktop
+text was moved behind English catalogs ready for translation.
+
+### Login & connection
+
+- **The server now shows its certificate fingerprint so you can compare it.**
+  The start-up banner, the admin Dashboard and the setup wizard's finish step
+  print the served certificate's SHA-256 in the same format the desktop client
+  shows before its trust prompt. Publish it out of band and compare — a
+  mismatch is the one warning that means an interception attempt. Previously
+  the disclosure told users to compare a fingerprint nothing printed.
+- The client and server now agree on a protocol version ("epoch") when
+  connecting. This release is epoch 1; clients from v1.2.0-alpha.4 and earlier
+  still connect.
+- **A server now says what it is before you connect.** `GET /api/v1/server-info`
+  returns the server name, the protocol epoch it speaks, and whether the owner
+  has switched on browser-client hosting — so a client can tell it is too old
+  for a server without opening a connection and being turned away. The hosting
+  switch exists and is off by default; the browser client itself is post-beta.
+  No version number is included, on this or any other endpoint that does not
+  require logging in.
+- A client too old for its server is told "update the client" on the connect
+  screen, with the usual Update Now button — instead of failing in confusing
+  ways. The saved login is kept, so the updated client signs back in by
+  itself.
+- **Upgrade the server before the clients.** The server only offers client
+  releases that speak its own protocol epoch, so a protocol-changing release
+  reaches clients once the server runs it. Releases that do not change the
+  protocol are offered as before.
+- Signing in from a new device is flagged, so the client can tell you about a
+  session you did not start.
+- **The startup banner stopped calling a LAN address reachable.** It printed
+  whatever address it found first — your `192.168.x` address on a home server,
+  or the Docker bridge address on a container host — under the heading of an
+  address the server can be reached at. Share that URL and it works for you and
+  nobody else. It now prefers a public address when the machine has one, and
+  says in one line what kind of address it printed and what that means for
+  anyone outside the machine.
+- **A failed HTTPS certificate is no longer silent.** With `tls.mode: acme`, a
+  server that could not get a certificate logged nothing at all: it reported a
+  healthy start and then failed every connection. It now logs the failure once,
+  naming the usual cause — inbound port 80 has to be reachable from the
+  internet.
+- The error for `tls.mode: acme` with an IP address said Let's Encrypt does not
+  issue certificates for IP addresses. It has since January 2026; the limit is
+  OwnCord's certificate client. The message now says so, and names the two
+  options that do work on a raw IP.
+
+### Voice
+
+- **Voice that joins and then carries no sound is now warned about at start-up.**
+  If `voice.node_ip` is not a public address, remote callers connect and hear
+  nothing, because it is the address LiveKit gives them to send audio to. The
+  server says so at boot instead of leaving it to be discovered on a call. It
+  warns, never refuses — a LAN-only or Tailscale-only server has a good reason
+  to use a private address there.
+- **Linux desktop voice now connects to remote servers.** It failed to join on
+  any server not on the same machine; it now joins like Windows and macOS.
+
+### Desktop UI
+
+- **Every right-click menu is usable without a mouse.** The member, channel, DM
+  and voice-participant menus open with **Shift+F10** (or the Menu key) on a
+  focused row, move with the arrow keys and Home/End, open the Change Role and
+  Move-to submenus with the right arrow, close with Escape, and return focus to
+  the row you opened them from. Moderators could previously only ban, kick,
+  change a role, server-mute or move a user — and members only block or mute —
+  by right-clicking.
+- The channel menu gains **Move Up** and **Move Down** for channel managers, so
+  reordering no longer needs a drag.
+
+### Accounts & admin
+
+- **The backup schedule and retention window are now owner-only.** Any other
+  administrator, including one holding MANAGE_SERVER or ADMINISTRATOR, is
+  refused when they try to change them, matching the owner-only backup and
+  restore buttons they already could not use. The panel shows both fields
+  read-only to a non-owner. Retention must be `0` (keep forever) or between 7
+  and 3650 days, and the `pre_restore_*` safety copies are never pruned.
+- The connectivity diagnostics now name the kind of address a client connected
+  from (`address_class`), so a Tailscale peer is no longer reported as coming
+  from the public internet. Addresses in `100.64.0.0/10` were previously counted
+  as public.
+- New optional `server.reachability_report_enabled` adds a `reachability`
+  section to the admin connectivity diagnostics: this host's addresses, the
+  ports that need forwarding, and an explicit list of what the server **cannot**
+  determine about its own reachability. Off by default. It makes no network
+  request of any kind — see below.
+- **[docs/port-forwarding.md](docs/port-forwarding.md) now covers what actually
+  goes wrong**: blocked ISP ports, CGNAT, hairpin NAT, changing public IPs, and
+  the LiveKit UDP range that causes most "voice connects but nobody can hear me"
+  reports. It states plainly which cases OwnCord cannot detect for you, and how
+  to check each one yourself. A server cannot test whether the outside world can
+  reach it without asking the outside world, and OwnCord does not ask anyone —
+  so it tells you what it does not know instead of guessing.
+- Under heavy load the server now refuses expensive sign-in work with a "busy,
+  try again" instead of queueing it until everything slows down.
+
+### Accounts & sign-in
+
+- **Two-factor sign-in survives a restart.** Used one-time codes, half-finished
+  logins and pending enrolments are stored, so a restart can no longer let a
+  code be replayed or drop you mid-enrolment.
+- If the server cannot read its two-factor key it now refuses to start rather
+  than quietly generating a new one — which would have locked out every
+  account that had two-factor enabled.
+- **Ten one-time recovery codes** can be generated for a two-factor account, so
+  losing your phone is no longer the end of the account.
+- **Recovery kit.** You can create a recovery secret, held only by you; the
+  server keeps a verifier it cannot reverse. Redeeming it resets your password
+  and signs out every session, without a second factor and without any email
+  server. The kit is single-use and must be replaced after it is redeemed.
+- **Owner-assisted recovery.** The server owner can issue a 15-minute,
+  single-use recovery credential for an account, after recording how they
+  verified the person — in person, voice call, video call, or trusted contact.
+  There is no free-text field, so nothing about the conversation can end up in
+  the audit log.
+- **Recovery from the desktop client.** Settings > Account creates or replaces
+  the recovery kit and regenerates the recovery codes, each shown once; the
+  connect page's "Recover your account" redeems a kit or an owner-issued
+  credential and signs you in.
+- The desktop 2FA box would only take six digits, so a recovery code could not
+  be typed at sign-in — it now accepts either.
+- **Sign out everywhere** revokes every session including the one you are
+  using, and drops the live connections immediately rather than waiting for
+  the next sweep.
+- Changing your password or two-factor settings now tells you when part of the
+  change did not apply, instead of reporting success.
+- Repeated failed logins for one username are counted against one lockout,
+  however the name was capitalised.
+- An API token can no longer be created with a negative lifetime, and a token
+  whose label is a number can be revoked again.
+
+### Installing & updating
+
+- **A failed start-up no longer discards your rollback binary.** A
+  self-updated server used to delete `chatserver.old` before it had proved it
+  could boot, so a migration (or any later start-up failure) left no local
+  rollback. It is now removed only after every start-up stage succeeds.
+- **An older server refuses to start on a database a newer one has migrated,**
+  naming the migrations it does not recognise, instead of serving on a schema
+  it has never seen. Restoring a backup written by a newer server is refused
+  the same way before the live database is touched.
+- **The shipped systemd unit's comment now says off-disk directories need
+  `ReadWritePaths` too.** With `ProtectSystem=strict`, a documented off-disk
+  `backup.dir` (or `upload.storage_dir`) is read-only unless the unit allows
+  it, so following the deployment guide exactly previously produced failing
+  backups. Add a `ReadWritePaths=` line for each such path.
+- **The connectivity report no longer tells you to forward `7880/TCP`.**
+  Clients tunnel LiveKit signalling through `:8443/livekit`, so voice needs
+  only `7881/TCP` and `50000-60000/UDP`; forwarding 7880 just exposed
+  LiveKit's API.
+- **First-run setup asks for a setup token.** The server prints a one-time
+  token in its start-up output while setup is open, and the setup wizard asks
+  for it before creating the Owner account. Restarting the server prints a
+  fresh token, which is how you get one after reopening setup.
+- **The `.env.example` placeholder LiveKit credentials are refused** like the
+  `devkey` defaults: voice stays off until real values are set.
+- **A start-up warning** names an admin allowlist that will see a proxy's or
+  container relay's address because `server.trusted_proxies` is empty. It stays
+  silent once the allowlist no longer admits loopback or the container's bridge
+  gateway, so narrowing `server.admin_allowed_cidrs` is a real fix.
+- **ARM64 server builds.** Releases now carry four server assets instead of
+  two: `chatserver.exe` and `chatserver-windows-arm64.exe` for Windows,
+  `chatserver-linux-amd64.tar.gz` and `chatserver-linux-arm64.tar.gz` for
+  Linux. The existing x64 names are unchanged.
+- **Self-update works on ARM64.** An ARM64 server previously reported no update
+  available, forever, because no asset matched its architecture. It now
+  downloads and verifies the asset built for it. Each Windows binary carries
+  its own signature, so an ARM64 machine no longer checks its download against
+  the x64 one.
+- Every published server asset is now built on its own architecture and run
+  through a full lifecycle check before release — it starts, migrates a fresh
+  database, reports healthy, shuts down cleanly on a stop signal, and restarts
+  on the same data directory. Previously a release asset was only checked as
+  far as "it starts".
+- **ARM64 Docker image.** `ghcr.io/j3vb/owncord-server` is now one tag covering
+  `linux/amd64` and `linux/arm64`, so a Raspberry Pi, an Ampere or Graviton
+  VPS and an x86-64 box all pull the same tag. Both are built and checked on
+  their own hardware before the tag is pushed.
+- The container is checked through the same full lifecycle as the standalone
+  assets: it boots on an empty volume, migrates, reports healthy, drains
+  cleanly on `docker stop`, and is then replaced by a new container that finds
+  the old data intact. Previously only "it starts" was checked.
+- **The image reports its own health.** `docker ps` shows a health state even
+  without the compose file, so `docker run`, Podman and Kubernetes all see it.
+- **The shipped compose file drops every Linux capability** and blocks
+  privilege escalation. If you run the container by hand, pass
+  `--cap-drop=ALL --security-opt=no-new-privileges:true`.
+- **Upgrading and rolling back are rehearsed before a release ships.**
+  Nothing previously checked that a new server takes over an install that is
+  already in use, rather than an empty one. Every release now upgrades the
+  previously published version to the one being shipped and rolls back out of
+  it again, as standalone binaries and as containers, and is blocked unless a
+  signed-in session, an uploaded file, the configuration, the credential keys
+  and the backups all survive both directions intact.
+- **Windows ARM64 desktop client.** Releases now carry a native Windows ARM64
+  installer (`OwnCord_<version>_arm64-setup.exe`), and the server offers it
+  updates, as it already did for Windows x64 and Linux x64/ARM64.
+- **Every desktop build is used before a release ships, not just built.** The
+  Windows x64/ARM64 installers and Linux x64/ARM64 AppImages are each
+  installed on their own architecture, connected to a server, taken into a
+  voice channel and through an account recovery, then updated from the
+  previous release and rolled back to it; each .deb is installed and booted.
+  A failure blocks the release.
+- **Plugins are described by `plugin.json` only — the `plugin.toml` manifest is
+  gone.** A plugin directory carrying only a `plugin.toml` no longer loads;
+  convert it to `plugin.json`. A directory carrying both could previously leave
+  the server honouring a different manifest than the one approved at install.
+- **The Docker quick-start no longer crash-loops.** It now ships a
+  `config.yaml.example` and tells you to copy it before `docker compose up -d`;
+  previously the compose file bind-mounted a config nothing created, so Docker
+  made a _directory_ at that path and the server failed to read its
+  configuration. The same pages now say which files come from the release's
+  source snapshot rather than its assets, and that `voice.livekit_url` must be
+  set to the LiveKit container (`ws://livekit:7880`) because compose injects
+  only the key and secret, with `voice.auto_download_livekit` set to `false`.
+- **`chatserver --version` and `--help` print and exit.** Asking a build what
+  it was no longer starts a server or writes a `config.yaml` into the working
+  directory.
+- **The Windows installer's SmartScreen warning is now explained.** The
+  quick-start tells you what "Windows protected your PC" means on first install
+  and on Update Now, and how to continue, since the installers are not
+  code-signed.
+- **The desktop app no longer reappears on the old version after starting an
+  update.** Once the installer is launching, a launch handed to the still-running
+  old process (shortcut, `owncord://` link, autostart) is ignored instead of
+  bringing the old window back for the whole install. The update log now records
+  the version and PID at startup and the timing around the installer launch.
+- **A silent Windows update no longer relaunches the old version.** The
+  installer could overwrite the app while the old copy was still exiting, skip
+  the locked file and start the old build again. It now waits for the old
+  executable to close before copying the new one.
+
+### Configuration
+
+- **A quoted number or boolean in `config.yaml` is now rejected at startup**,
+  naming the line it sits on. `port: 8443` is a number; `port: "8443"` is a
+  string and is no longer accepted.
+- **List-valued `OWNCORD_*` overrides are comma-separated.** `OWNCORD_FOO=a,b`
+  sets two entries, not one. A configuration file is unaffected.
+- **A section left empty keeps its defaults.** `voice:` with nothing beneath it
+  no longer discards everything that section would otherwise have supplied.
+
+### Privacy & data
+
+- **Deleting an account now really deletes it.** Every class of data the
+  account owned — messages, files, reactions, DMs, sessions, tokens, voice
+  state — is removed, not just hidden. The file half is journaled, so an
+  interrupted deletion resumes on the next start instead of stranding files.
+  Administrators can do this for an account from the admin panel.
+- **A backup restore can no longer resurrect a deleted account.** Deletions are
+  recorded outside the database file and re-applied whenever the server opens
+  it, including after a restore of a backup taken before the deletion.
+- Audit history about a deleted account keeps its integrity — what happened and
+  when — without keeping who.
+- **An account deletion now finishes its own disk-level cleanup.** If a reader
+  is holding the database open while the deletion runs, the final compaction is
+  retried at the next start and by the background maintenance pass, instead of
+  waiting for an unrelated later write to happen along.
+- **A server whose deletion history has gone missing now says so.** If the
+  deletion markers are absent but the key that names them is still there — the
+  shape a restore from a database-only backup leaves — start-up logs an error
+  naming the absent history. It still starts, deliberately: losing one small
+  file should not be a total outage.
+- **Message retention.** Off by default: messages are kept forever unless you
+  say otherwise. An operator can set a server-wide window and override it per
+  channel in either direction. Pinned messages are exempt and DMs are never in
+  scope. The admin panel previews what a policy would remove before you apply
+  it. The sweep is bounded, restart-safe, and swept messages disappear from
+  reconnect history too.
+- The server no longer contacts a public DNS server on startup to work out its
+  own address; it reads the interface table instead. A default install makes no
+  outbound connection you did not configure.
+- Per-user volume settings and DM notes saved by an older client are now
+  carried across to this version instead of being left behind.
+
+### Message Requests
+
+- **First-time DMs arrive as Message Requests.** A stranger's first direct
+  message no longer lands in your inbox: it waits in a Message Requests list as
+  a text-only preview until you accept, ignore, delete or block it. Accepting is
+  what creates the contact — ignoring keeps the sender out of your normal DMs,
+  and blocking also files the request away. Only text is shown before you
+  accept, so an unsolicited attachment is never fetched.
+- You can mark a sender as trusted so their later messages skip the request
+  queue, and the same sender is recognised across your devices.
+
+### Moderation
+
+- **A permission-gated Moderation Center** brings reports, evidence and
+  decisions into one place. Members with the moderator role see the queue and
+  the authorized evidence; everyone else sees nothing, and the server enforces
+  that, not the panel.
+- **Report a message, user or attachment to your own server's moderators.**
+  Reporting is local to the server — nothing is sent anywhere central — and the
+  evidence snapshot is taken at report time so a later edit or delete cannot
+  change what the moderator reviews.
+- **Issue a warning, timeout, kick or ban from a report**, with the role
+  hierarchy enforced: you cannot act on someone at or above your own rank, on
+  yourself, or on the owner. Every action and status change is written to an
+  immutable audit history.
+- **Appeals.** A user who was warned or restricted can file an appeal from their
+  Safety tab, withdraw it, and follow its status; a moderator reviews and decides
+  it, and the decision is recorded.
+
+### Safety & consent
+
+- **NSFW channels wait for your acknowledgement.** An adult channel's content,
+  previews and attachments are not fetched or rendered until you acknowledge
+  them; acknowledging is per user, survives a restart, and can be revoked.
+- **External content is gated on consent before anything is requested.**
+  Link previews, GIF search and embedded media make no third-party request
+  until you consent for that server, and the desktop client fetches through a
+  local broker that confines the destination — so nothing is contacted, and no
+  destination leaked, before you agree.
+
+### Translation-ready text
+
+- **The desktop app's text now lives behind English catalogs**, with a
+  shrink-only scan that fails CI when a user-visible string is written outside
+  them. This is not a second language: it is the seam and the inventory a later
+  translation can build on, plus date, number and plural formatting helpers.
+
+### Desktop UI
+
+- **A zoomed window can reach the sidebar again.** At 200 % zoom (or any
+  window at most 800 px wide) the sidebar collapsed to nothing and channels,
+  DMs, Message Requests, the Moderation Center and Settings became
+  unreachable. A menu button in the header now opens it as a drawer that
+  closes on Escape, on an outside click, and after choosing a destination.
+
+### Admin panel
+
+- **The admin panel now matches the app's look and is readable for everyone.**
+  It uses the same dark neon palette as the desktop client, and every text,
+  status badge, input edge and danger button meets WCAG contrast targets.
+- **Keyboard focus is visible again** on the admin panel: tabbing shows a cyan
+  ring on links, buttons and fields instead of nothing.
+- Dialogs take focus when they open, keep Tab inside, hand focus back when they
+  close, and announce their title; form fields, search boxes and file pickers
+  have proper labels; toggles report their on/off state; icon buttons have names.
+- **Error notifications now stay until you dismiss them**, so a failure can be
+  read and acted on, and the panel honours your system's reduced-motion
+  setting.
+- On a narrow window the admin panel's navigation stays reachable and wide
+  tables scroll instead of being cut off.
+- Audit log, dashboard activity and pending registration times now show in
+  your local time; hover one to see the exact UTC time.
+- **Audit log search now covers the whole log**, not just the 50 entries on
+  screen; the action filter does too. Server log lines, the Dashboard's
+  Attention times, API tokens, plugins and support-bundle expiry also show
+  local time with the UTC time on hover.
+- The Server logs toolbar shows real icons instead of symbols that some
+  systems drew as empty boxes, and its level buttons say whether they are on.
+  The Diagnostics redaction report is laid out as a readable list.
+- The admin panel's security policy now refuses any script that is not one of
+  the panel's own files, so injected markup can no longer run code. The panel
+  looks and works exactly as before.
+- **The admin panel's navigation is regrouped** into Overview, Community,
+  Moderation, Server, Operations and Integrations, with count badges for
+  pending registrations and active warnings and a dot when an update is
+  available. Existing `/admin#section` links still open the same pages.
+- A top bar now names the server and its version, shows the signed-in account
+  and role, and holds Sign out in its account menu.
+- Below 900 px wide the navigation is a drawer behind a menu button: it takes
+  keyboard focus when it opens and closes on Escape, an outside click or a
+  chosen page.
+- **Creating a role now warns when it would outrank Admin or Moderator.** A new
+  role still defaults to the highest free rank below yours, which for the owner
+  is above every built-in role; the dialog now says so before you create it,
+  offers a one-click "place just above" the default role, and refuses a rank
+  that is already taken.
+- The Roles page is a rank ladder, highest first, with a line at your own rank,
+  and every permission's description is shown under it instead of in a
+  mouse-only tooltip.
+- Channel access opens as a side drawer with Access, Overrides and Explain tabs
+  instead of one long dialog.
+- Deleting a channel or a role now asks you to type its name first.
+- **Members has All, Pending and Banned tabs, a username search and a role
+  filter**, and they search the whole server, not just the page on screen. Each
+  row has one Manage button and a ⋮ menu instead of a row of unlabelled icons.
+- Your own row, and anyone at or above your rank, no longer offers Ban, Force
+  logout or any other action the server would refuse; a You, Outranks you or
+  Same rank badge says why.
+- **The setup wizard's security step now says what each TLS mode means for
+  the desktop app**: Let's Encrypt needs port 80 as well as the server port and
+  every renewal makes members accept a new fingerprint, and "off" means the
+  desktop app cannot connect without an HTTPS reverse proxy in front.
+- The setup wizard names each step ("Step 3 of 6 · Server"), and its finish
+  screen shows the address members connect to beside the invite code and the
+  certificate fingerprint. Sign-in and setup share one card layout, and Enter
+  submits them.
+- **Who may register is now a choice**: closed, invite only, approval, or open.
+  Fresh installs default to invite only. Existing servers keep the behaviour
+  they had — a server that required an invite still requires one, and
+  registration is never opened by the upgrade. Switching mode is audited.
+- The desktop sign-up form follows the server's registration mode: it asks for
+  an invite code only when one is needed, says up front when an admin must
+  approve the account, and disables Register on a closed server. If the mode
+  cannot be read, it still asks for a code.
+- **Approval mode** adds a queue: applicants can be listed, approved or denied,
+  and cannot sign in until approved.
+- Retention can be read, set and cleared per channel, with a server-wide
+  default and an effect preview.
+- **Settings are grouped** into General, Access & registration and Security,
+  with a save bar that stays in view while there are unsaved changes.
+- The upload limit and voice quality now show the values the server is running
+  with from config.yaml, instead of disabled fields that could disagree with it.
+- The backup schedule moved to Backups & restore, beside the backups it makes.
+- **Restoring a backup asks you to type its file name**, then waits for the
+  server to restart and reloads. It used to be one click and only suggested a
+  restart.
+- **Updating the server backs up the database first** unless you untick it,
+  links the release notes and warns that database migrations only run forward;
+  a failed backup stops the update.
+- Creating or revoking an invite, and installing or uninstalling a plugin, now
+  show up in the audit log. Invite entries name the invite by id, never by
+  code.
+- The owner check no longer costs a second database lookup on every request.
+- **A refused `/admin` request now names the setting behind it.** The `403`
+  body points at `server.admin_allowed_cidrs` (private networks by default), so
+  a VPS operator can tell a firewall from the allowlist; the metrics and LiveKit
+  webhook routes name their own allowlists the same way. The quick-start and
+  deployment pages describe the SSH tunnel (`ssh -L 8443:localhost:8443`) and
+  the allowlist entry for headless installs.
+
+### Accessibility
+
+- **The desktop client's login page is keyboard-operable.** The Register toggle
+  and the "recover your account" link are now real buttons reachable with Tab;
+  they were links without a destination, so a keyboard-only user could not
+  sign up or start recovery.
+- **The Appearance theme and accent pickers are one Tab stop each**, moved with
+  the arrow keys, instead of one stop per tile and swatch.
+- Focus rings are restored on channel mentions and message-link chips, and on
+  the status text field.
+- Composer refusals (message too long, uploads pending, a failed upload) now
+  stay on screen until you edit or send again, and use a text colour that meets
+  the contrast bar rather than vanishing after four seconds at about 3:1.
+- Destructive and status labels — Delete Channel, Log Out, "Offline", a slow
+  server's latency — use the accessible danger text colour instead of the raw
+  red fill colour.
+- The in-app **Reduce Motion** toggle now also stops the connect-page background
+  pulse and the primary-button shimmer.
+- **Voice and media controls are keyboard-reachable and meet contrast targets.**
+  Mute, deafen, camera, screen-share and disconnect are operable with Tab and
+  Enter, announce their state, and use the accessible text colours.
+- **Message reading, composing and the overlays are keyboard- and
+  screen-reader-friendlier:** the message list and composer expose their roles
+  and labels, and dialogs keep focus inside and hand it back when they close.
+- **Settings > Logs no longer scrolls sideways at 200 % zoom.** Its filter and
+  level controls and its Copy All, Clear Logs and Refresh buttons wrap onto
+  more than one row, and a log line with a long unbroken URL, token or hash
+  wraps too, instead of pushing the pane into a horizontal scroll.
+
+### Documentation
+
+- `docs/trust-model.md` answers "who can read my messages?": the server
+  operator can read text and files; voice, video and screen share are
+  end-to-end encrypted; what beta does not claim. Every claim cites the code
+  or test behind it.
+- `docs/architecture/plugins.md`: plugins are experimental, off by default,
+  compiled out of release binaries, and carry no API promise.
+- `docs/architecture/data-lifecycle.md` models what happens to your data when a
+  destructive operation is interrupted, runs out of disk, crashes, races
+  another writer, or is undone by a restore.
+- `docs/architecture/diagnostics.md` lists every diagnostic surface the server
+  has and where its data goes, and states the support-bundle contract.
+- `docs/architecture/server-boundaries.md` records which parts of the server
+  may talk to the database directly.
+- `docs/deployment.md` now covers upgrading and rolling back: stop the server,
+  archive the install, swap the binary or image, and — because migrations only
+  ever run forward — restore that archive first if you need the old version
+  back.
+- **`docs/deployment.md` says what a backup has to contain to be restorable.**
+  The backup endpoint's file is the database only; the uploads and the key and
+  marker files beside `data/` are what a restore needs with it, and restoring
+  without the markers brings deleted accounts back. The same page describes the
+  three stages a server passes through as its disk fills, and what an operator
+  sees at each.
+- **`docs/architecture/data-lifecycle.md` carries the failure and recovery
+  drill results.** Every destructive operation is now measured against the
+  failure axes that matter — interrupted, out of disk, racing a reader,
+  crashed, undone by a restore — with each row naming the test or the drill run
+  that produced it, and the byte-level erasure evidence under an active reader
+  tabulated file by file.
+- **`docs/capacity.md` says how much one server carries, and on what.** 250
+  registered accounts, 100 connections held for three minutes, and 25 people in
+  voice — measured on a 2 vCPU / 4 GB machine, with the exact commands to
+  re-run it yourself, and with the things the numbers do not mean written down
+  next to them.
+- **Docs (not user-visible):** the beta product requirement for deleted-account
+  audit history, the requirement-traceability row, and the repository-health
+  register now describe the retained audit-token design as it was actually
+  built and approved at HP-4 — one stable per-subject token, not an erased
+  key — instead of the earlier, superseded wording. Those pages, and the
+  trust-model and security pages carrying the same claim, now also name the
+  two residues the token does not cover — the `erasure_jobs` row's bare user
+  id and the free text an erased moderator authored — rather than claiming a
+  deidentification the shipped code does not deliver.
+- **`docs/deployment.md` now answers day-2 operation from the page itself.**
+  Where logs actually land under journald, Docker, Task Scheduler and NSSM
+  (with the two `nssm set` lines a Windows service needs or it has no logs at
+  all); the support bundle — what it holds, what it never holds, and how to
+  download it from the admin panel; the configurable capacity ceilings and what
+  each returns when reached; what grows on disk and what is pruned, and the
+  thirteen steps the background maintenance pass takes in order.
+- **`docs/deployment.md` moves the backup set to where recovery is read.**
+  Backup Strategy carries the full list of what a restorable backup must
+  contain and what each file costs you to lose; Upgrade and Rollback keeps a
+  one-line pointer, and Restore now describes the real sequence the server
+  runs, including what a restore cannot bring back.
+- **`docs/deployment.md` documents the certificate per mode, honestly.**
+  Self-signed: two years, no expiry check, no reload — and the rotation
+  procedure with what every desktop client sees afterwards. ACME: what it
+  needs (inbound port 80 included) and what renews trigger on pinned desktop
+  clients. Manual and plaintext: the restart and the trade-off, respectively.
+- **`docs/deployment.md` gained "When it fails"** — a symptom-first section
+  for the failures an owner actually hits: the health endpoint, a server that
+  refuses to start, voice with no audio, voice that will not join, the
+  certificate-mismatch modal, a 2FA lockout after a restore, upload refusals,
+  an update that did not come back — and what to send when asking for help.
+- `docs/deployment.md`'s update-failure procedure names the audit rows the
+  updater writes, the two self-recovery shapes read from its verification and
+  rotation code, the pre-checks that prevent the failures, and the port-80
+  row for ACME moved into the canonical firewall table.
+
+### Repository
+
+- `protocol/schema.json` declares `protocol_epoch`; `npm run generate` emits it
+  as `ws.ProtocolEpoch` and `PROTOCOL_EPOCH`. Rules for bumping it:
+  `docs/protocol.md`, Compatibility.
+- The server's route table, database tables and configuration keys are now
+  generated into the docs and checked for drift in CI.
+- CI gained a coverage floor, a nightly Docker smoke test of `dev`, seeded
+  simulation and fuzz targets, and four static invariant rules covering lock
+  discipline, database-import boundaries, permission chokepoints and outbound
+  network sites.
+- The load baseline now runs the server inside a 2-CPU, 4 GB cgroup with the
+  load generators pinned outside it, and a second, unconstrained leg kept only
+  as a headroom check. A voice harness drives 25 publishers and 25 subscribers
+  through LiveKit's own load tester and checks the result, rather than trusting
+  its exit status.
+- The load baseline gained three operational profiles beside the capacity run:
+  `operational` (reconnect storm, per-phase database-wait deltas, voice
+  join/leave churn, upload admission through the quota, and the same run with
+  TLS off for a cost delta), `restart` (the server is stopped and started under
+  100 connections, with drain time, exit code and lost drain-window sends
+  checked) and `ceiling-search` (connections stepped up to 500 to find where a
+  capacity budget first breaks). `GET /api/v1/metrics` now reports the SQLite
+  reader pool's wait count and seconds beside the writer's.
+- All four of those profiles have now been run on the 2-CPU cgroup and the
+  numbers published in `docs/capacity.md` — including the two budgets they
+  miss, the restart that drained in six seconds losing nothing, and why the
+  connection search stops telling you about the hardware past 100 connections
+  in one channel.
+- `upgrade-rehearsal.yml` now also runs the failure and recovery drills, on the
+  nightly and on dispatch: backup and restore through the real admin endpoints
+  with clients connected, the deletion-marker restore, disk pressure both as a
+  process and inside the container image, corrupt operator input, and the SFU
+  drill against a checksum-verified LiveKit release. A drill that cannot run
+  reports `skipped`; none of them can report a pass they did not measure.
+- Releases now carry a signed provenance attestation for every asset, an SBOM
+  for each server asset, and an attestation on the container image. None of it
+  requires trusting the download page — [Verifying a
+  Download](docs/deployment.md#verifying-a-download) has the commands.
+- The database-boundary guard now rejects handle **use**, not only imports: a
+  file that reaches the handle through a package field is measured even when it
+  imports nothing, every boundary file pins the exact calls and hand-offs it
+  makes, and an adapter file that makes one fails the gate. Four previously
+  unclassified websocket reads now go through the seam that owns them, and the
+  replay purge's two deletes stay exactly where they are, pinned. No behaviour
+  change.
+
 ## v1.2.0-alpha.4
 
 **62 bug fixes**, all user-visible, plus repository work that changes nothing an

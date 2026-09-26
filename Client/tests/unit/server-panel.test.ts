@@ -29,8 +29,14 @@ import { loadCredential } from "@lib/credentials";
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Every page signal makeAc hands out, aborted in afterEach: the connect page's
+// teardown, so an Add Server modal left open does not outlive its test.
+const pageControllers: AbortController[] = [];
+
 function makeAc(): AbortController {
-  return new AbortController();
+  const ac = new AbortController();
+  pageControllers.push(ac);
+  return ac;
 }
 
 function makeOpts(overrides: Partial<ServerPanelOptions> = {}): ServerPanelOptions {
@@ -80,6 +86,7 @@ describe("ServerPanel", () => {
   });
 
   afterEach(() => {
+    for (const ac of pageControllers.splice(0)) ac.abort();
     container.remove();
   });
 
@@ -256,6 +263,7 @@ describe("ServerPanel", () => {
       vi.mocked(loadCredential).mockResolvedValueOnce({
         username: "saveduser",
         token: "tok",
+        hasPassword: false,
       });
 
       const panel = createServerPanel(makeOpts({ onCredentialLoaded }), [SIMPLE_PROFILES[0]!]);
@@ -266,7 +274,7 @@ describe("ServerPanel", () => {
 
       // Password is no longer returned from credential store over IPC (security hardening)
       await vi.waitFor(() => {
-        expect(onCredentialLoaded).toHaveBeenCalledWith("localhost:8443", "saveduser", undefined);
+        expect(onCredentialLoaded).toHaveBeenCalledWith("localhost:8443", "saveduser", false);
       });
     });
 
@@ -698,6 +706,87 @@ describe("ServerPanel", () => {
       panel.renderProfiles([]);
       expect(container.querySelectorAll(".server-item").length).toBe(0);
     });
+
+    // OC-0336: renderServerProfiles rebuilds every row from scratch on each
+    // call, but a per-row click listener bound to the page-lifetime `signal`
+    // (which only aborts once, when the connect page is destroyed) would
+    // keep every discarded row from a prior render reachable — and its
+    // click handler still live — until then.
+    it("does not fire onServerClick for a row discarded by a later render (OC-0336)", () => {
+      const onServerClick = vi.fn();
+      const panel = createServerPanel(makeOpts({ onServerClick }), SIMPLE_PROFILES);
+      container.appendChild(panel.element);
+
+      const staleItem = container.querySelector(".server-item") as HTMLElement;
+      expect(staleItem).not.toBeNull();
+
+      panel.renderProfiles([SIMPLE_PROFILES[1]!]);
+      expect(container.contains(staleItem)).toBe(false);
+
+      // Clicking the detached, stale row must not still reach the handler
+      // it closed over.
+      staleItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(onServerClick).not.toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Advisory compatibility badge (B7-12)
+  // -----------------------------------------------------------------------
+
+  describe("updateCompatibility", () => {
+    it("badges a client-older server as needing a client update", () => {
+      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
+      container.appendChild(panel.element);
+
+      panel.updateCompatibility("localhost:8443", "client-older");
+
+      const badge = container.querySelector(".srv-compat-badge")!;
+      expect(badge.textContent).toBe("Client update needed");
+      expect(badge.classList.contains("client-older")).toBe(true);
+    });
+
+    it("badges a server-older server as needing a server update", () => {
+      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
+      container.appendChild(panel.element);
+
+      panel.updateCompatibility("localhost:8443", "server-older");
+
+      const badge = container.querySelector(".srv-compat-badge")!;
+      expect(badge.textContent).toBe("Server update needed");
+      expect(badge.classList.contains("server-older")).toBe(true);
+    });
+
+    it("shows no badge for a compatible server", () => {
+      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
+      container.appendChild(panel.element);
+
+      panel.updateCompatibility("localhost:8443", "client-older");
+      panel.updateCompatibility("localhost:8443", "compatible");
+
+      const badge = container.querySelector(".srv-compat-badge")!;
+      expect(badge.textContent).toBe("");
+      expect(badge.classList.contains("client-older")).toBe(false);
+    });
+
+    it("shows no badge when the probe could not reach the server", () => {
+      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
+      container.appendChild(panel.element);
+
+      panel.updateCompatibility("localhost:8443", "unreachable");
+
+      const badge = container.querySelector(".srv-compat-badge")!;
+      expect(badge.textContent).toBe("");
+    });
+
+    it("ignores updates for unknown hosts", () => {
+      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
+      container.appendChild(panel.element);
+
+      panel.updateCompatibility("unknown.host:9999", "client-older");
+
+      expect(container.querySelector(".srv-compat-badge")?.textContent).toBe("");
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -980,6 +1069,36 @@ describe("ServerPanel", () => {
       saveBtn.click();
 
       expect(onAddProfile).toHaveBeenCalledWith("Trimmed Server", "trimmed.com:8443");
+    });
+
+    // OC-0335: handleAddServer builds a fresh modal on every "+ Add Server"
+    // click, but its listeners were bound to the page-lifetime `signal`
+    // (which only aborts once, when the connect page is destroyed) and
+    // closeModal() only removed the overlay from the DOM. A closed modal's
+    // save button therefore kept its listener live — and the modal
+    // reachable through it — for the rest of the connect page's life.
+    it("does not fire onAddProfile from a closed modal's stale save button (OC-0335)", () => {
+      const onAddProfile = vi.fn();
+      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
+      container.appendChild(panel.element);
+
+      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
+      addBtn.click();
+
+      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
+      inputs[0]!.value = "Stale Server";
+      inputs[1]!.value = "stale.example.com:8443";
+
+      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
+      const cancelBtn = container.querySelector(".btn-ghost") as HTMLElement;
+      cancelBtn.click();
+
+      expect(container.querySelector(".modal-overlay")).toBeNull();
+
+      // Clicking the closed modal's stale save button must not still reach
+      // the handler it closed over.
+      saveBtn.click();
+      expect(onAddProfile).not.toHaveBeenCalled();
     });
 
     it("focuses the name input on modal open", () => {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -89,7 +90,7 @@ func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, download
 	if err != nil {
 		return "", err
 	}
-	names := checksumEntryNamesForGOOS(runtime.GOOS)
+	names := checksumEntryNamesForGOOS(runtime.GOOS, runtime.GOARCH)
 	if len(names) == 0 {
 		names = []string{assetFilename}
 	}
@@ -193,7 +194,7 @@ func extractChatserverFromTarGz(r io.Reader, destPath string) (string, error) {
 	tr := tar.NewReader(gr)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return "", fmt.Errorf("archive contains no file named chatserver")
 		}
 		if err != nil {
@@ -248,16 +249,40 @@ func extractChatserverFromTarGz(r io.Reader, destPath string) (string, error) {
 }
 
 // serverDownloadAssetName returns the GitHub release asset file name for the
-// server binary on the given GOOS (windows, linux). Other values return "".
-func serverDownloadAssetName(goos string) string {
-	switch goos {
-	case "windows":
+// server binary on the given GOOS/GOARCH. Only the four published pairs
+// resolve; every other combination returns "" so the caller treats the update
+// as unavailable rather than installing a foreign-arch binary it cannot
+// execute (OC-0320). The pairs are matched whole — never by architecture or
+// OS alone — so adding an asset can never widen an unrelated one.
+func serverDownloadAssetName(goos, goarch string) string {
+	switch {
+	case goos == "windows" && goarch == "amd64":
 		return windowsServerBinary
-	case "linux":
+	case goos == "windows" && goarch == "arm64":
+		return windowsServerArm64Binary
+	case goos == "linux" && goarch == "amd64":
 		return linuxServerArchive
+	case goos == "linux" && goarch == "arm64":
+		return linuxServerArm64Archive
 	default:
 		return ""
 	}
+}
+
+// serverSignatureAssetName returns the detached-signature asset paired with
+// serverDownloadAssetName's result, or "" where no detached signature is
+// published. It is Windows-only: the Linux tarball path verifies through the
+// signed manifest and checksum instead, so requiring a signature there would
+// block Linux updates (see hasRequiredServerAssetsFor).
+func serverSignatureAssetName(goos, goarch string) string {
+	if goos != "windows" {
+		return ""
+	}
+	binary := serverDownloadAssetName(goos, goarch)
+	if binary == "" {
+		return ""
+	}
+	return binary + ".sig"
 }
 
 // downloadFile downloads the content at url and writes it to destPath.

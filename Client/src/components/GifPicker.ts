@@ -2,11 +2,26 @@
 // (which proxies Klipy). Uses @lib/dom helpers exclusively. Never sets
 // innerHTML with user content.
 
+import { Disposable } from "@lib/disposable";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
 import type { GifApi, GifResult } from "@lib/gifProvider";
+import {
+  fetchExternalImage,
+  recoverEvictedImage,
+  renderFailureStatus,
+} from "@components/message-list/attachments";
+import {
+  admitDerived,
+  externalAllowed,
+  GIF_PICKER_ITEM,
+  requestExternalItem,
+} from "../features/content-consent/external";
+import { externalConsentText } from "../i18n/externalConsent";
+import { contentText } from "../i18n/content";
+import { messagingText } from "../i18n/messaging";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,9 +40,6 @@ export interface GifPickerOptions {
   readonly onUnavailable?: (reason: string) => void;
 }
 
-/** Shown in-picker and passed to onUnavailable when the server has no key. */
-export const GIF_UNAVAILABLE_MESSAGE = "GIFs are not enabled on this server";
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -43,8 +55,8 @@ export function createGifPicker(options: GifPickerOptions): {
   readonly element: HTMLDivElement;
   destroy(): void;
 } {
-  const abortController = new AbortController();
-  const signal = abortController.signal;
+  const disposable = new Disposable();
+  const signal = disposable.signal;
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let currentRequestId = 0;
@@ -57,13 +69,13 @@ export function createGifPicker(options: GifPickerOptions): {
   const searchInput = createElement("input", {
     class: "gp-search",
     type: "text",
-    placeholder: "Search Klipy",
+    placeholder: messagingText("gif.searchPlaceholder"),
   });
   header.appendChild(searchInput);
 
   // Attribution
   const attribution = createElement("div", { class: "gp-attribution" });
-  setText(attribution, "Powered by Klipy");
+  setText(attribution, messagingText("gif.attribution"));
   header.appendChild(attribution);
 
   root.appendChild(header);
@@ -73,18 +85,46 @@ export function createGifPicker(options: GifPickerOptions): {
   const gridArea = createElement("div", {
     class: "gp-grid-area",
     role: "listbox",
-    "aria-label": "GIFs",
+    "aria-label": messagingText("gif.listLabel"),
   });
   root.appendChild(gridArea);
   enableRovingNavigation(gridArea, ".gp-item", signal);
 
+  // Single delegated listener for the whole grid, registered once at mount
+  // time. renderGifs() discards and rebuilds every cell on each search (20
+  // cells per render); a listener bound directly to each cell would register
+  // (and, since it lives on the picker-lifetime `signal`, never release) one
+  // abort algorithm per discarded cell for the rest of the picker's life —
+  // the same pattern EmojiPicker's delegated click handler already fixes.
+  gridArea.addEventListener(
+    "click",
+    (e) => {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      const cell = target.closest<HTMLElement>(".gp-item");
+      if (cell === null) return;
+      const fullUrl = cell.dataset.fullUrl;
+      if (fullUrl === undefined) return;
+      options.onSelect(fullUrl);
+      options.onClose();
+    },
+    { signal },
+  );
+
   // Loading indicator
-  const loadingEl = createElement("div", { class: "gp-loading" });
-  setText(loadingEl, "Loading...");
+  const loadingEl = createElement("div", { class: "gp-loading", role: "status" });
+  setText(loadingEl, messagingText("gif.loading"));
 
   // Empty state
   const emptyEl = createElement("div", { class: "gp-empty" });
-  setText(emptyEl, "No GIFs found");
+  setText(emptyEl, messagingText("gif.empty"));
+
+  /** Transient failure: the same calm line as before plus a bounded retry,
+   *  which re-runs the last query under the picker's current consent. */
+  function showLoadError(message: string, retry: () => void): void {
+    clearChildren(gridArea);
+    gridArea.appendChild(renderFailureStatus(message, contentText("gif.retry"), retry));
+  }
 
   // ── Rendering ──
 
@@ -104,24 +144,24 @@ export function createGifPicker(options: GifPickerOptions): {
         role: "option",
         // Same fallback as the img alt below — an untitled GIF still needs a
         // pronounceable accessible name.
-        "aria-label": gif.title || "GIF",
+        "aria-label": gif.title || messagingText("gif.itemLabel"),
+        // Read by the delegated click handler on gridArea (see mount-time
+        // listener above) instead of a per-cell listener.
+        "data-full-url": gif.fullUrl,
       });
+      // Klipy's CDN is still an external host: the thumbnail arrives through
+      // the external-content broker, not as a URL the webview loads itself.
       const img = createElement("img", {
         class: "gp-img",
-        src: gif.url,
-        alt: gif.title || "GIF",
+        alt: gif.title || messagingText("gif.itemLabel"),
         loading: "lazy",
       });
+      admitDerived(GIF_PICKER_ITEM, `url:${gif.url}`);
+      recoverEvictedImage(img, { url: gif.url });
+      void fetchExternalImage({ url: gif.url }).then((src) => {
+        if (src !== null) img.src = src;
+      });
       item.appendChild(img);
-
-      item.addEventListener(
-        "click",
-        () => {
-          options.onSelect(gif.fullUrl);
-          options.onClose();
-        },
-        { signal },
-      );
 
       grid.appendChild(item);
     }
@@ -137,7 +177,36 @@ export function createGifPicker(options: GifPickerOptions): {
     gridArea.appendChild(loadingEl);
   }
 
+  // B9-8: the picker is one external item. Until the viewer consents, not
+  // even the query reaches the server's GIF proxy.
+  let consentBtn: HTMLButtonElement | null = null;
+  function showConsent(): void {
+    if (consentBtn !== null) return;
+    gridArea.hidden = true;
+    consentBtn = createElement("button", { type: "button", class: "btn-ghost gp-consent" });
+    setText(consentBtn, externalConsentText("gif.load"));
+    consentBtn.addEventListener(
+      "click",
+      () => {
+        void requestExternalItem(GIF_PICKER_ITEM).then((ok) => {
+          if (!ok || signal.aborted) return;
+          consentBtn?.remove();
+          consentBtn = null;
+          gridArea.hidden = false;
+          searchInput.focus();
+          void loadGifs(searchInput.value.trim());
+        });
+      },
+      { signal },
+    );
+    root.insertBefore(consentBtn, gridArea);
+  }
+
   async function loadGifs(query: string): Promise<void> {
+    if (!externalAllowed(GIF_PICKER_ITEM)) {
+      showConsent();
+      return;
+    }
     const requestId = ++currentRequestId;
     showLoading();
 
@@ -158,14 +227,24 @@ export function createGifPicker(options: GifPickerOptions): {
       if (disabled) {
         root.classList.add("gp-unavailable");
         searchInput.disabled = true;
-        options.onUnavailable?.(GIF_UNAVAILABLE_MESSAGE);
+        options.onUnavailable?.(messagingText("gif.disabled"));
       }
       if (requestId === currentRequestId) {
-        clearChildren(gridArea);
-        const errEl = createElement("div", { class: "gp-empty" });
-        const fallback = err instanceof Error ? err.message : "Failed to load GIFs";
-        setText(errEl, disabled ? GIF_UNAVAILABLE_MESSAGE : fallback);
-        gridArea.appendChild(errEl);
+        if (disabled) {
+          clearChildren(gridArea);
+          const errEl = createElement("div", { class: "gp-empty", role: "status" });
+          setText(errEl, messagingText("gif.disabled"));
+          gridArea.appendChild(errEl);
+        } else {
+          // A transient provider/network failure keeps the query and offers a
+          // bounded retry; it never turns into the empty-results state (B9-9).
+          showLoadError(contentText("gif.failed"), () => {
+            // The retry is replaced by the loading line, so keyboard focus
+            // moves to the search field rather than falling to <body>.
+            searchInput.focus();
+            void loadGifs(searchInput.value.trim());
+          });
+        }
       }
     }
   }
@@ -207,7 +286,7 @@ export function createGifPicker(options: GifPickerOptions): {
     if (debounceTimer !== null) {
       clearTimeout(debounceTimer);
     }
-    abortController.abort();
+    disposable.destroy();
   }
 
   return { element: root, destroy };

@@ -13,6 +13,7 @@ vi.mock("@tauri-apps/api/event", async () => ({
 
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient, toConnectionStatus } from "../../src/lib/ws";
+import { expectConsole } from "../helpers/console";
 
 describe("message handling edge cases", () => {
   let client: ReturnType<typeof createWsClient>;
@@ -62,6 +63,7 @@ describe("message handling edge cases", () => {
     client.on("chat_message", (p) => messages.push(p));
 
     emitTauriEvent("ws-message", JSON.stringify({ payload: { data: "no type" } }));
+    expectConsole("warn", /\[ws\] Invalid WS message: missing type or payload/);
     expect(messages).toHaveLength(0);
   });
 
@@ -74,6 +76,7 @@ describe("message handling edge cases", () => {
     client.on("chat_message", (p) => messages.push(p));
 
     emitTauriEvent("ws-message", JSON.stringify({ type: "chat_message" }));
+    expectConsole("warn", /\[ws\] Invalid WS message: missing type or payload/);
     expect(messages).toHaveLength(0);
   });
 
@@ -225,6 +228,7 @@ describe("message handling edge cases", () => {
         },
       }),
     );
+    expectConsole("error", /\[ws\] Listener error for chat_message/);
 
     // Second listener should still receive the message
     expect(messages).toHaveLength(1);
@@ -238,8 +242,17 @@ describe("message handling edge cases", () => {
     // Should not crash
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
+    // The throwing listener fires once per state change: this one is the
+    // connect transition.
+    expectConsole("error", /\[ws\] State listener error/);
 
     expect(client.getState()).toBe("connecting");
+
+    // The second is the disconnect transition. Provoke it here rather than
+    // leaving it to this file's afterEach: a log raised during teardown has no
+    // test body left to claim it.
+    client.disconnect();
+    expectConsole("error", /\[ws\] State listener error/);
   });
 
   it("ws-error event is logged without crash", async () => {
@@ -248,6 +261,7 @@ describe("message handling edge cases", () => {
 
     // Emit a ws-error event
     emitTauriEvent("ws-error", "Connection reset by peer");
+    expectConsole("warn", /\[ws\] WebSocket error \(proxy\)/);
 
     // No crash expected
     expect(client.getState()).toBe("connecting");
@@ -288,6 +302,7 @@ describe("message handling edge cases", () => {
       status: "mismatch",
       message: "Stored: sha256:OLD",
     });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
 
     expect(events).toHaveLength(0);
   });
@@ -370,6 +385,7 @@ describe("handleMessage size boundary", () => {
     };
 
     emitTauriEvent("ws-message", JSON.stringify(msg));
+    expectConsole("warn", /\[ws\] Message exceeds size limit, dropping/);
     expect(messages).toHaveLength(0);
   });
 
@@ -470,6 +486,7 @@ describe("handleMessage size boundary", () => {
     };
 
     emitTauriEvent("ws-message", JSON.stringify(msg));
+    expectConsole("warn", /\[ws\] Message exceeds size limit, dropping/);
     expect(messages).toHaveLength(0);
   });
 });
@@ -688,6 +705,7 @@ describe("send edge cases", () => {
       type: "chat_send",
       payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
     });
+    expectConsole("warn", /\[ws\] Cannot send, WebSocket not open/);
 
     expect(id).toBe("test-uuid-1234");
   });
@@ -703,6 +721,7 @@ describe("send edge cases", () => {
 
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
+    expectConsole("error", /\[ws\] ws_connect failed/);
 
     // Should attempt reconnect after failure
     expect(states).toContain("reconnecting");
@@ -789,6 +808,7 @@ describe("send edge cases", () => {
 
     // Flush promise to trigger the catch
     await vi.advanceTimersByTimeAsync(10);
+    expectConsole("error", /\[ws\] ws_send failed/);
     expect(client.getState()).toBe("connected");
   });
 
@@ -822,6 +842,7 @@ describe("send edge cases", () => {
       payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
     });
     await vi.advanceTimersByTimeAsync(10);
+    expectConsole("warn", /\[ws\] ws_send: outbound channel full, message dropped/);
 
     expect(failures).toEqual([{ id, code: "NETWORK" }]);
   });
@@ -856,6 +877,7 @@ describe("send edge cases", () => {
       payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
     });
     await vi.advanceTimersByTimeAsync(10);
+    expectConsole("error", /\[ws\] ws_send failed/);
 
     expect(failures).toEqual([{ id, code: "OFFLINE" }]);
   });
@@ -887,6 +909,7 @@ describe("send edge cases", () => {
       type: "chat_send",
       payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
     });
+    expectConsole("warn", /\[ws\] Cannot send, WebSocket not open/);
     // The early-return notification is deferred a microtask so callers can
     // register the id (optimistic row) before the failure lands.
     expect(failures).toEqual([]);
@@ -922,6 +945,7 @@ describe("send edge cases", () => {
 
     // Let the 30s heartbeat fire (and its ws_send reject).
     await vi.advanceTimersByTimeAsync(30_100);
+    expectConsole("warn", /\[ws\] ws_send: outbound channel full, message dropped/);
 
     expect(failures).toEqual([]);
   });
@@ -957,6 +981,7 @@ describe("send edge cases", () => {
       payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
     });
     await vi.advanceTimersByTimeAsync(10);
+    expectConsole("warn", /\[ws\] ws_send: outbound channel full, message dropped/);
 
     expect(failures).toEqual([]);
   });

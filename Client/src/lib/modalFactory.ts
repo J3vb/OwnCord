@@ -1,7 +1,7 @@
 /**
  * Shared modal overlay factory.
  * Creates a modal with backdrop, optional click-outside and Escape key
- * dismissal, and clean lifecycle management via AbortController.
+ * dismissal, and clean lifecycle management via Disposable.
  *
  * Every factory modal carries the dialog accessibility contract (DC-13):
  * role="dialog" + aria-modal on the container, focus moved into the dialog on
@@ -12,8 +12,10 @@
  *   - div.modal                  (content container)
  */
 
+import { Disposable } from "./disposable";
 import { createElement } from "./dom";
 import { applyDialogSemantics, focusDialog, trapFocus } from "./a11y";
+import { connectText } from "../i18n/connect";
 
 export interface ModalOptions {
   /** The content element to place inside the modal container. */
@@ -30,8 +32,12 @@ export interface ModalOptions {
   readonly overlayAttrs?: Readonly<Record<string, string>>;
   /** Accessible name for the dialog (aria-label on the .modal container). */
   readonly ariaLabel?: string;
+  /** Id of an element naming the dialog (aria-labelledby); wins over ariaLabel. */
+  readonly ariaLabelledBy?: string;
   /** AbortSignal for automatic cleanup when the parent component is destroyed. */
   readonly signal?: AbortSignal;
+  /** Focus target on close when the opener is no longer in the document. */
+  readonly fallbackFocus?: () => HTMLElement | null;
 }
 
 export interface ModalInstance {
@@ -61,10 +67,12 @@ export function createModal(
     className,
     overlayAttrs,
     ariaLabel,
+    ariaLabelledBy,
     signal,
+    fallbackFocus,
   } = options;
 
-  const ac = new AbortController();
+  const disposable = new Disposable();
 
   // Build overlay
   const overlayBaseAttrs: Record<string, string> = {
@@ -78,8 +86,8 @@ export function createModal(
   // Build modal container
   const modalClass = className !== undefined ? `modal ${className}` : "modal";
   const modal = createElement("div", { class: modalClass });
-  applyDialogSemantics(modal, ariaLabel !== undefined ? { label: ariaLabel } : {});
-  trapFocus(modal, ac.signal);
+  applyDialogSemantics(modal, { label: ariaLabel, labelledBy: ariaLabelledBy });
+  trapFocus(modal, disposable.signal);
   modal.appendChild(content);
   overlay.appendChild(modal);
 
@@ -90,7 +98,7 @@ export function createModal(
     if (closed) return;
     closed = true;
     overlay.remove();
-    ac.abort();
+    disposable.destroy();
     restoreFocus?.();
     if (onClose !== undefined) {
       onClose();
@@ -106,7 +114,7 @@ export function createModal(
           handleClose();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
   }
 
@@ -119,7 +127,7 @@ export function createModal(
           handleClose();
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
   }
 
@@ -133,12 +141,12 @@ export function createModal(
           overlay.remove();
           restoreFocus?.();
           onClose?.();
-          if (!ac.signal.aborted) {
-            ac.abort();
+          if (!disposable.signal.aborted) {
+            disposable.destroy();
           }
         }
       },
-      { signal: ac.signal },
+      { signal: disposable.signal },
     );
   }
 
@@ -147,7 +155,7 @@ export function createModal(
   // After append: move focus into the dialog and remember where it came from.
   // Callers that focus a specific control afterwards (e.g. the prompt input)
   // simply override the initial target; the restore still works.
-  restoreFocus = focusDialog(modal);
+  restoreFocus = focusDialog(modal, fallbackFocus);
 
   return {
     overlay,
@@ -217,12 +225,12 @@ export function createPromptModal(
   const confirm = createElement(
     "button",
     { class: "btn btn-primary", style: "flex:1;", "data-testid": "prompt-confirm" },
-    options.confirmLabel ?? "Save",
+    options.confirmLabel ?? connectText("modal.save"),
   );
   const cancel = createElement(
     "button",
     { class: "btn btn-secondary", style: "flex:1;", "data-testid": "prompt-cancel" },
-    "Cancel",
+    connectText("common.cancel"),
   );
   row.appendChild(confirm);
   row.appendChild(cancel);

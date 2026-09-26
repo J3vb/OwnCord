@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -126,16 +127,26 @@ func TestCheckForUpdate_NewerVersionAvailable(t *testing.T) {
 	if info.ChecksumURL == "" {
 		t.Error("expected non-empty ChecksumURL")
 	}
-	// Server binary asset is only selected on Windows and Linux.
-	if want := serverDownloadAssetName(runtime.GOOS); want != "" {
+	// Server binary asset is only selected on Windows and Linux, amd64 only.
+	if want := serverDownloadAssetName(runtime.GOOS, runtime.GOARCH); want != "" {
 		if info.DownloadURL == "" {
 			t.Error("expected non-empty DownloadURL")
 		}
 	} else if info.DownloadURL != "" {
 		t.Error("expected empty DownloadURL on unsupported GOOS")
 	}
-	if info.SignatureURL == "" {
-		t.Error("expected non-empty SignatureURL")
+	// The detached binary signature is Windows-only: DownloadAndVerify sets
+	// needSignature = runtime.GOOS == "windows", and the Linux tarball path
+	// verifies through the signed manifest and checksum instead. The reported
+	// URL is now the signature paired with the asset this host would actually
+	// download, so a non-Windows host reports none rather than pointing at a
+	// Windows signature it would never fetch.
+	if want := serverSignatureAssetName(runtime.GOOS, runtime.GOARCH); want != "" {
+		if info.SignatureURL == "" {
+			t.Error("expected non-empty SignatureURL on Windows")
+		}
+	} else if info.SignatureURL != "" {
+		t.Errorf("expected empty SignatureURL off Windows, got %q", info.SignatureURL)
 	}
 	if info.ManifestURL == "" {
 		t.Error("expected non-empty ManifestURL")
@@ -335,18 +346,21 @@ func TestUpdateChecksum_SHA256MatchesChecksumsFile(t *testing.T) {
 	tests := []struct {
 		name    string
 		goos    string
+		goarch  string
 		assetFn func(*testing.T) []byte
 	}{
 		{
-			name: "windows_exe",
-			goos: "windows",
+			name:   "windows_exe",
+			goos:   "windows",
+			goarch: "amd64",
 			assetFn: func(*testing.T) []byte {
 				return []byte("windows server binary payload for checksum test")
 			},
 		},
 		{
-			name: "linux_tar_gz",
-			goos: "linux",
+			name:   "linux_tar_gz",
+			goos:   "linux",
+			goarch: "amd64",
 			assetFn: func(t *testing.T) []byte {
 				return mustBuildChatserverTarGz(t, []byte("linux inner binary for checksum test"))
 			},
@@ -356,7 +370,7 @@ func TestUpdateChecksum_SHA256MatchesChecksumsFile(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			asset := tc.assetFn(t)
-			names := checksumEntryNamesForGOOS(tc.goos)
+			names := checksumEntryNamesForGOOS(tc.goos, tc.goarch)
 			if len(names) == 0 {
 				t.Fatal("checksumEntryNamesForGOOS: empty names")
 			}
@@ -397,7 +411,7 @@ func TestUpdateChecksum_FallbackChecksumLine(t *testing.T) {
 	// Only "chatserver.exe", no windows/ prefix — second entry in list must match.
 	checksumData := fmt.Appendf(nil, "%s  chatserver.exe\n", expectedHex)
 
-	names := checksumEntryNamesForGOOS("windows")
+	names := checksumEntryNamesForGOOS("windows", "amd64")
 	parsed, err := u.parseChecksumFileAny(checksumData, names...)
 	if err != nil {
 		t.Fatalf("parseChecksumFileAny: %v", err)
@@ -450,17 +464,108 @@ func TestParseChecksumFileAny_FirstMatch(t *testing.T) {
 
 func TestServerDownloadAssetName(t *testing.T) {
 	tests := []struct {
-		goos string
-		want string
+		goos   string
+		goarch string
+		want   string
 	}{
-		{"windows", "chatserver.exe"},
-		{"linux", "chatserver-linux-amd64.tar.gz"},
-		{"darwin", ""},
-		{"freebsd", ""},
+		{"windows", "amd64", "chatserver.exe"},
+		{"linux", "amd64", "chatserver-linux-amd64.tar.gz"},
+		{"windows", "arm64", "chatserver-windows-arm64.exe"},
+		{"linux", "arm64", "chatserver-linux-arm64.tar.gz"},
+		{"darwin", "amd64", ""},
+		{"freebsd", "amd64", ""},
+		// The pairing still fails closed: a host must never receive a binary
+		// for an architecture it cannot execute (OC-0320). Only the four
+		// published pairs above resolve; everything else is "".
+		{"darwin", "arm64", ""},
+		{"linux", "386", ""},
+		{"windows", "arm", ""},
 	}
 	for _, tc := range tests {
-		if got := serverDownloadAssetName(tc.goos); got != tc.want {
-			t.Errorf("serverDownloadAssetName(%q) = %q, want %q", tc.goos, got, tc.want)
+		if got := serverDownloadAssetName(tc.goos, tc.goarch); got != tc.want {
+			t.Errorf("serverDownloadAssetName(%q, %q) = %q, want %q", tc.goos, tc.goarch, got, tc.want)
+		}
+	}
+}
+
+// TestChecksumEntryNamesForTarget pins the checksum lookup to the target's
+// whole GOOS/GOARCH pair, the way serverDownloadAssetName already is. A
+// GOOS-only lookup handed every architecture the amd64 entry names, so an
+// arm64 host looked up its own download under the amd64 file's hash, the
+// comparison failed, and the update was refused with nothing naming the
+// reason.
+func TestChecksumEntryNamesForTarget(t *testing.T) {
+	tests := []struct {
+		goos   string
+		goarch string
+		want   []string
+	}{
+		{"windows", "amd64", []string{"windows/chatserver.exe", "chatserver.exe"}},
+		{"windows", "arm64", []string{"windows/chatserver-windows-arm64.exe", "chatserver-windows-arm64.exe"}},
+		{"linux", "amd64", []string{"linux/chatserver-linux-amd64.tar.gz", "chatserver-linux-amd64.tar.gz"}},
+		{"linux", "arm64", []string{"linux/chatserver-linux-arm64.tar.gz", "chatserver-linux-arm64.tar.gz"}},
+		// Fail closed, like the asset-name pairing: an unpublished target
+		// resolves no checksum entry at all, so download.go falls back to the
+		// filename it actually fetched rather than to another target's hash.
+		{"darwin", "arm64", nil},
+		{"linux", "386", nil},
+	}
+	for _, tc := range tests {
+		if got := checksumEntryNamesForGOOS(tc.goos, tc.goarch); !slices.Equal(got, tc.want) {
+			t.Errorf("checksumEntryNamesForGOOS(%q, %q) = %q, want %q", tc.goos, tc.goarch, got, tc.want)
+		}
+	}
+
+	// The bare entry must match a checksum line in the release's layout, which
+	// the release workflow writes with an in-directory `sha256sum -- *` and so
+	// without a directory prefix. This is the assertion an amd64-only lookup
+	// fails: neither amd64 name appears in an arm64-only blob, and
+	// parseChecksumFileAny reports no matching line.
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	for _, target := range []struct{ goos, goarch string }{
+		{"windows", "arm64"},
+		{"linux", "arm64"},
+	} {
+		names := checksumEntryNamesForGOOS(target.goos, target.goarch)
+		if len(names) == 0 {
+			t.Fatalf("checksumEntryNamesForGOOS(%q, %q): empty names", target.goos, target.goarch)
+		}
+		bare := names[len(names)-1]
+		sum := sha256.Sum256([]byte("arm64 asset payload"))
+		expectedHex := hex.EncodeToString(sum[:])
+		checksumData := fmt.Appendf(nil, "%s  %s\n", expectedHex, bare)
+
+		parsed, err := u.parseChecksumFileAny(checksumData, names...)
+		if err != nil {
+			t.Fatalf("%s/%s: parseChecksumFileAny(%q): %v", target.goos, target.goarch, bare, err)
+		}
+		if !strings.EqualFold(parsed, expectedHex) {
+			t.Errorf("%s/%s: parsed %q, want %q", target.goos, target.goarch, parsed, expectedHex)
+		}
+	}
+}
+
+// The detached binary signature must name the asset actually downloaded. A
+// fixed "chatserver.exe.sig" would hand a Windows arm64 host the amd64
+// signature, so verification would fail on every arm64 update — the OC-0320
+// architecture-blindness failure moved one step down the pipeline.
+func TestServerSignatureAssetName(t *testing.T) {
+	tests := []struct {
+		goos   string
+		goarch string
+		want   string
+	}{
+		{"windows", "amd64", "chatserver.exe.sig"},
+		{"windows", "arm64", "chatserver-windows-arm64.exe.sig"},
+		// Windows-only: the Linux tarball verifies through the signed
+		// manifest and checksum and never receives a detached signature.
+		{"linux", "amd64", ""},
+		{"linux", "arm64", ""},
+		{"darwin", "arm64", ""},
+	}
+	for _, tc := range tests {
+		if got := serverSignatureAssetName(tc.goos, tc.goarch); got != tc.want {
+			t.Errorf("serverSignatureAssetName(%q, %q) = %q, want %q", tc.goos, tc.goarch, got, tc.want)
 		}
 	}
 }

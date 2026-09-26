@@ -37,7 +37,7 @@ flowchart LR
     WSP -->|"WSS, fingerprint-pinned"| HUB
     LKP -->|"TLS, fingerprint-pinned"| LK
     WV -->|"admin panel (browser)"| ADM
-    HUB <-->|"webhooks + server SDK"| LK
+    HUB <-->|"server SDK (webhooks: operator opt-in)"| LK
     RTR --> DBF
     HUB --> DBF
     RTR --> UPS
@@ -62,7 +62,7 @@ minisign signatures against pinned embedded public keys.
 flowchart TB
     subgraph hostbox ["Operator host (or Docker)"]
         BIN["owncord server binary"]
-        BIN --> CFGF["config.yaml<br/>(koanf: defaults → YAML → OWNCORD_* env)"]
+        BIN --> CFGF["config.yaml<br/>(defaults → YAML → OWNCORD_* env)"]
         BIN --> DATA["data dir<br/>SQLite DB + uploads + TLS certs"]
         BIN --> LKPROC["livekit-server<br/>(optional managed subprocess)"]
         BIN --> P1[":8443 HTTPS + WSS<br/>API, WS, admin, uploads"]

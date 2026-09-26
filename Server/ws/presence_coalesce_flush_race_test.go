@@ -56,7 +56,18 @@ func TestFlushPresenceQueue_ConcurrentDirectPresenceOrdersLast(t *testing.T) {
 
 	raced := make(chan struct{})
 	var hookRan bool
-	presenceFlushRaceHook = func() {
+	presenceFlushRaceHook = func(flushed *Hub) {
+		if flushed != h {
+			// A sibling test's leaked AfterFunc: QueuePresence arms a 300ms
+			// flush that nothing disarms, so TestEmitEvents_DirectPresence-
+			// DropsQueuedEntry and TestQueuePresence_CoalescesLatestWins each
+			// leave one firing well after they return. Running this body for
+			// their Hub would close(raced) a second time and panic the whole
+			// package — which is exactly what it did on Windows under
+			// -tags deadlock, where the run is fast enough for those timers
+			// to land inside this test.
+			return
+		}
 		hookRan = true
 		// Simulate EmitEvents' direct presence branch racing in exactly
 		// here: after flushPresenceQueue has snapshotted (and, currently,

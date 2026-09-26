@@ -5,9 +5,13 @@ const mockUpdatePttKey = vi.fn();
 const mockVkName = vi.fn((vk: number) => `Key-${vk}`);
 
 vi.mock("@lib/ptt", () => ({
-  captureKeyPress: (...args: unknown[]) => mockCaptureKeyPress(...args),
-  updatePttKey: (...args: unknown[]) => mockUpdatePttKey(...args),
   vkName: (vk: number) => mockVkName(vk),
+}));
+vi.mock("../../src/platform/desktop/pushToTalk", () => ({
+  pushToTalk: {
+    captureKeyPress: (...args: unknown[]) => mockCaptureKeyPress(...args),
+    updateKey: (...args: unknown[]) => mockUpdatePttKey(...args),
+  },
 }));
 
 import { buildKeybindsTab } from "../../src/components/settings/KeybindsTab";
@@ -108,6 +112,46 @@ describe("KeybindsTab", () => {
     expect(mockUpdatePttKey).toHaveBeenCalledWith(0x05);
     expect(pttBtn.style.borderColor).toBe("");
     expect(pttBtn.style.color).toBe("");
+  });
+
+  it("ignores a capture that completes after settings closes", async () => {
+    let finish!: (vk: number) => void;
+    mockCaptureKeyPress.mockReturnValue(
+      new Promise<number>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const controller = new AbortController();
+    const el = buildKeybindsTab(controller.signal);
+    const button = el.querySelector(".kbd") as HTMLButtonElement;
+    button.click();
+    controller.abort();
+    finish(0x20);
+    await Promise.resolve();
+
+    expect(mockUpdatePttKey).not.toHaveBeenCalled();
+  });
+
+  it("does not re-enable a cleared key when the previous capture completes", async () => {
+    localStorage.setItem("owncord:settings:pttVk", "113");
+    let finish!: (vk: number) => void;
+    mockCaptureKeyPress.mockReturnValue(
+      new Promise<number>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const controller = new AbortController();
+    const el = buildKeybindsTab(controller.signal);
+    const button = el.querySelector(".kbd") as HTMLButtonElement;
+    button.click();
+    (el.querySelector(".ac-btn") as HTMLButtonElement).click();
+    finish(0x20);
+    await Promise.resolve();
+
+    expect(mockUpdatePttKey).toHaveBeenCalledExactlyOnceWith(0);
+    expect(button.textContent).toBe("Not set");
+    expect(button.style.borderColor).toBe("");
+    controller.abort();
   });
 
   it("restores previous value when captureKeyPress times out (returns 0)", async () => {

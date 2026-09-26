@@ -6,9 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
@@ -20,9 +19,6 @@ const staleClientTimeout = 90 * time.Second
 // onStaleTick runs the cheap in-memory maintenance driven by the stale ticker.
 func (h *Hub) onStaleTick() {
 	h.sweepStaleClients()
-	// Per-channel token buckets are created on first broadcast; prune idle
-	// ones here or the bucket map grows for the process lifetime.
-	h.topicLimiter.Cleanup(10 * time.Minute)
 	h.refreshTelemetryGauges()
 }
 
@@ -108,9 +104,6 @@ func (h *Hub) sweepStaleClients() {
 // provides time-based session enforcement for idle WebSocket connections
 // that never trigger the message-count-based check (BUG-109).
 func (h *Hub) sweepRevokedSessions() {
-	if h.db == nil {
-		return
-	}
 	// Hub run-loop sweeper — no request tie.
 	ctx := context.Background()
 
@@ -128,12 +121,14 @@ func (h *Hub) sweepRevokedSessions() {
 	}
 
 	// One batched lookup for every connected client instead of a query per
-	// client per sweep.
+	// client per sweep. The expiry and ban rules behind the verdicts are
+	// SessionService's — the same ones the handshake applies — so a live session
+	// and a resuming one cannot disagree about what "still valid" means.
 	hashes := make([]string, len(snapshot))
 	for i, c := range snapshot {
 		hashes[i] = c.tokenHash
 	}
-	sessions, err := h.db.GetSessionsWithBanStatusBatch(ctx, hashes)
+	verdicts, err := h.authn.SweepSessions(ctx, hashes)
 	if err != nil {
 		// A failed batch lookup says nothing about any individual session —
 		// kicking everyone on a transient DB error would be a mass disconnect.
@@ -143,27 +138,31 @@ func (h *Hub) sweepRevokedSessions() {
 	}
 
 	for _, c := range snapshot {
-		result := sessions[c.tokenHash]
-		if result == nil || auth.IsSessionExpired(result.ExpiresAt) {
+		// A hash the authenticator did not answer for reads as the map's
+		// zero value, which is SessionRevoked by design: fail closed.
+		switch verdicts[c.tokenHash] {
+		case service.SessionRevoked:
 			slog.Info("session sweep: revoked/expired session, disconnecting",
 				"user_id", c.userID)
 			h.kickClient(c)
-			continue
-		}
-		tempUser := &db.User{Banned: result.Banned, BanExpires: result.BanExpires}
-		if auth.IsEffectivelyBanned(tempUser) {
+		case service.SessionBanned:
 			slog.Info("session sweep: banned user, disconnecting",
 				"user_id", c.userID)
 			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
 			h.kickClient(c)
+		case service.SessionLive:
 		}
 	}
 }
 
 // sweepStaleVoiceEvictRevoked is sweepStaleVoiceStates' permission stage: it
-// re-checks CONNECT_VOICE for every client currently in voice and evicts the
-// ones who no longer hold it.
+// re-checks CONNECT_VOICE for every client currently in voice, evicts the
+// ones who no longer hold it, and reconciles active media source permissions.
 func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
+	// The whole SFU reconciliation pass shares a budget. An unavailable
+	// companion cannot hold the hub loop for one network timeout per user.
+	mediaCtx, cancelMedia := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelMedia()
 	// Revocation must evict a live session, not merely block the next join.
 	// Nothing else in ws re-validates voice permissions for a connection that
 	// stays open, so a user stripped of CONNECT_VOICE kept their SFU session
@@ -182,10 +181,10 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		if chID == 0 {
 			continue
 		}
-		allowed, err := h.hasChannelPermChecked(ctx, c.userID, chID, permissions.ConnectVoice)
+		allowed, err := h.voiceStillAllowed(ctx, c.userID, chID)
 		if err != nil {
 			// A transient read failure (I/O error, lock contention, a
-			// maintenance window) is not a revocation — hasChannelPerm and
+			// maintenance window) is not a revocation — hasChannelAccess and
 			// permissions.Checker.HasChannelPerm both collapse any DB error
 			// to "denied", which would otherwise evict every in-voice
 			// participant on one bad read. Skip this client this tick; the
@@ -196,6 +195,14 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 			continue
 		}
 		if allowed {
+			if h.livekit != nil && mediaCtx.Err() == nil {
+				curChID, joinToken := c.getVoiceState()
+				if curChID == chID && joinToken != "" {
+					if syncErr := h.trySyncVoiceParticipantPermissions(mediaCtx, c.userID, chID, joinToken); syncErr != nil && !liveKitParticipantMissing(syncErr) {
+						slog.Warn("voice permission reconciliation deferred", "user_id", c.userID, "channel_id", chID, "err", syncErr)
+					}
+				}
+			}
 			continue
 		}
 		// The permission check is a DB round-trip; a voice_join to a
@@ -216,17 +223,14 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 // slip through the primary cleanup paths (registerNow, readPump defer,
 // LiveKit webhook).
 func (h *Hub) sweepStaleVoiceStates() {
-	if h.db == nil {
-		return
-	}
 	// Hub run-loop sweeper — no request tie.
 	ctx := context.Background()
 
 	h.sweepStaleVoiceEvictRevoked(ctx)
 
-	allStates, err := h.db.GetAllVoiceStates(ctx)
+	allStates, err := h.voice.AllStates(ctx)
 	if err != nil {
-		slog.Warn("sweepStaleVoiceStates: GetAllVoiceStates failed", "err", err)
+		slog.Warn("sweepStaleVoiceStates: AllStates failed", "err", err)
 		return
 	}
 	if len(allStates) == 0 {
@@ -277,9 +281,9 @@ func (h *Hub) sweepStaleVoiceStates() {
 		// Channel-conditional delete: only removes the row if it still points
 		// at the channel we snapshotted. If the user rejoined or moved between
 		// the snapshot and now, the delete is a no-op and we skip the broadcast.
-		deleted, err := h.db.LeaveVoiceChannelIfMatch(ctx, s.userID, s.channelID, s.joinedAt)
+		deleted, err := h.voice.LeaveIfMatch(ctx, s.userID, s.channelID, s.joinedAt)
 		if err != nil {
-			slog.Error("sweepStaleVoiceStates: LeaveVoiceChannelIfMatch failed",
+			slog.Error("sweepStaleVoiceStates: LeaveIfMatch failed",
 				"err", err, "user_id", s.userID, "channel_id", s.channelID)
 			continue
 		}
@@ -288,7 +292,7 @@ func (h *Hub) sweepStaleVoiceStates() {
 		}
 		slog.Warn("sweepStaleVoiceStates: removed ghost voice state",
 			"user_id", s.userID, "channel_id", s.channelID)
-		h.broadcastVoiceEvent(ctx, s.channelID, buildVoiceLeave(s.channelID, s.userID))
+		h.broadcastVoiceEvent(ctx, s.channelID, s.userID, buildVoiceLeave(s.channelID, s.userID))
 		// Re-elect the key holder now that this ghost row is gone — every
 		// other path that removes a voice participant does this
 		// (finishVoiceLeave, the LiveKit webhook, registerNow,
@@ -317,40 +321,29 @@ func (h *Hub) sweepStaleVoiceStates() {
 // tests use this hook to reproduce it deterministically.
 var sweepStaleVoiceJoinRaceHook func(userID, channelID int64, joinedAt string)
 
-// hasChannelPermChecked is hasChannelPerm's error-aware counterpart: it
-// distinguishes a genuine permission denial (role missing, or the effective
-// permission bits don't include perm) from a DB read failure, by inlining the
-// same resolution hasChannelPerm/permissions.Checker.HasChannelPerm perform —
-// both of which collapse any error into "denied", indistinguishable from a
-// real revocation. sweepStaleVoiceStates needs that distinction: unlike a
-// handler answering one client's request, it evicts a live voice session on
-// "denied", so a transient read failure must not be treated as a revocation.
-func (h *Hub) hasChannelPermChecked(ctx context.Context, userID, channelID int64, perm int64) (allowed bool, err error) {
-	role, err := h.db.GetRoleForUser(ctx, userID)
+// voiceStillAllowed is the sweep's error-aware re-run of the join gate: it
+// distinguishes a genuine refusal (permissions.CanJoinVoice over the live
+// subject — the bit revoked, the channel archived or deleted, DM membership
+// or block state changed) from a DB read failure. sweepStaleVoiceStates
+// needs that distinction: unlike a handler answering one client's request,
+// it evicts a live voice session on "denied", so a transient read failure
+// must not be treated as a revocation. Deliberately read live, never through
+// the cached PermissionService: this is the last-line backstop, and staying
+// authoritative for a change that somehow bypassed the invalidation hooks is
+// worth the handful of reads a minute it costs for the clients in voice.
+func (h *Hub) voiceStillAllowed(ctx context.Context, userID, channelID int64) (allowed bool, err error) {
+	ch, err := h.readers.Dispatch.GetChannel(ctx, channelID)
 	if err != nil {
 		return false, err
 	}
-	if role == nil {
-		// No role row is a genuine deny, not an error — mirrors
-		// hasChannelPerm's role == nil case.
+	if ch == nil {
 		return false, nil
 	}
-	if permissions.HasAdmin(role.Permissions) {
-		return true, nil
-	}
-	allow, deny, err := h.db.GetChannelPermissions(ctx, channelID, role.ID)
+	sub, err := channelSubject(ctx, h.readers.Dispatch, h.permChecker, nil, userID, ch, true)
 	if err != nil {
 		return false, err
 	}
-	o := permissions.ChannelOverride{Allow: allow, Deny: deny}
-	if userID != 0 {
-		uAllow, uDeny, uErr := h.db.GetUserChannelPermissions(ctx, channelID, userID)
-		if uErr != nil {
-			return false, uErr
-		}
-		o.UserAllow, o.UserDeny = uAllow, uDeny
-	}
-	return permissions.EffectiveChannelPerms(role.Permissions, o)&perm == perm, nil
+	return permissions.CanJoinVoice(sub) == nil, nil
 }
 
 // cleanupVoiceRaceClearHook, when non-nil, runs immediately before
@@ -367,9 +360,9 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	// Cleanup must complete even if the triggering request goes away.
 	ctx := context.Background()
 	// Get all users in the channel's voice state from DB.
-	states, err := h.db.GetChannelVoiceStates(ctx, channelID)
+	states, err := h.voice.ChannelStates(ctx, channelID)
 	if err != nil {
-		slog.Error("CleanupVoiceForChannel GetChannelVoiceStates", "err", err, "channel_id", channelID)
+		slog.Error("CleanupVoiceForChannel ChannelStates", "err", err, "channel_id", channelID)
 		return
 	}
 	if len(states) == 0 {
@@ -381,8 +374,8 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	// being in THIS channel: a user who moved to another voice channel
 	// between the snapshot above and this loop must not be clobbered.
 	for _, vs := range states {
-		if _, err := h.db.LeaveVoiceChannelIfMatch(ctx, vs.UserID, channelID, vs.JoinedAt); err != nil {
-			slog.Error("CleanupVoiceForChannel LeaveVoiceChannelIfMatch", "err", err, "user_id", vs.UserID, "channel_id", channelID)
+		if _, err := h.voice.LeaveIfMatch(ctx, vs.UserID, channelID, vs.JoinedAt); err != nil {
+			slog.Error("CleanupVoiceForChannel LeaveIfMatch", "err", err, "user_id", vs.UserID, "channel_id", channelID)
 		}
 
 		// Clear client voice state and its voice-topic subscription. The

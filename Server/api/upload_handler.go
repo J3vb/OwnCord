@@ -1,7 +1,8 @@
 package api
 
 import (
-	"database/sql"
+	"bytes"
+	"context"
 	"errors"
 	"image"
 	_ "image/gif"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -130,155 +132,177 @@ func safeStorageErrorMessage(err error) string {
 // 400. Detail never crosses the HTTP boundary either way (path leakage —
 // see safeStorageErrorMessage).
 func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
+	// B5-2: the two bounds refuse with 507 and their own codes, so a client
+	// can tell "your quota is full" from "the server is out of disk" from a
+	// filesystem failure; none of the three bodies carries a path.
+	if errors.Is(saveErr, service.ErrQuotaExceeded) {
+		slog.Info(what+" refused: user storage quota", "error", saveErr)
+		writeErr(w, http.StatusInsufficientStorage, "STORAGE_QUOTA_EXCEEDED", "upload rejected: your storage quota is full")
+		return
+	}
+	if errors.Is(saveErr, service.ErrLowDisk) {
+		slog.Warn(what+" refused: server storage below its reserved headroom", "error", saveErr)
+		writeErr(w, http.StatusInsufficientStorage, "STORAGE_LOW_DISK", "upload rejected: the server is low on disk space")
+		return
+	}
 	if errors.Is(saveErr, storage.ErrIO) {
 		slog.Error(what+" failed: server storage error", "error", saveErr)
-		writeJSON(w, http.StatusInsufficientStorage, errorResponse{
-			Error:   "STORAGE_ERROR",
-			Message: "upload failed: server storage error",
-		})
+		writeErr(w, http.StatusInsufficientStorage, "STORAGE_ERROR", "upload failed: server storage error")
 		return
 	}
 	slog.Warn(what+" rejected", "error", saveErr)
-	writeJSON(w, http.StatusBadRequest, errorResponse{
-		Error:   "BAD_REQUEST",
-		Message: safeStorageErrorMessage(saveErr),
-	})
+	writeErr(w, http.StatusBadRequest, "BAD_REQUEST", safeStorageErrorMessage(saveErr))
 }
 
 // MountUploadRoutes registers upload and file-serving endpoints.
 // allowedOrigins controls the Access-Control-Allow-Origin header on served files.
 //
-// permSvc MUST be non-nil — handleServeFile dereferences it to enforce
-// per-channel ACLs on every file download. A nil permSvc would panic for
-// any authenticated file request, so we fail fast at mount time rather
-// than let the first user hit a 500.
-func MountUploadRoutes(r chi.Router, database *db.DB, store FileStore, limiter *auth.RateLimiter, allowedOrigins []string, permSvc *service.PermissionService) {
-	if permSvc == nil {
-		panic("api: MountUploadRoutes requires a non-nil PermissionService")
+// uploads MUST be non-nil — it owns the access decision on every file
+// download and the attachment row behind every upload. A nil service would
+// panic on the first request either route saw, so we fail fast at mount time
+// rather than let a user find it.
+func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store FileStore, limiter *auth.RateLimiter, allowedOrigins []string, uploads *service.UploadService) {
+	if uploads == nil {
+		panic("api: MountUploadRoutes requires a non-nil UploadService")
 	}
 	// Upload requires authentication and a higher body size limit (100 MB).
 	r.With(
-		AuthMiddleware(database),
+		AuthMiddleware(sessions),
 		MaxBodySize(uploadMaxBodySize),
-	).Post("/api/v1/uploads", handleUpload(database, store, limiter))
+	).Post("/api/v1/uploads", handleUpload(uploads, store, limiter))
 	// File serving requires authentication for channel-level access control.
-	r.With(AuthMiddleware(database)).Get("/api/v1/files/{id}", handleServeFile(database, store, allowedOrigins, permSvc))
+	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
 }
 
-func handleUpload(database *db.DB, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {
+func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
 		// BUG-131: Per-user upload rate limit to prevent disk exhaustion.
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if ok && user != nil {
-			uploadKey := auth.Key("upload", user.ID)
-			if !limiter.Allow(uploadKey, uploadRateLimitPerMinute, time.Minute) {
-				writeJSON(w, http.StatusTooManyRequests, errorResponse{
-					Error:   "RATE_LIMITED",
-					Message: "upload rate limit exceeded, try again later",
-				})
-				return
-			}
+		if !limiter.Allow(auth.Key("upload", user.ID), uploadRateLimitPerMinute, time.Minute) {
+			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "upload rate limit exceeded, try again later")
+			return
 		}
 
 		// Limit request body size to prevent abuse.
 		r.Body = http.MaxBytesReader(w, r.Body, uploadMaxBodySize)
 
-		// Parse multipart form — 10 MB in memory, rest on disk.
-		if err := r.ParseMultipartForm(multipartMemoryLimit); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: "invalid multipart form",
-			})
-			return
-		}
-
-		file, header, err := r.FormFile("file")
+		// Stream the multipart body instead of buffering or spooling it: no
+		// part is read until the bytes it could cost are admitted below.
+		mr, err := r.MultipartReader()
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: "missing file field",
-			})
-			return
-		}
-		defer file.Close() //nolint:errcheck
-
-		// Generate UUID for storage.
-		fileID := uuid.New().String()
-
-		// Detect MIME type from actual file bytes (never trust client header).
-		var sniffBuf [512]byte
-		n, readErr := file.Read(sniffBuf[:])
-		if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: "failed to read uploaded file",
-			})
-			return
-		}
-		detectedMime := http.DetectContentType(sniffBuf[:n])
-		// Seek back so the full content is available for storage.
-		if _, seekErr := file.Seek(0, 0); seekErr != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to process uploaded file",
-			})
-			return
-		}
-		mime := detectedMime
-
-		// Store file on disk (validates file type via magic bytes).
-		writtenBytes, saveErr := store.Save(fileID, file)
-		if saveErr != nil {
-			writeStorageSaveError(w, saveErr, "file upload")
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
 			return
 		}
 
-		// Extract image dimensions if the file is an image.
-		var width, height *int
-		if strings.HasPrefix(mime, "image/") {
-			f, openErr := store.Open(fileID)
-			if openErr == nil {
-				cfg, _, decErr := image.DecodeConfig(f)
-				f.Close() //nolint:errcheck
-				if decErr == nil {
-					w2, h2 := cfg.Width, cfg.Height
-					width = &w2
-					height = &h2
-				} else {
-					slog.Warn("failed to decode image dimensions", "id", fileID, "error", decErr)
-				}
+		// B5-2: admit the bytes before reading any of them. The declared
+		// length is untrusted and a chunked request carries none at all
+		// (-1), so the envelope is what this request may cost the volume
+		// before the true size is known: the declared length when it is
+		// sane, otherwise the worst case a single file can ever cost — the
+		// configured per-file cap (upload.max_size_mb, already enforced by
+		// storage.Storage.Save) when one is set, else the full request cap.
+		// A chunked upload otherwise reserves the entire 100 MiB request cap
+		// for every user regardless of how small the body turns out to be,
+		// which starves anyone whose quota or headroom is smaller than that.
+		// The deferred Settle returns the charge on every path that does not
+		// reach Record, a panic included.
+		worstCase := int64(uploadMaxBodySize)
+		if fileCap := uploads.MaxUploadBytes(); fileCap > 0 && fileCap < worstCase {
+			worstCase = fileCap
+		}
+		envelope := r.ContentLength
+		if envelope <= 0 || envelope > worstCase {
+			envelope = worstCase
+		}
+		res, err := uploads.Reserve(r.Context(), user.ID, envelope)
+		if err != nil {
+			writeStorageSaveError(w, err, "file upload")
+			return
+		}
+		defer res.Settle(r.Context())
+
+		part, err := findFilePart(mr)
+		if err != nil {
+			writeUploadPartError(w, err)
+			return
+		}
+		defer part.Close() //nolint:errcheck
+
+		stored, ok := uploadStoreFile(r.Context(), w, part, res, store)
+		if !ok {
+			return
+		}
+
+		// Record the attachment (unlinked — message_id is NULL) and commit
+		// the reservation under the same lock.
+		safeFilename := sanitizeUploadFilename(part.FileName())
+		if err := uploads.Record(r.Context(), service.AttachmentRecord{
+			ID:         stored.id,
+			UploaderID: user.ID,
+			Filename:   safeFilename,
+			MimeType:   stored.mime,
+			Size:       stored.size,
+			Width:      stored.width,
+			Height:     stored.height,
+		}, res); err != nil {
+			// Clean up stored file on DB failure; Settle returns the charge.
+			if delErr := store.Delete(stored.id); delErr != nil {
+				slog.Error("failed to clean up orphaned upload file", "stored_as", stored.id, "error", delErr)
 			}
-		}
-
-		// Insert attachment record in DB (unlinked — message_id is NULL).
-		user, _ = r.Context().Value(UserKey).(*db.User)
-		safeFilename := sanitizeUploadFilename(header.Filename)
-		if err := database.CreateAttachment(r.Context(), fileID, user.ID, safeFilename, fileID, mime, writtenBytes, width, height); err != nil {
-			// Clean up stored file on DB failure.
-			_ = store.Delete(fileID)
 			slog.Error("failed to create attachment record", "error", err)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to save attachment",
-			})
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save attachment")
 			return
 		}
 
-		slog.Info("file uploaded", "id", fileID, "filename", safeFilename, "size", writtenBytes, "mime", mime)
+		slog.Info("file uploaded", "id", stored.id, "filename", safeFilename, "size", stored.size, "mime", stored.mime)
 
 		writeJSON(w, http.StatusCreated, uploadResponse{
-			ID:       fileID,
+			ID:       stored.id,
 			Filename: safeFilename,
-			Size:     writtenBytes,
-			Mime:     mime,
-			URL:      "/api/v1/files/" + fileID,
-			Width:    width,
-			Height:   height,
+			Size:     stored.size,
+			Mime:     stored.mime,
+			URL:      "/api/v1/files/" + stored.id,
+			Width:    stored.width,
+			Height:   stored.height,
 		})
 	}
 }
 
-func handleServeFile(database *db.DB, store FileStore, allowedOrigins []string, permSvc *service.PermissionService) http.HandlerFunc {
+// findFilePart walks a multipart request until it finds the "file" field
+// carrying an actual file (a filename= attribute — what distinguished
+// r.FormFile("file") from a same-named plain value), closing every other
+// part without buffering it, and reports the reader's own error (io.EOF
+// included) when no such field turns up.
+func findFilePart(mr *multipart.Reader) (*multipart.Part, error) {
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			return nil, err
+		}
+		if part.FormName() == "file" && part.FileName() != "" {
+			return part, nil
+		}
+		part.Close() //nolint:errcheck
+	}
+}
+
+// writeUploadPartError maps findFilePart's error onto the response the
+// handler always gave: running out of parts without finding "file" is the
+// same "missing file field" FormFile gave, and anything else — a malformed
+// boundary, truncated headers — is the same "invalid multipart form"
+// ParseMultipartForm gave for any structural failure.
+func writeUploadPartError(w http.ResponseWriter, err error) {
+	if errors.Is(err, io.EOF) {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "missing file field")
+		return
+	}
+	writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
+}
+
+func handleServeFile(uploads *service.UploadService, store FileStore, allowedOrigins []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fileID := chi.URLParam(r, "id")
 		if fileID == "" {
@@ -286,12 +310,16 @@ func handleServeFile(database *db.DB, store FileStore, allowedOrigins []string, 
 			return
 		}
 
-		aa := serveFileResolve(w, r, database, fileID)
-		if aa == nil {
+		aa, err := uploads.Resolve(r.Context(), fileID)
+		if err != nil {
+			writeFileAccessError(w, r, fileID, err)
 			return
 		}
 
-		if !serveFileAuthorize(w, r, database, permSvc, aa, fileID) {
+		user, _ := r.Context().Value(UserKey).(*db.User)
+		role, _ := r.Context().Value(RoleKey).(*db.Role)
+		if authErr := uploads.Authorize(r.Context(), aa, user, role); authErr != nil {
+			writeFileAccessError(w, r, fileID, authErr)
 			return
 		}
 
@@ -342,133 +370,88 @@ func handleServeFile(database *db.DB, store FileStore, allowedOrigins []string, 
 	}
 }
 
-// serveFileResolve looks up the attachment behind {id} and applies the checks
-// that make a file unservable regardless of who is asking. It returns nil once
-// it has written the response, so the caller only has to return.
-func serveFileResolve(w http.ResponseWriter, r *http.Request, database *db.DB, fileID string) *db.AttachmentAccess {
-	// Look up attachment metadata with channel context.
-	aa, err := database.GetAttachmentWithChannel(r.Context(), fileID)
-	if err != nil {
-		slog.Error("failed to look up attachment", "id", fileID, "error", err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{
-			Error:   "INTERNAL_ERROR",
-			Message: "internal server error",
-		})
-		return nil
-	}
-	if aa == nil {
-		http.NotFound(w, r)
-		return nil
-	}
-
-	// A soft-deleted message's attachments must stop being servable the
-	// moment the message is deleted — the client shows a tombstone, but
-	// without this check the file stays reachable by URL forever (no
-	// sweep can ever reclaim a linked row either, since the only reaper
-	// requires message_id IS NULL). Checked before the ACL branch so it
-	// also covers admins, matching the tombstone applying to everyone.
-	//
-	// Queried directly rather than through database.GetMessage: that
-	// wrapper's SELECT list carries every message column, and the
-	// `deleted` flag is the only one this check needs.
-	if aa.MessageID != nil {
-		var deleted bool
-		deletedErr := database.QueryRowContext(r.Context(),
-			`SELECT deleted FROM messages WHERE id = ?`, *aa.MessageID).Scan(&deleted)
-		switch {
-		case errors.Is(deletedErr, sql.ErrNoRows):
-			// No message row — leave ACL to decide (unlinked-shaped by now).
-		case deletedErr != nil:
-			slog.Error("failed to look up message for attachment", "id", fileID, "error", deletedErr)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "internal server error",
-			})
-			return nil
-		case deleted:
-			http.NotFound(w, r)
-			return nil
-		}
-	}
-
-	return aa
+// storedUpload is what the bytes stage of an upload produces: the id the file
+// is stored under, the type sniffed from its own bytes, what was written, and
+// the image dimensions when it is an image.
+type storedUpload struct {
+	id, mime      string
+	size          int64
+	width, height *int
 }
 
-// serveFileAuthorize decides whether the caller may read aa. It returns false
-// once it has written the response, so the caller only has to return.
-func serveFileAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB, permSvc *service.PermissionService, aa *db.AttachmentAccess, fileID string) bool {
-	user, _ := r.Context().Value(UserKey).(*db.User)
-	role, _ := r.Context().Value(RoleKey).(*db.Role)
+// uploadStoreFile is the bytes stage of handleUpload: sniff the type, write the
+// file through the store under its reservation, and measure it if it is an
+// image. It writes its own error response and reports ok=false, so the caller
+// only has to return. Split out of handleUpload to keep that handler under
+// the funlen limit; the steps and their order are unchanged.
+//
+// file is an io.Reader, not multipart.File — a *multipart.Part (the caller's
+// argument since the handler moved to streaming) is not seekable, so the
+// sniffed header bytes are re-joined with the rest of the stream instead of
+// being rewound.
+func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader, res *service.StorageReservation, store FileStore) (storedUpload, bool) {
+	// Generate UUID for storage.
+	fileID := uuid.New().String()
 
-	// ── Access control ──────────────────────────────────────────────
-	isAdmin := role != nil && permissions.HasAdmin(role.Permissions)
+	// Detect MIME type from actual file bytes (never trust client header).
+	// file is a *multipart.Part in production, and Part.Read may return
+	// fewer bytes than requested even when more remain — a genuine short
+	// read, not EOF — so io.ReadFull is required here instead of a single
+	// Read call to fill the sniff buffer (or hit real EOF/ErrUnexpectedEOF
+	// for a file shorter than it).
+	var sniffBuf [512]byte
+	n, readErr := io.ReadFull(file, sniffBuf[:])
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "failed to read uploaded file")
+		return storedUpload{}, false
+	}
+	mime := http.DetectContentType(sniffBuf[:n])
+	// Reconstruct the full stream: the sniffed bytes plus the remainder.
+	body := io.MultiReader(bytes.NewReader(sniffBuf[:n]), file)
 
-	// DM participation is required of everyone, including admins — this
-	// matches every other DM read gate in the codebase (requireChannelRead,
-	// PermissionService.RequireChannelAccess, checkSendPermission), none of
-	// which have an admin bypass. Checked ahead of the `!isAdmin` block so
-	// the admin bypass below cannot skip it.
-	if aa.ChannelID != nil && aa.ChannelType == "dm" {
-		if user == nil {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "you do not have access to this file",
-			})
-			return false
-		}
-		ok, dmErr := database.IsDMParticipant(r.Context(), user.ID, *aa.ChannelID)
-		if dmErr != nil || !ok {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "you do not have access to this file",
-			})
-			return false
-		}
+	// Store file on disk (validates file type via magic bytes).
+	writtenBytes, saveErr := saveReserved(ctx, res, store, fileID, body)
+	if saveErr != nil {
+		writeStorageSaveError(w, saveErr, "file upload")
+		return storedUpload{}, false
 	}
 
-	if !isAdmin {
-		if aa.ChannelID == nil {
-			// An unlinked attachment that some user's avatar points at is
-			// readable by every authenticated user: an avatar has to be
-			// visible to the people who see the messages it sits next to.
-			// The check is by the exact URL the column stores, so the file
-			// stops being public the instant the avatar is replaced.
-			isAvatar, avatarErr := database.IsAvatarFileURL(r.Context(), service.AvatarFileURL(fileID))
-			if avatarErr != nil {
-				slog.Error("failed to check avatar file", "id", fileID, "error", avatarErr)
-			}
-			switch {
-			case isAvatar:
-				// Public while in use — fall through to serving.
-			// Unlinked attachment — only the uploader may access.
-			// M-2: Legacy rows (NULL uploader_id) are now denied rather than
-			// served to any authenticated user.
-			case aa.UploaderID == nil:
-				slog.Warn("legacy attachment access denied (NULL uploader_id)", "id", fileID)
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "you do not have access to this file",
-				})
-				return false
-			case user == nil || *aa.UploaderID != user.ID:
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "you do not have access to this file",
-				})
-				return false
-			}
-		} else if aa.ChannelType != "dm" {
-			// Linked attachment in a guild channel — check channel
-			// permissions. The DM case is handled unconditionally above.
-			if user == nil || !permSvc.HasChannelPerm(r.Context(), user.ID, *aa.ChannelID, permissions.ReadMessages) {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "you do not have access to this file",
-				})
-				return false
+	// Extract image dimensions if the file is an image.
+	var width, height *int
+	if strings.HasPrefix(mime, "image/") {
+		f, openErr := store.Open(fileID)
+		if openErr == nil {
+			cfg, _, decErr := image.DecodeConfig(f)
+			f.Close() //nolint:errcheck
+			if decErr == nil {
+				w2, h2 := cfg.Width, cfg.Height
+				width = &w2
+				height = &h2
+			} else {
+				slog.Warn("failed to decode image dimensions", "id", fileID, "error", decErr)
 			}
 		}
 	}
 
-	return true
+	return storedUpload{id: fileID, mime: mime, size: writtenBytes, width: width, height: height}, true
+}
+
+// writeFileAccessError maps an UploadService refusal onto the response the
+// file routes have always given: a missing or tombstoned attachment and one the
+// caller may not read are both plain 404/403 bodies that say nothing about
+// which rule answered, and anything else is a 500 whose detail stays in the log.
+func writeFileAccessError(w http.ResponseWriter, r *http.Request, fileID string, err error) {
+	switch {
+	case errors.Is(err, service.ErrNotFound):
+		http.NotFound(w, r)
+	case errors.Is(err, permissions.ErrNSFWUnacknowledged):
+		// B5-7: the response carries the code and nothing else — no detail
+		// that could distinguish it from any other refusal on this route.
+		writeJSON(w, http.StatusForbidden, errorResponse{Error: "NSFW_ACKNOWLEDGEMENT_REQUIRED"})
+	case errors.Is(err, service.ErrForbidden):
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "you do not have access to this file")
+	default:
+		slog.Error("failed to resolve attachment", "id", fileID, "error", err)
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+	}
 }

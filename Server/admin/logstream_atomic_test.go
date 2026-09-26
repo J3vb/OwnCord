@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -62,44 +61,6 @@ func TestRingBuffer_SnapshotAndSubscribe_SnapshotExcludedFromChannel(t *testing.
 	}
 }
 
-// gapProbeSSEWriter drives the handler from inside its own writes: the first
-// backfilled entry triggers onFirstBackfill (which writes a fresh log line,
-// i.e. exactly the interleaving the gap loses), and once wantData entries have
-// been written the request context is cancelled so the handler returns.
-type gapProbeSSEWriter struct {
-	header          http.Header
-	statusCode      int
-	dataWrites      int
-	wantData        int
-	buffer          bytes.Buffer
-	onFirstBackfill func()
-	cancel          func()
-}
-
-func (w *gapProbeSSEWriter) Header() http.Header {
-	if w.header == nil {
-		w.header = make(http.Header)
-	}
-	return w.header
-}
-
-func (w *gapProbeSSEWriter) WriteHeader(statusCode int) { w.statusCode = statusCode }
-func (w *gapProbeSSEWriter) Flush()                     {}
-
-func (w *gapProbeSSEWriter) Write(data []byte) (int, error) {
-	_, _ = w.buffer.Write(data)
-	if bytes.Contains(data, []byte("data: ")) {
-		w.dataWrites++
-		if w.dataWrites == 1 && w.onFirstBackfill != nil {
-			w.onFirstBackfill()
-		}
-		if w.dataWrites >= w.wantData && w.cancel != nil {
-			w.cancel()
-		}
-	}
-	return len(data), nil
-}
-
 // The end-to-end shape of v059: a log line written *while the backfill loop is
 // running* must still reach the stream. Under the old Snapshot()-then-
 // Subscribe() ordering it was in neither — the snapshot predated it and the
@@ -135,12 +96,15 @@ func TestHandleLogStream_EntryWrittenDuringBackfillIsDelivered(t *testing.T) {
 	defer cancel()
 
 	req := httptest.NewRequest(http.MethodGet, "/logs/stream?ticket="+ticket, nil).WithContext(ctx)
-	writer := &gapProbeSSEWriter{
-		header:   make(http.Header),
-		wantData: 3,
-		cancel:   cancel,
-		onFirstBackfill: func() {
-			logBuf.Write(LogEntry{Timestamp: "2026-08-07T10:00:02Z", Level: "warn", Message: "written-during-backfill", Source: "test"})
+	writer := &sseProbe{
+		header: make(http.Header),
+		onData: func(n int) {
+			if n == 1 {
+				logBuf.Write(LogEntry{Timestamp: "2026-08-07T10:00:02Z", Level: "warn", Message: "written-during-backfill", Source: "test"})
+			}
+			if n >= 3 {
+				cancel()
+			}
 		},
 	}
 

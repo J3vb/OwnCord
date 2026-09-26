@@ -11,24 +11,25 @@ import (
 )
 
 // The admin panel's role editor renders one checkbox per permission bit from a
-// PERM_GROUPS literal in the static HTML. Nothing compiles that literal, so a
-// bit added to permissions.AllPerms without being added there becomes silently
-// ungrantable through the panel — the role editor would quietly clear it on
-// every save, because collectRolePerms rebuilds the mask from the boxes it
-// rendered. These tests are the only thing tying the two together.
+// PERM_GROUPS literal in static/js/roles-channels.js. Nothing compiles that
+// literal, so a bit added to permissions.AllPerms without being added there
+// becomes silently ungrantable through the panel — the role editor would
+// quietly clear it on every save, because collectRolePerms rebuilds the mask
+// from the boxes it rendered. These tests are the only thing tying the two
+// together.
 
 var permGroupsBlockRe = regexp.MustCompile(`(?s)const PERM_GROUPS=\[(.*?)\n\];`)
 
 // permGridBits extracts the bit values the panel's permission grid renders.
 func permGridBits(t *testing.T) []int64 {
 	t.Helper()
-	source, err := os.ReadFile("static/index.html")
+	source, err := os.ReadFile("static/js/roles-channels.js")
 	if err != nil {
 		t.Fatalf("read admin panel: %v", err)
 	}
 	block := permGroupsBlockRe.FindSubmatch(source)
 	if block == nil {
-		t.Fatal("PERM_GROUPS literal not found in static/index.html")
+		t.Fatal("PERM_GROUPS literal not found in static/js/roles-channels.js")
 	}
 	// Each entry is [0x…,'Label','Description'].
 	entryRe := regexp.MustCompile(`\[(0x[0-9a-fA-F]+),'`)
@@ -87,13 +88,13 @@ var overrideBitsBlockRe = regexp.MustCompile(`(?s)const OVERRIDE_BITS=\[(.*?)\n\
 // renders one tri-state row for.
 func overrideMatrixBits(t *testing.T) []int64 {
 	t.Helper()
-	source, err := os.ReadFile("static/index.html")
+	source, err := os.ReadFile("static/js/roles-channels.js")
 	if err != nil {
 		t.Fatalf("read admin panel: %v", err)
 	}
 	block := overrideBitsBlockRe.FindSubmatch(source)
 	if block == nil {
-		t.Fatal("OVERRIDE_BITS literal not found in static/index.html")
+		t.Fatal("OVERRIDE_BITS literal not found in static/js/roles-channels.js")
 	}
 	entryRe := regexp.MustCompile(`\[(0x[0-9a-fA-F]+),'`)
 	matches := entryRe.FindAllSubmatch(block[1], -1)

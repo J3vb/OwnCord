@@ -7,6 +7,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -27,12 +28,12 @@ func (r *recordingAuthBroadcaster) BroadcastMemberBan(userID int64) {
 // broadcast an event. Every other connected client kept the deleted user's
 // pre-deletion username in its member list until it reconnected (v068).
 func TestDeleteAccount_BroadcastsMemberBan(t *testing.T) {
-	database := newAuthTestDB(t)
+	database := newMigratedAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	broadcaster := &recordingAuthBroadcaster{}
 
 	r := chi.NewRouter()
-	api.MountAuthRoutes(r, database, limiter, nil, testTOTPKey, broadcaster)
+	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, broadcaster), api.AuthMiddleware(service.NewSessionService(database)), limiter, nil)
 
 	hash, _ := auth.HashPassword("correctPass1")
 	uid, _ := database.CreateUser(context.Background(), "deletebroadcast", hash, 4)
@@ -51,14 +52,14 @@ func TestDeleteAccount_BroadcastsMemberBan(t *testing.T) {
 	}
 }
 
-// Omitting the broadcaster (the shape every existing MountAuthRoutes call
-// site uses today) must keep working exactly as before: no event, no panic.
+// A nil broadcaster (the shape every test mount uses) must keep working
+// exactly as before: no event, no panic.
 func TestDeleteAccount_NoBroadcasterOmitted(t *testing.T) {
-	database := newAuthTestDB(t)
+	database := newMigratedAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 
 	r := chi.NewRouter()
-	api.MountAuthRoutes(r, database, limiter, nil, testTOTPKey)
+	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(service.NewSessionService(database)), limiter, nil)
 
 	hash, _ := auth.HashPassword("correctPass1")
 	uid, _ := database.CreateUser(context.Background(), "deletenobroadcast", hash, 4)

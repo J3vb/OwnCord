@@ -7,6 +7,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -17,7 +18,7 @@ import (
 // The V2 handler is a thin gate: the constructor validates channel_id and the
 // handler hands off to the hub's handleVoiceJoin routine via Result.JoinVoice.
 func TestHandleVoiceJoinV2_SignalsJoin(t *testing.T) {
-	result := handleVoiceJoinV2(context.Background(), VoiceJoinCmd{userID: 1, channelID: 7}, ClientInfo{UserID: 1}, VoiceDeps{})
+	result := handleVoiceJoinV2(context.Background(), VoiceJoinCmd{userID: 1, ChannelID: 7}, ClientInfo{UserID: 1}, VoiceDeps{})
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
@@ -44,8 +45,8 @@ func TestVoiceJoinConstructor_Errors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cmd.(VoiceJoinCmd).ChannelID() != 42 {
-		t.Errorf("ChannelID() = %d, want 42", cmd.(VoiceJoinCmd).ChannelID())
+	if cmd.(VoiceJoinCmd).ChannelID != 42 {
+		t.Errorf("ChannelID() = %d, want 42", cmd.(VoiceJoinCmd).ChannelID)
 	}
 }
 
@@ -77,7 +78,8 @@ func TestHandleVoiceLeaveV2_RateLimited(t *testing.T) {
 	for range voiceLeaveRateLimit + 1 {
 		res := handleVoiceLeaveV2(context.Background(), cmd, info, deps)
 		if res.Error != nil {
-			ce, ok := res.Error.(ClientError)
+			var ce ClientError
+			ok := errors.As(res.Error, &ce)
 			if !ok || ce.Code != ErrCodeRateLimited {
 				t.Fatalf("expected rate-limit ClientError, got %v", res.Error)
 			}
@@ -108,7 +110,8 @@ func TestHandleVoiceLeaveV2_RateLimited_StillSignalsLeave(t *testing.T) {
 	for range voiceLeaveRateLimit + 1 {
 		res := handleVoiceLeaveV2(context.Background(), cmd, info, deps)
 		if res.Error != nil {
-			ce, ok := res.Error.(ClientError)
+			var ce ClientError
+			ok := errors.As(res.Error, &ce)
 			if !ok || ce.Code != ErrCodeRateLimited {
 				t.Fatalf("expected rate-limit ClientError, got %v", res.Error)
 			}
@@ -149,18 +152,19 @@ func TestChatCommandConstructor_Errors(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	cc := cmd.(ChatCommandCmd)
-	if cc.ChannelID() != 5 || cc.Command() != "/hi" || cc.ReqID() != "req-9" || len(cc.Args()) != 2 {
+	if cc.ChannelID != 5 || cc.Command != "/hi" || cc.ReqID != "req-9" || len(cc.Args()) != 2 {
 		t.Errorf("unexpected command fields: %+v", cc)
 	}
 }
 
 func TestHandleChatCommandV2_NoRegistry(t *testing.T) {
 	deps := PluginDeps{Registry: nil, MessageSvc: nil}
-	cmd := ChatCommandCmd{userID: 1, channelID: 1, command: "/hi"}
+	cmd := ChatCommandCmd{userID: 1, ChannelID: 1, Command: "/hi"}
 
 	result := handleChatCommandV2(context.Background(), cmd, ClientInfo{UserID: 1}, deps)
 
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T", result.Error)
 	}
@@ -178,7 +182,8 @@ func TestCanPluginBroadcast_NilServiceFailsClosed(t *testing.T) {
 	if gate == nil {
 		t.Fatal("expected a forbidden Result when MessageSvc is nil")
 	}
-	ce, ok := gate.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(gate.Error, &ce)
 	if !ok || ce.Code != ErrCodeForbidden {
 		t.Errorf("expected FORBIDDEN ClientError, got %v", gate.Error)
 	}

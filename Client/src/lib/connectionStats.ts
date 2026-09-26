@@ -55,17 +55,14 @@ interface PrevSnapshot {
  *  RTT is typically on the subscriber PC in LiveKit's SFU model. */
 async function collectAllStats(room: Room): Promise<RTCStatsReport[]> {
   try {
-    const engine = room.engine as unknown as Record<string, unknown>;
-    const pcManager = engine.pcManager as
-      | { publisher?: { pc?: RTCPeerConnection }; subscriber?: { pc?: RTCPeerConnection } }
-      | undefined;
-
+    // Use the SDK transport API: PCTransport owns a private _pc, not a
+    // public `pc`. Keeping this typed makes SDK shape changes a build error.
+    const pcManager = room.engine.pcManager;
     const reports: RTCStatsReport[] = [];
-    if (pcManager?.publisher?.pc) {
-      reports.push(await pcManager.publisher.pc.getStats());
-    }
-    if (pcManager?.subscriber?.pc) {
-      reports.push(await pcManager.subscriber.pc.getStats());
+    for (const transport of [pcManager?.publisher, pcManager?.subscriber]) {
+      // oxlint-disable-next-line no-await-in-loop -- two transports only: parallelising a two-element poll buys nothing and complicates the optional chaining
+      const report = await transport?.getStats();
+      if (report) reports.push(report);
     }
     return reports;
   } catch {
@@ -235,10 +232,27 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
 
 // --- Formatting helpers ---
 
+/**
+ * Format a byte count as `B` / `<kiloUnit>` / `MB`, switching units at
+ * `base` and `base * base`. Shared by `formatBytes` here (base-1000, "kB")
+ * and `formatFileSize` in components/message-list/attachments.ts
+ * (base-1024, "KB") — those two disagreed on both the base and the unit
+ * case before this was unified, so keep each call site's own `base`/
+ * `kiloUnit`/`decimals` rather than picking one for both.
+ */
+export function formatByteSize(
+  bytes: number,
+  base: number,
+  kiloUnit: string,
+  decimals: number,
+): string {
+  if (bytes < base) return `${Math.round(bytes)} B`;
+  if (bytes < base * base) return `${(bytes / base).toFixed(decimals)} ${kiloUnit}`;
+  return `${(bytes / (base * base)).toFixed(decimals)} MB`;
+}
+
 export function formatBytes(bytes: number): string {
-  if (bytes < 1000) return `${Math.round(bytes)} B`;
-  if (bytes < 1_000_000) return `${(bytes / 1000).toFixed(2)} kB`;
-  return `${(bytes / 1_000_000).toFixed(2)} MB`;
+  return formatByteSize(bytes, 1000, "kB", 2);
 }
 
 export function formatRate(bytesPerSec: number): string {
@@ -248,7 +262,10 @@ export function formatRate(bytesPerSec: number): string {
 /** Format bytes/sec as human-readable Mbps (for bandwidth display). */
 export function formatBitrate(bytesPerSec: number): string {
   const mbps = (bytesPerSec * 8) / 1_000_000;
+  // i18n-exempt: unit-formatted numeric bandwidth value, no English words
   if (mbps < 0.01) return "0 Mbps";
+  // i18n-exempt: unit-formatted numeric bandwidth value, no English words
   if (mbps < 1) return `${(mbps * 1000).toFixed(0)} Kbps`;
+  // i18n-exempt: unit-formatted numeric bandwidth value, no English words
   return `${mbps.toFixed(1)} Mbps`;
 }

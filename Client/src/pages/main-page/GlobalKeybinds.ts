@@ -7,6 +7,7 @@
  * messages into a session that doesn't exist.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createLogger } from "@lib/logger";
 import { voiceStore } from "@stores/voice.store";
 
@@ -77,8 +78,7 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     }
   };
 
-  document.addEventListener("keydown", handler);
-  return () => {
-    document.removeEventListener("keydown", handler);
-  };
+  const owner = new Disposable();
+  document.addEventListener("keydown", handler, { signal: owner.signal });
+  return () => owner.destroy();
 }

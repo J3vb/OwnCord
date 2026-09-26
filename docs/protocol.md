@@ -25,14 +25,16 @@ All client-server real-time communication happens over a single WebSocket connec
 12. [Channel Focus and Read State](#channel-focus-and-read-state)
 13. [Channel Updates](#channel-updates)
 14. [Member Updates](#member-updates)
-15. [Voice Signaling](#voice-signaling)
-16. [Voice Moderation](#voice-moderation)
-17. [Voice End-to-End Encryption](#voice-end-to-end-encryption)
-18. [Direct Messages](#direct-messages)
-19. [Server Restart](#server-restart)
-20. [Error Handling](#error-handling)
-21. [Rate Limits](#rate-limits)
-22. [Message Type Reference Table](#message-type-reference-table)
+15. [Moderation Queue](#moderation-queue)
+16. [Moderator Actions](#moderator-actions)
+17. [Voice Signaling](#voice-signaling)
+18. [Voice Moderation](#voice-moderation)
+19. [Voice End-to-End Encryption](#voice-end-to-end-encryption)
+20. [Direct Messages](#direct-messages)
+21. [Server Restart](#server-restart)
+22. [Error Handling](#error-handling)
+23. [Rate Limits](#rate-limits)
+24. [Message Type Reference Table](#message-type-reference-table)
 
 ---
 
@@ -91,15 +93,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                           |
-| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                              |
-| Global broadcasts  | Yes      | `member_join`, `member_leave`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state`, `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below)                                                                                                                                          |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                            |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`                                                                                                                                                              |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                   |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                            |
+| Category           | Has seq? | Examples                                                                                                                                                                                     |
+| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                        |
+| Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
+| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`, `mod_action`, `appeal_status`, `channel_create` (targeted per recipient; see below)                                  |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                      |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                   |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                             |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                      |
 
 **`presence` is split, and only one half is sequenced.** Connect and disconnect
 presence is a normal sequenced global broadcast, so it replays on a warm resume.
@@ -138,6 +140,7 @@ After the WebSocket connection is established, the client sends the first messag
 | `token`             | string | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                            |
 | `last_seq`          | uint64 | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                        |
 | `active_channel_id` | int64  | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown. |
+| `epoch`             | int    | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                 |
 
 `active_channel_id` closes a resume-only gap. The hub restores a reconnecting
 client's channel subscription by copying it from the previous connection entry,
@@ -197,12 +200,66 @@ buffer), or `"db"` (persistent `events` table). See
 {
   "type": "auth_error",
   "payload": {
-    "message": "Invalid or expired token"
+    "message": "invalid token"
   }
 }
 ```
 
-After sending `auth_error`, the server closes the connection.
+`message` is one of a fixed set the server actually sends: `invalid message`
+(the first frame did not parse as JSON), `first message must be auth` (the
+first frame was not type `auth`), `missing token`, `invalid token`, `session
+expired`, and `user not found`.
+
+After sending `auth_error`, the server closes the connection with close code
+**1008** (policy violation) and reason `authentication failed`.
+
+One refusal carries more than `message`. When the client's `epoch` is outside
+the range the server accepts, the payload is:
+
+```json
+{
+  "type": "auth_error",
+  "payload": {
+    "message": "this client speaks protocol epoch 0 but the server needs 2; update the client",
+    "code": "protocol_epoch_unsupported",
+    "client_epoch": 0,
+    "server_epoch": 2,
+    "min_epoch": 2
+  }
+}
+```
+
+`message` names which side to update; the numbers let a client decide for
+itself (`server_epoch > client_epoch` — the client is the older side). The
+close that follows is the same 1008.
+
+### Compatibility (protocol epoch)
+
+The protocol has one version number, the **epoch**, declared once as
+`protocol_epoch` in `protocol/schema.json` and generated into
+`ws.ProtocolEpoch` (server) and `PROTOCOL_EPOCH` (client). The client sends it
+in `auth`; the server accepts an `epoch` in `[min_epoch, server_epoch]` and
+refuses anything else with `protocol_epoch_unsupported`.
+
+- **Within an epoch, changes are additive.** New optional fields; new message
+  types the other side may ignore. Unknown server→client types are ignored by
+  the client; unknown client→server types get an `error` frame. The frozen
+  transcripts under `protocol/fixtures/epoch-1/` replay against the server for
+  as long as epoch 1 is accepted — a failing fixture means "bump the epoch",
+  not "fix the fixture".
+- **A breaking change is a new epoch.** Bump `protocol_epoch`, regenerate, and
+  set `minClientEpoch` (`Server/ws/messages.go`) to the new value: the server
+  accepts exactly one epoch by policy. Epoch 1 additionally accepts an absent
+  `epoch` (0), because clients up to v1.2.0-alpha.4 predate the field.
+- **The server upgrades first.** A release's signed server-update manifest
+  carries its `protocol_epoch`, and `GET /api/v1/client-update` never
+  advertises a release whose epoch is newer than the server's own — a client
+  that auto-updated onto it would be refused at the next handshake. Releases
+  that do not bump the epoch (fixes, additive features) reach clients whether
+  or not the server has been updated.
+- **A refused client can still update in place.** On
+  `protocol_epoch_unsupported` with a newer server, the desktop client shows
+  the regular update banner on the connect page.
 
 ### Step 4: ready Payload
 
@@ -213,8 +270,8 @@ After `auth_ok`, the server sends a `ready` message containing all initial state
 The server broadcasts to all connected clients:
 
 ```json
-{ "type": "member_join", "payload": { "user": { "id": 1, "username": "alex", "avatar": "uuid.png", "role": "admin" }, "status": "online" } }
-{ "type": "presence", "payload": { "user_id": 1, "status": "online", "custom_status": null } }
+{ "type": "member_join", "seq": 15, "payload": { "user": { "id": 1, "username": "alex", "avatar": "uuid.png", "role": "admin" }, "status": "online" } }
+{ "type": "presence", "seq": 16, "payload": { "user_id": 1, "status": "online", "custom_status": null } }
 ```
 
 ### Periodic Session Revalidation
@@ -267,7 +324,9 @@ DM chat events (`chat_message`, `chat_edited`, `chat_deleted`,
 `events` table as channel broadcasts, so they replay at tiers 1 and 2 —
 filtered to the DM's participants. The unsequenced DM lifecycle events
 (`dm_channel_open`/`dm_channel_close`) are not replayed; that state is always
-recoverable via the full `ready` payload.
+recoverable via the full `ready` payload. `dm_request` (B5-6) is unsequenced
+too, but its state is not in `ready` — a missed one is recovered from
+`GET /api/v1/dm-requests` instead (see the dm_request section below).
 
 ---
 
@@ -292,14 +351,32 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `slow_mode`, `nsfw`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0 }`.
+These fields advertise retry-safe `chat_send` support. Older servers omit them;
+clients must not infer support from the protocol epoch or silently retry a
+durable pending message against a server that no longer advertises support.
 
-`nsfw`, `voice_max_users` and `voice_max_video` are always present, with their
-zero values (`false`, `0`, `0`) on an unconfigured channel — never omitted, so
-"absent" never has to mean two different things. `nsfw` is a label the server
-never acts on (see below); the two voice limits are the values the voice-join
-path enforces with `CHANNEL_FULL` / `VIDEO_LIMIT`, shipped so a client can show
-"3/5" and explain a refusal it could have predicted.
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
+
+`nsfw`, `nsfw_acknowledged`, `voice_max_users` and `voice_max_video` are always
+present, with their column defaults on an unconfigured channel — `false`,
+`false`, `0`, and **`25`** for `voice_max_video`, which is `DEFAULT 25` rather
+than zero (migration 004) — never omitted, so "absent" never has to mean two
+different things. `nsfw` is a label the server enforces (see below);
+`nsfw_acknowledged` is whether the CALLER has their own consent row for it
+(migration `047`, B5-7) — always `false` for an unlabelled channel, where it
+means nothing; the two voice limits are the values
+the voice-join path enforces with `CHANNEL_FULL` / `VIDEO_LIMIT`, shipped so a
+client can show "3/5" and explain a refusal it could have predicted.
+
+`can_moderate_voice` is whether the caller may mute, deafen, move or disconnect
+voice participants in that channel. It is `permissions.AuthorizeVoiceModerator`,
+the same authorizer the voice-moderation commands enforce in the target's
+channel: the base role must hold `MUTE_MEMBERS`, and the effective permission
+after both override layers must hold `READ_MESSAGES | MUTE_MEMBERS`
+(Administrator bypasses the bits). Target rank and move-destination capacity
+are per-target and stay server-side refusals. No override data is sent. Older
+servers omit it.
 
 `mention_count` is the number of unread messages that mention this user — a
 direct `@username` or an authorized `@everyone`/`@here` — in that channel. It is
@@ -347,12 +424,63 @@ to reconstruct them:
 }
 ```
 
-| Field         | Type           | Required | Constraints                                                                  |
-| ------------- | -------------- | -------- | ---------------------------------------------------------------------------- |
-| `channel_id`  | number         | Yes      | Positive integer                                                             |
-| `content`     | string         | Yes*     | Max 4000 runes. HTML-sanitized. *Can be empty if `attachments` is non-empty. |
-| `reply_to`    | number or null | No       | Message ID being replied to                                                  |
-| `attachments` | string[]       | No       | Upload IDs from `POST /api/v1/uploads`. Requires `ATTACH_FILES` permission.  |
+| Field               | Type           | Required | Constraints                                                                   |
+| ------------------- | -------------- | -------- | ----------------------------------------------------------------------------- |
+| `channel_id`        | number         | Yes      | Positive integer                                                              |
+| `content`           | string         | Yes*     | Max 4000 runes. HTML-sanitized. *Can be empty if `attachments` is non-empty.  |
+| `reply_to`          | number or null | No       | Message ID being replied to                                                   |
+| `attachments`       | string[]       | No       | Upload IDs from `POST /api/v1/uploads`. Requires `ATTACH_FILES` permission.   |
+| `client_message_id` | string         | No       | Stable timestamp and UUID v4, scoped to the sender. See retry contract below. |
+
+`chat_send` also accepts optional `client_message_id`: exactly
+`<13-digit Unix milliseconds>:<lowercase UUID v4>` (50 characters), generated
+once for the logical message and kept unchanged across transport retries.
+The envelope `id` remains a fresh correlation id for each request. Omission
+preserves older clients' existing send behavior without deduplication.
+
+The embedded time must be less than 24 hours old and no more than five minutes
+ahead of the server clock (or equal to a later advertised restore floor).
+Expired or malformed ids return `BAD_REQUEST`;
+clients must keep the timestamp unchanged and retain expired text for copying
+or discarding rather than silently minting another id for an uncertain send.
+
+The first accepted request binds `(sender, client_message_id)` transactionally
+to its channel, raw content, reply target and ordered attachment ids. A repeat
+of the same request returns the original message id and timestamp, with the
+current envelope `id`, optional echoed `client_message_id`, and
+`deduplicated: true`. New sends omit `deduplicated` (equivalent to false).
+The `chat_message` broadcast also echoes `client_message_id` when supplied;
+history does not carry it, so clients also reconcile by acknowledged server
+message id when history was restored before acknowledgment.
+
+Retries still pass current send permissions, DM membership/block/timeout and
+the general chat rate limit. A matching receipt does not spend slow-mode
+cooldown, reopen DMs, increment mentions, dispatch push notifications or
+broadcast another message. Changed payloads or channels with the same key
+return `CONFLICT`. Keys belong to their sender, so another authorized sender
+may independently use the same key without seeing the first sender's result.
+Receipts survive message deletion: a deleted original returns `FORBIDDEN`
+and is never recreated; a missing channel returns `NOT_FOUND`.
+
+Message content, mentions, attachment ownership links and the receipt commit
+together. Receipts contain only ids, a request fingerprint, the original
+timestamp and expiry, and are removed on sender erasure or expiry maintenance.
+Expired logical ids are refused even after their receipts have been pruned.
+This guarantees one persisted message per accepted key during its retry
+window, not delivery of every post-commit notification across a process crash;
+normal history/reconnect synchronization recovers the committed message.
+Deduplication survives ordinary process restarts. Before the admin backup
+restore overwrites the closed database, the server durably advances a monotonic
+retry floor outside that database. The floor includes the permitted five-minute
+clock skew. A receipt-missing id older than that floor returns `BAD_REQUEST`
+with an instruction to review the draft; an existing matching receipt remains
+acknowledgeable. `ready.capabilities.message_retry_floor_ms` advertises the
+floor (0 before any restore). New logical ids use `max(Date.now(), floor)`,
+while recovered pending ids remain unchanged. Sidecar read/write failures
+fail closed. This protects the supported admin restore path; replacing database
+and sidecar files manually can discard this history, so such recovery requires
+deliberate review of pending drafts. The client never automatically retries
+recovered drafts.
 
 ### chat_send_ok (Server -> Client)
 
@@ -382,7 +510,8 @@ Direct response to sender (no seq):
       "id": 1,
       "username": "alex",
       "avatar": "uuid.png",
-      "role": "admin"
+      "role": "admin",
+      "display_name": "Alex A."
     },
     "content": "Hello everyone!",
     "reply_to": null,
@@ -396,6 +525,9 @@ Direct response to sender (no seq):
   }
 }
 ```
+
+`user.display_name` is the author's nickname to render instead of `username`;
+present only when the author has one, omitted otherwise (see `member_join`).
 
 | Field               | Type     | Description                                                                                                         |
 | ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -662,13 +794,12 @@ clears its local badge optimistically and the next `ready` confirms.
 
 ## Channel Updates
 
-All channel update messages are broadcast to all connected clients. Triggered by REST API calls from admins.
+Channel messages are triggered by REST API calls from admins and reach only the clients that may view the channel (`channel_delete` excepted).
 
-### channel_create (Server -> Client, broadcast)
+### channel_create (Server -> Client, targeted)
 
 ```json
 {
-  "seq": 60,
   "type": "channel_create",
   "payload": {
     "id": 8,
@@ -680,21 +811,32 @@ All channel update messages are broadcast to all connected clients. Triggered by
     "slow_mode": 0,
     "nsfw": false,
     "voice_max_users": 0,
-    "voice_max_video": 0
+    "voice_max_video": 0,
+    "can_send": true,
+    "can_moderate_voice": false
   }
 }
 ```
 
-`can_send` is an **optional extra field on the targeted form only.** When a role
-or channel-override edit changes who may post, `RefreshChannelVisibility` sends
-each still-visible client its own `channel_create`, and that copy carries this
-viewer's `can_send` — the same value `ready` ships per channel — so the composer
-affordance converges without a reconnect.
+Every `channel_create` is addressed to one client and carries that viewer's own
+`can_send` and `can_moderate_voice` — the same values `ready` ships per channel.
+It has no `seq` and is not replayed: a client that misses one is forced onto a
+full `ready` on resume instead. It is sent in three cases:
 
-The broadcast form omits it: one encoded frame is delivered to a whole audience,
-and a single value would be wrong for some of them. Older servers omit it too.
-**Treat an absent `can_send` as "unchanged", never as `false`** — a client that
-resets on absence would disable the composer on every ordinary broadcast.
+- **Channel creation.** Every connected client that may view the new channel
+  gets its own copy, so a new channel arrives with its verdicts already set.
+- **Visibility refresh.** When a role or channel-override edit changes who may
+  see or post, `RefreshChannelVisibility` sends each still-visible client its
+  own copy, so the composer affordance converges without a reconnect. A role
+  edit or a role- or user-override edit on the channel converges the
+  voice-moderation controls the same way.
+- **Timeout refresh.** When a moderator times a member out or lifts the
+  timeout, or the timeout expires, that member alone gets a fresh copy of
+  every channel they can see, so their `can_send` follows the timeout without
+  a reconnect.
+
+Older servers sent `channel_create` as one shared broadcast without either field.
+**Treat an absent `can_send` or `can_moderate_voice` as "unchanged", never as `false`.**
 
 ### channel_update (Server -> Client, broadcast)
 
@@ -704,11 +846,24 @@ client is told about. Sent on every admin `PATCH`, so a client applies channel
 edits (rename, topic, category move, slow mode, `nsfw`, voice limits) without
 reconnecting.
 
-`nsfw` is shipped so clients can gate or label a channel; **the server applies
-no content behaviour of its own to a flagged channel** — no filtering, no age
-check, no restriction on who may read or post. The desktop client shows a
-one-time-per-session warning before rendering the channel and marks it in the
-sidebar; a client that ignores the field behaves exactly as before it existed.
+`nsfw` is shipped so clients can gate or label a channel, and **the server now
+enforces it** (migration `047`, B5-7): a member with no acknowledgement row
+for a labelled channel gets no content from it — no message history, around
+window, pins, reaction users, search hits, or live/replayed `chat_message` /
+`chat_edited` / `reaction_update` — and no attachment bytes from it either,
+regardless of client. `channel_create`/`channel_update` themselves still reach
+every viewer including the one that just turned the label on, since those
+frames carry no message content; `nsfw_acknowledged` is per-viewer and ships
+only in `ready` (above), not in this broadcast, the same reason `can_send` is
+omitted from it. See `PUT`/`DELETE
+/api/v1/channels/{id}/nsfw-acknowledgement` (`docs/api.md`) for how a client
+records or revokes consent, and the `nsfw_ack` frame below for the second-
+device signal. The desktop client's own gating UI (blur, consent prompt) is
+B9's; an account with no standing acknowledgement simply never satisfies the
+server-side gate and receives no content to render, on any device or client
+that ignores this UI — the row is per-user, not per-session or per-device, so
+a second device or a client that skips the gating UI inherits whatever the
+account has already acknowledged rather than bypassing consent.
 
 Archiving or unarchiving additionally triggers targeted `channel_create` /
 `channel_delete` sends (`Hub.RefreshChannelVisibility`), because it changes who
@@ -731,6 +886,30 @@ into an archive that nobody can see or moderate.
   "payload": { "id": 8 }
 }
 ```
+
+### nsfw_ack (Server -> Client, direct)
+
+B5-7. Sent to the caller's OWN other live sockets after `PUT` or `DELETE
+/api/v1/channels/{id}/nsfw-acknowledgement` (`docs/api.md`), so a second
+device converges without a reconnect.
+
+```json
+{
+  "type": "nsfw_ack",
+  "payload": { "channel_id": 8, "acknowledged": true }
+}
+```
+
+| Field          | Type    | Description                                         |
+| -------------- | ------- | --------------------------------------------------- |
+| `channel_id`   | integer | The channel the caller just acknowledged or revoked |
+| `acknowledged` | boolean | `true` after `PUT`, `false` after `DELETE`          |
+
+**Unsequenced and NOT replayed**, like `dm_channel_open`/`dm_request`: a
+client that misses one (a dropped connection during the request) recovers on
+its next `ready`, whose per-channel `nsfw_acknowledged` field is the
+persisted source of truth — there is nothing here a resync needs to recover
+that `ready` does not already carry.
 
 ---
 
@@ -894,11 +1073,137 @@ be distinguishable from one that leaves it alone.
 and is omitted when none is published; peers that pinned a different key must
 surface a TOFU mismatch.
 
-### member_leave (reserved)
+---
 
-`member_leave` is a defined message type that the server does not currently
-emit (clients handle it defensively). Reserved for future member-removal
-flows.
+## Moderation Queue
+
+### mod_queue (Server -> Client)
+
+B5-8: a change in the report queue — a report filed, assigned or closed —
+delivered ONLY to connected holders of the `MODERATE_MEMBERS` permission bit
+(or `ADMINISTRATOR`). The reporter and the subject never receive this frame,
+even if one of them separately holds the bit (report confidentiality). It is
+unsequenced and never replayed: a moderator who was offline when a report
+changed gets the current queue from `GET /api/v1/moderation/queue`, not from
+reconnect replay.
+
+```json
+{
+  "type": "mod_queue",
+  "payload": {
+    "report_id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9",
+    "state": "assigned"
+  }
+}
+```
+
+The payload carries only the report's opaque public id and its new state —
+never the reporter's identity, never the reported content, never the
+subject, and never the sequential internal id (a bit holder who could
+correlate `report_id` values in order could otherwise infer a report's
+position relative to reports they cannot see). `state` is one of `open`,
+`assigned`, `resolved`, `dismissed`.
+
+**B5-10 reuses this same wire type for an appeal-queue change** (a
+submission, assignment or decision), carrying `appeal_id` instead of
+`report_id` — one wire type, two optional ids, exactly one of which is ever
+set on a given frame:
+
+```json
+{
+  "type": "mod_queue",
+  "payload": {
+    "appeal_id": "1a2b3c4d5e6f7081920a1b2c3d4e5f60",
+    "state": "overturned"
+  }
+}
+```
+
+Like the report variant, this frame is filtered against one principal: the
+appellant. A moderator who filed the appeal being changed never receives
+this frame about their OWN appeal, even though they can see its state
+through `GET /api/v1/appeals/mine` — the same confidentiality rule
+`mod_queue`'s report variant applies to the reporter and subject. The
+ACTING moderator on the appealed action is deliberately NOT excluded: they
+may already see the appeal through the queue and detail views, so there is
+no oracle to protect against for them. `state` here is one of `open`,
+`assigned`, `upheld`, `overturned`, `withdrawn` — a withdrawal broadcasts
+this frame too, so a connected moderator's queue view drops the row
+immediately rather than only on their next `GET`.
+
+---
+
+## Moderator Actions
+
+### mod_action (Server -> Client)
+
+B5-9: a warning issued, a timeout applied, or a timeout lifted, delivered
+ONLY to the live target — targeted and unsequenced, never replayed. A
+disconnected target simply sees the warning in `ready`'s `notices` on next
+connect; every own warning, timeout, removal and lapsed or reversed ban,
+with its ledger id, is readable over REST at `GET /api/v1/users/me/moderation` (see
+[api.md](api.md)).
+
+```json
+{
+  "type": "mod_action",
+  "payload": {
+    "id": 42,
+    "kind": "timeout",
+    "reason": "at most 500 runes, no control characters",
+    "expires_at": "2026-09-06T12:00:00Z"
+  }
+}
+```
+
+`kind` is `warning` or `timeout`. `expires_at` is `null` for a warning and
+for a lifted timeout; present for an active timeout.
+
+## Appeals
+
+### appeal_status (Server -> Client)
+
+B5-10: an appeal's state changed (assigned, decided, or withdrawn),
+delivered ONLY to the appellant — targeted and unsequenced, never replayed.
+A disconnected appellant simply sees the current state on their next
+`GET /api/v1/appeals/mine`.
+
+```json
+{
+  "type": "appeal_status",
+  "payload": {
+    "id": "9f1c2e7a4b6d5031c8e0a2f6b1d4c7e9",
+    "state": "overturned",
+    "decision_note": "at most 2000 runes, no control characters"
+  }
+}
+```
+
+`id` is the appeal's opaque public id. `state` is one of `assigned`,
+`upheld`, `overturned`, `withdrawn`. `decision_note` is `null` until the
+appeal is decided.
+
+### ready's notices
+
+`ready`'s payload carries a `notices` array: every warning issued to the
+connecting user that they have not yet acknowledged.
+
+```json
+{
+  "notices": [
+    {
+      "id": 42,
+      "kind": "warning",
+      "reason": "at most 500 runes, no control characters",
+      "created_at": "2026-09-05T10:00:00Z"
+    }
+  ]
+}
+```
+
+Acknowledge one with `POST /api/v1/users/me/notices/{id}/ack` (see
+[api.md](api.md)) — own rows only. An acknowledged warning never reappears
+here.
 
 ---
 
@@ -912,12 +1217,17 @@ Voice uses LiveKit as the SFU. WebSocket messages handle signaling (join/leave/s
 { "type": "voice_join", "payload": { "channel_id": 10 } }
 ```
 
-On success, server sends (in order):
+On success, server sends:
 
 1. `voice_token` -- LiveKit JWT + URL
 2. `voice_state` broadcast -- joiner's state to all clients
 3. Existing `voice_state` messages -- one per existing participant (to joiner only)
 4. `voice_config` -- channel audio settings (to joiner only)
+
+All four keep the order above on the joiner's own socket: item 2 is
+delivered synchronously (same call, same seq mechanism as any other
+broadcast) rather than handed to the hub's asynchronous broadcast queue, so
+it is written before item 3 in the same program order as items 1 and 4.
 
 ### voice_token (Server -> Client, direct)
 
@@ -983,12 +1293,6 @@ Quality presets:
 }
 ```
 
-### voice_speakers (reserved)
-
-`voice_speakers` (`{ channel_id, speakers: [user_id, ...], threshold_mode }`)
-is a defined message type that the server does not currently emit; clients
-already handle it. Reserved for active-speaker signaling.
-
 ### voice_state (Server -> Client, broadcast)
 
 ```json
@@ -1014,6 +1318,14 @@ already handle it. Reserved for active-speaker signaling.
 Moderation](#voice-moderation)). `muted` / `deafened` are always set alongside
 them, so a client that ignores the two new fields still renders the user as
 silenced; they exist so the UI can show that the user may not lift it.
+
+`voice_state` also arrives **unsequenced** in one case: when a client joins a
+voice channel, the states of participants already in the room are relayed to
+it directly, one message per participant (see the `voice_join` reply order
+above) — those relayed copies carry no `seq` and are not replayed on resume.
+Every other `voice_state` — a join, a leave, a mute/unmute, anything that
+changes an existing participant's state — is the sequenced broadcast form
+shown above.
 
 ### voice_mute / voice_deafen (Client -> Server)
 
@@ -1325,6 +1637,78 @@ Sent to the caller of `DELETE /api/v1/dms/{id}`. For a group that is a _leave_,
 and the remaining participants receive a fresh `dm_channel_open` carrying the
 new membership.
 
+### dm_request (Server -> Client)
+
+B5-6, one-to-one DMs only. Sent to the **recipient** in two situations:
+
+- **On creation**, once: the first message from a sender the recipient does
+  not yet trust (`docs/schema.md` migration `046`) stages a `message_requests`
+  row instead of opening the conversation, and the recipient gets this frame
+  with `preview` set. A resend while the request is still pending, or after
+  it was ignored or deleted, creates no second row and sends nothing
+  (decision 5) — the sender's own frames (`chat_send_ok`, `chat_message`) are
+  unaffected either way, and the sender never learns which of the two cases
+  they hit. `blocked` is not part of this silence (Codex P2-9): a resend from
+  a blocked sender never reaches this gate at all — it is refused up front
+  with `ErrBlocked` by the existing, pre-B5-6 block check, which the sender
+  does see.
+- **On every transition**, with the new `state` and `preview: null` (the held
+  message never changes): `accept` (`dm_channel_open` is sent first, then
+  this), `ignore`, `delete`, `block` — see `docs/api.md`'s "Message Requests"
+  section for the REST routes that decide a request. Sent to the recipient's
+  other live connections, not to the sender.
+
+```json
+{
+  "type": "dm_request",
+  "payload": {
+    "id": 1,
+    "state": "pending",
+    "channel_id": 100,
+    "sender": {
+      "id": 7,
+      "username": "stranger",
+      "display_name": "",
+      "avatar": ""
+    },
+    "preview": {
+      "message_id": 55,
+      "content": "hi, stranger",
+      "timestamp": "2026-09-05T12:00:00Z"
+    },
+    "created_at": "2026-09-05T12:00:00Z",
+    "decided_at": null
+  }
+}
+```
+
+| Field        | Type           | Description                                                                                   |
+| ------------ | -------------- | --------------------------------------------------------------------------------------------- |
+| `state`      | string         | `pending`, `accepted`, `ignored`, `deleted` or `blocked`                                      |
+| `sender`     | object         | The message's author — a stranger's profile, safely previewed with no automatic fetch (below) |
+| `preview`    | object \| null | The held message's id/content/timestamp; present only on creation, `null` on every transition |
+| `decided_at` | string \| null | Set once a recipient transition lands; `null` while pending                                   |
+
+**Unsequenced and NOT replayed**, like `dm_channel_open`/`dm_channel_close`
+above: a client that misses one recovers from `GET /api/v1/dm-requests`, the
+persisted source of truth, rather than the replay ring buffer. Unlike
+`dm_channel_open` it does not bump the visibility watermark — a missed
+`dm_request` does not strand a channel a full resync is needed to see, the
+REST inbox already has it.
+
+**The recipient's client must render this with every automatic media, embed,
+link-preview and avatar fetch suppressed** — decision 4's "safely previewed":
+`sender.avatar` can be an external URL (Codex P3-10), so fetching it is
+exactly the kind of network request to a stranger-controlled endpoint this
+frame exists to withhold, same as any link or embed in the message body.
+Nothing the client would otherwise auto-fetch runs until the recipient
+accepts (B9 implements the client half; this frame carries the flag by
+construction — the suppression list above is exhaustive over what the
+payload contains to fetch from).
+
+**The sender receives nothing from this path, ever** — not a hint that a
+request exists, not its state, not whether it was ever decided.
+
 ### DM Authorization
 
 All handlers that touch a channel check the channel type and branch to participant-based authorization for DMs instead of role-based permissions. This applies to: `chat_send`, `chat_edit`, `chat_delete`, `reaction_add`/`remove`, `typing_start`, `channel_focus`, `mark_read`, `call_ring`, `call_decline`.
@@ -1433,26 +1817,27 @@ and the ringer's own 30s window already covers it.
 
 ### Error Codes
 
-| Code              | Description                                                                                                               |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `BAD_REQUEST`     | Invalid payload format or field values                                                                                    |
-| `BAD_PAYLOAD`     | Structurally valid message with a field that fails validation (E2EE announce/offer key material, signatures, targets)     |
-| `INTERNAL`        | Server-side error                                                                                                         |
-| `NOT_FOUND`       | Channel or message not found                                                                                              |
-| `FORBIDDEN`       | Missing required permission                                                                                               |
-| `NOT_KEY_HOLDER`  | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                              |
-| `RATE_LIMITED`    | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not) |
-| `ALREADY_JOINED`  | Already in this voice channel                                                                                             |
-| `CHANNEL_FULL`    | Voice channel at capacity                                                                                                 |
-| `VOICE_ERROR`     | Voice-specific error                                                                                                      |
-| `VIDEO_LIMIT`     | Maximum video streams reached                                                                                             |
-| `BANNED`          | User is banned                                                                                                            |
-| `INVALID_JSON`    | Message is not valid JSON                                                                                                 |
-| `UNKNOWN_TYPE`    | Unrecognized message type                                                                                                 |
-| `SLOW_MODE`       | Channel has slow mode enabled                                                                                             |
-| `CONFLICT`        | Duplicate reaction or constraint violation                                                                                |
-| `SERVER_MUTED`    | Self-unmute refused: a moderator imposed the mute                                                                         |
-| `SERVER_DEAFENED` | Self-undeafen refused: a moderator imposed the deafen                                                                     |
+| Code               | Description                                                                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `BAD_REQUEST`      | Invalid payload format or field values                                                                                                           |
+| `BAD_PAYLOAD`      | Structurally valid message with a field that fails validation (E2EE announce/offer key material, signatures, targets)                            |
+| `INTERNAL`         | Server-side error                                                                                                                                |
+| `NOT_FOUND`        | Channel or message not found                                                                                                                     |
+| `FORBIDDEN`        | Missing required permission                                                                                                                      |
+| `NOT_KEY_HOLDER`   | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                                                     |
+| `RATE_LIMITED`     | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not)                        |
+| `ALREADY_JOINED`   | Already in this voice channel                                                                                                                    |
+| `CHANNEL_FULL`     | Voice channel at capacity                                                                                                                        |
+| `VOICE_ERROR`      | Voice-specific error                                                                                                                             |
+| `VIDEO_LIMIT`      | Maximum video streams reached                                                                                                                    |
+| `BANNED`           | User is banned                                                                                                                                   |
+| `INVALID_JSON`     | Message is not valid JSON                                                                                                                        |
+| `UNKNOWN_TYPE`     | Unrecognized message type                                                                                                                        |
+| `SLOW_MODE`        | Channel has slow mode enabled                                                                                                                    |
+| `CONFLICT`         | Duplicate reaction or constraint violation                                                                                                       |
+| `SERVER_MUTED`     | Self-unmute refused: a moderator imposed the mute                                                                                                |
+| `SERVER_DEAFENED`  | Self-undeafen refused: a moderator imposed the deafen                                                                                            |
+| `SESSION_REPLACED` | Sent before the close to a connection displaced because the same account connected from another device; the client does not reconnect on its own |
 
 After 10 consecutive invalid JSON messages, the connection is forcibly closed.
 
@@ -1531,7 +1916,7 @@ tables below add per-type behavioral notes.
 | `chat_command`        | 5/sec                                | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
 | `ping`                | 2/sec (silently dropped)             | Heartbeat                                                       |
 
-### Server -> Client (39 types)
+### Server -> Client (42 types)
 
 | Type                  | Has seq? | Delivery                                                                |
 | --------------------- | -------- | ----------------------------------------------------------------------- |
@@ -1546,7 +1931,7 @@ tables below add per-type behavioral notes.
 | `reaction_update`     | Yes      | Channel or DM participants                                              |
 | `typing`              | No       | Channel (excl. sender) or DM                                            |
 | `presence`            | Yes      | All clients                                                             |
-| `channel_create`      | Yes      | All clients                                                             |
+| `channel_create`      | No       | Each client that may view the channel (per-recipient)                   |
 | `channel_update`      | Yes      | All clients                                                             |
 | `channel_delete`      | Yes      | All clients                                                             |
 | `voice_state`         | Yes      | All clients                                                             |
@@ -1555,9 +1940,7 @@ tables below add per-type behavioral notes.
 | `voice_disconnected`  | No       | Direct to disconnected user                                             |
 | `voice_config`        | No       | Direct to joiner                                                        |
 | `voice_token`         | No       | Direct to joiner                                                        |
-| `voice_speakers`      | No       | Reserved — not currently emitted                                        |
 | `member_join`         | Yes      | All clients                                                             |
-| `member_leave`        | Yes      | Reserved — not currently emitted                                        |
 | `member_update`       | Yes      | All clients                                                             |
 | `user_update`         | Yes      | All clients (profile changes)                                           |
 | `member_ban`          | Yes      | All clients                                                             |
@@ -1565,15 +1948,20 @@ tables below add per-type behavioral notes.
 | `emoji_update`        | Yes      | All clients (full custom-emoji set)                                     |
 | `dm_channel_open`     | No       | Direct to participant                                                   |
 | `dm_channel_close`    | No       | Direct to participant                                                   |
+| `dm_request`          | No       | Direct to recipient (B5-6)                                              |
 | `call_incoming`       | No       | Direct to each other DM participant                                     |
 | `call_declined`       | No       | Direct to each other DM participant                                     |
 | `voice_e2ee_announce` | No       | Voice channel (excl. sender)                                            |
 | `voice_e2ee_offer`    | No       | Direct to target participant                                            |
 | `server_restart`      | Yes      | All clients                                                             |
+| `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only               |
+| `mod_action`          | No       | Direct to the live target only                                          |
+| `appeal_status`       | No       | Direct to the appellant only                                            |
 | `error`               | No       | Direct to requester                                                     |
 | `pong`                | No       | Direct to pinger                                                        |
 | `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                      |
 | `plugin_broadcast`    | Yes      | Channel (plugin output posted as a broadcast; sequenced and replayable) |
+| `nsfw_ack`            | No       | Direct to the user's own sockets (B5-7)                                 |
 
 ### Plugin command types
 

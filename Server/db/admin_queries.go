@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
@@ -63,18 +65,38 @@ func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 
 // ─── User Management ──────────────────────────────────────────────────────────
 
-// ListAllUsers returns users joined with their role name, ordered by ID.
-// limit=0 returns no rows.
-func (d *DB) ListAllUsers(ctx context.Context, limit, offset int) ([]UserWithRole, error) {
+// UserListFilter narrows ListAllUsers for the admin Members page. The zero
+// value lists everyone.
+type UserListFilter struct {
+	// Query is a case-insensitive username substring; empty matches all.
+	Query string
+	// RoleID keeps one role; 0 means any role.
+	RoleID int64
+	// BannedOnly keeps only effectively banned users (a lapsed temporary ban
+	// does not count, as in notBannedClause).
+	BannedOnly bool
+}
+
+// ListAllUsers returns active users matching f, joined with their role name
+// and position, ordered by ID. limit=0 returns no rows.
+func (d *DB) ListAllUsers(ctx context.Context, f UserListFilter, limit, offset int) ([]UserWithRole, error) {
+	var bannedOnly int64
+	if f.BannedOnly {
+		bannedOnly = 1
+	}
 	rows, err := d.q.ListAllUsers(ctx, dbgen.ListAllUsersParams{
-		Limit:  int64(limit),
-		Offset: int64(offset),
+		Query:      f.Query,
+		RoleID:     f.RoleID,
+		BannedOnly: bannedOnly,
+		Limit:      int64(limit),
+		Offset:     int64(offset),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ListAllUsers: %w", err)
 	}
 	result := make([]UserWithRole, 0, len(rows))
-	for _, r := range rows {
+	for i := range rows {
+		r := &rows[i]
 		result = append(result, UserWithRole{
 			User: User{
 				ID:         r.ID,
@@ -88,7 +110,8 @@ func (d *DB) ListAllUsers(ctx context.Context, limit, offset int) ([]UserWithRol
 				BanReason:  r.BanReason,
 				BanExpires: r.BanExpires,
 			},
-			RoleName: r.RoleName,
+			RoleName:     r.RoleName,
+			RolePosition: int(r.RolePosition),
 		})
 	}
 	return result, nil
@@ -214,6 +237,35 @@ func (d *DB) LogAudit(ctx context.Context, actorID int64, action, targetType str
 	return nil
 }
 
+// LogAuditEntry inserts an audit entry with every field, the tokens
+// included (B4-10); LogAudit is the token-less form the rest of the server
+// writes. The erasure's unlinking rules are applied under the writer
+// connection, once it is held: an entry about a subject whose erasure
+// committed while this call waited for the connection is written unlinked.
+func (d *DB) LogAuditEntry(ctx context.Context, e AuditEntry) error {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("LogAuditEntry begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	e = unlinkEntry(e, d.auditUnlinkRules())
+	if err := dbgen.New(tx).LogAuditEntry(ctx, dbgen.LogAuditEntryParams{
+		ActorID:      e.ActorID,
+		Action:       e.Action,
+		TargetType:   e.TargetType,
+		TargetID:     e.TargetID,
+		Detail:       e.Detail,
+		SubjectToken: nullableToken(e.SubjectToken),
+		ActorToken:   nullableToken(e.ActorToken),
+	}); err != nil {
+		return fmt.Errorf("LogAuditEntry: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("LogAuditEntry commit: %w", err)
+	}
+	return nil
+}
+
 // PersistAudits inserts a batch of audit entries in a single transaction with
 // one prepared insert, so the audit writer's flush pays for one fsync instead
 // of one per entry. Only the LogAudit-shaped fields are written — ID, ActorName
@@ -233,8 +285,9 @@ func (d *DB) PersistAudits(ctx context.Context, entries []AuditEntry) (int, erro
 	// Fallback: insert rows individually so one bad row doesn't drop the batch.
 	persisted := 0
 	var firstErr error
-	for _, e := range entries {
-		if err := d.LogAudit(ctx, e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail); err != nil {
+	for i := range entries {
+		e := &entries[i]
+		if err := d.LogAuditEntry(ctx, *e); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -253,15 +306,21 @@ func (d *DB) persistAuditsTx(ctx context.Context, entries []AuditEntry) error {
 		return fmt.Errorf("PersistAudits begin tx: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO audit_log (actor_id, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO audit_log (actor_id, action, target_type, target_id, detail, subject_token, actor_token) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,
 	)
 	if err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("PersistAudits prepare: %w", err)
 	}
 	defer func() { _ = stmt.Close() }()
-	for _, e := range entries {
-		if _, err := stmt.ExecContext(ctx, e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail); err != nil {
+	// The erasure's unlinking rules, read now that the writer connection is
+	// held: an erasure that committed while this batch waited for it has
+	// installed its rule, and the batch's entries about the subject go down
+	// unlinked instead of raw after the transaction's UPDATE.
+	rules := d.auditUnlinkRules()
+	for i := range entries {
+		e := unlinkEntry(entries[i], rules)
+		if _, err := stmt.ExecContext(ctx, e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail, e.SubjectToken, e.ActorToken); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("PersistAudits insert action %q: %w", e.Action, err)
 		}
@@ -274,27 +333,61 @@ func (d *DB) persistAuditsTx(ctx context.Context, entries []AuditEntry) error {
 
 // GetAuditLog returns audit log entries ordered newest-first with pagination.
 func (d *DB) GetAuditLog(ctx context.Context, limit, offset int) ([]AuditEntry, error) {
+	return d.SearchAuditLog(ctx, "", "", limit, offset)
+}
+
+// SearchAuditLog is GetAuditLog narrowed to one action (exact) and to rows
+// whose actor name, action, target type or detail contains query (ASCII
+// case-insensitive). An empty action or query does not narrow.
+//
+// ponytail: a substring scan over the whole table, fine at an admin's page
+// rate; an FTS5 index over audit_log is the upgrade if the table outgrows it.
+func (d *DB) SearchAuditLog(ctx context.Context, action, query string, limit, offset int) ([]AuditEntry, error) {
 	rows, err := d.q.GetAuditLog(ctx, dbgen.GetAuditLogParams{
-		Limit:  int64(limit),
-		Offset: int64(offset),
+		Action:    action,
+		Query:     query,
+		RowLimit:  int64(limit),
+		RowOffset: int64(offset),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("GetAuditLog: %w", err)
+		return nil, fmt.Errorf("SearchAuditLog: %w", err)
 	}
 	entries := make([]AuditEntry, 0, len(rows))
-	for _, r := range rows {
+	for i := range rows {
+		r := &rows[i]
 		entries = append(entries, AuditEntry{
-			ID:         r.ID,
-			ActorID:    r.ActorID,
-			ActorName:  r.ActorName,
-			Action:     r.Action,
-			TargetType: r.TargetType,
-			TargetID:   r.TargetID,
-			Detail:     r.Detail,
-			CreatedAt:  r.CreatedAt,
+			ID:           r.ID,
+			ActorID:      r.ActorID,
+			ActorName:    r.ActorName,
+			Action:       r.Action,
+			TargetType:   r.TargetType,
+			TargetID:     r.TargetID,
+			Detail:       r.Detail,
+			SubjectToken: r.SubjectToken,
+			ActorToken:   r.ActorToken,
+			CreatedAt:    r.CreatedAt,
 		})
 	}
 	return entries, nil
+}
+
+// ListAuditActions returns up to limit distinct action names in the whole
+// audit log, sorted.
+func (d *DB) ListAuditActions(ctx context.Context, limit int) ([]string, error) {
+	actions, err := d.q.ListAuditActions(ctx, int64(limit))
+	if err != nil {
+		return nil, fmt.Errorf("ListAuditActions: %w", err)
+	}
+	return actions, nil
+}
+
+// nullableToken maps an empty token to NULL, so the partial indexes on the
+// token columns hold only the rows that carry one.
+func nullableToken(token string) *string {
+	if token == "" {
+		return nil
+	}
+	return &token
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -319,6 +412,30 @@ func (d *DB) SetSetting(ctx context.Context, key, value string) error {
 		Value: value,
 	}); err != nil {
 		return fmt.Errorf("SetSetting: %w", err)
+	}
+	return nil
+}
+
+// ApplySettings upserts every key→value pair in one transaction, so a
+// mid-loop failure leaves no partial update behind. Keys are applied in
+// sorted order for deterministic behaviour under test.
+func (d *DB) ApplySettings(ctx context.Context, updates map[string]string) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("ApplySettings: begin: %w", err)
+	}
+	q := d.q.WithTx(tx)
+	for _, key := range slices.Sorted(maps.Keys(updates)) {
+		if err := q.SetSetting(ctx, dbgen.SetSettingParams{Key: key, Value: updates[key]}); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("ApplySettings: %s: %w", key, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("ApplySettings: commit: %w", err)
 	}
 	return nil
 }

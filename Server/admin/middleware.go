@@ -9,6 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
@@ -17,8 +18,8 @@ import (
 // package (api/router.go's plugin admin handler). Those routes stay
 // ADMINISTRATOR-only, so it chains the perimeter check with an explicit
 // ADMINISTRATOR requirement rather than exposing the widened perimeter.
-func RequireAdminAuth(database *db.DB) func(http.Handler) http.Handler {
-	perimeter := adminAuthMiddleware(database)
+func RequireAdminAuth(sessions *service.SessionService) func(http.Handler) http.Handler {
+	perimeter := adminAuthMiddleware(sessions)
 	administrator := requirePerm(permissions.Administrator)
 	return func(next http.Handler) http.Handler {
 		return perimeter(administrator(next))
@@ -31,7 +32,7 @@ func RequireAdminAuth(database *db.DB) func(http.Handler) http.Handler {
 // groups re-check the specific bit they need via requirePerm.
 // On success it stores the *db.User, *db.Role and *db.Session in the request
 // context so downstream handlers can retrieve them without re-querying.
-func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
+func adminAuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, ok := auth.ExtractBearerToken(r)
@@ -45,7 +46,7 @@ func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			// API token inherits its owning user's role, so a token whose user
 			// clears the perimeter authenticates here too and /admin/api/*
 			// works for headless clients.
-			user, role, sess, err := auth.ResolveTokenHash(r.Context(), database, hash)
+			user, role, sess, err := sessions.ResolveBearer(r.Context(), hash)
 			if err != nil {
 				switch {
 				case errors.Is(err, auth.ErrTokenExpired):
@@ -116,24 +117,23 @@ func requirePerm(perm int64) func(http.Handler) http.Handler {
 	}
 }
 
-// ownerOnlyMiddleware wraps a handler to require Owner role (position == 100).
-// It reads the user from context (set by adminAuthMiddleware) rather than
-// re-authenticating, avoiding redundant DB queries and session-expiry gaps.
-func ownerOnlyMiddleware(database *db.DB, next http.Handler) http.Handler {
+// ownerOnlyMiddleware wraps a handler to require the Owner role
+// (permissions.IsOwner). It consumes the *db.Role that
+// adminAuthMiddleware resolved and stored in the request context — the same
+// contract as requirePerm, so no second role read runs and no read-fault
+// error mapping exists here at all: OC-0345's 503 branch died with the query
+// it served, and OC-0379 pins the absence (a role read fault now surfaces
+// once, at the perimeter, as its 503). A request that somehow arrives without
+// the context role fails closed as unauthenticated.
+func ownerOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(adminUserKey).(*db.User)
-		if !ok || user == nil {
+		role, ok := r.Context().Value(adminRoleKey).(*db.Role)
+		if !ok || role == nil {
 			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 
-		role, err := database.GetRoleByID(r.Context(), user.RoleID)
-		if err != nil || role == nil {
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "role not found")
-			return
-		}
-
-		if role.Position < permissions.OwnerRolePosition {
+		if !permissions.IsOwner(role.ID, role.Position) {
 			writeErr(w, http.StatusForbidden, "FORBIDDEN", "owner role required")
 			return
 		}

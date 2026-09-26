@@ -3,7 +3,7 @@
 // guards (L-16).
 //
 //   node scripts/check-workflow-guards.mjs
-//   node scripts/check-workflow-guards.mjs --selftest
+//   node --test scripts/check-workflow-guards.test.mjs
 //
 // Why this exists rather than trusting review: the guards below are three lines
 // in a YAML file that nothing else verifies. actionlint checks expression
@@ -90,74 +90,7 @@ function main() {
   );
 }
 
-function selftest() {
-  let failed = 0;
-  const assert = (cond, msg) => {
-    console.log(`${cond ? "PASS" : "FAIL"} ${msg}`);
-    if (!cond) failed++;
-  };
+const invokedDirectly =
+  process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
-  const good = [
-    "name: X",
-    "concurrency:",
-    "  group: x-${{ github.event.issue.number }}",
-    "  cancel-in-progress: true",
-    "jobs:",
-    "  j:",
-    "    if: |",
-    "      contains(fromJSON('[\"someone\"]'), github.actor) && true",
-    "    runs-on: ubuntu-latest",
-    "    timeout-minutes: 30",
-  ].join("\n");
-
-  assert(auditWorkflow(good).length === 0, "a fully guarded workflow reports nothing");
-
-  const missing = (src) => auditWorkflow(src).map((f) => f.name);
-
-  assert(
-    missing(good.replace("    timeout-minutes: 30", "")).includes("timeout-minutes"),
-    "a missing timeout-minutes is caught",
-  );
-  assert(
-    missing(good.replace("concurrency:", "# concurrency:")).includes("concurrency group"),
-    "a missing concurrency group is caught",
-  );
-  assert(
-    missing(good.replace("  cancel-in-progress: true", "  cancel-in-progress: false")).includes(
-      "cancel-in-progress",
-    ),
-    "cancel-in-progress: false is caught",
-  );
-  assert(
-    missing(good.replace("contains(fromJSON('[\"someone\"]'), github.actor) && ", "")).includes(
-      "actor allowlist",
-    ),
-    "a condition with no actor term is caught",
-  );
-
-  // The shapes that must NOT trip it.
-  assert(
-    auditWorkflow(good.replace("timeout-minutes: 30", "timeout-minutes: 5")).length === 0,
-    "any positive timeout satisfies the check, not one specific value",
-  );
-  assert(
-    auditWorkflow(good.replace("github.event.issue.number", "github.ref")).length === 0,
-    "the concurrency key is not prescribed, only its presence",
-  );
-
-  // A commented-out guard is not a guard.
-  assert(
-    missing(good.replace("    timeout-minutes: 30", "    # timeout-minutes: 30")).includes(
-      "timeout-minutes",
-    ),
-    "a commented-out timeout does not count",
-  );
-
-  console.log(
-    failed ? `\nselftest: ${failed} assertion(s) failed` : "\nselftest: all assertions pass",
-  );
-  process.exit(failed ? 1 : 0);
-}
-
-if (process.argv.includes("--selftest")) selftest();
-else main();
+if (invokedDirectly) main();

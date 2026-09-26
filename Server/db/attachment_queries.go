@@ -26,10 +26,12 @@ type Attachment struct {
 // AttachmentAccess holds attachment metadata plus the channel context needed
 // for access control. ChannelID and ChannelType are empty when the attachment
 // is unlinked (message_id IS NULL or the message/channel was deleted).
+// ChannelNSFW is meaningless in that case too (always false).
 type AttachmentAccess struct {
 	Attachment
 	ChannelID   *int64
 	ChannelType string
+	ChannelNSFW bool
 }
 
 // CreateAttachment inserts a new attachment record (initially unlinked to any message).
@@ -97,6 +99,7 @@ func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*Attachme
 		},
 		ChannelID:   r.ChannelID,
 		ChannelType: derefString(r.Type),
+		ChannelNSFW: r.Nsfw != nil && *r.Nsfw != 0,
 	}, nil
 }
 
@@ -110,11 +113,17 @@ func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*Attachme
 // handleServeFile's avatar branch (gated on ChannelID == nil) reachable: once
 // message_id is set that branch is dead and the file falls under the
 // message's channel ACL / soft-delete state instead, permanently splitting
-// from what users.avatar still names (OC-0216). This single UPDATE is the
+// from what users.avatar still names. This single UPDATE is the
 // atomic attachment-IDOR guard for message sends: ownership is enforced in
 // the same statement that links, so there is no check-then-link race.
 // Returns the number of rows updated.
 func (d *DB) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
+	return linkAttachmentsToMessage(ctx, d.writer, messageID, uploaderID, attachmentIDs)
+}
+
+// linkAttachmentsToMessage is shared by legacy sends and retry-safe sends'
+// writer transaction, so both enforce the same atomic ownership predicate.
+func linkAttachmentsToMessage(ctx context.Context, exec mentionExecer, messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
 	if len(attachmentIDs) == 0 {
 		return 0, nil
 	}
@@ -135,7 +144,7 @@ func (d *DB) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID
 		   AND NOT EXISTS (SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id)`,
 		strings.Join(placeholders, ","),
 	)
-	res, err := d.writer.ExecContext(ctx, query, args...)
+	res, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("LinkAttachmentsToMessage: %w", err)
 	}

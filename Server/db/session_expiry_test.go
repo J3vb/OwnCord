@@ -80,14 +80,14 @@ func TestDeleteExpiredSessions_SargableFormat(t *testing.T) {
 }
 
 // TestMigration031_NormalizesLegacyFormats drives the real migration file:
-// it builds the pre-031 schema with migrationCutoffFS, seeds legacy
+// it builds the pre-031 schema with migrationsUpTo, seeds legacy
 // space-separated and Z-less expires_at rows on it, then applies the full
 // chain so migration 031's one-time UPDATE pass is what normalizes them.
 func TestMigration031_NormalizesLegacyFormats(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
 
-	if err := db.MigrateFS(database, migrationCutoffFS{underlying: migrations.FS, cutoff: "031_"}); err != nil {
+	if err := db.MigrateFS(database, migrationsUpTo(t, "031_")); err != nil {
 		t.Fatalf("MigrateFS building pre-031 schema: %v", err)
 	}
 	var idx int
