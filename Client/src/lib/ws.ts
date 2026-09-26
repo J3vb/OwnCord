@@ -107,6 +107,10 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 // arrives for 60 s, which is one missed app-level heartbeat window (30 s) plus
 // margin and stays under the "Reconnecting within about 75 s" acceptance.
 const SERVER_SILENCE_RECONNECT_MS = 60_000;
+// Silence only counts once a heartbeat ping has gone unanswered this long: a
+// minimised webview throttles the heartbeat setInterval, so a quiet socket may
+// simply not have been asked for a pong yet.
+const PONG_GRACE_MS = 15_000;
 
 function uuid(): string {
   return crypto.randomUUID();
@@ -197,6 +201,8 @@ export function createWsClient({
   // CLI-01: fires when no inbound frame has arrived for
   // SERVER_SILENCE_RECONNECT_MS while the socket still reports open.
   let livenessTimer: ReturnType<typeof setTimeout> | null = null;
+  // When the oldest heartbeat ping sent since the last inbound frame went out.
+  let unansweredPingAt: number | null = null;
   let intentionalClose = false;
   let certMismatchBlock = false; // blocks reconnect on TOFU mismatch
   // Mirror of the proxy's own open/closed state, kept here because the
@@ -265,6 +271,7 @@ export function createWsClient({
       if (proxyOpen) {
         try {
           sendRaw(JSON.stringify({ type: "ping", payload: {} }));
+          unansweredPingAt ??= Date.now();
         } catch (err) {
           log.warn("Heartbeat ping send failed", err);
         }
@@ -280,24 +287,32 @@ export function createWsClient({
   }
 
   // CLI-01: re-arm the silence deadline. Called after auth_ok and on every
-  // inbound frame, so any traffic — pong, chat, presence, a server ping —
-  // proves the socket is still delivering bytes. A half-open socket delivers
-  // nothing, so the timer survives to fire.
+  // inbound frame, so any traffic — pong, chat, presence — proves the socket
+  // is still delivering bytes. A half-open socket delivers nothing, so the
+  // timer survives to fire.
   function armLiveness(): void {
     if (livenessTimer !== null) clearTimeout(livenessTimer);
-    livenessTimer = setTimeout(() => {
-      livenessTimer = null;
-      if (intentionalClose || !proxyOpen || state !== "connected") return;
-      log.warn("No inbound frame within the liveness deadline; forcing reconnect", {
-        silenceMs: SERVER_SILENCE_RECONNECT_MS,
-        host: config?.host ?? "unknown",
-      });
-      // Tear down like an observed close: the next connect's ws_connect drops
-      // the stale Rust sender (which closes the half-open socket) and dials.
-      proxyOpen = false;
-      stopHeartbeat();
-      scheduleReconnect();
-    }, SERVER_SILENCE_RECONNECT_MS);
+    unansweredPingAt = null;
+    livenessTimer = setTimeout(onLivenessDeadline, SERVER_SILENCE_RECONNECT_MS);
+  }
+
+  function onLivenessDeadline(): void {
+    livenessTimer = null;
+    if (intentionalClose || !proxyOpen || state !== "connected") return;
+    const pingAgeMs = unansweredPingAt === null ? 0 : Date.now() - unansweredPingAt;
+    if (pingAgeMs < PONG_GRACE_MS) {
+      livenessTimer = setTimeout(onLivenessDeadline, PONG_GRACE_MS - pingAgeMs);
+      return;
+    }
+    log.warn("No inbound frame within the liveness deadline; forcing reconnect", {
+      silenceMs: SERVER_SILENCE_RECONNECT_MS,
+      host: config?.host ?? "unknown",
+    });
+    // Tear down like an observed close: the next connect's ws_connect drops
+    // the stale Rust sender (which closes the half-open socket) and dials.
+    proxyOpen = false;
+    stopHeartbeat();
+    scheduleReconnect();
   }
 
   function stopLiveness(): void {
@@ -380,15 +395,6 @@ export function createWsClient({
     // Heartbeats have no payload and do not belong in the domain dispatcher.
     if (parsed.type === "pong") {
       for (const listener of pongListeners) listener();
-      return;
-    }
-
-    // CLI-01: a server-initiated heartbeat ping (the counterpart the server
-    // lane adds so a minimised webview's throttled setInterval cannot be the
-    // only thing keeping the connection alive). It is liveness, not a domain
-    // frame, so it is never dispatched. The app-level ping is kept for old
-    // servers that only answer pongs.
-    if (parsed.type === "ping") {
       return;
     }
 

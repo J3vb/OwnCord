@@ -103,20 +103,50 @@ describe("client liveness deadline (CLI-01)", () => {
     expect(states).not.toContain("reconnecting");
   });
 
-  it("treats a server heartbeat ping as a liveness frame without dispatching it", async () => {
-    await connectAndAuth();
-
-    const pinged: unknown[] = [];
-    client.on("typing", (p) => pinged.push(p));
-
-    await vi.advanceTimersByTimeAsync(50_000);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ping" }));
+  it("does not count silence as dead until a heartbeat ping goes unanswered", async () => {
+    // A minimised webview throttles the heartbeat setInterval; capture its
+    // callback so the test decides when (and whether) a ping goes out.
+    let heartbeat: (() => void) | null = null;
+    const realSetInterval = globalThis.setInterval;
+    const spy = vi.spyOn(globalThis, "setInterval").mockImplementation(((
+      fn: () => void,
+      ms?: number,
+    ) => {
+      if (ms === 30_000) {
+        heartbeat = fn;
+        return 0 as unknown as ReturnType<typeof setInterval>;
+      }
+      return realSetInterval(fn, ms);
+    }) as typeof setInterval);
+    try {
+      await connectAndAuth();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(heartbeat).not.toBeNull();
+    const fireHeartbeat = (): void => heartbeat?.();
 
     const states: ConnectionState[] = [];
     client.onStateChange((s) => states.push(s));
 
-    await vi.advanceTimersByTimeAsync(20_000);
+    // Past the deadline with no ping ever sent: silence is not yet evidence.
+    await vi.advanceTimersByTimeAsync(90_000);
     expect(states).not.toContain("reconnecting");
+
+    // The throttled heartbeat finally fires; its pong lands within the grace.
+    fireHeartbeat();
+    await vi.advanceTimersByTimeAsync(5_000);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "pong" }));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(states).not.toContain("reconnecting");
+
+    // A ping that stays unanswered past the grace is a dead link.
+    fireHeartbeat();
+    await vi.advanceTimersByTimeAsync(14_000);
+    expect(states).not.toContain("reconnecting");
+    await vi.advanceTimersByTimeAsync(2_000);
+    expectConsole("warn", /\[ws\] No inbound frame within the liveness deadline/);
+    expect(states).toContain("reconnecting");
   });
 
   it("dial once when a close arrives while the silence deadline also fires", async () => {

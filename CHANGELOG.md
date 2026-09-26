@@ -43,7 +43,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Login & connection
 
-- **A half-open connection no longer stays "connected" forever.** When the network path drops silently — a firewall change, a lost Wi-Fi hop — the client used to keep showing Connected while sends vanished. It now treats a minute without any server frame as a dead link, shows Reconnecting and dials again. Servers that send the new heartbeat ping keep the connection alive from their side too.
+- **A half-open connection no longer stays "connected" forever.** When the network path drops silently — a firewall change, a lost Wi-Fi hop — the client used to keep showing Connected while sends vanished. It now treats a minute without any server frame as a dead link, shows Reconnecting and dials again.
 
 ### Voice
 
