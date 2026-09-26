@@ -44,7 +44,7 @@ async function boot(calls: string[], respond: Responder) {
         const method = String((opts.method as string) || "GET").toUpperCase();
         const p = String(input).replace(/^\/admin\/api/, "");
         calls.push(`${method} ${p}`);
-        const json = p === "/setup/status" ? { needs_setup: false } : (respond(p, method) ?? {});
+        const json = p === "/setup/status" ? { needs_setup: false } : ((await respond(p, method)) ?? {});
         return { ok: true, status: 200, json: async () => json } as Response;
       }) as typeof fetch;
     },
@@ -272,5 +272,58 @@ describe("Server/admin/static — Members (AO-4)", () => {
     more.click();
     doc.body.click();
     expect(menu.classList.contains("hidden")).toBe(true);
+  });
+
+  it("ignores a late, superseded list response instead of swapping the rows the menus act on", async () => {
+    const held: Record<string, (rows: unknown) => void> = {};
+    const hold = (q: string) => new Promise((resolve) => (held[q] = resolve));
+    const ALL = [
+      { id: 5, username: "alice", role_id: 4, role_position: 40 },
+      { id: 6, username: "bob", role_id: 4, role_position: 40 },
+    ];
+    const { doc, settle, show } = await boot([], (p) => {
+      if (p === "/roles") return ROLES;
+      if (p.includes("banned=1"))
+        return [{ id: 7, username: "tempbanned", role_id: 4, role_position: 40, banned: true }];
+      if (p.includes("q=zz")) return hold("zz");
+      if (p.includes("q=spam")) return hold("spam");
+      if (p.startsWith("/users?")) return ALL;
+      return {};
+    });
+    await show({ id: 1, permissions: ADMINISTRATOR, role_position: 100, is_owner: true });
+    const search = (v: string) => {
+      const box = doc.getElementById("membersSearch") as HTMLInputElement;
+      box.value = v;
+      box.dispatchEvent(new dom!.window.Event("input", { bubbles: true }));
+    };
+    const menuOpensFor = (id: number) => {
+      const more = doc.querySelector(
+        `[data-action="toggleMemberMenu"][data-args="[${id}]"]`,
+      ) as HTMLButtonElement;
+      more.click();
+      const open = !doc.getElementById("memberMenu")!.classList.contains("hidden");
+      doc.body.click();
+      return open;
+    };
+
+    // Search "zz", clear it, and let the "zz" response land last.
+    search("zz");
+    await settle(300);
+    search("");
+    await settle(300);
+    held.zz!([]);
+    await settle();
+    expect(doc.querySelectorAll("#membersList tbody tr")).toHaveLength(2);
+    expect(menuOpensFor(5)).toBe(true);
+
+    // Search "spam", switch to Banned, and let the search response land last.
+    search("spam");
+    await settle(300);
+    (doc.getElementById("membersTab-banned") as HTMLElement).click();
+    await settle();
+    held.spam!([]);
+    await settle();
+    expect(doc.getElementById("membersList")!.textContent).toContain("tempbanned");
+    expect(menuOpensFor(7)).toBe(true);
   });
 });

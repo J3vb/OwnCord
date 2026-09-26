@@ -52,7 +52,7 @@ async function membersRoleList(){
 }
 
 async function renderUsers(){
-  membersListSeq++;
+  const seq=++membersListSeq;
   const pendingAllowed=can(PERM.MANAGE_SERVER);
   if(state.membersTab==='pending'&&!pendingAllowed)state.membersTab='all';
   /* Approval-mode applications wait on the Pending tab until someone with
@@ -76,7 +76,7 @@ async function renderUsers(){
       +'<label class="sr-only" for="membersRole">Filter by role</label>'
       +'<select class="filter-select" id="membersRole" data-change-action="filterMembersRole"><option value="0">All roles</option>'
       +roles.map(r=>'<option value="'+r.id+'"'+(state.membersRole===r.id?' selected':'')+'>'+esc(r.name)+'</option>').join('')+'</select></div>';
-    const list=await membersListHtml();
+    const list=await membersListHtml(seq);
     html+='<p class="members-summary" id="membersSummary" role="status">'+esc(list.summary)+'</p><div id="membersList">'+list.html+'</div>';
   }
   html+='</div><div class="member-menu hidden" id="memberMenu" role="menu"></div>';
@@ -95,8 +95,10 @@ function pendingHtml(pending){
 }
 
 /* The table and pager, without the toolbar, so a search keystroke can
-   replace just this and keep focus in the search box. */
-async function membersListHtml(){
+   replace just this and keep focus in the search box. Rows are kept only
+   while seq is still the latest request, so a late, superseded response
+   cannot swap the rows the menus and Manage act on. */
+async function membersListHtml(seq){
   const offset=(state.usersPage-1)*PAGE_SIZE;
   /* Fetch one row past the page: a page of exactly PAGE_SIZE rows is
      otherwise indistinguishable from "a full page and nothing after it", and
@@ -108,7 +110,7 @@ async function membersListHtml(){
   catch(e){return{summary:'',html:'<p class="members-error">'+esc(e.message)+'</p>'}}
   const hasMore=rows.length>PAGE_SIZE;
   const users=rows.slice(0,PAGE_SIZE).map(u=>({...u,id:u.id||u.ID,username:u.Username||u.username||'',role_id:u.role_id||u.RoleID||4}));
-  membersRows={};users.forEach(u=>{membersRows[u.id]=u});
+  if(seq===membersListSeq){membersRows={};users.forEach(u=>{membersRows[u.id]=u})}
   const filtered=!!(state.membersQuery||state.membersRole);
   const banned=state.membersTab==='banned';
   const noun=banned?'banned member':'member';
@@ -239,7 +241,7 @@ async function setMembersTab(tab){
    supersedes an earlier one still in flight. */
 async function refreshMembersList(){
   const seq=++membersListSeq;
-  const list=await membersListHtml();
+  const list=await membersListHtml(seq);
   const el=document.getElementById('membersList');
   if(seq!==membersListSeq||state.section!=='users'||!el)return;
   closeMemberMenu(false);
