@@ -5,7 +5,9 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -37,12 +39,28 @@ func handleGetStats(users *service.UserService, hub HubBroadcaster) http.Handler
 	}
 }
 
+// maxUserSearchLen bounds the Members search box's q parameter. Usernames are
+// far shorter, so a longer query can only be a mistake or abuse.
+const maxUserSearchLen = 64
+
+// handleListUsers serves the Members page: q is a case-insensitive username
+// substring, role_id keeps one role and banned=1 keeps only effective bans.
+// Filtering happens in the query, so it covers every page, not the fetched one.
 func handleListUsers(users *service.UserService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := queryInt(r, "limit", 50, 1, 500)
 		offset := queryInt(r, "offset", 0, 0, math.MaxInt32)
+		filter := db.UserListFilter{
+			Query:      strings.TrimSpace(r.URL.Query().Get("q")),
+			RoleID:     int64(queryInt(r, "role_id", 0, 0, math.MaxInt32)),
+			BannedOnly: r.URL.Query().Get("banned") == "1",
+		}
+		if utf8.RuneCountInString(filter.Query) > maxUserSearchLen {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "search is too long")
+			return
+		}
 
-		page, err := users.ListAll(r.Context(), limit, offset)
+		page, err := users.ListAll(r.Context(), filter, limit, offset)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list users")
 			return
@@ -51,6 +69,9 @@ func handleListUsers(users *service.UserService) http.HandlerFunc {
 		safe := make([]adminUserResponse, len(page))
 		for i := range page {
 			safe[i] = toAdminUserResponse(&page[i].User, page[i].RoleName)
+			// The panel compares it with its own role_position from /me to
+			// offer only the actions the server's outrank rule allows.
+			safe[i].RolePosition = &page[i].RolePosition
 		}
 		writeJSON(w, http.StatusOK, safe)
 	}

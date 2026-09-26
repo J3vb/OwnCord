@@ -463,11 +463,12 @@ func (s *UserService) ServerStats(ctx context.Context) (*db.ServerStats, error) 
 	return stats, nil
 }
 
-// ListAll returns one page of users with their role names, newest first. The
-// caller bounds limit and offset; this does not re-bound them, so an unbounded
-// caller stays the caller's bug rather than becoming a silent truncation here.
-func (s *UserService) ListAll(ctx context.Context, limit, offset int) ([]db.UserWithRole, error) {
-	users, err := s.st.ListAllUsers(ctx, limit, offset)
+// ListAll returns one page of the users matching f with their role names, in
+// id order. The caller bounds limit and offset; this does not re-bound them, so
+// an unbounded caller stays the caller's bug rather than becoming a silent
+// truncation here.
+func (s *UserService) ListAll(ctx context.Context, f db.UserListFilter, limit, offset int) ([]db.UserWithRole, error) {
+	users, err := s.st.ListAllUsers(ctx, f, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to list users: %w", ErrInternal, err)
 	}

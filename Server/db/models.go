@@ -281,10 +281,12 @@ type ServerStats struct {
 	OnlineCount  int   `json:"online_count"`
 }
 
-// UserWithRole extends User with the name of the user's role.
+// UserWithRole extends User with the name and hierarchy position of the
+// user's role.
 type UserWithRole struct {
 	User
-	RoleName string `json:"role_name"`
+	RoleName     string `json:"role_name"`
+	RolePosition int    `json:"role_position"`
 }
 
 // AuditEntry represents a single row from the audit_log table joined with the

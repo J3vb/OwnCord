@@ -211,6 +211,49 @@ input,select,textarea{font-family:inherit;border:none}
 .activity-text strong{color:var(--text-normal)}
 .activity-time{font-size:11px;color:var(--text-muted);margin-top:2px}
 
+/* Members (AO-4): tabs, the list, one Manage button plus an overflow menu per
+   row. The menu is position:fixed (members.js places it) so the table's scroll
+   wrapper cannot clip it. */
+.member-tabs{display:flex;gap:4px;box-shadow:inset 0 -1px 0 var(--border-strong);margin-bottom:16px;overflow-x:auto}
+.member-tab{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:8px 14px;background:transparent;color:var(--text-muted);font-size:14px;font-weight:600;border-bottom:2px solid transparent;white-space:nowrap}
+.member-tab:hover{color:var(--text-normal)}
+.member-tab:focus-visible{outline-offset:-2px}
+.member-tab[aria-selected="true"]{color:var(--header-primary);border-bottom-color:var(--accent)}
+.tab-count{min-width:20px;height:20px;padding:0 6px;border-radius:var(--radius-pill);background:var(--bg-active);color:var(--text-normal);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.member-tab[aria-selected="true"] .tab-count{background:var(--accent);color:var(--on-accent)}
+.members-summary{font-size:12px;color:var(--text-muted);margin:-4px 0 8px}
+.members-empty{text-align:center;color:var(--text-muted);padding:24px}
+.members-error{color:var(--text-danger)}
+.member-cell{display:flex;align-items:center;gap:8px;min-width:0}
+.member-sub{font-size:12px;color:var(--text-muted);margin-top:2px}
+.tbl .col-actions{text-align:right;width:1%;white-space:nowrap;position:relative}
+.member-role-inline{display:none}
+.member-actions{justify-content:flex-end;align-items:center;gap:4px}
+.member-btn{padding:6px 12px;font-size:12px}
+.member-btn.danger:hover{border-color:var(--danger-fill);color:var(--text-danger)}
+.member-more{width:32px;height:32px}
+.member-more svg{width:16px;height:16px}
+.member-more:disabled{opacity:.35;cursor:not-allowed}
+.member-more:disabled:hover{background:transparent;color:var(--text-muted)}
+.member-menu{position:fixed;z-index:60;min-width:220px;padding:4px;background:var(--bg-primary);border:1px solid var(--border-strong);border-radius:var(--radius-md);box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.member-menu .user-menu-item:focus-visible{outline-offset:-2px}
+.member-menu-sep{height:1px;background:var(--border-strong);margin:4px 0}
+.member-card{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.member-card .avatar{width:48px;height:48px;font-size:20px}
+.member-card-name{font-size:16px;font-weight:700;color:var(--header-primary);word-break:break-word}
+.member-card-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:4px;font-size:13px}
+.member-note{color:var(--text-muted);line-height:1.5}
+/* Narrow: the role moves under the name so Manage stays on screen without
+   scrolling the table sideways. */
+@media(max-width:600px){
+  .members-filter{align-items:stretch}
+  .members-tbl .col-role{display:none}
+  .member-role-inline{display:block;margin-top:4px}
+  .members-tbl th,.members-tbl td{padding:10px 8px}
+  .member-btn{padding:6px 10px}
+  .member-actions{gap:2px}
+}
+
 .update-card{display:flex;align-items:flex-start;gap:16px;padding:20px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border)}
 .update-icon{width:48px;height:48px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .update-icon svg{width:24px;height:24px}

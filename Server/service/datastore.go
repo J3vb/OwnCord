@@ -437,7 +437,7 @@ type Store interface {
 	// ── Admin ──
 	UserCount(ctx context.Context) (int64, error)
 	GetServerStats(ctx context.Context) (*db.ServerStats, error)
-	ListAllUsers(ctx context.Context, limit, offset int) ([]db.UserWithRole, error)
+	ListAllUsers(ctx context.Context, f db.UserListFilter, limit, offset int) ([]db.UserWithRole, error)
 	BanUser(ctx context.Context, id int64, reason string, expires *time.Time) error
 	UnbanUser(ctx context.Context, id int64) error
 	LogAudit(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail string) error
