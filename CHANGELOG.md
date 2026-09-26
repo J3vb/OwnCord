@@ -41,6 +41,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Login & connection
+
+- A dead connection (a dropped network or a sleeping laptop) could stay open on the server for up to two minutes, so the user still showed online — the server now pings each connection every 25 seconds and closes one that stops answering within about 50 seconds.
+
 ### Voice
 
 - Linux desktop voice works against a server on the same Docker host again — the client tried LiveKit's Docker-internal hostname, which does not resolve outside the container network, and now falls back to the `/livekit` tunnel like the other platforms.
