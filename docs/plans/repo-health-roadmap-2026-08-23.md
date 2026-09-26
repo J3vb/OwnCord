@@ -1545,8 +1545,11 @@ retained RC gates B10 kept:
   2026-09-26): **OD-1**, the Linux desktop client that shares a host with its
   Docker Compose server (the server sends LiveKit's container-internal
   `direct_url`, which does not resolve outside the container network), fixed as
-  the first post-beta voice item; and **OD-2**, running HP-6 with an unfamiliar
-  operator, after the post-beta restart lane.
+  the first post-beta voice item — the client half landed in #1843 (Linux
+  tunnels a non-loopback `direct_url`) and ships in the next client release,
+  and the server half, no longer sending one, is RT-2 in Phase A lane A1; and
+  **OD-2**, running HP-6 with an unfamiliar operator, after the post-beta
+  restart lane.
 
 Nothing here waives an RC check, upgrade/rollback, advisory closure or HP-10.
 B11 has no entry date; it starts from the published beta.

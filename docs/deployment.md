@@ -202,6 +202,23 @@ stopped.
 
 LiveKit runs as its own container (`livekit/livekit-server:v1.13.5`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset and `voice.auto_download_livekit` false. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.
 
+### Linux desktop voice
+
+Two limits apply to Linux desktop clients:
+
+- **The server must be 2.0.0-beta.1 or later.** The Linux client's native voice
+  sends its room credential as an `Authorization` header; the server forwards it
+  through `/livekit` from 2.0.0-beta.1 on, and a `1.2.0-alpha.*` server drops it
+  and refuses the join. Update the server.
+- **A 2.0.0-beta.1 or older client on the Docker host cannot join as
+  `localhost`.** A client that reaches the server as `localhost`, `127.0.0.1`
+  or `::1` uses the `direct_url` it is handed, `ws://livekit:7880`, as-is, and
+  that name does not resolve outside the container network. On the same
+  machine, connect using the host's LAN address or hostname instead: the client
+  then routes voice through the server's `/livekit` tunnel. Failing that, run
+  the client on another machine. The next client release tunnels any
+  non-loopback `direct_url`, and a later server change stops sending one.
+
 ---
 
 ## First Run Behavior
