@@ -689,6 +689,10 @@ function renderReports(
           loadList(false, false);
           return;
         }
+        // A note the closed report refused is already said to be unsaved: the
+        // re-read must not answer it a second time as a discarded draft.
+        if (w.kind === "note" && isStatus(err, 409) && draft.id === id)
+          draft = { ...draft, text: "" };
         setText(writeAlert, isAction(w) ? actionErrorText(w, err) : reviewErrorText(w, err));
         reread(id);
       },
