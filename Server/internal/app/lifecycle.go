@@ -38,6 +38,11 @@ const closeStepBudget = 10 * time.Second
 // writer and the database stop under it.
 const httpDrainBudget = 30 * time.Second
 
+// teardownBudget caps the whole close walk, whatever the step budgets add up
+// to, so a teardown finishes inside systemd's TimeoutStopSec=60 — which an
+// installed unit file keeps even after an update raises it.
+const teardownBudget = 50 * time.Second
+
 // stage is one start step, in start order. The name is what a failure is
 // reported as, so an operator reading `starting audit-writer: ...` knows
 // exactly how far the boot got — and it is the key the failure-injection

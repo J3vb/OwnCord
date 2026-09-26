@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/config"
 )
 
 // The composite-close contract, as three properties. Before B3-3's rewrite
@@ -198,14 +200,22 @@ func TestAppClose_GivesEveryStepItsOwnBudget(t *testing.T) {
 	}
 }
 
-// TestAppClose_HTTPDrainKeepsItsLongerBudget: the HTTP drain gets
-// httpDrainBudget, matching the server's read and write timeouts, so a slow
-// request the server allows is not cut off at the 10s every other step gets.
+// TestAppClose_HTTPDrainKeepsItsLongerBudget: the http step startHTTP
+// registers gets httpDrainBudget, matching the server's read and write
+// timeouts, so a slow request the server allows is not cut off at the 10s
+// every other step gets.
 func TestAppClose_HTTPDrainKeepsItsLongerBudget(t *testing.T) {
 	a := newTestApp()
+	a.cfg = &config.Config{}
+	if err := a.startHTTP(); err != nil {
+		t.Fatalf("startHTTP() = %v", err)
+	}
+	t.Cleanup(func() { _ = a.ln.Close() })
+
 	remaining := map[string]time.Duration{}
-	record := func(stage string) func(context.Context) error {
-		return func(ctx context.Context) error {
+	for i := range a.closers {
+		stage := a.closers[i].stage
+		a.closers[i].stop = func(ctx context.Context) error {
 			deadline, ok := ctx.Deadline()
 			if !ok {
 				t.Errorf("%s step ran without a deadline", stage)
@@ -214,10 +224,6 @@ func TestAppClose_HTTPDrainKeepsItsLongerBudget(t *testing.T) {
 			return nil
 		}
 	}
-	a.onClose("audit-writer", record("audit-writer"))
-	a.onClose("hub-notice", record("hub-notice"))
-	a.onCloseWithin("http", httpDrainBudget, record("http"))
-
 	if err := a.Close(context.Background()); err != nil {
 		t.Fatalf("Close() = %v", err)
 	}
@@ -228,5 +234,33 @@ func TestAppClose_HTTPDrainKeepsItsLongerBudget(t *testing.T) {
 	}
 	within("http", 30*time.Second)
 	within("hub-notice", 10*time.Second)
-	within("audit-writer", 10*time.Second)
+	within("listener", 10*time.Second)
+}
+
+// TestAppClose_OverallDeadlineCapsTheSteps: the step budgets add up (a 30s
+// drain plus 10s for each later step), so one overall deadline caps the walk
+// to keep a teardown inside systemd's stop timeout. Every step still runs.
+func TestAppClose_OverallDeadlineCapsTheSteps(t *testing.T) {
+	a := newTestApp()
+	a.closeStepBudget = 200 * time.Millisecond
+	a.teardownBudget = 300 * time.Millisecond
+	var ran []string
+	for _, stage := range []string{"database", "audit-writer", "http"} {
+		a.onClose(stage, func(ctx context.Context) error {
+			ran = append(ran, stage)
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	}
+
+	started := time.Now()
+	if err := a.Close(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close() = %v, want a deadline error", err)
+	}
+	if took := time.Since(started); took >= 500*time.Millisecond {
+		t.Errorf("Close took %v; the 300ms overall deadline should cap the 600ms of step budgets", took)
+	}
+	if want := []string{"http", "audit-writer", "database"}; !slices.Equal(ran, want) {
+		t.Errorf("steps run = %v, want %v", ran, want)
+	}
 }

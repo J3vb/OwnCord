@@ -95,6 +95,10 @@ type App struct {
 	// registered with a budget of its own keeps it. Never set outside tests.
 	closeStepBudget time.Duration
 
+	// teardownBudget overrides the overall close deadline (teardownBudget) so
+	// a test need not wait out fifty seconds. Never set outside tests.
+	teardownBudget time.Duration
+
 	// onCloseStep is called with each stage's name just before its close step
 	// runs. It makes the teardown walk observable, which is how the tests
 	// assert what is still alive at a given point in it. Never set outside
@@ -156,9 +160,10 @@ func (a *App) onCloseWithin(stage string, budget time.Duration, stop func(contex
 // below a failing one are the ones that release the database handle, the
 // LiveKit process and the audit queue, so aborting the walk would leak
 // exactly what teardown exists to reclaim. Later errors are logged.
-// Each step runs under its own budget, and ctx lends it values only:
-// neither its cancellation nor an earlier step's overrun cuts a later step
-// short. Calling it twice is a no-op.
+// Each step runs under its own budget, capped by what is left of one overall
+// teardownBudget, and ctx lends it values only: neither its cancellation nor
+// an earlier step's overrun cuts a later step short of that cap. Calling it
+// twice is a no-op.
 func (a *App) Close(ctx context.Context) error {
 	if a.closed {
 		return nil
@@ -169,6 +174,12 @@ func (a *App) Close(ctx context.Context) error {
 	if defaultBudget <= 0 {
 		defaultBudget = closeStepBudget
 	}
+	teardown := a.teardownBudget
+	if teardown <= 0 {
+		teardown = teardownBudget
+	}
+	overall, cancelOverall := context.WithTimeout(context.WithoutCancel(ctx), teardown)
+	defer cancelOverall()
 	var first error
 	for i := len(a.closers) - 1; i >= 0; i-- {
 		step := a.closers[i]
@@ -183,7 +194,7 @@ func (a *App) Close(ctx context.Context) error {
 		if budget <= 0 {
 			budget = defaultBudget
 		}
-		stepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
+		stepCtx, cancel := context.WithTimeout(overall, budget)
 		started := time.Now()
 		err := step.stop(stepCtx)
 		cancel()

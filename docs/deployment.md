@@ -275,10 +275,10 @@ in its header comments. The important choices it encodes:
   replacement gets reaped by the cgroup cleanup.
 - `TimeoutStopSec=60` — the server drains gracefully on SIGTERM, each
   shutdown step on its own budget — up to 30s for the HTTP drain and 10s
-  for each other step — so one step that overruns
-  cannot starve the next; a normal stop takes about 5–10s and the worst case
-  stays near 55s, so systemd waits 60s before SIGKILLing a wedged teardown; the server's own 90s restart backstop covers non-systemd
-  supervisors.
+  for each other step — so one step that overruns cannot starve the next,
+  and the whole teardown is capped at 50s; a normal stop takes about 5–10s,
+  so systemd's 60s is only reached by a wedged teardown, which it SIGKILLs;
+  the server's own 90s restart backstop covers non-systemd supervisors.
 - `ReadWritePaths=/opt/owncord` under `ProtectSystem=strict` — the install
   directory must stay writable or the admin panel's self-update (which
   renames the new binary into place) breaks. `ProtectSystem=strict` mounts
