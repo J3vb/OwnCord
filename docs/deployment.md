@@ -222,6 +222,9 @@ startup settings are written into `config.yaml` — comments and any hand edits
 in the file are preserved. The wizard also persists the generated LiveKit
 credentials so voice keeps working across restarts. If the port or TLS mode
 changed, the server restarts itself once and the wizard shows the new address.
+The finish screen shows the address members enter in the desktop app (with TLS
+off, it points them to your HTTPS reverse proxy's address instead), the invite
+code and, for a certificate the server already serves, its fingerprint.
 "Skip" runs the legacy minimal flow: just the Owner account, everything else
 on defaults.
 
@@ -425,7 +428,9 @@ mode `0600`.
 
 ### TLS Off
 
-Not recommended. For development or when behind a TLS-terminating reverse proxy:
+Only behind a TLS-terminating reverse proxy
+([Reverse Proxy Topology](#reverse-proxy-topology)). The desktop app connects
+only over `wss://`, so without one it cannot connect at all:
 
 ```yaml
 tls:

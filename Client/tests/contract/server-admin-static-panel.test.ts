@@ -163,6 +163,14 @@ async function boot(
   return { dom, bridge };
 }
 
+// Sign-in is a real <form>: submit it the way Enter or the button does, then
+// let the handler's fetch chain (mocked, so microtasks only) run out.
+async function submitForm(doc: Document, id: string): Promise<void> {
+  (doc.getElementById(id) as HTMLFormElement).requestSubmit();
+  const win = doc.defaultView!;
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => win.setTimeout(resolve, 0));
+}
+
 const defaultRespond: Responder = (p) => {
   if (p === "/setup/status") return { json: { needs_setup: false } };
   return { json: {} };
@@ -199,7 +207,7 @@ describe("Server/admin/static — panel behaviour", () => {
 
     (doc.getElementById("loginUser") as HTMLInputElement).value = "owner";
     (doc.getElementById("loginPass") as HTMLInputElement).value = "hunter22";
-    await (doc.getElementById("loginBtn") as unknown as { onclick: () => Promise<void> }).onclick();
+    await submitForm(doc, "loginStep1");
 
     // The token-less response must not be stored, and the panel must ask for
     // the code rather than pretending the session expired.
@@ -209,7 +217,7 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(doc.getElementById("loginErr")?.textContent).toBe("");
 
     (doc.getElementById("loginTotp") as HTMLInputElement).value = "123456";
-    await (doc.getElementById("totpBtn") as unknown as { onclick: () => Promise<void> }).onclick();
+    await submitForm(doc, "loginTotpStep");
 
     const verify = calls.find((c) => c.path === "/api/v1/auth/verify-totp");
     expect(verify).toBeTruthy();
@@ -238,13 +246,13 @@ describe("Server/admin/static — panel behaviour", () => {
 
     (doc.getElementById("loginUser") as HTMLInputElement).value = "owner";
     (doc.getElementById("loginPass") as HTMLInputElement).value = "hunter22";
-    await (doc.getElementById("loginBtn") as unknown as { onclick: () => Promise<void> }).onclick();
+    await submitForm(doc, "loginStep1");
 
     (doc.getElementById("loginTotp") as HTMLInputElement).value = "000000";
-    await (doc.getElementById("totpBtn") as unknown as { onclick: () => Promise<void> }).onclick();
+    await submitForm(doc, "loginTotpStep");
 
     // The code is single-use; the challenge is not. A retry has to keep working.
-    expect(doc.getElementById("loginErr")?.textContent).toBe("invalid two-factor code");
+    expect(doc.getElementById("loginErr")?.textContent).toBe("Invalid two-factor code");
     expect(booted.bridge.state.partialToken).toBe("PARTIAL-123");
     expect(doc.getElementById("loginTotpStep")?.className).not.toContain("hidden");
 

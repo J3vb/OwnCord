@@ -32,7 +32,7 @@ It works behind CGNAT and strict home routers, so setup is usually faster than m
 ## TLS Recommendation
 
 - Recommended: keep `tls.mode: self_signed` (default).
-- Optional advanced setup: set `tls.mode: off` only if every client is strictly inside trusted Tailscale access and you accept plaintext inside the tailnet.
+- Do not set `tls.mode: off` for tailnet-only access: the desktop app connects only over `wss://`, so `off` works only behind an HTTPS reverse proxy ([deployment.md](deployment.md#tls-off)).
 
 ## Voice/Video with Tailscale
 
