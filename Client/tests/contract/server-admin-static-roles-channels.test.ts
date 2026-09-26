@@ -20,6 +20,7 @@ window.__test = {
   get state(){return state},
   openRoleModal: openRoleModal,
   renderRoles: renderRoles,
+  moveRole: moveRole,
   saveRole: saveRole,
   openDeleteChannel: openDeleteChannel,
   confirmDeleteChannel: confirmDeleteChannel,
@@ -43,6 +44,7 @@ interface Bridge {
   state: any;
   openRoleModal: (id: number | null) => void;
   renderRoles: () => Promise<string>;
+  moveRole: (id: number, delta: number) => Promise<void>;
   saveRole: (id: number | null) => Promise<void>;
   openDeleteChannel: (id: number, name: string) => void;
   confirmDeleteChannel: (id: number, name: string) => Promise<void>;
@@ -168,16 +170,56 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     );
   });
 
-  it("does not count the role being edited against itself", async () => {
+  it("does not warn when editing a role at its current position", async () => {
     const booted = await boot([]);
     dom = booted.dom;
     const { bridge, doc } = booted;
 
     bridge.openRoleModal(2); // Admin, at 80
     const line = doc.getElementById("rolePlacement")!;
-    expect(line.className).not.toContain("is-error");
-    expect(line.textContent).toContain("This role will outrank Moderator.");
-    expect(line.textContent).not.toContain("outrank Admin");
+    expect(line.className).toBe("rank-placement");
+    expect(line.textContent).toBe("Sits between Owner (100) and Moderator (60).");
+    expect(line.querySelector('[data-action="placeRoleAboveDefault"]')).toBeNull();
+  });
+
+  it("warns on edit only when the new position newly outranks a role, with no one-click move", async () => {
+    const booted = await boot([]);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+
+    bridge.openRoleModal(3); // Moderator, at 60
+    const line = doc.getElementById("rolePlacement")!;
+
+    type(doc, "rolePos", "70");
+    expect(line.className).toBe("rank-placement");
+    expect(line.textContent).toBe("Sits between Admin (80) and Member (40).");
+
+    type(doc, "rolePos", "90");
+    expect(line.className).toContain("is-warn");
+    expect(line.textContent).toContain("This role will outrank Admin.");
+    expect(line.textContent).not.toMatch(/outrank[^.]*Moderator/);
+    expect(line.querySelector('[data-action="placeRoleAboveDefault"]')).toBeNull();
+  });
+
+  it("does not paint the ladder over a page the user navigated to mid-reorder", async () => {
+    let release!: (roles: unknown) => void;
+    const pending = new Promise((resolve) => {
+      release = resolve;
+    });
+    const booted = await boot([], (p) => (p === "/roles" ? pending : {}));
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    bridge.state.section = "roles";
+    const content = doc.getElementById("content")!;
+
+    const move = bridge.moveRole(3, 1);
+    await new Promise((resolve) => dom!.window.setTimeout(resolve, 0));
+    bridge.state.section = "channels";
+    content.innerHTML = "<p>Channels page</p>";
+    release(SEEDED);
+    await move;
+
+    expect(content.textContent).toBe("Channels page");
   });
 
   it("shows every permission's description as readable text tied to its checkbox (U14)", async () => {

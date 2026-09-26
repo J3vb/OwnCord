@@ -607,9 +607,12 @@ async function moveRole(id,delta){
   ids[i]=movable[j].id;ids[j]=movable[i].id;
   try{await api('PATCH','/roles/reorder',{role_ids:ids});showToast('Roles reordered')}
   catch(e){showToast(e.message,'error');return}
+  if(state.section!=='roles')return;
+  let html;
+  try{html=await renderRoles()}catch(e){renderContent();return}
   const c=document.getElementById('content');
   if(!c||state.section!=='roles')return;
-  try{c.innerHTML=await renderRoles()}catch(e){renderContent();return}
+  c.innerHTML=html;
   const dir=delta<0?'up':'down',other=delta<0?'down':'up';
   const btn=[c.querySelector('[data-focus="'+dir+'-'+id+'"]'),c.querySelector('[data-focus="'+other+'-'+id+'"]')].find(b=>b&&!b.disabled);
   if(btn)btn.focus();
@@ -652,7 +655,8 @@ function rolePositionError(pos,editId){
 /* The live line under the position field: where the role sits, and a warning
    (U13) when it would outrank roles such as Admin or Moderator — a new role
    defaults to the highest free slot below the caller, which for the owner is
-   above every seeded role. */
+   above every seeded role. An edit warns only about roles the new position
+   newly outranks, and offers no one-click move. */
 function renderRolePlacement(){
   const el=document.getElementById('rolePlacement');
   const input=document.getElementById('rolePos');
@@ -662,6 +666,11 @@ function renderRolePlacement(){
   const err=rolePositionError(pos,editId);
   if(err){el.className='rank-placement is-error';el.textContent=err;return}
   const p=rolePlacement(pos,editId);
+  const editing=editId!==null;
+  if(editing){
+    const was=(state.roleList||[]).find(r=>r.id===editId);
+    p.outranks=was?p.outranks.filter(r=>r.position>was.position):[];
+  }
   const between=p.above&&p.below?'Sits between '+esc(p.above.name)+' ('+p.above.position+') and '+esc(p.below.name)+' ('+p.below.position+').'
     :p.above?'Sits below every other role, under '+esc(p.above.name)+' ('+p.above.position+').'
     :p.below?'Sits above every other role, over '+esc(p.below.name)+' ('+p.below.position+').':'';
@@ -671,7 +680,7 @@ function renderRolePlacement(){
   el.className='rank-placement is-warn';
   el.innerHTML='<strong>This role will outrank '+listNames(p.outranks)+'.</strong> '
     +'With Manage Roles or a moderation permission, its members could act on theirs. '+between
-    +(slot!==null&&slot!==pos&&def?'<div><button type="button" class="btn btn-outline" data-action="placeRoleAboveDefault" data-args="'+actArgs(slot)+'">Place just above '+esc(def.name)+' ('+slot+')</button></div>':'');
+    +(!editing&&slot!==null&&slot!==pos&&def?'<div><button type="button" class="btn btn-outline" data-action="placeRoleAboveDefault" data-args="'+actArgs(slot)+'">Place just above '+esc(def.name)+' ('+slot+')</button></div>':'');
 }
 function placeRoleAboveDefault(slot){
   const input=document.getElementById('rolePos');if(!input)return;
