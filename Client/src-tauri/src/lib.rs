@@ -49,10 +49,15 @@ fn log_level_from_env() -> log::LevelFilter {
 fn native_voice_state() -> native_voice::NativeVoiceState {
     native_voice::NativeVoiceState::new()
 }
-/// Off Linux the webview's own WebRTC handles voice; a unit placeholder keeps
-/// the builder chain identical on every platform.
+/// Off Linux the webview's own WebRTC handles voice; an empty placeholder keeps
+/// the builder chain identical on every platform. A unit struct, not `()`:
+/// clippy rejects both `-> ()` and passing a unit value to `.manage`.
 #[cfg(not(target_os = "linux"))]
-fn native_voice_state() -> () {}
+struct NoNativeVoice;
+#[cfg(not(target_os = "linux"))]
+fn native_voice_state() -> NoNativeVoice {
+    NoNativeVoice
+}
 
 // Used by the single-instance closure and the startup log below.
 use tauri::Manager;
