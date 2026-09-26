@@ -39,7 +39,7 @@ this repo, so no code was changed.
      `RunEvent::Exit`, so the single-instance plugin's `destroy()` (release the
      mutex, destroy its message window) never runs. Windows frees the mutex
      only when the process is gone.
-4. The NSIS installer (passive mode from `tauri.conf.json:63`) finds any
+4. The NSIS installer (passive mode from `tauri.conf.json:64`) finds any
    `owncord-client.exe` owned by the current user, kills it, waits 500 ms,
    copies files, then relaunches the new exe with the old arguments
    (`installer.nsi` `Section Install` and `.onInstSuccess`, `utils.nsh`
@@ -104,7 +104,7 @@ matches the number. But it cannot hold the new client back:
 connection for the same user at once and kicks the old one. The server also
 does not track the client version, so it cannot show "old version".
 
-### H4 (ruled out): file locks during install
+### H4 (ruled out, wrongly for silent installs; see §6): file locks during install
 
 If the old exe were still locked, NSIS `File` would show an
 "Error opening file for writing" dialog, not a silent delay. The installer
@@ -180,4 +180,3 @@ installer wait, bounded, for the old executable to unlock before overwriting
 it, and `tests/e2e/native/packaged-update.spec.ts` holds the executable locked
 across every update so the race is forced on every run instead of once a
 fortnight.
-
