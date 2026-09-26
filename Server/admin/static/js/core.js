@@ -101,11 +101,10 @@ function fmtBytes(b){if(b<1024)return b+' B';if(b<1048576)return(b/1024).toFixed
    a value that already carries one (or an offset) is passed through unchanged,
    so this is a no-op on the columns the server formats itself. */
 function utcDate(s){const v=String(s);return new Date(/[Zz]|[+-]\d\d:?\d\d$/.test(v)?v:v.replace(' ','T')+'Z')}
-/* U9: one local-time formatter for the SQLite naive-UTC strings (audit,
-   dashboard activity, pending registrations). The UTC instant stays available
-   as a tooltip; the visible text is the viewer's local time, matching the
-   Tokens and Backups tables. fmt, when given, is an Intl.DateTimeFormat
-   (the log viewer asks for the time alone). */
+/* U9/AO-7: the panel's one timestamp formatter, for SQLite naive-UTC strings
+   and ISO instants alike. The UTC instant stays available as a tooltip; the
+   visible text is the viewer's local time. fmt, when given, is an
+   Intl.DateTimeFormat (the log viewer asks for the time alone). */
 function fmtLocal(s,fmt){if(!s)return'';const d=utcDate(s);if(isNaN(d.getTime()))return esc(String(s));return'<span title="'+esc(d.toISOString())+'">'+esc(fmt?fmt.format(d):d.toLocaleString())+'</span>'}
 function actionBadge(a){if(!a)return'badge-muted';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'badge-red';if(a.includes('create'))return'badge-green';if(a.includes('update'))return'badge-yellow';return'badge-accent'}
 function actionColor(a){if(!a)return'var(--accent)';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'var(--text-danger)';if(a.includes('create'))return'var(--text-positive)';if(a.includes('update'))return'var(--text-warning)';return'var(--accent)'}
