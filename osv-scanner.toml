@@ -21,29 +21,9 @@ id = "GO-2026-5932"
 reason = "golang.org/x/crypto, module-level only: govulncheck reports it unreachable from our code"
 
 # --- npm: dev-only. Same class as the brace-expansion note in ci.yml's npm
-# audit step: these reach us only through eslint/stryker tooling, ship in no
+# audit step: these reach us only through stryker tooling, ship in no
 # artifact, and `npm audit --omit=dev --audit-level=high` already gates the
 # shipped tree. The fix is a devDependency bump for a dependency-owning PR.
-[[IgnoredVulns]]
-id = "GHSA-p498-v437-472g"
-reason = "@humanfs/node dev-only via eslint; not shipped"
-
-[[IgnoredVulns]]
-id = "GHSA-5jgf-p345-68v8"
-reason = "fast-uri dev-only via ajv/stryker; not shipped"
-
-[[IgnoredVulns]]
-id = "GHSA-f65p-4m7j-42xc"
-reason = "fast-uri dev-only via ajv/stryker; not shipped"
-
-[[IgnoredVulns]]
-id = "GHSA-fph4-wmhf-6fwf"
-reason = "fast-uri dev-only via ajv/stryker; not shipped"
-
-[[IgnoredVulns]]
-id = "GHSA-jqff-g426-hqxp"
-reason = "fast-uri dev-only via ajv/stryker; not shipped"
-
 [[IgnoredVulns]]
 id = "GHSA-4mjr-xmp4-gh2g"
 reason = "qs dev-only via stryker's typed-rest-client; not shipped"
