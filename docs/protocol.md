@@ -1244,6 +1244,10 @@ it is written before item 3 in the same program order as items 1 and 4.
 }
 ```
 
+`direct_url` is the server's own `voice.livekit_url`, sent only when its host
+is loopback (`localhost`, `127.0.0.1`, `::1`) and omitted otherwise; a client
+without it connects through the `url` proxy path.
+
 `is_key_holder` tells the joiner whether they are the channel's E2EE key
 holder (see [Voice End-to-End Encryption](#voice-end-to-end-encryption)).
 Tokens are 5-minute scoped JWTs whose publish sources (mic/camera/screen) are
