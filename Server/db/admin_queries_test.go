@@ -137,7 +137,7 @@ func TestGetServerStats_WithData(t *testing.T) {
 func TestListAllUsers_Empty(t *testing.T) {
 	database := newSchemaTestDB(t, adminTestSchema)
 
-	users, err := database.ListAllUsers(context.Background(), 50, 0)
+	users, err := database.ListAllUsers(context.Background(), db.UserListFilter{}, 50, 0)
 	if err != nil {
 		t.Fatalf("ListAllUsers() error: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestListAllUsers_WithRoleName(t *testing.T) {
 		t.Fatalf("CreateUser error: %v", err)
 	}
 
-	users, err := database.ListAllUsers(context.Background(), 50, 0)
+	users, err := database.ListAllUsers(context.Background(), db.UserListFilter{}, 50, 0)
 	if err != nil {
 		t.Fatalf("ListAllUsers() error: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestListAllUsers_Pagination(t *testing.T) {
 		}
 	}
 
-	page1, err := database.ListAllUsers(context.Background(), 3, 0)
+	page1, err := database.ListAllUsers(context.Background(), db.UserListFilter{}, 3, 0)
 	if err != nil {
 		t.Fatalf("ListAllUsers page1 error: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestListAllUsers_Pagination(t *testing.T) {
 		t.Errorf("page1 len = %d, want 3", len(page1))
 	}
 
-	page2, err := database.ListAllUsers(context.Background(), 3, 3)
+	page2, err := database.ListAllUsers(context.Background(), db.UserListFilter{}, 3, 3)
 	if err != nil {
 		t.Fatalf("ListAllUsers page2 error: %v", err)
 	}
@@ -205,13 +205,87 @@ func TestListAllUsers_ZeroLimit(t *testing.T) {
 	database := newSchemaTestDB(t, adminTestSchema)
 	_, _ = database.CreateUser(context.Background(), "zerotest", "hash", 4)
 
-	users, err := database.ListAllUsers(context.Background(), 0, 0)
+	users, err := database.ListAllUsers(context.Background(), db.UserListFilter{}, 0, 0)
 	if err != nil {
 		t.Fatalf("ListAllUsers(0, 0) error: %v", err)
 	}
 	// limit=0 should return nothing
 	if len(users) != 0 {
 		t.Errorf("ListAllUsers(0, 0) = %d users, want 0", len(users))
+	}
+}
+
+// The Members page searches, filters by role and lists bans server-side, so
+// a filter narrows the whole table rather than the fetched page.
+func TestListAllUsers_Filter(t *testing.T) {
+	ctx := context.Background()
+	database := newSchemaTestDB(t, adminTestSchema)
+	ids := map[string]int64{}
+	for _, u := range []struct {
+		name string
+		role int
+	}{{"Alice", 4}, {"malice", 3}, {"bob", 4}, {"carol", 4}, {"dave", 4}} {
+		id, err := database.CreateUser(ctx, u.name, "hash", u.role)
+		if err != nil {
+			t.Fatalf("CreateUser(%s): %v", u.name, err)
+		}
+		ids[u.name] = id
+	}
+	future := time.Now().Add(time.Hour)
+	past := time.Now().Add(-time.Hour)
+	if err := database.BanUser(ctx, ids["bob"], "spam", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.BanUser(ctx, ids["carol"], "", &future); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.BanUser(ctx, ids["dave"], "", &past); err != nil {
+		t.Fatal(err)
+	}
+
+	names := func(f db.UserListFilter) []string {
+		t.Helper()
+		rows, err := database.ListAllUsers(ctx, f, 50, 0)
+		if err != nil {
+			t.Fatalf("ListAllUsers(%+v): %v", f, err)
+		}
+		out := make([]string, len(rows))
+		for i, r := range rows {
+			out[i] = r.Username
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		f    db.UserListFilter
+		want string
+	}{
+		{db.UserListFilter{}, "Alice,malice,bob,carol,dave"},
+		// Case-insensitive substring, not a prefix.
+		{db.UserListFilter{Query: "ALICE"}, "Alice,malice"},
+		// No LIKE wildcards: % and _ are literal.
+		{db.UserListFilter{Query: "%"}, ""},
+		{db.UserListFilter{Query: "_"}, ""},
+		{db.UserListFilter{RoleID: 3}, "malice"},
+		{db.UserListFilter{Query: "alice", RoleID: 4}, "Alice"},
+		// A lapsed temporary ban (dave) is not a ban.
+		{db.UserListFilter{BannedOnly: true}, "bob,carol"},
+		{db.UserListFilter{BannedOnly: true, Query: "car"}, "carol"},
+	} {
+		if got := strings.Join(names(tc.f), ","); got != tc.want {
+			t.Errorf("ListAllUsers(%+v) = %q, want %q", tc.f, got, tc.want)
+		}
+	}
+
+	rows, err := database.ListAllUsers(ctx, db.UserListFilter{RoleID: 3}, 50, 0)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ListAllUsers(role 3) = %v, %v", rows, err)
+	}
+	var want int
+	if err := database.QueryRowContext(ctx, `SELECT position FROM roles WHERE id = 3`).Scan(&want); err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].RolePosition != want {
+		t.Errorf("RolePosition = %d, want %d (the role's position)", rows[0].RolePosition, want)
 	}
 }
 

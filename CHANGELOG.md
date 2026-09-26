@@ -421,6 +421,12 @@ text was moved behind English catalogs ready for translation.
 - Channel access opens as a side drawer with Access, Overrides and Explain tabs
   instead of one long dialog.
 - Deleting a channel or a role now asks you to type its name first.
+- **Members has All, Pending and Banned tabs, a username search and a role
+  filter**, and they search the whole server, not just the page on screen. Each
+  row has one Manage button and a ⋮ menu instead of a row of unlabelled icons.
+- Your own row, and anyone at or above your rank, no longer offers Ban, Force
+  logout or any other action the server would refuse; a You, Outranks you or
+  Same rank badge says why.
 - **The setup wizard's security step now says what each TLS mode means for
   the desktop app**: Let's Encrypt needs port 80 as well as the server port and
   every renewal makes members accept a new fingerprint, and "off" means the

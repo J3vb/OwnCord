@@ -86,7 +86,7 @@ func TestUserService_ListAllAndServerStats(t *testing.T) {
 		seedUserRole(t, database, i, permissions.MemberRoleID)
 	}
 
-	page, err := svc.ListAll(ctx, 2, 0)
+	page, err := svc.ListAll(ctx, db.UserListFilter{}, 2, 0)
 	if err != nil {
 		t.Fatalf("ListAll: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestUserService_ListAllAndServerStats(t *testing.T) {
 	}
 
 	// The offset is the caller's too: page two of a 3-row set holds the rest.
-	rest, err := svc.ListAll(ctx, 2, 2)
+	rest, err := svc.ListAll(ctx, db.UserListFilter{}, 2, 2)
 	if err != nil {
 		t.Fatalf("ListAll(offset): %v", err)
 	}
@@ -127,7 +127,7 @@ func TestUserService_AdminReadsFailLoud(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	if _, err := svc.ListAll(ctx, 10, 0); !errors.Is(err, ErrInternal) {
+	if _, err := svc.ListAll(ctx, db.UserListFilter{}, 10, 0); !errors.Is(err, ErrInternal) {
 		t.Errorf("ListAll on a closed database: err = %v, want ErrInternal", err)
 	}
 	if _, err := svc.ServerStats(ctx); !errors.Is(err, ErrInternal) {
