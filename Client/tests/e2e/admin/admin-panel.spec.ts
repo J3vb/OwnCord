@@ -135,7 +135,9 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page, adminS
     await page.goto("/admin/");
     await expect(page.locator("#adminShell")).toBeVisible({ timeout: 10_000 });
 
-    await page.locator(".nav-item", { hasText: "Sign Out" }).click();
+    // Sign out lives in the top bar's user menu.
+    await page.locator("#userMenuBtn").click();
+    await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page.locator("#loginOverlay")).toBeVisible();
 
     await page.locator("#loginUser").fill(OWNER.username);

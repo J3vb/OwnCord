@@ -256,12 +256,12 @@ endpoints return plain-text errors — see their section):
 Create a new account. What it takes depends on the server's `registration_mode`
 setting (B4-1; the admin panel's Settings page, or the setup wizard):
 
-| Mode       | Behaviour                                                                                                                                                                      |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `closed`   | Every request is refused with `403` before the body is read.                                                                                                                   |
-| `invite`   | The default. A valid, unexpired, unrevoked invite with remaining uses is required and consumed. `201` with a session.                                                          |
-| `approval` | No invite. The account is created locked and answers `202`; it cannot sign in (`403 account is awaiting approval`) until an admin approves it in the admin panel's Users page. |
-| `open`     | No invite. `201` with a session.                                                                                                                                               |
+| Mode       | Behaviour                                                                                                                                                                        |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `closed`   | Every request is refused with `403` before the body is read.                                                                                                                     |
+| `invite`   | The default. A valid, unexpired, unrevoked invite with remaining uses is required and consumed. `201` with a session.                                                            |
+| `approval` | No invite. The account is created locked and answers `202`; it cannot sign in (`403 account is awaiting approval`) until an admin approves it in the admin panel's Members page. |
+| `open`     | No invite. `201` with a session.                                                                                                                                                 |
 
 `approval` and `open` also budget 5 registrations per client address per 24
 hours, and `approval` caps the pending queue at 100 applications; both refusals
@@ -3031,7 +3031,9 @@ admin. Violations return `403 FORBIDDEN`.
 ### GET /admin/api/me
 
 Describes the calling principal so a panel can hide what the role cannot use.
-Every route still re-checks its bit server-side.
+Every route still re-checks its bit server-side. `server_name` is the live
+`server_name` setting and `version` is the build version, both for the
+panel's top bar. Unauthenticated endpoints never report the version.
 
 #### Response 200 OK
 
@@ -3043,7 +3045,9 @@ Every route still re-checks its bit server-side.
   "role_name": "Moderator",
   "role_position": 60,
   "permissions": 1048575,
-  "is_owner": false
+  "is_owner": false,
+  "server_name": "OwnCord Server",
+  "version": "1.2.0"
 }
 ```
 

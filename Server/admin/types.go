@@ -98,6 +98,10 @@ type adminMeResponse struct {
 	// IsOwner mirrors ownerOnlyMiddleware: owner-only routes gate on position,
 	// not on a permission bit, so the panel cannot derive this from the mask.
 	IsOwner bool `json:"is_owner"`
+	// ServerName and Version fill the panel's top bar. Only authenticated
+	// panel principals see Version; unauthenticated endpoints never carry it.
+	ServerName string `json:"server_name"`
+	Version    string `json:"version,omitempty"`
 }
 
 // toAdminUserResponse converts a db.User and its resolved role name to the

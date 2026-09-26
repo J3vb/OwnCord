@@ -111,7 +111,10 @@ for (const media of [false, true]) {
         await admin.locator("#loginUser").fill("alice");
         await admin.locator("#loginPass").fill(TEST_PASSWORD);
         await admin.locator("#loginBtn").click();
-        await admin.getByRole("tab", { name: "Updates", exact: true }).click();
+        await admin
+          .getByRole("navigation", { name: "Admin sections" })
+          .getByRole("button", { name: /^Updates\b/ })
+          .click();
         await admin.getByRole("button", { name: "Apply Update & Restart", exact: true }).click();
         const applied = admin.waitForResponse(
           (response) =>
