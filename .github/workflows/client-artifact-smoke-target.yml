@@ -257,6 +257,15 @@ jobs:
           dbus-run-session -- bash -c 'printf "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
             xvfb-run -a npx playwright test --config playwright.config.artifact.ts --project artifact-update --output test-results/artifact-update'
 
+      # A WebKit web process that dies takes its reason with it: WebDriver only
+      # reports "page crash or hang". The kernel log keeps the signal (segfault,
+      # OOM kill) for the report below.
+      - name: Save kernel crash lines (Linux)
+        if: ${{ always() && runner.os == 'Linux' }}
+        run: |
+          mkdir -p test-results
+          sudo dmesg -T | grep -iE 'segfault|trap|killed process|out of memory|webkit|owncord' > test-results/kernel-crashes.txt || true
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
