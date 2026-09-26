@@ -27,11 +27,14 @@ const MEMBER_TABS=[['all','All'],['pending','Pending'],['banned','Banned']];
 function memberGuard(u){
   const me=state.me||{};
   if(u.id===me.id)return'self';
-  if(typeof u.role_position==='number'&&u.role_position>=(me.role_position||0))return'rank';
-  return'';
+  if(typeof u.role_position!=='number')return'';
+  const mine=me.role_position||0;
+  return u.role_position>mine?'above':u.role_position===mine?'peer':'';
 }
+const MEMBER_RANK_TEXT='Their role is at or above yours, so you cannot change their role or moderate them.';
 const MEMBER_GUARD_TEXT={self:'This is your account. You cannot change your own role, or ban, force logout or erase yourself.',
-  rank:'Their role is at or above yours, so you cannot change their role or moderate them.'};
+  above:MEMBER_RANK_TEXT,peer:MEMBER_RANK_TEXT};
+const MEMBER_GUARD_BADGE={self:'You',above:'Outranks you',peer:'Same rank'};
 
 function usersQuery(){
   let q='';
@@ -49,6 +52,7 @@ async function membersRoleList(){
 }
 
 async function renderUsers(){
+  membersListSeq++;
   const pendingAllowed=can(PERM.MANAGE_SERVER);
   if(state.membersTab==='pending'&&!pendingAllowed)state.membersTab='all';
   /* Approval-mode applications wait on the Pending tab until someone with
@@ -140,7 +144,7 @@ function memberRowHtml(u){
   const name=esc(u.username);
   const more=guard?MEMBER_GUARD_TEXT[guard]:items.length?'More actions for '+u.username:'No other actions available for '+u.username;
   const role='<span class="role-badge"><span class="role-dot" style="background:'+esc(roleColor(u.role_id))+'"></span>'+esc(roleName(u.role_id,u.role_name||u.RoleName))+'</span>';
-  return'<tr><td><div class="member-cell"><span class="avatar" aria-hidden="true" style="background:var(--accent)">'+esc(initial)+'</span><div><strong>'+name+'</strong>'+(guard==='self'?' <span class="badge badge-accent">You</span>':'')+'<div class="member-role-inline">'+role+'</div></div></div></td>'
+  return'<tr><td><div class="member-cell"><span class="avatar" aria-hidden="true" style="background:var(--accent)">'+esc(initial)+'</span><div><strong>'+name+'</strong>'+(guard?' <span class="badge '+(guard==='self'?'badge-accent':'badge-muted')+'" title="'+esc(MEMBER_GUARD_TEXT[guard])+'">'+MEMBER_GUARD_BADGE[guard]+'</span>':'')+'<div class="member-role-inline">'+role+'</div></div></div></td>'
     +'<td class="col-role">'+role+'</td>'
     +'<td>'+memberStatusHtml(u)+'</td>'
     +'<td class="col-actions"><div class="act-group member-actions">'
@@ -226,7 +230,7 @@ async function setMembersTab(tab){
   if(tab===state.membersTab&&document.getElementById('membersPanel'))return;
   state.membersTab=tab;state.usersPage=1;
   const html=await renderUsers();
-  if(state.section!=='users')return;
+  if(state.section!=='users'||state.membersTab!==tab)return;
   document.getElementById('content').innerHTML=html;
   document.getElementById('membersTab-'+tab)?.focus();
 }

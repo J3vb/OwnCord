@@ -3280,20 +3280,20 @@ effective bans: a lapsed temporary ban is not listed)
 
 Array of:
 
-| Field           | Type    | Notes                         |
-| --------------- | ------- | ----------------------------- |
-| `id`            | int     |                               |
-| `username`      | string  |                               |
-| `avatar`        | string? | omitted when unset            |
-| `role_id`       | int     |                               |
-| `role_name`     | string  |                               |
-| `role_position` | int     | the role's hierarchy position |
-| `status`        | string  | presence status               |
-| `created_at`    | string  |                               |
-| `last_seen`     | string? | omitted when never seen       |
-| `banned`        | bool    |                               |
-| `ban_reason`    | string? | omitted when unset            |
-| `ban_expires`   | string? | omitted for permanent bans    |
+| Field           | Type    | Notes                                                                                                                                                                                           |
+| --------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`            | int     |                                                                                                                                                                                                 |
+| `username`      | string  |                                                                                                                                                                                                 |
+| `avatar`        | string? | omitted when unset                                                                                                                                                                              |
+| `role_id`       | int     |                                                                                                                                                                                                 |
+| `role_name`     | string  |                                                                                                                                                                                                 |
+| `role_position` | int     | the role's hierarchy position; the server refuses role changes and moderation on a member whose position is at or above the caller's (`/me` `role_position`), and the panel hides those actions |
+| `status`        | string  | presence status                                                                                                                                                                                 |
+| `created_at`    | string  |                                                                                                                                                                                                 |
+| `last_seen`     | string? | omitted when never seen                                                                                                                                                                         |
+| `banned`        | bool    |                                                                                                                                                                                                 |
+| `ban_reason`    | string? | omitted when unset                                                                                                                                                                              |
+| `ban_expires`   | string? | omitted for permanent bans                                                                                                                                                                      |
 
 Password hashes and TOTP secrets are never included.
 
