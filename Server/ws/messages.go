@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/url"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -732,23 +730,6 @@ func buildVoiceToken(channelID int64, token string, proxyPath string, directURL 
 			IsKeyHolder: isKeyHolder,
 		},
 	})
-}
-
-// loopbackURLOrEmpty returns rawURL when its host is localhost or a loopback
-// IP, and "" otherwise.
-func loopbackURLOrEmpty(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return ""
-	}
-	host := u.Hostname()
-	if host == "localhost" {
-		return rawURL
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return rawURL
-	}
-	return ""
 }
 
 // buildVoiceE2EEAnnounce constructs a voice_e2ee_announce server→client relay.
