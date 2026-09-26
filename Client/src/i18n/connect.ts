@@ -132,11 +132,6 @@ export const connectText = defineCatalog("connect", {
   "connected.ready": "Ready!",
 
   "session.expired": "Your session expired — sign in again.",
-  "session.serverRestarting": "Server is restarting for {reason}. OwnCord will reconnect.",
-  "session.restartReasonDefault": "maintenance",
-  "session.restartReason.update": "an update",
-  "session.restartReason.backupRestore": "a backup restore",
-  "session.restartReason.setup": "setup",
   "session.banned": "You have been banned.",
   "error.serverFallback": "Server error",
   "error.rateLimited": "Too many requests. Try again later.",

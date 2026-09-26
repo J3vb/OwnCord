@@ -62,35 +62,25 @@ export function handleAuthError(
   clearAuth(epochRefusal ? "protocol_epoch" : "user");
 }
 
-/** Catalog phrase per restart reason the server sends; anything else reads as maintenance. */
-const RESTART_REASON_KEYS = {
-  update: "session.restartReason.update",
-  backup_restore: "session.restartReason.backupRestore",
-  setup: "session.restartReason.setup",
-} as const;
-
 export function handleServerRestart(payload: Payload<"server_restart">): void {
   log.warn("Server restarting", {
     reason: payload.reason,
     delaySeconds: payload.delay_seconds,
   });
-  // A zero delay cancels an earlier announcement (update_aborted): the socket
-  // never drops, so there is nothing to tell the user.
-  if (payload.delay_seconds <= 0) return;
-  // Every announced restart keeps the session (Q4): whether it is an admin
-  // update, a restore, a systemd or Docker restart, or a stop, the token
-  // stays valid, and ws.ts reconnects on its own once the socket drops and
-  // resumes into the same channel. The voice session does not survive —
-  // the server's voice state (and a managed LiveKit) goes with the process —
-  // so end it now rather than leave a call the server will not know about.
-  if (voiceStore.getState().currentChannelId !== null) {
+  // Every announced restart keeps the session (Q4): the token stays valid,
+  // ws.ts reconnects on its own once the socket drops and resumes into the
+  // same channel, and MainPage's banner counts down. Only the hub's final
+  // teardown notice ("shutdown") ends the voice session — the server's voice
+  // state (and a managed LiveKit) goes with the process. An admin's earlier
+  // announcement leaves the call alone: the restart may still be aborted.
+  if (
+    payload.reason === "shutdown" &&
+    payload.delay_seconds > 0 &&
+    voiceStore.getState().currentChannelId !== null
+  ) {
     void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
     leaveVoiceChannel();
   }
-  const reasonKey = Object.hasOwn(RESTART_REASON_KEYS, payload.reason ?? "")
-    ? RESTART_REASON_KEYS[payload.reason as keyof typeof RESTART_REASON_KEYS]
-    : "session.restartReasonDefault";
-  setTransientError(connectText("session.serverRestarting", { reason: connectText(reasonKey) }));
 }
 
 /**

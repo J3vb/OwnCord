@@ -3371,43 +3371,41 @@ describe("WS Dispatcher", () => {
     });
   });
 
-  it("wires server_restart to transient error", () => {
-    mock.dispatch("server_restart", {
-      reason: "update",
-      delay_seconds: 10,
-    });
-    expectConsole("warn", /\[dispatcher\] Server restarting/);
+  it("keeps the session and sets no transient error for any server_restart reason", () => {
+    setTransientError(null);
+    authStore.setState((prev) => ({
+      ...prev,
+      isAuthenticated: true,
+      user: { id: 1, username: "stay-user", avatar: null, role: "member" },
+    }));
 
-    const error = uiStore.getState().transientError;
-    expect(error).toBe("Server is restarting for an update. OwnCord will reconnect.");
-  });
-
-  it("wires server_restart with null reason to maintenance", () => {
-    mock.dispatch("server_restart", {
-      reason: null,
-      delay_seconds: 5,
-    });
-    expectConsole("warn", /\[dispatcher\] Server restarting/);
-
-    const error = uiStore.getState().transientError;
-    expect(error).toContain("maintenance");
-  });
-
-  it("reads an unknown or prototype-named reason as maintenance, never the raw wire string", () => {
-    for (const reason of ["constructor", "backup_restore_v2"]) {
+    for (const reason of ["update", "backup_restore", "setup", "shutdown", null]) {
       mock.dispatch("server_restart", { reason, delay_seconds: 5 });
       expectConsole("warn", /\[dispatcher\] Server restarting/);
-      expect(uiStore.getState().transientError).toBe(
-        "Server is restarting for maintenance. OwnCord will reconnect.",
-      );
+      expect(authStore.getState().isAuthenticated).toBe(true);
+      expect(authStore.getState().logoutReason).toBeUndefined();
+      expect(uiStore.getState().transientError).toBeNull();
     }
   });
 
-  it("says nothing for a zero-delay cancel (update_aborted)", () => {
-    setTransientError(null);
+  it("leaves the call intact through an update notice that is then aborted", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 42,
+      voiceStatus: "connected",
+    }));
+
+    mock.dispatch("server_restart", { reason: "update", delay_seconds: 5 });
+    expectConsole("warn", /\[dispatcher\] Server restarting/);
     mock.dispatch("server_restart", { reason: "update_aborted", delay_seconds: 0 });
     expectConsole("warn", /\[dispatcher\] Server restarting/);
-    expect(uiStore.getState().transientError).toBeNull();
+
+    await vi.runAllTimersAsync();
+    expect(mockLeaveVoice).not.toHaveBeenCalled();
+    const voice = voiceStore.getState();
+    expect(voice.currentChannelId).toBe(42);
+    expect(voice.voiceStatus).toBe("connected");
   });
 
   it("keeps the session through a shutdown notice but ends the call (Q4)", async () => {
@@ -3429,7 +3427,6 @@ describe("WS Dispatcher", () => {
     // Still signed in: ws.ts reconnects and resumes once the socket drops.
     expect(authStore.getState().isAuthenticated).toBe(true);
     expect(authStore.getState().logoutReason).toBeUndefined();
-    expect(uiStore.getState().transientError).not.toContain("signed out");
 
     // The call does not survive the server process: the LiveKit session
     // closes (leaveVoice also turns camera and screenshare off) and the
@@ -3439,20 +3436,6 @@ describe("WS Dispatcher", () => {
     const voice = voiceStore.getState();
     expect(voice.currentChannelId).toBeNull();
     expect(voice.voiceStatus).toBe("idle");
-  });
-
-  it("keeps the session for every server_restart reason", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      isAuthenticated: true,
-      user: { id: 1, username: "stay-user", avatar: null, role: "member" },
-    }));
-
-    for (const reason of ["update", "backup_restore", "setup", "shutdown"]) {
-      mock.dispatch("server_restart", { reason, delay_seconds: 5 });
-      expectConsole("warn", /\[dispatcher\] Server restarting/);
-      expect(authStore.getState().isAuthenticated).toBe(true);
-    }
   });
 
   it("wires error BANNED to clear auth and show error", () => {
