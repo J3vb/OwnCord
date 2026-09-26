@@ -17,12 +17,12 @@ type progressingUploadResult struct {
 // runProgressingUpload serves one request whose body arrives in small chunks
 // every 5 ms for sendFor, reading it through a progressReader over the
 // deadline start returns, and reports how the handler's read ended.
-func runProgressingUpload(t *testing.T, readTimeout, sendFor time.Duration, start func(http.ResponseWriter) *transferDeadline) progressingUploadResult {
+func runProgressingUpload(t *testing.T, readTimeout, sendFor time.Duration, start func(http.ResponseWriter, *http.Request) *transferDeadline) progressingUploadResult {
 	t.Helper()
 	done := make(chan progressingUploadResult, 1)
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		begin := time.Now()
-		d := start(w)
+		d := start(w, r)
 		defer d.release()
 		d.touch()
 		_, err := io.Copy(io.Discard, progressReader{r: r.Body, d: d})
@@ -74,8 +74,8 @@ func TestTransferDeadline_ProgressingTransferClosedAtLifetimeCap(t *testing.T) {
 		lifetime = 200 * time.Millisecond
 		sendFor  = 2 * time.Second
 	)
-	res := runProgressingUpload(t, progress, sendFor, func(w http.ResponseWriter) *transferDeadline {
-		return startTransfer(w, progress, lifetime)
+	res := runProgressingUpload(t, progress, sendFor, func(w http.ResponseWriter, r *http.Request) *transferDeadline {
+		return startTransfer(w, r, progress, lifetime)
 	})
 	if res.err == nil {
 		t.Fatalf("progressing transfer ran to EOF after %v; want it cut at the %v lifetime cap", res.elapsed, lifetime)
@@ -95,9 +95,9 @@ func TestTransferDeadline_ProgressingTransferCutAtShutdown(t *testing.T) {
 		sendFor    = 2 * time.Second
 		shutdownAt = 200 * time.Millisecond
 	)
-	res := runProgressingUpload(t, progress, sendFor, func(w http.ResponseWriter) *transferDeadline {
-		d := startTransfer(w, progress, lifetime)
-		time.AfterFunc(shutdownAt, CancelInFlightTransfers)
+	res := runProgressingUpload(t, progress, sendFor, func(w http.ResponseWriter, r *http.Request) *transferDeadline {
+		d := startTransfer(w, r, progress, lifetime)
+		time.AfterFunc(shutdownAt, CancelInFlightTransfers(serverOf(r)))
 		return d
 	})
 	if res.err == nil {
@@ -106,4 +106,47 @@ func TestTransferDeadline_ProgressingTransferCutAtShutdown(t *testing.T) {
 	if res.elapsed >= sendFor {
 		t.Fatalf("transfer ended after %v, not at shutdown (%v): %v", res.elapsed, shutdownAt, res.err)
 	}
+}
+
+// TestTransferDeadline_TransferStartingAfterShutdownIsCut: a request already
+// past its headers when shutdown begins reaches the transfer handler after the
+// hook has run; its transfer must be cut at once, not given the full lifetime.
+func TestTransferDeadline_TransferStartingAfterShutdownIsCut(t *testing.T) {
+	const (
+		progress = time.Second
+		lifetime = time.Minute
+		sendFor  = 2 * time.Second
+	)
+	res := runProgressingUpload(t, progress, sendFor, func(w http.ResponseWriter, r *http.Request) *transferDeadline {
+		CancelInFlightTransfers(serverOf(r))()
+		return startTransfer(w, r, progress, lifetime)
+	})
+	if res.err == nil {
+		t.Fatalf("transfer started after shutdown ran to EOF after %v; want it cut at once", res.elapsed)
+	}
+	if res.elapsed >= progress {
+		t.Fatalf("transfer started after shutdown ran for %v before it was cut: %v", res.elapsed, res.err)
+	}
+}
+
+// TestTransferDeadline_ShutdownLeavesOtherServersAlone: one server's shutdown
+// hook must not cut a transfer another server in the same process starts.
+func TestTransferDeadline_ShutdownLeavesOtherServersAlone(t *testing.T) {
+	const (
+		progress = time.Second
+		lifetime = time.Minute
+		sendFor  = 300 * time.Millisecond
+	)
+	CancelInFlightTransfers(&http.Server{})()
+	res := runProgressingUpload(t, progress, sendFor, func(w http.ResponseWriter, r *http.Request) *transferDeadline {
+		return startTransfer(w, r, progress, lifetime)
+	})
+	if res.err != nil {
+		t.Fatalf("transfer on a live server cut after %v by another server's shutdown: %v", res.elapsed, res.err)
+	}
+}
+
+func serverOf(r *http.Request) *http.Server {
+	srv, _ := r.Context().Value(http.ServerContextKey).(*http.Server)
+	return srv
 }

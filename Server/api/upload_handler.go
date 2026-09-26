@@ -194,7 +194,7 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		// moves, so a transfer that keeps progressing is not cut before
 		// transferMaxLifetime while a peer that stops sending is. The global timeouts are deliberately left alone:
 		// they still bound the header phase and slowloris behaviour.
-		deadlines := newTransferDeadline(w)
+		deadlines := newTransferDeadline(w, r)
 		defer deadlines.release()
 		deadlines.touch()
 
@@ -340,7 +340,7 @@ func handleServeFile(uploads *service.UploadService, store FileStore, allowedOri
 		// writer so every chunk that lands pushes the connection write deadline
 		// out; a stalled peer is abandoned after transferProgressTimeout, and
 		// any download is closed after transferMaxLifetime.
-		deadlines := newTransferDeadline(w)
+		deadlines := newTransferDeadline(w, r)
 		defer deadlines.release()
 		deadlines.touch()
 		w = progressWriter{ResponseWriter: w, d: deadlines}

@@ -35,18 +35,26 @@ import (
 // CancelInFlightTransfers (registered with http.Server.RegisterOnShutdown)
 // cuts every in-flight transfer's deadline to now so the drain stays bounded.
 
-// inFlight holds the transfers whose handlers are still running.
+// inFlight holds the transfers whose handlers are still running, and the
+// servers that have begun shutting down.
 var inFlight = struct {
-	mu  syncutil.Mutex
-	set map[*transferDeadline]struct{}
-}{set: map[*transferDeadline]struct{}{}}
+	mu      syncutil.Mutex
+	set     map[*transferDeadline]struct{}
+	closing map[*http.Server]struct{}
+}{set: map[*transferDeadline]struct{}{}, closing: map[*http.Server]struct{}{}}
 
-// CancelInFlightTransfers cuts every transfer currently in flight.
-func CancelInFlightTransfers() {
-	inFlight.mu.Lock()
-	defer inFlight.mu.Unlock()
-	for d := range inFlight.set {
-		d.cut()
+// CancelInFlightTransfers returns srv's shutdown hook: it cuts every transfer
+// srv is serving, and any that starts on srv afterwards is cut at once.
+func CancelInFlightTransfers(srv *http.Server) func() {
+	return func() {
+		inFlight.mu.Lock()
+		defer inFlight.mu.Unlock()
+		inFlight.closing[srv] = struct{}{}
+		for d := range inFlight.set {
+			if d.srv == srv {
+				d.cut()
+			}
+		}
 	}
 }
 
@@ -54,6 +62,7 @@ func CancelInFlightTransfers() {
 type transferDeadline struct {
 	ctl     *http.ResponseController
 	timeout time.Duration
+	srv     *http.Server
 
 	mu    syncutil.Mutex
 	until time.Time
@@ -61,19 +70,24 @@ type transferDeadline struct {
 
 // newTransferDeadline starts a transfer's deadlines; the handler must defer
 // release so a later shutdown does not touch a connection it no longer owns.
-func newTransferDeadline(w http.ResponseWriter) *transferDeadline {
-	return startTransfer(w, transferProgressTimeout, transferMaxLifetime)
+func newTransferDeadline(w http.ResponseWriter, r *http.Request) *transferDeadline {
+	return startTransfer(w, r, transferProgressTimeout, transferMaxLifetime)
 }
 
 // startTransfer is newTransferDeadline with the bounds supplied, so tests can
 // use short ones.
-func startTransfer(w http.ResponseWriter, timeout, lifetime time.Duration) *transferDeadline {
+func startTransfer(w http.ResponseWriter, r *http.Request, timeout, lifetime time.Duration) *transferDeadline {
+	srv, _ := r.Context().Value(http.ServerContextKey).(*http.Server)
 	d := &transferDeadline{
 		ctl:     http.NewResponseController(w),
 		timeout: timeout,
+		srv:     srv,
 		until:   time.Now().Add(lifetime),
 	}
 	inFlight.mu.Lock()
+	if _, closing := inFlight.closing[srv]; closing && srv != nil {
+		d.until = time.Now()
+	}
 	inFlight.set[d] = struct{}{}
 	inFlight.mu.Unlock()
 	return d
