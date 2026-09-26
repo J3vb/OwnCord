@@ -179,7 +179,7 @@ Client                     OwnCord Server              LiveKit Server
 **Client connection paths:**
 
 - **Proxy path** (`/livekit`): Client connects through OwnCord's HTTPS server. Avoids mixed-content issues.
-- **Direct URL** (`ws://localhost:7880`): The server sends `direct_url` only when `voice.livekit_url`'s host is loopback (`localhost`, `127.0.0.1`, `::1`) and omits it otherwise, so a compose-internal name such as `ws://livekit:7880` never reaches the client (`Server/ws/messages.go` `buildVoiceToken`). Used when the client is on localhost and the URL is itself loopback `ws:`/`http:`; any other `direct_url` goes through the proxy path. On Linux desktop native voice the loopback test is on the host alone (any scheme, IPv6 included), so a compose-internal name such as `ws://livekit:7880` that resolves only inside the container network still goes through the proxy path ([security.md](security.md#tauri-capabilities-least-privilege)).
+- **Direct URL** (`ws://localhost:7880`): Sent only when `voice.livekit_url` is loopback ([protocol.md](protocol.md#voice_token-server---client-direct)). Used when the client is on localhost and the URL is itself loopback `ws:`/`http:`; any other `direct_url` goes through the proxy path. On Linux desktop native voice the loopback test is on the host alone (any scheme, IPv6 included), so a compose-internal name such as `ws://livekit:7880` that resolves only inside the container network still goes through the proxy path ([security.md](security.md#tauri-capabilities-least-privilege)).
 
 ---
 
