@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -90,6 +91,7 @@ func shutdownServers(shutdownCtx context.Context, log *slog.Logger, srv, acmeSrv
 	// hijacked WebSocket connections, so the hub's own stop below is not
 	// delayed by connected clients — they get the restart notice right after
 	// the drain instead of right before it.
+	srv.RegisterOnShutdown(api.CancelInFlightTransfers)
 	shutdownErr := srv.Shutdown(shutdownCtx)
 
 	// Stop the WebSocket hub: notify clients, stop LiveKit, close all client
