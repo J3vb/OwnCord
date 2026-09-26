@@ -208,7 +208,9 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, all
 		// the victim's participant identity. Strip the credential before the
 		// error reaches slog: the raw query blob first, so an encoded form is
 		// caught too, then the decoded token. The Authorization header carries
-		// the same JWT for the native client, so it gets the same treatment.
+		// the same JWT for the native client. coder/websocket's dial errors do
+		// not include request headers today, so scrubbing it is future-proofing
+		// against a library change that starts echoing them.
 		safeErr := redactKey(err.Error(), backendURL.RawQuery)
 		safeErr = redactKey(safeErr, backendURL.Query().Get("access_token"))
 		safeErr = redactKey(safeErr, authz)

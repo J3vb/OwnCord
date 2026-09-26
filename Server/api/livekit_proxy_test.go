@@ -338,6 +338,8 @@ func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
 	if strings.Contains(out, token) {
 		t.Fatalf("the LiveKit access token leaked into the log stream:\n%s", out)
 	}
+	// Future-proofing: coder/websocket's dial errors omit request headers
+	// today, so this holds even without the proxy's Authorization scrub.
 	if strings.Contains(out, headerToken) {
 		t.Fatalf("the Authorization token leaked into the log stream:\n%s", out)
 	}
