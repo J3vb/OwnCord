@@ -281,6 +281,40 @@ describe("Server/admin/static — setup wizard and sign-in", () => {
     expect(doc.getElementById("setupFingerprintLater")!.classList.contains("hidden")).toBe(true);
   });
 
+  it("sends members to the reverse proxy when security is off", async () => {
+    const booted = await boot({
+      json: {
+        token: "T",
+        invite_code: "INV-1",
+        restart_required: true,
+        restart_url: "http://chat.lan:8443/admin",
+      },
+    });
+    dom = booted.dom;
+    const { doc } = booted;
+    await submit(dom);
+    await fillAccount(dom);
+    await submit(dom);
+    const tls = doc.getElementById("wizTLS") as HTMLSelectElement;
+    tls.value = "off";
+    tls.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    for (let i = 0; i < 4; i++) await submit(dom);
+
+    expect(doc.getElementById("setupSuccessOverlay")!.classList.contains("visible")).toBe(true);
+    // The desktop app speaks only wss://, so the plain-HTTP host:port is not
+    // something a member can add.
+    expect(doc.getElementById("setupAddress")!.parentElement!.classList.contains("hidden")).toBe(
+      true,
+    );
+    expect(doc.getElementById("setupAddressHint")!.textContent).toBe(
+      "Members add this server using the address your HTTPS reverse proxy serves.",
+    );
+    expect(doc.getElementById("setupFingerprintLater")!.classList.contains("hidden")).toBe(true);
+    expect((doc.getElementById("restartLink") as HTMLAnchorElement).href).toBe(
+      "http://chat.lan:8443/admin",
+    );
+  });
+
   it("keeps the quick path to an account-only payload with the setup token", async () => {
     const booted = await boot();
     dom = booted.dom;

@@ -248,16 +248,18 @@ async function wizFinish(){
 /* Fills the success card: the address to connect to, the invite code, and
    the certificate fingerprint members compare against their trust prompt. */
 function renderSetupSuccess(resp){
-  const addr=setupAddress(resp);
-  document.getElementById('setupAddress').textContent=addr;
-  if(/^(localhost|127\.|\[::1\])/.test(addr))document.getElementById('setupAddressHint').textContent='This is this computer’s own address. Members on other machines use its network address or domain, with the same port.';
+  const mode=wiz.skip?wiz.defaults&&wiz.defaults.tls_mode:wiz.data.tls_mode;
+  const addr=setupAddress(resp),addrEl=document.getElementById('setupAddress'),addrHint=document.getElementById('setupAddressHint');
+  addrEl.textContent=addr;
+  addrEl.parentElement.classList.toggle('hidden',mode==='off');
+  if(mode==='off')addrHint.textContent='Members add this server using the address your HTTPS reverse proxy serves.';
+  else if(/^(localhost|127\.|\[::1\])/.test(addr))addrHint.textContent='This is this computer’s own address. Members on other machines use its network address or domain, with the same port.';
   document.getElementById('inviteCode').textContent=resp.invite_code;
   const warn=document.getElementById('setupWarnings');warn.innerHTML='';
   (resp.warnings||[]).forEach(wm=>{const div=document.createElement('div');div.className='wiz-callout';div.textContent=wm;warn.appendChild(div)});
   const fp=!!resp.certificate_fingerprint;
   if(fp)document.getElementById('certFingerprint').textContent=resp.certificate_fingerprint;
   document.getElementById('setupFingerprint').classList.toggle('hidden',!fp);
-  const mode=wiz.skip?wiz.defaults&&wiz.defaults.tls_mode:wiz.data.tls_mode;
   document.getElementById('setupFingerprintLater').classList.toggle('hidden',fp||mode==='off'||mode==='acme');
 }
 
