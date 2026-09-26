@@ -41,6 +41,14 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Messages & files
+
+- **Large attachments no longer fail on a slow connection.** Uploads and
+  downloads used to be cut after 30 seconds no matter how steadily they were
+  moving, so a 25 MB file on a 1 Mbit/s uplink was lost mid-transfer and a
+  download stopped without an error. The server now keeps a transfer alive
+  while it is making progress and only gives up on one that has stalled.
+
 ### Voice
 
 - Linux desktop voice works against a server on the same Docker host again — the client tried LiveKit's Docker-internal hostname, which does not resolve outside the container network, and now falls back to the `/livekit` tunnel like the other platforms.
