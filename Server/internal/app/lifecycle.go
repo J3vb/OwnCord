@@ -26,11 +26,17 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// closeStepBudget bounds each close step on its own — the same figure the
-// operator is told about in the "draining connections" log line. The shorter
-// timeouts inside some stop steps (the audit drain, the event flush, plugins,
-// telemetry) sit within it.
+// closeStepBudget bounds each close step on its own, except the HTTP drain —
+// the figures the operator is told about in the "draining connections" log
+// line. The shorter timeouts inside some stop steps (the audit drain, the
+// event flush, plugins, telemetry) sit within it.
 const closeStepBudget = 10 * time.Second
+
+// httpDrainBudget bounds the "http" close step. It matches the server's
+// ReadTimeout and WriteTimeout, so a request the server legitimately allows
+// (a slow upload or export download) finishes before the hub, the audit
+// writer and the database stop under it.
+const httpDrainBudget = 30 * time.Second
 
 // stage is one start step, in start order. The name is what a failure is
 // reported as, so an operator reading `starting audit-writer: ...` knows
@@ -269,9 +275,10 @@ func pushDispatchEnabled(cfg *config.Config) bool {
 //
 // Its close step is stopHub: GracefulStopContext, which calls StopLiveKit,
 // the sole caller of LiveKitProcess.Stop, then a join on the dispatch
-// goroutine. gracefulOnce makes it idempotent alongside the stop the http
-// step performs on the normal path, so it is reached on every return from Run
-// and a supervised livekit-server process is never orphaned (OC-0027).
+// goroutine. gracefulOnce makes it idempotent alongside the stop the
+// hub-notice step performs on the normal path, so it is reached on every
+// return from Run and a supervised livekit-server process is never orphaned
+// (OC-0027).
 func (a *App) startHub() error {
 	rt, err := StartRuntime(a.cfg, a.database, a.plugins)
 	if err != nil {
@@ -407,7 +414,8 @@ func (a *App) startACME() error {
 }
 
 // startHTTP builds the main server and registers the ordered graceful
-// shutdown — ACME, then in-flight HTTP handlers, then the hub. It starts last
+// shutdown — the http step (ACME, then in-flight HTTP handlers, within
+// httpDrainBudget), then the hub-notice step. It starts last
 // of the real stages so that shutdown is the FIRST thing the reverse walk
 // does: in-flight handlers' broadcasts must still reach a live hub and event
 // persister, or the frames vanish from the replay store across the restart.
@@ -439,7 +447,7 @@ func (a *App) startHTTP() error {
 		a.hub.GracefulStopContext(ctx)
 		return nil
 	})
-	a.onClose("http", func(ctx context.Context) error {
+	a.onCloseWithin("http", httpDrainBudget, func(ctx context.Context) error {
 		return shutdownServers(ctx, a.log, a.srv, a.acmeSrv)
 	})
 	// An open admin log stream never returns on its own and Shutdown waits for

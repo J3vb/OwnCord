@@ -274,7 +274,8 @@ in its header comments. The important choices it encodes:
   update handoff when updating from older OwnCord releases, whose spawned
   replacement gets reaped by the cgroup cleanup.
 - `TimeoutStopSec=60` — the server drains gracefully on SIGTERM, each
-  shutdown step on its own budget of at most 10s, so one step that overruns
+  shutdown step on its own budget — up to 30s for the HTTP drain and 10s
+  for each other step — so one step that overruns
   cannot starve the next; a normal stop takes about 5–10s and the worst case
   stays near 55s, so systemd waits 60s before SIGKILLing a wedged teardown; the server's own 90s restart backstop covers non-systemd
   supervisors.

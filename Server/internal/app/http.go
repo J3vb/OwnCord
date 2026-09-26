@@ -63,9 +63,9 @@ func serveAndWait(ctx context.Context, log *slog.Logger, rc *RestartCoordinator,
 		}
 	case <-ctx.Done():
 		if reason, ok := rc.Requested(); ok {
-			log.Info("restart requested, draining connections (10s per shutdown step)", "reason", reason)
+			log.Info("restart requested, draining connections (up to 30s for HTTP, 10s per other shutdown step)", "reason", reason)
 		} else {
-			log.Info("shutdown signal received, draining connections (10s per shutdown step)")
+			log.Info("shutdown signal received, draining connections (up to 30s for HTTP, 10s per other shutdown step)")
 		}
 	}
 

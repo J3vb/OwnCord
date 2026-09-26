@@ -571,8 +571,9 @@ no closer.
 
 `App.Close` reports the **first** error and still runs every later step: the
 steps below a failing one are the ones that release the database handle, the
-LiveKit process and the audit queue. Each step runs on a 10s budget of its
-own and logs how long it took, so a step that overruns (an HTTP drain held
+LiveKit process and the audit queue. Each step runs on a budget of its own —
+up to 30s for the `http` drain, matching the server's read and write
+timeouts, and 10s for every other step — and logs how long it took, so a step that overruns (an HTTP drain held
 open) cannot leave the restart notice, the audit drain or the event flush on
 an expired context (SRV-06). `internal/app/close_test.go` pins the
 order, the first-error rule, the per-step budget and idempotence;

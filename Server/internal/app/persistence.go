@@ -84,8 +84,8 @@ func newAuditWriter(bgCtx context.Context, database *db.DB) *db.AuditWriter {
 	return auditWriter
 }
 
-// stopAuditWriter drains the async audit writer, within its share of
-// App.Close's shutdown budget.
+// stopAuditWriter drains the async audit writer, within the audit-writer
+// step's own App.Close budget.
 func stopAuditWriter(ctx context.Context, auditWriter *db.AuditWriter) {
 	stopCtx, stopCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer stopCancel()

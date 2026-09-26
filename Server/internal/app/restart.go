@@ -33,8 +33,9 @@ const (
 
 	// RestartBackstopDelay sets when a stalled drain enters the emergency
 	// handoff. Run's
-	// worst-case legitimate teardown is ≈55s — the 30s shutdown budget plus
-	// its sequential bounded defers — so 90s only ever fires on a genuinely
+	// worst-case legitimate teardown is ≈55s — the 30s HTTP drain plus the
+	// later close steps, each bounded by its own budget of at most 10s and
+	// most far shorter in practice — so 90s only ever fires on a genuinely
 	// wedged teardown. Even this path must join the managed LiveKit process
 	// before handing off: exiting OwnCord alone need not stop its child. A
 	// child the OS cannot reap keeps the handoff blocked rather than

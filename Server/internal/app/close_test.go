@@ -197,3 +197,36 @@ func TestAppClose_GivesEveryStepItsOwnBudget(t *testing.T) {
 		}
 	}
 }
+
+// TestAppClose_HTTPDrainKeepsItsLongerBudget: the HTTP drain gets
+// httpDrainBudget, matching the server's read and write timeouts, so a slow
+// request the server allows is not cut off at the 10s every other step gets.
+func TestAppClose_HTTPDrainKeepsItsLongerBudget(t *testing.T) {
+	a := newTestApp()
+	remaining := map[string]time.Duration{}
+	record := func(stage string) func(context.Context) error {
+		return func(ctx context.Context) error {
+			deadline, ok := ctx.Deadline()
+			if !ok {
+				t.Errorf("%s step ran without a deadline", stage)
+			}
+			remaining[stage] = time.Until(deadline)
+			return nil
+		}
+	}
+	a.onClose("audit-writer", record("audit-writer"))
+	a.onClose("hub-notice", record("hub-notice"))
+	a.onCloseWithin("http", httpDrainBudget, record("http"))
+
+	if err := a.Close(context.Background()); err != nil {
+		t.Fatalf("Close() = %v", err)
+	}
+	within := func(stage string, budget time.Duration) {
+		if got := remaining[stage]; got > budget || got < budget-5*time.Second {
+			t.Errorf("%s step budget = %v, want %v", stage, got, budget)
+		}
+	}
+	within("http", 30*time.Second)
+	within("hub-notice", 10*time.Second)
+	within("audit-writer", 10*time.Second)
+}
