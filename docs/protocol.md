@@ -302,6 +302,16 @@ The server responds immediately:
 
 Every 30 seconds, the server checks all clients. Any client with no activity for 90 seconds is forcibly disconnected. Normal chat activity also keeps the connection alive.
 
+### Desktop Transport Liveness
+
+The desktop client's Rust WebSocket proxy (`Client/src-tauri/src/ws_proxy.rs`)
+also sends a WebSocket protocol Ping every 25 seconds, which the server's read
+loop answers with a Pong. If no frame of any kind arrives for 62.5 seconds
+(2.5 ping intervals), the proxy closes the socket and the client reconnects.
+This catches a half-open connection that a firewall or NAT dropped silently,
+and does not depend on the webview's JSON ping timer, which the OS may throttle
+while the window is minimised. The JSON ping above is unchanged.
+
 ---
 
 ## Reconnection with State Recovery
