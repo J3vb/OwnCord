@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -228,7 +230,7 @@ type voiceTokenPayload struct {
 	ChannelID   int64  `json:"channel_id"`
 	Token       string `json:"token"`
 	URL         string `json:"url"`
-	DirectURL   string `json:"direct_url"`
+	DirectURL   string `json:"direct_url,omitempty"`
 	IsKeyHolder bool   `json:"is_key_holder"`
 }
 
@@ -715,7 +717,10 @@ func buildVoiceConfig(channelID int64, quality string, bitrate int, maxUsers int
 
 // buildVoiceToken constructs a voice_token message with a LiveKit token and URL.
 // url is the proxy path ("/livekit") for remote clients; direct_url is the raw
-// LiveKit URL (e.g. "ws://localhost:7880") for localhost clients.
+// LiveKit URL (e.g. "ws://localhost:7880") for localhost clients. directURL is
+// the server's own dial address, so it is sent only when its host is loopback:
+// anything else (a docker-compose service name like ws://livekit:7880, LiveKit
+// Cloud, another host) may not resolve on the client, which then tunnels.
 func buildVoiceToken(channelID int64, token string, proxyPath string, directURL string, isKeyHolder bool) []byte { //nolint:unparam // kept configurable for proxy path flexibility
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceToken,
@@ -723,10 +728,27 @@ func buildVoiceToken(channelID int64, token string, proxyPath string, directURL 
 			ChannelID:   channelID,
 			Token:       token,
 			URL:         proxyPath,
-			DirectURL:   directURL,
+			DirectURL:   loopbackURLOrEmpty(directURL),
 			IsKeyHolder: isKeyHolder,
 		},
 	})
+}
+
+// loopbackURLOrEmpty returns rawURL when its host is localhost or a loopback
+// IP, and "" otherwise.
+func loopbackURLOrEmpty(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return rawURL
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return rawURL
+	}
+	return ""
 }
 
 // buildVoiceE2EEAnnounce constructs a voice_e2ee_announce server→client relay.

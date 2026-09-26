@@ -49,6 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 - Linux desktop voice works against a server on the same Docker host again — the client tried LiveKit's Docker-internal hostname, which does not resolve outside the container network, and now falls back to the `/livekit` tunnel like the other platforms.
 - Linux desktop voice joins remote servers older than v2.0.0-beta.1. Those servers dropped the voice sign-in the Linux client sent, so the join failed; the client now sends it the way Windows and macOS do.
+- The server no longer hands clients LiveKit's internal address — it sends LiveKit's own address only when that address is loopback, so an older Linux client on the Docker host also gets voice through the `/livekit` tunnel.
 
 ### Accounts & admin
 
