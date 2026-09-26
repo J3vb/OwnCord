@@ -1508,6 +1508,13 @@ delay the drain — they get the restart notice immediately afterwards. The orde
 is the reverse of the start sequence in `Server/internal/app/lifecycle.go`, not
 a hand-written teardown.
 
+A managed livekit-server never outlives the server, even when the server dies
+without running this sequence: on Linux the kernel kills it with its parent
+(`Pdeathsig`), and on Windows it runs in a job object that is killed when the
+server exits. On Windows, closing the server's console window stops the server
+and LiveKit together; after a self-restart in `spawn` mode, the replacement
+opens a new console window of its own.
+
 ## See Also
 
 - [Server Configuration](server-configuration.md) -- full config key reference

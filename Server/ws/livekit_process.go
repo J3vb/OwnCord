@@ -262,17 +262,7 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath, binPath string) {
 			return
 		}
 
-		cmd := exec.CommandContext(ctx, binPath, "--config", cfgPath) //nolint:gosec // G204: binary path from trusted server config or verified download
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		// Give LiveKit a short graceful shutdown window, then let os/exec
-		// kill and reap it before Stop allows an updater to start a successor.
-		cmd.Cancel = func() error { return stopLiveKitProcess(cmd.Process) }
-		cmd.WaitDelay = 5 * time.Second
-		// Linux: die with a parent that never ran its teardown (kill -9,
-		// OOM, restart-backstop force-exit) instead of orphaning with
-		// 7880/UDP still bound. Other platforms use the default nil attrs.
-		cmd.SysProcAttr = liveKitSysProcAttr()
+		cmd := newLiveKitCmd(ctx, cfgPath, binPath)
 
 		slog.Info("livekit: starting process",
 			"binary", binPath,
@@ -290,6 +280,10 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath, binPath string) {
 		// started after the unlock, that write races every such read.
 		err := cmd.Start()
 		if err == nil {
+			if jobErr := containLiveKitProcess(cmd.Process); jobErr != nil {
+				slog.Warn("livekit: companion may outlive this process if it exits without shutting down",
+					"error", jobErr)
+			}
 			p.cmd = cmd
 			p.runDone = make(chan struct{})
 		}
@@ -347,6 +341,23 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath, binPath string) {
 			delay = maxDelay
 		}
 	}
+}
+
+// newLiveKitCmd builds one companion launch for runLoop.
+func newLiveKitCmd(ctx context.Context, cfgPath, binPath string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, binPath, "--config", cfgPath) //nolint:gosec // G204: binary path from trusted server config or verified download
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	// Give LiveKit a short graceful shutdown window, then let os/exec
+	// kill and reap it before Stop allows an updater to start a successor.
+	cmd.Cancel = func() error { return stopLiveKitProcess(cmd.Process) }
+	cmd.WaitDelay = 5 * time.Second
+	// Die with a parent that never ran its teardown (kill -9, OOM,
+	// console close, restart-backstop force-exit) instead of orphaning
+	// with 7880/UDP still bound: Pdeathsig on Linux here, a job object
+	// on Windows via containLiveKitProcess once runLoop has started it.
+	cmd.SysProcAttr = liveKitSysProcAttr()
+	return cmd
 }
 
 // IsRunning returns true if the companion process is currently running.
