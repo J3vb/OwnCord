@@ -157,7 +157,11 @@ async function launchLinux(
     ],
     tmpdir(),
     // FUSE is not assumed on runners; the AppImage runtime extracts instead.
-    { ...process.env, APPIMAGE_EXTRACT_AND_RUN: "1" },
+    // Its extraction directory is named by the file's hash and deleted by the
+    // runtime's parent process when the app exits; killInstalled never matches
+    // that parent (APPIMAGE is set only in its child), so a relaunch of the
+    // same file could lose its files to the old parent's cleanup. Keep them.
+    { ...process.env, APPIMAGE_EXTRACT_AND_RUN: "1", NO_CLEANUP: "1" },
   );
   const base = `http://127.0.0.1:${port}`;
   const call = async (method: string, path: string, body?: unknown) => {
