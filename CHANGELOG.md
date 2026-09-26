@@ -416,8 +416,7 @@ text was moved behind English catalogs ready for translation.
 - Retention can be read, set and cleared per channel, with a server-wide
   default and an effect preview.
 - **Settings are grouped** into General, Access & registration and Security,
-  with a save bar that stays in view while there are unsaved changes; leaving
-  the page no longer loses them.
+  with a save bar that stays in view while there are unsaved changes.
 - The upload limit and voice quality now show the values the server is running
   with from config.yaml, instead of disabled fields that could disagree with it.
 - The backup schedule moved to Backups & restore, beside the backups it makes.

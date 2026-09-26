@@ -86,7 +86,7 @@ function loadAdminPanel(fetchCalls: FetchCall[], respond: Responder): JSDOM {
 }
 
 interface Bridge {
-  state: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  state: any;
   PERM: Record<string, number>;
   navigateTo: (id: string) => void;
   closeModal: () => void;

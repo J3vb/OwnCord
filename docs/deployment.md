@@ -184,7 +184,7 @@ first, and know what a rollback costs before you need one:
 standalone install.
 
 Pulling the image is the **only** upgrade path in Docker: the admin panel's
-in-place "Apply Update & Restart" is refused in container deployments (503
+in-place update is refused in container deployments (503
 `CONTAINER_DEPLOYMENT`), because the running binary is image content — a
 replacement written next to it would die with the container. The shipped
 image sets `OWNCORD_CONTAINER=1` to mark this; operators who bind-mount the

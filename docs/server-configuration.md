@@ -80,9 +80,9 @@ restart the server and read the new token from its start-up output.
 
 ### Backups (`backup`)
 
-| Key          | Type   | Default          | Description                                                                                                                                                                                                                                                         |
-| ------------ | ------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `backup.dir` | string | `"data/backups"` | Directory where database backups are written and pruned. Point it at another disk or an off-host mount so backups don't share a single point of failure with the live database. The admin panel's Backup Schedule and Retention settings operate on this directory. |
+| Key          | Type   | Default          | Description                                                                                                                                                                                                                                                                              |
+| ------------ | ------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backup.dir` | string | `"data/backups"` | Directory where database backups are written and pruned. Point it at another disk or an off-host mount so backups don't share a single point of failure with the live database. The backup schedule and retention on the admin panel's Backups & restore page operate on this directory. |
 
 ### Security (`security`)
 
