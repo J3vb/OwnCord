@@ -223,6 +223,7 @@ func handleDeleteChannel(channels *service.ChannelService, hub HubBroadcaster) h
 const (
 	maxAuditQueryRunes = 100
 	maxAuditActionLen  = 64
+	maxAuditActions    = 200
 )
 
 func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
@@ -251,6 +252,22 @@ func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
 			return
+		}
+		// The first page also names every action in the whole log, so the
+		// panel's action filter is not limited to the rows it has fetched.
+		// A header, because the body is a bare array.
+		if offset == 0 {
+			actions, err := settings.AuditActions(r.Context(), maxAuditActions)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
+				return
+			}
+			names, err := json.Marshal(actions)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
+				return
+			}
+			w.Header().Set("X-Audit-Actions", string(names))
 		}
 		writeJSON(w, http.StatusOK, entries)
 	}

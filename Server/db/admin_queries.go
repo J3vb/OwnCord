@@ -350,6 +350,16 @@ func (d *DB) SearchAuditLog(ctx context.Context, action, query string, limit, of
 	return entries, nil
 }
 
+// ListAuditActions returns up to limit distinct action names in the whole
+// audit log, sorted.
+func (d *DB) ListAuditActions(ctx context.Context, limit int) ([]string, error) {
+	actions, err := d.q.ListAuditActions(ctx, int64(limit))
+	if err != nil {
+		return nil, fmt.Errorf("ListAuditActions: %w", err)
+	}
+	return actions, nil
+}
+
 // nullableToken maps an empty token to NULL, so the partial indexes on the
 // token columns hold only the rows that carry one.
 func nullableToken(token string) *string {

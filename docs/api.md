@@ -3567,7 +3567,11 @@ An over-long or non-UTF-8 `q` or `action` is `400 BAD_REQUEST`.
 
 #### Response 200 OK
 
-Array of:
+On the first page (`offset` 0) the response also carries an
+`X-Audit-Actions` header: a JSON array of the distinct action names in the
+whole log, sorted, at most 200, whatever `q` and `action` are — so the admin
+panel's action filter can offer actions no fetched row contains. The body is
+an array of:
 
 ```json
 {

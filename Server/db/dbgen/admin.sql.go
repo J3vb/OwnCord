@@ -272,6 +272,34 @@ func (q *Queries) ListAllUsers(ctx context.Context, arg ListAllUsersParams) ([]L
 	return items, nil
 }
 
+const listAuditActions = `-- name: ListAuditActions :many
+SELECT DISTINCT action FROM audit_log ORDER BY action LIMIT ?
+`
+
+// Every distinct action in the whole log, for the panel's action filter.
+func (q *Queries) ListAuditActions(ctx context.Context, limit int64) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listAuditActions, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var action string
+		if err := rows.Scan(&action); err != nil {
+			return nil, err
+		}
+		items = append(items, action)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const logAudit = `-- name: LogAudit :exec
 INSERT INTO audit_log (actor_id, action, target_type, target_id, detail)
 VALUES (?, ?, ?, ?, ?)

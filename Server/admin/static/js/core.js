@@ -62,16 +62,17 @@ function handleSessionExpired(){
   showOverlay('loginOverlay');
 }
 
-async function api(method,path,body,headers){
+async function api(method,path,body,headers){return(await apiRes(method,path,body,headers)).data}
+async function apiRes(method,path,body,headers){
   const opts={method,headers:{'Authorization':'Bearer '+state.token,'Content-Type':'application/json',...headers}};
   if(body!==undefined)opts.body=JSON.stringify(body);
   const res=await fetch('/admin/api'+path,opts);
   if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
-  if(res.status===204)return null;
+  if(res.status===204)return{data:null,res};
   const data=await res.json();
   if(!res.ok)throw new Error(data.message||res.statusText);
   if(method==='GET')noteBadgeSource(path,data);
-  return data;
+  return{data,res};
 }
 
 /* ═══ Permissions ═══ */
@@ -103,9 +104,9 @@ function utcDate(s){const v=String(s);return new Date(/[Zz]|[+-]\d\d:?\d\d$/.tes
 /* U9: one local-time formatter for the SQLite naive-UTC strings (audit,
    dashboard activity, pending registrations). The UTC instant stays available
    as a tooltip; the visible text is the viewer's local time, matching the
-   Tokens and Backups tables. opts, when given, are toLocaleString options
+   Tokens and Backups tables. fmt, when given, is an Intl.DateTimeFormat
    (the log viewer asks for the time alone). */
-function fmtLocal(s,opts){if(!s)return'';const d=utcDate(s);if(isNaN(d.getTime()))return esc(String(s));return'<span title="'+esc(d.toISOString())+'">'+esc(d.toLocaleString(undefined,opts))+'</span>'}
+function fmtLocal(s,fmt){if(!s)return'';const d=utcDate(s);if(isNaN(d.getTime()))return esc(String(s));return'<span title="'+esc(d.toISOString())+'">'+esc(fmt?fmt.format(d):d.toLocaleString())+'</span>'}
 function actionBadge(a){if(!a)return'badge-muted';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'badge-red';if(a.includes('create'))return'badge-green';if(a.includes('update'))return'badge-yellow';return'badge-accent'}
 function actionColor(a){if(!a)return'var(--accent)';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'var(--text-danger)';if(a.includes('create'))return'var(--text-positive)';if(a.includes('update'))return'var(--text-warning)';return'var(--accent)'}
 /* Roles are createable now, so the four seeded ids are a fallback, not the set.

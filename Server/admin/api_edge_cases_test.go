@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -359,6 +360,20 @@ func TestAdminAPI_AuditLog_Search(t *testing.T) {
 	t.Run("a blank q does not narrow", func(t *testing.T) {
 		if got := get(t, "limit=500&q=%20%20"); len(got) < 66 {
 			t.Fatalf("q=blank = %d rows, want every row", len(got))
+		}
+	})
+	t.Run("the first page names every action, older ones included", func(t *testing.T) {
+		w := doRequest(t, handler, http.MethodGet, "/audit-log?limit=5&action=role_create", token, nil)
+		var actions []string
+		if err := json.Unmarshal([]byte(w.Header().Get("X-Audit-Actions")), &actions); err != nil {
+			t.Fatalf("X-Audit-Actions = %q: %v", w.Header().Get("X-Audit-Actions"), err)
+		}
+		if !slices.Contains(actions, "channel_delete") || !slices.IsSorted(actions) {
+			t.Fatalf("X-Audit-Actions = %v, want a sorted list naming the oldest row's channel_delete", actions)
+		}
+		w = doRequest(t, handler, http.MethodGet, "/audit-log?limit=5&offset=5", token, nil)
+		if h := w.Header().Get("X-Audit-Actions"); h != "" {
+			t.Fatalf("offset=5 X-Audit-Actions = %q, want none past the first page", h)
 		}
 	})
 	t.Run("limit stays capped at 500", func(t *testing.T) {

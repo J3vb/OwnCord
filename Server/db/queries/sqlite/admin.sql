@@ -58,6 +58,10 @@ WHERE (CAST(sqlc.arg(action) AS TEXT) = '' OR a.action = sqlc.arg(action))
 ORDER BY a.id DESC
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
+-- name: ListAuditActions :many
+-- Every distinct action in the whole log, for the panel's action filter.
+SELECT DISTINCT action FROM audit_log ORDER BY action LIMIT ?;
+
 -- name: GetSetting :one
 SELECT value FROM settings WHERE key = ?;
 

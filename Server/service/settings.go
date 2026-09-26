@@ -316,3 +316,9 @@ func parseSettingsPatchBool(value string) (bool, error) {
 func (s *SettingsService) AuditLog(ctx context.Context, action, query string, limit, offset int) ([]db.AuditEntry, error) {
 	return s.st.SearchAuditLog(ctx, action, query, limit, offset)
 }
+
+// AuditActions returns up to limit distinct action names in the whole audit
+// log, sorted.
+func (s *SettingsService) AuditActions(ctx context.Context, limit int) ([]string, error) {
+	return s.st.ListAuditActions(ctx, limit)
+}

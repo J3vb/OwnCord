@@ -28,6 +28,7 @@ window.__test = {
   myPosition: myPosition,
   renderUsers: renderUsers,
   renderAudit: renderAudit,
+  renderTokens: renderTokens,
   openRoleModal: openRoleModal,
   renderRetention: renderRetention,
   saveChannelRetention: saveChannelRetention,
@@ -65,6 +66,7 @@ interface Bridge {
   myPosition: () => number;
   renderUsers: () => Promise<string>;
   renderAudit: () => Promise<string>;
+  renderTokens: () => Promise<string>;
   openRoleModal: (id: number | null) => void;
   renderRetention: () => Promise<string>;
   saveChannelRetention: (id: number) => Promise<void>;
@@ -81,7 +83,10 @@ interface Bridge {
   actions: Record<string, unknown>;
 }
 
-type Responder = (path: string, method: string) => { status?: number; json?: unknown };
+type Responder = (
+  path: string,
+  method: string,
+) => { status?: number; json?: unknown; headers?: Record<string, string> };
 
 const proposedPreview = {
   token: "signed-preview",
@@ -136,7 +141,7 @@ function loadAdminPanel(calls: FetchCall[], respond: Responder): JSDOM {
         return {
           ok: status >= 200 && status < 300,
           status,
-          headers: new Headers(),
+          headers: new Headers(r.headers),
           json: async () => r.json ?? {},
           text: async () => JSON.stringify(r.json ?? {}),
         } as Response;
@@ -258,6 +263,34 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(utcDate("2026-03-19 08:29:41").getTime()).toBe(Date.UTC(2026, 2, 19, 8, 29, 41));
     expect(utcDate("2026-03-19T08:29:41Z").getTime()).toBe(Date.UTC(2026, 2, 19, 8, 29, 41));
     expect(utcDate("2026-03-19T10:29:41+02:00").getTime()).toBe(Date.UTC(2026, 2, 19, 8, 29, 41));
+  });
+
+  // OC-0331. The API Tokens table renders naive-UTC created_at / last_used
+  // through fmtLocal: local text, the UTC instant in the tooltip.
+  it("renders token timestamps as UTC instants (OC-0331)", async () => {
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p === "/tokens")
+        return {
+          json: [
+            {
+              id: 1,
+              label: "ci",
+              username: "owner",
+              created_at: "2026-09-01 10:00:00",
+              last_used: "2026-09-02 11:30:00",
+            },
+          ],
+        };
+      return { json: {} };
+    };
+    const booted = await boot([], respond);
+    dom = booted.dom;
+    const doc = booted.dom.window.document;
+    doc.getElementById("content")!.innerHTML = await booted.bridge.renderTokens();
+    const cells = doc.querySelectorAll("tbody tr td");
+    expect(cells[2]!.querySelector("span")!.title).toBe("2026-09-01T10:00:00.000Z");
+    expect(cells[3]!.querySelector("span")!.title).toBe("2026-09-02T11:30:00.000Z");
   });
 
   // OC-0364. Nothing clears users.banned when a temporary ban lapses; expiry
@@ -561,9 +594,15 @@ describe("Server/admin/static — panel behaviour", () => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) {
         const q = new URLSearchParams(p.slice("/audit-log?".length));
-        if (q.get("q")) return { json: [row(3, "channel_delete", "removed #needle & co")] };
+        const headers =
+          q.get("offset") === "0"
+            ? { "X-Audit-Actions": '["channel_delete","role_create","setting_change"]' }
+            : undefined;
+        if (q.get("q"))
+          return { json: [row(3, "channel_delete", "removed #needle & co")], headers };
         return {
           json: Array.from({ length: 51 }, (_, i) => row(100 - i, "setting_change", "motd")),
+          headers,
         };
       }
       return { json: {} };
@@ -599,11 +638,13 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(doc.activeElement).toBe(search);
 
     // The action filter is a server parameter too, and restarts at page 1.
+    // Its options are every action the server names, not only fetched ones.
     calls.length = 0;
     const select = doc.querySelector<HTMLSelectElement>("#auditAction")!;
     expect([...select.options].map((o) => o.value)).toEqual([
       "all",
       "channel_delete",
+      "role_create",
       "setting_change",
     ]);
     select.value = "channel_delete";
@@ -612,6 +653,45 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
       "/audit-log?limit=51&offset=0&q=needle%20%26%20co&action=channel_delete",
     );
+  });
+
+  // A failed page turn used to advance state.auditPage while the old rows
+  // stayed on screen, so the next ">" skipped a page.
+  it("keeps the audit pager on the shown page when a page turn fails (AO-7)", async () => {
+    const calls: FetchCall[] = [];
+    let fail = false;
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/audit-log?")) {
+        if (fail) return { status: 500, json: { message: "boom" } };
+        return {
+          json: Array.from({ length: 51 }, (_, i) => ({ id: 100 - i, action: "setting_change" })),
+        };
+      }
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { window } = booted.dom;
+    const doc = window.document;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+    booted.bridge.state.section = "audit";
+    doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
+    const next = () =>
+      doc.querySelector<HTMLButtonElement>('[data-action="turnAuditPage"][data-args="[1]"]')!;
+
+    fail = true;
+    next().click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(booted.bridge.state.auditPage).toBe(1);
+    expect(doc.querySelector(".pagination-info")!.textContent).toContain("Page 1");
+
+    fail = false;
+    calls.length = 0;
+    next().click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toContain("offset=50");
+    expect(booted.bridge.state.auditPage).toBe(2);
   });
 
   // OC-0367. CreateRole refuses an explicitly requested position that is

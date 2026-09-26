@@ -145,25 +145,28 @@ async function renderDashboard(){
    log, not just the fetched page. Typing refetches after a short pause and
    replaces only #auditResults, so the search box keeps its focus and caret;
    auditSeq drops a response a newer request has already superseded. The
-   action options are every action the panel has fetched so far; typing an
-   action name into the search reaches the rest. */
-let auditSeq=0,auditSearchTimer=null;
-const auditActionsSeen=new Set();
+   action options are every action in the whole log, which the first page's
+   X-Audit-Actions header names. */
+let auditSeq=0,auditSearchTimer=null,auditActions=[];
 function auditQuery(){
   const q=state.auditSearch.trim();
   return(q?'&q='+encodeURIComponent(q):'')+(state.auditActionFilter!=='all'?'&action='+encodeURIComponent(state.auditActionFilter):'');
 }
-async function loadAuditPage(){
+/* page is committed to state.auditPage only once its rows arrive, so a failed
+   fetch leaves the pager and the rows on screen in step. */
+async function loadAuditPage(page){
   const seq=++auditSeq;
-  const offset=(state.auditPage-1)*PAGE_SIZE;
+  const offset=(page-1)*PAGE_SIZE;
   // Over-fetched like the Users page, so the ">" button never offers an
   // empty page at an exact multiple of PAGE_SIZE.
-  const entries=await api('GET','/audit-log?limit='+(PAGE_SIZE+1)+'&offset='+offset+auditQuery());
+  const{data:entries,res}=await apiRes('GET','/audit-log?limit='+(PAGE_SIZE+1)+'&offset='+offset+auditQuery());
   if(seq!==auditSeq)return false;
+  const actions=res.headers.get('X-Audit-Actions');
+  if(actions){try{auditActions=JSON.parse(actions)}catch(e){}}
+  state.auditPage=page;
   const hasMore=!!entries&&entries.length>PAGE_SIZE;
   state.auditHasMore=hasMore;
   state.auditCache=(entries||[]).slice(0,PAGE_SIZE);
-  state.auditCache.forEach(e=>{if(e.action)auditActionsSeen.add(e.action)});
   return true;
 }
 
@@ -174,14 +177,14 @@ function auditOptionsHtml(){
   // fire no change event because the element's value already was "all".
   // Keeping the active filter in the set makes the control and the state
   // impossible to diverge.
-  const actionTypes=[...new Set([...auditActionsSeen].concat(state.auditActionFilter!=='all'?[state.auditActionFilter]:[]))].sort();
+  const actionTypes=[...new Set(auditActions.concat(state.auditActionFilter!=='all'?[state.auditActionFilter]:[]))].sort();
   let html='<option value="all" '+(state.auditActionFilter==='all'?'selected':'')+'>All Actions</option>';
   actionTypes.forEach(t=>{html+='<option value="'+esc(t)+'" '+(state.auditActionFilter===t?'selected':'')+'>'+esc(t)+'</option>'});
   return html;
 }
 
 async function renderAudit(){
-  try{await loadAuditPage()}catch(e){return'<div class="page-title">Audit log</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p><button class="btn btn-accent" data-action="renderContent">Retry</button>'}
+  try{await loadAuditPage(state.auditPage)}catch(e){return'<div class="page-title">Audit log</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p><button class="btn btn-accent" data-action="renderContent">Retry</button>'}
 
   let html='<div class="page-title">Audit log</div><div class="page-desc">Every administrative action, newest first. Search and the action filter cover the whole log.</div>';
   html+='<div class="filter-bar audit-filters">';
@@ -218,9 +221,9 @@ function renderAuditRow(e){
 
 /* Refetch the current page for the current search and filter, replacing only
    the results. Focus on a pager button stays on the same button. */
-async function reloadAudit(){
+async function reloadAudit(page){
   let fresh;
-  try{fresh=await loadAuditPage()}catch(e){showToast(e.message,'error');return}
+  try{fresh=await loadAuditPage(page)}catch(e){showToast(e.message,'error');return}
   const box=document.getElementById('auditResults');
   if(!fresh||!box||state.section!=='audit')return;
   const focused=box.contains(document.activeElement)?document.activeElement.getAttribute('data-args'):null;
@@ -249,7 +252,7 @@ function exportAuditCSV(){
 /* ═══ Server Logs ═══ */
 /* Log times are the viewer's local clock to the millisecond; the tooltip
    keeps the UTC instant (fmtLocal). */
-const LOG_TIME={hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:3,hourCycle:'h23'};
+const LOG_TIME=new Intl.DateTimeFormat(undefined,{hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:3,hourCycle:'h23'});
 function pauseLabel(){return state.logPaused?OPS_ICON.play+'Resume':OPS_ICON.pause+'Pause'}
 
 function renderLogs(){
@@ -565,11 +568,11 @@ async function uninstallPlugin(id){
 Object.assign(ACTIONS,{clearLogs,confirmRevokeToken,copyAllLogs,copyAuditLog,copyToken,createToken,
   discardSupportBundle,downloadSupportBundle,exportAuditCSV,installPlugin,openCreateTokenModal,openUninstallPlugin,
   previewSupportBundle,revokeToken,setPluginEnabled,toggleLogAutoScroll,toggleLogLevel,toggleLogPause,uninstallPlugin,
-  turnAuditPage(delta){state.auditPage=Math.max(1,state.auditPage+delta);reloadAudit()},
+  turnAuditPage(delta){reloadAudit(Math.max(1,state.auditPage+delta))},
   setAuditSearch(){
     state.auditSearch=this.value;clearTimeout(auditSearchTimer);
-    auditSearchTimer=setTimeout(()=>{state.auditPage=1;reloadAudit()},300);
+    auditSearchTimer=setTimeout(()=>reloadAudit(1),300);
   },
-  setAuditActionFilter(){clearTimeout(auditSearchTimer);state.auditActionFilter=this.value;state.auditPage=1;reloadAudit()},
+  setAuditActionFilter(){clearTimeout(auditSearchTimer);state.auditActionFilter=this.value;reloadAudit(1)},
   setLogSearch(){state.logSearch=this.value;renderLogLines()},
   pluginFileChosen(){document.getElementById('pluginInstallBtn').disabled=!this.files.length}});
