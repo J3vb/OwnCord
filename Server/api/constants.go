@@ -124,7 +124,8 @@ const (
 	// slow uplink (about 200 s at 1 Mbit/s) is otherwise cut mid-body and a
 	// download truncates with no error. The per-route progress wrappers in
 	// upload_handler.go push the connection deadline out on every chunk, so a
-	// transfer that keeps moving is never cut, while a peer that stalls is.
+	// transfer that keeps moving is not cut before transferMaxLifetime, while
+	// a peer that stalls is.
 	transferProgressTimeout = 30 * time.Second
 
 	// transferMaxLifetime caps a file transfer's total lifetime however

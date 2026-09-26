@@ -47,7 +47,8 @@ and only when it changes something a contributor or fork holder must do
   downloads used to be cut after 30 seconds no matter how steadily they were
   moving, so a 25 MB file on a 1 Mbit/s uplink was lost mid-transfer and a
   download stopped without an error. The server now keeps a transfer alive
-  while it is making progress and only gives up on one that has stalled.
+  while it is making progress and gives up on one that has stalled; any
+  single transfer is still closed after 10 minutes.
 
 ### Voice
 

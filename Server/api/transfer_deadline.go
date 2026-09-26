@@ -18,7 +18,7 @@ import (
 // Rather than relax the global timeouts (which would weaken the slowloris
 // posture for every route), the two transfer routes wrap their reader/writer so
 // every chunk that actually moves pushes the connection deadline forward. A
-// transfer that keeps progressing is never cut; a peer that stops sending or
+// transfer that keeps progressing is not cut before transferMaxLifetime; a peer that stops sending or
 // reading is abandoned after transferProgressTimeout, and no transfer outlives
 // transferMaxLifetime however it progresses. This mirrors the
 // SetWriteDeadline(time.Time{}) override admin/logstream.go already applies to
@@ -58,8 +58,8 @@ func (d *transferDeadline) touch() {
 }
 
 // progressReader re-arms the transfer deadline on every read that returns
-// bytes, so a slow but moving body is never cut by the connection's read
-// deadline. It wraps an io.ReadCloser (http.MaxBytesReader's result) and
+// bytes, so a slow but moving body is not cut by the connection's read
+// deadline before transferMaxLifetime. It wraps an io.ReadCloser (http.MaxBytesReader's result) and
 // preserves Close.
 type progressReader struct {
 	r io.ReadCloser
@@ -77,8 +77,8 @@ func (p progressReader) Read(b []byte) (int, error) {
 func (p progressReader) Close() error { return p.r.Close() }
 
 // progressWriter re-arms the transfer deadline on every write that lands
-// bytes, so a slow but moving download is never cut by the connection's write
-// deadline.
+// bytes, so a slow but moving download is not cut by the connection's write
+// deadline before transferMaxLifetime.
 type progressWriter struct {
 	http.ResponseWriter
 	d *transferDeadline

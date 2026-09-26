@@ -337,7 +337,8 @@ func handleServeFile(uploads *service.UploadService, store FileStore, allowedOri
 		// SRV-05: a download longer than the server's global 30 s WriteTimeout
 		// is truncated with no error (the client sees a short body). Wrap the
 		// writer so every chunk that lands pushes the connection write deadline
-		// out; a stalled peer is abandoned after transferProgressTimeout.
+		// out; a stalled peer is abandoned after transferProgressTimeout, and
+		// any download is closed after transferMaxLifetime.
 		deadlines := newTransferDeadline(w)
 		deadlines.touch()
 		w = progressWriter{ResponseWriter: w, d: deadlines}
