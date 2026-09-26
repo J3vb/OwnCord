@@ -102,8 +102,9 @@ const DEFAULT_MAX_MESSAGE_SIZE = 1_048_576; // 1MB
 const HEARTBEAT_INTERVAL_MS = 30_000;
 // CLI-01: a half-open socket delivers nothing inbound while `transport.send`
 // still resolves against the local buffer, so the state machine would sit on
-// "connected" forever. The server pings about every 25 s (and the Rust proxy
-// closes at 2.5x that); this app-side fallback reconnects when no frame at all
+// "connected" forever. Newer servers send an RFC 6455 control ping about every
+// 25 s, which the Rust proxy consumes (never reaching JS) and closes on at 2.5x
+// that; for every server, this app-side fallback reconnects when no frame at all
 // arrives for 60 s, which is one missed app-level heartbeat window (30 s) plus
 // margin and stays under the "Reconnecting within about 75 s" acceptance.
 const SERVER_SILENCE_RECONNECT_MS = 60_000;
