@@ -694,6 +694,60 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(booted.bridge.state.auditPage).toBe(2);
   });
 
+  // A failed search or filter change used to commit the new query while the
+  // old rows stayed on screen, so the next page turn, Copy page and Export CSV
+  // disagreed with what was shown.
+  it("keeps the audit query on the shown rows when a search or filter change fails (AO-7)", async () => {
+    const calls: FetchCall[] = [];
+    let fail = false;
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/audit-log?")) {
+        if (fail) return { status: 500, json: { message: "boom" } };
+        return {
+          json: Array.from({ length: 51 }, (_, i) => ({ id: 100 - i, action: "setting_change" })),
+          headers: { "X-Audit-Actions": '["channel_delete",7,"setting_change"]' },
+        };
+      }
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { window } = booted.dom;
+    const doc = window.document;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+    booted.bridge.state.section = "audit";
+    doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
+    const select = doc.querySelector<HTMLSelectElement>("#auditAction")!;
+    expect([...select.options].map((o) => o.value)).toEqual([
+      "all",
+      "channel_delete",
+      "setting_change",
+    ]);
+
+    fail = true;
+    const search = doc.querySelector<HTMLInputElement>(".filter-search")!;
+    search.value = "foo";
+    search.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 350));
+    expect(booted.bridge.state.auditSearch).toBe("");
+
+    search.value = "";
+    select.value = "channel_delete";
+    select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(booted.bridge.state.auditActionFilter).toBe("all");
+    expect(doc.querySelector<HTMLSelectElement>("#auditAction")!.value).toBe("all");
+
+    fail = false;
+    calls.length = 0;
+    doc.querySelector<HTMLButtonElement>('[data-action="turnAuditPage"][data-args="[1]"]')!.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=51&offset=50",
+    );
+  });
+
   // OC-0367. CreateRole refuses an explicitly requested position that is
   // taken, and the slot below the actor is the one the previous new role got.
   it("prefills Create Role with the highest free position below the actor (OC-0367)", async () => {
