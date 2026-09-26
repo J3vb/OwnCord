@@ -1,18 +1,42 @@
 /* OwnCord admin panel: Diagnostics, the Dashboard and its attention panel,
    Audit Log, Server Logs, API Tokens and Plugins. */
 
+/* Icons these pages need that the shared set (core.js I) lacks. The log
+   toolbar used Unicode glyphs before, and "⏸" renders as a missing-glyph box
+   in Linux Chromium. */
+const OPS_ICON={
+  pause:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>',
+  play:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg>',
+  copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+};
+
 /* Support bundles remain local until the administrator chooses to share the
    downloaded file. The server freezes the preview; confirmation sends its ID
    and hash, and cannot regenerate different content under an old preview. */
+/* What a bundle carries and what it never does, shown before the operator
+   asks for one. The server's redaction rules are the authority; this is the
+   summary of them. */
+const SUPPORT_INCLUDED=['Versions and selected settings','Database counts','Server health metrics','A recent event timeline'];
+const SUPPORT_EXCLUDED=['Message contents','Credentials and tokens','Addresses','Raw logs'];
 function renderDiagnostics(){
-  let html='<div class="page-title">Diagnostics</div><div class="page-desc">Create a support bundle to investigate server problems.</div>';
-  html+='<div class="section-card"><div class="section-card-body"><p>Includes versions, selected settings, database counts, server health metrics and a recent event timeline. Client media connectivity is not tested. Message contents, credentials, addresses and raw logs are excluded. Nothing is uploaded.</p><button class="btn btn-accent" style="margin-top:16px" data-action="previewSupportBundle" '+(state.supportBusy?'disabled':'')+'>'+(state.supportBusy?'Preparing…':'Create support bundle preview')+'</button></div></div>';
+  const busy=state.supportBusy?' disabled':'';
+  const list=items=>'<ul class="support-list">'+items.map(i=>'<li>'+esc(i)+'</li>').join('')+'</ul>';
+  let html='<div class="page-title">Diagnostics</div><div class="page-desc">Create a support bundle to investigate server problems. Nothing is uploaded: you review the archive, download it and decide who sees it.</div>';
+  html+='<div class="section-card"><div class="section-card-header"><h3>Support bundle</h3></div><div class="section-card-body">'
+    +'<div class="support-scope"><div><h4>Included</h4>'+list(SUPPORT_INCLUDED)+'</div><div><h4>Never included</h4>'+list(SUPPORT_EXCLUDED)+'</div></div>'
+    +'<p class="support-note">Client media connectivity is not tested.</p>'
+    +'<button class="btn btn-accent" data-action="previewSupportBundle"'+busy+'>'+(state.supportBusy?'Preparing…':'Create support bundle preview')+'</button></div></div>';
   const p=state.supportPreview;if(!p)return html;
-  html+='<div class="section-card" id="support-preview"><div class="section-card-header"><h3>Review before download</h3></div><div class="section-card-body"><p>Archive size: <strong>'+p.byte_size+' bytes</strong> ('+fmtBytes(p.byte_size)+'). Preview expires '+esc(utcDate(p.expires_at).toLocaleTimeString())+'.</p><p style="overflow-wrap:anywhere">SHA-256: <code>'+esc(p.sha256)+'</code></p><table class="tbl"><thead><tr><th>Item</th><th>Bytes</th><th>SHA-256</th></tr></thead><tbody>';
-  p.items.forEach(item=>{html+='<tr><td>'+esc(item.name)+'</td><td>'+item.byte_size+'</td><td style="overflow-wrap:anywhere;max-width:280px"><code>'+esc(item.sha256)+'</code></td></tr>'});
-  html+='</tbody></table><h4 style="margin-top:16px">Redaction report</h4>';
-  p.redactions.forEach(rule=>{html+='<p><strong>'+esc(rule.item)+': '+esc(rule.rule)+'</strong><br>'+esc(rule.omitted)+'</p>'});
-  html+='<p>Review the downloaded file before sharing it with someone helping you.</p><button class="btn btn-ghost" data-action="discardSupportBundle" '+(state.supportBusy?'disabled':'')+'>Discard preview</button> <button class="btn btn-accent" id="support-confirm" data-action="downloadSupportBundle" '+(state.supportBusy?'disabled':'')+'>Confirm download</button></div></div>';
+  html+='<div class="section-card" id="support-preview"><div class="section-card-header"><h3>Review before download</h3></div><div class="section-card-body">'
+    +'<dl class="facts"><dt>Archive size</dt><dd><strong>'+p.byte_size+' bytes</strong> ('+fmtBytes(p.byte_size)+')</dd>'
+    +'<dt>SHA-256</dt><dd><code class="hash">'+esc(p.sha256)+'</code></dd>'
+    +'<dt>Preview expires</dt><dd>'+fmtLocal(p.expires_at)+'</dd></dl></div>'
+    +'<div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Item</th><th class="num">Bytes</th><th>SHA-256</th></tr></thead><tbody>';
+  p.items.forEach(item=>{html+='<tr><td><code>'+esc(item.name)+'</code></td><td class="num">'+item.byte_size+'</td><td><code class="hash">'+esc(item.sha256)+'</code></td></tr>'});
+  html+='</tbody></table></div><div class="section-card-body"><h4 class="support-heading">Redaction report</h4><ul class="redaction-list">';
+  p.redactions.forEach(rule=>{html+='<li><div class="redaction-rule"><code>'+esc(rule.item)+'</code><span>'+esc(rule.rule)+'</span></div><p>'+esc(rule.omitted)+'</p></li>'});
+  html+='</ul><p class="support-note">Review the downloaded file before sharing it with someone helping you.</p>'
+    +'<div class="support-actions"><button class="btn btn-ghost" data-action="discardSupportBundle"'+busy+'>Discard preview</button><button class="btn btn-accent" id="support-confirm" data-action="downloadSupportBundle"'+busy+'>Confirm download</button></div></div></div>';
   return html;
 }
 function discardSupportBundle(){state.supportPreview=null;if(state.section==='diagnostics')renderContent()}
@@ -52,14 +76,13 @@ async function downloadSupportBundle(){
    and is never drawn as healthy. */
 const ATTN_STATUS={ok:['badge-green','Healthy'],warning:['badge-yellow','Warning'],critical:['badge-red','Critical'],unknown:['badge-muted','Unknown']};
 function attnBadge(s){const b=ATTN_STATUS[s]||ATTN_STATUS.unknown;return'<span class="badge '+b[0]+'">'+b[1]+'</span>'}
-function attnTime(iso){if(!iso)return'';const d=new Date(iso);return isNaN(d.getTime())?'':d.toLocaleString()}
 function renderAttention(rep){
   const warnings=(rep&&rep.warnings)||[],signals=(rep&&rep.signals)||[];
   const active=warnings.filter(w=>!w.recovered_at);
   let html='<div class="section-card" id="attentionPanel"><div class="section-card-header"><h3>Attention'+(active.length?' ('+active.length+')':'')+'</h3><button class="btn btn-ghost" data-action="renderContent">Refresh</button></div><div class="section-card-body">';
   if(!rep||!rep.evaluated_at)html+='<p class="attn-pending" style="color:var(--text-muted)">The server has not evaluated its health yet.</p>';
   else{
-    html+='<div class="activity-time">Evaluated '+esc(attnTime(rep.evaluated_at))+'</div>';
+    html+='<div class="activity-time">Evaluated '+fmtLocal(rep.evaluated_at)+'</div>';
     if(!active.length)html+='<p class="attn-none" style="margin-top:8px">No active warnings.</p>';
   }
   warnings.forEach(w=>{
@@ -67,8 +90,8 @@ function renderAttention(rep){
     html+='<div class="activity-item attn-warning" data-id="'+esc(w.id)+'"><div>'+(rec?'<span class="badge badge-green">Recovered</span>':attnBadge(w.severity))+'</div><div>'
       +'<div class="activity-text"><strong>'+esc(w.title)+'</strong>'+(w.detail?' — '+esc(w.detail):'')+'</div>'
       +'<div class="activity-text attn-action">'+esc(w.action)+'</div>'
-      +'<div class="activity-time">First seen '+esc(attnTime(w.first_observed))+' · last seen '+esc(attnTime(w.last_observed))
-      +(w.occurrences>1?' · '+w.occurrences+' occurrences':'')+(rec?' · recovered '+esc(attnTime(w.recovered_at)):'')+'</div></div></div>';
+      +'<div class="activity-time">First seen '+fmtLocal(w.first_observed)+' · last seen '+fmtLocal(w.last_observed)
+      +(w.occurrences>1?' · '+w.occurrences+' occurrences':'')+(rec?' · recovered '+fmtLocal(w.recovered_at):'')+'</div></div></div>';
   });
   html+='</div>';
   if(signals.length){
@@ -118,124 +141,146 @@ async function renderDashboard(){
 }
 
 /* ═══ Audit Log ═══ */
-async function renderAudit(){
+/* Search (q) and the action filter run on the server, so they cover the whole
+   log, not just the fetched page. Typing refetches after a short pause and
+   replaces only #auditResults, so the search box keeps its focus and caret;
+   auditSeq drops a response a newer request has already superseded. The
+   action options are every action the panel has fetched so far; typing an
+   action name into the search reaches the rest. */
+let auditSeq=0,auditSearchTimer=null;
+const auditActionsSeen=new Set();
+function auditQuery(){
+  const q=state.auditSearch.trim();
+  return(q?'&q='+encodeURIComponent(q):'')+(state.auditActionFilter!=='all'?'&action='+encodeURIComponent(state.auditActionFilter):'');
+}
+async function loadAuditPage(){
+  const seq=++auditSeq;
   const offset=(state.auditPage-1)*PAGE_SIZE;
   // Over-fetched like the Users page, so the ">" button never offers an
-  // empty page at an exact multiple of PAGE_SIZE. The cache keeps the sliced
-  // page so the "N entries on this page" label stays accurate.
-  let entries;
-  try{entries=await api('GET','/audit-log?limit='+(PAGE_SIZE+1)+'&offset='+offset)}catch(e){return'<div class="page-title">Audit Log</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
+  // empty page at an exact multiple of PAGE_SIZE.
+  const entries=await api('GET','/audit-log?limit='+(PAGE_SIZE+1)+'&offset='+offset+auditQuery());
+  if(seq!==auditSeq)return false;
   const hasMore=!!entries&&entries.length>PAGE_SIZE;
+  state.auditHasMore=hasMore;
   state.auditCache=(entries||[]).slice(0,PAGE_SIZE);
+  state.auditCache.forEach(e=>{if(e.action)auditActionsSeen.add(e.action)});
+  return true;
+}
 
-  // Collect unique action types for the filter dropdown.
-  // The options come from the fetched page but the filter is global, so a
-  // filtered action that does not occur on this page would leave no option
-  // `selected`: the control would read "All Actions" with the filter still
-  // applied, and picking "All Actions" would fire no change event because the
-  // element's value already was "all". Keeping the active filter in the set
-  // makes the control and the state impossible to diverge.
-  const actionTypes=[...new Set(state.auditCache.map(e=>e.action).filter(Boolean).concat(state.auditActionFilter!=='all'?[state.auditActionFilter]:[]))].sort();
-
-  // Client-side filter on fetched page.
-  const filtered=auditFiltered();
-
-  let html='<div class="page-title">Audit Log</div><div class="page-desc">Action history — '+state.auditCache.length+' entries on this page</div>';
-
-  // Filter bar
-  html+='<div class="filter-bar">';
-  html+='<input class="filter-search" aria-label="Search audit log" placeholder="Search audit log..." value="'+esc(state.auditSearch)+'" data-input-action="setAuditSearch">';
-  html+='<select class="filter-select" aria-label="Filter by action" data-change-action="setAuditActionFilter">';
-  html+='<option value="all" '+(state.auditActionFilter==='all'?'selected':'')+'>All Actions</option>';
+function auditOptionsHtml(){
+  // The filter is global, so a filtered action that the fetched rows do not
+  // contain would leave no option `selected`: the control would read "All
+  // Actions" with the filter still applied, and picking "All Actions" would
+  // fire no change event because the element's value already was "all".
+  // Keeping the active filter in the set makes the control and the state
+  // impossible to diverge.
+  const actionTypes=[...new Set([...auditActionsSeen].concat(state.auditActionFilter!=='all'?[state.auditActionFilter]:[]))].sort();
+  let html='<option value="all" '+(state.auditActionFilter==='all'?'selected':'')+'>All Actions</option>';
   actionTypes.forEach(t=>{html+='<option value="'+esc(t)+'" '+(state.auditActionFilter===t?'selected':'')+'>'+esc(t)+'</option>'});
-  html+='</select>';
-  html+='<button class="btn btn-ghost" data-action="copyAuditLog" title="Copy filtered entries">Copy All</button>';
-  html+='<button class="btn btn-ghost" data-action="exportAuditCSV" title="Export as CSV">Export CSV</button>';
-  html+='</div>';
-
-  // Table
-  html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead><tbody id="auditTbody">';
-  if(!filtered.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">No matching entries</td></tr>';
-  else filtered.forEach(e=>{html+=renderAuditRow(e)});
-  html+='</tbody></table></div></div>';
-
-  // Pagination
-  html+='<div class="pagination"><div class="pagination-info">Page '+state.auditPage+(state.auditSearch||state.auditActionFilter!=='all'?' ('+filtered.length+' of '+state.auditCache.length+' shown)':'')+'</div><div class="pagination-btns">';
-  html+='<button class="page-btn" '+(state.auditPage<=1?'disabled':'')+' data-action="turnAuditPage" data-args="[-1]">&lt;</button>';
-  html+='<button class="page-btn active">'+state.auditPage+'</button>';
-  html+='<button class="page-btn" '+(hasMore?'':'disabled')+' data-action="turnAuditPage" data-args="[1]">&gt;</button>';
-  html+='</div></div>';
   return html;
 }
 
-// Audit-filter predicate: action dropdown plus the free-text search, applied to
-// the fetched page. Shared by renderAudit, refilterAudit, copyAuditLog and
-// exportAuditCSV so the four stay in step.
-function auditFiltered(){
-  return state.auditCache.filter(e=>{
-    if(state.auditActionFilter!=='all'&&e.action!==state.auditActionFilter)return false;
-    if(state.auditSearch){const s=state.auditSearch.toLowerCase();
-      if(!(e.actor_name||String(e.actor_id)||'').toLowerCase().includes(s)&&!(e.action||'').toLowerCase().includes(s)&&!(e.target_type||'').toLowerCase().includes(s)&&!(e.detail||'').toLowerCase().includes(s))return false}
-    return true;
-  });
+async function renderAudit(){
+  try{await loadAuditPage()}catch(e){return'<div class="page-title">Audit log</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p><button class="btn btn-accent" data-action="renderContent">Retry</button>'}
+
+  let html='<div class="page-title">Audit log</div><div class="page-desc">Every administrative action, newest first. Search and the action filter cover the whole log.</div>';
+  html+='<div class="filter-bar audit-filters">';
+  html+='<input type="search" class="filter-search" aria-label="Search audit log" placeholder="Search actor, action, target or detail…" maxlength="100" value="'+esc(state.auditSearch)+'" data-input-action="setAuditSearch">';
+  html+='<select class="filter-select" id="auditAction" aria-label="Filter by action" data-change-action="setAuditActionFilter">'+auditOptionsHtml()+'</select>';
+  html+='<button class="btn btn-ghost" data-action="copyAuditLog" title="Copy the entries on this page">'+OPS_ICON.copy+'Copy page</button>';
+  html+='<button class="btn btn-ghost" data-action="exportAuditCSV" title="Export the entries on this page as CSV">'+I.download+'Export CSV</button>';
+  html+='</div>';
+  return html+'<div id="auditResults">'+auditResultsHtml()+'</div>';
+}
+
+function auditResultsHtml(){
+  const rows=state.auditCache,filtered=!!(state.auditSearch.trim()||state.auditActionFilter!=='all');
+  let html='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl audit-tbl"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead><tbody id="auditTbody">';
+  if(!rows.length)html+='<tr><td colspan="5" class="tbl-empty">'+(filtered?'No entries match this search':'No audit entries yet')+'</td></tr>';
+  else rows.forEach(e=>{html+=renderAuditRow(e)});
+  html+='</tbody></table></div></div>';
+  // The count is a status message, so a screen reader hears how many entries
+  // a search found without leaving the search box.
+  html+='<div class="pagination"><div class="pagination-info" role="status">Page '+state.auditPage+' · '+rows.length+(filtered?' matching':'')+' entr'+(rows.length===1?'y':'ies')+'</div><div class="pagination-btns">';
+  html+='<button class="page-btn" aria-label="Previous page" '+(state.auditPage<=1?'disabled':'')+' data-action="turnAuditPage" data-args="[-1]">&lt;</button>';
+  html+='<span class="page-btn active" aria-current="page">'+state.auditPage+'</span>';
+  html+='<button class="page-btn" aria-label="Next page" '+(state.auditHasMore?'':'disabled')+' data-action="turnAuditPage" data-args="[1]">&gt;</button>';
+  return html+'</div></div>';
 }
 
 function renderAuditRow(e){
-  return'<tr><td style="font-size:12px;color:var(--text-muted);white-space:nowrap">'+fmtLocal(e.created_at)+'</td>'
+  return'<tr><td class="audit-time">'+fmtLocal(e.created_at)+'</td>'
     +'<td><strong>'+esc(e.actor_name||e.actor_id)+'</strong></td>'
     +'<td><span class="badge '+actionBadge(e.action)+'">'+esc(e.action)+'</span></td>'
-    +'<td>'+esc(e.target_type)+(e.target_id?' #'+e.target_id:'')+'</td>'
-    +'<td style="font-size:12px;color:var(--text-muted)">'+esc(e.detail)+'</td></tr>';
+    +'<td class="audit-target">'+esc(e.target_type)+(e.target_id?' #'+e.target_id:'')+'</td>'
+    +'<td class="audit-detail">'+esc(e.detail)+'</td></tr>';
 }
 
-function refilterAudit(){
-  const tbody=document.getElementById('auditTbody');if(!tbody)return;
-  const filtered=auditFiltered();
-  if(!filtered.length)tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">No matching entries</td></tr>';
-  else tbody.innerHTML=filtered.map(renderAuditRow).join('');
+/* Refetch the current page for the current search and filter, replacing only
+   the results. Focus on a pager button stays on the same button. */
+async function reloadAudit(){
+  let fresh;
+  try{fresh=await loadAuditPage()}catch(e){showToast(e.message,'error');return}
+  const box=document.getElementById('auditResults');
+  if(!fresh||!box||state.section!=='audit')return;
+  const focused=box.contains(document.activeElement)?document.activeElement.getAttribute('data-args'):null;
+  box.innerHTML=auditResultsHtml();
+  const select=document.getElementById('auditAction');if(select)select.innerHTML=auditOptionsHtml();
+  if(focused===null)return;
+  const again=box.querySelector('button.page-btn[data-args="'+focused+'"]:not([disabled])');
+  (again||box.querySelector('button.page-btn:not([disabled])')||document.querySelector('.filter-search')).focus();
 }
 
 function copyAuditLog(){
-  const filtered=auditFiltered();
-  const lines=filtered.map(e=>(e.created_at||'')+'\t'+(e.actor_name||e.actor_id)+'\t'+(e.action||'')+'\t'+(e.target_type||'')+(e.target_id?' #'+e.target_id:'')+'\t'+(e.detail||''));
+  const lines=state.auditCache.map(e=>(e.created_at||'')+'\t'+(e.actor_name||e.actor_id)+'\t'+(e.action||'')+'\t'+(e.target_type||'')+(e.target_id?' #'+e.target_id:'')+'\t'+(e.detail||''));
   navigator.clipboard.writeText(lines.join('\n')).then(()=>showToast('Copied '+lines.length+' entries','info')).catch(()=>showToast('Copy failed','error'));
 }
 
 function exportAuditCSV(){
-  const filtered=auditFiltered();
+  const rows=state.auditCache;
   const csvQ=v=>'"'+String(v||'').replace(/"/g,'""')+'"';
   let csv='Time,Actor,Action,Target,Detail\n';
-  filtered.forEach(e=>{csv+=csvQ(e.created_at)+','+csvQ(e.actor_name||e.actor_id)+','+csvQ(e.action)+','+csvQ((e.target_type||'')+(e.target_id?' #'+e.target_id:''))+','+csvQ(e.detail)+'\n'});
+  rows.forEach(e=>{csv+=csvQ(e.created_at)+','+csvQ(e.actor_name||e.actor_id)+','+csvQ(e.action)+','+csvQ((e.target_type||'')+(e.target_id?' #'+e.target_id:''))+','+csvQ(e.detail)+'\n'});
   const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download='audit_log_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
-  URL.revokeObjectURL(url);showToast('Exported '+filtered.length+' entries','info');
+  URL.revokeObjectURL(url);showToast('Exported '+rows.length+' entries','info');
 }
 
 /* ═══ Server Logs ═══ */
+/* Log times are the viewer's local clock to the millisecond; the tooltip
+   keeps the UTC instant (fmtLocal). */
+const LOG_TIME={hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:3,hourCycle:'h23'};
+function pauseLabel(){return state.logPaused?OPS_ICON.play+'Resume':OPS_ICON.pause+'Pause'}
+
 function renderLogs(){
-  const lvlBtn=(l)=>{const on=state.logLevels[l];return'<button class="level-toggle '+(on?'active-'+l.toLowerCase():'')+'" data-action="toggleLogLevel" data-args="'+actArgs(l)+'">'+l+'</button>'};
-  let html='<div class="page-title">Server Logs</div><div class="page-desc">Real-time structured log stream</div>';
+  /* Each level chip is a toggle button: aria-pressed carries its state, and
+     the filled or hollow dot shows it without relying on colour. */
+  const lvlBtn=(l)=>'<button class="level-toggle lvl-'+l.toLowerCase()+'" aria-pressed="'+!!state.logLevels[l]+'" data-level="'+l+'" data-action="toggleLogLevel" data-args="'+actArgs(l)+'">'+l+'</button>';
+  let html='<div class="page-title">Server logs</div><div class="page-desc">Real-time structured log stream</div>';
   html+='<div class="log-toolbar">';
-  html+=lvlBtn('DEBUG')+lvlBtn('INFO')+lvlBtn('WARN')+lvlBtn('ERROR');
-  html+='<input class="filter-search" aria-label="Filter logs" placeholder="Filter logs..." style="flex:1;min-width:150px" value="'+esc(state.logSearch)+'" data-input-action="setLogSearch">';
-  html+='<button class="btn btn-ghost" data-action="toggleLogAutoScroll" id="autoScrollBtn" title="Auto-scroll">'+(state.logAutoScroll?'⬇ Auto':'⏸ Manual')+'</button>';
-  html+='<button class="btn btn-ghost" data-action="toggleLogPause" id="pauseBtn">'+(state.logPaused?'▶ Resume':'⏸ Pause')+'</button>';
-  html+='<button class="btn btn-ghost" data-action="copyAllLogs" title="Copy visible logs">Copy All</button>';
-  html+='<button class="btn btn-ghost" data-action="clearLogs" title="Clear log view">Clear</button>';
-  html+='</div>';
-  html+='<div class="log-output" id="logOutput"></div>';
-  html+='<div class="log-status"><span class="'+(state.logPaused?'dot-off':'dot-live')+'" id="logDot"></span><span id="logStatusText">'+(state.logPaused?'Paused':'Connecting...')+'</span><span style="margin-left:auto" id="logCount">'+state.logEntries.length+' entries</span></div>';
+  html+='<div class="level-group" role="group" aria-label="Show levels">'+lvlBtn('DEBUG')+lvlBtn('INFO')+lvlBtn('WARN')+lvlBtn('ERROR')+'</div>';
+  html+='<input type="search" class="filter-search log-filter" aria-label="Filter logs" placeholder="Filter logs…" value="'+esc(state.logSearch)+'" data-input-action="setLogSearch">';
+  html+='<div class="log-actions">';
+  html+='<button class="btn btn-ghost" data-action="toggleLogAutoScroll" id="autoScrollBtn" aria-pressed="'+state.logAutoScroll+'" title="Keep the newest line in view">'+I.arrowDown+'Auto-scroll</button>';
+  html+='<button class="btn btn-ghost" data-action="toggleLogPause" id="pauseBtn">'+pauseLabel()+'</button>';
+  html+='<button class="btn btn-ghost" data-action="copyAllLogs" title="Copy the lines the filters show">'+OPS_ICON.copy+'Copy</button>';
+  html+='<button class="btn btn-ghost" data-action="clearLogs" title="Clear the lines on screen">'+I.trash+'Clear</button>';
+  html+='</div></div>';
+  // A focusable region, so the log scrolls from the keyboard. Not role=log:
+  // that is a live region, and a streaming log would talk over everything.
+  html+='<div class="log-output" id="logOutput" role="region" aria-label="Log lines" tabindex="0"></div>';
+  html+='<div class="log-status"><span class="'+(state.logPaused?'dot-off':'dot-live')+'" id="logDot"></span><span id="logStatusText" role="status">'+(state.logPaused?'Paused':'Connecting...')+'</span><span style="margin-left:auto" id="logCount">'+state.logEntries.length+' entries</span></div>';
   setTimeout(()=>{renderLogLines();if(!state.logPaused)connectLogStream()},0);
   return html;
 }
 
-function toggleLogLevel(l){state.logLevels[l]=!state.logLevels[l];const btns=document.querySelectorAll('.level-toggle');btns.forEach(b=>{if(b.textContent===l){b.className='level-toggle '+(state.logLevels[l]?'active-'+l.toLowerCase():'')}});renderLogLines()}
+function toggleLogLevel(l){state.logLevels[l]=!state.logLevels[l];document.querySelectorAll('.level-toggle[data-level="'+l+'"]').forEach(b=>b.setAttribute('aria-pressed',String(state.logLevels[l])));renderLogLines()}
 
-function toggleLogAutoScroll(){state.logAutoScroll=!state.logAutoScroll;const btn=document.getElementById('autoScrollBtn');if(btn)btn.textContent=state.logAutoScroll?'⬇ Auto':'⏸ Manual'}
+function toggleLogAutoScroll(){state.logAutoScroll=!state.logAutoScroll;const btn=document.getElementById('autoScrollBtn');if(btn)btn.setAttribute('aria-pressed',String(state.logAutoScroll))}
 
 function toggleLogPause(){
   state.logPaused=!state.logPaused;
-  const btn=document.getElementById('pauseBtn');if(btn)btn.textContent=state.logPaused?'▶ Resume':'⏸ Pause';
+  const btn=document.getElementById('pauseBtn');if(btn)btn.innerHTML=pauseLabel();
   const dot=document.getElementById('logDot');if(dot)dot.className=state.logPaused?'dot-off':'dot-live';
   const txt=document.getElementById('logStatusText');
   if(state.logPaused){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}if(txt)txt.textContent='Paused'}
@@ -299,8 +344,7 @@ function appendLogLine(entry){
   const out=document.getElementById('logOutput');if(!out)return;
   const div=document.createElement('div');
   div.className='log-line l-'+entry.level.toLowerCase();
-  const ts=entry.ts?entry.ts.substring(11,23):'';
-  div.innerHTML='<span class="log-ts">'+esc(ts)+'</span><span class="log-lvl">'+esc(entry.level)+'</span><span class="log-src">['+esc(entry.source||'server')+']</span>'+esc(entry.msg)+(entry.attrs&&entry.attrs!=='{}'?' <span style="color:var(--text-muted)">'+esc(entry.attrs)+'</span>':'');
+  div.innerHTML='<span class="log-ts">'+fmtLocal(entry.ts,LOG_TIME)+'</span><span class="log-lvl">'+esc(entry.level)+'</span><span class="log-src">['+esc(entry.source||'server')+']</span>'+esc(entry.msg)+(entry.attrs&&entry.attrs!=='{}'?' <span style="color:var(--text-muted)">'+esc(entry.attrs)+'</span>':'');
   out.appendChild(div);
   // Trim DOM to max lines
   while(out.children.length>state.logMaxLines)out.removeChild(out.firstChild);
@@ -337,9 +381,9 @@ async function renderTokens(){
   else tokens.forEach(t=>{
     const revoked=!!t.revoked_at;
     html+='<tr><td>'+esc(t.label||'—')+'</td><td>'+esc(t.username)+'</td>';
-    html+='<td>'+(t.created_at?utcDate(t.created_at).toLocaleString():'')+'</td>';
-    html+='<td>'+(t.last_used?utcDate(t.last_used).toLocaleString():'<span style="color:var(--text-muted)">never</span>')+'</td>';
-    html+='<td>'+(t.expires_at?utcDate(t.expires_at).toLocaleString():'<span style="color:var(--text-muted)">never</span>')+'</td>';
+    html+='<td>'+fmtLocal(t.created_at)+'</td>';
+    html+='<td>'+(t.last_used?fmtLocal(t.last_used):'<span style="color:var(--text-muted)">never</span>')+'</td>';
+    html+='<td>'+(t.expires_at?fmtLocal(t.expires_at):'<span style="color:var(--text-muted)">never</span>')+'</td>';
     html+='<td>'+tokenStatus(t)+'</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end">'+(revoked?'':'<button class="act-btn danger" title="Revoke" aria-label="Revoke" data-action="confirmRevokeToken" data-args="'+actArgs(t.id,t.label)+'">'+I.trash+'</button>')+'</div></td></tr>';
   });
@@ -370,8 +414,7 @@ async function createToken(){
 function showTokenOnceModal(d){
   openModal('<div class="modal-header"><h3>Token Created</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModalAndRefresh">&times;</button></div>'+
     '<div class="modal-body"><p style="color:var(--text-muted)">Store this token now — it is shown only once and cannot be recovered. Bound to <strong style="color:var(--text-normal)">'+esc(d.user)+'</strong>.</p>'+
-    '<div style="display:flex;gap:8px;margin-top:12px"><code style="flex:1;font-family:var(--font-mono);font-size:12px;background:var(--bg-active);padding:10px;border-radius:var(--radius-sm);word-break:break-all">'+esc(d.token)+'</code>'+
-    '<button class="btn btn-ghost" data-action="copyToken" data-args="'+actArgs(d.token)+'">Copy</button></div></div>'+
+    '<div class="code-copy"><code>'+esc(d.token)+'</code><button class="btn btn-ghost" data-action="copyToken" data-args="'+actArgs(d.token)+'">Copy</button></div></div>'+
     '<div class="modal-footer"><button class="btn btn-accent" data-action="closeModalAndRefresh">Done</button></div>');
 }
 function copyToken(t){navigator.clipboard.writeText(t).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed — select the token and copy it manually','error'))}
@@ -454,7 +497,7 @@ async function renderPlugins(){
     html+='<tr><td><div><strong>'+esc(name)+'</strong>'+(summary?'<div style="font-size:12px;color:var(--text-muted);margin-top:2px">'+esc(summary)+'</div>':'')+'</div></td>';
     html+='<td style="font-family:var(--font-mono);font-size:12px">'+esc(version||'—')+'</td>';
     html+='<td>'+(enabled?'<span class="badge badge-green">Enabled</span>':'<span class="badge badge-muted">Disabled</span>')+'</td>';
-    html+='<td style="font-size:12px;color:var(--text-muted)">'+(installed?new Date(installed).toLocaleString():'')+'</td>';
+    html+='<td style="font-size:12px;color:var(--text-muted)">'+fmtLocal(installed)+'</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end">';
     if(disabled){
       html+='<span style="font-size:12px;color:var(--text-muted)">runtime off</span>';
@@ -522,8 +565,11 @@ async function uninstallPlugin(id){
 Object.assign(ACTIONS,{clearLogs,confirmRevokeToken,copyAllLogs,copyAuditLog,copyToken,createToken,
   discardSupportBundle,downloadSupportBundle,exportAuditCSV,installPlugin,openCreateTokenModal,openUninstallPlugin,
   previewSupportBundle,revokeToken,setPluginEnabled,toggleLogAutoScroll,toggleLogLevel,toggleLogPause,uninstallPlugin,
-  turnAuditPage(delta){state.auditPage+=delta;renderContent()},
-  setAuditSearch(){state.auditSearch=this.value;refilterAudit()},
-  setAuditActionFilter(){state.auditActionFilter=this.value;refilterAudit()},
+  turnAuditPage(delta){state.auditPage=Math.max(1,state.auditPage+delta);reloadAudit()},
+  setAuditSearch(){
+    state.auditSearch=this.value;clearTimeout(auditSearchTimer);
+    auditSearchTimer=setTimeout(()=>{state.auditPage=1;reloadAudit()},300);
+  },
+  setAuditActionFilter(){clearTimeout(auditSearchTimer);state.auditActionFilter=this.value;state.auditPage=1;reloadAudit()},
   setLogSearch(){state.logSearch=this.value;renderLogLines()},
   pluginFileChosen(){document.getElementById('pluginInstallBtn').disabled=!this.files.length}});

@@ -311,7 +311,8 @@ func parseSettingsPatchBool(value string) (bool, error) {
 }
 
 // AuditLog returns a page of the audit trail — the settings/audit family
-// owns the read the admin panel's log view uses.
-func (s *SettingsService) AuditLog(ctx context.Context, limit, offset int) ([]db.AuditEntry, error) {
-	return s.st.GetAuditLog(ctx, limit, offset)
+// owns the read the admin panel's log view uses. action and query narrow it
+// as db.SearchAuditLog describes; empty strings return every row.
+func (s *SettingsService) AuditLog(ctx context.Context, action, query string, limit, offset int) ([]db.AuditEntry, error) {
+	return s.st.SearchAuditLog(ctx, action, query, limit, offset)
 }

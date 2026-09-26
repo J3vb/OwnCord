@@ -441,7 +441,7 @@ type Store interface {
 	BanUser(ctx context.Context, id int64, reason string, expires *time.Time) error
 	UnbanUser(ctx context.Context, id int64) error
 	LogAudit(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail string) error
-	GetAuditLog(ctx context.Context, limit, offset int) ([]db.AuditEntry, error)
+	SearchAuditLog(ctx context.Context, action, query string, limit, offset int) ([]db.AuditEntry, error)
 	AdminCreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error)
 	AdminUpdateChannel(ctx context.Context, id int64, u db.ChannelUpdate) error
 	AdminDeleteChannel(ctx context.Context, id int64) error

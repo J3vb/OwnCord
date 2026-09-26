@@ -2,8 +2,11 @@ package admin
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -214,6 +217,14 @@ func handleDeleteChannel(channels *service.ChannelService, hub HubBroadcaster) h
 	}
 }
 
+// Longest audit search text and action filter the log view accepts. Real
+// action names are short snake_case identifiers; the search is a phrase an
+// operator types.
+const (
+	maxAuditQueryRunes = 100
+	maxAuditActionLen  = 64
+)
+
 func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if settings == nil {
@@ -222,8 +233,21 @@ func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 		}
 		limit := queryInt(r, "limit", 50, 1, 500)
 		offset := queryInt(r, "offset", 0, 0, math.MaxInt32)
+		// q searches the whole log (actor, action, target type, detail) and
+		// action narrows it to one action, so the panel's search is not
+		// limited to the page it happened to fetch.
+		query := strings.TrimSpace(r.URL.Query().Get("q"))
+		action := r.URL.Query().Get("action")
+		if !utf8.ValidString(query) || utf8.RuneCountInString(query) > maxAuditQueryRunes {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("q must be valid text of at most %d characters", maxAuditQueryRunes))
+			return
+		}
+		if !utf8.ValidString(action) || len(action) > maxAuditActionLen {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("action must be valid text of at most %d bytes", maxAuditActionLen))
+			return
+		}
 
-		entries, err := settings.AuditLog(r.Context(), limit, offset)
+		entries, err := settings.AuditLog(r.Context(), action, query, limit, offset)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
 			return

@@ -391,6 +391,13 @@ text was moved behind English catalogs ready for translation.
   tables scroll instead of being cut off.
 - Audit log, dashboard activity and pending registration times now show in
   your local time; hover one to see the exact UTC time.
+- **Audit log search now covers the whole log**, not just the 50 entries on
+  screen; the action filter does too. Server log lines, the Dashboard's
+  Attention times, API tokens, plugins and support-bundle expiry also show
+  local time with the UTC time on hover.
+- The Server logs toolbar shows real icons instead of symbols that some
+  systems drew as empty boxes, and its level buttons say whether they are on.
+  The Diagnostics redaction report is laid out as a readable list.
 - The admin panel's security policy now refuses any script that is not one of
   the panel's own files, so injected markup can no longer run code. The panel
   looks and works exactly as before.

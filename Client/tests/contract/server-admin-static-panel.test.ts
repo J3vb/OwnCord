@@ -541,6 +541,79 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toContain("limit=51");
   });
 
+  // AO-7. Search and the action filter used to run over the fetched page of
+  // 50 only, so an older match was unreachable. They are now GET /audit-log
+  // q and action parameters, and a keystroke refetches without re-rendering
+  // the search box out from under the operator.
+  it("searches the audit log on the server and keeps the search box focused (AO-7)", async () => {
+    const calls: FetchCall[] = [];
+    const row = (id: number, action: string, detail: string) => ({
+      id,
+      action,
+      actor_id: 1,
+      actor_name: "owner",
+      target_type: "channel",
+      target_id: id,
+      detail,
+      created_at: "2026-09-01 10:00:00",
+    });
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/audit-log?")) {
+        const q = new URLSearchParams(p.slice("/audit-log?".length));
+        if (q.get("q")) return { json: [row(3, "channel_delete", "removed #needle & co")] };
+        return {
+          json: Array.from({ length: 51 }, (_, i) => row(100 - i, "setting_change", "motd")),
+        };
+      }
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { window } = booted.dom;
+    const doc = window.document;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+    booted.bridge.state.section = "audit";
+    booted.bridge.state.auditPage = 2;
+    doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
+    expect(doc.querySelectorAll("#auditTbody tr")).toHaveLength(50);
+
+    const search = doc.querySelector<HTMLInputElement>(".filter-search")!;
+    expect(search.maxLength).toBe(100);
+    search.focus();
+    calls.length = 0;
+    search.value = "needle & co";
+    search.dispatchEvent(new window.Event("input", { bubbles: true }));
+    // Debounced: nothing is fetched on the keystroke itself.
+    expect(calls.some((c) => c.path.startsWith("/audit-log?"))).toBe(false);
+    await new Promise((resolve) => window.setTimeout(resolve, 350));
+
+    const fetched = calls.find((c) => c.path.startsWith("/audit-log?"))?.path;
+    expect(fetched).toBe("/audit-log?limit=51&offset=0&q=needle%20%26%20co");
+    const rows = doc.querySelectorAll("#auditTbody tr");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain("removed #needle & co");
+    expect(doc.querySelector(".pagination-info")!.textContent).toBe("Page 1 · 1 matching entry");
+    expect(doc.querySelector('.pagination-info[role="status"]')).not.toBeNull();
+    // The results were replaced, not the page: the box still has focus.
+    expect(doc.activeElement).toBe(search);
+
+    // The action filter is a server parameter too, and restarts at page 1.
+    calls.length = 0;
+    const select = doc.querySelector<HTMLSelectElement>("#auditAction")!;
+    expect([...select.options].map((o) => o.value)).toEqual([
+      "all",
+      "channel_delete",
+      "setting_change",
+    ]);
+    select.value = "channel_delete";
+    select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=51&offset=0&q=needle%20%26%20co&action=channel_delete",
+    );
+  });
+
   // OC-0367. CreateRole refuses an explicitly requested position that is
   // taken, and the slot below the actor is the one the previous new role got.
   it("prefills Create Role with the highest free position below the actor (OC-0367)", async () => {

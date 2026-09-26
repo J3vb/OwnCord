@@ -84,13 +84,21 @@ SELECT a.id, a.actor_id, COALESCE(u.username, '') AS actor_name, a.action,
        COALESCE(a.actor_token, '') AS actor_token, a.created_at
 FROM audit_log a
 LEFT JOIN users u ON u.id = a.actor_id
+WHERE (CAST(?1 AS TEXT) = '' OR a.action = ?1)
+  AND (CAST(?2 AS TEXT) = ''
+       OR instr(lower(COALESCE(u.username, '')), lower(?2)) > 0
+       OR instr(lower(a.action), lower(?2)) > 0
+       OR instr(lower(a.target_type), lower(?2)) > 0
+       OR instr(lower(a.detail), lower(?2)) > 0)
 ORDER BY a.id DESC
-LIMIT ? OFFSET ?
+LIMIT ?4 OFFSET ?3
 `
 
 type GetAuditLogParams struct {
-	Limit  int64 `json:"limit"`
-	Offset int64 `json:"offset"`
+	Action    string `json:"action"`
+	Query     string `json:"query"`
+	RowOffset int64  `json:"rowOffset"`
+	RowLimit  int64  `json:"rowLimit"`
 }
 
 type GetAuditLogRow struct {
@@ -106,8 +114,17 @@ type GetAuditLogRow struct {
 	CreatedAt    string `json:"createdAt"`
 }
 
+// An empty action or query matches every row. action is an exact match;
+// query is a case-insensitive (ASCII) substring of the actor name, action,
+// target type or detail. instr, not LIKE, so the caller's text carries no
+// wildcards to escape.
 func (q *Queries) GetAuditLog(ctx context.Context, arg GetAuditLogParams) ([]GetAuditLogRow, error) {
-	rows, err := q.db.QueryContext(ctx, getAuditLog, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, getAuditLog,
+		arg.Action,
+		arg.Query,
+		arg.RowOffset,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

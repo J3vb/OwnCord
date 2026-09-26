@@ -103,8 +103,9 @@ function utcDate(s){const v=String(s);return new Date(/[Zz]|[+-]\d\d:?\d\d$/.tes
 /* U9: one local-time formatter for the SQLite naive-UTC strings (audit,
    dashboard activity, pending registrations). The UTC instant stays available
    as a tooltip; the visible text is the viewer's local time, matching the
-   Tokens and Backups tables. */
-function fmtLocal(s){if(!s)return'';const d=utcDate(s);if(isNaN(d.getTime()))return esc(String(s));return'<span title="'+esc(d.toISOString())+'">'+esc(d.toLocaleString())+'</span>'}
+   Tokens and Backups tables. opts, when given, are toLocaleString options
+   (the log viewer asks for the time alone). */
+function fmtLocal(s,opts){if(!s)return'';const d=utcDate(s);if(isNaN(d.getTime()))return esc(String(s));return'<span title="'+esc(d.toISOString())+'">'+esc(d.toLocaleString(undefined,opts))+'</span>'}
 function actionBadge(a){if(!a)return'badge-muted';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'badge-red';if(a.includes('create'))return'badge-green';if(a.includes('update'))return'badge-yellow';return'badge-accent'}
 function actionColor(a){if(!a)return'var(--accent)';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'var(--text-danger)';if(a.includes('create'))return'var(--text-positive)';if(a.includes('update'))return'var(--text-warning)';return'var(--accent)'}
 /* Roles are createable now, so the four seeded ids are a fallback, not the set.
