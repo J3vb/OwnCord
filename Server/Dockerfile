@@ -7,7 +7,7 @@
 # toolchain cross-compiles both targets natively via GOARCH below.
 # The tag is for humans; the digest is what actually builds. Dependabot's
 # `docker` block moves both together, so the tag and the digest cannot drift.
-FROM --platform=$BUILDPLATFORM golang:1.26-bookworm@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-bookworm@sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195 AS builder
 
 ARG VERSION=dev
 # Supplied by BuildKit per target platform ("amd64", "arm64"). Left empty by a
