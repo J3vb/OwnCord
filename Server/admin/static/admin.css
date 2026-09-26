@@ -232,6 +232,43 @@ input,select,textarea{font-family:inherit;border:none}
 .setting-row:last-child{border-bottom:none}
 .setting-info{flex:1;min-width:0}.setting-name{font-size:14px;color:var(--text-normal);margin-bottom:2px}
 .setting-desc{font-size:12px;color:var(--text-muted)}.setting-ctrl{flex-shrink:0;margin-left:16px}
+/* Server pages (Settings, Backups & restore, Updates). */
+.setting-ctrl .form-input{width:280px;max-width:100%}
+.setting-ctrl .form-input[type=number]{width:120px}
+.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:24px}
+.page-head .page-desc{margin-bottom:0}
+.link-btn{background:none;padding:0;color:var(--text-link);font:inherit;text-decoration:underline;cursor:pointer}
+.text-link{color:var(--text-link)}
+.fact-list{margin-top:8px}
+.fact-row{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:10px 0;border-bottom:1px solid var(--border)}
+.fact-row:last-child{border-bottom:none}
+.fact-row dd{display:flex;align-items:baseline;justify-content:flex-end;gap:12px;flex-wrap:wrap}
+.fact-value{font-weight:600;color:var(--header-primary)}
+.fact-key{font-family:var(--font-mono);font-size:12px;color:var(--text-muted)}
+.card-actions{display:flex;justify-content:flex-end;padding-top:12px}
+/* Save bar: sits after the last section, and while there are unsaved
+   changes (.dirty) it pins to the bottom of the scrolling content, so Save is
+   never a page-height away from the field just edited. */
+.save-bar.dirty{position:sticky;bottom:0}
+.save-bar{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:12px 16px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:var(--radius-md);box-shadow:0 -8px 24px rgba(0,0,0,.45);z-index:5}
+.save-bar-status{margin-right:auto;font-size:13px;color:var(--text-muted)}
+.update-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.callout-warning{background:rgba(242,184,75,.1);border:1px solid rgba(242,184,75,.35);color:var(--text-warning);font-size:13px;padding:10px 12px;border-radius:var(--radius-sm);margin-top:12px;line-height:1.45}
+.check-row{display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer}
+.check-row input{width:16px;height:16px;accent-color:var(--accent);flex-shrink:0}
+.modal-list{margin:12px 0 0 20px;display:grid;gap:6px;color:var(--text-muted)}
+.modal-body code{font-family:var(--font-mono);font-size:12px}
+.restart-wait{display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text-muted)}
+.restart-wait .spinner{width:14px;height:14px;border:2px solid var(--border-strong);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;flex-shrink:0}
+@media(max-width:600px){
+  .setting-row{flex-direction:column;align-items:stretch;gap:8px}
+  .setting-ctrl{margin-left:0}
+  .setting-ctrl .form-input,.setting-ctrl .filter-select{width:100%}
+  .update-grid{grid-template-columns:1fr}
+  .fact-row{flex-direction:column;gap:4px}
+  .fact-row dd{justify-content:flex-start}
+}
 
 .modal-overlay{position:fixed;inset:0;background:var(--bg-overlay);display:none;align-items:center;justify-content:center;z-index:100}
 .modal-overlay.visible{display:flex}

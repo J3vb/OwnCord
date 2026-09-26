@@ -426,6 +426,17 @@ text was moved behind English catalogs ready for translation.
   and cannot sign in until approved.
 - Retention can be read, set and cleared per channel, with a server-wide
   default and an effect preview.
+- **Settings are grouped** into General, Access & registration and Security,
+  with a save bar that stays in view while there are unsaved changes.
+- The upload limit and voice quality now show the values the server is running
+  with from config.yaml, instead of disabled fields that could disagree with it.
+- The backup schedule moved to Backups & restore, beside the backups it makes.
+- **Restoring a backup asks you to type its file name**, then waits for the
+  server to restart and reloads. It used to be one click and only suggested a
+  restart.
+- **Updating the server backs up the database first** unless you untick it,
+  links the release notes and warns that database migrations only run forward;
+  a failed backup stops the update.
 - Creating or revoking an invite, and installing or uninstalling a plugin, now
   show up in the audit log. Invite entries name the invite by id, never by
   code.

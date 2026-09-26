@@ -99,7 +99,7 @@ Routes are registered in the `Mount*Routes` function of the owning `Server/api/*
 
 `/admin/api/*` is IP-restricted (`admin_allowed_cidrs`) and needs a bearer (session or API token) whose role holds any `permissions.AdminPerimeter` bit (`ADMINISTRATOR`, `MANAGE_CHANNELS`, `MANAGE_ROLES`, `MANAGE_SERVER`, `VIEW_AUDIT_LOG`, `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS`). Each group then re-checks its own bit:
 
-- channels, overrides, access preview → `MANAGE_CHANNELS`; roles → `MANAGE_ROLES`; settings, registrations, retention → `MANAGE_SERVER`; audit log → `VIEW_AUDIT_LOG`; force-logout → `KICK_MEMBERS`.
+- channels, overrides, access preview → `MANAGE_CHANNELS`; roles → `MANAGE_ROLES`; settings, config facts (`GET /config`), registrations, retention → `MANAGE_SERVER`; audit log → `VIEW_AUDIT_LOG`; force-logout → `KICK_MEMBERS`.
 - `PATCH /users/{id}` → the perimeter only, with a ban or role change re-checked in `ModerationService` (`BAN_MEMBERS`/`MANAGE_ROLES` plus role hierarchy).
 - logs ticket, support bundles, attention, account erasure → `ADMINISTRATOR`, which bypasses every bit check.
 - tokens, backups, updates, recovery credentials → **Owner role only**; `ADMINISTRATOR` does not bypass this.

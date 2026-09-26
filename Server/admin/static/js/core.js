@@ -404,7 +404,7 @@ function closeNav(restoreFocus=true){
 window.addEventListener('resize',()=>{if(window.innerWidth>900)closeNav(false)});
 /* Sign-out and session expiry: close the popups and forget the last
    principal's badge counts. */
-function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending:0,warnings:0,update:false}}
+function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending:0,warnings:0,update:false};state.settingsChanged=false}
 
 /* ═══ Nav badges ═══ */
 /* Pending registrations (Members), active attention warnings (Dashboard) and
@@ -432,6 +432,7 @@ function navigateTo(id){
   if(!sectionAllowed(id)){showToast('You do not have permission to open that section','error');return}
   try{
     if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}}
+    if(state.section==='settings'&&id!=='settings')state.settingsChanged=false;
     state.section=id;renderNav();renderContent();closeNav();
   }catch(err){
     console.error('[Admin] Tab navigation failed for "'+id+'":', err);

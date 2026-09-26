@@ -295,6 +295,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			r.Use(requirePerm(permissions.ManageServer))
 			r.Get("/settings", handleGetSettings(settings))
 			r.Patch("/settings", handlePatchSettings(settings, svc.Retention))
+			r.Get("/config", handleGetConfigFacts(setupOpts.RunningCfg))
 		})
 		ownerOnly(r, http.MethodPost, "/backup", handleBackup(database))
 		ownerOnly(r, http.MethodGet, "/backups", handleListBackups())
