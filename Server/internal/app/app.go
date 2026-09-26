@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/api"
@@ -88,6 +89,10 @@ type App struct {
 	// what was already up. Never set outside tests.
 	failStage string
 
+	// closeStepBudget overrides the per-step close budget (closeStepBudget)
+	// so a test need not wait out ten seconds. Never set outside tests.
+	closeStepBudget time.Duration
+
 	// onCloseStep is called with each stage's name just before its close step
 	// runs. It makes the teardown walk observable, which is how the tests
 	// assert what is still alive at a given point in it. Never set outside
@@ -143,20 +148,35 @@ func (a *App) onClose(stage string, stop func(context.Context) error) {
 // below a failing one are the ones that release the database handle, the
 // LiveKit process and the audit queue, so aborting the walk would leak
 // exactly what teardown exists to reclaim. Later errors are logged.
-// Calling it twice is a no-op.
+// Each step runs under its own closeStepBudget, and ctx lends it values only:
+// neither its cancellation nor an earlier step's overrun cuts a later step
+// short. Calling it twice is a no-op.
 func (a *App) Close(ctx context.Context) error {
 	if a.closed {
 		return nil
 	}
 	a.closed = true
 
+	budget := a.closeStepBudget
+	if budget <= 0 {
+		budget = closeStepBudget
+	}
 	var first error
 	for i := len(a.closers) - 1; i >= 0; i-- {
 		step := a.closers[i]
 		if a.onCloseStep != nil {
 			a.onCloseStep(step.stage)
 		}
-		err := step.stop(ctx)
+		// Each step gets a budget of its own rather than a share of one
+		// deadline: a step that overran it (an HTTP drain held open by a
+		// long request) must not leave the hub's restart notice, the audit
+		// drain and the event flush running on an expired context (SRV-06).
+		stepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
+		started := time.Now()
+		err := step.stop(stepCtx)
+		cancel()
+		a.log.Info("shutdown step finished", "stage", step.stage,
+			"duration", time.Since(started).Round(time.Millisecond), "error", err)
 		if err == nil {
 			continue
 		}

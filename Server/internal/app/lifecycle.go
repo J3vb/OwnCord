@@ -26,11 +26,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// shutdownBudget is the total time Close is given, and the same 30 seconds
-// the operator is told about in the "draining connections" log line. The
-// per-stage timeouts inside the individual stop steps are budgets of their
-// own and are unchanged by the move.
-const shutdownBudget = 30 * time.Second
+// closeStepBudget bounds each close step on its own — the same figure the
+// operator is told about in the "draining connections" log line. The shorter
+// timeouts inside some stop steps (the audit drain, the event flush, plugins,
+// telemetry) sit within it.
+const closeStepBudget = 10 * time.Second
 
 // stage is one start step, in start order. The name is what a failure is
 // reported as, so an operator reading `starting audit-writer: ...` knows
@@ -108,12 +108,11 @@ func (a *App) Run(ctx context.Context) (err error) {
 	})
 
 	defer func() {
-		// WithoutCancel, not Background: teardown must run its full budget
-		// even when the caller's context is what ended the server, while
-		// still carrying whatever values that context holds.
-		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownBudget)
-		defer cancel()
-		if closeErr := a.Close(closeCtx); closeErr != nil && err == nil {
+		// Close gives every step its own budget and ignores ctx's
+		// cancellation, so teardown runs in full even when the caller's
+		// context is what ended the server, while still carrying whatever
+		// values that context holds.
+		if closeErr := a.Close(ctx); closeErr != nil && err == nil {
 			err = closeErr
 		}
 	}()
@@ -432,9 +431,22 @@ func (a *App) startHTTP() error {
 		}
 		return nil
 	})
-	a.onClose("http", func(ctx context.Context) error {
-		return shutdownServers(ctx, a.log, a.srv, a.acmeSrv, a.hub)
+	// The hub stops right after the drain — it notifies clients, stops
+	// LiveKit and closes every socket — as a step of its own, so its notice
+	// window keeps its budget however long the drain took (SRV-06). The later
+	// "hub" step then only joins the dispatch loop.
+	a.onClose("hub-notice", func(ctx context.Context) error {
+		a.hub.GracefulStopContext(ctx)
+		return nil
 	})
+	a.onClose("http", func(ctx context.Context) error {
+		return shutdownServers(ctx, a.log, a.srv, a.acmeSrv)
+	})
+	// An open admin log stream never returns on its own and Shutdown waits for
+	// every active handler, so end the streams as soon as Shutdown begins.
+	if a.deps.LogBuf != nil {
+		a.srv.RegisterOnShutdown(a.deps.LogBuf.EndStreams)
+	}
 	// Bind here, not in serve(): a port that cannot be bound must fail start()
 	// before the previous binary is removed (REL-01).
 	return serveWithBindRetry(a.log, "server", func() (err error) {

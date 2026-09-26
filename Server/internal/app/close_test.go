@@ -1,11 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -161,4 +163,37 @@ func TestStopHub_BoundedByTheShutdownBudget(t *testing.T) {
 // through. The stages are supplied by each test.
 func newTestApp() *App {
 	return &App{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+}
+
+// TestAppClose_GivesEveryStepItsOwnBudget is SRV-06: the steps used to share
+// one deadline, so an HTTP drain that overran it left the hub's restart
+// notice, the audit drain and the event flush running on an expired context.
+// A step that uses up its budget must leave the next step a live one, and
+// every step's duration is logged.
+func TestAppClose_GivesEveryStepItsOwnBudget(t *testing.T) {
+	var logs bytes.Buffer
+	a := &App{log: slog.New(slog.NewTextHandler(&logs, nil)), closeStepBudget: 50 * time.Millisecond}
+	var auditCtxErr error = errors.New("audit-writer step never ran")
+	a.onClose("audit-writer", func(ctx context.Context) error {
+		auditCtxErr = ctx.Err()
+		return nil
+	})
+	a.onClose("http", func(ctx context.Context) error {
+		<-ctx.Done() // an open stream holding the drain for the whole budget
+		return ctx.Err()
+	})
+
+	caller, cancel := context.WithCancel(context.Background())
+	cancel() // the caller's cancellation must not cut teardown short either
+	if err := a.Close(caller); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close() = %v, want the http step's own deadline", err)
+	}
+	if auditCtxErr != nil {
+		t.Errorf("audit-writer step ran on a dead context (%v): it inherited the http step's overrun", auditCtxErr)
+	}
+	for _, stage := range []string{"stage=http duration=", "stage=audit-writer duration="} {
+		if !strings.Contains(logs.String(), stage) {
+			t.Errorf("no duration logged for %s; log:\n%s", stage, logs.String())
+		}
+	}
 }

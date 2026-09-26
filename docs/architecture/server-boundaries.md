@@ -530,27 +530,27 @@ close function, which is exactly what B3-3's failure-injection test now pins.
 order. There is no `defer` stack and no second teardown path: `App.Run` closes
 on every return — a failed start, a serve error and a clean shutdown alike.
 
-| #   | Stage (`App.stages()`) | Close step, and what it does                                                                                              |
-| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 1   | (in `Run`) `bgCtx`     | `background-context` — cancels bgCtx; registered first, so it runs **last**                                               |
-| 2   | `data-dir`             | —                                                                                                                         |
-| 3   | `tls`                  | —                                                                                                                         |
-| 4   | `database`             | `database` — `database.Close()`, registered before the migration runs                                                     |
-| 5   | `migrate`              | —                                                                                                                         |
-| 6   | `erasure-markers`      | `erasure-markers` — `markers.Close()`, releases the deletion-marker file                                                  |
-| 7   | `push-vapid-key`       | —                                                                                                                         |
-| 8   | `telemetry`            | `telemetry` — bounded OTel shutdown                                                                                       |
-| 9   | `plugins`              | `plugins` — `registry.Close`                                                                                              |
-| 10  | `hub`                  | `hub` — `GracefulStopContext`, the only caller of `LiveKitProcess.Stop`                                                   |
-| 11  | `router`               | `router` — the rate-limiter cleanup goroutine                                                                             |
-| 12  | `event-persistence`    | `event-persistence` — drains the persister, cancels bgCtx, joins the pruner                                               |
-| 13  | `audit-writer`         | `audit-writer` — drains the audit queue                                                                                   |
-| 14  | `maintenance`          | `maintenance` — joins the maintenance loop                                                                                |
-| 15  | `acme`                 | — (shut down by the `http` step, in the order the drain requires)                                                         |
-| 16  | `signals`              | `signals` — unregisters the signal handler; armed before the bind retry below                                             |
-| 17  | `http`                 | `http` — ACME shutdown, then in-flight handlers, then the hub, on one 30s budget, then `listener` releases the bound port |
+| #   | Stage (`App.stages()`) | Close step, and what it does                                                                                                                                                                   |
+| --- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | (in `Run`) `bgCtx`     | `background-context` — cancels bgCtx; registered first, so it runs **last**                                                                                                                    |
+| 2   | `data-dir`             | —                                                                                                                                                                                              |
+| 3   | `tls`                  | —                                                                                                                                                                                              |
+| 4   | `database`             | `database` — `database.Close()`, registered before the migration runs                                                                                                                          |
+| 5   | `migrate`              | —                                                                                                                                                                                              |
+| 6   | `erasure-markers`      | `erasure-markers` — `markers.Close()`, releases the deletion-marker file                                                                                                                       |
+| 7   | `push-vapid-key`       | —                                                                                                                                                                                              |
+| 8   | `telemetry`            | `telemetry` — bounded OTel shutdown                                                                                                                                                            |
+| 9   | `plugins`              | `plugins` — `registry.Close`                                                                                                                                                                   |
+| 10  | `hub`                  | `hub` — joins the dispatch loop; on an early return it is the `GracefulStopContext`, the only caller of `LiveKitProcess.Stop`                                                                  |
+| 11  | `router`               | `router` — the rate-limiter cleanup goroutine                                                                                                                                                  |
+| 12  | `event-persistence`    | `event-persistence` — drains the persister, cancels bgCtx, joins the pruner                                                                                                                    |
+| 13  | `audit-writer`         | `audit-writer` — drains the audit queue                                                                                                                                                        |
+| 14  | `maintenance`          | `maintenance` — joins the maintenance loop                                                                                                                                                     |
+| 15  | `acme`                 | — (shut down by the `http` step, in the order the drain requires)                                                                                                                              |
+| 16  | `signals`              | `signals` — unregisters the signal handler; armed before the bind retry below                                                                                                                  |
+| 17  | `http`                 | `http` — ACME shutdown and the drain of in-flight handlers (an open admin Logs stream is ended as `Shutdown` begins), then `hub-notice` stops the hub, then `listener` releases the bound port |
 
-Close order is therefore `http`, `listener`, `signals`, `maintenance`, `audit-writer`,
+Close order is therefore `http`, `hub-notice`, `listener`, `signals`, `maintenance`, `audit-writer`,
 `event-persistence`, `router`, `hub`, `plugins`, `telemetry`,
 `erasure-markers`, `database`, `background-context`. All four facts hold, and
 now hold **because of the ordering rule** rather than because of where a
@@ -571,8 +571,11 @@ no closer.
 
 `App.Close` reports the **first** error and still runs every later step: the
 steps below a failing one are the ones that release the database handle, the
-LiveKit process and the audit queue. `internal/app/close_test.go` pins the
-order, the first-error rule and idempotence;
+LiveKit process and the audit queue. Each step runs on a 10s budget of its
+own and logs how long it took, so a step that overruns (an HTTP drain held
+open) cannot leave the restart notice, the audit drain or the event flush on
+an expired context (SRV-06). `internal/app/close_test.go` pins the
+order, the first-error rule, the per-step budget and idempotence;
 `internal/app/lifecycle_failure_test.go` fails each stage in turn — the table
 is generated from `App.stages()`, so a new stage is covered the day it is
 added — and asserts on every row that the error names the stage, no goroutine

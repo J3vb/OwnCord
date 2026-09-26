@@ -44,6 +44,7 @@ and only when it changes something a contributor or fork holder must do
 ### Login & connection
 
 - A server update, backup restore or restart no longer signs everyone out — the desktop client counts down, reconnects on its own and returns to the channel it was in. Voice calls still end when the server actually stops.
+- An admin with the Logs tab open no longer stalls a restart for 30 seconds and cuts the restart notice and the audit flush short — the log stream now ends as shutdown begins, and each shutdown step has its own 10-second budget.
 
 ### Voice
 
