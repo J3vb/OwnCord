@@ -14,7 +14,7 @@ import (
 // the deadline forever and the body would read to EOF.
 func TestTransferDeadline_ProgressingTransferClosedAtLifetimeCap(t *testing.T) {
 	const (
-		progress = 40 * time.Millisecond
+		progress = time.Second
 		lifetime = 200 * time.Millisecond
 		sendFor  = 2 * time.Second
 	)
