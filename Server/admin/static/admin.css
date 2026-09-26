@@ -360,28 +360,47 @@ input,select,textarea{font-family:inherit;border:none}
 .code-copy code{flex:1;font-family:var(--font-mono);font-size:13px;color:var(--text-link);word-break:break-all}
 .code-copy .btn{padding:4px 10px;font-size:11px}
 
-/* Auth overlays */
-.auth-overlay{position:fixed;inset:0;background:var(--bg-tertiary);display:none;align-items:center;justify-content:center;z-index:50}
+/* Auth cards: the setup wizard, its success screen and sign-in share one
+   layout, a brand header over a titled card. The overlay scrolls, not the
+   card, so a tall step never clips at 200% zoom or on a phone. */
+.auth-overlay{position:fixed;inset:0;background:var(--bg-tertiary);display:none;overflow-y:auto;padding:32px 16px;z-index:50}
 .auth-overlay.visible{display:flex}
-.auth-box{background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-md);padding:32px;width:380px}
-.auth-box h2{font-size:20px;font-weight:700;color:var(--header-primary);margin-bottom:20px}
-.auth-error{color:var(--text-danger);font-size:13px;margin-top:10px;min-height:20px}
-.auth-box.wizard{width:560px;max-width:94vw;max-height:92vh;overflow-y:auto}
-.wiz-steps{display:flex;gap:6px;margin-bottom:20px}
-.wiz-dot{height:4px;flex:1;border-radius:2px;background:var(--border);transition:background .2s}
+.auth-box{margin:auto;width:100%;max-width:480px;background:var(--bg-primary);border:1px solid var(--border-strong);border-radius:var(--radius-lg);padding:32px;box-shadow:0 8px 48px rgba(0,0,0,.5)}
+.auth-brand{display:flex;align-items:center;gap:10px;padding-bottom:20px;margin-bottom:24px;border-bottom:1px solid var(--border)}
+.auth-title{font-size:22px;font-weight:700;color:var(--header-primary);line-height:1.25;margin-bottom:8px}
+.auth-sub{color:var(--text-muted);font-size:14px;line-height:1.5;margin-bottom:20px}
+.auth-submit{width:100%;justify-content:center;min-height:40px;margin-top:8px}
+.auth-error{color:var(--text-danger);font-size:13px;line-height:1.45}
+.auth-error:not(:empty){margin-top:16px;padding:10px 12px;border-radius:var(--radius-sm);background:rgba(255,143,146,.1);border:1px solid rgba(255,143,146,.35)}
+.wiz-progress{display:flex;align-items:baseline;gap:6px;font-size:12px;color:var(--text-muted);margin-bottom:8px}
+.wiz-progress strong{color:var(--accent-text);font-weight:700}
+.wiz-steps{display:flex;gap:6px;margin-bottom:24px}
+.wiz-dot{height:4px;flex:1;border-radius:var(--radius-pill);background:var(--bg-active)}
+.wiz-dot.done{background:var(--accent);opacity:.5}
 .wiz-dot.active{background:var(--accent)}
-.wiz-dot.done{background:var(--accent);opacity:.45}
 .wiz-sub{color:var(--text-muted);font-size:14px;margin-bottom:20px;line-height:1.5}
-.wiz-hint{color:var(--text-muted);font-size:12px;margin-top:6px;line-height:1.4}
+.wiz-hint{color:var(--text-muted);font-size:12px;margin-top:6px;line-height:1.45}
+.wiz-hint code,.wiz-sub code{font-family:var(--font-mono);font-size:12px;color:var(--text-normal)}
 .wiz-nav{display:flex;justify-content:space-between;gap:8px;margin-top:24px}
+.wiz-nav .btn{min-height:40px;padding:8px 20px;justify-content:center}
+.form-input[aria-invalid="true"]{border-color:var(--text-danger)}
+.wiz-review{margin:0 0 4px}
 .wiz-review-row{display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
-.wiz-review-row .k{color:var(--text-muted);white-space:nowrap}
-.wiz-review-row .v{color:var(--text-normal);font-weight:600;text-align:right;word-break:break-word}
+.wiz-review-row dt{color:var(--text-muted);white-space:nowrap}
+.wiz-review-row dd{color:var(--text-normal);font-weight:600;text-align:right;overflow-wrap:anywhere}
 .wiz-callout{background:rgba(242,184,75,.1);border:1px solid rgba(242,184,75,.35);color:var(--text-warning);font-size:13px;padding:10px 12px;border-radius:var(--radius-sm);margin-top:16px;line-height:1.45}
-.wiz-skip{display:block;width:100%;text-align:center;margin-top:14px;color:var(--text-muted);font-size:12px;cursor:pointer;text-decoration:underline;background:none}
+.wiz-skip{display:block;width:100%;min-height:40px;text-align:center;margin-top:8px;color:var(--text-muted);font-size:13px;text-decoration:underline;background:none;border-radius:var(--radius-sm)}
 .wiz-skip:hover{color:var(--text-normal)}
 .wiz-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
 .wiz-toggle-row .lbl{font-size:14px;color:var(--text-normal)}
+.setup-facts{margin-bottom:8px}
+.setup-fact{margin-bottom:16px}
+.setup-fact dt{font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.02em;text-transform:uppercase}
+.setup-restart{margin:8px 0 16px}
+.setup-restart .spinner{display:inline-block;width:13px;height:13px;border:2px solid var(--border-strong);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;vertical-align:-2px;margin-right:6px}
+.setup-restart-link{font-size:14px;margin-bottom:8px}
+.setup-restart-link a{color:var(--text-link);overflow-wrap:anywhere}
+@media(max-width:600px){.auth-overlay{padding:16px}.auth-box{padding:24px 20px}.wiz-review-row{flex-direction:column;gap:2px}.wiz-review-row dd{text-align:left}}
 
 /* Log viewer. Level chips are aria-pressed toggles: pressed is tinted with a
    filled dot, released is outlined with a hollow one, so the state does not

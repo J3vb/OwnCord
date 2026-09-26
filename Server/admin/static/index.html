@@ -8,50 +8,68 @@
 </head>
 <body>
 
-<!-- Auth: Setup (first-run wizard; content rendered by renderWizard) -->
+<!-- Auth cards: setup wizard, setup success and sign-in share one layout, a
+     brand header over a titled card. Each is a real <form>, so Enter submits
+     and password managers see the fields; setup.js handles the submit. -->
 <div class="auth-overlay" id="setupOverlay">
-  <div class="auth-box wizard" id="wizardBox"></div>
+  <form class="auth-box" id="wizardForm" novalidate aria-labelledby="wizTitle">
+    <div class="auth-brand"><div class="sidebar-logo"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L4 5.5v5c0 5.25 3.4 10.15 8 11.5 4.6-1.35 8-6.25 8-11.5v-5L12 2zm0 3l1.5 3h3.2l-2.6 1.9 1 3.1L12 11.1 8.9 13l1-3.1L7.3 8h3.2L12 5z"/></svg></div><div><div class="sidebar-title">OwnCord</div><div class="sidebar-subtitle">First-run setup</div></div></div>
+    <!-- Step content rendered by renderWizard (setup.js). -->
+    <div id="wizardBox"></div>
+  </form>
 </div>
 
-<!-- Auth: Setup Success -->
 <div class="auth-overlay" id="setupSuccessOverlay">
   <div class="auth-box">
-    <h2>Setup Complete!</h2>
-    <p style="color:var(--text-muted);font-size:14px;margin-bottom:16px">Your owner account has been created. Here's your invite code:</p>
-    <div class="code-copy"><code id="inviteCode"></code><button class="btn btn-ghost" data-action="copyInvite">Copy</button></div>
-    <p style="color:var(--text-warning);font-size:13px;margin:16px 0">Save this code! Share it with people you want to invite.</p>
+    <div class="auth-brand"><div class="sidebar-logo"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L4 5.5v5c0 5.25 3.4 10.15 8 11.5 4.6-1.35 8-6.25 8-11.5v-5L12 2zm0 3l1.5 3h3.2l-2.6 1.9 1 3.1L12 11.1 8.9 13l1-3.1L7.3 8h3.2L12 5z"/></svg></div><div><div class="sidebar-title">OwnCord</div><div class="sidebar-subtitle">Setup complete</div></div></div>
+    <h1 class="auth-title" id="setupTitle" tabindex="-1">Your server is ready</h1>
+    <p class="auth-sub">Your owner account is signed in. Share these with the people you invite.</p>
+    <dl class="setup-facts">
+      <div class="setup-fact">
+        <dt>Server address</dt>
+        <dd><div class="code-copy"><code id="setupAddress"></code><button type="button" class="btn btn-ghost" data-action="copyCode" data-args="[&quot;setupAddress&quot;]" aria-label="Copy server address">Copy</button></div>
+          <p class="wiz-hint" id="setupAddressHint">What members enter in the OwnCord desktop app to add this server.</p></dd>
+      </div>
+      <div class="setup-fact">
+        <dt>Invite code</dt>
+        <dd><div class="code-copy"><code id="inviteCode"></code><button type="button" class="btn btn-ghost" data-action="copyCode" data-args="[&quot;inviteCode&quot;]" aria-label="Copy invite code">Copy</button></div>
+          <p class="wiz-hint">New members need it to register. You can create more invites later in the admin panel.</p></dd>
+      </div>
+      <div class="setup-fact hidden" id="setupFingerprint">
+        <dt>Certificate fingerprint</dt>
+        <dd><div class="code-copy"><code id="certFingerprint"></code><button type="button" class="btn btn-ghost" data-action="copyCode" data-args="[&quot;certFingerprint&quot;]" aria-label="Copy certificate fingerprint">Copy</button></div>
+          <p class="wiz-hint">Publish it out of band (another platform, a call). Members compare it with the prompt their desktop app shows before they accept the connection: a mismatch is the one warning that means an interception attempt.</p></dd>
+      </div>
+    </dl>
+    <p class="wiz-hint hidden" id="setupFingerprintLater">The certificate fingerprint appears on the Dashboard once the server serves its new certificate. Publish it before members connect.</p>
     <div id="setupWarnings"></div>
-    <div id="setupFingerprint" style="display:none">
-      <p style="font-size:13px;color:var(--text-muted);margin:16px 0 8px">Your certificate fingerprint. Users compare it against the prompt their client shows before they accept the connection — publish it out of band. A mismatch is the one warning that means an interception attempt.</p>
-      <div class="code-copy"><code id="certFingerprint"></code></div>
+    <div class="setup-restart hidden" id="setupRestart" role="status">
+      <p class="auth-sub"><span class="spinner" aria-hidden="true"></span>Applying your settings — the server is restarting…</p>
+      <p class="setup-restart-link">When it's back, open: <a id="restartLink" href="#"></a></p>
+      <p class="wiz-hint" id="restartHint">This can take a few seconds. If the page doesn't redirect on its own, open the link above. You may need to sign in again, and with a self-signed certificate your browser may show a one-time security warning — choose Advanced &rarr; Continue.</p>
     </div>
-    <div id="setupRestart" style="display:none">
-      <p style="color:var(--text-muted);font-size:14px;margin-bottom:8px"><span class="spinner" style="display:inline-block;width:13px;height:13px;border:2px solid var(--border-strong);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;vertical-align:-2px;margin-right:6px"></span>Applying your settings — the server is restarting…</p>
-      <p style="font-size:14px;margin-bottom:8px">When it's back, open: <a id="restartLink" href="#" style="color:var(--text-link);word-break:break-all"></a></p>
-      <p class="wiz-hint" id="restartHint">This can take a few seconds. If the page doesn't redirect on its own, click the link above. You may need to sign in again, and with a self-signed certificate your browser may show a one-time security warning — choose Advanced &rarr; Continue.</p>
-    </div>
-    <button class="btn btn-accent" id="setupContinueBtn" style="width:100%">Continue to Admin Panel</button>
+    <button type="button" class="btn btn-accent auth-submit" id="setupContinueBtn">Continue to Admin Panel</button>
   </div>
 </div>
 
-<!-- Auth: Login -->
 <div class="auth-overlay" id="loginOverlay">
   <div class="auth-box">
-    <h2>OwnCord Admin</h2>
-    <div id="loginStep1">
-      <div class="form-group"><label class="form-label" for="loginUser">Username</label><input class="form-input" id="loginUser" autocomplete="username" placeholder="admin"></div>
-      <div class="form-group"><label class="form-label" for="loginPass">Password</label><input class="form-input" id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••"></div>
-      <button class="btn btn-accent" id="loginBtn" style="width:100%">Sign In</button>
-    </div>
+    <div class="auth-brand"><div class="sidebar-logo"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L4 5.5v5c0 5.25 3.4 10.15 8 11.5 4.6-1.35 8-6.25 8-11.5v-5L12 2zm0 3l1.5 3h3.2l-2.6 1.9 1 3.1L12 11.1 8.9 13l1-3.1L7.3 8h3.2L12 5z"/></svg></div><div><div class="sidebar-title">OwnCord</div><div class="sidebar-subtitle">Admin Panel</div></div></div>
+    <h1 class="auth-title">Sign in</h1>
+    <form id="loginStep1" novalidate>
+      <div class="form-group"><label class="form-label" for="loginUser">Username</label><input class="form-input" id="loginUser" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required></div>
+      <div class="form-group"><label class="form-label" for="loginPass">Password</label><input class="form-input" id="loginPass" name="password" type="password" autocomplete="current-password" required></div>
+      <button type="submit" class="btn btn-accent auth-submit" id="loginBtn">Sign In</button>
+    </form>
     <!-- Second step of a two-factor sign-in. Hidden until the login response
          says the account has TOTP enabled. -->
-    <div id="loginTotpStep" class="hidden">
-      <p style="color:var(--text-muted);font-size:13px;margin-bottom:14px">Enter the 6-digit code from your authenticator app, or one of your emergency recovery codes.</p>
-      <div class="form-group"><label class="form-label" for="loginTotp">Authentication code</label><input class="form-input" id="loginTotp" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" placeholder="000000"></div>
-      <button class="btn btn-accent" id="totpBtn" style="width:100%">Verify</button>
-      <button class="btn btn-ghost" id="totpCancelBtn" style="width:100%;margin-top:8px">Back</button>
-    </div>
-    <div class="auth-error" id="loginErr"></div>
+    <form id="loginTotpStep" class="hidden" novalidate>
+      <p class="auth-sub">Enter the 6-digit code from your authenticator app, or one of your emergency recovery codes.</p>
+      <div class="form-group"><label class="form-label" for="loginTotp">Authentication code</label><input class="form-input" id="loginTotp" name="code" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required></div>
+      <button type="submit" class="btn btn-accent auth-submit" id="totpBtn">Verify</button>
+      <button type="button" class="btn btn-ghost auth-submit" id="totpCancelBtn">Back</button>
+    </form>
+    <div class="auth-error" id="loginErr" role="alert"></div>
   </div>
 </div>
 

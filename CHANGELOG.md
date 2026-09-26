@@ -427,6 +427,14 @@ text was moved behind English catalogs ready for translation.
 - Your own row, and anyone at or above your rank, no longer offers Ban, Force
   logout or any other action the server would refuse; a You, Outranks you or
   Same rank badge says why.
+- **The setup wizard's security step now says what each TLS mode means for
+  the desktop app**: Let's Encrypt needs port 80 as well as the server port and
+  every renewal makes members accept a new fingerprint, and "off" means the
+  desktop app cannot connect without an HTTPS reverse proxy in front.
+- The setup wizard names each step ("Step 3 of 6 · Server"), and its finish
+  screen shows the address members connect to beside the invite code and the
+  certificate fingerprint. Sign-in and setup share one card layout, and Enter
+  submits them.
 - **Who may register is now a choice**: closed, invite only, approval, or open.
   Fresh installs default to invite only. Existing servers keep the behaviour
   they had — a server that required an invite still requires one, and
