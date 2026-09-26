@@ -527,10 +527,12 @@ func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimit
 	// This avoids mixed-content blocks (secure page → insecure WS).
 	// Client connects to wss://server:8443/livekit/* → ws://localhost:7880/*
 	//
-	// NOTE: AuthMiddleware is intentionally omitted. The LiveKit JS SDK's
-	// signal requests don't carry OwnCord session tokens — authentication
-	// is handled by the LiveKit JWT (access_token query param) which the
-	// LiveKit server validates. Users can only obtain a valid JWT through
+	// NOTE: AuthMiddleware is intentionally omitted. LiveKit signal requests
+	// don't carry OwnCord session tokens — authentication is handled by the
+	// LiveKit JWT, which the LiveKit server validates. It arrives either as
+	// the access_token query param (JS SDK) or as an Authorization: Bearer
+	// header (Rust SDK, the Linux client's native voice), which the proxy
+	// forwards. Users can only obtain a valid JWT through
 	// the authenticated voice_join WS flow. Rate limiting prevents abuse.
 	r.With(RateLimitMiddleware(limiter, "livekit_proxy:", livekitProxyRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)).
 		Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))

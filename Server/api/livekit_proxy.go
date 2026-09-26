@@ -182,8 +182,18 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, all
 	backendURL.Path = r.URL.Path
 	backendURL.RawQuery = r.URL.RawQuery
 
+	// Forward the Authorization header: the LiveKit Rust SDK (the Linux
+	// client's native voice) sends its room-join token as a Bearer header
+	// rather than the access_token query parameter. Nothing else is forwarded.
+	var backendHeader http.Header
+	authz := r.Header.Get("Authorization")
+	if authz != "" {
+		backendHeader = http.Header{"Authorization": {authz}}
+	}
+
 	// Connect to LiveKit backend.
 	backConn, dialResp, err := websocket.Dial(r.Context(), backendURL.String(), &websocket.DialOptions{
+		HTTPHeader:   backendHeader,
 		Subprotocols: r.Header.Values("Sec-WebSocket-Protocol"),
 	})
 	if dialResp != nil && dialResp.Body != nil {
@@ -197,9 +207,15 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, all
 		// configured stdout level) could replay it inside its 5-minute TTL as
 		// the victim's participant identity. Strip the credential before the
 		// error reaches slog: the raw query blob first, so an encoded form is
-		// caught too, then the decoded token.
+		// caught too, then the decoded token. The Authorization header carries
+		// the same JWT for the native client. coder/websocket's dial errors do
+		// not include request headers today, so scrubbing it is future-proofing
+		// against a library change that starts echoing them.
 		safeErr := redactKey(err.Error(), backendURL.RawQuery)
 		safeErr = redactKey(safeErr, backendURL.Query().Get("access_token"))
+		safeErr = redactKey(safeErr, authz)
+		_, bearer, _ := strings.Cut(authz, " ")
+		safeErr = redactKey(safeErr, strings.TrimSpace(bearer))
 		slog.Warn("livekit proxy: backend dial failed", "host", backendURL.Host, "path", backendURL.Path, "err", safeErr)
 		writeErr(w, http.StatusBadGateway, "BAD_GATEWAY", "backend unavailable")
 		return

@@ -106,6 +106,8 @@ text was moved behind English catalogs ready for translation.
   server says so at boot instead of leaving it to be discovered on a call. It
   warns, never refuses — a LAN-only or Tailscale-only server has a good reason
   to use a private address there.
+- **Linux desktop voice now connects to remote servers.** It failed to join on
+  any server not on the same machine; it now joins like Windows and macOS.
 
 ### Desktop UI
 

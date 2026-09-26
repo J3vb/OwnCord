@@ -310,6 +310,8 @@ func TestLiveKitProxy_DoesNotBlockUserMetrics(t *testing.T) {
 // 5-minute TTL by anyone reading stdout or the admin panel's log ring buffer.
 func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
 	const token = "eyJhbGciOiJIUzI1NiJ9.SECRET-LIVEKIT-JWT-PAYLOAD.c2lnbmF0dXJl"
+	// The native (Rust SDK) client sends its token as a header instead.
+	const headerToken = "eyJhbGciOiJIUzI1NiJ9.SECRET-HEADER-JWT-PAYLOAD.c2lnbmF0dXJl"
 
 	var logs bytes.Buffer
 	prev := slog.Default()
@@ -322,6 +324,7 @@ func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
 	r := httptest.NewRequest("GET", "/rtc?access_token="+token, nil)
 	r.Header.Set("Connection", "Upgrade")
 	r.Header.Set("Upgrade", "websocket")
+	r.Header.Set("Authorization", "Bearer "+headerToken)
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, r)
 
@@ -334,6 +337,11 @@ func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
 	}
 	if strings.Contains(out, token) {
 		t.Fatalf("the LiveKit access token leaked into the log stream:\n%s", out)
+	}
+	// Future-proofing: coder/websocket's dial errors omit request headers
+	// today, so this holds even without the proxy's Authorization scrub.
+	if strings.Contains(out, headerToken) {
+		t.Fatalf("the Authorization token leaked into the log stream:\n%s", out)
 	}
 	if !strings.Contains(out, "backend dial failed") {
 		t.Errorf("the failure must still be diagnosable, got:\n%s", out)

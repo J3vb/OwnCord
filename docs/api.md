@@ -4514,7 +4514,7 @@ Check whether the LiveKit server is reachable.
 
 All requests to `/livekit/*` are reverse-proxied to the LiveKit server URL. The `/livekit` prefix is stripped before forwarding. This allows the client to connect to LiveKit through OwnCord's HTTPS server, avoiding mixed-content blocks.
 
-**Auth:** None (LiveKit handles its own JWT-based auth)
+**Auth:** None (LiveKit handles its own JWT-based auth). The JWT arrives as the `access_token` query parameter (JS SDK) or an `Authorization: Bearer` header (Rust SDK, the Linux client's native voice); on a WebSocket upgrade the proxy forwards the query string, the `Sec-WebSocket-Protocol` values and `Authorization`, and no other request header.
 **Rate limit:** 30 requests/minute per IP
 
 ---
