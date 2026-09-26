@@ -44,6 +44,7 @@ and only when it changes something a contributor or fork holder must do
 ### Login & connection
 
 - A server update, backup restore or restart no longer signs everyone out — the desktop client counts down, reconnects on its own and returns to the channel it was in. Voice calls still end when the server actually stops.
+- A dead connection (a dropped network or a sleeping laptop) could stay open on the server for up to two minutes, so the user still showed online — the server now pings each connection every 25 seconds and closes one that stops answering within about 50 seconds.
 
 ### Voice
 
