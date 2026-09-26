@@ -122,8 +122,8 @@ pub(crate) fn rewrite_proxy_headers(request: &str, remote_host: &str) -> String 
 /// only as a bearer header, and servers before the RT-1 fix drop every header
 /// when re-dialling LiveKit, so the join fails with 401. The query string
 /// survives on every server version — it is how the JS SDK sends the token —
-/// so the tunnel rewrites the request into that shape. A request that already
-/// carries `access_token`, or has no bearer header, passes through unchanged.
+/// so the tunnel rewrites the request into that shape. A request with no bearer
+/// header passes through unchanged.
 pub(crate) fn move_bearer_to_query(request: &str) -> String {
     let mut lines: Vec<&str> = request.split("\r\n").collect();
     let bearer = lines.iter().enumerate().skip(1).find_map(|(i, line)| {
@@ -144,12 +144,6 @@ pub(crate) fn move_bearer_to_query(request: &str) -> String {
     else {
         return request.to_string();
     };
-    let has_query_token = target
-        .split_once('?')
-        .is_some_and(|(_, q)| q.split('&').any(|p| p.starts_with("access_token=")));
-    if has_query_token {
-        return request.to_string();
-    }
     let encoded: String = url::form_urlencoded::byte_serialize(token.as_bytes()).collect();
     let sep = if target.contains('?') { '&' } else { '?' };
     let request_line = format!("{method} {target}{sep}access_token={encoded} {version}");
@@ -612,13 +606,6 @@ mod tests {
         ] {
             assert_eq!(move_bearer_to_query(request), request);
         }
-    }
-
-    #[test]
-    fn keeps_an_existing_query_token() {
-        let request = "GET /rtc?access_token=q HTTP/1.1\r\nAuthorization: Bearer h\r\n\r\n";
-
-        assert_eq!(move_bearer_to_query(request), request);
     }
 
     #[test]
