@@ -1540,7 +1540,13 @@ retained RC gates B10 kept:
   if it does not stay in the beta under Q12's item-11 re-examination;
 - post-beta TLS (B6-3..B6-5), the D-03 certificate-verifier change, the Linux
   voice device test, the `chatserver restore` CLI (OP-10) and the setup-time
-  recovery kit (D-17).
+  recovery kit (D-17);
+- the two owner deferrals that had no scheduled home (**Q2**, accepted
+  2026-09-26): **OD-1**, the Linux desktop client that shares a host with its
+  Docker Compose server (the server sends LiveKit's container-internal
+  `direct_url`, which does not resolve outside the container network), fixed as
+  the first post-beta voice item; and **OD-2**, running HP-6 with an unfamiliar
+  operator, after the post-beta restart lane.
 
 Nothing here waives an RC check, upgrade/rollback, advisory closure or HP-10.
 B11 has no entry date; it starts from the published beta.

@@ -79,6 +79,14 @@ Each item links to the guidance that owns it.
   host; an HTTP reverse proxy cannot carry it. "Joins but no audio" is almost
   always a missing forwarding rule or a wrong `voice.node_ip` — see
   [Port Forwarding](port-forwarding.md).
+- **Linux voice needs a server on 2.0.0-beta.1 or later.** The Linux client's
+  native voice engine sends its room credential as an HTTP header, and servers
+  from the `1.2.0-alpha.*` series drop that header and refuse the join. Update
+  the server.
+- **On Linux, a client on the same machine as a Docker Compose server cannot
+  join voice.** The server hands the client LiveKit's container-internal address
+  (`ws://livekit:7880`), which does not resolve outside the container network, so
+  the join fails. Run the desktop client on another machine.
 
 ## FAQ
 
@@ -105,6 +113,11 @@ failure because the media never reaches it.
 `server.admin_allowed_cidrs`, which defaults to loopback and private networks.
 On a VPS, use an SSH tunnel or add your address to that setting — see
 [Reaching `/admin` on a headless server](quick-start.md#reaching-admin-on-a-headless-server-vps).
+
+**Voice works on Windows and macOS, but not on Linux.**
+Two known cases, both in [Voice and video](#voice-and-video): the server is an
+older `1.2.0-alpha.*` release, or the Linux client and a Docker Compose server
+run on the same machine.
 
 ## See also
 
