@@ -656,8 +656,9 @@ describe("Server/admin/static — panel behaviour", () => {
   });
 
   // A failed page turn used to advance state.auditPage while the old rows
-  // stayed on screen, so the next ">" skipped a page.
-  it("keeps the audit pager on the shown page when a page turn fails (AO-7)", async () => {
+  // stayed on screen, so the next ">" skipped a page. A failure now replaces
+  // the rows with the error and a Retry for the page that failed.
+  it("shows a failed audit page turn as an error with Retry (AO-7)", async () => {
     const calls: FetchCall[] = [];
     let fail = false;
     const respond: Responder = (p) => {
@@ -677,27 +678,28 @@ describe("Server/admin/static — panel behaviour", () => {
     booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
     booted.bridge.state.section = "audit";
     doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
-    const next = () =>
-      doc.querySelector<HTMLButtonElement>('[data-action="turnAuditPage"][data-args="[1]"]')!;
 
     fail = true;
-    next().click();
+    doc.querySelector<HTMLButtonElement>('[data-action="turnAuditPage"][data-args="[1]"]')!.click();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(booted.bridge.state.auditPage).toBe(1);
-    expect(doc.querySelector(".pagination-info")!.textContent).toContain("Page 1");
+    expect(booted.bridge.state.auditCache).toEqual([]);
+    expect(doc.querySelectorAll("#auditTbody tr")).toHaveLength(0);
+    expect(doc.querySelector('#auditResults [role="alert"]')!.textContent).toBe("boom");
 
     fail = false;
     calls.length = 0;
-    next().click();
+    doc.querySelector<HTMLButtonElement>('#auditResults [data-action="reloadAudit"]')!.click();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toContain("offset=50");
     expect(booted.bridge.state.auditPage).toBe(2);
+    expect(doc.querySelectorAll("#auditTbody tr")).toHaveLength(50);
   });
 
-  // A failed search or filter change used to commit the new query while the
-  // old rows stayed on screen, so the next page turn, Copy page and Export CSV
-  // disagreed with what was shown.
-  it("keeps the audit query on the shown rows when a search or filter change fails (AO-7)", async () => {
+  // A failed search used to leave the old query's rows on screen; and a page
+  // turn has to use the query the controls show, even while a search is
+  // still pending.
+  it("keeps the audit rows and pager on the query the controls show (AO-7)", async () => {
     const calls: FetchCall[] = [];
     let fail = false;
     const respond: Responder = (p) => {
@@ -725,26 +727,31 @@ describe("Server/admin/static — panel behaviour", () => {
       "setting_change",
     ]);
 
-    fail = true;
     const search = doc.querySelector<HTMLInputElement>(".filter-search")!;
     search.value = "foo";
     search.dispatchEvent(new window.Event("input", { bubbles: true }));
-    await new Promise((resolve) => window.setTimeout(resolve, 350));
-    expect(booted.bridge.state.auditSearch).toBe("");
-
-    search.value = "";
-    select.value = "channel_delete";
-    select.dispatchEvent(new window.Event("change", { bubbles: true }));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(booted.bridge.state.auditActionFilter).toBe("all");
-    expect(doc.querySelector<HTMLSelectElement>("#auditAction")!.value).toBe("all");
-
-    fail = false;
     calls.length = 0;
     doc.querySelector<HTMLButtonElement>('[data-action="turnAuditPage"][data-args="[1]"]')!.click();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=50",
+      "/audit-log?limit=51&offset=50&q=foo",
+    );
+
+    fail = true;
+    select.value = "channel_delete";
+    select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 350));
+    expect(booted.bridge.state.auditActionFilter).toBe("channel_delete");
+    expect(booted.bridge.state.auditCache).toEqual([]);
+    expect(doc.querySelectorAll("#auditTbody tr")).toHaveLength(0);
+    expect(doc.querySelector('#auditResults [role="alert"]')).not.toBeNull();
+
+    fail = false;
+    calls.length = 0;
+    doc.querySelector<HTMLButtonElement>('#auditResults [data-action="reloadAudit"]')!.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=51&offset=0&q=foo&action=channel_delete",
     );
   });
 

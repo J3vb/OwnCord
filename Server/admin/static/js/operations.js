@@ -152,23 +152,18 @@ function auditQuery(search,action){
   const q=search.trim();
   return(q?'&q='+encodeURIComponent(q):'')+(action!=='all'?'&action='+encodeURIComponent(action):'');
 }
-function auditControls(){
-  const box=document.getElementById('auditSearch'),select=document.getElementById('auditAction');
-  return{search:box?box.value:state.auditSearch,action:select?select.value:state.auditActionFilter};
-}
-/* page, search and action are committed to state only once their rows
-   arrive, so a failed fetch leaves the pager, the rows on screen, Copy page
-   and Export CSV in step. */
-async function loadAuditPage(page,search=state.auditSearch,action=state.auditActionFilter){
+/* state.auditSearch and state.auditActionFilter mirror the controls; page is
+   committed to state.auditPage only once its rows arrive. */
+async function loadAuditPage(page){
   const seq=++auditSeq;
   const offset=(page-1)*PAGE_SIZE;
   // Over-fetched like the Users page, so the ">" button never offers an
   // empty page at an exact multiple of PAGE_SIZE.
-  const{data:entries,res}=await apiRes('GET','/audit-log?limit='+(PAGE_SIZE+1)+'&offset='+offset+auditQuery(search,action));
+  const{data:entries,res}=await apiRes('GET','/audit-log?limit='+(PAGE_SIZE+1)+'&offset='+offset+auditQuery(state.auditSearch,state.auditActionFilter));
   if(seq!==auditSeq)return false;
   const actions=res.headers.get('X-Audit-Actions');
   if(actions){try{const a=JSON.parse(actions);if(Array.isArray(a))auditActions=a.filter(x=>typeof x==='string')}catch(e){}}
-  state.auditPage=page;state.auditSearch=search;state.auditActionFilter=action;
+  state.auditPage=page;
   const hasMore=!!entries&&entries.length>PAGE_SIZE;
   state.auditHasMore=hasMore;
   state.auditCache=(entries||[]).slice(0,PAGE_SIZE);
@@ -193,7 +188,7 @@ async function renderAudit(){
 
   let html='<div class="page-title">Audit log</div><div class="page-desc">Every administrative action, newest first. Search and the action filter cover the whole log.</div>';
   html+='<div class="filter-bar audit-filters">';
-  html+='<input type="search" id="auditSearch" class="filter-search" aria-label="Search audit log" placeholder="Search actor, action, target or detail…" maxlength="100" value="'+esc(state.auditSearch)+'" data-input-action="setAuditSearch">';
+  html+='<input type="search" class="filter-search" aria-label="Search audit log" placeholder="Search actor, action, target or detail…" maxlength="100" value="'+esc(state.auditSearch)+'" data-input-action="setAuditSearch">';
   html+='<select class="filter-select" id="auditAction" aria-label="Filter by action" data-change-action="setAuditActionFilter">'+auditOptionsHtml()+'</select>';
   html+='<button class="btn btn-ghost" data-action="copyAuditLog" title="Copy the entries on this page">'+OPS_ICON.copy+'Copy page</button>';
   html+='<button class="btn btn-ghost" data-action="exportAuditCSV" title="Export the entries on this page as CSV">'+I.download+'Export CSV</button>';
@@ -224,17 +219,23 @@ function renderAuditRow(e){
     +'<td class="audit-detail">'+esc(e.detail)+'</td></tr>';
 }
 
-/* Refetch the current page for the current search and filter, replacing only
-   the results. Focus on a pager button stays on the same button. */
-async function reloadAudit(page,search,action){
-  let fresh;
-  try{fresh=await loadAuditPage(page,search,action)}catch(e){
-    const select=document.getElementById('auditAction');if(select)select.innerHTML=auditOptionsHtml();
-    showToast(e.message,'error');return;
-  }
+/* Fetch a page for the current search and filter, replacing only the
+   results. A failure replaces them with the error and a Retry, so no rows for
+   another query stay on screen or in Copy page and Export CSV. Focus on a
+   pager button stays on the same button. */
+async function reloadAudit(page){
+  const load=loadAuditPage(page),seq=auditSeq;
+  let err=null;
+  try{await load}catch(e){err=e}
   const box=document.getElementById('auditResults');
-  if(!fresh||!box||state.section!=='audit')return;
+  if(seq!==auditSeq||!box||state.section!=='audit')return;
   const focused=box.contains(document.activeElement)?document.activeElement.getAttribute('data-args'):null;
+  if(err){
+    state.auditCache=[];
+    box.innerHTML='<p role="alert" style="color:var(--text-danger)">'+esc(err.message)+'</p><button class="btn btn-accent" data-action="reloadAudit" data-args="'+actArgs(page)+'">Retry</button>';
+    if(focused!==null)box.querySelector('button').focus();
+    return;
+  }
   box.innerHTML=auditResultsHtml();
   const select=document.getElementById('auditAction');if(select)select.innerHTML=auditOptionsHtml();
   if(focused===null)return;
@@ -574,13 +575,13 @@ async function uninstallPlugin(id){
 }
 
 Object.assign(ACTIONS,{clearLogs,confirmRevokeToken,copyAllLogs,copyAuditLog,copyToken,createToken,
-  discardSupportBundle,downloadSupportBundle,exportAuditCSV,installPlugin,openCreateTokenModal,openUninstallPlugin,
+  discardSupportBundle,downloadSupportBundle,exportAuditCSV,reloadAudit,installPlugin,openCreateTokenModal,openUninstallPlugin,
   previewSupportBundle,revokeToken,setPluginEnabled,toggleLogAutoScroll,toggleLogLevel,toggleLogPause,uninstallPlugin,
   turnAuditPage(delta){reloadAudit(Math.max(1,state.auditPage+delta))},
   setAuditSearch(){
-    clearTimeout(auditSearchTimer);
-    auditSearchTimer=setTimeout(()=>{const c=auditControls();reloadAudit(1,c.search,c.action)},300);
+    state.auditSearch=this.value;clearTimeout(auditSearchTimer);
+    auditSearchTimer=setTimeout(()=>reloadAudit(1),300);
   },
-  setAuditActionFilter(){clearTimeout(auditSearchTimer);const c=auditControls();reloadAudit(1,c.search,c.action)},
+  setAuditActionFilter(){clearTimeout(auditSearchTimer);state.auditActionFilter=this.value;reloadAudit(1)},
   setLogSearch(){state.logSearch=this.value;renderLogLines()},
   pluginFileChosen(){document.getElementById('pluginInstallBtn').disabled=!this.files.length}});
