@@ -682,6 +682,14 @@ advance runs inside the message transaction. That halved writer waits and
 took ~7% off the aligned-burst p95 (318 → 297 ms locally). Spread sends are
 unchanged at 18 ms. These local figures are not reference-runner figures.
 
+**OC-0454 is declined by owner decision D-09 (Q14, 2026-09-26) as an accepted
+low, and this document does not budget the aligned burst.** The shape is a
+property of per-frame fan-out cost — one TLS record and one write syscall per
+frame per recipient — not a correctness defect, and a real population rarely
+presses Enter in unison. Reopen on a user-visible burst scenario where the
+acknowledgement tail costs someone; the fix then is a connection wrapper that
+coalesces queued frames into one flush.
+
 **Measurement-only rows — no budget is published for any of them, and this
 document does not invent one.**
 

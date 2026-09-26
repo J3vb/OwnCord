@@ -10524,13 +10524,15 @@
       "why": "When N senders hit the server in the same instant their sends serialize on the single SQLite writer, so the last sender's acknowledgement waits N hops. Re-profiled 2026-09-23 (perf/oc-0454-single-writer-checkout), the hop is not the checkout: the message transaction holds the writer 0.31-0.33 ms p50 (0.72-0.85 ms p95) under the burst, and the gap to the next holder is 0.44-0.49 ms p50. The rest is CPU. A 100-sender burst makes 100 transactions plus 100 x 100 = 10,000 WebSocket frames inside about 100 ms, and every frame is its own TLS record and write syscall (coder/websocket flushes each message; there is no API to write several before one flush). writePump is 57% of server CPU and the write syscall alone 30%. Two vCPUs are saturated for the burst window while the 2 s average is ~0.2 cores, so the writer's next waiter queues behind fan-out goroutines. Each send also took the writer twice (message transaction, then the author's UpdateReadState). That second checkout is now folded into the transaction: writer waits halved, but the burst p95 moved only ~7%, because the checkouts were never the dominant cost. Separately, about half of what ws-load.js reports as acknowledgement latency in a burst is the generator: each k6 VU parses up to 99 inbound chat_message frames before it sees its own chat_send_ok. Server-side, client-send to ack-written was 72/115 ms p50/p95 against 160/318 ms measured by k6 on the same run. A real population rarely presses Enter in unison. The residual shape is a property of per-frame fan-out cost, not a correctness defect.",
       "repro": "K6_SEND_PHASE=aligned (ws-load.js, default spread) puts every VU's sends on the same epoch-aligned 2 s boundary. Locally: server pinned to CPUs 0-1 with taskset, k6 v1.3.0 pinned to 2-3, capacity profile, K6_PEAK_VUS=100 K6_RAMP=30s K6_SUSTAIN=90s, TLS self_signed, no voice leg. Read ws_broadcast_latency_ms from k6-summary.json, and db_writer_wait_count/_seconds deltas from /api/v1/metrics.",
       "evidence": "Original: runs 35852682786 (10 s buckets: 573/520/524/554/582/506/557/531 ms p95 from t=180 s on self_signed, 3-69 ms before) and 35856013841/35856019988 (phase-preserved: 41-96 ms p95); local 2-core timing then put the checkout hold at 0.40-0.60 ms and the idle gap at 5.5-6.1 ms. Re-measured 2026-09-23 on a 4-CPU sandbox with the split above, interleaved, dev (20bcfdf8) vs one-checkout fix (8c49f320). Aligned: ack p50/p95/p99 160/318/345 and 154/319/355 ms on dev, 143/298/322 and 146/296/324 ms on the fix; delivery p95 318/320 vs 299/297 ms. Writer waits per 60 s of sustain 6030/5944 on dev vs 2972/3019 on the fix, wait time 191/180 s vs 158/155 s. Spread (default): ack 4/18/29 vs 4/18/30 ms, delivery p95 20 vs 19 ms, unchanged. Diagnostic build (not committed), aligned: server-side client-send to chat_send_ok written 72/115 ms p50/p95 on dev and 60-65/110-116 ms on the fix; SendMessage service time 65/108 ms vs 51-55/100-105 ms; writer transaction hold 0.31-0.33 ms p50; gap between holds 0.44-0.49 ms p50. 30 s CPU profile under the burst: ws.writePump 57% cumulative, write syscall 30%, SQLite work ~10%; the block profile's only send-path wait is database/sql.(*DB).conn (BeginTx 58%, UpdateReadState 40% on dev).",
-      "status": "open",
+      "status": "declined",
       "found": "2026-09-23",
       "hunt": "oc-0445-diagnosis",
       "lens": "run-the-thing",
       "finder": "fm/oc-0445-fable",
       "suggestedFix": "Done: one writer checkout per send (the author's read-state upsert runs inside CreateMessageWithMentions / CreateMessageDelivery). What remains is per-frame fan-out cost: one TLS record and one write syscall per frame per recipient. Coalescing queued frames into one flush needs support coder/websocket does not expose (or a connection wrapper), so it is not a small change and is not justified by a real-population shape yet. Cheaper per-frame trims exist (writePumpWrite builds a context.WithTimeout per frame, ~7% of CPU) but would not change the shape.",
-      "note": "2026-09-23: kept open. The one-checkout change (8c49f320, perf/oc-0454-single-writer-checkout) halves writer checkouts and takes ~7% off the aligned-burst p95. The per-hop cost it was filed against turned out to be fan-out CPU plus generator-side backlog, so the shape remains."
+      "note": "2026-09-23: kept open. The one-checkout change (8c49f320, perf/oc-0454-single-writer-checkout) halves writer checkouts and takes ~7% off the aligned-burst p95. The per-hop cost it was filed against turned out to be fan-out CPU plus generator-side backlog, so the shape remains. 2026-09-26: declined by D-09 (Q14) as an accepted low; see rationale for the reopen trigger.",
+      "rationale": "Owner decision D-09 (Q14, 2026-09-26): declined as an accepted low. The alignment it was filed against is a genuine simultaneous-burst cost of per-frame fan-out, not a correctness defect, and a real population rarely presses Enter in unison. The one-checkout change (8c49f320) already halved writer waits and took ~7% off the aligned burst. Trigger to reopen: a user-visible burst scenario where the acknowledgement tail costs someone, at which point the per-frame write path (a connection wrapper that coalesces queued frames into one flush) is the fix.",
+      "declinedDate": "2026-09-26"
     },
     {
       "id": "OC-0455",
@@ -11069,11 +11071,19 @@
       "evidence": "Server/.golangci.yml:17-22: RATCHET / \"just above today's worst offender\". Server/.golangci.yml:47-52: \"Complexity budgets set to a TARGET ... Existing offenders are deliberately left failing\". Server/.golangci.yml:61-63, 67-68, 71, 74-78: stale 'Worst today' and duplicate-pair lists. .github/workflows/ci.yml:456-462: blocking Lint step with version v2.11.3 and no only-new-issues, so the tree must already be clean for CI to pass.",
       "suggestedFix": "Delete the RATCHET paragraph (lines 17-21) and the 'Worst today' and duplicate-pair notes. Keep the target rationale, and state that the tree is clean at these budgets, so any failure is a new regression. While there, rename the stale ci.yml:524 step label \"Import cycles (ceiling 29, B7-10 lowers it)\"; the command runs at --max-warnings=0.",
       "confidence": "high",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25",
       "hunt": "b9-exit-audit-2026-09-25",
       "lens": "code-health",
-      "finder": "b9-exit-audit"
+      "finder": "b9-exit-audit",
+      "fix": {
+        "commit": "6f120c02",
+        "test": "n/a (documentation)",
+        "revertProof": "n/a",
+        "pr": 1800
+      },
+      "fixedDate": "2026-09-26",
+      "note": "Corrected by 6f120c02 (#1800, 2026-09-25): the RATCHET paragraph and every 'Worst today'/duplicate-pair note are gone, the settings block states the tree is clean at these budgets, and the ci.yml import-cycles step is renamed. Verified against HEAD: the stale strings no longer occur in Server/.golangci.yml."
     }
   ]
 }
