@@ -135,4 +135,22 @@ describe("admin support bundle preview and confirmation", () => {
     expect(panel.state.supportPreview).toBeNull();
     expect(downloads).toEqual([]);
   });
+
+  // AO-7. The redaction report was an unstyled wall of text. Each rule is now
+  // a list item naming its file and rule, and the preview's expiry is local
+  // time with the UTC instant in its tooltip.
+  it("renders the redaction report as a list and the expiry through fmtLocal", async () => {
+    const { panel, content } = await boot();
+    await panel.previewSupportBundle();
+    const rules = content.querySelectorAll(".redaction-list li");
+    expect(rules).toHaveLength(1);
+    expect(rules[0]!.querySelector(".redaction-rule code")!.textContent).toBe("events.json");
+    expect(rules[0]!.querySelector(".redaction-rule span")!.textContent).toBe(
+      "fixed event codes only",
+    );
+    expect(rules[0]!.querySelector("p")!.textContent).toBe("raw messages and credentials omitted");
+    expect(content.querySelector(".facts [title]")!.getAttribute("title")).toBe(
+      "2099-01-01T12:00:00.000Z",
+    );
+  });
 });

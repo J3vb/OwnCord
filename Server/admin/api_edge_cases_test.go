@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -295,6 +297,105 @@ func TestAdminAPI_AuditLog_Pagination(t *testing.T) {
 	}
 	if len(entries) != 2 {
 		t.Errorf("expected 2 entries with limit=2 offset=2, got %d", len(entries))
+	}
+}
+
+// TestAdminAPI_AuditLog_Search pins the server-side audit search (AO-7): q
+// and action narrow the whole log, not just the page the panel fetched, and
+// the pagination limits still apply to the narrowed result.
+func TestAdminAPI_AuditLog_Search(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+	ctx := context.Background()
+
+	uid, _ := database.CreateUser(ctx, "searcher", "hash", 1)
+	// The one match is the OLDEST row, behind a full page of newer noise, so
+	// a page-local filter could never find it.
+	_ = database.LogAudit(ctx, uid, "channel_delete", "channel", 1, "removed #Needle-Room")
+	for i := range 60 {
+		_ = database.LogAudit(ctx, uid, "setting_change", "setting", int64(i), "motd updated")
+	}
+	for i := range 5 {
+		_ = database.LogAudit(ctx, uid, "role_create", "role", int64(i), "")
+	}
+
+	get := func(t *testing.T, query string) []map[string]any {
+		t.Helper()
+		w := doRequest(t, handler, http.MethodGet, "/audit-log?"+query, token, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET /audit-log?%s status = %d, want 200; body: %s", query, w.Code, w.Body.String())
+		}
+		var entries []map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &entries); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return entries
+	}
+
+	t.Run("q matches detail case-insensitively across the whole log", func(t *testing.T) {
+		got := get(t, "limit=50&q=needle-room")
+		if len(got) != 1 || got[0]["action"] != "channel_delete" {
+			t.Fatalf("q=needle-room = %v, want the one channel_delete row", got)
+		}
+	})
+	t.Run("q matches the actor name", func(t *testing.T) {
+		if got := get(t, "limit=500&q=SEARCH"); len(got) != 66 {
+			t.Fatalf("q=SEARCH = %d rows, want all 66 by actor searcher", len(got))
+		}
+	})
+	t.Run("action is an exact match", func(t *testing.T) {
+		if got := get(t, "limit=500&action=role_create"); len(got) != 5 {
+			t.Fatalf("action=role_create = %d rows, want 5", len(got))
+		}
+		if got := get(t, "limit=500&action=role"); len(got) != 0 {
+			t.Fatalf("action=role = %d rows, want 0 (no prefix match)", len(got))
+		}
+	})
+	t.Run("q and action combine, and paginate", func(t *testing.T) {
+		if got := get(t, "action=setting_change&q=MOTD&limit=7&offset=56"); len(got) != 4 {
+			t.Fatalf("page past offset 56 of 60 matches = %d rows, want 4", len(got))
+		}
+	})
+	t.Run("a blank q does not narrow", func(t *testing.T) {
+		if got := get(t, "limit=500&q=%20%20"); len(got) < 66 {
+			t.Fatalf("q=blank = %d rows, want every row", len(got))
+		}
+	})
+	t.Run("the first page names every action, older ones included", func(t *testing.T) {
+		w := doRequest(t, handler, http.MethodGet, "/audit-log?limit=5&action=role_create", token, nil)
+		var actions []string
+		if err := json.Unmarshal([]byte(w.Header().Get("X-Audit-Actions")), &actions); err != nil {
+			t.Fatalf("X-Audit-Actions = %q: %v", w.Header().Get("X-Audit-Actions"), err)
+		}
+		if !slices.Contains(actions, "channel_delete") || !slices.IsSorted(actions) {
+			t.Fatalf("X-Audit-Actions = %v, want a sorted list naming the oldest row's channel_delete", actions)
+		}
+		w = doRequest(t, handler, http.MethodGet, "/audit-log?limit=5&offset=5", token, nil)
+		if h := w.Header().Get("X-Audit-Actions"); h != "" {
+			t.Fatalf("offset=5 X-Audit-Actions = %q, want none past the first page", h)
+		}
+	})
+	t.Run("limit stays capped at 500", func(t *testing.T) {
+		for i := range 500 {
+			_ = database.LogAudit(ctx, uid, "setting_change", "setting", int64(i), "bulk")
+		}
+		if got := get(t, "limit=100000&q=setting"); len(got) != 500 {
+			t.Fatalf("limit=100000 = %d rows, want the 500 cap", len(got))
+		}
+	})
+
+	for name, query := range map[string]string{
+		"an over-long q":        "q=" + strings.Repeat("a", 101),
+		"an over-long action":   "action=" + strings.Repeat("a", 65),
+		"a q that is not UTF-8": "q=%ff%fe",
+	} {
+		t.Run("rejects "+name, func(t *testing.T) {
+			w := doRequest(t, handler, http.MethodGet, "/audit-log?"+query, token, nil)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }
 

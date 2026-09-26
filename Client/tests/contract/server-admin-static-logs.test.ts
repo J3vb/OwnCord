@@ -17,7 +17,8 @@ const ADMIN_HTML_SOURCE = adminPanelHtml();
 const BRIDGE = `<script>
 window.__test = {
   state: state,
-  connectLogStream: connectLogStream
+  connectLogStream: connectLogStream,
+  renderLogs: renderLogs
 };
 </script>`;
 if (!ADMIN_HTML_SOURCE.includes("</body>")) {
@@ -76,6 +77,7 @@ function loadAdminPanel(fetchCalls: FetchCall[]): JSDOM {
 interface Bridge {
   state: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   connectLogStream: () => Promise<void>;
+  renderLogs: () => string;
 }
 
 function backfillEntry(i: number) {
@@ -207,5 +209,62 @@ describe("Server/admin/static — log stream (re)connect (OC-0435)", () => {
     }
 
     expect(bridge.state.logEntries.length).toBe(5);
+  });
+
+  // AO-7. The toolbar carried Unicode glyphs ("⏸" is a missing-glyph box in
+  // Linux Chromium) and level chips whose on/off state was colour only.
+  it("renders level chips as aria-pressed toggles and an icon toolbar", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    const toolbar = doc.querySelector(".log-toolbar")!;
+    expect(toolbar.textContent).not.toMatch(/[⬇⏸▶]/);
+    expect(doc.querySelector('[role="group"][aria-label="Show levels"]')).not.toBeNull();
+    const chip = (l: string) =>
+      doc.querySelector<HTMLButtonElement>(`.level-toggle[data-level="${l}"]`)!;
+    for (const l of ["DEBUG", "INFO", "WARN", "ERROR"]) {
+      expect(chip(l).getAttribute("aria-pressed")).toBe("true");
+    }
+
+    const es = FakeEventSource.instances[0]!;
+    es.onmessage?.({
+      data: JSON.stringify({ ...backfillEntry(1), ts: "2026-09-12T08:15:30.250Z" }),
+    });
+    es.onmessage?.({ data: JSON.stringify({ ...backfillEntry(2), level: "WARN" }) });
+    expect(doc.querySelectorAll("#logOutput .log-line")).toHaveLength(2);
+    // Local time on screen, the UTC instant in the tooltip (fmtLocal).
+    expect(doc.querySelector("#logOutput .log-ts span")!.getAttribute("title")).toBe(
+      "2026-09-12T08:15:30.250Z",
+    );
+
+    chip("INFO").click();
+    expect(chip("INFO").getAttribute("aria-pressed")).toBe("false");
+    expect(doc.querySelectorAll("#logOutput .log-line")).toHaveLength(1);
+    chip("INFO").click();
+    expect(chip("INFO").getAttribute("aria-pressed")).toBe("true");
+
+    const auto = doc.getElementById("autoScrollBtn")!;
+    expect(auto.getAttribute("aria-pressed")).toBe("true");
+    auto.click();
+    expect(auto.getAttribute("aria-pressed")).toBe("false");
+
+    const pause = doc.getElementById("pauseBtn")!;
+    expect(pause.textContent).toBe("Pause");
+    pause.click();
+    expect(pause.textContent).toBe("Resume");
+    expect(pause.querySelector("svg")).not.toBeNull();
+
+    // The log scrolls from the keyboard without being a live region.
+    const out = doc.getElementById("logOutput")!;
+    expect(out.getAttribute("tabindex")).toBe("0");
+    expect(out.getAttribute("role")).toBe("region");
   });
 });

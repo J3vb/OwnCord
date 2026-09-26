@@ -3557,11 +3557,23 @@ Remove a channel's override so the server window applies again. Audited as
 Read the audit trail, newest first.
 
 **Auth:** `VIEW_AUDIT_LOG`
-**Query params:** `limit` (default 50, min 1), `offset` (default 0)
+**Query params:** `limit` (default 50, 1–500), `offset` (default 0), and two
+optional filters that narrow the whole log before paging:
+
+- `q`: case-insensitive (ASCII) substring of the actor's name, the action, the
+  target type or the detail. Surrounding whitespace is trimmed; at most 100
+  characters.
+- `action`: one exact action name, such as `channel_delete`; at most 64 bytes.
+
+An over-long or non-UTF-8 `q` or `action` is `400 BAD_REQUEST`.
 
 #### Response 200 OK
 
-Array of:
+On the first page (`offset` 0) the response also carries an
+`X-Audit-Actions` header: a JSON array of the distinct action names in the
+whole log, sorted, at most 200, whatever `q` and `action` are — so the admin
+panel's action filter can offer actions no fetched row contains. The body is
+an array of:
 
 ```json
 {

@@ -340,15 +340,23 @@ input,select,textarea{font-family:inherit;border:none}
 .wiz-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
 .wiz-toggle-row .lbl{font-size:14px;color:var(--text-normal)}
 
-/* Log viewer */
+/* Log viewer. Level chips are aria-pressed toggles: pressed is tinted with a
+   filled dot, released is outlined with a hollow one, so the state does not
+   rest on colour alone. */
 .log-toolbar{display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
-.level-toggle{padding:4px 10px;border-radius:10px;font-size:11px;font-weight:700;background:var(--bg-hover);color:var(--text-muted);transition:all .15s;text-transform:uppercase;letter-spacing:.03em}
-.level-toggle:hover{color:var(--text-normal)}
-.level-toggle.active-debug{background:rgba(163,169,178,.2);color:var(--text-normal)}
-.level-toggle.active-info{background:rgba(92,195,137,.2);color:var(--text-positive)}
-.level-toggle.active-warn{background:rgba(242,184,75,.2);color:var(--text-warning)}
-.level-toggle.active-error{background:rgba(255,143,146,.2);color:var(--text-danger)}
-.log-output{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:12px;line-height:1.6;padding:8px 12px;overflow-y:auto;height:calc(100vh - 240px);white-space:pre-wrap;word-break:break-all}
+.level-group{display:flex;gap:6px;flex-wrap:wrap}
+.level-toggle{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:4px 10px;border-radius:var(--radius-pill);font-size:11px;font-weight:700;background:transparent;color:var(--text-muted);border:1px solid var(--border-control);transition:background .15s,color .15s,border-color .15s;text-transform:uppercase;letter-spacing:.03em}
+.level-toggle::before{content:'';width:7px;height:7px;border-radius:50%;border:1.5px solid currentColor;flex-shrink:0}
+.level-toggle[aria-pressed="true"]::before{background:currentColor}
+.level-toggle:hover{color:var(--text-normal);border-color:var(--text-muted)}
+.level-toggle[aria-pressed="true"].lvl-debug{background:rgba(163,169,178,.15);border-color:rgba(163,169,178,.5);color:var(--text-normal)}
+.level-toggle[aria-pressed="true"].lvl-info{background:rgba(92,195,137,.15);border-color:rgba(92,195,137,.5);color:var(--text-positive)}
+.level-toggle[aria-pressed="true"].lvl-warn{background:rgba(242,184,75,.15);border-color:rgba(242,184,75,.5);color:var(--text-warning)}
+.level-toggle[aria-pressed="true"].lvl-error{background:rgba(255,143,146,.15);border-color:rgba(255,143,146,.5);color:var(--text-danger)}
+.log-toolbar .log-filter{flex:1;min-width:180px}
+.log-actions{display:flex;gap:6px;flex-wrap:wrap}
+.log-actions .btn[aria-pressed="true"]{background:var(--accent-glow);color:var(--accent-text)}
+.log-output{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:12px;line-height:1.6;padding:8px 12px;overflow-y:auto;height:calc(100vh - 300px);min-height:240px;white-space:pre-wrap;word-break:break-all}
 .log-line{padding:1px 0}
 .log-line .log-ts{color:var(--text-muted);margin-right:8px}
 .log-line .log-lvl{display:inline-block;width:44px;font-weight:700;margin-right:6px}
@@ -362,6 +370,35 @@ input,select,textarea{font-family:inherit;border:none}
 .log-status .dot-live{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
 .log-status .dot-off{width:6px;height:6px;border-radius:50%;background:var(--red)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* Audit log */
+.audit-tbl .audit-time{font-size:12px;color:var(--text-muted);white-space:nowrap}
+.audit-tbl .audit-target{white-space:nowrap}
+.audit-tbl .audit-detail{font-size:12px;color:var(--text-muted);min-width:220px;overflow-wrap:anywhere}
+@media(max-width:600px){.audit-filters{align-items:stretch}}
+.tbl .tbl-empty{text-align:center;color:var(--text-muted);padding:24px}
+.tbl .num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* Diagnostics: the bundle's scope, then the frozen preview as facts, a file
+   table and the redaction rules. */
+.support-scope{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:12px}
+.support-scope h4,.support-heading{font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px}
+.support-list{list-style:none;display:grid;gap:4px}
+.support-list li{font-size:13px;padding-left:14px;position:relative}
+.support-list li::before{content:'';position:absolute;left:0;top:.55em;width:6px;height:6px;border-radius:50%;background:var(--border-control)}
+.support-note{font-size:13px;color:var(--text-muted);margin:12px 0}
+.facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px 16px;font-size:13px}
+.facts dt{color:var(--text-muted)}
+.facts dd{min-width:0}
+code.hash{font-family:var(--font-mono);font-size:12px;overflow-wrap:anywhere;word-break:break-all}
+#support-preview .tbl code{font-family:var(--font-mono);font-size:12px}
+#support-preview .tbl code.hash{display:inline-block;min-width:32ch}
+.redaction-list{list-style:none;display:grid;gap:8px}
+.redaction-list li{padding:10px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm)}
+.redaction-rule{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;font-size:13px;font-weight:600;color:var(--header-primary)}
+.redaction-rule code{font-family:var(--font-mono);font-size:12px;font-weight:400;color:var(--accent-text)}
+.redaction-list p{font-size:13px;color:var(--text-muted);margin-top:4px;line-height:1.45}
+.support-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px}
 
 .hidden{display:none!important}
 

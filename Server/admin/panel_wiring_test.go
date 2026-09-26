@@ -117,7 +117,8 @@ func TestAdminPanelRetentionIsWired(t *testing.T) {
 // OC-0331: api_tokens.created_at / last_used_at are SQLite datetime('now')
 // strings — naive UTC with no zone — and new Date() reads that non-ISO form
 // as LOCAL time. expires_at in the same row carries an explicit Z and was
-// therefore right, so the table contradicted itself.
+// therefore right, so the table contradicted itself. The rendered cells are
+// checked in Client/tests/contract (server-admin-static-panel.test.ts).
 func TestAdminPanelTokenTimestampsParsedAsUTC(t *testing.T) {
 	source := adminPanelSource(t)
 
@@ -130,11 +131,6 @@ func TestAdminPanelTokenTimestampsParsedAsUTC(t *testing.T) {
 	} {
 		if strings.Contains(source, raw) {
 			t.Errorf("%s is still parsed as local time", raw)
-		}
-	}
-	for _, fixed := range []string{"utcDate(t.created_at)", "utcDate(t.last_used)"} {
-		if !strings.Contains(source, fixed) {
-			t.Errorf("missing %s", fixed)
 		}
 	}
 }
