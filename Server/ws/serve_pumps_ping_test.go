@@ -16,7 +16,7 @@ import (
 	"github.com/coder/websocket"
 )
 
-const testPingInterval = 50 * time.Millisecond
+const testPingInterval = 300 * time.Millisecond
 
 // startPingPumpServer accepts one connection, runs pingPump plus a read loop
 // (the Pong is only processed by a concurrent Read, as readPump does in
