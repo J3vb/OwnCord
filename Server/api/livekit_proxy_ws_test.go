@@ -155,6 +155,53 @@ func TestLiveKitProxy_WebSocket_PreservesQueryString(t *testing.T) {
 	}
 }
 
+// TestLiveKitProxy_WebSocket_ForwardsAuthorization covers the Linux client's
+// native voice: the LiveKit Rust SDK sends its room-join token as an
+// Authorization header, not the access_token query parameter. Dropping the
+// header left LiveKit with no token, so every remote join was rejected.
+func TestLiveKitProxy_WebSocket_ForwardsAuthorization(t *testing.T) {
+	const authz = "Bearer eyJhbGciOiJIUzI1NiJ9.native.sig"
+	var gotAuthz, gotCookie string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthz = r.Header.Get("Authorization")
+		gotCookie = r.Header.Get("Cookie")
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			return
+		}
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte("ok"))
+		conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+	}))
+	t.Cleanup(srv.Close)
+
+	proxy := httptest.NewServer(api.NewLiveKitProxy("ws://"+srv.Listener.Addr().String(), []string{"*"}))
+	t.Cleanup(proxy.Close)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	conn, dialResp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": {authz}, "Cookie": {"session=secret"}},
+	})
+	if dialResp != nil && dialResp.Body != nil {
+		defer dialResp.Body.Close() //nolint:errcheck // best-effort close in test
+	}
+	if err != nil {
+		t.Fatalf("dial through proxy: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if gotAuthz != authz {
+		t.Errorf("backend saw Authorization %q, want %q", gotAuthz, authz)
+	}
+	if gotCookie != "" {
+		t.Errorf("backend saw Cookie %q; only Authorization may be forwarded", gotCookie)
+	}
+}
+
 func TestLiveKitProxy_WebSocket_BackendUnavailable(t *testing.T) {
 	// Nothing is listening on this port, so the backend dial must fail.
 	proxy := httptest.NewServer(api.NewLiveKitProxy("ws://127.0.0.1:1", []string{"*"}))
