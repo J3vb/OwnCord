@@ -595,10 +595,10 @@ database, prefer scheduling backups at a low-traffic time of day.
 
 ### Scheduled Backups
 
-The **Backup Schedule** (off / daily / weekly) and **Retention (days)**
-settings in the admin panel are enforced by the server's maintenance loop
-(checked every 15 minutes). Only the Owner can change them; the panel shows
-both read-only to any other administrator:
+The **Automatic backups** schedule (off / daily / weekly) and **Keep backups
+for (days)** on the admin panel's Backups & restore page are enforced by the
+server's maintenance loop (checked every 15 minutes). Only the Owner can
+change them, and that page is the Owner's alone:
 
 - A scheduled backup is taken when the newest backup on disk is older than
   the schedule interval — a manual backup resets the clock too.
@@ -637,6 +637,9 @@ Manage tokens with `./chatserver token list` and
 `./chatserver token revoke <id|label>`.
 
 ### Restore
+
+In the admin panel, **Restore** asks for the backup's file name typed out,
+then waits for the restart and reloads the page.
 
 Restoring replaces the live database file, in this order: the server runs
 `integrity_check` on the backup file and refuses a broken one; it writes the
@@ -728,7 +731,7 @@ and what — if anything — ever deletes it:
 | ------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `chatserver.db` + `chatserver.db-wal`       | every feature                                                          | messages: the server window or a per-channel retention policy (`0` = keep forever); the persisted event tier: 24 h | retention sweep, at most 5 000 messages per tick; the event pruner, every 60 minutes; the WAL is truncated after an erasure completes   |
 | `uploads/`                                  | attachments, avatars, emoji                                            | `upload.max_size_mb` (default 100) per file, `upload.user_quota_mb` (default `0` = unlimited) per user             | the orphan sweep (unlinked for more than 1 hour), the retention sweep, erasure, and the reconciliation pass, at most 500 files per tick |
-| `backups/`                                  | manual and scheduled backups, and the `pre_restore_*.db` safety copies | `Retention (days)` in the admin panel                                                                              | retention always keeps the newest backup and never removes the `pre_restore_*` safety copies, which must be deleted by hand             |
+| `backups/`                                  | manual and scheduled backups, and the `pre_restore_*.db` safety copies | `Keep backups for (days)` on the admin panel's Backups & restore page                                              | retention always keeps the newest backup and never removes the `pre_restore_*` safety copies, which must be deleted by hand             |
 | `acme_certs/`                               | `tls.mode: acme` only                                                  | one certificate for the configured domain                                                                          | the ACME client manages renewal itself                                                                                                  |
 | `livekit/`                                  | `voice.auto_download_livekit`                                          | one pinned release of the LiveKit server binary                                                                    | never — delete the file by hand to force a fresh download                                                                               |
 | `plugins/`                                  | plugins loaded by `-tags wazero` builds                                | what the plugins themselves write                                                                                  | never                                                                                                                                   |
@@ -853,8 +856,9 @@ sudo systemctl start owncord
 ```
 
 The admin panel's in-place update performs the same swap for you, including the
-supervisor handoff — see [Auto-Update](#auto-update). Take the archive first
-either way; the panel does not take one for you.
+supervisor handoff — see [Auto-Update](#auto-update). Its update dialog backs
+up the database first unless you untick that, but the copy is the database
+alone, so take the archive first either way.
 
 **Docker** — `docker compose pull && docker compose up -d`, with the container
 specifics under [Upgrading](#upgrading) in the Docker section.
@@ -1259,6 +1263,10 @@ The server checks GitHub Releases for updates:
 - Verifies a signed `server-update-manifest.json` that binds the binary hash to the release version
 - Cross-checks the binary SHA256 against `checksums.sha256`
 
+The admin panel's update dialog links the release notes, warns that database
+migrations only run forward, and takes a database backup first unless you
+untick it; if that backup fails, nothing is updated.
+
 Applying an update runs in this order:
 
 1. Download and verify the replacement beside the installed executable.
@@ -1448,7 +1456,7 @@ choose one: [TLS Setup](#tls-setup).
 - [ ] **Set `voice.node_ip`** -- required for remote users behind NAT
 - [ ] **Review upload limits** -- adjust `upload.max_size_mb` for your use case
 - [ ] **Configure GitHub token** -- optional, for reliable update checks
-- [ ] **Schedule backups** -- use the built-in Backup Schedule in the admin panel, or the endpoint from your own cron ([Scheduled Backups](#scheduled-backups))
+- [ ] **Schedule backups** -- use the built-in schedule on the admin panel's Backups & restore page, or the endpoint from your own cron ([Scheduled Backups](#scheduled-backups))
 - [ ] **Monitor health** -- poll `/health` for uptime monitoring; it is poll-only, the server does not push alerts
 
 ## Background Maintenance

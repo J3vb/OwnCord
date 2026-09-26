@@ -1,61 +1,87 @@
 /* OwnCord admin panel: Settings, Message Retention, Backups and Updates. */
 
 /* ═══ Settings ═══ */
+/* The keys this page edits. Config-file values (upload limit, voice quality)
+   are read-only facts from GET /config, and the owner-only backup policy
+   lives on Backups & restore. */
+const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa'];
+function settingNorm(k,v){return k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):(v||'')}
+function settingsFormValues(keys){
+  const out={};
+  keys.forEach(k=>{const el=document.getElementById('s-'+k);if(el)out[k]=el.classList.contains('toggle')?(el.classList.contains('on')?'true':'false'):el.value});
+  return out;
+}
+/* Only what actually changed. The server's require_2fa enrollment
+   precondition (service.validateRequire2FAUpdate) keys on the key's mere
+   presence in the PATCH, not on whether its value moved — so resending it
+   unchanged re-runs that precondition for a save that never touched it and
+   can wedge the whole page once any TOTP-less user exists. */
+function settingsDiff(values){
+  const cur=state._settings||{};const body={};
+  Object.keys(values).forEach(k=>{if(values[k]!==settingNorm(k,cur[k]))body[k]=values[k]});
+  return body;
+}
+function settingsRow(key,name,desc,ctrl){
+  return'<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-'+key+'">'+name+'</label>'+(desc?'<div class="setting-desc" id="s-'+key+'-desc">'+desc+'</div>':'')+'</div><div class="setting-ctrl">'+ctrl+'</div></div>';
+}
+function settingsCard(title,body){const id='sc-'+title.replace(/\W+/g,'-');return'<section class="section-card" aria-labelledby="'+id+'"><div class="section-card-header"><h3 id="'+id+'">'+esc(title)+'</h3></div><div class="section-card-body">'+body+'</div></section>'}
+function voiceQualityLabel(q){return{low:'Low',medium:'Medium',high:'High'}[q]||q||'Unknown'}
+
 async function renderSettings(){
-  let settings;
+  let settings,facts=null;
   try{settings=await api('GET','/settings')}catch(e){return'<div class="page-title">Settings</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
+  try{facts=await api('GET','/config')}catch(e){}
   state._settings={...settings};
-  const v=k=>settings[k]||'';
-  const isOn=k=>v(k)==='1'||v(k)==='true';
-  let html='<div class="page-title">Server Settings</div><div class="page-desc">Configure your OwnCord server</div>';
-  html+='<div class="section-card"><div class="section-card-header"><h3>General</h3></div><div class="section-card-body">';
-  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-server_name">Server Name</label></div><div class="setting-ctrl"><input class="form-input" id="s-server_name" value="'+esc(v('server_name'))+'" style="width:240px" data-input-action="markSettingsChanged"></div></div>';
-  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-server_icon">Server Icon URL</label><div class="setting-desc">Not used by the server or client yet &mdash; stored for a future release</div></div><div class="setting-ctrl"><input class="form-input" id="s-server_icon" value="'+esc(v('server_icon'))+'" style="width:240px" disabled title="Not implemented yet"></div></div>';
-  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-motd">Message of the Day</label><div class="setting-desc">Shown to users when they connect</div></div><div class="setting-ctrl"><input class="form-input" id="s-motd" value="'+esc(v('motd'))+'" style="width:300px" data-input-action="markSettingsChanged"></div></div>';
-  html+='</div></div>';
-  html+='<div class="section-card"><div class="section-card-header"><h3>Limits</h3></div><div class="section-card-body">';
-  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-max_upload_bytes">Max Upload Size (bytes)</label><div class="setting-desc">Controlled by upload.max_size_mb in config.yaml (requires restart) &mdash; this display value has no effect</div></div><div class="setting-ctrl"><input class="form-input" id="s-max_upload_bytes" value="'+esc(v('max_upload_bytes'))+'" style="width:160px" type="number" disabled title="Set upload.max_size_mb in config.yaml and restart"></div></div>';
-  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-voice_quality">Voice Quality</label><div class="setting-desc">Controlled by voice.quality in config.yaml (requires restart) &mdash; this display value has no effect</div></div><div class="setting-ctrl"><select class="filter-select" id="s-voice_quality" disabled title="Set voice.quality in config.yaml and restart"><option value="low" '+(v('voice_quality')==='low'?'selected':'')+'>Low</option><option value="medium" '+(v('voice_quality')==='medium'?'selected':'')+'>Medium</option><option value="high" '+(v('voice_quality')==='high'?'selected':'')+'>High</option></select></div></div>';
-  html+='</div></div>';
-  html+='<div class="section-card"><div class="section-card-header"><h3>Security</h3></div><div class="section-card-body">';
-  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require 2FA</div><div class="setting-desc">Require all users to enable two-factor authentication</div></div><div class="setting-ctrl"><button class="toggle '+(isOn('require_2fa')?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+(isOn('require_2fa')?'true':'false')+'" aria-labelledby="s-require_2fa-name" data-action="toggleSetting"></button></div></div>';
-  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-registration_mode">Registration</label><div class="setting-desc">Closed: nobody can register. Invite: a valid invite code is required. Approval: new accounts wait in Users until you approve them. Open: anyone can register.</div></div><div class="setting-ctrl"><select class="filter-select" id="s-registration_mode" data-change-action="markSettingsChanged">'+regModeOptions(v('registration_mode')||'invite')+'</select></div></div>';
-  html+='</div></div>';
-  const owner=isOwner();
-  html+='<div class="section-card"><div class="section-card-header"><h3>Backup</h3></div><div class="section-card-body">';
-  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-backup_schedule">Schedule</label><div class="setting-desc">'+(owner?'':'Owner only. ')+'The backup policy is owner-only (BPR-072).</div></div><div class="setting-ctrl"><select class="filter-select" id="s-backup_schedule" '+(owner?'':'disabled title="Owner role required"')+' data-change-action="markSettingsChanged"><option value="off" '+(v('backup_schedule')==='off'?'selected':'')+'>Off</option><option value="daily" '+(v('backup_schedule')==='daily'?'selected':'')+'>Daily</option><option value="weekly" '+(v('backup_schedule')==='weekly'?'selected':'')+'>Weekly</option></select></div></div>';
-  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="s-backup_retention">Retention (days)</label><div class="setting-desc">'+(owner?'0 keeps backups forever.':'Owner only. 0 keeps backups forever.')+'</div></div><div class="setting-ctrl"><input class="form-input" id="s-backup_retention" value="'+esc(v('backup_retention'))+'" style="width:100px" type="number" '+(owner?'':'disabled title="Owner role required"')+' data-input-action="markSettingsChanged"></div></div>';
-  html+='</div></div>';
-  html+='<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button class="btn btn-accent" id="saveSettingsBtn" '+(state.settingsChanged?'':'disabled')+' data-action="saveSettings">Save Changes</button></div>';
+  /* Unsaved edits survive leaving the page: the nav's unsaved dot promises
+     they are still there to save. */
+  const draft=state.settingsDraft||{};
+  const v=k=>k in draft?draft[k]:(settings[k]||'');
+  const on=settingNorm('require_2fa',v('require_2fa'))==='true';
+  let html='<div class="page-title">Settings</div><div class="page-desc">How your server presents itself and who can join.'+(isOwner()?' The backup schedule is on <button class="link-btn" data-action="navigateTo" data-args="'+actArgs('backups')+'">Backups &amp; restore</button>.':'')+'</div>';
+  html+=settingsCard('General',
+    settingsRow('server_name','Server name','Shown in the client and at the top of this panel','<input class="form-input" id="s-server_name" value="'+esc(v('server_name'))+'" aria-describedby="s-server_name-desc" data-input-action="markSettingsChanged">')
+    +settingsRow('motd','Message of the day','Shown to members when they connect','<input class="form-input" id="s-motd" value="'+esc(v('motd'))+'" aria-describedby="s-motd-desc" data-input-action="markSettingsChanged">'));
+  html+=settingsCard('Access & registration',
+    settingsRow('registration_mode','Registration','Closed: nobody can register. Invite: a valid invite code is required. Approval: new accounts wait in Members until you approve them. Open: anyone can register.','<select class="filter-select" id="s-registration_mode" aria-describedby="s-registration_mode-desc" data-change-action="markSettingsChanged">'+regModeOptions(v('registration_mode')||'invite')+'</select>'));
+  html+=settingsCard('Security',
+    '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
+  /* Facts, not inputs: these take effect from config.yaml at start-up, so
+     an editable-looking field here would change nothing. */
+  let factRows;
+  if(facts)factRows=[['Max upload size',facts.upload_max_size_mb+' MB','upload.max_size_mb'],['Voice quality',voiceQualityLabel(facts.voice_quality),'voice.quality']]
+    .map(([n,val,key])=>'<div class="fact-row"><dt>'+n+'</dt><dd><span class="fact-value">'+esc(val)+'</span><code class="fact-key">'+key+'</code></dd></div>').join('');
+  html+=settingsCard('Set in config.yaml','<p class="setting-desc">These values come from the server\'s config file. Change them there and restart the server.</p>'
+    +(facts?'<dl class="fact-list">'+factRows+'</dl>':'<p class="setting-desc" style="margin-top:8px">The running configuration could not be read.</p>'));
+  html+='<div class="save-bar'+(state.settingsChanged?' dirty':'')+'" id="settingsSaveBar" role="region" aria-label="Save settings"><span class="save-bar-status" id="settingsSaveState" role="status">'+(state.settingsChanged?'Unsaved changes':'All changes saved')+'</span>'
+    +'<button class="btn btn-ghost" id="discardSettingsBtn" data-action="discardSettings"'+(state.settingsChanged?'':' disabled')+'>Discard</button>'
+    +'<button class="btn btn-accent" id="saveSettingsBtn" data-action="saveSettings"'+(state.settingsChanged?'':' disabled')+'>Save changes</button></div>';
   return html;
 }
 
-function markSettingsChanged(){state.settingsChanged=true;renderNav();const btn=document.getElementById('saveSettingsBtn');if(btn)btn.disabled=false}
+function setSettingsChanged(changed){
+  if(state.settingsChanged!==changed){state.settingsChanged=changed;renderNav()}
+  const s=document.getElementById('settingsSaveState');if(s)s.textContent=changed?'Unsaved changes':'All changes saved';
+  const bar=document.getElementById('settingsSaveBar');if(bar)bar.classList.toggle('dirty',changed);
+  ['saveSettingsBtn','discardSettingsBtn'].forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=!changed});
+}
+
+function markSettingsChanged(){
+  const diff=settingsDiff(settingsFormValues(SETTINGS_KEYS));
+  state.settingsDraft=Object.keys(diff).length?diff:null;
+  setSettingsChanged(!!state.settingsDraft);
+}
+
+function discardSettings(){state.settingsDraft=null;setSettingsChanged(false);renderContent()}
 
 async function saveSettings(){
-  const body={};
-  ['server_name','server_icon','motd','max_upload_bytes','voice_quality','backup_schedule','backup_retention','registration_mode'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.value});
-  ['require_2fa'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.classList.contains('on')?'true':'false'});
-  /* Send only what actually changed. The server's require_2fa enrollment
-     precondition (service.validateRequire2FAUpdate) keys on the key's mere
-     presence in the PATCH, not on whether its value moved — so resending it
-     unchanged re-runs that precondition for a save that never touched it and
-     can wedge the whole page once any TOTP-less user exists. */
-  const cur=state._settings||{};
-  Object.keys(body).forEach(k=>{
-    const curNorm=(k==='require_2fa')?((cur[k]==='1'||cur[k]==='true')?'true':'false'):(cur[k]||'');
-    if(body[k]===curNorm)delete body[k];
-  });
   const btn=document.getElementById('saveSettingsBtn');
   if(btn){if(btn.disabled)return;btn.disabled=true}
-  if(!Object.keys(body).length){
-    state.settingsChanged=false;renderNav();showToast('Settings saved');
-    return;
-  }
+  const body=settingsDiff(settingsFormValues(SETTINGS_KEYS));
+  if(!Object.keys(body).length){state.settingsDraft=null;setSettingsChanged(false);showToast('Settings saved');return}
   try{
-    await api('PATCH','/settings',body);
-    state.settingsChanged=false;renderNav();showToast('Settings saved');
-    // Leave the button disabled: there are no unsaved changes any more.
+    state._settings=await api('PATCH','/settings',body);
+    if('server_name' in body&&state.me){state.me.server_name=body.server_name;renderTopbar()}
+    state.settingsDraft=null;setSettingsChanged(false);showToast('Settings saved');
   }catch(e){
     showToast(e.message,'error');
     if(btn)btn.disabled=false;
@@ -226,22 +252,74 @@ async function clearChannelRetention(id){
   await previewRetentionChange({scope:'channel',channel_id:id,days:null});
 }
 
+/* ═══ Restart wait ═══ */
+/* Restoring a backup and applying an update both end in a self-restart.
+   Poll the unauthenticated setup-status route until the old process has
+   gone and a new one answers, then reload. A restart quicker than one poll
+   never shows the gap, so an answer after 20 s counts as back too. */
+function waitForRestart(statusId){
+  const started=Date.now();let sawDown=false;
+  const tick=async()=>{
+    let up=false;
+    try{up=(await fetch('/admin/api/setup/status',{cache:'no-store'})).ok}catch(e){}
+    if(!up)sawDown=true;
+    const elapsed=Date.now()-started;
+    if(up&&(sawDown||elapsed>20000)){location.reload();return}
+    if(elapsed>120000){
+      const el=document.getElementById(statusId);
+      if(el)el.innerHTML='The server has not come back after two minutes. Check it on the host, then <button class="link-btn" data-action="reloadPage">reload this page</button>.';
+      return;
+    }
+    setTimeout(tick,2000);
+  };
+  setTimeout(tick,2000);
+}
+function restartingHTML(title,lead){
+  return'<div class="modal-header"><h3>'+esc(title)+'</h3></div><div class="modal-body"><p>'+esc(lead)+'</p><p class="restart-wait" id="restartWait" role="status"><span class="spinner" aria-hidden="true"></span>Waiting for the server to come back. This page reloads by itself; you may need to sign in again.</p></div>';
+}
+
 /* ═══ Backups ═══ */
+const BACKUP_KEYS=['backup_schedule','backup_retention'];
 async function renderBackups(){
   let backups;
-  try{backups=await api('GET','/backups')}catch(e){return'<div class="page-title">Backups</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
-  let html='<div class="page-title">Backups</div><div class="page-desc">Database backup and restore</div>';
-  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px"><div class="section-card"><div class="section-card-header"><h3>Manual Backup</h3></div><div class="section-card-body" style="text-align:center;padding:32px"><button class="btn btn-accent" style="font-size:15px;padding:12px 32px" data-action="createBackup" '+(state.backupRunning?'disabled':'')+'>'+(state.backupRunning?'<div class="spinner"></div> Running...':I.download+' Create Backup Now')+'</button></div></div>';
-  html+='<div class="section-card"><div class="section-card-header"><h3>Schedule</h3></div><div class="section-card-body"><p style="color:var(--text-muted);font-size:13px">Configure backup schedule in Settings.</p><button class="btn btn-ghost" style="margin-top:8px" data-action="navigateTo" data-args="'+actArgs('settings')+'">Go to Settings</button></div></div></div>';
-  html+='<div class="section-card"><div class="section-card-header"><h3>Backup History</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Filename</th><th>Size</th><th>Date</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!backups||!backups.length)html+='<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px">No backups found</td></tr>';
+  try{backups=await api('GET','/backups')}catch(e){return'<div class="page-title">Backups &amp; restore</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
+  /* The schedule is owner-only policy in the settings table (BPR-072); this
+     page is owner-only, so it is edited here rather than on Settings. */
+  let policyErr='';
+  try{state._settings=await api('GET','/settings')}catch(e){policyErr=e.message}
+  const v=k=>(state._settings||{})[k]||'';
+  let html='<div class="page-head"><div><div class="page-title">Backups &amp; restore</div><div class="page-desc">Copies of the server database. Restoring one replaces everything that happened after it was taken.</div></div>'
+    +'<button class="btn btn-accent" data-action="createBackup"'+(state.backupRunning?' disabled':'')+'>'+(state.backupRunning?'<span class="spinner" aria-hidden="true"></span> Backing up…':I.download+' Create backup now')+'</button></div>';
+  let sched;
+  if(policyErr)sched='<p style="color:var(--text-danger)">'+esc(policyErr)+'</p>';
+  else sched=settingsRow('backup_schedule','Automatic backups','A copy is taken on this schedule by the server\'s maintenance sweep','<select class="filter-select" id="s-backup_schedule" aria-describedby="s-backup_schedule-desc" data-change-action="markBackupPolicyChanged">'
+      +[['off','Off'],['daily','Daily'],['weekly','Weekly']].map(([o,l])=>'<option value="'+o+'"'+(v('backup_schedule')===o?' selected':'')+'>'+l+'</option>').join('')+'</select>')
+    +settingsRow('backup_retention','Keep backups for (days)','0 keeps every backup; otherwise 7 to 3650 days. Older backups are deleted.','<input class="form-input" id="s-backup_retention" type="number" min="0" max="3650" value="'+esc(v('backup_retention'))+'" aria-describedby="s-backup_retention-desc" data-input-action="markBackupPolicyChanged">')
+    +'<div class="card-actions"><button class="btn btn-accent" id="saveBackupPolicyBtn" data-action="saveBackupPolicy" disabled>Save schedule</button></div>';
+  html+=settingsCard('Schedule',sched);
+  html+='<section class="section-card" aria-labelledby="sc-history"><div class="section-card-header"><h3 id="sc-history">Backup history</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>File</th><th>Size</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
+  if(!backups||!backups.length)html+='<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px">No backups yet</td></tr>';
   else backups.forEach(b=>{
     html+='<tr><td><code style="font-family:var(--font-mono);font-size:12px">'+esc(b.name)+'</code></td>';
-    html+='<td>'+fmtBytes(b.size)+'</td><td>'+(b.date?new Date(b.date).toLocaleString():'')+'</td>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" data-action="openRestoreModal" data-args="'+actArgs(b.name)+'">Restore</button><button class="act-btn danger" title="Delete" aria-label="Delete" data-action="openDeleteBackupModal" data-args="'+actArgs(b.name)+'">'+I.trash+'</button></div></td></tr>';
+    html+='<td>'+fmtBytes(b.size)+'</td><td>'+(b.date?esc(new Date(b.date).toLocaleString()):'')+'</td>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" data-action="openRestoreModal" data-args="'+actArgs(b.name,b.date||'')+'">Restore</button><button class="act-btn danger" title="Delete '+esc(b.name)+'" aria-label="Delete '+esc(b.name)+'" data-action="openDeleteBackupModal" data-args="'+actArgs(b.name)+'">'+I.trash+'</button></div></td></tr>';
   });
-  html+='</tbody></table></div></div>';
+  html+='</tbody></table></div></section>';
   return html;
+}
+
+function markBackupPolicyChanged(){
+  const b=document.getElementById('saveBackupPolicyBtn');
+  if(b)b.disabled=!Object.keys(settingsDiff(settingsFormValues(BACKUP_KEYS))).length;
+}
+
+async function saveBackupPolicy(){
+  const btn=document.getElementById('saveBackupPolicyBtn');
+  if(btn){if(btn.disabled)return;btn.disabled=true}
+  const body=settingsDiff(settingsFormValues(BACKUP_KEYS));
+  if(!Object.keys(body).length)return;
+  try{state._settings=await api('PATCH','/settings',body);showToast('Backup schedule saved')}
+  catch(e){showToast(e.message,'error');if(btn)btn.disabled=false}
 }
 
 async function createBackup(){
@@ -249,19 +327,45 @@ async function createBackup(){
   try{await api('POST','/backup');state.backupRunning=false;showToast('Backup created');renderContent()}catch(e){state.backupRunning=false;showToast(e.message,'error');renderContent()}
 }
 
-function openRestoreModal(name){
-  openModal('<div class="modal-header"><h3>Restore Backup</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Overwrite the current database with <strong style="color:var(--text-normal)">'+esc(name)+'</strong>? A pre-restore backup will be created. Server restart recommended after restore.</p></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" data-action="confirmRestore" data-args="'+actArgs(name)+'">Restore</button></div>');
+/* Restore overwrites the live database and restarts the server, so it asks
+   for the backup's name typed out, like erasing an account does. */
+function openRestoreModal(name,date){
+  openModal('<div class="modal-header"><h3>Restore backup</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body">'
+    +'<p>Replace the live database with <strong>'+esc(name)+'</strong>'+(date?', taken '+esc(new Date(date).toLocaleString()):'')+'.</p>'
+    +'<ul class="modal-list"><li><strong style="color:var(--text-danger)">Everything since that backup is lost</strong>: messages, members, roles and settings.</li>'
+    +'<li>A safety copy of the current database (<code>pre_restore_…</code>) is saved first and appears in this list.</li>'
+    +'<li>The server restarts by itself. Everyone, including you, is disconnected and may need to sign in again.</li></ul>'
+    +'<div class="form-group" style="margin-top:16px"><label class="form-label" for="restoreConfirm">Type <strong style="color:var(--text-normal);text-transform:none">'+esc(name)+'</strong> to confirm</label><input class="form-input" id="restoreConfirm" autocomplete="off" autocapitalize="off" spellcheck="false" data-input-action="checkRestoreConfirm" data-args="'+actArgs(name)+'"></div>'
+    +'<p class="auth-error" id="restoreErr" role="alert"></p></div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" id="restoreConfirmBtn" data-action="confirmRestore" data-args="'+actArgs(name)+'" disabled>Restore and restart</button></div>');
+}
+
+function checkRestoreConfirm(name){
+  const b=document.getElementById('restoreConfirmBtn');
+  if(b)b.disabled=(document.getElementById('restoreConfirm')?.value||'').trim()!==name;
 }
 
 async function confirmRestore(name){
-  try{await api('POST','/backups/'+encodeURIComponent(name)+'/restore');closeModal();showToast('Database restored. Restart recommended.','info');renderContent()}catch(e){showToast(e.message,'error')}
+  if((document.getElementById('restoreConfirm')?.value||'').trim()!==name)return;
+  const b=document.getElementById('restoreConfirmBtn');if(b)b.disabled=true;
+  try{
+    await api('POST','/backups/'+encodeURIComponent(name)+'/restore');
+    setModalHTML(restartingHTML('Restoring backup','The database was restored from '+name+' and the server is restarting.'));
+    waitForRestart('restartWait');
+  }catch(e){
+    /* Some failures still restart the server (its database is already
+       closed); the message says so, and then waiting is the right thing. */
+    if(/restarting/i.test(e.message)){setModalHTML(restartingHTML('Restore failed',e.message));waitForRestart('restartWait');return}
+    const err=document.getElementById('restoreErr');if(err)err.textContent=e.message;
+    if(b)b.disabled=false;
+  }
 }
 
 /* Deleting a backup is irreversible — confirm it like every other destructive
    action here. It also used to report success without looking at the response,
    so a failed delete said "Backup deleted" and left the file in place. */
 function openDeleteBackupModal(name){
-  openModal('<div class="modal-header"><h3>Delete Backup</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Permanently delete <strong style="color:var(--text-normal)">'+esc(name)+'</strong>? This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" data-action="confirmDeleteBackup" data-args="'+actArgs(name)+'">Delete</button></div>');
+  openModal('<div class="modal-header"><h3>Delete backup</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Permanently delete <strong style="color:var(--text-normal)">'+esc(name)+'</strong>? This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" data-action="confirmDeleteBackup" data-args="'+actArgs(name)+'">Delete</button></div>');
 }
 
 async function confirmDeleteBackup(name){
@@ -269,16 +373,23 @@ async function confirmDeleteBackup(name){
 }
 
 /* ═══ Updates ═══ */
+/* Only an https release page is linked; the URL comes from the release feed. */
+function releaseNotesLink(info,text){
+  const u=info&&info.release_url;
+  return /^https:\/\//i.test(u||'')?'<a class="text-link" href="'+esc(u)+'" target="_blank" rel="noopener noreferrer">'+esc(text)+'<span class="sr-only"> (opens in a new tab)</span></a>':'';
+}
+
 async function renderUpdates(){
   // A failed check is not the same as "up to date" — saying so would be a lie
   // that hides a broken update path.
   let info,checkError='';
   try{info=await api('GET','/updates')}catch(e){checkError=e.message||'Update check failed'}
+  state.updateInfo=info||null;
   let html='<div class="page-title">Updates</div><div class="page-desc">Server version management</div>';
-  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">';
+  html+='<div class="update-grid">';
   html+='<div class="update-card"><div class="update-icon" style="background:rgba(92,195,137,.15);color:var(--text-positive)">'+I.check+'</div><div class="update-info"><div class="update-ver">'+(info?esc(info.current):'unknown')+'</div><div class="update-notes">Current version</div></div></div>';
   if(checkError)html+='<div class="update-card" style="border-color:var(--red)"><div class="update-icon" style="background:rgba(255,143,146,.15);color:var(--text-danger)">'+I.ban+'</div><div class="update-info"><div class="update-ver">Check failed</div><div class="update-notes">'+esc(checkError)+'</div></div></div>';
-  else if(info&&info.update_available)html+='<div class="update-card" style="border-color:var(--accent)"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">'+esc(info.latest)+' <span class="badge badge-accent">New</span></div><div class="update-notes">Available for download</div></div></div>';
+  else if(info&&info.update_available)html+='<div class="update-card" style="border-color:var(--accent)"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent-text)">'+I.updates+'</div><div class="update-info"><div class="update-ver">'+esc(info.latest)+' <span class="badge badge-accent">New</span></div><div class="update-notes">Available. '+releaseNotesLink(info,'Release notes')+'</div></div></div>';
   else html+='<div class="update-card"><div class="update-icon" style="background:rgba(92,195,137,.15);color:var(--text-positive)">'+I.check+'</div><div class="update-info"><div class="update-ver">Up to date</div><div class="update-notes">You\'re running the latest version</div></div></div>';
   html+='</div>';
   if(info&&info.update_available&&info.can_apply===false){
@@ -286,35 +397,66 @@ async function renderUpdates(){
        refused server-side (503 CONTAINER_DEPLOYMENT) — say so instead of
        offering a button that can only fail. */
     html+='<div class="update-card"><div class="update-info"><div class="update-notes">In-place update is unavailable in container deployments — upgrade by pulling the new image and recreating the container.</div></div></div>';
-    html+='<div style="margin-top:16px"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check Again</button></div>';
+    html+='<div style="margin-top:16px"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check again</button></div>';
   }else if(info&&info.update_available){
-    html+='<div style="display:flex;gap:8px"><button class="btn btn-danger" data-action="applyUpdate" '+(state.updateApplying?'disabled':'')+'>'+(state.updateApplying?'<div class="spinner"></div> Applying...':'Apply Update & Restart')+'</button>';
-    html+='<button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check Again</button></div>';
+    html+='<div class="btn-row"><button class="btn btn-accent" data-action="applyUpdate"'+(state.updateApplying?' disabled':'')+'>'+(state.updateApplying?'<span class="spinner" aria-hidden="true"></span> Updating…':'Update to '+esc(info.latest)+'…')+'</button>';
+    html+='<button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check again</button></div>';
   }else{
-    html+='<div style="margin-top:16px"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check for Updates</button></div>';
+    html+='<div style="margin-top:16px"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check for updates</button></div>';
   }
   return html;
 }
 
+/* OP-11: an update migrates the database forward only, so the dialog leads
+   with a backup (on by default), the release notes, and the latest backup. */
 async function applyUpdate(){
-  openModal('<div class="modal-header"><h3>Apply Update</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">This will restart the server. All connected users will be briefly disconnected. Continue?</p></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" data-action="confirmApplyUpdate">Update & Restart</button></div>');
+  const info=state.updateInfo||{};
+  const notes=releaseNotesLink(info,'Read the release notes for '+(info.latest||'this version'));
+  openModal('<div class="modal-header"><h3>Update to '+esc(info.latest||'the latest version')+'</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body">'
+    +'<p>The server downloads and verifies the release, replaces its binary and restarts. Everyone connected is disconnected for a moment.</p>'
+    +'<div class="callout-warning"><strong>Database migrations only run forward.</strong> Once the new version starts, older versions cannot open the database, so the only way back is restoring a backup taken before the update.</div>'
+    +(notes?'<p style="margin-top:12px">'+notes+' before you update.</p>':'')
+    +'<p class="setting-desc" id="updateLastBackup" style="margin-top:12px">Checking for recent backups…</p>'
+    +'<label class="check-row"><input type="checkbox" id="updateBackupFirst" checked data-change-action="syncUpdateConfirm"> Back up the database first (recommended)</label>'
+    +'<p class="auth-error" id="updateErr" role="alert"></p></div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" id="updateConfirmBtn" data-action="confirmApplyUpdate">Back up and update</button></div>');
+  let text;
+  try{
+    const list=await api('GET','/backups');
+    const latest=(list||[]).filter(b=>b.date).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+    text=latest?'Latest backup: '+new Date(latest.date).toLocaleString()+' ('+latest.name+').':'There are no backups yet.';
+  }catch(e){text='The backup list could not be read.'}
+  const el=document.getElementById('updateLastBackup');if(el)el.textContent=text;
+}
+
+function syncUpdateConfirm(){
+  const b=document.getElementById('updateConfirmBtn');
+  if(b)b.textContent=document.getElementById('updateBackupFirst')?.checked?'Back up and update':'Update without a backup';
 }
 
 async function confirmApplyUpdate(){
-  closeModal();state.updateApplying=true;renderContent();
+  const btn=document.getElementById('updateConfirmBtn');
+  if(btn){if(btn.disabled)return;btn.disabled=true}
+  const err=document.getElementById('updateErr');if(err)err.textContent='';
+  const fail=msg=>{if(err)err.textContent=msg;if(btn)btn.disabled=false};
+  if(document.getElementById('updateBackupFirst')?.checked){
+    if(btn)btn.textContent='Backing up…';
+    try{await api('POST','/backup')}catch(e){syncUpdateConfirm();return fail('The backup failed, so nothing was updated: '+e.message)}
+  }
+  if(btn)btn.textContent='Updating…';
+  state.updateApplying=true;
   try{
-    const r=await fetch('/admin/api/updates/apply',{method:'POST',headers:{'Authorization':'Bearer '+state.token}});
-    if(r.ok){showToast('Update applied! Server restarting...','info');setTimeout(()=>location.reload(),10000);return}
-    let msg='Update failed';
-    try{const e=await r.json();msg=e.message||msg}catch(parseErr){}
-    showToast(msg,'error');
-  }catch(e){showToast(e.message,'error')}
-  // Failure path only: re-render so the button leaves its "Applying..." state
-  // instead of staying disabled until the next navigation.
-  state.updateApplying=false;renderContent();
+    await api('POST','/updates/apply');
+    setModalHTML(restartingHTML('Updating to '+((state.updateInfo||{}).latest||'the latest version'),'The update was applied and the server is restarting.'));
+    waitForRestart('restartWait');
+  }catch(e){
+    state.updateApplying=false;syncUpdateConfirm();fail(e.message);
+  }
 }
 
-Object.assign(ACTIONS,{applyRetention,applyUpdate,clearChannelRetention,confirmApplyUpdate,confirmDeleteBackup,
-  confirmRestore,createBackup,markSettingsChanged,openApplyRetention,openChannelRetention,openDeleteBackupModal,
-  openRestoreModal,saveChannelRetention,saveSettings,
+Object.assign(ACTIONS,{applyRetention,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
+  confirmDeleteBackup,confirmRestore,createBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,
+  openApplyRetention,openChannelRetention,openDeleteBackupModal,openRestoreModal,saveBackupPolicy,saveChannelRetention,
+  saveSettings,syncUpdateConfirm,
+  reloadPage(){location.reload()},
   toggleSetting(){toggleSwitch(this);markSettingsChanged()}});

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -28,6 +29,28 @@ func handleGetSettings(settings *service.SettingsService) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, all)
+	}
+}
+
+// configFactsResponse is GET /config: the config.yaml values the Settings
+// page shows as read-only facts. They come from the configuration the server
+// booted with, not from the settings rows of the same name, which only the
+// setup wizard writes and which go stale when config.yaml is edited.
+type configFactsResponse struct {
+	UploadMaxSizeMB int    `json:"upload_max_size_mb"`
+	VoiceQuality    string `json:"voice_quality"`
+}
+
+func handleGetConfigFacts(cfg *config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if cfg == nil {
+			writeErr(w, http.StatusServiceUnavailable, "CONFIG_UNAVAILABLE", "running configuration unavailable")
+			return
+		}
+		writeJSON(w, http.StatusOK, configFactsResponse{
+			UploadMaxSizeMB: cfg.Upload.MaxSizeMB,
+			VoiceQuality:    cfg.Voice.Quality,
+		})
 	}
 }
 

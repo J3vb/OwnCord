@@ -166,6 +166,7 @@ func TestAuditAndSettings_ModeratorForbidden(t *testing.T) {
 		{http.MethodGet, "/audit-log"},
 		{http.MethodGet, "/settings"},
 		{http.MethodPatch, "/settings"},
+		{http.MethodGet, "/config"},
 		{http.MethodPost, "/logs/ticket"},
 	} {
 		if w := doRequest(t, handler, tc.method, tc.path, token, nil); w.Code != http.StatusForbidden {

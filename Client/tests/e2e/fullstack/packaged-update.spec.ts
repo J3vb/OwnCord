@@ -115,12 +115,13 @@ for (const media of [false, true]) {
           .getByRole("navigation", { name: "Admin sections" })
           .getByRole("button", { name: /^Updates\b/ })
           .click();
-        await admin.getByRole("button", { name: "Apply Update & Restart", exact: true }).click();
+        await admin.getByRole("button", { name: /^Update to v/ }).click();
         const applied = admin.waitForResponse(
           (response) =>
             response.url().endsWith("/updates/apply") && response.request().method() === "POST",
         );
-        await admin.getByRole("button", { name: "Update & Restart", exact: true }).click();
+        // The dialog backs the database up first by default (OP-11).
+        await admin.getByRole("button", { name: "Back up and update", exact: true }).click();
         expect((await applied).status()).toBe(200);
         await expect
           .poll(

@@ -13,6 +13,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -902,6 +903,39 @@ func TestAdminAPI_GetSettings_OK(t *testing.T) {
 	}
 	if _, ok := settings["server_name"]; !ok {
 		t.Error("response missing 'server_name'")
+	}
+}
+
+// ─── GET /admin/api/config ────────────────────────────────────────────────────
+
+// The Settings page shows these as read-only facts, so they must be the
+// values the server is running with, not the settings rows of the same name.
+func TestAdminAPI_GetConfigFacts_ReportsRunningConfig(t *testing.T) {
+	database := openAdminTestDB(t)
+	cfg := &config.Config{Upload: config.UploadConfig{MaxSizeMB: 64}, Voice: config.VoiceConfig{Quality: "low"}}
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database), admin.SetupOptions{RunningCfg: cfg})
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodGet, "/config", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["upload_max_size_mb"] != float64(64) || got["voice_quality"] != "low" {
+		t.Errorf("config facts = %v, want upload_max_size_mb 64 and voice_quality low", got)
+	}
+}
+
+func TestAdminAPI_GetConfigFacts_WithoutRunningConfig(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+
+	if w := doRequest(t, handler, http.MethodGet, "/config", token, nil); w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503; body: %s", w.Code, w.Body.String())
 	}
 }
 
