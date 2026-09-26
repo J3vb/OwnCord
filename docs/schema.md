@@ -953,10 +953,10 @@ Bits 2-4, 7-8, 13-15, 23, 28-29, 31 are reserved.
 
 The bit map above is the authority on what each bit _does_; this grouping is
 how the bits are _presented_ — it is the layout of the admin panel's role
-permission grid (`PERM_GROUPS` in `Server/admin/static/index.html`). It carries
-no semantics, but the two must stay in step: every defined bit belongs to
-exactly one group, and a bit missing from the grouping is a bit no operator can
-grant through the panel.
+permission grid (`PERM_GROUPS` in `Server/admin/static/js/roles-channels.js`).
+It carries no semantics, but the two must stay in step: every defined bit
+belongs to exactly one group, and a bit missing from the grouping is a bit no
+operator can grant through the panel.
 
 | Group      | Bits                                                                                                                        |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------- |

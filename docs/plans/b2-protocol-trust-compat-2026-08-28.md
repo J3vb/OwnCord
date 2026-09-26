@@ -301,9 +301,10 @@ Not shipped, and why:
 
 ## B2-3 — Server-first updates
 
-Folded into B2-2 item 4 (`899c956f`). The `v1.2.0-beta.1` tag-line note for
+Folded into B2-2 item 4 (`899c956f`). The `v2.0.0-beta.1` tag-line note for
 `CHANGELOG.md`/`docs/contributing.md` was not written: the changelog entry is
-under `## Unreleased` and takes the tag when one is cut.
+under `## Unreleased` and takes the tag when one is cut; the release procedure
+in `docs/contributing.md` now carries the rename step.
 
 ## B2-4 — Compatibility matrix
 

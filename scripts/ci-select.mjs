@@ -41,7 +41,7 @@
 //   Client reads outside Client/:
 //     docs/api.md                              tests/contract/api-profile-route.test.ts
 //     docs/architecture/platform-contracts.md  tests/unit/platform-contracts-counts.test.ts
-//     Server/admin/static/index.html           tests/contract/server-admin-static-*.test.ts
+//     Server/admin/static/ (all of it)         tests/contract/server-admin-*.test.ts
 //     protocol/schema.json                     src/lib/protocolTypes.ts is generated from it
 //
 //   Rust reads outside Client/src-tauri/:
@@ -248,8 +248,9 @@ export function classify(paths) {
       // breaks only that path would otherwise merge with the required native
       // check reported as skipped.
       add("server", "integration", "native");
-      // The admin panel's HTML is asserted against by the client's contract
-      // specs, so a Server change to it is also a client-unit-test change.
+      // The admin panel (index.html, admin.css, js/) is run by the client's
+      // contract specs, so a Server change to it is also a client-unit-test
+      // change.
       if (path.startsWith("Server/admin/static/")) add("client");
       continue;
     }

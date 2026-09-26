@@ -192,11 +192,24 @@ Stated plainly so it is not discovered at the worst moment. The certificate work
 
 ## Outbound traffic
 
-A default install with voice enabled makes one outbound connection you should
-know about: `livekit-server` is configured with `use_external_ip: true` and
-queries a public STUN server at start-up to discover its external address. That
-is the SFU's own behaviour, not OwnCord reporting anything about you. OwnCord
-itself contacts no external service.
+OwnCord sends no telemetry, but it is not connection-free. The complete
+inventory of outbound paths — what opens each one and what leaves the machine —
+is in [diagnostics.md](architecture/diagnostics.md#egress-inventory); the rows an
+offline operator is most likely to meet are:
+
+- **`livekit-server` STUN at start-up.** A default install with voice enabled
+  queries a public STUN server (`use_external_ip: true`) to discover its
+  external address. That is the SFU's own behaviour, not OwnCord reporting
+  anything about you.
+- **LiveKit binary download at first boot**, if `voice.auto_download_livekit`
+  is on and no `voice.livekit_binary` is set — one checksum-pinned download from
+  GitHub.
+- **`api.github.com` on an update check** — an admin asking the panel to check,
+  or a client polling for its own update. Optional, and rate-limit-only if you
+  set `github.token`.
+
+Nothing here is automatic product telemetry: every row is a feature the
+operator switched on, an admin action, or the LiveKit server's own behaviour.
 
 ## Troubleshooting Checklist
 

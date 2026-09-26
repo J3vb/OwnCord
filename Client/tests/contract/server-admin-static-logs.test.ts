@@ -3,18 +3,16 @@
 // module carries no JavaScript engine, so nothing under Server/ can execute
 // this SPA. See docs/contributing.md#testing for the membership rule.
 //
-// Loads the real Server/admin/static/index.html (the Go admin panel's
-// single-file SPA) into a scripted jsdom window and drives its inline log
-// stream connection logic directly, the same way a browser would. jsdom does
+// Loads the real admin panel (Server/admin/static, the Go admin panel's SPA)
+// into a scripted jsdom window and drives its log stream connection logic
+// directly, the same way a browser would. jsdom does
 // not implement EventSource, so a minimal fake stands in for it — this test
 // only needs its constructor, onmessage and close() to be observable.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { readFileSync } from "node:fs";
-import path from "node:path";
+import { adminPanelHtml } from "../helpers/admin-panel";
 
-const ADMIN_HTML_PATH = path.resolve(__dirname, "../../../Server/admin/static/index.html");
-const ADMIN_HTML_SOURCE = readFileSync(ADMIN_HTML_PATH, "utf8");
+const ADMIN_HTML_SOURCE = adminPanelHtml();
 
 const BRIDGE = `<script>
 window.__test = {
@@ -90,7 +88,7 @@ function backfillEntry(i: number) {
   };
 }
 
-describe("Server/admin/static/index.html — log stream (re)connect (OC-0435)", () => {
+describe("Server/admin/static — log stream (re)connect (OC-0435)", () => {
   let dom: JSDOM | undefined;
 
   afterEach(() => {

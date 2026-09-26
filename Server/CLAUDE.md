@@ -34,11 +34,15 @@ coraza WAF, prometheus.
 - Build tags gate whole files, so all four variants must compile: default,
   `-tags otel`, `-tags wazero`, `-tags otel,wazero`. Tests must also pass under
   `-race` and under `-tags deadlock`. The `ci-check` skill has the commands.
-- `admin/static/index.html` is server-owned, and its invariants are locked from
-  two places: text-level ones from `admin/perm_grid_test.go` and
-  `admin/emoji_section_test.go`, execution-level ones from
-  `Client/tests/contract/` — Go has no JS engine, so a Go port could only grep.
-  Do not "fix" that split by rewriting the contract test as a regex.
+- `admin/static/` (the admin panel: `index.html`, `admin.css`, and classic
+  scripts under `js/` with no build step) is server-owned, and its invariants
+  are locked from two places: text-level ones from `admin/perm_grid_test.go`,
+  `admin/panel_wiring_test.go` and `admin/emoji_section_test.go`,
+  execution-level ones from `Client/tests/contract/` — Go has no JS engine, so
+  a Go port could only grep. Do not "fix" that split by rewriting the contract
+  test as a regex. Its CSP is `script-src 'self'`: no inline `<script>` or
+  `on*=` handler; a control names a handler registered in `ACTIONS`
+  (`js/core.js`) through `data-action`.
 - `ws` is the hub: broadcast fan-out, per-client send queues, replay, and voice
   state all interact under several locks. Sequenced frames share one per-client
   FIFO because clients ack only `max(seq)` — a frame that skips the queue, or a

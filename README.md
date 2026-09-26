@@ -43,11 +43,14 @@ That keeps iteration fast, and it also means behaviour can change quickly betwee
 
 ## Platform Support (Current Releases)
 
-| Component      | Windows x64          | Linux x64                   | Linux ARM64          |
-| -------------- | -------------------- | --------------------------- | -------------------- |
-| Server binary  | Yes                  | Yes                         | Not yet              |
-| Desktop client | Yes (NSIS installer) | Yes (AppImage, .deb)        | Yes (AppImage, .deb) |
-| Docker server  | N/A                  | Build from source (compose) | Not yet              |
+| Component      | Windows x64          | Windows ARM64        | Linux x64              | Linux ARM64            |
+| -------------- | -------------------- | -------------------- | ---------------------- | ---------------------- |
+| Server binary  | Yes                  | Yes                  | Yes                    | Yes                    |
+| Desktop client | Yes (NSIS installer) | Yes (NSIS installer) | Yes (AppImage, .deb)   | Yes (AppImage, .deb)   |
+| Docker server  | N/A                  | N/A                  | Yes (multi-arch image) | Yes (multi-arch image) |
+
+Every server asset and the Docker image ship for both `amd64` and `arm64`
+(`ghcr.io/j3vb/owncord-server` is one multi-architecture tag).
 
 ## Start Here
 
@@ -90,12 +93,20 @@ The client uses TOFU (Trust On First Use) for self-signed certificates: it promp
 
 ## What OwnCord Already Has
 
-- Real-time channels and direct messages over WebSocket
-- Voice/video channels via LiveKit — the LiveKit server binary is downloaded and managed for you
-- Invite-only registration and role-based permissions
-- Web admin panel with logs, backups, and update tooling
-- File uploads and inline media rendering
-- TOTP 2FA support and API rate limiting
+- Real-time channels and direct messages over WebSocket, with durable history
+  and per-channel retention
+- Voice/video channels via LiveKit — the LiveKit server binary is downloaded and
+  managed for you, with end-to-end-encrypted media and key verification
+- Registration modes (`closed` / `invite` / `approval` / `open`), invite codes,
+  and role-based permissions
+- Moderation: reports, appeals, warnings and timeouts, the Moderation Center,
+  Message Requests and NSFW handling
+- Web admin panel with logs, backups, retention controls, an audit log and
+  update tooling
+- File uploads, inline media rendering and an external-content consent gate
+- TOTP 2FA with emergency recovery codes, a rotating local recovery kit for
+  account recovery, and API rate limiting
+- Multi-device sessions; every credential is stored in the OS keyring
 - Desktop client auto-update with signature verification
 - WASM plugin system (slash commands; sandboxed, default-disabled — enable via
   `plugins.enabled` and build with `-tags wazero`)
@@ -192,7 +203,7 @@ On first run, the server generates `config.yaml` and a local `data/` directory:
 ```text
 data/
 ├── chatserver.db
-├── certs/
+├── cert.pem        # self-signed TLS certificate (key.pem beside it)
 ├── uploads/
 └── backups/
 ```

@@ -12,13 +12,12 @@
 // wiring; these tests run it.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { readFileSync } from "node:fs";
+import { adminIndexHtml, adminPanelHtml } from "../helpers/admin-panel";
 import path from "node:path";
 
-const ADMIN_HTML_PATH = path.resolve(__dirname, "../../../Server/admin/static/index.html");
-const ADMIN_HTML_SOURCE = readFileSync(ADMIN_HTML_PATH, "utf8");
+const ADMIN_HTML_SOURCE = adminPanelHtml();
 
-// The page's <script> is a classic script: its top-level declarations live in
+// The panel's scripts are classic scripts: their top-level declarations live in
 // the window's shared script scope but never land on `window`. A second script
 // bridges the bindings these tests drive onto a test-only global.
 const BRIDGE = `<script>
@@ -35,7 +34,13 @@ window.__test = {
   clearChannelRetention: clearChannelRetention,
   openApplyRetention: openApplyRetention,
   closeModal: closeModal,
-  applyRetention: applyRetention
+  applyRetention: applyRetention,
+  navigateTo: navigateTo,
+  nav: NAV,
+  wiz: wiz,
+  wizStepCount: WIZ_STEP_COUNT,
+  renderWizard: renderWizard,
+  actions: ACTIONS
 };
 </script>`;
 if (!ADMIN_HTML_SOURCE.includes("</body>")) {
@@ -66,6 +71,12 @@ interface Bridge {
   openApplyRetention: () => Promise<void>;
   closeModal: () => void;
   applyRetention: () => Promise<void>;
+  navigateTo: (id: string) => void;
+  nav: { id?: string }[];
+  wiz: { step: number };
+  wizStepCount: number;
+  renderWizard: () => void;
+  actions: Record<string, unknown>;
 }
 
 type Responder = (path: string, method: string) => { status?: number; json?: unknown };
@@ -123,7 +134,9 @@ function loadAdminPanel(calls: FetchCall[], respond: Responder): JSDOM {
         return {
           ok: status >= 200 && status < 300,
           status,
+          headers: new Headers(),
           json: async () => r.json ?? {},
+          text: async () => JSON.stringify(r.json ?? {}),
         } as Response;
       }) as typeof fetch;
     },
@@ -148,7 +161,7 @@ const defaultRespond: Responder = (p) => {
   return { json: {} };
 };
 
-describe("Server/admin/static/index.html — panel behaviour", () => {
+describe("Server/admin/static — panel behaviour", () => {
   let dom: JSDOM | undefined;
 
   afterEach(() => {
@@ -286,17 +299,18 @@ describe("Server/admin/static/index.html — panel behaviour", () => {
     const usersCall = calls.find((c) => c.path.startsWith("/users?"));
     expect(usersCall?.path).toContain("limit=51");
     // 50 rows came back for a 51-row request, so this is the last page.
-    expect(html).toContain('onclick="state.usersPage++;renderContent()"');
-    expect(html).toMatch(/<button class="page-btn" disabled onclick="state\.usersPage\+\+/);
+    expect(html).toContain('data-action="turnUsersPage" data-args="[1]"');
+    expect(html).toMatch(
+      /<button class="page-btn" disabled data-action="turnUsersPage" data-args="\[1\]"/,
+    );
 
     // OC-0390: erasure is reachable, and not adjacent to Force Logout.
-    expect(html).toContain("openEraseUser(2,");
-    const row = html.slice(
-      html.indexOf("openEraseUser(2,") - 800,
-      html.indexOf("openEraseUser(2,"),
-    );
-    expect(row).toContain("forceLogout(2)");
-    expect(row.slice(row.indexOf("forceLogout(2)"))).toContain("<span style=");
+    const erase = 'data-action="openEraseUser" data-args="[2,';
+    const forceLogout = 'data-action="forceLogout" data-args="[2]"';
+    expect(html).toContain(erase);
+    const row = html.slice(html.indexOf(erase) - 800, html.indexOf(erase));
+    expect(row).toContain(forceLogout);
+    expect(row.slice(row.indexOf(forceLogout))).toContain("<span style=");
   });
 
   it("offers a next page when an overflow row comes back (OC-0361)", async () => {
@@ -319,9 +333,187 @@ describe("Server/admin/static/index.html — panel behaviour", () => {
     booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
 
     const html = await booted.bridge.renderUsers();
-    expect(html).toMatch(/<button class="page-btn" {2}onclick="state\.usersPage\+\+/);
+    expect(html).toMatch(
+      /<button class="page-btn" {2}data-action="turnUsersPage" data-args="\[1\]"/,
+    );
     // The overflow row is fetched, never rendered.
-    expect(html).not.toContain("openEraseUser(52,");
+    expect(html).not.toContain('data-action="openEraseUser" data-args="[52,');
+  });
+
+  // AO-2. The admin CSP is script-src 'self', so the browser refuses an on*=
+  // attribute or an inline <script>, and the control it wires silently does
+  // nothing. A control names its handler in data-action / data-input-action /
+  // data-change-action instead, and core.js dispatches only names registered
+  // in ACTIONS; an unregistered name is just as dead. So render what the
+  // panel renders — the static document, the setup wizard, every section and
+  // the dialogs their buttons open — and check the live DOM.
+  it("renders every section and dialog without inline script, naming only registered actions", async () => {
+    const served = new JSDOM(adminIndexHtml()).window.document.querySelectorAll("script");
+    expect(served.length).toBeGreaterThan(0);
+    for (const script of served) expect(script.getAttribute("src")).toBeTruthy();
+
+    const roles = [
+      { id: 1, name: "Owner", position: 100, permissions: ADMINISTRATOR },
+      { id: 9, name: "Helper", position: 60, permissions: 0 },
+      { id: 4, name: "Member", position: 40, permissions: 0, is_default: true },
+    ];
+    const respond: Responder = (p, method) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/users?"))
+        return {
+          json: [{ id: 2, username: "member", role_id: 4, status: "online", banned: false }],
+        };
+      if (p === "/registrations")
+        return { json: [{ id: 3, username: "applicant", created_at: "2026-09-01 10:00:00" }] };
+      if (p === "/roles") return { json: roles };
+      if (p === "/channels") return { json: [{ id: 5, name: "general", type: "text" }] };
+      if (/^\/channels\/\d+\/permissions$/.test(p)) return { json: { roles: [], users: [] } };
+      if (p.startsWith("/audit-log?"))
+        return {
+          json: [
+            {
+              id: 1,
+              action: "channel_create",
+              actor_id: 1,
+              actor_name: "owner",
+              target_type: "channel",
+              target_id: 5,
+              created_at: "2026-09-01 10:00:00",
+            },
+          ],
+        };
+      if (p === "/tokens")
+        return {
+          json: [{ id: 1, label: "ci", username: "owner", created_at: "2026-09-01 10:00:00" }],
+        };
+      if (p === "/backups")
+        return { json: [{ name: "owncord.db", size: 4096, date: "2026-09-01T10:00:00Z" }] };
+      if (p === "/updates")
+        return { json: { current: "1.0.0", latest: "1.1.0", update_available: true } };
+      if (p === "/settings") return { json: { server_name: "OwnCord" } };
+      if (p === "/retention")
+        return {
+          json: { server_days: 30, revision: "revision-1", channels: [{ channel_id: 5, days: 0 }] },
+        };
+      if (p === "/retention/preview") return { json: method === "POST" ? proposedPreview : [] };
+      if (p === "/stats") return { json: { user_count: 2 } };
+      if (p === "/api/v1/admin/plugins/")
+        return { json: [{ id: 1, name: "hello", version: "1.0.0", enabled: true }] };
+      if (p === "/api/v1/emoji/") return { json: [{ id: 1, shortcode: "wave" }] };
+      return { json: {} };
+    };
+    const booted = await boot([], respond);
+    dom = booted.dom;
+    const { window } = booted.dom;
+    const { bridge } = booted;
+    const doc = window.document;
+    bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100, is_owner: true };
+    (window as unknown as { EventSource: unknown }).EventSource = class {
+      close() {}
+    };
+    const settle = () => new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    const inline: string[] = [];
+    const names = new Set<string>();
+    const scan = (where: string) => {
+      for (const el of doc.querySelectorAll("*")) {
+        for (const attr of el.getAttributeNames()) {
+          if (attr.startsWith("on")) inline.push(`${where}: <${el.localName} ${attr}>`);
+        }
+        for (const attr of ["data-action", "data-input-action", "data-change-action"]) {
+          const name = el.getAttribute(attr);
+          if (name) names.add(name);
+        }
+      }
+    };
+    scan("document");
+
+    for (let step = 0; step < bridge.wizStepCount; step++) {
+      bridge.wiz.step = step;
+      bridge.renderWizard();
+      scan(`setup step ${step}`);
+    }
+
+    const content = doc.getElementById("content")!;
+    const sections = bridge.nav
+      .map((n) => n.id)
+      .filter((id): id is string => !!id && id !== "logout");
+    expect(sections.length).toBeGreaterThan(10);
+    const opened = new Set<string>();
+    for (const id of sections) {
+      bridge.navigateTo(id);
+      await settle();
+      const title = content.querySelector(".page-title")?.textContent;
+      expect(title, `section ${id}`).toBeTruthy();
+      expect(title, `section ${id}`).not.toMatch(/^(Error|Loading\.\.\.)$/);
+      scan(`section ${id}`);
+
+      const openers = new Set(
+        [...content.querySelectorAll("[data-action]")]
+          .map((el) => el.getAttribute("data-action")!)
+          .filter((name) => /^open|^applyUpdate$/.test(name)),
+      );
+      for (const name of openers) {
+        (content.querySelector(`[data-action="${name}"]`) as HTMLElement).click();
+        await settle();
+        expect(doc.getElementById("modal")!.classList.contains("visible"), name).toBe(true);
+        opened.add(name);
+        scan(`dialog ${name}`);
+        bridge.closeModal();
+      }
+    }
+
+    expect(inline).toEqual([]);
+    expect([...opened]).toEqual(
+      expect.arrayContaining([
+        "openEditUser",
+        "openBanUser",
+        "openRoleModal",
+        "openChannelModal",
+        "applyUpdate",
+        "openCreateTokenModal",
+      ]),
+    );
+    expect(names.size).toBeGreaterThan(70);
+    const unregistered = [...names].filter((n) => typeof bridge.actions[n] !== "function");
+    expect(unregistered).toEqual([]);
+  });
+
+  it("dispatches a delegated click with its data-args", async () => {
+    const calls: FetchCall[] = [];
+    const users = Array.from({ length: 51 }, (_, i) => ({
+      id: i + 2,
+      username: "u" + (i + 2),
+      role_id: 4,
+    }));
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/users?")) return { json: users };
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { bridge } = booted;
+    bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+    bridge.state.section = "users";
+    const doc = dom.window.document;
+    doc.getElementById("content")!.innerHTML = await bridge.renderUsers();
+    calls.length = 0;
+
+    // The icon inside the button is the event target; the listener resolves it
+    // to the button through closest().
+    const next = doc.querySelector('[data-action="turnUsersPage"][data-args="[1]"]')!;
+    next.appendChild(doc.createElement("span")).click();
+    expect(bridge.state.usersPage).toBe(2);
+    await new Promise((resolve) => dom!.window.setTimeout(resolve, 0));
+    expect(calls.some((c) => c.path === "/users?limit=51&offset=50")).toBe(true);
+
+    // String arguments survive the attribute round trip, quotes included.
+    const erase = doc.createElement("button");
+    erase.setAttribute("data-action", "openEraseUser");
+    erase.setAttribute("data-args", JSON.stringify([7, `o'brien "x"`]));
+    doc.body.appendChild(erase).click();
+    expect(doc.getElementById("modalInner")!.textContent).toContain(`o'brien "x"`);
   });
 
   // OC-0373. The option set is rebuilt from the fetched page while the filter
@@ -456,9 +648,9 @@ describe("Server/admin/static/index.html — panel behaviour", () => {
     expect(html).toContain(">channel<");
     expect(html).toContain(">server<");
     // DMs are never in scope, so they are not offered a policy.
-    expect(html).not.toContain("openChannelRetention(9,");
-    expect(html).toContain("openChannelRetention(5,");
-    expect(html).toContain("clearChannelRetention(7)");
+    expect(html).not.toContain('data-action="openChannelRetention" data-args="[9,');
+    expect(html).toContain('data-action="openChannelRetention" data-args="[5,');
+    expect(html).toContain('data-action="clearChannelRetention" data-args="[7]"');
 
     // Every edit previews first, then explicit confirmation reaches its route.
     booted.bridge.state.retentionPolicyChannels = [{ channel_id: 5, days: 0 }];

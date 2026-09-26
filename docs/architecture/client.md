@@ -1,10 +1,10 @@
 # Client Architecture (Tauri)
 
-**Verified against:** commit `5630aa1`, 2026-08-04 — except the native-CI
-paragraph, re-measured at `a3a0a49b`, 2026-09-18.
+**Verified against:** `origin/dev` at `4a70f7b8`, 2026-09-25.
 
-Desktop client built on Tauri v2: a TypeScript webview (~42k LOC, vanilla TS —
-no UI framework) plus ~4.7k LOC of Rust across 16 modules. State lives in a
+Desktop client built on Tauri v2: a TypeScript webview (~70k LOC of non-test
+sources, vanilla TS — no UI framework) plus ~13k LOC of Rust across 26 modules.
+State lives in a
 hand-rolled reactive store (`src/lib/store.ts`: immutable updates,
 microtask-batched notifications, selector subscriptions). Components are
 factory functions returning `{ element, mount, destroy }` built with the
@@ -109,7 +109,7 @@ yet scheduled.
 | Credentials         | `src-tauri/src/credentials.rs`                                                         | OS keychain per host; password field `serde(skip)` so it never crosses IPC back to JS — the frontend gets `has_password` and shows a placeholder, and `login_with_saved_password` does the login inside Rust. `save_credential` preserves the stored password unless `clear_password` is set, so a re-save never has to resend it                                                                            |
 | Multi-server        | `src/lib/profiles.ts`                                                                  | Server profiles w/ 15s health polling and auto-connect; one active connection, quick-switch replaces WS + tunnels                                                                                                                                                                                                                                                                                            |
 | HTTP capability     | `src-tauri/capabilities/default.json`                                                  | `http:allow-fetch` is the only URL-scoped identifier (the other two `fetch_*` commands take a validated `ResourceId`); allows `https://*` + `http://127.0.0.1:*`, denies https loopback. Wildcard is required by link previews — see [docs/plans/tauri-capability-narrowing.md](../plans/tauri-capability-narrowing.md)                                                                                      |
-| Updates             | `src/lib/updater.ts` + `update_commands.rs`                                            | Endpoint derived from the connected server URL, https-only, TLS pinned to TOFU fingerprint, minisign-verified                                                                                                                                                                                                                                                                                                |
+| Updates             | `src/lib/updater.ts` + `update_commands.rs`                                            | Endpoint derived from the connected server URL, https-only, TLS pinned to TOFU fingerprint, minisign-verified. On Windows the NSIS pre-install hook (`src-tauri/nsis/hooks.nsh`) waits for the old executable to unlock before the installer overwrites it, so a first update after install cannot skip the copy and relaunch the old binary                                                                 |
 | Settings            | `commands.rs` + `src/lib/preferences.ts`                                               | Split persistence: Rust store (`settings.json`, key-allowlisted) _and_ raw `localStorage` for UI prefs/themes                                                                                                                                                                                                                                                                                                |
 | Theming             | `src/lib/themes.ts` + `styles/tokens.css`                                              | CSS custom properties; 4 built-in themes + custom overrides                                                                                                                                                                                                                                                                                                                                                  |
 | GIF picker          | `src/lib/gifProvider.ts` + `components/GifPicker.ts`                                   | Calls the user's own server (`/api/v1/gif/*`) through `api.ts` — no provider API key in the bundle. Server answers `503 GIF_DISABLED` when unconfigured: the picker shows "GIFs are not enabled on this server" and `onUnavailable` disables the composer's GIF button (with a `title`/`aria-label` reason) instead of failing silently. Returned media URLs are still pinned to the `klipy.com` CDN.        |
@@ -192,8 +192,8 @@ install, boot, connect, media and recovery — nightly on unsigned builds, and i
 `release.yml` before `publish` on the signed bundles, where it also updates from
 the previous release and rolls back), Stryker mutation testing
 (manual-only), oxlint + type-checked ESLint, Prettier, Knip (non-blocking),
-strict `tsc`. Rust: 84 `cargo test --lib` tests across 10 of the 16 modules,
-blocking in CI together with `cargo clippy -D warnings`.
+strict `tsc`. Rust: the `cargo test --lib` suite lives beside the code across 22
+of the 26 modules, blocking in CI together with `cargo clippy -D warnings`.
 
 **Source of truth:** `src/main.ts`, `src/lib/dispatcher.ts` (+ `src/features/*/wsHandlers.ts`), `src/lib/ws.ts`,
 `src/lib/api.ts`, `src/lib/store.ts`, `src/stores/*.store.ts` (+ the `messages.store.ts` reducers in `src/features/messaging/`),
