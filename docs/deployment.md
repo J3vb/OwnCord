@@ -745,7 +745,7 @@ Four facts the table cannot carry:
 - **Message retention is off by default.** `settings.retention_days` is `0`
   on a fresh and on an upgraded server, so message growth is unbounded until
   an owner sets a window in the admin panel. `GET /admin/api/retention/preview`
-  (admin panel, Retention) shows exactly which messages a window would delete
+  (admin panel, Message retention) shows exactly which messages a window would delete
   before it runs. Pinned messages and DMs are never swept.
 - **Report content and moderation actions age out on their own:**
   `moderation.report_retention_days` 180, `moderation.action_retention_days`

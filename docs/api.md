@@ -256,12 +256,12 @@ endpoints return plain-text errors — see their section):
 Create a new account. What it takes depends on the server's `registration_mode`
 setting (B4-1; the admin panel's Settings page, or the setup wizard):
 
-| Mode       | Behaviour                                                                                                                                                                      |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `closed`   | Every request is refused with `403` before the body is read.                                                                                                                   |
-| `invite`   | The default. A valid, unexpired, unrevoked invite with remaining uses is required and consumed. `201` with a session.                                                          |
-| `approval` | No invite. The account is created locked and answers `202`; it cannot sign in (`403 account is awaiting approval`) until an admin approves it in the admin panel's Users page. |
-| `open`     | No invite. `201` with a session.                                                                                                                                               |
+| Mode       | Behaviour                                                                                                                                                                        |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `closed`   | Every request is refused with `403` before the body is read.                                                                                                                     |
+| `invite`   | The default. A valid, unexpired, unrevoked invite with remaining uses is required and consumed. `201` with a session.                                                            |
+| `approval` | No invite. The account is created locked and answers `202`; it cannot sign in (`403 account is awaiting approval`) until an admin approves it in the admin panel's Members page. |
+| `open`     | No invite. `201` with a session.                                                                                                                                                 |
 
 `approval` and `open` also budget 5 registrations per client address per 24
 hours, and `approval` caps the pending queue at 100 applications; both refusals
