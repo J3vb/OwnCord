@@ -185,6 +185,8 @@ function runPublication(scenario) {
       STEPS_BUILD_OUTPUTS_DIGEST: digest,
       GITHUB_REPOSITORY: "J3vb/OwnCord",
       GH_TOKEN: "test-only",
+      GITHUB_STEP_SUMMARY: join(dir, "summary.md"),
+      DRY_RUN: scenario === "dry-run" ? "true" : "false",
     };
     let status = 0;
     let output = "";
@@ -232,6 +234,15 @@ test("success promotes all release tags in one command from the verified index",
   ]);
   assert.equal(result.events.at(-2)[0], "gh", "attestation must verify before promotion");
   assert.deepEqual(result.events.at(-1), creates[0]);
+});
+
+test("dry-run verifies everything, then leaves every release tag unchanged", () => {
+  const result = runPublication("dry-run");
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(result.tags, oldTags);
+  assert.ok(!result.events.some((e) => e[3] === "create"), "a dry run may not write a tag");
+  assert.equal(result.events.at(-1)[0], "gh", "a dry run still verifies the attestation");
+  assert.match(result.output, /Dry run: would promote/);
 });
 
 for (const scenario of [

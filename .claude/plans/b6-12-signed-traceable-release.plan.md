@@ -672,3 +672,83 @@ rows and the pasted `gh attestation verify` output in the flipping PR.
       longer says "Not published yet" for Linux ARM64
 - [ ] PRD rows (B6-12, B6-1), `README.md`, `CHANGELOG.md` updated;
       `ci-check` green
+
+## Revision 2026-09-25 — PX-02a: dry run, two-build compare, tag-run evidence
+
+Beta readiness review phase R4, item PX-02a, with owner decisions D-02 and
+D-11 (2026-09-25). Tasks 1–5 landed in #1617 and #1618; this revision changes
+`release.yml` and `upgrade-rehearsal.yml` only, and it ticks nothing: every
+box above, and B6-1's and B6-2's "awaits a tag run" rows, are ticked from the
+first real tag run's evidence.
+
+**D-02 supersedes question 4 and the "no dry-run" correction.** The rehearsed
+tag is the first beta tag, `v2.0.0-beta.1`, not `v1.2.0-alpha.5`. Budget for
+it to fail: a transient failure is re-run in place ("Re-run failed jobs" on
+the same run); anything that needs a commit becomes `v2.0.0-beta.2` (bump the
+three client manifests, add the CHANGELOG heading, tag again), because the
+ruleset forbids moving or deleting the tag. If `release-server-docker`
+promoted its tags and `publish` then failed, GHCR's `:2.0.0-beta.1` and
+`:latest` already point at the beta.1 image; `beta.2`'s promotion moves them.
+
+**The dry run.** `release.yml` now has a `workflow_dispatch` trigger with one
+input, `version` (no `v`). It runs every job a tag runs — gate evidence, the
+version check against the manifests, all builds, smokes and rehearsals, both
+`environment: release` approvals, signing, attestation and every
+verification — and skips only the two consumable writes: the GHCR tag
+promotion (the step prints the tags it would write) and `gh release create`.
+It leaves an untagged image digest with its attestation on GHCR, attestations
+in the public Sigstore log, and a `dry-run-release` artifact (seven days)
+holding everything the release would have published, so the notes and the
+off-runner verification can be checked before the tag exists. Run it on the
+commit about to be tagged, after the manifests are bumped:
+`gh workflow run release.yml --ref main -f version=2.0.0-beta.1`. The
+end-to-end order belongs to the release procedure in
+[`docs/contributing.md`](../../docs/contributing.md) (RE-08, a separate lane);
+this plan does not restate it.
+
+**Repository settings.** Nothing new to configure. The dry run relies on
+three things that are true today and must stay true:
+
+- The `release` environment keeps its required reviewer (`J3vb`) and
+  `deployment_branch_policy: null`. If deployments are ever restricted to
+  `v*` tags, add `main` as well, or every dry run stops at its first approval.
+  Each dry run asks for the same two approvals as a tag.
+- The dispatch trigger registers only once this `release.yml` is on `main`
+  (it arrives with the release PR); before that `gh workflow run` has nothing
+  to dispatch.
+- `gate-evidence` needs green required checks on the dispatched SHA, and
+  `ci.yml` runs on pushes to `main` only, so dry runs are dispatched on
+  `main`.
+
+**D-11, rebuild twice and compare.** Each `release-server` leg builds its
+binary, then builds it again from a local clone of the same commit at another
+path with an empty `GOCACHE`, and fails unless the two are byte-identical.
+The release build gains `-trimpath`, without which the checkout path is
+compiled into the binary. Measured locally on `linux/amd64` at `4a70f7b8`:
+identical, sha256 `05e550e6…`. A `git worktree` second checkout does not work
+— go builds it with no `vcs.*` stamp — so the second checkout is a clone.
+
+**Two latent tag-time defects fixed on the way.** Neither had ever executed.
+
+- The pushed image carried metadata-action's OCI **labels**; the smoke builds
+  carry none, and labels live in the image config, so the "smoked == pushed"
+  config check would have failed on every tag. The metadata now goes on as
+  manifest and index **annotations**, which leave the config alone.
+- `upgrade-rehearsal.yml` kept the B6-11 drills off the release path with
+  `if: github.event_name != 'workflow_call'`, but a called workflow sees its
+  caller's event (`push`), so the drills ran inside every release. The guard
+  is now an explicit `release: true` input from `release.yml`.
+
+**Where the first tag run's evidence lands.** Each row below is ticked from
+that run's id, not from this PR.
+
+| Row                                                              | Evidence in the run                                                                                                     |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| B6-1: four server assets build, smoke and upload                 | the four `Build server (…)` legs green; the `publish` summary table "Server assets"                                     |
+| B6-1: update manifest and `checksums.sha256` cover all four      | step "Every server asset the updater resolves is covered" — fails closed, and its table shows each hash in both files   |
+| B6-1: signed assets verify against the pinned key                | step "Verify signed assets against pinned server update key"; the table's minisign column                               |
+| B6-2: published manifest carries `linux/amd64` and `linux/arm64` | `release-server-docker` summary line from `verify-manifest`                                                             |
+| B6-2: both architectures smoked on native runners                | both `smoke-server-docker` legs green; the `verify-configs` summary lines "linux/<arch>: smoked == pushed"              |
+| B6-12: SBOMs, provenance, verify-before-publish                  | the four `Attest SBOM` steps, both attest-and-verify steps, all before `gh release create` and before the tag promotion |
+| B6-12: `gate-evidence` passed and the owner approved             | the `Verify exact-SHA gate evidence` job; the environment's deployment log for both approvals                           |
+| BPR-005 two-build compare (D-11)                                 | each `Build server (…)` summary line "built twice, from two paths with two caches, one sha256 …"                        |
