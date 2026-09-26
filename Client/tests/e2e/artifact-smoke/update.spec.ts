@@ -28,6 +28,13 @@ const CURRENT = process.env.OWNCORD_ARTIFACT_DIR ?? "";
 const PREVIOUS = process.env.OWNCORD_PREVIOUS_ARTIFACT_DIR ?? "";
 const updater = process.platform === "win32" ? ".nsis.zip" : ".AppImage.tar.gz";
 
+// The previous release is the baseline this test updates FROM, not the build
+// under test. Its bundled WebKit has lost the page within seconds of launch on
+// the Linux runners (x64 and ARM64), before any of this release's code ran:
+// WebDriver answers "invalid session id" (page crash or hang) or "unknown
+// error". Only the baseline's launch and first interaction retry on that.
+const BASELINE_SESSION_LOST = /WebDriver [\s\S]*"error":"(invalid session id|unknown error)"/;
+
 const digest = async (file: string) =>
   createHash("sha256")
     .update(await readFile(file))
@@ -54,21 +61,54 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
   const host = gateway.origin.replace("https://", "");
   const { installation, binary } = await installArtifact(PREVIOUS);
   let app: ArtifactDriver | undefined;
+  // Runs `step` (which launches the baseline), relaunching at most twice when
+  // the baseline's WebDriver session dies. Each lost attempt's error and
+  // driver log (the app's stderr) is attached to the report. Any other error
+  // fails at once.
+  const baseline = async (label: string, step: () => Promise<void>) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await step();
+      } catch (error) {
+        if (attempt > 2 || !BASELINE_SESSION_LOST.test(String(error))) throw error;
+        await info.attach(`baseline-${label}-lost-${attempt}`, {
+          body: `${String(error)}\n\n${app?.log() ?? ""}`,
+          contentType: "text/plain",
+        });
+      }
+    }
+  };
   const relaunch = async () => {
     await app?.close().catch(() => {});
-    await killInstalled(binary);
-    app = await launchArtifact(binary, { preserveProfile: true });
-    return app;
+    // The digest poll sees the new binary as soon as the installer starts
+    // writing it, and Windows refuses to start a file still open for writing
+    // (EBUSY). Retry until the installer has let go of it.
+    const deadline = Date.now() + 60_000;
+    for (;;) {
+      await killInstalled(binary);
+      try {
+        app = await launchArtifact(binary, { preserveProfile: true });
+        return app;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EBUSY" || Date.now() > deadline) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      }
+    }
   };
   try {
-    app = await launchArtifact(binary);
-    await waitFor(app, "#host", "", 60_000);
-    const previous = await appVersion(app);
-    expect(previous).not.toBe(version);
-
-    // Auto-connect, so the relaunched version proves the profile and the
-    // stored credential survived the update.
-    await app.click("#auto-connect");
+    let previous = "";
+    await baseline("launch", async () => {
+      await app?.close().catch(() => {});
+      await killInstalled(binary);
+      app = await launchArtifact(binary);
+      await waitFor(app, "#host", "", 60_000);
+      previous = await appVersion(app);
+      expect(previous).not.toBe(version);
+      // Auto-connect, so the relaunched version proves the profile and the
+      // stored credential survived the update.
+      await app.click("#auto-connect");
+    });
+    if (!app) throw new Error("the baseline never launched");
     await artifactLogin(app, host, "alice", TEST_PASSWORD);
     const text = `artifact-update-${crypto.randomUUID()}`;
     await app.fill("[data-testid='message-input'] textarea", text);
@@ -93,11 +133,13 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
     await app!.close().catch(() => {});
     await killInstalled(binary);
     await installArtifact(PREVIOUS, installation);
-    await relaunch();
-    expect(await appVersion(app!)).toBe(previous);
     // The previous version auto-connects from the profile the update kept
     // (its connect form sits disabled meanwhile): rollback keeps the account.
-    await waitFor(app!, "[data-testid='app-layout']", "", 60_000);
+    await baseline("rollback", async () => {
+      await relaunch();
+      expect(await appVersion(app!)).toBe(previous);
+      await waitFor(app!, "[data-testid='app-layout']", "", 60_000);
+    });
     await waitFor(app!, ".msg-text", text);
   } catch (error) {
     if (app)
