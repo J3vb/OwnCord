@@ -1060,13 +1060,13 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       # Fast feedback by default. `client-e2e-parity` runs the complete
-      # 688-test suite against the built bundle, and until this split this job
-      # ran those same 688 against the dev server — the two configs share
+      # 694-test suite against the built bundle, and until this split this job
+      # ran those same 694 against the dev server — the two configs share
       # testDir and testIgnore, so the jobs differed only in which server served
       # the app (10.8 and 8.8 minutes for one identical test set).
       #
       # So this leg runs the 137-test smoke set (Client/playwright.config.smoke.ts)
-      # and widens back to the full 688 when the specs or their fixtures moved —
+      # and widens back to the full 694 when the specs or their fixtures moved —
       # at that point the smoke set is no longer a fair sample of the change.
       # The two steps are complementary rather than a default and an override,
       # so exactly one runs; the full-suite condition doubles as the fail-safe,
