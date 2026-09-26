@@ -4036,12 +4036,12 @@ Roles ordered by position descending, each with its member count.
 }
 ```
 
-| Field         | Type    | Required | Description                                    |
-| ------------- | ------- | -------- | ---------------------------------------------- |
-| `name`        | string  | Yes      | 1–32 characters, unique case-insensitively     |
-| `color`       | string  | No       | `#rgb`/`#rrggbb`, or `""` for none             |
-| `permissions` | integer | No       | Bitfield; defaults to `0`                      |
-| `position`    | integer | No       | Defaults to one below the actor's own position |
+| Field         | Type    | Required | Description                                                           |
+| ------------- | ------- | -------- | --------------------------------------------------------------------- |
+| `name`        | string  | Yes      | 1–32 characters, unique case-insensitively                            |
+| `color`       | string  | No       | `#rgb`/`#rrggbb`, or `""` for none                                    |
+| `permissions` | integer | No       | Bitfield; defaults to `0`                                             |
+| `position`    | integer | No       | Must be free; defaults to the highest free slot below the actor's own |
 
 #### Response 201 Created
 
@@ -4052,7 +4052,7 @@ The created role (`id`, `name`, `color`, `permissions`, `position`,
 
 | Status | Code          | When                                                                                |
 | ------ | ------------- | ----------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | Missing/blank/over-long name, duplicate name, bad color, negative position          |
+| 400    | `BAD_REQUEST` | Missing/blank/over-long name, duplicate name, bad color, negative or taken position |
 | 403    | `FORBIDDEN`   | Missing `MANAGE_ROLES`, position at or above your own, or a permission bit you lack |
 
 ### PATCH /admin/api/roles/{id}

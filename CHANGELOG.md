@@ -403,6 +403,17 @@ text was moved behind English catalogs ready for translation.
 - Below 900 px wide the navigation is a drawer behind a menu button: it takes
   keyboard focus when it opens and closes on Escape, an outside click or a
   chosen page.
+- **Creating a role now warns when it would outrank Admin or Moderator.** A new
+  role still defaults to the highest free rank below yours, which for the owner
+  is above every built-in role; the dialog now says so before you create it,
+  offers a one-click "place just above" the default role, and refuses a rank
+  that is already taken.
+- The Roles page is a rank ladder, highest first, with a line at your own rank,
+  and every permission's description is shown under it instead of in a
+  mouse-only tooltip.
+- Channel access opens as a side drawer with Access, Overrides and Explain tabs
+  instead of one long dialog.
+- Deleting a channel or a role now asks you to type its name first.
 - **Who may register is now a choice**: closed, invite only, approval, or open.
   Fresh installs default to invite only. Existing servers keep the behaviour
   they had — a server that required an invite still requires one, and
