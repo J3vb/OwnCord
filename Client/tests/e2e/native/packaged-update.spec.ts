@@ -21,7 +21,7 @@ const exec = promisify(execFile);
  * Resolves once the handle is held. Tries pwsh first, like the cleanup below.
  */
 async function holdExecutable(exe: string, oldPid: number, seconds: number) {
-  const script = `$f = [System.IO.File]::Open($env:OWNCORD_E2E_INSTALLED_EXE, 'Open', 'Read', 'Read'); [Console]::Out.WriteLine('held'); Wait-Process -Id ${oldPid} -Timeout 120 -ErrorAction SilentlyContinue; Start-Sleep -Seconds ${seconds}; $f.Close()`;
+  const script = `$ErrorActionPreference = 'Stop'; $f = [System.IO.File]::Open($env:OWNCORD_E2E_INSTALLED_EXE, 'Open', 'Read', 'Read'); [Console]::Out.WriteLine('held'); Wait-Process -Id ${oldPid} -Timeout 120 -ErrorAction SilentlyContinue; Start-Sleep -Seconds ${seconds}; $f.Close()`;
   for (const shell of ["pwsh", "powershell"]) {
     const holder = spawn(shell, ["-NoProfile", "-NonInteractive", "-Command", script], {
       env: { ...process.env, OWNCORD_E2E_INSTALLED_EXE: exe },
