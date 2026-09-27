@@ -1249,8 +1249,8 @@ export default function () {
             socket.send(envelope("channel_focus", { channel_id: VU_CHANNEL_ID }));
             if (joinsVoice && !IS_OPERATIONAL) {
               // Capacity joins once on ready, as B6-9. Under operational the
-              // churn timer owns every join, so all joins land on the shared
-              // K6_VOICE_CHURN_MS grid that voice_state_delivery_ms reads.
+              // churn timer owns every join, so all joins land on the per-VU
+              // churn grid (churnOffsetMs) that voice_state_delivery_ms reads.
               voiceJoinSent = Date.now();
               socket.send(envelope("voice_join", { channel_id: VOICE_CHANNEL_ID }));
             }
