@@ -356,6 +356,16 @@ classes rather than a thrown error. Two methods, two native commands
 `tauri::ipc::Response`), because a raw-bytes response cannot also carry the
 JSON. The suite is `externalContent.suite.ts`, run against the desktop binding.
 
+**`HttpClient` gained one member (B11b):** `onUploadProgress(handler)` — a
+subscription to the `upload-progress` event the Rust HTTP proxy emits while an
+upload body crosses the loopback tunnel. It is an addition to the existing
+contract, not a new one, because it is the same capability: the webview never
+sees the upload bytes (the HTTP plugin buffers the whole body before the native
+client sends it), so the transport reports them out of band. The API client
+tags each upload with an `X-Upload-Id` header and matches ticks back by that id;
+the composer's chip renders them as a determinate `<progress>`. The browser
+adapter B8 will add returns an inert unsubscribe.
+
 **Suite coverage gaps.** A round-3 adversarial review found suite tests whose
 only assertion a completely inert, do-nothing subject also satisfies —
 `Client/tests/unit/platform/suites-are-falsifiable.test.ts` now runs every

@@ -68,16 +68,30 @@
 .attachment-preview-item.uploading {
   opacity: 0.6;
 }
-.attachment-preview-spinner {
+/* Upload progress on the chip: a native bar along the bottom edge, left
+   indeterminate (browsers animate it) until the transport reports a first
+   byte, then determinate. Its value/max announce the percentage. */
+.attachment-preview-item > progress {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  animation: spinCentered 1s linear infinite;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  border: none;
+  background: var(--bg-overlay);
 }
-@keyframes spinCentered {
-  to {
-    transform: translate(-50%, -50%) rotate(360deg);
+.attachment-preview-item > progress::-webkit-progress-bar {
+  background: var(--bg-overlay);
+}
+.attachment-preview-item > progress::-webkit-progress-value {
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .attachment-preview-item > progress::-webkit-progress-value {
+    transition: none;
   }
 }
 @keyframes iconSpin {

@@ -11,8 +11,12 @@
 use log::{debug, error, info, warn};
 use rustls::pki_types::ServerName;
 use std::net::IpAddr;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
-use tokio::io::{self, AsyncRead, AsyncReadExt};
+use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -161,6 +165,86 @@ where
     }
 }
 
+/// The value of a request header, matched case-insensitively, from the raw
+/// request head (`read_request_headers` output, ending in `\r\n\r\n`).
+///
+/// The request line (first line) is skipped: a request target may contain a
+/// colon, so only lines after it are split on the first colon. Surrounding
+/// whitespace is trimmed the way an HTTP field value is.
+pub(crate) fn header_value(raw: &[u8], name: &str) -> Option<String> {
+    let text = String::from_utf8_lossy(raw);
+    for line in text.split("\r\n").skip(1) {
+        if line.is_empty() {
+            continue;
+        }
+        let Some((field, value)) = line.split_once(':') else {
+            continue;
+        };
+        if field.trim().eq_ignore_ascii_case(name) {
+            return Some(value.trim().to_string());
+        }
+    }
+    None
+}
+
+/// The request body length declared by `Content-Length`, if it is a valid
+/// non-negative integer. Absent for a chunked or bodyless request.
+pub(crate) fn content_length(raw: &[u8]) -> Option<u64> {
+    header_value(raw, "content-length")?.parse::<u64>().ok()
+}
+
+/// Wraps a stream so every byte *read* from it is added to `read_bytes`;
+/// writes pass through untouched. `http_proxy` uses this to report upload
+/// progress while `copy_bidirectional` moves the request body, without
+/// disturbing the full-duplex copy or its deadline.
+pub(crate) struct CountingStream<A> {
+    inner: A,
+    read_bytes: Arc<AtomicU64>,
+}
+
+impl<A> CountingStream<A> {
+    pub(crate) fn new(inner: A, read_bytes: Arc<AtomicU64>) -> Self {
+        Self { inner, read_bytes }
+    }
+}
+
+impl<A: AsyncRead + Unpin> AsyncRead for CountingStream<A> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        let before = buf.filled().len();
+        let result = Pin::new(&mut this.inner).poll_read(cx, buf);
+        if matches!(result, Poll::Ready(Ok(()))) {
+            let read = buf.filled().len().saturating_sub(before) as u64;
+            if read > 0 {
+                this.read_bytes.fetch_add(read, Ordering::Relaxed);
+            }
+        }
+        result
+    }
+}
+
+impl<A: AsyncWrite + Unpin> AsyncWrite for CountingStream<A> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
+}
+
 /// Maximum consecutive accept errors before [`run_accept_loop`] exits.
 pub(crate) const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 5;
 
@@ -256,6 +340,7 @@ pub(crate) fn rewrite_headers(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncWriteExt;
 
     #[test]
     fn validate_rejects_crlf_and_null() {
@@ -310,6 +395,67 @@ mod tests {
             resolve_remote_target("example.com:8443").expect("hostname:port must parse");
         assert!(matches!(server_name, ServerName::DnsName(_)));
         assert_eq!(dial_target, "example.com:8443");
+    }
+
+    #[test]
+    fn header_value_is_case_insensitive_and_trimmed() {
+        let raw = b"POST /api/v1/uploads HTTP/1.1\r\nHost: x\r\nX-Upload-Id: abc-123  \r\nContent-Length: 42\r\n\r\n";
+        assert_eq!(header_value(raw, "x-upload-id").as_deref(), Some("abc-123"));
+        assert_eq!(header_value(raw, "X-UPLOAD-ID").as_deref(), Some("abc-123"));
+        assert_eq!(header_value(raw, "missing"), None);
+    }
+
+    #[test]
+    fn header_value_ignores_the_request_line() {
+        // A request-target that itself contains a colon must not be read as a
+        // header pair.
+        let raw = b"GET /x:y HTTP/1.1\r\nHost: h\r\n\r\n";
+        assert_eq!(header_value(raw, "GET /x"), None);
+    }
+
+    #[test]
+    fn content_length_parses_and_rejects_garbage() {
+        assert_eq!(
+            content_length(b"POST / HTTP/1.1\r\nContent-Length: 1024\r\n\r\n"),
+            Some(1024)
+        );
+        assert_eq!(
+            content_length(b"POST / HTTP/1.1\r\nContent-Length: many\r\n\r\n"),
+            None
+        );
+        assert_eq!(content_length(b"GET / HTTP/1.1\r\n\r\n"), None);
+    }
+
+    // The upload progress counter: every byte read from the wrapped stream is
+    // added to the shared total, so the proxy can emit progress while
+    // `copy_bidirectional` moves the request body.
+    #[tokio::test]
+    async fn counting_stream_totals_bytes_read() {
+        let (mut writer, reader) = tokio::io::duplex(64);
+        let counter = Arc::new(AtomicU64::new(0));
+        let mut counted = CountingStream::new(reader, Arc::clone(&counter));
+
+        writer.write_all(b"hello world").await.expect("write");
+        writer.shutdown().await.expect("shutdown");
+
+        let copied = io::copy(&mut counted, &mut io::sink()).await.expect("copy");
+        assert_eq!(copied, 11);
+        assert_eq!(counter.load(Ordering::Relaxed), 11);
+    }
+
+    #[tokio::test]
+    async fn counting_stream_passes_writes_through() {
+        let (writer, mut reader) = tokio::io::duplex(64);
+        let counter = Arc::new(AtomicU64::new(0));
+        let mut counted = CountingStream::new(writer, Arc::clone(&counter));
+
+        counted.write_all(b"payload").await.expect("write");
+        counted.shutdown().await.expect("shutdown");
+
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf).await.expect("read");
+        assert_eq!(buf, b"payload");
+        assert_eq!(counter.load(Ordering::Relaxed), 0, "writes are not counted");
     }
 
     // OC-0218: the data phase of a tunneled request must not be able to hang
