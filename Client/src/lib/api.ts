@@ -47,17 +47,16 @@ export interface ApiClientConfig {
 }
 
 /**
- * Per-request options for the internal `doFetch`. `uploadId` tags a multipart
- * upload so the native transport's `upload-progress` ticks can be matched to
- * this request, and `onUploadProgress` receives the matching ones as a 0–1
- * fraction.
+ * Per-request options for the internal `doFetch`. `onUploadProgress` tags a
+ * multipart upload with a fresh id so the native transport's `upload-progress`
+ * ticks can be matched to this request, and receives the matching ones as a
+ * 0–1 fraction.
  */
 interface RequestOptions {
   skipUnauthorized?: boolean;
   token?: string;
   multipart?: boolean;
   detached?: boolean;
-  uploadId?: string;
   onUploadProgress?: (fraction: number) => void;
 }
 
@@ -431,16 +430,16 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       const token = opts?.token ?? snapshot.token;
       // i18n-exempt: wire header value, never rendered
       if (token) headers["Authorization"] = `Bearer ${token}`;
-      // The Rust proxy echoes this id back in its upload-progress events, so
-      // the caller can tell its own upload's ticks from any other in flight.
-      if (opts?.uploadId !== undefined) headers["X-Upload-Id"] = opts.uploadId;
       const init: RequestInit = { method, headers, signal: transport.signal };
       if (body !== undefined)
         init.body = opts?.multipart ? (body as FormData) : JSON.stringify(body);
       // Subscribe before the request goes out (the proxy can emit as soon as
       // the body starts moving) and let the request scope unsubscribe it.
-      if (opts?.uploadId !== undefined && opts.onUploadProgress !== undefined) {
-        const id = opts.uploadId;
+      if (opts?.onUploadProgress !== undefined) {
+        // The Rust proxy echoes this id back in its upload-progress events, so
+        // the caller can tell its own upload's ticks from any other in flight.
+        const id = crypto.randomUUID();
+        headers["X-Upload-Id"] = id;
         const onProgress = opts.onUploadProgress;
         const unsubscribe = desktop.http.onUploadProgress((p) => {
           if (p.id === id) {
@@ -1095,7 +1094,6 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
       return request<UploadResponse>("POST", "/uploads", formData, signal, {
         multipart: true,
-        uploadId: onProgress !== undefined ? crypto.randomUUID() : undefined,
         onUploadProgress: onProgress,
       });
     },
