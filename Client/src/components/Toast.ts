@@ -126,11 +126,15 @@ export function createToastContainer(): ToastContainer {
       return;
     }
 
-    // Evict oldest toasts when at capacity
+    // Evict the oldest toast when at capacity, sparing errors (they persist
+    // until dismissed): with every slot an error, a new non-error is the one
+    // that gives way, and only a new error displaces the oldest error.
     while (toasts.length >= MAX_TOASTS) {
-      const oldest = toasts[0];
-      if (oldest !== undefined) {
-        removeToast(oldest);
+      const oldest = toasts.find((t) => t.type !== "error");
+      if (oldest === undefined && type !== "error") return;
+      const victim = oldest ?? toasts[0];
+      if (victim !== undefined) {
+        removeToast(victim);
       }
     }
 

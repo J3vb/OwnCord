@@ -225,6 +225,33 @@ describe("ToastContainer", () => {
     expect(container.querySelector(".toast")!.textContent).toContain("Same error");
   });
 
+  it("evicts a non-error toast before an undismissed error at capacity", () => {
+    toast.show("Info first", "info");
+    for (let i = 0; i < 4; i++) toast.show(`Error ${i}`, "error");
+    toast.show("Saved", "success");
+    vi.advanceTimersByTime(400);
+
+    const texts = [...container.querySelectorAll(".toast-text")].map((el) => el.textContent);
+    expect(texts).toEqual(["Error 0", "Error 1", "Error 2", "Error 3", "Saved"]);
+  });
+
+  it("keeps five distinct errors when a success arrives, evicting the success", () => {
+    for (let i = 0; i < 5; i++) toast.show(`Error ${i}`, "error");
+    toast.show("Profile updated", "success");
+    vi.advanceTimersByTime(400);
+
+    const texts = [...container.querySelectorAll(".toast-text")].map((el) => el.textContent);
+    expect(texts).toEqual(["Error 0", "Error 1", "Error 2", "Error 3", "Error 4"]);
+  });
+
+  it("lets a new error displace the oldest error when every slot holds one", () => {
+    for (let i = 0; i < 6; i++) toast.show(`Error ${i}`, "error");
+    vi.advanceTimersByTime(400);
+
+    const texts = [...container.querySelectorAll(".toast-text")].map((el) => el.textContent);
+    expect(texts).toEqual(["Error 1", "Error 2", "Error 3", "Error 4", "Error 5"]);
+  });
+
   it("does not coalesce toasts with different text or type", () => {
     toast.show("Same error", "error");
     toast.show("Same error", "info");
