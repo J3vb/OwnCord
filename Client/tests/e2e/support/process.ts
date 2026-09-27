@@ -4,14 +4,23 @@ import { createServer } from "node:net";
 import { createSocket } from "node:dgram";
 import { setTimeout as delay } from "node:timers/promises";
 
-export async function freePort(): Promise<number> {
-  const listener = createServer();
-  listener.listen(0, "127.0.0.1");
-  await once(listener, "listening");
-  const address = listener.address();
-  if (!address || typeof address === "string") throw new Error("No test port allocated");
-  await new Promise<void>((resolve, reject) => listener.close((e) => (e ? reject(e) : resolve())));
-  return address.port;
+/** Distinct free TCP ports, one per name: every listener stays open until all are allocated, so the OS cannot hand one port out twice. */
+export async function freePorts<K extends string>(...names: K[]): Promise<Record<K, number>> {
+  const listeners = names.map(() => createServer().listen(0, "127.0.0.1"));
+  try {
+    await Promise.all(listeners.map((listener) => once(listener, "listening")));
+    const ports = {} as Record<K, number>;
+    names.forEach((name, i) => {
+      const address = listeners[i]!.address();
+      if (!address || typeof address === "string") throw new Error("No test port allocated");
+      ports[name] = address.port;
+    });
+    return ports;
+  } finally {
+    await Promise.all(
+      listeners.map((listener) => new Promise((resolve) => listener.close(resolve))),
+    );
+  }
 }
 
 /** TCP availability does not imply UDP availability (notably Windows exclusions). */

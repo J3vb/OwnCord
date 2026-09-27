@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { startNativeApp } from "./native-app";
-import { freePort, startProcess, stopProcess, waitForHttp } from "./process";
+import { freePorts, startProcess, stopProcess, waitForHttp } from "./process";
 
 const exec = promisify(execFile);
 const WINDOWS_EXE = "owncord-client.exe";
@@ -143,8 +143,7 @@ async function launchLinux(
     for (const profile of profiles) await rm(profile, { recursive: true, force: true });
   };
   if (!options.preserveProfile) await clearProfiles();
-  const port = await freePort();
-  const nativePort = await freePort();
+  const { port, nativePort } = await freePorts("port", "nativePort");
   const driver = startProcess(
     "tauri-driver",
     [

@@ -36,7 +36,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ChildProcess } from "node:child_process";
-import { freePort, freeUdpPort, startProcess, stopProcess, waitForHttp } from "../support/process";
+import { freePorts, freeUdpPort, startProcess, stopProcess, waitForHttp } from "../support/process";
 
 /** livekit-client's package exports hide dist/; the spec runs from Client/. */
 const livekitDist = resolve("node_modules/livekit-client/dist");
@@ -117,8 +117,9 @@ let dataDir: string;
 
 test.beforeAll(async () => {
   dataDir = await mkdtemp(join(tmpdir(), "owncord-native-voice-"));
-  livekitPort = await freePort();
-  const rtcPort = await freePort();
+  const ports = await freePorts("livekit", "rtc");
+  livekitPort = ports.livekit;
+  const rtcPort = ports.rtc;
   const rtcUdpPort = await freeUdpPort();
   const config = join(dataDir, "livekit.yaml");
   await writeFile(
