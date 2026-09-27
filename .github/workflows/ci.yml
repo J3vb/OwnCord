@@ -891,8 +891,8 @@ jobs:
       # contributor east or west of it (the fifth instance of this class). A
       # half-hour offset — the one offset no whole-hour zone shares — moves both
       # the date and the hour, so a date-only or time-only assertion is caught
-      # too. No coverage: the floor script just measured the UTC run, and this
-      # leg is a timezone proof, not a second coverage measurement.
+      # too. No coverage: the floor check below reads the UTC run's report, and
+      # this leg is a timezone proof, not a second coverage measurement.
       - name: Run unit tests at a half-hour offset (America/St_Johns)
         env:
           TZ: America/St_Johns

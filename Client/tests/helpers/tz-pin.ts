@@ -54,8 +54,9 @@ export function restoreTZ(original: string | undefined): void {
  * For suites that assert an exact rendered local time. Pinning UTC there is
  * what makes them pass off-UTC (BUG-11): the fixture is a real UTC instant,
  * so the rendered string is only stable when Date renders in UTC. The
- * `unit-tz` CI leg runs the whole suite at a half-hour offset precisely so a
- * new unpinned assertion is caught.
+ * `client-tests` CI job's "Run unit tests at a half-hour offset
+ * (America/St_Johns)" step runs the whole suite there precisely so a new
+ * unpinned assertion is caught.
  *
  * @param zone IANA zone to pin, e.g. "UTC".
  * @returns A restore function; call it from `afterEach`.

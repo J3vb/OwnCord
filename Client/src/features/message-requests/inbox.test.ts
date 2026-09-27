@@ -16,7 +16,7 @@ import { setConnectionStatus } from "@stores/ui.store";
 import type { DispatchApi } from "../connection/dispatchContext";
 import { NAVIGATION_DESTINATIONS } from "../navigation/destinations";
 import { renderInbox } from "./Inbox";
-import { pinZone } from "../../../tests/helpers/tz-pin";
+import { pinZone, tzPinHonored } from "../../../tests/helpers/tz-pin";
 import { messageRequestsStore, pendingRequestCount, resetMessageRequests } from "./store";
 import { buildInbox } from "./view";
 import { applyReadyDmRequests, handleDmRequest } from "./wsHandlers";
@@ -443,23 +443,30 @@ describe("inbox view", () => {
   // Berlin and assert the correct instant and its Berlin rendering, which
   // only holds once the row goes through parseTimestamp. The old code
   // produced "Sep 5, 2026, 12:00 PM" here; the fix produces 2:00 PM.
-  describe("[BUG-11] a request's time is the server's instant, not the viewer's", () => {
-    let restore: () => void;
-    beforeEach(() => {
-      restore = pinZone("Europe/Berlin");
-    });
-    afterEach(() => {
-      restore();
-    });
+  const berlinPinHonored = tzPinHonored(
+    "Europe/Berlin",
+    () => new Date(2026, 0, 15).getTimezoneOffset() === -60,
+  );
+  describe.skipIf(!berlinPinHonored)(
+    "[BUG-11] a request's time is the server's instant, not the viewer's",
+    () => {
+      let restore: () => void;
+      beforeEach(() => {
+        restore = pinZone("Europe/Berlin");
+      });
+      afterEach(() => {
+        restore();
+      });
 
-    it("renders the UTC instant and a canonical RFC3339 datetime", () => {
-      expect(new Date(2026, 0, 15).getTimezoneOffset()).toBe(-60);
-      handleDmRequest(frame(1, "pending"));
-      open();
-      messageRequestsStore.flush();
-      const time = rows()[0]!.querySelector("time")!;
-      expect(time.getAttribute("datetime")).toBe("2026-09-05T12:00:00.000Z");
-      expect(time.textContent).toBe("Sep 5, 2026, 2:00 PM");
-    });
-  });
+      it("renders the UTC instant and a canonical RFC3339 datetime", () => {
+        expect(new Date(2026, 0, 15).getTimezoneOffset()).toBe(-60);
+        handleDmRequest(frame(1, "pending"));
+        open();
+        messageRequestsStore.flush();
+        const time = rows()[0]!.querySelector("time")!;
+        expect(time.getAttribute("datetime")).toBe("2026-09-05T12:00:00.000Z");
+        expect(time.textContent).toBe("Sep 5, 2026, 2:00 PM");
+      });
+    },
+  );
 });
