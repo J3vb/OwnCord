@@ -374,7 +374,12 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     void desktop.appMetadata
       .getVersion()
       .then((v) => {
-        versionEl.textContent = t("logs.version.known", { version: v });
+        // A host that answers without a version (a browser mock) reads as
+        // unknown, never "vnull".
+        versionEl.textContent =
+          typeof v === "string" && v !== ""
+            ? t("logs.version.known", { version: v })
+            : t("logs.version.unknown");
       })
       .catch(() => {
         versionEl.textContent = t("logs.version.unknown");
