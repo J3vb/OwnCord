@@ -31,7 +31,7 @@ works the same on Windows, macOS and Linux.
 | Command                       | Description                                                                                                                   |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `npm run bootstrap`           | `npm ci` in all three package roots                                                                                           |
-| `npm run check`               | Everything CI gates on: server, client, Rust                                                                                  |
+| `npm run check`               | CI's static, unit and drift gates: server, client, Rust (not the Playwright, govulncheck, npm-audit or coverage-floor jobs)   |
 | `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift                                               |
 | `npm run check:client`        | Client only — typecheck, lint (warnings denied, import cycles), knip, coverage-gated unit + integration tests, bundle budgets |
 | `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                                                                 |
@@ -134,13 +134,15 @@ Windows client builds and server-only work need none of this. Design and rationa
 | `npm run test:browser`      | Vitest browser-mode tests                  |
 
 PR CI runs only the narrow mutation subset (`Client/stryker.ci.config.mjs`,
-`src/lib/permissions.ts`). The full-client mutation baseline
-(`src/lib/**` + `src/stores/**`, 76 files / 12 387 mutants) is the sharded
-`mutation` job in `.github/workflows/nightly-test-depth.yml`, driven locally
-with `cd Client && STRYKER_SHARD=<livekit|audio-media|transport-auth|lib-rest|stores>
+`src/lib/permissions.ts`). The full-client mutation baseline (the base config's
+configured surface, 146 files today) is the sharded `mutation` job in
+`.github/workflows/nightly-test-depth.yml`, driven locally with `cd Client &&
+STRYKER_SHARD=<livekit|audio-media|transport-auth|lib-rest|stores|safety-moderation>
 npx stryker run stryker.shard.config.mjs`. `Client/scripts/check-mutation-shards.mjs`
-proves the shard union still equals the configured surface. The measured score
-is recorded in `docs/plans/b7-8-mutation-baseline-*.md`.
+proves the shard union still equals the configured surface, and now runs in
+`Client Static Checks` on every PR so a new file cannot sit in no shard until the
+nightly fails. The measured score is recorded in
+`docs/plans/b7-8-mutation-baseline-*.md`.
 
 **Type checking, linting & formatting**
 

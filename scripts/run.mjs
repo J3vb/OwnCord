@@ -36,8 +36,10 @@ const bin = (c) => (WIN && (c === "npm" || c === "npx") ? `${c}.cmd` : c);
 // binary, and a shell would put its quoting rules between us and the arguments.
 const needsShell = (c) => WIN && (c === "npm" || c === "npx");
 
-/** A step that always runs. */
-const step = (cmd, args, cwd = ".") => ({ cmd, args, cwd });
+/** A step that always runs. `label`, when set, replaces the dumped argv in the
+ *  printed banner — used by the chunked prettier steps, whose argument list is
+ *  thousands of paths. */
+const step = (cmd, args, cwd = ".", label = "") => ({ cmd, args, cwd, label });
 
 /**
  * A step that is skipped, with a printed reason, when `probe` is not on PATH.
@@ -102,7 +104,10 @@ const CHECK_SERVER = [
   step("go", ["build", "-tags", "wazero", "./..."], "Server"),
   step("go", ["build", "-tags", "otel,wazero", "./..."], "Server"),
   step("go", ["vet", "./..."], "Server"),
-  step("go", ["test", "-race", "./..."], "Server"),
+  // -timeout 20m matches the CI race step (ci.yml). Go's default is 10m, and
+  // `ws` alone took 431 s here, so a slow machine could time out locally on a
+  // suite CI passes. D7 of the check-reliability pain-points report.
+  step("go", ["test", "-race", "-timeout", "20m", "./..."], "Server"),
   // The whole tree, as ci.yml runs it. This step said `./ws/` ("where lock
   // order varies") until a branch that touched no Server/admin file went red
   // on the CI deadlock leg on an admin test the narrower command never ran.
@@ -143,6 +148,9 @@ const CHECK_CLIENT = [
   step("npm", ["run", "check:admin-types"], "Client"),
   step("npm", ["run", "lint"], "Client"),
   step("npm", ["run", "knip"], "Client"),
+  // D6: the CI job that runs this on every PR (client-check) mirrors ci.yml, so
+  // the nightly mutation union check cannot drift unnoticed.
+  step("node", ["scripts/check-mutation-shards.mjs"], "Client"),
   step("npm", ["run", "test:coverage"], "Client"),
   // B7-7 bundle budgets: scratch --manifest build (dist-budget/, never the
   // shipped dist/) then the gate. Node zlib, not the gzip CLI, so it runs
@@ -191,6 +199,48 @@ const CHECK_DOCS = [
   ...LEDGER_VERIFY,
 ];
 
+// D8 of the check-reliability pain-points report: `npx prettier --check .`
+// walks the FILESYSTEM, not the tracked set, so it fails on a git-excluded
+// agent file (`.opencode/plugins/fm-busy-state.js` here) and walked the ~23 GB
+// `Client/src-tauri/target/` that only a nested .gitignore excludes. The
+// tracked set is the only correct list, as it already is for shellcheck and
+// actionlint above. `--ignore-unknown` is required when paths are named
+// explicitly: the directory walk only visits known extensions, but an explicit
+// `.sql`/`.sh`/`.toml` path with no inferred parser is a fatal error. Prettier
+// still honours `.prettierignore` for explicitly-passed files, so the generated
+// and frozen paths there stay excluded.
+//
+// Chunked because the tracked list is ~100 KB of paths. Windows caps a spawned
+// command line at ~8 KB, so there the list is split into several
+// `prettier --check` calls; on POSIX ARG_MAX is ~2 MB and the single call is
+// both correct and faster than many Node startups. `--ignore-unknown` lets a
+// chunk that lands on only extensionless paths pass rather than erroring.
+const PRETTIER_CHUNK = WIN ? 6000 : 100000;
+const PRETTIER_TRACKED = (() => {
+  const files = tracked();
+  // A git that cannot list the tree must not silently drop the gate: fall back
+  // to the old filesystem walk (which still honours .prettierignore) so the
+  // step fails or passes on the real tree rather than vanishing.
+  if (files.length === 0) return [step("npx", ["prettier", "--check", "."], ".")];
+  const chunks = [];
+  let batch = [];
+  let len = 0;
+  for (const f of files) {
+    if (batch.length > 0 && len + f.length + 1 > PRETTIER_CHUNK) {
+      chunks.push(batch);
+      batch = [];
+      len = 0;
+    }
+    batch.push(f);
+    len += f.length + 1;
+  }
+  if (batch.length > 0) chunks.push(batch);
+  const label = (i) => (chunks.length > 1 ? ` (chunk ${i + 1}/${chunks.length})` : "");
+  return chunks.map((b, i) =>
+    step("npx", ["prettier", "--check", "--ignore-unknown", ...b], ".", `Prettier${label(i)}`),
+  );
+})();
+
 // Repository-wide formatting and script/workflow lint (RL-19 / L-13, S-05).
 //
 // No `gofmt -l` step here on purpose: `gofmt -l` prints offenders and still
@@ -198,7 +248,7 @@ const CHECK_DOCS = [
 // `formatters` block in Server/.golangci.yml, which runs inside the pinned
 // Lint check, and by .githooks/pre-commit on staged files.
 const CHECK_HYGIENE = [
-  step("npx", ["prettier", "--check", "."], "."),
+  ...PRETTIER_TRACKED,
   optional(
     "shellcheck",
     "shellcheck",
@@ -306,15 +356,16 @@ function runTask(name) {
     console.error(`unknown task: ${name}\nknown: ${Object.keys(TASKS).join(", ")}`);
     process.exit(2);
   }
+  const describe = (s) => (s.label ? `${s.cmd} ${s.label}` : `${s.cmd} ${s.args.join(" ")}`);
   const skipped = [];
   for (const s of steps) {
     if (s.probe && !onPath(s.probe)) {
-      console.log(`\n--- SKIP  ${s.cmd} ${s.args.join(" ")}  (${s.why})`);
+      console.log(`\n--- SKIP  ${describe(s)}  (${s.why})`);
       skipped.push(s.probe);
       continue;
     }
     const where = s.cwd === "." ? "" : `  [in ${s.cwd}]`;
-    console.log(`\n--- ${s.cmd} ${s.args.join(" ")}${where}`);
+    console.log(`\n--- ${describe(s)}${where}`);
     // With shell:true Node deprecates a separate args array (DEP0190), because it
     // concatenates without escaping. So concatenate deliberately instead: the only
     // commands that take this branch are the npm shims, and no argument in this
@@ -340,7 +391,7 @@ function runTask(name) {
       process.exit(1);
     }
     if (r.status !== 0) {
-      console.error(`\nFAILED: ${s.cmd} ${s.args.join(" ")}${where} exited ${r.status}`);
+      console.error(`\nFAILED: ${describe(s)}${where} exited ${r.status}`);
       process.exit(r.status ?? 1);
     }
   }
@@ -359,7 +410,8 @@ if (!arg || arg === "--list") {
     console.log(`\n${name}`);
     for (const s of steps) {
       const where = s.cwd === "." ? "" : `   (in ${s.cwd})`;
-      console.log(`  ${s.probe ? "[optional] " : ""}${s.cmd} ${s.args.join(" ")}${where}`);
+      const label = s.label ? `${s.cmd} ${s.label}` : `${s.cmd} ${s.args.join(" ")}`;
+      console.log(`  ${s.probe ? "[optional] " : ""}${label}${where}`);
     }
   }
   console.log("");
