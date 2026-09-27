@@ -149,6 +149,56 @@ jobs:
           cat "$answer" >> "$GITHUB_OUTPUT"
           cat "$answer"
 
+  # D3 of the pain-points report: cheap Go checks ran only as the last steps of
+  # each 20-27 minute server leg, so a lint or invariant failure was found after
+  # the race tests. This job is deliberately additive: it runs the same checks
+  # early for fast feedback, and every step it mirrors stays in the required
+  # `Server Build & Test` legs, so no gating is moved off a required context and
+  # no required-check name changes. A lint or invariant failure now reports in
+  # minutes instead of after the 20-minute race step.
+  #
+  # Gated on the `server` capability like the other server jobs, so a client-only
+  # PR does not pay for it.
+  server-fast-checks:
+    name: Server Lint & Invariants
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: Server/
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.27"
+          cache-dependency-path: Server/go.sum
+
+      # The architectural invariants (file sizes, the db import boundary, the
+      # authz chokepoint, syncutil locks, egress sites). Inside `go test -race
+      # ./...` they only report after the whole race run; here they report in
+      # seconds. Not -race: the rules parse the tree, they do not exercise it.
+      - name: Go invariants
+        run: go test ./invariants/...
+
+      # The doc gates the race leg runs with -count=1 because they read files
+      # outside the module. Cheap (seconds) and pure drift checks.
+      - name: Document gates (-count=1)
+        run: go test -count=1 ./cmd/dbinventory/ ./migrations/
+
+      # Same action, version and inputs as the required server leg's Lint step;
+      # the point is the earlier report, not a second policy.
+      - name: Lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.2
+          working-directory: Server/
+          verify: false
+
   server-build-test:
     name: Server Build & Test (${{ matrix.os }})
     needs: changes
