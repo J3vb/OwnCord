@@ -74,7 +74,8 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page, adminS
       /^(Waiting for the first health check|Everything is running normally|\d+ problems? needs? your attention)$/,
     );
     const checks = page.locator("#healthChecks");
-    if ((await checks.count()) > 0) {
+    const hasChecks = (await checks.count()) > 0;
+    if (hasChecks) {
       if (!(await checks.evaluate((el) => el.hasAttribute("open")))) {
         await checks.locator(":scope > summary").click();
       }
@@ -85,11 +86,11 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page, adminS
 
     // The shared accessibility checks, over this page.
     expect(await findUnnamedControls(page.locator("#content"))).toEqual([]);
-    for (const text of [".health-hero-sub", ".count-chip"]) {
+    for (const text of hasChecks ? [".health-hero-sub", ".count-chip"] : [".health-hero-sub"]) {
       const { ratio } = await textContrast(page.locator(text).first());
       expect(ratio, text).toBeGreaterThanOrEqual(Q1.text);
     }
-    if ((await checks.count()) > 0) {
+    if (hasChecks) {
       const summary = checks.locator(":scope > summary");
       expect(await keyboardReachable(page, summary)).toBe(true);
       expect((await focusIndicator(page)).problems).toEqual([]);
