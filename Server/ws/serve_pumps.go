@@ -2,7 +2,9 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net"
 	"time"
 
 	"github.com/coder/websocket"
@@ -121,6 +123,44 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+// pingInterval is how often the server sends a WebSocket protocol Ping, and
+// how long it waits for the matching Pong (CLI-01). The peer's WebSocket stack
+// answers a protocol Ping itself, so liveness no longer rests on the client's
+// app-level ping — a webview timer a minimised window may throttle. A live
+// peer refreshes its activity every interval; a silent (half-open) one is
+// closed at most 2×pingInterval after it went quiet.
+var pingInterval = 25 * time.Second
+
+// pingPump sends a protocol Ping every interval until ctx ends. A Pong
+// refreshes the client's activity for the stale sweep; a missing Pong closes
+// the connection, and readPump's teardown takes it from there. The Pong is
+// read by readPump's conn.Read, so pingPump only works alongside it.
+func pingPump(ctx context.Context, conn *websocket.Conn, c *Client, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		pingCtx, cancel := context.WithTimeout(ctx, interval)
+		err := conn.Ping(pingCtx)
+		cancel()
+		if err != nil {
+			if ctx.Err() == nil && !errors.Is(err, net.ErrClosed) {
+				slog.Warn("ws closing unresponsive connection (no pong)", "user_id", c.userID, "err", err)
+				_ = conn.CloseNow()
+			}
+			return
+		}
+		// Not touch(): a Pong is liveness, not a received message.
+		c.mu.Lock()
+		c.lastActivity = time.Now()
+		c.mu.Unlock()
 	}
 }
 

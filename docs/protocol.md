@@ -298,9 +298,19 @@ The server responds immediately:
 { "type": "pong" }
 ```
 
+### Server Protocol Ping
+
+Every 25 seconds the server sends a WebSocket protocol Ping frame (RFC 6455
+control frame, not a JSON message) and waits up to 25 seconds for the Pong.
+Browsers and WebSocket libraries answer it automatically, so a peer stays
+alive even when its app-level ping timer is throttled. A Pong counts as
+activity for the stale sweep below; a peer that misses a Pong is disconnected,
+so a silent peer is closed within 50 seconds. A client can treat a gap of more
+than 2.5 × 25 seconds without any frame from the server as a dead connection.
+
 ### Server Stale Client Sweep
 
-Every 30 seconds, the server checks all clients. Any client with no activity for 90 seconds is forcibly disconnected. Normal chat activity also keeps the connection alive.
+Every 30 seconds, the server checks all clients. Any client with no activity (a message, or a Pong to the server's protocol Ping) for 90 seconds is forcibly disconnected. Normal chat activity also keeps the connection alive.
 
 ### Client Silence Deadline
 
