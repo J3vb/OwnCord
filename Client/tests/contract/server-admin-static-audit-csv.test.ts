@@ -76,4 +76,15 @@ describe("audit Copy page rows", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(panel.copied).toEqual(["t\talice\tban\t\tbanned bob"]);
   });
+
+  it("keeps the server actor's id 0 when it has no name", async () => {
+    const panel = loadPanel();
+    panel.state.auditCache = [
+      { created_at: "t", actor_name: "", actor_id: 0, action: "backup_create", detail: "" },
+    ];
+    panel.copyAuditLog();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(panel.copied).toEqual(["t\t0\tbackup_create\t\t"]);
+    expect(panel.csvQ(0)).toBe('"0"');
+  });
 });

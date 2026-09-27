@@ -252,7 +252,7 @@ function copyAuditLog(){
    read the cell as text, not a formula. Both the Copy page clipboard rows
    and the CSV export wrap their cells with this. */
 function formulaGuard(v){
-  const s=String(v||'');
+  const s=String(v??'');
   return /^[=+\-@\t\r]/.test(s)?"'"+s:s;
 }
 
