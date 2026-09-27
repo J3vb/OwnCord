@@ -46,21 +46,44 @@ async function timeJoin(page: Page): Promise<number> {
   return Date.now() - start;
 }
 
-/** The client's own join timeline for the join just made, from the production
- *  `__owncord.lkDebug()` introspection (SRE-M2). */
-async function joinTimings(page: Page): Promise<Record<string, number | null>> {
-  return page.evaluate(() => {
-    const info = (
-      window as unknown as {
-        __owncord: {
-          lkDebug: () => {
-            voiceJoin?: { lastJoins?: Array<{ timings?: Record<string, number | null> }> };
-          };
-        };
-      }
-    ).__owncord.lkDebug();
-    return info.voiceJoin?.lastJoins?.[0]?.timings ?? {};
-  });
+/** The client's own join timeline for the join started at `since`, from the
+ *  production `__owncord.lkDebug()` introspection (SRE-M2). "Voice Connected"
+ *  shows before the activate phase ends, so wait until that join is recorded
+ *  rather than read the previous sample's. */
+async function joinTimings(page: Page, since: number): Promise<Record<string, number | null>> {
+  let timings: Record<string, number | null> = {};
+  await expect
+    .poll(
+      async () => {
+        const voiceJoin = await page.evaluate(
+          () =>
+            (
+              window as unknown as {
+                __owncord: {
+                  lkDebug: () => {
+                    voiceJoin?: {
+                      active: unknown;
+                      lastJoins: Array<{
+                        startedAt: number;
+                        timings: Record<string, number | null>;
+                      }>;
+                    };
+                  };
+                };
+              }
+            ).__owncord.lkDebug().voiceJoin,
+        );
+        const last = voiceJoin?.lastJoins[0];
+        if (voiceJoin?.active !== null || last === undefined || last.startedAt < since) {
+          return false;
+        }
+        timings = last.timings;
+        return true;
+      },
+      { intervals: [50], timeout: 10_000 },
+    )
+    .toBe(true);
+  return timings;
 }
 
 function median(values: number[]): number | null {
@@ -91,8 +114,9 @@ test("voice join reaches decoded remote media within the budget", async ({
     }
     // No open peer is still decoding, so any audio counted is this join's.
     await expect.poll(async () => (await mediaStats(alice)).audioSamples).toBe(0);
+    const sampleStart = Date.now();
     samples.push(await timeJoin(alice));
-    for (const [phase, ms] of Object.entries(await joinTimings(alice))) {
+    for (const [phase, ms] of Object.entries(await joinTimings(alice, sampleStart))) {
       if (typeof ms === "number") (phaseSamples[phase] ??= []).push(ms);
     }
   }

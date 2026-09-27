@@ -16,6 +16,7 @@ import {
   failJoinAttempt,
   finishJoinAttempt,
   markFirstRemoteTrackSubscribed,
+  markJoinMilestone,
   markLocalTrackPublished,
   recordDecryptError,
   recordSelfTestStage,
@@ -23,6 +24,7 @@ import {
   setJoinUrlKind,
   voiceJoinSnapshot,
 } from "@lib/voiceJoinTrace";
+import { addLogListener, setLogLevel, type LogEntry } from "@lib/logger";
 import { expectConsole } from "../helpers/console";
 
 const T0 = 1_000_000;
@@ -120,6 +122,34 @@ describe("voice join attempt", () => {
       activateMs: 10,
       e2eeMs: 20,
     });
+  });
+
+  it("logs E2EE key-exchange milestones join-relative, only during a join", () => {
+    const entries: LogEntry[] = [];
+    const stop = addLogListener((entry) => entries.push(entry));
+    setLogLevel("info");
+    try {
+      markJoinMilestone("e2ee room key applied");
+      const id = beginJoinAttempt(4);
+      at(15);
+      markJoinMilestone("e2ee announce sent");
+      at(60);
+      markJoinMilestone("e2ee room key applied");
+      abandonJoinAttempt(id);
+      markJoinMilestone("e2ee room key applied");
+    } finally {
+      setLogLevel("warn");
+      stop();
+    }
+
+    expect(
+      entries
+        .filter((e) => e.message.startsWith("voice join milestone: e2ee"))
+        .map((e) => [e.message, e.data]),
+    ).toEqual([
+      ["voice join milestone: e2ee announce sent", { ms: 15 }],
+      ["voice join milestone: e2ee room key applied", { ms: 60 }],
+    ]);
   });
 
   it("marks join-relative ms for the first local and remote track", () => {

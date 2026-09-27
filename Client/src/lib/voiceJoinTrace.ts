@@ -212,6 +212,15 @@ export function countJoinRetry(id: number): void {
   if (a !== null && a.id === id) a.retries++;
 }
 
+/** Log a join-relative E2EE key-exchange milestone (announce sent, room key
+ *  generated, key holder's offer received, room key applied) for the active
+ *  attempt. Outside a join (a mid-call rotation or a reconnect) it is a no-op. */
+export function markJoinMilestone(milestone: string): void {
+  const a = active;
+  if (a === null) return;
+  log.info(`voice join milestone: ${milestone}`, { ms: Date.now() - a.startedAt });
+}
+
 /** Join-relative ms at the first local track publication. First mark wins.
  *  Falls back to the most recently recorded attempt when the SDK delivers the
  *  publication just after connect returned (the attempt is already recorded). */
@@ -285,7 +294,7 @@ export function abandonJoinAttempt(id: number): void {
   if (a !== null && a.id === id) active = null;
 }
 
-/** One receive-side E2EE decrypt failure (OC-0452's InvalidKey path). */
+/** One receive-side E2EE decrypt failure (any error from a remote sender). */
 export function recordDecryptError(): void {
   decryptErrorCount++;
 }
