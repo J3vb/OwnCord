@@ -558,7 +558,10 @@ now hold **because of the ordering rule** rather than because of where a
 `defer` happened to sit: `push-vapid-key` is deliberately absent — it registers
 no closer. `boot-marker` clears the marker as it runs, so any exit that reaches
 `App.Close` — a clean shutdown, a planned restart, or a reported start failure
-— reads back as clean on the next start. An exit that never runs `Close` (a
+— reads back as clean on the next start. The one exception is a start that
+inherited an unclean exit and failed before the `hub` stage put it on the
+attention panel: its close writes the previous run's unclean record back, so
+the next start still reports it. An exit that never runs `Close` (a
 `kill -9`, an OOM kill, or a hardware-fault exit through `stackutil.Fatal`, which
 calls `os.Exit` from the hub breaker or the router's recovery site) leaves the
 marker armed, which is exactly the unclean exit the attention panel reports

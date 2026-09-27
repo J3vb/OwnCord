@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -36,7 +37,7 @@ func TestApp_BootMarkerStage_ReportsPreviousExitAndClearsOnCleanClose(t *testing
 	svc := service.NewAttentionService(service.AttentionThresholds{}, service.AttentionSources{
 		DiskFree: func() (uint64, error) { return 1 << 30, nil },
 	})
-	svc.RecordBootStatus(a.prevBoot)
+	a.recordBootStatus(&service.Services{Attention: svc})
 	svc.Evaluate(context.Background(), time.Now())
 	raised := false
 	for _, w := range svc.Report().Warnings {
@@ -53,5 +54,51 @@ func TestApp_BootMarkerStage_ReportsPreviousExitAndClearsOnCleanClose(t *testing
 	}
 	if st := readBootMarker(markerPath); !st.Recorded || st.Unclean {
 		t.Fatalf("after a clean close the marker reads %+v, want recorded and clean", st)
+	}
+}
+
+// SRE-08: a start after a kill -9 that fails before the hub stage never shows
+// the unclean exit, so its close must not mark the marker clean — the next
+// successful start still reports the killed run, then clears it.
+func TestApp_BootMarkerStage_FailedStartCarriesUncleanExitForward(t *testing.T) {
+	a := bootTestApp(t, "0", "")
+	if err := a.startDataDir(); err != nil {
+		t.Fatalf("startDataDir: %v", err)
+	}
+	dataDir, err := filepath.Abs(a.cfg.Server.DataDir)
+	if err != nil {
+		t.Fatalf("Abs: %v", err)
+	}
+	a.cfg.Server.DataDir = dataDir
+	markerPath := bootMarkerPath(dataDir)
+	killedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if _, err := openBootMarker(markerPath, killedAt); err != nil {
+		t.Fatalf("arming the killed run's marker: %v", err)
+	}
+
+	// The restart fails before the hub stage: Close runs without a report.
+	if err := a.startBootMarker(); err != nil {
+		t.Fatalf("startBootMarker: %v", err)
+	}
+	if err := a.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// The next start still sees the killed run.
+	b := bootTestApp(t, "0", "")
+	b.cfg.Server.DataDir = dataDir
+	if err := b.startBootMarker(); err != nil {
+		t.Fatalf("startBootMarker: %v", err)
+	}
+	if !b.prevBoot.Unclean || !b.prevBoot.StartedAt.Equal(killedAt) {
+		t.Fatalf("after a failed start prevBoot = %+v, want the killed run started %v", b.prevBoot, killedAt)
+	}
+	svc := service.NewAttentionService(service.AttentionThresholds{}, service.AttentionSources{})
+	b.recordBootStatus(&service.Services{Attention: svc})
+	if err := b.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if st := readBootMarker(markerPath); !st.Recorded || st.Unclean {
+		t.Fatalf("after a reported start and a clean close the marker reads %+v, want clean", st)
 	}
 }

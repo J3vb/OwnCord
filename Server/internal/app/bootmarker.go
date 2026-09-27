@@ -30,6 +30,9 @@ type bootMarkerFile struct {
 type bootMarker struct {
 	path string
 	file bootMarkerFile
+	// unreported is an unclean previous exit this run has not yet shown on
+	// the attention panel; close carries it forward instead of writing clean.
+	unreported *bootMarkerFile
 
 	mu sync.Mutex
 }
@@ -86,11 +89,24 @@ func (m *bootMarker) recordPanic(at time.Time) {
 	_ = err // the marker is best-effort: a failure must not panic the recovery path
 }
 
-// close rewrites the marker as a clean shutdown.
+// reported notes that the previous run's exit reached the attention panel.
+func (m *bootMarker) reported() {
+	m.mu.Lock()
+	m.unreported = nil
+	m.mu.Unlock()
+}
+
+// close rewrites the marker as a clean shutdown, or, when this run inherited
+// an unclean exit it never reported, restores that exit so the next start
+// still reports it.
 func (m *bootMarker) close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.file.Clean = true
+	if m.unreported != nil {
+		m.file = *m.unreported
+	} else {
+		m.file.Clean = true
+	}
 	return m.write()
 }
 
@@ -146,6 +162,9 @@ func (a *App) startBootMarker() error {
 		a.log.Warn("could not write the boot marker; the next start cannot tell how this run ended", "error", err)
 		return nil
 	}
+	if a.prevBoot.Recorded && a.prevBoot.Unclean {
+		marker.unreported = &bootMarkerFile{StartedAt: a.prevBoot.StartedAt, LastPanicAt: a.prevBoot.LastPanicAt}
+	}
 	a.bootMarker = marker
 	stackutil.SetPanicRecorder(marker.recordPanic)
 	a.onClose("boot-marker", func(context.Context) error {
@@ -166,8 +185,12 @@ func formatMarkerTime(t time.Time) string {
 // recordBootStatus folds the previous run's exit into the attention panel
 // (SRE-08). StartRuntime builds the service without knowing the boot marker,
 // which only the App's boot-marker stage read.
-func recordBootStatus(svc *service.Services, boot service.BootStatus) {
-	if svc != nil && svc.Attention != nil {
-		svc.Attention.RecordBootStatus(boot)
+func (a *App) recordBootStatus(svc *service.Services) {
+	if svc == nil || svc.Attention == nil {
+		return
+	}
+	svc.Attention.RecordBootStatus(a.prevBoot)
+	if a.bootMarker != nil {
+		a.bootMarker.reported()
 	}
 }

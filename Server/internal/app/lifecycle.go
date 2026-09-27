@@ -293,7 +293,7 @@ func (a *App) startHub() error {
 	}
 	a.runtime = rt
 	a.hub = a.runtime.Hub
-	recordBootStatus(rt.Services, a.prevBoot)
+	a.recordBootStatus(rt.Services)
 	// The emergency restart path must stop LiveKit even when an earlier
 	// shutdown step wedges before the hub's closer can run.
 	a.deps.Restart.setCompanionStop(a.hub.StopLiveKit)
