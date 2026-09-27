@@ -130,8 +130,9 @@ type Hub struct {
 	reconnectTierDB   atomic.Uint64
 	reconnectTierFull atomic.Uint64
 
-	// Sequence watermark of the last channel-visibility change. Visibility
-	// updates are sent as targeted, unsequenced messages, so clients resuming
+	// Sequence watermark of the last channel-visibility change or content
+	// shed (SRV-03). Visibility updates are sent as targeted, unsequenced
+	// messages and a shed content frame never got a seq, so clients resuming
 	// from a seq at or before this point must take the full-ready path to
 	// converge (replay cannot deliver them). Reset on restart — a fresh
 	// connection always gets a correctly filtered ready payload anyway.

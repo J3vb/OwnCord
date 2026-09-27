@@ -207,8 +207,9 @@ func (h *Hub) reconnectPrecheck(
 	// two reads below — the same posture handleFreshConnect takes.
 	database := h.readers.Visibility
 	// Channel-visibility changes are delivered as targeted, unsequenced
-	// messages, so replay cannot bring a client that missed one back into a
-	// coherent state — force the full-ready path instead.
+	// messages, and a shed content frame (SRV-03) never got a seq, so replay
+	// cannot bring a client that missed one back into a coherent state —
+	// force the full-ready path instead.
 	if h.mustFullResync(lastSeq) {
 		slog.Info("ws replay skipped (resync watermark at or past last_seq), sending full ready",
 			"user_id", c.userID, "last_seq", lastSeq)

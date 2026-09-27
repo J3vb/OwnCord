@@ -53,7 +53,9 @@ sequenceDiagram
 dedicated mutex; the client reports its `last_seq` on reconnect and the hub
 picks the cheapest replay tier. A `visibilityChangeSeq` watermark forces a full
 re-sync whenever channel visibility changed while the client was away, so
-permission changes can never be replayed around. `auth_ok.replay_source`
+permission changes can never be replayed around; a message frame shed before it
+got a `seq` (topic limiter or full dispatch queue) moves the same watermark, so
+a client resuming at or behind the shed recovers it from the database. `auth_ok.replay_source`
 (`none|buffer|db`) reports which tier served the reconnect and feeds the
 `ws_reconnect_tier_total` metric. `active_channel_id` is what lets a resuming
 client re-declare its channel without a separate focus frame, and an absent
