@@ -16,6 +16,7 @@ import {
   type LocalTrack,
   type VideoCaptureOptions,
   type ScreenShareCaptureOptions,
+  type AudioCaptureOptions,
 } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
@@ -46,19 +47,26 @@ export const CAMERA_PUBLISH_BITRATES: Record<StreamQuality, number> = {
   source: 8_000_000,
 };
 
+/** Screen-share audio: capture it, but exclude OwnCord's own playback from the
+ *  captured stream. Without `restrictOwnAudio` a screen share on Windows
+ *  captures system loopback — the call itself — and echoes every other caller
+ *  back into the stream the viewers hear. Chromium-only (WebView2 included);
+ *  other browsers ignore the constraint and keep their current behaviour. */
+const SCREENSHARE_AUDIO: AudioCaptureOptions = { restrictOwnAudio: true };
+
 export const SCREENSHARE_PRESETS: Record<StreamQuality, ScreenShareCaptureOptions> = {
-  low: { audio: true, resolution: ScreenSharePresets.h720fps5.resolution },
+  low: { audio: SCREENSHARE_AUDIO, resolution: ScreenSharePresets.h720fps5.resolution },
   medium: {
-    audio: true,
+    audio: SCREENSHARE_AUDIO,
     resolution: ScreenSharePresets.h1080fps15.resolution,
     contentHint: "detail",
   },
   high: {
-    audio: true,
+    audio: SCREENSHARE_AUDIO,
     resolution: ScreenSharePresets.h1080fps30.resolution,
     contentHint: "detail",
   },
-  source: { audio: true, contentHint: "detail" }, // no resolution cap — use native source resolution
+  source: { audio: SCREENSHARE_AUDIO, contentHint: "detail" }, // no resolution cap — use native source resolution
 };
 
 export const SCREENSHARE_PUBLISH_BITRATES: Record<StreamQuality, number> = {
@@ -368,11 +376,11 @@ export async function enableScreenshare(
   try {
     stopManualScreenTracks(state, room);
     // Linux captures in the native backend (no getDisplayMedia behind a
-    // WebRTC-less webview): its room's picker-and-capture stands in.
-    const captureOptions = getScreenShareCaptureOptions(quality, fps);
+    // WebRTC-less webview): its room's picker-and-capture stands in and sets
+    // the capture from the picker's per-share quality.
     const screenTracks = isLinuxDesktop()
-      ? await room.localParticipant.createScreenTracks(captureOptions)
-      : await createLocalScreenTracks(captureOptions);
+      ? await room.localParticipant.createScreenTracks()
+      : await createLocalScreenTracks(getScreenShareCaptureOptions(quality, fps));
     if ((state.generation ?? 0) !== generation) {
       // A disableScreenshare ran to completion while the OS picker was still
       // up — it already reset localScreenshare and sent voice_screenshare
@@ -448,7 +456,17 @@ export async function enableScreenshare(
     const sendId = ws.send({ type: "voice_screenshare", payload: { enabled: true } });
     registerPendingVideoEnable(sendId, "screen");
     deps.reapplyAudioPipeline();
-    log.info("Screenshare enabled", { quality, fps: effectiveFps, maxBitrate });
+    // The Linux native track carries the dialog's per-share encoding, which
+    // replaces the saved prefs.
+    const picked = (
+      videoTrack as { publishEncoding?: { maxBitrate: number; maxFramerate: number } } | undefined
+    )?.publishEncoding;
+    log.info(
+      "Screenshare enabled",
+      picked !== undefined
+        ? { fps: picked.maxFramerate, maxBitrate: picked.maxBitrate }
+        : { quality, fps: effectiveFps, maxBitrate },
+    );
   } catch (err) {
     removeEndedListener?.();
     if ((state.generation ?? 0) !== generation) {
