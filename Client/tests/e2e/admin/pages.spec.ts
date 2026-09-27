@@ -119,6 +119,9 @@ test("Retention: a server-wide window is previewed and applied", async ({
   await change.click();
   await expect(change).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator("#retentionDays")).toBeFocused();
+  await expect(page.locator(".ret-sweep")).toContainText(
+    "Nothing will be deleted on the next sweep",
+  );
 
   await page.locator("#retentionDays").fill("30");
   await page.getByRole("button", { name: "Preview change" }).click();
@@ -130,8 +133,11 @@ test("Retention: a server-wide window is previewed and applied", async ({
   await expect(page.locator(".ret-policy-big")).toHaveText("Messages are deleted after 30 days");
   await expect(page.locator("#retentionDays")).toHaveValue("30");
 
-  // Only channels with their own rule are listed; none yet.
+  // Only channels with their own rule are listed; none yet. The next-sweep
+  // count lives with the field behind Change….
   await expect(page.locator(".empty-line")).toContainText("No channel has its own rule");
+  await expect(page.locator(".empty-line")).toContainText("open Show all");
+  await expect(page.locator(".ret-sweep")).toBeHidden();
   expect(await findUnnamedControls(page.locator("#content"))).toEqual([]);
   const { ratio } = await textContrast(page.locator(".ret-policy-sub"));
   expect(ratio).toBeGreaterThanOrEqual(Q1.text);
@@ -144,10 +150,12 @@ test("Retention: a channel exception is added and listed on its own", async ({
   await signInAsOwner(page, seededAdminServer);
   await navigate(page, "Message retention");
 
-  await page.getByRole("button", { name: "Add exception" }).click();
-  const channel = await page.locator("#chRetChannel option").first().textContent();
+  await page.locator(".ret-all > summary").click();
+  const first = page.locator(".ret-all .ret-row").first();
+  const channel = await first.locator("strong").textContent();
+  await first.getByRole("button", { name: "Set exception" }).click();
   await page.locator("#chRetDays").fill("7");
-  await page.getByRole("button", { name: "Preview exception" }).click();
+  await page.getByRole("button", { name: "Preview override" }).click();
   await expect(
     page.locator("#modalInner h3", { hasText: "Confirm retention change" }),
   ).toBeVisible();
