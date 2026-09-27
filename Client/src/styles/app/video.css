@@ -220,6 +220,110 @@
   display: none;
 }
 
+/* ── Full screen, pop-out and stream info (PR 4) ── */
+/* The theatre fallback: the tile fills the window when the full-screen API
+   is refused (the window itself goes full screen alongside). */
+.video-cell--theatre {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  border-radius: 0;
+}
+.video-cell:fullscreen {
+  border-radius: 0;
+}
+.video-cell:fullscreen .video-tile-nav,
+.video-cell:fullscreen .video-tile-overlay,
+.video-cell--theatre .video-tile-nav,
+.video-cell--theatre .video-tile-overlay {
+  opacity: 1;
+}
+.video-cell:fullscreen .video-label,
+.video-cell--theatre .video-label {
+  top: 12px;
+  bottom: auto;
+}
+.video-fs-calls {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+  transform: translateX(-50%);
+}
+.video-fs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-circle);
+  background: var(--scrim-strong);
+  color: var(--on-fill);
+}
+.video-fs-btn[aria-pressed="true"] {
+  background: var(--danger-fill);
+}
+.video-fs-btn--leave {
+  width: 56px;
+  border-radius: var(--radius-pill);
+  background: var(--danger-fill);
+}
+.video-fs-btn--leave:hover {
+  background: var(--danger-fill-hover);
+}
+/* The quality chip shows on the stream you are watching. */
+.video-quality {
+  flex-shrink: 0;
+  min-height: 24px;
+  padding: 1px 8px;
+  border: 1px solid var(--scrim-hover);
+  border-radius: var(--radius-pill);
+  background: var(--scrim);
+  color: var(--on-fill);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.video-quality[hidden],
+.video-cell:not(.focused):not(:fullscreen):not(.video-cell--theatre) .video-quality {
+  display: none;
+}
+.video-stats {
+  position: absolute;
+  top: 44px;
+  left: 8px;
+  z-index: 4;
+  min-width: 220px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  box-shadow: var(--shadow-md);
+  font-size: var(--font-size-sm);
+}
+.video-stats h4 {
+  margin: 0 0 6px;
+  color: var(--header-primary);
+  font-size: var(--font-size-sm);
+}
+.video-stats dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0;
+}
+.video-stats dt {
+  color: var(--text-muted);
+}
+.video-stats dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Video tile overlay (mute button) ── */
 .video-tile-overlay {
   position: absolute;

@@ -61,6 +61,7 @@ vi.mock("@lib/livekitSession", () => ({
   disableScreenshare: vi.fn().mockResolvedValue(undefined),
   getLocalCameraStream: vi.fn(() => null),
   getLocalScreenshareStream: vi.fn(() => null),
+  getRemoteVideoStats: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@lib/notifications", () => ({
@@ -137,6 +138,7 @@ const {
         setPeople: ReturnType<typeof vi.fn>;
         setSpeaking: ReturnType<typeof vi.fn>;
         setCallbacks: ReturnType<typeof vi.fn>;
+        setCallState: ReturnType<typeof vi.fn>;
       };
     },
   },
@@ -219,6 +221,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       setPeople: vi.fn(),
       setSpeaking: vi.fn(),
       setCallbacks: vi.fn(),
+      setCallState: vi.fn(),
       mount: vi.fn(),
       destroy: vi.fn(),
     };
@@ -276,6 +279,7 @@ import {
   fetchExternalImage,
 } from "../../src/components/message-list/attachments";
 import { desktop } from "../../src/platform/desktop";
+import { SCREENSHARE_TILE_ID_OFFSET } from "../../src/lib/constants";
 import { saveUserStatus } from "../../src/lib/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
 import { startRingChime } from "../../src/lib/notifications";
@@ -1049,6 +1053,41 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     const last = grid.setSpeaking.mock.calls.at(-1)![0] as ReadonlySet<number>;
     expect([...last]).toEqual([10]);
+  });
+
+  it("wires full screen, the full-screen call controls and stream stats into the video grid", async () => {
+    const lk = await import("@lib/livekitSession");
+    const setFullscreen = vi.spyOn(desktop.window, "setFullscreen").mockResolvedValue(undefined);
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    const grid = capturedChatAreaRef.current!.videoGrid;
+    const cbs = grid.setCallbacks.mock.calls.at(-1)![0] as {
+      setWindowFullscreen: (on: boolean) => Promise<void>;
+      callControls: { onMuteToggle: () => void; onDeafenToggle: () => void; onLeave: () => void };
+      getStreamStats: (tileId: number) => Promise<unknown>;
+    };
+
+    await cbs.setWindowFullscreen(true);
+    expect(setFullscreen).toHaveBeenCalledWith(true);
+
+    // Stats for a screen-share tile ask for that user's screen share.
+    await cbs.getStreamStats(10 + SCREENSHARE_TILE_ID_OFFSET);
+    expect(lk.getRemoteVideoStats).toHaveBeenLastCalledWith(10, "screenshare");
+    await cbs.getStreamStats(10);
+    expect(lk.getRemoteVideoStats).toHaveBeenLastCalledWith(10, "camera");
+
+    // Leave from a full-screen tile leaves the call.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9 }));
+    cbs.callControls.onLeave();
+    expect(ws.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
+
+    // The full-screen controls show your mute state.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: true }));
+    voiceStore.flush();
+    expect(grid.setCallState).toHaveBeenLastCalledWith({ muted: true, deafened: false });
+    setFullscreen.mockRestore();
   });
 
   it("stops your screen share from the grid's self-preview cover, and names remote tiles for their controls", async () => {
