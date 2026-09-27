@@ -206,6 +206,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
         const pendingTimer = btn.dataset.resetTimer;
         if (pendingTimer) clearTimeout(Number(pendingTimer));
         btn.dataset.confirmPending = "";
+        btn.classList.remove("ac-btn-danger");
         btn.textContent = t("advanced.button.clearing");
         btn.setAttribute("disabled", "");
         try {

@@ -640,6 +640,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
     await vi.waitFor(() => {
       expect(btn.textContent).toBe("Failed");
     });
+    expect(btn.classList.contains("ac-btn-danger")).toBe(false);
   });
 
   it("deletes only .jsonl files when clearing log files, skips directories", async () => {

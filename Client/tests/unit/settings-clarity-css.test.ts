@@ -1,6 +1,6 @@
 // Settings UX clarity pass: the stylesheet rules behind the button hierarchy.
 // jsdom never applies app.css, so these assert the parsed rules
-// (tests/helpers/app-css.ts); b9-primitives.spec.ts measures the contrast.
+// (tests/helpers/app-css.ts); settings-tabs-extra.spec.ts measures the contrast.
 import { describe, it, expect } from "vitest";
 import { cascadedDeclaration, varToken } from "../helpers/app-css";
 
