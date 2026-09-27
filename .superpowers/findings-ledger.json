@@ -11072,7 +11072,7 @@
       "finder": "b9-exit-audit",
       "fixed": "2026-09-27",
       "fix": {
-        "commit": "1ebc006ad1ea9f204c7490b8026a76b45f5855bd",
+        "commit": "143a7df675fed7d8eb32dd74c4c327b095525c33",
         "test": "Client/tests/unit/eslint-rules.test.ts",
         "revertProof": "self-reported"
       },

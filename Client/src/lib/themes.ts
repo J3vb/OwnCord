@@ -95,7 +95,7 @@ const THEME_KEYS: ReadonlySet<string> = new Set(
 const STORAGE_KEY_ACTIVE = "owncord:theme:active";
 const STORAGE_KEY_LEGACY = "owncord:settings:theme";
 
-const BUILT_IN_THEMES: ReadonlySet<string> = new Set(["dark", "neon-glow", "midnight", "light"]);
+const BUILT_IN_THEMES: ReadonlySet<string> = new Set(Object.keys(THEMES));
 
 function isKnownThemeName(name: string): boolean {
   return BUILT_IN_THEMES.has(name);

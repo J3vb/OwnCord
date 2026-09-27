@@ -1,6 +1,7 @@
-// ARCH-11 canaries: every custom lint rule in eslint-rules.js must actually
-// FIRE on a real production-path pattern when evaluated through the real
-// eslint.config.js — not merely pass in RuleTester isolation. #1587 showed how
+// ARCH-11 canaries: every custom lint rule in eslint-rules.js must stay
+// enabled by the real eslint.config.js at the production module it guards, and
+// must still fire on its shape. A canary fails if the rule's scope stops
+// covering that module, or if the rule stops firing on its shape. #1587 showed how
 // a rule can go inert: its scope is a `files:` glob in eslint.config.js, and a
 // refactor that moves the guarded code to a new file (or changes the shape the
 // matcher keys on) leaves the rule matching nothing while its RuleTester cases
