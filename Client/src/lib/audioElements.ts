@@ -10,7 +10,7 @@ import {
   type RemoteTrackPublication,
   type RemoteParticipant,
 } from "livekit-client";
-import { loadPref, savePref, STORAGE_PREFIX } from "@components/settings/helpers";
+import { loadPref, savePref, STORAGE_PREFIX } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { migrateLegacyValue } from "@lib/legacyKeyMigration";
 import { parseUserId } from "../features/voice/sessionState";

@@ -77,7 +77,7 @@ body:
     id: client-version
     attributes:
       label: Client version
-      description: Settings → Logs shows it. Leave blank for a server-only bug.
+      description: Settings → Diagnostics & logs shows it. Leave blank for a server-only bug.
       placeholder: "1.2.0-alpha.4"
     validations:
       required: false
@@ -170,7 +170,8 @@ body:
       label: Support bundle, logs, screenshots, or anything else
       description: >-
         Attach a support bundle if you can — it is usually the fastest way to a
-        fix. Desktop client: Settings → Logs → Export. Server operator: admin
+        fix. Desktop client: Settings → Diagnostics & logs → Export Support
+        Bundle. Server operator: admin
         panel → Diagnostics → Create support bundle preview, review it, then
         Confirm download. Both are local files that upload nothing, but review
         them before sharing: the client bundle copies log lines verbatim and

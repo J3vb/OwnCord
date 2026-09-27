@@ -15,7 +15,7 @@ between what the desktop client does and what lives only on the server web panel
 A tabbed overlay (`SettingsOverlay`) available both authenticated (in Main) and
 unauthenticated (on Connect, for appearance/advanced). Tabs: Account,
 Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds,
-Advanced, Logs.
+Advanced, Diagnostics & logs.
 
 **Target rules:**
 

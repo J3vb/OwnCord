@@ -1,0 +1,166 @@
+/* ── Screen share source picker (design state 12) ─────────────────────────
+   The Linux native share dialog: Screens/Applications tabs with a thumbnail
+   per source, an Audio note (native capture is video-only) and a per-share
+   quality override. Built on the
+   shared .modal shell from login.css, so it inherits the dialog chrome and
+   only widens the box for the source grid. */
+
+.screen-share-picker {
+  min-width: 0;
+}
+
+.ssp-tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: 12px 24px 0;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.ssp-tab {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 8px 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+}
+
+.ssp-tab[aria-selected="true"] {
+  color: var(--header-primary);
+  border-bottom-color: var(--accent);
+}
+
+.ssp-sources {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.ssp-empty,
+.ssp-portal {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  margin: 4px 0 0;
+}
+
+.ssp-source {
+  background: var(--bg-secondary);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 6px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ssp-source[aria-checked="true"] {
+  border-color: var(--accent);
+}
+
+.ssp-thumb {
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: #000; /* intentional: source previews letterbox on true black */
+}
+
+.ssp-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.ssp-nothumb {
+  color: var(--text-faint);
+  font-size: var(--font-size-xs);
+}
+
+.ssp-title {
+  font-size: var(--font-size-sm);
+  color: var(--header-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ssp-sub {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.ssp-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.ssp-opt {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.ssp-opt-label {
+  font-weight: 600;
+  color: var(--header-primary);
+  font-size: var(--font-size-sm);
+}
+
+.ssp-opt-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.ssp-opt-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-normal);
+  min-width: 0;
+}
+
+.ssp-hint {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  margin-top: 4px;
+}
+
+.ssp-select {
+  background: var(--bg-input);
+  border: 1px solid var(--border-control);
+  color: var(--text-normal);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  min-width: 0;
+}
+
+.ssp-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ssp-go:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 800px) {
+  .ssp-options {
+    grid-template-columns: 1fr;
+  }
+}

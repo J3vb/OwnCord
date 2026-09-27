@@ -4,7 +4,7 @@ const { mockLoadPref } = vi.hoisted(() => ({
   mockLoadPref: vi.fn((_key: string, defaultVal: unknown) => defaultVal),
 }));
 
-vi.mock("@components/settings/helpers", () => ({
+vi.mock("@lib/preferences", () => ({
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: vi.fn(),
 }));
@@ -92,7 +92,7 @@ describe("screen share FPS", () => {
       const opts = getScreenShareCaptureOptions("high", 60);
       expect(opts.resolution?.frameRate).toBe(60);
       expect(opts.resolution?.width).toBe(SCREENSHARE_PRESETS.high.resolution?.width);
-      expect(opts.audio).toBe(true);
+      expect(opts.audio).toEqual({ restrictOwnAudio: true });
     });
 
     it("keeps the per-quality fps at the default setting", () => {
@@ -104,7 +104,16 @@ describe("screen share FPS", () => {
       const opts = getScreenShareCaptureOptions("source", 30);
       expect(opts).not.toBe(SCREENSHARE_PRESETS.source);
       expect(opts.resolution).toBeUndefined();
-      expect(opts.audio).toBe(true);
+      expect(opts.audio).toEqual({ restrictOwnAudio: true });
+    });
+
+    it("captures screen audio with restrictOwnAudio so the call never echoes into the stream", () => {
+      for (const quality of ["low", "medium", "high", "source"] as const) {
+        expect(getScreenShareCaptureOptions(quality, 30).audio).toEqual({
+          restrictOwnAudio: true,
+        });
+        expect(SCREENSHARE_PRESETS[quality].audio).toEqual({ restrictOwnAudio: true });
+      }
     });
 
     it("uses a zero-size resolution sentinel for source with explicit fps", () => {

@@ -20,7 +20,7 @@
 
 import type { SessionInfo } from "@lib/api";
 import { createLogger } from "@lib/logger";
-import { formatMessageTimestamp } from "@components/message-list/formatting";
+import { formatMessageTimestamp } from "@lib/formatting";
 import { accountText } from "../i18n/account";
 
 const log = createLogger("session-notice");

@@ -14,15 +14,14 @@
 // 19 or 20 — an accessibility toggle that makes text smaller.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockGetActiveThemeName, mockApplyThemeByName } = vi.hoisted(() => ({
+const { mockGetActiveThemeName } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
-  mockApplyThemeByName: vi.fn(),
 }));
-vi.mock("@lib/themes", () => ({
+vi.mock("@lib/themes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/themes")>()),
   getActiveThemeName: mockGetActiveThemeName,
   restoreAccent: vi.fn(),
   restoreTheme: vi.fn(),
-  applyThemeByName: mockApplyThemeByName,
 }));
 vi.mock("@lib/os-motion", () => ({ SYNC_OS_MOTION_DEFAULT: true, syncOsMotionListener: vi.fn() }));
 

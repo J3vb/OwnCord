@@ -3,7 +3,7 @@ import { defineCatalog } from "./format";
 /**
  * The startup-safe slice of the messaging journey (B9-19): the message date
  * stamps, the attachment download labels and the who-reacted tooltip. These
- * modules are statically reachable from the entry — `message-list/formatting.ts`
+ * modules are statically reachable from the entry — `lib/formatting.ts`
  * and `message-list/attachments.ts` through their many callers, and
  * `message-list/reaction-tooltip.ts` through the dispatcher's reaction_update
  * handler — so their copy lives here rather than in the main-page catalog

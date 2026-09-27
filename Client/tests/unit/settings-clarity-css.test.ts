@@ -21,3 +21,20 @@ describe("settings button hierarchy", () => {
     );
   });
 });
+
+describe("settings status icons", () => {
+  it.each([
+    [".st-ic.st-ok", "--text-positive"],
+    [".st-ic.st-warn", "--text-warning"],
+    [".st-ic.st-crit", "--text-danger"],
+    [".st-ic.st-pending", "--text-muted"],
+  ])("colours %s with the qualified text token %s", (selector, token) => {
+    expect(varToken(cascadedDeclaration(selector, "color"))).toBe(token);
+  });
+
+  it("titles a settings card in a contrast-qualified colour, not --text-faint", () => {
+    expect(varToken(cascadedDeclaration(".settings-card-head h3", "color"))).toBe(
+      "--header-primary",
+    );
+  });
+});

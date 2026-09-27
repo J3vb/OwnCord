@@ -38,7 +38,7 @@ export {
   shouldGroup,
   getUserRole,
   roleColorVar,
-} from "./formatting";
+} from "@lib/formatting";
 
 export {
   renderInlineContent,
@@ -51,8 +51,8 @@ export { setServerHost } from "./attachments";
 
 // -- Imports for composite functions ------------------------------------------
 
-import { formatTime, formatFullDate, formatMessageTimestamp } from "./formatting";
-import { getUserRole, resolveAuthor, roleColorVar } from "./formatting";
+import { formatTime, formatFullDate, formatMessageTimestamp } from "@lib/formatting";
+import { getUserRole, resolveAuthor, roleColorVar } from "@lib/formatting";
 import { createAvatarElement, resolveDisplayName } from "@lib/avatar";
 import { renderMentions, renderMessageContent } from "./content-parser";
 import { highlightsCurrentUser } from "@lib/mentions";

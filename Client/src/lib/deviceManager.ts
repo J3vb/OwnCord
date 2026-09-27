@@ -6,7 +6,7 @@
 
 import { Room } from "livekit-client";
 import { voiceStore } from "@stores/voice.store";
-import { loadPref, savePref } from "@components/settings/helpers";
+import { loadPref, savePref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import type { AudioPipeline } from "@lib/audioPipeline";
 import { nativeAudioDevices } from "../features/voice/native/devices";

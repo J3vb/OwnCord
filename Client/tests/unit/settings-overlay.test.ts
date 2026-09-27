@@ -4,13 +4,13 @@ import { createSettingsOverlay } from "@components/SettingsOverlay";
 // listener at load. The re-import below reuses these instances, so the
 // vi.resetModules() does not install a second copy of each listener.
 import * as attachments from "@components/message-list/attachments";
-import * as formatting from "@components/message-list/formatting";
+import * as formatting from "@lib/formatting";
 import * as media from "@components/message-list/media";
 import * as channelMutes from "@lib/channel-mutes";
 
 const APP_LIFETIME_MODULES = [
   ["@components/message-list/attachments", attachments],
-  ["@components/message-list/formatting", formatting],
+  ["@lib/formatting", formatting],
   ["@components/message-list/media", media],
   ["@lib/channel-mutes", channelMutes],
 ] as const;
@@ -140,7 +140,7 @@ describe("SettingsOverlay", () => {
       "Voice & Audio",
       "Keybinds",
       "Advanced",
-      "Logs",
+      "Diagnostics & logs",
     ]);
 
     overlay.destroy?.();
