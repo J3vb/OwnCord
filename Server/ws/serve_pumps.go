@@ -12,14 +12,45 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// writePumpWrite writes one frame to the WebSocket under writeTimeout.
-// Returns false only when the write failed.
+// writeFrameChunk caps the payload of one outbound data frame.
+const writeFrameChunk = 16 << 10
+
+// writeFragmented writes msg as one text message in frames of at most
+// writeFrameChunk bytes. coder/websocket holds its frame write lock for a whole
+// frame, and a control frame — the Pong answering a peer's Ping, or pingPump's
+// own Ping — waits for that lock under a fixed 5s deadline. One large frame on
+// a slow link could hold it for up to writeTimeout (10s), failing the Pong and
+// with it readPump's conn.Read, which drops a live session. Between fragments
+// the lock is free, so a control frame waits for one chunk at most.
+func writeFragmented(ctx context.Context, conn *websocket.Conn, msg []byte) error {
+	if len(msg) <= writeFrameChunk {
+		return conn.Write(ctx, websocket.MessageText, msg)
+	}
+	w, err := conn.Writer(ctx, websocket.MessageText)
+	if err != nil {
+		return err
+	}
+	for len(msg) > 0 {
+		n := min(len(msg), writeFrameChunk)
+		if _, err := w.Write(msg[:n]); err != nil {
+			return err
+		}
+		msg = msg[n:]
+	}
+	return w.Close()
+}
+
+// writePumpWrite writes one message to the WebSocket under writeTimeout.
+// Returns false only when the write failed. A failed write closes the
+// connection: it may have left a message half-sent, and readPump's teardown
+// must run rather than leave a peer that never hears another event.
 func writePumpWrite(ctx context.Context, conn *websocket.Conn, c *Client, msg []byte) bool {
 	wCtx, cancel := context.WithTimeout(ctx, writeTimeout)
-	err := conn.Write(wCtx, websocket.MessageText, msg)
+	err := writeFragmented(wCtx, conn, msg)
 	cancel()
 	if err != nil {
 		slog.Warn("ws writePump error", "user_id", c.userID, "err", err)
+		_ = conn.CloseNow()
 		return false
 	}
 	return true
