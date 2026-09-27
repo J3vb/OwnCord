@@ -225,6 +225,29 @@ describe("Server/admin/static — hash history (UX-12a)", () => {
     expect(booted.dom.window.location.hash).toBe("#settings");
   });
 
+  it("keeps the page being left in history when a back-button discard is declined", async () => {
+    const booted = boot();
+    dom = booted.dom;
+    booted.bridge.navigateTo("dashboard");
+    await editSettings(booted);
+    const settle = async () => {
+      for (let i = 0; i < 5; i++) await booted.tick();
+    };
+
+    stubConfirm(booted.dom, false);
+    booted.dom.window.history.back();
+    await settle();
+    expect(booted.bridge.state.section).toBe("settings");
+    expect(booted.dom.window.location.hash).toBe("#settings");
+
+    const asked = stubConfirm(booted.dom, true);
+    booted.dom.window.history.back();
+    await settle();
+    expect(asked).toEqual(["Discard your unsaved changes?"]);
+    expect(booted.bridge.state.section).toBe("dashboard");
+    expect(booted.dom.window.location.hash).toBe("#dashboard");
+  });
+
   it("leaves edited Settings on the back button once the discard is confirmed", async () => {
     const booted = boot();
     dom = booted.dom;

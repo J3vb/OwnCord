@@ -516,7 +516,7 @@ function leaveSection(){
 }
 function navigateTo(id){
   if(!sectionAllowed(id)){showToast('You do not have permission to open that section','error');return}
-  if(!leaveSection()){replaceHash();return}
+  if(!leaveSection()){if(location.hash!=='#'+state.section)history.pushState(null,'','#'+state.section);return}
   try{
     if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}}
     state.settingsChanged=false;
