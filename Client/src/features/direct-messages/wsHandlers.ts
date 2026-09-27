@@ -5,6 +5,7 @@ import {
   dmStore,
   setDmChannels,
   addDmChannel,
+  addDmToChannelsStore,
   closeDmLocally,
   clearDmUnread,
   dmDisplayName,
@@ -13,12 +14,6 @@ import type { DmChannel } from "../../stores/dm.store";
 import { blocksStore, setBlockedByMe, clearBlockedByThem } from "../../stores/blocks.store";
 import type { DmChannelPayload } from "../../lib/types";
 import { isTextLikeChannel } from "../../lib/types";
-// addDmToChannelsStore (moved into @stores/dm.store, ARCH-06) is the only
-// place the DM->channelsStore mirror row is synthesized
-// (selectDmConversation on open); the dm_channel_close fallback below needs
-// the same synthesis for a DM it is activating that was never opened this
-// session.
-import { addDmToChannelsStore } from "../../stores/dm.store";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 

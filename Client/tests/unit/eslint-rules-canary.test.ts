@@ -4,9 +4,10 @@
 // a rule can go inert: its scope is a `files:` glob in eslint.config.js, and a
 // refactor that moves the guarded code to a new file (or changes the shape the
 // matcher keys on) leaves the rule matching nothing while its RuleTester cases
-// still pass. So each canary drives the rule through `ESLint.lintText` with the
-// filePath of a real production module it is meant to cover, and asserts both
-// that the rule is ENABLED there and that it reports.
+// still pass. So each canary asserts that the real eslint.config.js ENABLES the
+// rule at the filePath of a real production module it is meant to cover, and
+// separately that the rule reports on the canary's code shape when run in
+// isolation (without that filePath).
 //
 // Adding a rule to eslint-rules.js without a canary here fails the
 // "every rule has a canary" check at the bottom of this file.

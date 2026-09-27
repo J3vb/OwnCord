@@ -21,10 +21,6 @@ import { membersStore } from "@stores/members.store";
 import { isChannelMuted } from "@lib/channel-mutes";
 import { connectText } from "../../i18n/connect";
 
-// addDmToChannelsStore and dmChannelFromPayload now live in @stores/dm.store
-// (ARCH-06), imported above and still used here, so lib/ and features/ callers
-// no longer import this page module.
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
