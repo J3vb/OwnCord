@@ -1,5 +1,5 @@
 {
-  "nextId": 480,
+  "nextId": 481,
   "findings": [
     {
       "id": "OC-0001",
@@ -11090,6 +11090,29 @@
       },
       "fixedDate": "2026-09-25",
       "note": "Corrected by 6f120c02 (#1800, 2026-09-25): the RATCHET paragraph and every 'Worst today'/duplicate-pair note are gone, the settings block states the tree is clean at these budgets, and the ci.yml import-cycles step is renamed. Verified against HEAD: the stale strings no longer occur in Server/.golangci.yml."
+    },
+    {
+      "id": "OC-0480",
+      "title": "The operational profile's voice-join figure measured a 25-way aligned rejoin the harness scheduled on one tick, and the published 2x-p99 headroom holds only for the steady profile",
+      "file": "Server/scripts/k6/ws-load.js",
+      "line": 1364,
+      "severity": "low",
+      "why": "Affected property: the published voice-join budget (< 250 ms p95) measures the thing it names. Under the operational profile every voice VU was anchored to the same wall-clock grid (`CHURN_MS - Date.now() % CHURN_MS`), so all 25 left and rejoined on the same instant every 10 s; voice_join_time therefore measured a 25-way simultaneous join queue, not a single join. Across the four same-hour runs p95 was 130, 157, 335 and 437 ms against the 250 budget, and 2 of 4 missed; the steady profile, which does not churn, measures 3-4 ms p95 (PERF M3: leave p95 121 ms, join p95 55 ms). The misses were never filed. Separately, docs/capacity.md:116 promised 'each tightened budget keeps at least twice the measured p99 as headroom', which is true of the steady profile (p99 83 ms) and false of the operational one (ack p99 234 and 266 ms against a 300 budget).",
+      "repro": "Run `gh workflow run load-baseline.yml -f profile=operational` and read voice_join_time from k6-summary.json: the joins pile on one 10 s boundary. With the fix, `K6_VOICE_CHURN_PHASE=spread` (the new default) staggers each VU across the period, and `K6_VOICE_CHURN_PHASE=aligned` reproduces the old burst deliberately.",
+      "evidence": "Server/scripts/k6/ws-load.js:1364-1377 (old): the churn tick re-armed at `CHURN_MS - (Date.now() % CHURN_MS)`, one shared epoch grid for the whole cohort. voice_state_delivery_ms then read the same grid (ws-load.js:1244-1257). Runs: 35856013841 (voice-join p95 130 ms) and 35856019988 (335 ms) on the fix harness; dev runs 35856016690 and 35856022553 (437 ms on self_signed). docs/capacity.md:759-763 called the spread of 130-437 ms runner noise and left the misses unledgered; docs/capacity.md:116 states the 2x-p99-headroom rule the operational ack p99 (234/266 ms against 300) does not meet.",
+      "suggestedFix": "Phase-spread the churn by default so the voice-join budget measures one join, keep the aligned burst as an explicit `K6_VOICE_CHURN_PHASE=aligned` mode, and scope the headroom sentence to the steady profile. Do not loosen a budget.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-09-26",
+      "hunt": "roadmap-next-plan-2026-09-26",
+      "lens": "perf",
+      "finder": "a8-ci-qa",
+      "fix": {
+        "commit": "ca41b594",
+        "test": "node --test Server/scripts/k6/ws-load.test.mjs",
+        "revertProof": "pass (restoring ws-load.js from dev fails 2 of 11 offline checks -- the PERF-02 spread/aligned churn test and the per-phase p99 test; the fixed script passes all 11 under Node 26)"
+      },
+      "note": "PERF-02 (absorbs ED-04). K6_VOICE_CHURN_PHASE selects the shape: spread (default) staggers each VU at (vuId-1)/VOICE_VUS through the period, aligned keeps the shared grid as the deliberate burst OC-0454 measures. voice_state_delivery_ms attributes a cross-VU frame to the sender's own offset. The budget itself is unchanged."
     }
   ]
 }

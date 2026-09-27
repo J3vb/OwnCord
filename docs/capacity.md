@@ -113,11 +113,17 @@ column is where the B6 PRD started, kept so the tightening is auditable.
 | Voice join, OwnCord half (`voice_join` → `voice_token`) | < 250 ms | < 500 ms | < 2 s / < 4 s    | k6 `voice_join_time`             |
 | Graceful drain to exit 0                                | < 20 s   | —        | unchanged        | `Server/cmd/smoke` `drainBudget` |
 
-Each tightened budget keeps at least twice the measured p99 as headroom, so a
-busier runner does not turn a published promise into a flake. `auth_time` is
-the one with the least room on purpose: its floor is bcrypt at cost 12, roughly
-a quarter-second of one core, and that is a deliberate security cost rather
-than something to tune away.
+For the **steady** profile these budgets were tightened from a measured p99
+with at least twice it as headroom, so a busier runner does not turn a published
+promise into a flake. That headroom is a property of the steady shape:
+the operational profile runs a storm, a 25-way voice churn and upload pressure
+alongside the same fan-out, and there the acknowledgement p99 has been measured
+_over_ its budget (ramp p99 299 ms and tls-off upload p99 301 ms against 300).
+The budgets do not move for that — a busy-runner tail is a finding, not a
+number to loosen (see the operational section). `auth_time` is the one steady
+row with the least room on purpose: its floor is bcrypt at cost 12, roughly a
+quarter-second of one core, and that is a deliberate security cost rather than
+something to tune away.
 
 Two of the PRD's rows are corrected rather than satisfied, because as written
 they ask for measurements that cannot exist:
@@ -362,12 +368,26 @@ measurement. Report held population and generator saturation alongside it.
 ### Voice control churn
 
 The voice connections stop joining once and sitting: every `K6_VOICE_CHURN_MS`
-(default 10 000) each leaves and rejoins. The voice-join budget above is
-therefore applied under churn rather than under a single join, and a new
-`voice_state_delivery_ms` measures a `voice_state` broadcast reaching a
-_different_ connection.
+(default 10 000) each leaves and rejoins, so the voice-join budget above is
+applied under churn rather than under a single join. A `voice_state_delivery_ms`
+trend measures a `voice_state` broadcast reaching a _different_ connection.
 
-- **Budget**: the voice-join row above. `voice_state_delivery_ms` has none.
+`K6_VOICE_CHURN_PHASE` selects the churn's shape (PERF-02):
+
+- **`spread` (default)** — each voice VU's leave+rejoin sits at its own offset
+  through the period, so the cohort's joins arrive like an ordinary
+  population's churn and the voice-join row measures one join. This is the
+  shape a published voice-join figure is taken from.
+- **`aligned`** — every voice VU leaves and rejoins on the same instant. This
+  serialises the cohort's joins into one queue: it is the deliberate burst
+  OC-0454 measures, published as that and never used for the voice-join row.
+  The voice-join budget does not gate an `aligned` run (the burst is published
+  unbudgeted); the count sanity gate still does. The 130–437 ms p95 previously
+  published in this section came from this shape; it is a harness artifact, not
+  a single-join cost.
+
+- **Budget**: the voice-join row above, taken under `spread` (and by the
+  capacity profile, which does not churn). `voice_state_delivery_ms` has none.
 - **Still not a WebRTC measurement.** k6 speaks OwnCord's control plane only;
   the media path remains `lk load-test`'s, as the profile's caveats say.
 
@@ -773,9 +793,11 @@ Per phase, send → acknowledgement p95 / p99: ramp 35 / 151 ms, sustain
 51 / 176 ms, upload 110 / 301 ms, storm window 102 / 271 ms. The second run
 (35856019988) measured 96 / 267 ms and 98 / 266 ms on this leg and missed the
 voice-join p95 (335 ms against 250) — a row the interleaved `dev` runs missed
-too (437 ms on `self_signed` in 35856022553); voice join p95 moved between 130
-and 437 ms across the four runs of that hour and is not distinguishable from
-runner noise at one run per mode. The `dev` runs measured 373 / 452 and
+too (437 ms on `self_signed` in 35856022553). Those runs were taken under the
+old aligned churn, so that voice-join row measured a 25-way simultaneous rejoin
+rather than one join (PERF-02 / OC-0480): it is a harness shape, not a
+single-join cost. The default is now `spread`; a `spread` operational run is
+what republishes this table. The `dev` runs measured 373 / 452 and
 276 / 352 ms for acknowledgement on this leg.
 
 Per-phase database waits on this leg, for comparison with the table above:
