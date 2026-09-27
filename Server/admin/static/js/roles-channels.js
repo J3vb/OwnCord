@@ -685,6 +685,7 @@ function renderRolePlacement(){
 function placeRoleAboveDefault(slot){
   const input=document.getElementById('rolePos');if(!input)return;
   input.value=String(slot);
+  markModalDirty();
   renderRolePlacement();
   input.focus();
 }

@@ -7,10 +7,10 @@ document.addEventListener('keydown',e=>{
      the nav drawer; a persistent error toast goes first, as before. */
   if(e.key==='Escape'){
     if(document.querySelector('#toast.visible.error'))dismissToast();
-    else if(document.querySelector('.modal-overlay.visible'))closeModal();
+    else if(document.querySelector('.modal-overlay.visible'))dismissModal();
     else if(isUserMenuOpen())closeUserMenu(true);
     else if(isNavOpen())closeNav();
-    else closeModal();
+    else dismissModal();
   }
   /* "/" jumps to the page's search box — but only from outside a text
      field. The filter boxes are themselves .filter-search, so an unguarded
@@ -23,6 +23,6 @@ document.addEventListener('keydown',e=>{
     const s=document.querySelector('.filter-search');if(s){e.preventDefault();s.focus()}
   }
 });
-document.getElementById('modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal()});
+document.getElementById('modal').addEventListener('click',e=>{if(e.target===e.currentTarget)dismissModal()});
 
 checkAuth();
