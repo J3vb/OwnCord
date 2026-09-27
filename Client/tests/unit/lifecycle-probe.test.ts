@@ -186,23 +186,42 @@ describe("lifecycle soak pass bars", () => {
     expect(nodes.bar).toContain("page 0: 2858→2861");
   });
 
-  it("keeps the phase series exact for nodes: 1-2 nodes per login generation still fails", () => {
-    for (const growth of [1, 2]) {
-      const perLogin = [
-        sample(5, { nodes: 2858 }),
-        sample(6, { nodes: 2858 }),
-        sample(9, { nodes: 2858 }),
-        sample(10, { nodes: 2858 }),
-        sample(15, { nodes: 2858 + growth }),
-        sample(16, { nodes: 2858 + growth }),
-        sample(19, { nodes: 2858 + growth }),
-        sample(20, { nodes: 2858 + growth }),
-      ];
-      const nodes = bar(evaluateBars(perLogin), "nodes");
-      expect(nodes.pass).toBe(false);
-      expect(nodes.bar).toContain(`phase 5: 2858→${2858 + growth}`);
-      expect(nodes.bar).not.toMatch(/page \d:/);
-    }
+  it("tolerates a 1-2 node wobble in a per-phase pair", () => {
+    // The CI flake: phase 9 read 3013→3014 and phase 6 2991→2992 between the
+    // like-for-like samples 10 cycles apart — one retained, detached node in
+    // flux at a sample, exactly the within-page case. The net move is what the
+    // tolerance covers, so the 0.1/cycle slope it implies does not fail. The
+    // pages themselves hold flat here, so only the phase series see the wobble.
+    const wobble = [
+      sample(5, { nodes: 1000 }),
+      sample(6, { nodes: 2000 }),
+      sample(9, { nodes: 2000 }),
+      sample(10, { nodes: 1000 }),
+      sample(15, { nodes: 1001 }),
+      sample(16, { nodes: 2001 }),
+      sample(19, { nodes: 2001 }),
+      sample(20, { nodes: 1001 }),
+    ];
+    expect(bar(evaluateBars(wobble), "nodes").pass).toBe(true);
+  });
+
+  it("still fails a real nodes leak past the 2-node tolerance in a phase series", () => {
+    // A real leak that survives the navigation grows every phase series by 3,
+    // past the tolerance, and must still fail, while the page pairs stay flat.
+    const leaking = [
+      sample(5, { nodes: 2858 }),
+      sample(6, { nodes: 2858 }),
+      sample(9, { nodes: 2858 }),
+      sample(10, { nodes: 2858 }),
+      sample(15, { nodes: 2861 }),
+      sample(16, { nodes: 2861 }),
+      sample(19, { nodes: 2861 }),
+      sample(20, { nodes: 2861 }),
+    ];
+    const nodes = bar(evaluateBars(leaking), "nodes");
+    expect(nodes.pass).toBe(false);
+    expect(nodes.bar).toContain("phase 5: 2858→2861");
+    expect(nodes.bar).not.toMatch(/page \d:/);
   });
 
   it("keeps the tolerance to nodes: a 1-unit wobble in another metric still fails", () => {
