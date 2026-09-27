@@ -1140,4 +1140,58 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(doc.getElementById("loginOverlay")!.classList.contains("visible")).toBe(true);
     expect(bridge.state.token).toBe("");
   });
+
+  // UX-12(b). The badges used to load once at sign-in, so a warning raised
+  // while the operator was away stayed unseen until a re-login. Coming back
+  // to the tab refreshes every source — the open section's included — and a
+  // signed-out panel fetches nothing.
+  it("refreshes the nav badges when the tab comes back into view (UX-12(b))", async () => {
+    const calls: FetchCall[] = [];
+    let warnings = [{ id: "a" }];
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p === "/me")
+        return {
+          json: {
+            id: 1,
+            username: "ada",
+            role_name: "Owner",
+            permissions: ADMINISTRATOR,
+            role_position: 100,
+            is_owner: true,
+            server_name: "Lab",
+            version: "1.2.0",
+          },
+        };
+      if (p === "/attention") return { json: { warnings } };
+      if (p === "/registrations") return { json: [] };
+      if (p === "/updates") return { json: { update_available: false } };
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { bridge, dom: jsdom } = booted;
+    const doc = jsdom.window.document;
+    const tick = () => new Promise((resolve) => jsdom.window.setTimeout(resolve, 0));
+    await bridge.enterApp();
+    await tick();
+    const dashboard = () =>
+      doc.getElementById("sidebarNav")!.querySelector(`[data-args='["dashboard"]']`)!;
+    expect(bridge.state.section).toBe("dashboard");
+    expect(dashboard().textContent).toBe("Dashboard1 (1 active warnings)");
+
+    // A warning raised while the operator was on another tab.
+    warnings = [{ id: "a" }, { id: "b" }];
+    doc.dispatchEvent(new jsdom.window.Event("visibilitychange"));
+    await tick();
+    await tick();
+    expect(dashboard().textContent).toBe("Dashboard2 (2 active warnings)");
+
+    // Signed out, a return to the tab loads nothing.
+    (doc.querySelector('#userMenu [data-action="doLogout"]') as HTMLButtonElement).click();
+    calls.length = 0;
+    doc.dispatchEvent(new jsdom.window.Event("visibilitychange"));
+    await tick();
+    expect(calls).toEqual([]);
+  });
 });

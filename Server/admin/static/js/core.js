@@ -424,7 +424,9 @@ function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending
 /* Pending registrations (Members), active attention warnings (Dashboard) and
    an available update (Updates). Every GET of a source route refreshes its
    badge, so a page that loads the data keeps the count current for free;
-   refreshBadges loads what the principal may read once on sign-in. */
+   refreshBadges loads what the principal may read on sign-in, and again —
+   every source — whenever the operator comes back to the tab, so a warning
+   raised while they were away shows without a re-login (UX-12(b)). */
 const REGISTRATIONS_PAGE=50;
 function noteBadgeSource(path,data){
   let v;
@@ -435,12 +437,15 @@ function noteBadgeSource(path,data){
   state.badges[v[0]]=v[1];
   if(document.getElementById('sidebarNav').childElementCount)renderNav();
 }
-function refreshBadges(){
+function refreshBadges(everySource){
   const quiet=()=>{};
-  if(can(PERM.MANAGE_SERVER)&&state.section!=='users')api('GET','/registrations').catch(quiet);
-  if(can(PERM.ADMINISTRATOR)&&state.section!=='dashboard')api('GET','/attention').catch(quiet);
-  if(isOwner()&&state.section!=='dashboard'&&state.section!=='updates')api('GET','/updates').catch(quiet);
+  if(can(PERM.MANAGE_SERVER)&&(everySource||state.section!=='users'))api('GET','/registrations').catch(quiet);
+  if(can(PERM.ADMINISTRATOR)&&(everySource||state.section!=='dashboard'))api('GET','/attention').catch(quiet);
+  if(isOwner()&&(everySource||(state.section!=='dashboard'&&state.section!=='updates')))api('GET','/updates').catch(quiet);
 }
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&state.me)refreshBadges(true);
+});
 
 function navigateTo(id){
   if(!sectionAllowed(id)){showToast('You do not have permission to open that section','error');return}
