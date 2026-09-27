@@ -408,7 +408,11 @@ fn bars(width: u32, height: u32, n: usize) -> I420Buffer {
     let (y, u, v) = out.data_mut();
     for row in 0..height as usize {
         for col in 0..width as usize {
-            y[row * sy as usize + col] = if (col + n * 8) / 64 % 2 == 0 { 40 } else { 220 };
+            y[row * sy as usize + col] = if ((col + n * 8) / 64).is_multiple_of(2) {
+                40
+            } else {
+                220
+            };
         }
     }
     u.fill(128);
