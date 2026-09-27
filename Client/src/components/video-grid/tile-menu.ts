@@ -26,7 +26,7 @@ export interface TileMenuOptions {
   /** The person's display name. */
   readonly name: string;
   readonly config: TileConfig;
-  /** The grid's lifetime: the menu goes with it. */
+  /** The tile's lifetime: the menu closes when its tile is removed. */
   readonly signal: AbortSignal;
   /** The tiles' own sliders show the same settings; keep them in step. */
   readonly onVolumeChange: (isScreenshare: boolean, volume: number, muted: boolean) => void;
