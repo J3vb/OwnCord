@@ -21,6 +21,7 @@ import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { resetSafetyStore, safetyStore, setActiveTimeout } from "../../src/features/safety/store";
+import { setConnectionStatus, uiStore } from "../../src/stores/ui.store";
 import { expectConsole } from "../helpers/console";
 
 function resetStores(): void {
@@ -648,6 +649,26 @@ describe("MessageList", () => {
     controls()[0]!.click();
     expect(options.onReactionClick).toHaveBeenCalledWith(1, "🔥");
     resetSafetyStore();
+  });
+
+  it("disables delete while the socket is down and re-enables it on reconnect (CLI-08)", () => {
+    setConnectionStatus("connected");
+    uiStore.flush();
+    setMessages(1, [makeMessage({ id: 1 })]);
+    msgList.mount(container);
+    const deleteBtn = (): HTMLButtonElement =>
+      container.querySelector<HTMLButtonElement>("[data-testid='msg-delete-1']")!;
+    expect(deleteBtn().disabled).toBe(false);
+
+    setConnectionStatus("disconnected");
+    uiStore.flush();
+    expect(deleteBtn().disabled).toBe(true);
+    expect(deleteBtn().getAttribute("aria-disabled")).toBe("true");
+
+    setConnectionStatus("connected");
+    uiStore.flush();
+    deleteBtn().click();
+    expect(options.onDeleteClick).toHaveBeenCalledWith(1);
   });
 
   it("does not re-render when a DIFFERENT channel's messages update", () => {

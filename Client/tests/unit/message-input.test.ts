@@ -256,6 +256,28 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("isIdle is true only with no text, reply or edit", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    expect(comp.isIdle()).toBe(true);
+
+    textarea.value = "draft";
+    expect(comp.isIdle()).toBe(false);
+    textarea.value = "";
+
+    comp.setReplyTo(42, "testuser");
+    expect(comp.isIdle()).toBe(false);
+    comp.clearReply();
+
+    comp.startEdit(99, "");
+    expect(comp.isIdle()).toBe(false);
+    comp.cancelEdit();
+    expect(comp.isIdle()).toBe(true);
+
+    comp.destroy?.();
+  });
+
   it("startEdit sets textarea value and shows edit bar", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);

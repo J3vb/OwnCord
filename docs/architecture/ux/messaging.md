@@ -134,11 +134,17 @@ existing pending/sent row for that id and replace-in-place rather than append.
 
 ## 4. Edit / delete
 
-| Action                   | Target UX                                                                                                                                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Edit (own message)       | Inline edit in the composer (`startEdit`, `MessageInput.ts`); optimistic content swap; `chat_edited` reconciles + stamps "edited"; failure rolls back with a toast                         |
-| Delete (own / moderator) | **Two-click confirm** on the row (`createPendingDeleteManager()`, `pages/main-page/MessageController.ts`); optimistic tombstone; `chat_deleted` confirms; failure restores the row + toast |
-| Delete (no permission)   | The delete affordance is not offered on others' messages unless the user has MANAGE_MESSAGES                                                                                               |
+| Action                   | Target UX                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Edit (own message)       | Inline edit in the composer (`startEdit`, `MessageInput.ts`); the frame's envelope id is tracked (CLI-08) and resolved by the `chat_edited` echo; a refused or dropped frame shows exactly one error and puts the text back in the composer when it is empty, so no "edited" toast is claimed before delivery                                         |
+| Delete (own / moderator) | **Two-click confirm** on the row (`createPendingDeleteManager()`, `pages/main-page/MessageController.ts`); the frame's envelope id is tracked (CLI-08) and resolved by the `chat_deleted` echo; a refused or dropped frame shows one error instead of a false success, and the button is disabled with the connection reason while the socket is down |
+| Delete (no permission)   | The delete affordance is not offered on others' messages unless the user has MANAGE_MESSAGES                                                                                                                                                                                                                                                          |
+
+A frame counts as dropped when the socket leaves `connected` before its echo
+arrives; if several edits fail together, only the newest is put back. A tracked
+entry still unechoed after 90 s on a socket that stayed connected is dropped
+silently (`TRACKED_ACTION_EXPIRY_MS`, `ChannelController.ts`): the frame reached
+the server, and the echo can miss this client when it left the channel first.
 
 Deleted messages are soft-deleted (kept as a tombstone in the array, `deleted:true`)
 so surrounding context and reply references stay intact.
