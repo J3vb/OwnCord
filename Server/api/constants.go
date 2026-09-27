@@ -149,8 +149,8 @@ const (
 
 	// shutdownTransferGrace is how long an in-flight transfer may keep going
 	// once server shutdown begins. It fits inside the 30 s HTTP drain budget
-	// (shutdownBudget in internal/app), so a short transfer still finishes
-	// while a trickling one cannot hold the drain past it.
+	// (httpDrainBudget in internal/app/lifecycle.go), so a short transfer
+	// still finishes while a trickling one cannot hold the drain past it.
 	shutdownTransferGrace = 20 * time.Second
 
 	// maxAvatarURLLen is the maximum length of a user avatar URL.
