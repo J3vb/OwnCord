@@ -285,6 +285,7 @@ async function renderBackups(){
      page is owner-only, so it is edited here rather than on Settings. */
   let policyErr='';
   try{state._settings=await api('GET','/settings')}catch(e){policyErr=e.message}
+  state.backupPolicyChanged=false;
   const v=k=>(state._settings||{})[k]||'';
   let html='<div class="page-head"><div><div class="page-title">Backups &amp; restore</div><div class="page-desc">Copies of the server database. Restoring one replaces everything that happened after it was taken.</div></div>'
     +'<button class="btn btn-accent" data-action="createBackup"'+(state.backupRunning?' disabled':'')+'>'+(state.backupRunning?'<span class="spinner" aria-hidden="true"></span> Backing up…':I.download+' Create backup now')+'</button></div>';
@@ -307,8 +308,10 @@ async function renderBackups(){
 }
 
 function markBackupPolicyChanged(){
+  const changed=Object.keys(settingsDiff(settingsFormValues(BACKUP_KEYS))).length>0;
+  state.backupPolicyChanged=changed;
   const b=document.getElementById('saveBackupPolicyBtn');
-  if(b)b.disabled=!Object.keys(settingsDiff(settingsFormValues(BACKUP_KEYS))).length;
+  if(b)b.disabled=!changed;
 }
 
 async function saveBackupPolicy(){
@@ -316,7 +319,7 @@ async function saveBackupPolicy(){
   if(btn){if(btn.disabled)return;btn.disabled=true}
   const body=settingsDiff(settingsFormValues(BACKUP_KEYS));
   if(!Object.keys(body).length)return;
-  try{state._settings=await api('PATCH','/settings',body);showToast('Backup schedule saved')}
+  try{state._settings=await api('PATCH','/settings',body);state.backupPolicyChanged=false;showToast('Backup schedule saved')}
   catch(e){showToast(e.message,'error');if(btn)btn.disabled=false}
 }
 

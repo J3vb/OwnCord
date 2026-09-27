@@ -42,7 +42,8 @@ const I={
 const PAGE_SIZE=50;
 const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   me:null,partialToken:'',
-  usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
+  usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupPolicyChanged:false,backupRunning:false,updateApplying:false,
+  modalDirty:false,
   supportPreview:null,supportBusy:false,badges:{pending:0,warnings:0,update:false},
   cachedStats:null,cachedUpdate:null,channelCache:{},roleList:[],pluginRuntime:'unknown',pluginBusy:false,
   logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
@@ -183,8 +184,9 @@ function showToast(msg,type='success'){
 function dismissToast(){clearTimeout(window._tt);document.getElementById('toast').classList.remove('visible')}
 
 /* U6: every .toggle is a role=switch button; this keeps its visual class and
-   its aria-checked state in step in one place. */
-function toggleSwitch(el){el.classList.toggle('on');el.setAttribute('aria-checked',el.classList.contains('on')?'true':'false')}
+   its aria-checked state in step in one place. A toggle inside a dialog is an
+   edit like any field, so flipping one marks the dialog dirty (UX-10). */
+function toggleSwitch(el){el.classList.toggle('on');el.setAttribute('aria-checked',el.classList.contains('on')?'true':'false');if(el.closest&&el.closest('#modalInner'))markModalDirty()}
 
 /* U5: the reused dialog moves focus in, traps Tab, and restores it on close.
    One modal exists at a time, so a module-level opener is enough. */
@@ -222,6 +224,9 @@ function lockModal(on){
 function openModal(html){
   lockModal(false);
   state.retentionProposal=null;
+  /* A fresh dialog starts clean; the previous one's edits are gone with its
+     markup. */
+  state.modalDirty=false;
   const o=document.getElementById('modal');
   const inner=document.getElementById('modalInner');
   if(!o.classList.contains('visible'))modalOpener=document.activeElement;
@@ -235,8 +240,21 @@ function openModal(html){
     focusModalStart(inner);
   },0);
 }
+/* UX-10: a dialog that holds edits must not vanish silently. Edits inside the
+   dialog body set state.modalDirty, and the operator's own dismissals — a
+   Cancel or × button, the scrim, or Escape — go through dismissModal(), which
+   asks before discarding. closeModal() stays the internal close: a caller
+   that reaches it has already finished, so nothing there is at risk. */
+function markModalDirty(){state.modalDirty=true}
+function dismissModal(){
+  if(modalLocked)return false;
+  if(state.modalDirty&&!confirm('Discard your unsaved changes?'))return false;
+  closeModal();
+  return true;
+}
 function closeModal(){
   if(modalLocked)return;
+  state.modalDirty=false;
   state.retentionProposal=null;
   const o=document.getElementById('modal');
   o.classList.remove('visible');o.setAttribute('aria-hidden','true');
@@ -244,6 +262,25 @@ function closeModal(){
   if(modalOpener instanceof HTMLElement)modalOpener.focus();
   modalOpener=null;
 }
+/* Only real form fields count as edits. Two kinds of control are transient,
+   not unsaved work, so Cancel on them must not ask to discard:
+   the typed-name confirmation inputs (delete channel/role, restore, erase),
+   and the update dialog's back-up-first checkbox, a decision about the action
+   being cancelled rather than a value to save. The selects that only change
+   which panel or target is shown are navigation, not edits. */
+const MODAL_TRANSIENT_INPUTS=new Set(['typedConfirm','restoreConfirm','eraseConfirm','updateBackupFirst']);
+const MODAL_NAV_SELECTS=new Set(['permTarget','explainUser','explainAction']);
+function modalEditMarksDirty(el){
+  return el instanceof HTMLElement&&!MODAL_TRANSIENT_INPUTS.has(el.id)&&!MODAL_NAV_SELECTS.has(el.id);
+}
+document.getElementById('modal').addEventListener('input',e=>{if(modalEditMarksDirty(e.target))markModalDirty()});
+document.getElementById('modal').addEventListener('change',e=>{if(modalEditMarksDirty(e.target))markModalDirty()});
+/* Reload or close with unsaved work anywhere — a dialog edit or the Settings
+   form — asks the browser to confirm first. beforeunload is the only event
+   that can, and the browser owns the prompt text. */
+window.addEventListener('beforeunload',e=>{
+  if(state.settingsChanged||state.backupPolicyChanged||state.modalDirty){e.preventDefault();e.returnValue=''}
+});
 /* Keep Tab inside the dialog while it is open. */
 document.getElementById('modal').addEventListener('keydown',e=>{
   if(e.key!=='Tab')return;
@@ -418,7 +455,7 @@ function closeNav(restoreFocus=true){
 window.addEventListener('resize',()=>{if(window.innerWidth>900)closeNav(false)});
 /* Sign-out and session expiry: close the popups and forget the last
    principal's badge counts. */
-function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending:0,warnings:0,update:false};state.settingsChanged=false}
+function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending:0,warnings:0,update:false};state.settingsChanged=false;state.backupPolicyChanged=false;state.modalDirty=false}
 
 /* ═══ Nav badges ═══ */
 /* Pending registrations (Members), active attention warnings (Dashboard) and
@@ -452,6 +489,7 @@ function navigateTo(id){
   try{
     if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}}
     if(state.section==='settings'&&id!=='settings')state.settingsChanged=false;
+    if(state.section==='backups'&&id!=='backups')state.backupPolicyChanged=false;
     state.section=id;renderNav();renderContent();closeNav();
   }catch(err){
     console.error('[Admin] Tab navigation failed for "'+id+'":', err);
@@ -506,8 +544,8 @@ function delegateActions(type,attr){
 delegateActions('click','data-action');
 delegateActions('input','data-input-action');
 delegateActions('change','data-change-action');
-Object.assign(ACTIONS,{closeModal,renderContent,navigateTo,doLogout,dismissToast,openNav,
+Object.assign(ACTIONS,{closeModal:dismissModal,renderContent,navigateTo,doLogout,dismissToast,openNav,
   closeNav(){closeNav()},
   toggleUserMenu(){if(isUserMenuOpen())closeUserMenu(true);else openUserMenu()},
-  closeModalAndRefresh(){closeModal();renderContent()},
+  closeModalAndRefresh(){if(dismissModal())renderContent()},
   toggleSwitch(){toggleSwitch(this)}});
