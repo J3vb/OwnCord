@@ -107,27 +107,36 @@ func validate(s schema) error {
 		}
 	}
 	for _, e := range s.Enums {
-		if e.Name == "" || e.Go == "" || e.TS == "" || len(e.Values) == 0 {
-			return fmt.Errorf("enum %+v: name, go, ts and at least one value are required", e)
+		if err := validateEnum(e, goNames); err != nil {
+			return err
 		}
-		if goNames[e.Go] {
-			return fmt.Errorf("duplicate Go identifier %q", e.Go)
+	}
+	return nil
+}
+
+// validateEnum checks one enum, recording its Go identifiers in goNames so
+// they cannot collide with message constants or another enum's.
+func validateEnum(e enum, goNames map[string]bool) error {
+	if e.Name == "" || e.Go == "" || e.TS == "" || len(e.Values) == 0 {
+		return fmt.Errorf("enum %+v: name, go, ts and at least one value are required", e)
+	}
+	if goNames[e.Go] {
+		return fmt.Errorf("duplicate Go identifier %q", e.Go)
+	}
+	goNames[e.Go] = true
+	tsNames, wires := map[string]bool{}, map[string]bool{}
+	for _, v := range e.Values {
+		if v.Wire == "" || v.Go == "" || v.TS == "" {
+			return fmt.Errorf("enum %s value %+v: wire, go, and ts are all required", e.Name, v)
 		}
-		goNames[e.Go] = true
-		tsNames, wires := map[string]bool{}, map[string]bool{}
-		for _, v := range e.Values {
-			if v.Wire == "" || v.Go == "" || v.TS == "" {
-				return fmt.Errorf("enum %s value %+v: wire, go, and ts are all required", e.Name, v)
-			}
-			if goNames[v.Go] {
-				return fmt.Errorf("duplicate Go identifier %q", v.Go)
-			}
-			goNames[v.Go] = true
-			if tsNames[v.TS] || wires[v.Wire] {
-				return fmt.Errorf("enum %s: duplicate value %q/%q", e.Name, v.TS, v.Wire)
-			}
-			tsNames[v.TS], wires[v.Wire] = true, true
+		if goNames[v.Go] {
+			return fmt.Errorf("duplicate Go identifier %q", v.Go)
 		}
+		goNames[v.Go] = true
+		if tsNames[v.TS] || wires[v.Wire] {
+			return fmt.Errorf("enum %s: duplicate value %q/%q", e.Name, v.TS, v.Wire)
+		}
+		tsNames[v.TS], wires[v.Wire] = true, true
 	}
 	return nil
 }
