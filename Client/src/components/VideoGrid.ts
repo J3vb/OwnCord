@@ -141,6 +141,15 @@ export function computeGridLayout(
   return best;
 }
 
+/** Rendered, so it can take focus: not hidden by the grid (`hidden`) or by
+ *  the layout's CSS (the filmstrip hides a thumb's controls). */
+function isShown(el: HTMLElement): boolean {
+  return (
+    el.closest("[hidden]") === null &&
+    (typeof el.checkVisibility !== "function" || el.checkVisibility())
+  );
+}
+
 /** A labelled icon button on a tile, above the tile's own select button. */
 function tileButton(
   text: string,
@@ -325,14 +334,18 @@ export function createVideoGrid(): VideoGridComponent {
     return { userId, control };
   }
 
-  /** Put focus back on a captured tile control, or — when that tile is gone
-   *  (its peer left) — on the grid itself, so focus never drops to `<body>`
+  /** Put focus back on a captured tile control; when the layout hid it, on
+   *  the same tile's way in or out (Back to grid on the focused tile, its
+   *  select button elsewhere); when that tile is gone (its peer left), on
+   *  the grid itself — so focus never drops to `<body>` or a hidden control
    *  and never lands on another peer's identically named control. */
   function restoreFocusedControl(saved: { userId: number; control: string } | null): void {
     if (saved === null || root === null) return;
-    const target = root.querySelector<HTMLElement>(
-      `.video-cell[data-user-id='${saved.userId}'] [data-tile-control='${saved.control}']`,
-    );
+    const cell = root.querySelector(`.video-cell[data-user-id='${saved.userId}']`);
+    const way = saved.userId === focusedTileId ? "grid" : "select";
+    const target = [saved.control, way]
+      .map((control) => cell?.querySelector<HTMLElement>(`[data-tile-control='${control}']`))
+      .find((el) => el != null && isShown(el));
     (target ?? root).focus();
   }
 
@@ -350,9 +363,8 @@ export function createVideoGrid(): VideoGridComponent {
 
   function rebuildFocusLayout(): void {
     if (root === null) return;
-    syncTileNav();
-
     const savedFocus = captureFocusedControl();
+    syncTileNav();
 
     // Clear root children (we'll re-append in focus layout order)
     while (root.firstChild) root.removeChild(root.firstChild);
@@ -531,15 +543,11 @@ export function createVideoGrid(): VideoGridComponent {
     const video = cell.querySelector("video");
     if (video !== null) video.hidden = stopped;
     cell.querySelector(".video-stopped")?.remove();
+    const self = entry.config?.isSelf === true;
     if (!stopped) {
-      (
-        cell.querySelector<HTMLElement>(
-          "[data-tile-control='stop'], [data-tile-control='hide-preview']",
-        ) ?? cell.querySelector<HTMLElement>(".video-cell-select")
-      )?.focus();
+      restoreFocusedControl({ userId: tileId, control: self ? "hide-preview" : "stop" });
       return;
     }
-    const self = entry.config?.isSelf === true;
     const cover = createElement("div", { class: "video-stopped" });
     const again = createElement(
       "button",

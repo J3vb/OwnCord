@@ -144,9 +144,12 @@ export function showTileMenu(opts: TileMenuOptions): void {
   });
   menu.append(createElement("div", { class: "context-menu-sep" }), stop);
 
-  menu.style.left = `${opts.x}px`;
-  menu.style.top = `${opts.y}px`;
   document.body.appendChild(menu);
+  const margin = 8;
+  const left = Math.min(opts.x, window.innerWidth - menu.offsetWidth - margin);
+  const top = Math.min(opts.y, window.innerHeight - menu.offsetHeight - margin);
+  menu.style.left = `${Math.max(margin, left)}px`;
+  menu.style.top = `${Math.max(margin, top)}px`;
   restoreFocus = enableMenuKeyboard(menu, { signal: dismiss.signal, onClose: closeMenu });
 
   setOwnedTimeout(

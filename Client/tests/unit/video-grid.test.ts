@@ -1168,6 +1168,67 @@ describe("VideoGrid", () => {
       expect(cell(1 + 1_000_000).querySelector(".video-self-detail")!.textContent).toBe("No audio");
     });
 
+    it("hands focus to Back to grid when a tile opens, and back to the tile after", () => {
+      document.body.appendChild(container);
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+      grid.addStream(3, "Sam", fakeStream(), camera());
+
+      select(SCREEN).focus();
+      select(SCREEN).click();
+      const back = cell(SCREEN).querySelector<HTMLButtonElement>("[data-tile-control='grid']")!;
+      expect(document.activeElement).toBe(back);
+
+      back.click();
+      expect(document.activeElement).toBe(select(SCREEN));
+      container.remove();
+    });
+
+    it("Watch stream on a filmstrip thumb hands focus to the thumb, not its hidden controls", () => {
+      document.body.appendChild(container);
+      // The filmstrip's CSS hides a thumb's tile controls.
+      const proto = HTMLElement.prototype as { checkVisibility?: () => boolean };
+      proto.checkVisibility = function (this: HTMLElement) {
+        return this.closest(".video-focus-strip .video-tile-nav") === null;
+      };
+      try {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+        grid.addStream(3, "Sam", fakeStream(), camera());
+        cell(3).querySelector<HTMLButtonElement>("[data-tile-control='stop']")!.click();
+        grid.setFocusedTile(SCREEN);
+
+        cell(3).querySelector<HTMLButtonElement>("[data-tile-control='watch']")!.click();
+        expect(document.activeElement).toBe(select(3));
+      } finally {
+        delete proto.checkVisibility;
+        container.remove();
+      }
+    });
+
+    it("keeps the tile menu inside the window", async () => {
+      const width = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(200);
+      const height = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(220);
+      try {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+        cell(SCREEN).dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            clientX: window.innerWidth - 4,
+            clientY: window.innerHeight - 4,
+          }),
+        );
+        await vi.dynamicImportSettled();
+
+        const menu = document.querySelector<HTMLElement>(".video-tile-menu")!;
+        expect(menu.style.left).toBe(`${window.innerWidth - 200 - 8}px`);
+        expect(menu.style.top).toBe(`${window.innerHeight - 220 - 8}px`);
+        menu.remove();
+      } finally {
+        width.mockRestore();
+        height.mockRestore();
+      }
+    });
+
     it("Show preview hands focus to Hide preview on your own screen share", () => {
       document.body.appendChild(container);
       grid.addStream(1 + 1_000_000, "Your Screen", fakeStream(), {
