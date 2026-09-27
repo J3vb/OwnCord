@@ -318,8 +318,8 @@ func (h *Hub) StopLiveKit() {
 	}
 }
 
-// GracefulStop stops the LiveKit process (if managed) and then stops the hub,
-// announcing a plain shutdown. Safe to call multiple times concurrently.
+// GracefulStop stops the hub, announcing a plain shutdown, and then the
+// LiveKit process (if managed). Safe to call multiple times concurrently.
 // Prefer GracefulStopContext where a shutdown budget exists — this variant
 // waits the full client-notice window.
 func (h *Hub) GracefulStop() {
@@ -328,7 +328,8 @@ func (h *Hub) GracefulStop() {
 
 // GracefulStopContext is GracefulStop bounded by ctx: the client-notice wait
 // ends early when ctx expires, so the hub's drain counts against the caller's
-// shutdown budget instead of extending it. reason is what the restart notice
+// shutdown budget instead of extending it. The order is notice, notice
+// window, socket close, then StopLiveKit. reason is what the restart notice
 // tells clients — the restart's own intent (an update, a restore) rather than
 // a generic shutdown. Safe to call multiple times concurrently (only the
 // first call's ctx and reason are used).
@@ -342,9 +343,6 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 			// Broadcast restart notice to all connected clients.
 			h.BroadcastServerRestart(reason, 5)
 		}
-
-		// Stop LiveKit process.
-		h.StopLiveKit()
 
 		// Give clients the promised notice window to disconnect gracefully —
 		// the 5s matches the countdown BroadcastServerRestart told them.
@@ -361,6 +359,10 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 			c.closeSend()
 		}
 		h.mu.Unlock()
+
+		// Stop LiveKit only now, so a client leaves voice on the socket drop
+		// while its room is still up instead of reconnecting to a dead one.
+		h.StopLiveKit()
 
 		// Stop the hub dispatch loop.
 		h.stopOnce.Do(func() { close(h.stop) })

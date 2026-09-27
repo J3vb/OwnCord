@@ -1512,8 +1512,9 @@ The server handles `Ctrl+C` (SIGINT) and `SIGTERM`:
 
 1. Shuts down the ACME listener, ends any open admin Logs stream, then
    drains in-flight HTTP handlers
-2. Stops the hub on a budget of its own: sends the restart notice,
-   stops the LiveKit process and closes every WebSocket connection
+2. Stops the hub on a budget of its own: sends the restart notice, waits
+   out the notice window, closes every WebSocket connection and only then
+   stops the LiveKit process, so clients leave voice while it is still up
 3. Unregisters the signal handler, so a second `Ctrl+C` during steps 1–2 does
    not cut the drain short
 4. Joins the maintenance loop, flushes the audit queue and drains event
