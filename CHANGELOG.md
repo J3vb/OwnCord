@@ -82,6 +82,7 @@ and only when it changes something a contributor or fork holder must do
 ### Accounts & admin
 
 - The admin panel's nav badges (pending registrations, active warnings, an available update) loaded only at sign-in, so a warning raised later went unseen until a re-login — they now refresh whenever you come back to the tab.
+- **Taking a backup no longer freezes the server's writes.** The daily scheduled backup copied the database on the single write connection, so for its whole duration (a second or more on a large database) every message, upload and setting change waited, once a day and at a drifting time. The copy now runs alongside them, and a backup that is killed part-way leaves no file the Backups page would offer to restore. The log records how long each backup took; new backups are readable only by the server account.
 - The admin panel's update and restore dialogs could be dismissed (Escape, a click outside, Close) while the update or restore was already running, leaving no sign of the restart in progress — they now stay open until the server is back, or until the request fails.
 - The admin audit log's Export CSV could hand a spreadsheet a formula — a cell such as a username starting with `=`, `+`, `-` or `@` now gets a leading `'` so it opens as text.
 

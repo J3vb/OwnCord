@@ -500,11 +500,11 @@ func (d *DB) SQLReaderDB() *sql.DB {
 
 // PingRead answers whether the database can serve reads, via a bounded
 // SELECT 1 on the READER pool. The health endpoint uses it deliberately:
-// pinging the single-connection writer would queue behind any long write —
-// most notably a scheduled backup's VACUUM INTO — and report a healthy,
-// read-serving server as degraded for the backup's whole duration. Writer
-// saturation is reported separately (SQLDb().Stats() in /api/v1/metrics),
-// where it is a capacity signal rather than a liveness verdict.
+// pinging the single-connection writer would queue behind any long write and
+// report a healthy, read-serving server as degraded for that write's whole
+// duration. Writer saturation is reported separately (SQLDb().Stats() in
+// /api/v1/metrics), where it is a capacity signal rather than a liveness
+// verdict.
 func (d *DB) PingRead(ctx context.Context) error {
 	var one int
 	return d.reader.QueryRowContext(ctx, "SELECT 1").Scan(&one)

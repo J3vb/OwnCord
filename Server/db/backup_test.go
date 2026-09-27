@@ -205,3 +205,55 @@ func TestBackupToSafe_RejectsDoubleQuote(t *testing.T) {
 		t.Error("BackupToSafe() with double-quote in path should return error, got nil")
 	}
 }
+
+// TestBackupTo_RejectsPathOutsideDataBackups: the production entry point pins
+// its safe root to data/backups, so a destination anywhere else is refused
+// before a byte is written.
+func TestBackupTo_RejectsPathOutsideDataBackups(t *testing.T) {
+	database, tmpDir := newBackupFileDB(t)
+
+	outside := filepath.Join(tmpDir, "outside.db")
+	if err := database.BackupTo(context.Background(), outside); err == nil {
+		t.Fatal("BackupTo accepted a path outside data/backups")
+	}
+	if _, err := os.Stat(outside); !os.IsNotExist(err) {
+		t.Fatalf("a refused backup left a file behind (stat err=%v)", err)
+	}
+}
+
+// TestBackupToSafe_MissingDirectoryFails: a destination directory that does
+// not exist is an error, not a silently created tree.
+func TestBackupToSafe_MissingDirectoryFails(t *testing.T) {
+	database, tmpDir := newBackupFileDB(t)
+
+	backupDir := filepath.Join(tmpDir, "backups")
+	missing := filepath.Join(backupDir, "not-there")
+	if err := database.BackupToSafe(context.Background(), filepath.Join(missing, "b.db"), backupDir); err == nil {
+		t.Fatal("BackupToSafe into a missing directory should fail")
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatalf("a failed backup created its directory (stat err=%v)", err)
+	}
+}
+
+// TestBackupToSafe_ParentIsAFileFails: a destination whose parent is a regular
+// file cannot be checked for existence, so it is refused and the file that is
+// in the way is left alone.
+func TestBackupToSafe_ParentIsAFileFails(t *testing.T) {
+	database, tmpDir := newBackupFileDB(t)
+
+	backupDir := filepath.Join(tmpDir, "backups")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	blocker := filepath.Join(backupDir, "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.BackupToSafe(context.Background(), filepath.Join(blocker, "b.db"), backupDir); err == nil {
+		t.Fatal("BackupToSafe under a regular file should fail")
+	}
+	if got, err := os.ReadFile(blocker); err != nil || string(got) != "not a directory" {
+		t.Fatalf("the file in the way was touched: %q, %v", got, err)
+	}
+}

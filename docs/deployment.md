@@ -615,9 +615,15 @@ Every backup is verified with SQLite's `integrity_check` right after it is
 written (a failed backup is removed, never listed), and again before a
 restore is allowed to overwrite the live database.
 
-Note that a backup runs `VACUUM INTO` on the database's single write
-connection: writes queue for the duration (reads keep serving). On a large
-database, prefer scheduling backups at a low-traffic time of day.
+A backup runs `VACUUM INTO` on the database's **reader** connection and
+publishes the result with an atomic rename only once the copy is complete:
+writers keep serving for the whole duration, and a backup that is killed
+part-way leaves a `.tmp` file no listing offers as restorable, which the
+maintenance tick removes once it is a day old. Backups are created
+owner-only (mode `0600`), so an off-host copy job must run as the server's
+user or adjust the permissions itself. The server
+logs `duration_ms` when the backup lands, so a shrinking window is visible
+before it becomes a problem.
 
 ### Scheduled Backups
 

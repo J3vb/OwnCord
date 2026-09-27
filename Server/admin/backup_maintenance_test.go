@@ -228,3 +228,40 @@ func mustSetSetting(t *testing.T, database interface {
 		t.Fatalf("SetSetting(%s): %v", key, err)
 	}
 }
+
+// TestMaintainBackups_RemovesStaleBackupTemps: a backup killed mid-VACUUM
+// leaves a ".tmp" and SQLite's ".tmp-journal" sidecar, which no *.db scan
+// ever reclaims. The tick removes those untouched for longer than the
+// shortest schedule interval and leaves a fresh one — a backup that may still
+// be writing it — alone, whatever the schedule.
+func TestMaintainBackups_RemovesStaleBackupTemps(t *testing.T) {
+	database := openAdminTestDB(t)
+	dir := t.TempDir()
+	admin.SetBackupBaseDir(dir)
+	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
+	mustSetSetting(t, database, "backup_schedule", "off")
+
+	stale := filepath.Join(dir, "scheduled_20260101_000000.db.123.tmp")
+	staleJournal := stale + "-journal"
+	fresh := filepath.Join(dir, "chatserver_20260101_000000.db.456.tmp")
+	for _, p := range []string{stale, staleJournal, fresh} {
+		if err := os.WriteFile(p, []byte("partial"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backdate(t, stale, 25*time.Hour)
+	backdate(t, staleJournal, 25*time.Hour)
+
+	if err := admin.MaintainBackups(context.Background(), database, service.NewSettingsService(database)); err != nil {
+		t.Fatalf("MaintainBackups: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("a stale backup temp survived the tick (stat err=%v)", err)
+	}
+	if _, err := os.Stat(staleJournal); !os.IsNotExist(err) {
+		t.Fatalf("a stale backup temp's journal survived the tick (stat err=%v)", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatalf("the tick removed a backup temp that may still be written: %v", err)
+	}
+}

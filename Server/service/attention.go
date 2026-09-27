@@ -272,7 +272,7 @@ func (s *AttentionService) Evaluate(ctx context.Context, now time.Time) {
 	s.evalRate(&s.writerWait, r.writerWait, now, rateSpec{
 		id: "db_writer_wait", label: "Database writer wait", unit: "ms/min", floor: s.thresholds.WriterWaitMsPerMin,
 		title:  "Database writes are queueing",
-		action: "Check Server Logs for long-running writes (backups, retention sweeps, bulk deletes). Sustained waits mean the single SQLite writer is saturated.",
+		action: "Check Server Logs for long-running writes (retention sweeps, bulk deletes). Sustained waits mean the single SQLite writer is saturated.",
 	})
 	s.evalRate(&s.reconnects, r.reconnects, now, rateSpec{
 		id: "reconnects", label: "Client reconnects", unit: "/min", floor: s.thresholds.ReconnectsPerMin,
