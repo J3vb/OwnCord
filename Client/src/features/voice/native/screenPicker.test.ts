@@ -9,7 +9,6 @@ type FakePick = {
   source: string;
   quality: "low" | "medium" | "high" | "source";
   fps: number;
-  audio: boolean;
 } | null;
 
 const host = vi.hoisted(
@@ -60,7 +59,6 @@ describe("pickScreenSource", () => {
       source: "window:81",
       quality: "high",
       fps: 30,
-      audio: true,
     });
     await expect(pickScreenSource()).resolves.toEqual({
       source: "window:81",
@@ -71,7 +69,7 @@ describe("pickScreenSource", () => {
   });
 
   it("lets the dialog's per-share quality override the saved prefs", async () => {
-    host.pick = () => ({ source: "screen:277", quality: "low", fps: 30, audio: false });
+    host.pick = () => ({ source: "screen:277", quality: "low", fps: 30 });
     await expect(pickScreenSource()).resolves.toEqual({
       source: "screen:277",
       capture: { fps: 5, maxWidth: 1280, maxHeight: 720 },
@@ -80,12 +78,12 @@ describe("pickScreenSource", () => {
     });
   });
 
-  it("shows only the audio/quality step on Wayland and hands the portal the pick", async () => {
+  it("shows only the quality step on Wayland and hands the portal the pick", async () => {
     host.sources = { portal: true, sources: [] };
     host.pick = (opts) => {
       expect(opts.portal).toBe(true);
       expect(opts.sources).toEqual([]);
-      return { source: "portal", quality: "medium", fps: 60, audio: true };
+      return { source: "portal", quality: "medium", fps: 60 };
     };
     await expect(pickScreenSource()).resolves.toMatchObject({ source: "portal" });
   });

@@ -85,11 +85,10 @@ export const voiceText = defineCatalog("voice", {
   "picker.appsTab": { one: "Applications ({count})", other: "Applications ({count})" },
   "picker.tabEmpty": "Nothing to share in this tab.",
   "picker.portalNote":
-    "Your desktop will now ask which screen or window to share. Choose the source there; OwnCord only sets the audio and quality below.",
+    "Your desktop will now ask which screen or window to share. Choose the source there; OwnCord only sets the quality below.",
   "picker.audio": "Audio",
-  "picker.audioHint": "Other apps' audio and your notifications stay out of the stream.",
-  "picker.audioAllExcept": "Share all audio except OwnCord",
-  "picker.audioFromApp": "Share audio from {app} only",
+  "picker.audioUnavailable":
+    "Audio sharing is not available on Linux yet; only the picture is shared.",
   "picker.quality": "Stream quality",
   "picker.qualityHint": "Defaults from Settings → Voice & Audio; applies to this share only.",
   "picker.frameRate": "Frame rate",

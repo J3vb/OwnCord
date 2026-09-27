@@ -51,11 +51,10 @@ describe("showScreenSharePicker", () => {
       source: "window:9",
       quality: "high",
       fps: 30,
-      audio: true,
     });
   });
 
-  it("retitles the audio option for the picked app, not a screen", async () => {
+  it("says audio is not shared instead of offering a switch", async () => {
     const picking = showScreenSharePicker({
       sources,
       portal: false,
@@ -63,27 +62,12 @@ describe("showScreenSharePicker", () => {
       defaultFps: 30,
     });
     const root = await mounted();
-    clickTab(root, "Applications");
-    root.querySelector<HTMLButtonElement>(".ssp-source")!.click();
-    expect(root.querySelector(".ssp-opt-text")?.textContent).toContain("Code");
+    expect(root.querySelector('[role="switch"]')).toBeNull();
+    expect(root.querySelector(".ssp-opt-text")?.textContent).toContain(
+      "Audio sharing is not available on Linux yet",
+    );
     root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
-    await picking;
-  });
-
-  it("starts with audio on and toggles it off", async () => {
-    const picking = showScreenSharePicker({
-      sources,
-      portal: false,
-      defaultQuality: "high",
-      defaultFps: 30,
-    });
-    const root = await mounted();
-    const toggle = root.querySelector<HTMLButtonElement>(".ssp-switch")!;
-    expect(toggle.getAttribute("aria-checked")).toBe("true");
-    toggle.click();
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
-    root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
-    await expect(picking).resolves.toMatchObject({ audio: false });
+    await expect(picking).resolves.not.toHaveProperty("audio");
   });
 
   it("carries the per-share quality and fps override", async () => {
@@ -129,7 +113,7 @@ describe("showScreenSharePicker", () => {
     await expect(picking).resolves.toBeNull();
   });
 
-  it("shows only the audio/quality step on Wayland and resolves the portal", async () => {
+  it("shows only the quality step on Wayland and resolves the portal", async () => {
     const picking = showScreenSharePicker({
       sources: [],
       portal: true,
@@ -145,7 +129,6 @@ describe("showScreenSharePicker", () => {
       source: "portal",
       quality: "medium",
       fps: 60,
-      audio: true,
     });
   });
 

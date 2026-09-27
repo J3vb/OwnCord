@@ -3,20 +3,23 @@
  *
  * Replaces the minimal `features/voice/native/screenPicker.ts` modal with one
  * OwnCord-styled dialog: Screens/Applications tabs with a live thumbnail per
- * source, an Audio switch, a stream-quality override and Go Live. Nothing is
+ * source, a stream-quality override and Go Live. Nothing is
  * captured before Go Live — the host's `startScreen` runs only after this
  * resolves (the caller owns that step).
  *
  * Wayland has no enumerable sources: the system portal owns the source choice
- * and the consent, so `portal: true` shows only the Audio and Quality step and
+ * and the consent, so `portal: true` shows only the Quality step and
  * resolves `"portal"` for the host to hand to the portal.
+ *
+ * Linux native capture is video-only, so the Audio option says so instead of
+ * offering a switch that would do nothing.
  *
  * Built on `createModal`, so it carries the shared dialog contract (role,
  * modal, focus trap, Escape, focus restore). All copy lives in the `voice`
  * catalog.
  */
 
-import { createElement, appendChildren, setText } from "@lib/dom";
+import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import type { NativeVoiceScreenSource } from "../platform/contracts/nativeVoice";
@@ -28,10 +31,6 @@ export interface ScreenSharePick {
   source: string;
   quality: StreamQuality;
   fps: number;
-  /** Whether to capture audio. Linux native capture is video-only today, so
-   *  the host ignores this until per-app audio lands; the choice is kept so
-   *  the UI is ready and the value is not silently dropped. */
-  audio: boolean;
 }
 
 export interface ScreenSharePickerOptions {
@@ -49,6 +48,14 @@ interface QualityOption {
 }
 
 const FPS_OPTIONS: readonly number[] = [30, 60, 120];
+
+/** Linux native capture is video-only, so the Audio option is a note. */
+function buildAudioOption(): HTMLElement {
+  const wrap = createElement("div", { class: "ssp-opt" });
+  wrap.appendChild(createElement("div", { class: "ssp-opt-label" }, t("picker.audio")));
+  wrap.appendChild(createElement("div", { class: "ssp-opt-text" }, t("picker.audioUnavailable")));
+  return wrap;
+}
 
 /** Resolve the source to share, or null when the user closed the dialog. */
 export function showScreenSharePicker(
@@ -73,9 +80,6 @@ export function showScreenSharePicker(
     let selectedSource: string | null = null;
     let selectedQuality: StreamQuality = opts.defaultQuality;
     let selectedFps: number = opts.defaultFps;
-    let audioOn = true;
-    /** Set once the audio option is built so a source pick can retitle it. */
-    let refreshAudioHint: (() => void) | null = null;
     /** Set once the footer is built; the source list is built first, so a
      *  source pre-selection before then is a safe no-op. */
     let goLive: HTMLButtonElement | null = null;
@@ -149,7 +153,6 @@ export function showScreenSharePicker(
             card.setAttribute("aria-checked", String(on));
             card.tabIndex = on ? 0 : -1;
           }
-          refreshAudioHint?.();
           updateGoLive();
         }
 
@@ -255,48 +258,12 @@ export function showScreenSharePicker(
       }
     }
 
-    // ---- Options: audio + quality ------------------------------------------
+    // ---- Options: audio note + quality -------------------------------------
     const options = createElement("div", { class: "ssp-options" });
     options.appendChild(buildAudioOption());
     options.appendChild(buildQualityOption());
     body.appendChild(options);
     content.appendChild(body);
-
-    function buildAudioOption(): HTMLElement {
-      const wrap = createElement("div", { class: "ssp-opt" });
-      wrap.appendChild(createElement("div", { class: "ssp-opt-label" }, t("picker.audio")));
-      const row = createElement("div", { class: "ssp-opt-row" });
-      const toggle = createElement("button", {
-        class: "ssp-switch",
-        type: "button",
-        role: "switch",
-        "aria-checked": String(audioOn),
-        "aria-label": t("picker.audio"),
-      });
-      const text = createElement("span", { class: "ssp-opt-text" }, audioHint());
-      function refresh(): void {
-        toggle.setAttribute("aria-checked", String(audioOn));
-        toggle.classList.toggle("on", audioOn);
-        setText(text, audioHint());
-      }
-      toggle.addEventListener("click", () => {
-        audioOn = !audioOn;
-        refresh();
-      });
-      refresh();
-      refreshAudioHint = refresh;
-      appendChildren(row, toggle, text);
-      wrap.appendChild(row);
-      wrap.appendChild(createElement("div", { class: "ssp-hint" }, t("picker.audioHint")));
-      return wrap;
-    }
-
-    function audioHint(): string {
-      if (opts.portal || selectedSource === null) return t("picker.audioAllExcept");
-      const source = opts.sources.find((s) => s.id === selectedSource);
-      if (source === undefined || source.kind === "screen") return t("picker.audioAllExcept");
-      return t("picker.audioFromApp", { app: source.title });
-    }
 
     function buildQualityOption(): HTMLElement {
       const wrap = createElement("div", { class: "ssp-opt" });
@@ -364,7 +331,6 @@ export function showScreenSharePicker(
         source: selectedSource,
         quality: selectedQuality,
         fps: selectedFps,
-        audio: audioOn,
       };
       close();
     });

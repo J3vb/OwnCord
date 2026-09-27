@@ -4,7 +4,7 @@
 // with a thumbnail of what would be shared, so the user sees it before
 // sharing starts. On Wayland the host cannot enumerate anything — the
 // desktop portal's dialog is the picker (and the consent) — so the dialog
-// shows only the audio/quality step and hands "portal" to the host.
+// shows only the quality step and hands "portal" to the host.
 //
 // The dialog itself is `components/ScreenSharePicker.ts`; this module adapts
 // its result to the host capture and the shared publish settings, so the
