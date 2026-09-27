@@ -709,7 +709,8 @@ export function createVideoGrid(): VideoGridComponent {
       // Loaded on first use: the menu opens only on a right-click or
       // Shift+F10, so it stays out of the eager bundle.
       const openMenu = (x: number, y: number): void =>
-        void import("./video-grid/tile-menu").then(({ showTileMenu }) =>
+        void import("./video-grid/tile-menu").then(({ showTileMenu }) => {
+          if (entry.listeners.signal.aborted || root?.contains(cell) !== true) return;
           showTileMenu({
             x,
             y,
@@ -719,8 +720,8 @@ export function createVideoGrid(): VideoGridComponent {
             onVolumeChange: (isScreenshare, volume, muted) =>
               applyVolume(config.audioUserId, isScreenshare, volume, muted),
             onStopWatching: () => setStopped(userId, true),
-          }),
-        );
+          });
+        });
       cell.addEventListener(
         "contextmenu",
         (e) => {

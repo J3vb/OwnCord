@@ -1222,6 +1222,16 @@ describe("VideoGrid", () => {
       expect(document.querySelector(".video-tile-menu")).toBeNull();
     });
 
+    it("opens no menu for a tile removed while the menu was loading", async () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+      cell(SCREEN).dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+      grid.removeStream(SCREEN);
+      await vi.dynamicImportSettled();
+      expect(document.querySelector(".video-tile-menu")).toBeNull();
+    });
+
     it("keeps the tile menu inside the window", async () => {
       const width = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(200);
       const height = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(220);
