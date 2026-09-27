@@ -268,6 +268,14 @@ type ServerConfig struct {
 	// Prometheus scraper can be allowlisted without widening /admin to its
 	// network. Empty (default) falls back to AdminAllowedCIDRs.
 	MetricsAllowedCIDRs []string `yaml:"metrics_allowed_cidrs"`
+	// PprofEnabled exposes Go's pprof HTTP endpoints on a SEPARATE listener
+	// for operator-directed profiling (SRE-M1). Off by default, and
+	// deliberately never mounted on the main router: a profiling endpoint
+	// exposes heap contents and can burn CPU, so it is its own socket bound
+	// to the fixed loopback address 127.0.0.1:6060 and nothing else; reach
+	// it remotely through an SSH port-forward. See
+	// docs/server-configuration.md.
+	PprofEnabled bool `yaml:"pprof_enabled"`
 	// LiveKitWebhookAllowedCIDRs gates the LiveKit webhook and health
 	// endpoints. The webhook already authenticates cryptographically (LiveKit
 	// JWT signature over the body hash) — this perimeter is defence-in-depth,
@@ -504,6 +512,13 @@ server:
   #   - "10.0.0.0/8"
   #   - "172.16.0.0/12"
   #   - "192.168.0.0/16"
+  # pprof_enabled: false      # expose Go's pprof endpoints on a separate
+  #                           # listener bound to 127.0.0.1:6060 only, for
+  #                           # operator profiling. Off by default; never mounted
+  #                           # on the main router. In Docker that is the
+  #                           # container's own loopback: reach it with e.g.
+  #                           # docker run --rm --network container:<name>
+  #                           # curlimages/curl http://127.0.0.1:6060/debug/pprof/
   # browser_client_enabled: false  # host a browser client from this server.
   #                           # Owner opt-in, off by default. This build ships no
   #                           # browser assets, so turning it on hosts nothing yet.

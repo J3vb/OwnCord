@@ -188,10 +188,13 @@ Client                     OwnCord Server              LiveKit Server
 Neither shipped LiveKit config (`Server/livekit.yaml.example`, the managed
 `Server/ws/livekit_process.go`) defines a `webhook:` block, so LiveKit sends no
 webhooks by default and the server relies on its own server SDK plus client
-`voice_leave` frames. If you configure LiveKit to post webhooks to
-`POST /api/v1/livekit/webhook` (operator opt-in), the endpoint verifies the JWT
-and handles `participant_left` to clean up ghost voice states when a user
-disconnects from LiveKit without sending a `voice_leave` message.
+`voice_leave` frames. To catch a user whose LiveKit connection died without a
+`voice_leave`, the server polls LiveKit's participant list for every room with
+a voice member once a minute and removes a membership whose participant has
+been missing for two consecutive checks (`Server/ws/voice_reconcile.go`). If
+you configure LiveKit to post webhooks to `POST /api/v1/livekit/webhook`
+(operator opt-in), the endpoint verifies the JWT and handles
+`participant_left` to clean up such ghost voice states immediately.
 
 ---
 
