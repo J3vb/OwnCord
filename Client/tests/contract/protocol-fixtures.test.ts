@@ -157,12 +157,18 @@ function substitute(
     if (typeof v === "string") {
       const m = PLACEHOLDER.exec(v);
       if (m === null) return v;
+      const [klass, type] = [m[1]!, m[2]!];
       if (key !== null && Object.prototype.hasOwnProperty.call(overrides, key)) {
-        return overrides[key];
+        const pinned = overrides[key];
+        const pinnedType =
+          pinned === null ? "null" : typeof pinned === "boolean" ? "bool" : typeof pinned;
+        if (pinnedType !== type) {
+          throw new Error(`override ${key}=${String(pinned)} is ${pinnedType}, wire has ${v}`);
+        }
+        return pinned;
       }
       counter.n += 1;
       const n = counter.n;
-      const [klass, type] = [m[1]!, m[2]!];
       switch (type) {
         case "null":
           return null;
@@ -245,10 +251,15 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     counter: { n: number },
     envelopeId?: string,
   ): void {
+    const envelope = substitute(
+      { id: frame.id },
+      envelopeId === undefined ? {} : { id: envelopeId },
+      counter,
+    ) as { id?: string };
     ws.simulateMessage(
       frame.type as ServerMessage["type"],
       substitute(frame.payload, overrides, counter) as never,
-      envelopeId ?? (substitute(frame.id, {}, counter) as string | undefined),
+      envelope.id,
     );
   }
 
