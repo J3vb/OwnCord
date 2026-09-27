@@ -2,13 +2,13 @@
 
 Condensed from the sources listed at the end, at commit `7732f969` (2026-09-25). On conflict, the source documents win.
 
-The visual rules for the desktop client: themes and tokens, typography, spacing, components, states, layout and accessibility. The binding contract is [docs/architecture/b9-ui-contract.md](docs/architecture/b9-ui-contract.md); token values live in `Client/src/styles/tokens.css`, `Client/src/styles/theme-neon-glow.css` and the `THEMES` map in `Client/src/components/settings/helpers.ts`.
+The visual rules for the desktop client: themes and tokens, typography, spacing, components, states, layout and accessibility. The binding contract is [docs/architecture/b9-ui-contract.md](docs/architecture/b9-ui-contract.md); token values live in `Client/src/styles/tokens.css`, `Client/src/styles/theme-neon-glow.css` and the `THEMES` map in `Client/src/lib/themes.ts`.
 
 ## Brand direction
 
 The visual direction is **Refined Neon** (owner decision Q13), applied across four themes: `neon-glow` (the default on a fresh install, and the OwnCord brand identity), `dark` (whose values are `tokens.css`'s `:root` defaults), `midnight`, and `light`.
 
-`applyTheme()` (`components/settings/helpers.ts`) switches themes. It writes the theme's `THEMES` entry as inline custom properties on `<html>`, over `tokens.css`'s `:root` dark defaults, then `applyThemeByName()` (`lib/themes.ts`) sets `theme-<name>` on `<body>`. Only `body.theme-neon-glow` and `body.theme-light` (accent fills only) have CSS rules, so midnight is entirely its `THEMES` entry and most of light's palette is too: a new midnight or light value goes in `THEMES`. A user's custom accent (`applyAccent()`, inline on `<body>`) overrides the accent-derived tokens on top of whichever theme is active. High Contrast is a separate toggle layered over any theme.
+`applyTheme()` (`lib/themes.ts`) switches themes. It writes the theme's `THEMES` entry as inline custom properties on `<html>`, over `tokens.css`'s `:root` dark defaults, then `applyThemeByName()` (`lib/themes.ts`) sets `theme-<name>` on `<body>`. Only `body.theme-neon-glow` and `body.theme-light` (accent fills only) have CSS rules, so midnight is entirely its `THEMES` entry and most of light's palette is too: a new midnight or light value goes in `THEMES`. A user's custom accent (`applyAccent()`, inline on `<body>`) overrides the accent-derived tokens on top of whichever theme is active. High Contrast is a separate toggle layered over any theme.
 
 Accessibility is load-bearing, not decorative: the app targets a WCAG 2.2 AA-oriented bar (owner decision Q1), checked automatically on every UI PR. It is not a certification claim.
 

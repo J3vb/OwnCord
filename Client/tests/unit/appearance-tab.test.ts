@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildAppearanceTab } from "@components/settings/AppearanceTab";
 
-const { mockGetActiveThemeName, mockRestoreTheme, mockApplyThemeByName } = vi.hoisted(() => ({
+const { mockGetActiveThemeName, mockRestoreTheme } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
   mockRestoreTheme: vi.fn(),
-  mockApplyThemeByName: vi.fn(),
 }));
 
 vi.mock("@stores/ui.store", () => ({
@@ -12,11 +11,9 @@ vi.mock("@stores/ui.store", () => ({
 }));
 
 vi.mock("@lib/themes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/themes")>()),
   getActiveThemeName: mockGetActiveThemeName,
   restoreTheme: mockRestoreTheme,
-  applyThemeByName: mockApplyThemeByName,
-  // The real single writer of the accent tokens (B9-2).
-  applyAccent: (await importOriginal<typeof import("@lib/themes")>()).applyAccent,
 }));
 
 describe("AppearanceTab — Accessibility", () => {
@@ -166,14 +163,6 @@ describe("AppearanceTab — Accessibility", () => {
   it("keeps a saved accent applied after switching themes", () => {
     // applyThemeByName strips every inline custom property from <body>, so the
     // accent override has to be re-applied or the theme's own --accent wins.
-    mockApplyThemeByName.mockImplementation(() => {
-      const style = document.body.style;
-      for (let i = style.length - 1; i >= 0; i--) {
-        const prop = style.item(i);
-        if (prop.startsWith("--")) style.removeProperty(prop);
-      }
-    });
-
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 

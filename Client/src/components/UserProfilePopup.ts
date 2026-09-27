@@ -17,7 +17,7 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { createAvatarElement, resolveDisplayName } from "@lib/avatar";
-import { roleColorVar } from "./message-list/formatting";
+import { roleColorVar } from "@lib/formatting";
 import { reportEntryText } from "../i18n/reportEntry";
 import { shellText } from "../i18n/shell";
 import { requestsText } from "../i18n/requests";

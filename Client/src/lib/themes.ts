@@ -7,10 +7,95 @@
 
 import { deriveAccentTokens, parseColor, type Rgb } from "./color-contrast";
 
+/** Built-in theme palettes. Moved here from `@components/settings/helpers` so
+ *  `lib/` and `features/` modules can apply a theme without importing the
+ *  component layer. */
+export const THEMES = {
+  dark: {
+    "--bg-primary": "#313338",
+    "--bg-secondary": "#2b2d31",
+    "--bg-tertiary": "#1e1f22",
+    "--text-normal": "#dbdee1",
+  },
+  "neon-glow": {
+    "--bg-primary": "#17181b",
+    "--bg-secondary": "#111214",
+    "--bg-tertiary": "#0b0c0e",
+    "--text-normal": "#dfe2e6",
+  },
+  midnight: {
+    "--bg-primary": "#1a1a2e",
+    "--bg-secondary": "#16213e",
+    "--bg-tertiary": "#0f1a38",
+    "--text-normal": "#e2e4ef",
+    // Refined Neon (B9 Q13): midnight used to inherit dark's input fill and
+    // text roles, which were tuned for grey surfaces. Tested values; see
+    // docs/architecture/b9-ui-contract.md.
+    "--bg-input": "#232845",
+    "--text-muted": "#a9b0c8",
+    "--header-primary": "#f4f5fa",
+    "--text-link": "#5cc8ff",
+    "--border-control": "#6a7194",
+  },
+  light: {
+    "--bg-primary": "#ffffff",
+    "--bg-secondary": "#f2f3f5",
+    "--bg-tertiary": "#e3e5e8",
+    "--text-normal": "#2a2c31",
+    // OC-0043: the 4 keys above are all this theme used to set. Every other
+    // surface/text/border/interactive token then fell through to tokens.css's
+    // dark defaults, so widgets painting --text-normal (now dark) on top of
+    // e.g. --bg-input (still dark) rendered as unreadable dark-on-dark.
+    "--bg-input": "#ebedef",
+    "--bg-hover": "#e8e9ed",
+    "--bg-active": "#dcdfe4",
+    "--bg-modifier-hover": "rgba(0, 0, 0, 0.06)",
+    "--bg-modifier-active": "rgba(0, 0, 0, 0.08)",
+    "--bg-modifier-selected": "rgba(0, 0, 0, 0.1)",
+    "--text-muted": "#51545c",
+    "--text-faint": "#747f8d",
+    "--text-micro": "#949ba4",
+    "--header-primary": "#060607",
+    "--header-secondary": "#4e5058",
+    "--interactive-normal": "#4e5058",
+    "--interactive-hover": "#23272a",
+    "--interactive-active": "#000000",
+    "--interactive-muted": "#c7ccd1",
+    "--channel-icon": "#6d6f78",
+    "--border": "#e3e5e8",
+    "--border-strong": "#cbccd1",
+    "--scrollbar-thin-thumb": "#cdcfd4",
+    "--scrollbar-auto-thumb": "#cdcfd4",
+    // B9-2: the dark defaults for these read below 4.5:1 (text) or 3:1
+    // (focus) on light surfaces. Tested values; see docs/architecture/b9-ui-contract.md.
+    "--text-link": "#00658f",
+    "--text-positive": "#17703f",
+    "--text-warning": "#7a5500",
+    "--text-danger": "#b3261e",
+    "--accent-text": "#4150c4",
+    "--focus-ring": "#4752c4",
+    // Refined Neon (B9 Q13); light's accent fills are body.theme-light in
+    // tokens.css, outside the keys applyTheme clears.
+    "--danger-fill": "#c62828",
+    "--danger-fill-hover": "#a61f1f",
+    "--border-control": "#7d838d",
+  },
+} as const;
+
+export type ThemeName = keyof typeof THEMES;
+
+// Union of every CSS custom property any built-in theme sets. Used by
+// applyTheme to clear a previous theme's tokens before applying a new one,
+// without touching inline properties owned by other code (e.g. --accent,
+// --font-size).
+const THEME_KEYS: ReadonlySet<string> = new Set(
+  Object.values(THEMES).flatMap((theme) => Object.keys(theme)),
+);
+
 const STORAGE_KEY_ACTIVE = "owncord:theme:active";
 const STORAGE_KEY_LEGACY = "owncord:settings:theme";
 
-const BUILT_IN_THEMES: ReadonlySet<string> = new Set(["dark", "neon-glow", "midnight", "light"]);
+const BUILT_IN_THEMES: ReadonlySet<string> = new Set(Object.keys(THEMES));
 
 function isKnownThemeName(name: string): boolean {
   return BUILT_IN_THEMES.has(name);
@@ -45,6 +130,31 @@ export function applyThemeByName(name: string): void {
 
   localStorage.setItem(STORAGE_KEY_ACTIVE, name);
   reclampRoleColors();
+}
+
+/**
+ * Apply a built-in theme's palette inline on documentElement, then hand the
+ * body class and persistence to applyThemeByName. Moved here from
+ * `@components/settings/helpers` (ARCH-06) so `lib/` can apply a stored theme
+ * without importing the component layer.
+ */
+export function applyTheme(name: ThemeName): void {
+  const theme = THEMES[name];
+  const root = document.documentElement;
+  // Clear every key any built-in theme owns first, so switching to a theme
+  // that sets fewer keys (e.g. light -> dark) doesn't leave the previous
+  // theme's tokens stuck on <html>, outranking tokens.css's :root defaults
+  // via inline-style specificity. Keys owned by other code (--accent,
+  // --font-size) are not in THEME_KEYS and are left untouched.
+  for (const key of THEME_KEYS) {
+    root.style.removeProperty(key);
+  }
+  // Apply CSS variables for the theme (keeps existing behavior for inline var overrides)
+  for (const [key, value] of Object.entries(theme)) {
+    root.style.setProperty(key, value);
+  }
+  // Delegate body class and persistence to the theme manager
+  applyThemeByName(name);
 }
 
 /** Returns the currently active theme name, defaulting to "neon-glow". */

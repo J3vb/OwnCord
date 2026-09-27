@@ -7,7 +7,7 @@ import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
-import { loadPref } from "@components/settings/helpers";
+import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { formatByteSize } from "@lib/connectionStats";
 import { ensureHttpProxy } from "@lib/httpProxy";

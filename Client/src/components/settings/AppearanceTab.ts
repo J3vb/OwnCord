@@ -3,9 +3,15 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { loadPref, savePref, applyTheme, THEMES, createToggle } from "./helpers";
-import type { ThemeName } from "./helpers";
-import { applyAccent, getActiveThemeName, restoreTheme } from "@lib/themes";
+import { loadPref, savePref, createToggle } from "./helpers";
+import {
+  THEMES,
+  applyAccent,
+  applyTheme,
+  getActiveThemeName,
+  restoreTheme,
+  type ThemeName,
+} from "@lib/themes";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
 import {
   applyFontSize,

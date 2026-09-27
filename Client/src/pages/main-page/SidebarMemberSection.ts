@@ -8,7 +8,7 @@ import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createMemberList } from "@components/MemberList";
-import { parseTimestamp } from "@components/message-list/formatting";
+import { parseTimestamp } from "@lib/formatting";
 import { authStore } from "@stores/auth.store";
 import { setUserBlockedByMe } from "@stores/blocks.store";
 import { getRoleIdByName } from "@stores/channels.store";

@@ -60,7 +60,7 @@ paths at the 640×400 zoom viewport.
 `Client/src/styles/tokens.css` holds the dark defaults, which midnight shares
 where its `THEMES` entry does not override them, and light's accent fills
 (`body.theme-light`). `theme-neon-glow.css` and the midnight and light entries
-in `components/settings/helpers.ts` `THEMES` override them.
+in `lib/themes.ts` `THEMES` override them.
 `app/accessibility.css` holds High Contrast. A "surface" is any of
 `--bg-primary`, `--bg-secondary`, `--bg-tertiary` and `--bg-input`. The values
 are the owner's Q13 direction A, Refined Neon.

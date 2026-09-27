@@ -8,7 +8,7 @@ import { createIcon } from "@lib/icons";
 import klipyWatermark from "../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
-import { loadPref } from "@components/settings/helpers";
+import { loadPref } from "@lib/preferences";
 import {
   clearExternalImageCache,
   fetchExternalImage,
