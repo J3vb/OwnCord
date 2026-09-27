@@ -243,8 +243,12 @@ function openModal(html){
 /* UX-10: a dialog that holds edits must not vanish silently. Edits inside the
    dialog body set state.modalDirty, and the operator's own dismissals — a
    Cancel or × button, the scrim, or Escape — go through dismissModal(), which
-   asks before discarding. closeModal() stays the internal close: a caller
-   that reaches it has already finished, so nothing there is at risk. */
+   asks before discarding. closeModal() stays the internal close, for callers
+   that have finished their work. Two channel-access drawer paths can still
+   drop edits without asking and are a deferred follow-up: Clear override
+   closes the drawer through closeModal(), discarding pending Access-tab
+   edits, and switching the permission target repaints the matrix, discarding
+   override edits made for the previous target. */
 function markModalDirty(){state.modalDirty=true}
 function dismissModal(){
   if(modalLocked)return false;
