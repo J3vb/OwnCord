@@ -35,7 +35,7 @@
 //   rm scripts/admin-types-baseline.json && node scripts/check-admin-types.mjs --update
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import ts from "typescript";
 
 const CLIENT = join(import.meta.dirname, "..");
@@ -54,8 +54,8 @@ const DOC = [
 
 /**
  * Compile the panel with the loose checkJs program and return one identity per
- * diagnostic: { file, code, message } with file relative to the repository
- * root. Diagnostics with no file (a config-level error) are returned in
+ * diagnostic: { file, code, message } with file relative to Server/ and
+ * joined with "/" on every platform. Diagnostics with no file (a config-level error) are returned in
  * `configErrors`, which fail unconditionally — they mean the program itself
  * could not be built, not that the panel has an error.
  */
@@ -83,7 +83,8 @@ export function scanTree() {
       configErrors.push(message);
       continue;
     }
-    diagnostics.push({ file: relative(SERVER, d.file.fileName), code: d.code, message });
+    const file = relative(SERVER, d.file.fileName).split(sep).join("/");
+    diagnostics.push({ file, code: d.code, message });
   }
   return { diagnostics, configErrors };
 }
