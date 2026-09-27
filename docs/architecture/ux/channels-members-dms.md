@@ -59,8 +59,8 @@ sequenceDiagram
     CS->>CH: setActiveChannel(id)  %% selecting; badge cleared on mount, not here
     CH-->>CC: activeChannelId change
     CC->>CC: mountChannel(id, type) — MessageList + Typing + Composer
-    CC->>CH: clearUnread(id) + rememberLastChannel(id)  %% not recorded for a DM
-    CC->>SRV: channel_focus{channel_id}  %% server read-state
+    CC->>CH: viewChannel → clearUnread(id) + rememberLastChannel(id)  %% not recorded for a DM
+    CC->>SRV: viewChannel → channel_focus{channel_id}  %% server read-state
 ```
 
 > **✓ UX-8 (2026-09).** A launch restores the last channel viewed for that
