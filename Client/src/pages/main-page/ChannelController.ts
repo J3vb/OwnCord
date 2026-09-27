@@ -824,12 +824,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       onReportClick: (msgId: number) => {
         const msg = getChannelMessages(channelId).find((m) => m.id === msgId);
         if (msg === undefined) return;
-        // The dialog's closing restores focus to the Report button; the
-        // composer is the fallback when a re-render has replaced the row.
-        const fallbackFocus = () => slots.inputSlot.querySelector<HTMLElement>("textarea");
         import("../../features/reports/openers").then(
           ({ openMessageReport }) => {
-            if (!signal.aborted) openMessageReport({ api, msg, signal, fallbackFocus });
+            if (signal.aborted) return;
+            // The dialog's closing restores focus to the Report button; the
+            // composer is the fallback when a re-render has replaced the row.
+            openMessageReport({
+              api,
+              msg,
+              signal,
+              fallbackFocus: () => slots.inputSlot.querySelector<HTMLElement>("textarea"),
+            });
           },
           () => showToast(reportEntryText("reportLoadFailed"), "error"),
         );

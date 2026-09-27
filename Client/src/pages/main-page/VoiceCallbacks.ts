@@ -20,6 +20,14 @@ import {
 
 const log = createLogger("voice-callbacks");
 
+function handleCameraError(err: unknown): void {
+  log.error("Camera toggle failed", { error: String(err) });
+}
+
+function handleScreenshareError(err: unknown): void {
+  log.error("Screenshare toggle failed", { error: String(err) });
+}
+
 /** Gate signaling on a live WS socket. Leaving always tears down local media,
  *  even when the separate chat connection is unavailable. */
 function socketLive(): boolean {
@@ -112,9 +120,6 @@ export function createVoiceWidgetCallbacks(
     onCameraToggle: () => {
       if (!limiters.voiceVideo.tryConsume()) return;
       const next = !voiceStore.getState().localCamera;
-      const handleCameraError = (err: unknown) => {
-        log.error("Camera toggle failed", { error: String(err) });
-      };
       if (next) {
         enableCamera().catch(handleCameraError);
       } else {
@@ -124,9 +129,6 @@ export function createVoiceWidgetCallbacks(
     onScreenshareToggle: () => {
       if (!limiters.voiceVideo.tryConsume()) return;
       const next = !voiceStore.getState().localScreenshare;
-      const handleScreenshareError = (err: unknown) => {
-        log.error("Screenshare toggle failed", { error: String(err) });
-      };
       if (next) {
         enableScreenshare().catch(handleScreenshareError);
       } else {

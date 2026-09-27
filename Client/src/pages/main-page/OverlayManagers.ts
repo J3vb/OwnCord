@@ -128,22 +128,23 @@ export function createQuickSwitcherManager(
     }
   }
 
+  const handler = (e: KeyboardEvent): void => {
+    // Mirrors GlobalKeybinds.ts's guard: `e.key` is layout-dependent and
+    // uppercases under CapsLock/Shift, so compare case-insensitively;
+    // exclude altKey so AltGr (reported as ctrlKey+altKey on Windows)
+    // doesn't swallow a non-US character; and honour the same suspension
+    // every other app-wide shortcut respects.
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "k") return;
+    if (isSuspended?.() === true) return;
+    e.preventDefault();
+    if (instance !== null) {
+      close();
+    } else {
+      open();
+    }
+  };
+
   function attach(): () => void {
-    const handler = (e: KeyboardEvent): void => {
-      // Mirrors GlobalKeybinds.ts's guard: `e.key` is layout-dependent and
-      // uppercases under CapsLock/Shift, so compare case-insensitively;
-      // exclude altKey so AltGr (reported as ctrlKey+altKey on Windows)
-      // doesn't swallow a non-US character; and honour the same suspension
-      // every other app-wide shortcut respects.
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "k") return;
-      if (isSuspended?.() === true) return;
-      e.preventDefault();
-      if (instance !== null) {
-        close();
-      } else {
-        open();
-      }
-    };
     const owner = new Disposable();
     document.addEventListener("keydown", handler, { signal: owner.signal });
     return () => {

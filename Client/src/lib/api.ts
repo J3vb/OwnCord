@@ -343,6 +343,35 @@ interface SessionsListResponse {
 
 const log = createLogger("api");
 
+function refusal(): ApiClientError {
+  return new ApiClientError(403, NSFW_ACKNOWLEDGEMENT_REQUIRED, NSFW_ACKNOWLEDGEMENT_REQUIRED);
+}
+
+/**
+ * A content read from one channel, admitted only with NSFW consent (B9-7):
+ * refused locally, with the server's own error, before any request while
+ * the channel is gated, and discarded if consent was withdrawn while it was
+ * in flight — so nothing from a labelled channel is fetched or delivered
+ * pre-consent, whichever feature asked.
+ */
+async function channelContent<T>(channelId: number, load: () => Promise<T>): Promise<T> {
+  if (nsfwContentBlocked(channelId)) throw refusal();
+  let result: T;
+  try {
+    result = await load();
+  } catch (err) {
+    // The server's refusal outranks a stale local "consented". A resume
+    // that missed an nsfw_ack already gets a full ready (the revoke bumps
+    // the server's visibility watermark), so this is defence in depth.
+    if (err instanceof ApiClientError && err.code === NSFW_ACKNOWLEDGEMENT_REQUIRED) {
+      setNsfwAcknowledged(channelId, false);
+    }
+    throw err;
+  }
+  if (nsfwContentBlocked(channelId)) throw refusal();
+  return result;
+}
+
 /** Create the REST API client. */
 export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?: OnUnauthorized) {
   let config: Readonly<ApiClientConfig> = Object.freeze({ ...initialConfig });
@@ -442,33 +471,6 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean; detached?: boolean },
   ): Promise<T> {
     return doFetch<T>("API", "/api/v1", method, path, body, signal, opts);
-  }
-
-  /**
-   * A content read from one channel, admitted only with NSFW consent (B9-7):
-   * refused locally, with the server's own error, before any request while
-   * the channel is gated, and discarded if consent was withdrawn while it was
-   * in flight — so nothing from a labelled channel is fetched or delivered
-   * pre-consent, whichever feature asked.
-   */
-  async function channelContent<T>(channelId: number, load: () => Promise<T>): Promise<T> {
-    const refusal = (): ApiClientError =>
-      new ApiClientError(403, NSFW_ACKNOWLEDGEMENT_REQUIRED, NSFW_ACKNOWLEDGEMENT_REQUIRED);
-    if (nsfwContentBlocked(channelId)) throw refusal();
-    let result: T;
-    try {
-      result = await load();
-    } catch (err) {
-      // The server's refusal outranks a stale local "consented". A resume
-      // that missed an nsfw_ack already gets a full ready (the revoke bumps
-      // the server's visibility watermark), so this is defence in depth.
-      if (err instanceof ApiClientError && err.code === NSFW_ACKNOWLEDGEMENT_REQUIRED) {
-        setNsfwAcknowledged(channelId, false);
-      }
-      throw err;
-    }
-    if (nsfwContentBlocked(channelId)) throw refusal();
-    return result;
   }
 
   function adminRequest<T>(
