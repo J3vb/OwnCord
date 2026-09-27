@@ -948,5 +948,5 @@ async function deleteEmoji(id){
 
 Object.assign(ACTIONS,{clearPermOverride,confirmDeleteChannel,confirmDeleteEmoji,confirmDeleteRole,createChannel,
   deleteEmoji,explainAccess,moveRole,onPermTargetChange,openChannelEditModal,openChannelModal,openChannelPermsModal,openDeleteChannel,
-  openDeleteRole,openRoleModal,placeRoleAboveDefault,previewPermChange,renderPermMatrix,renderRolePlacement,
+  openDeleteRole,openRoleModal,placeRoleAboveDefault,previewPermChange,renderRolePlacement,
   saveChannelEdit,saveChannelPerms,saveRole,selectChannelTab,syncTypedConfirm,uploadEmoji});
