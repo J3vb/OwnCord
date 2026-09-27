@@ -41,13 +41,16 @@ func writeFragmented(ctx context.Context, conn *websocket.Conn, msg []byte) erro
 }
 
 // writePumpWrite writes one message to the WebSocket under writeTimeout.
-// Returns false only when the write failed.
+// Returns false only when the write failed. A failed write closes the
+// connection: it may have left a message half-sent, and readPump's teardown
+// must run rather than leave a peer that never hears another event.
 func writePumpWrite(ctx context.Context, conn *websocket.Conn, c *Client, msg []byte) bool {
 	wCtx, cancel := context.WithTimeout(ctx, writeTimeout)
 	err := writeFragmented(wCtx, conn, msg)
 	cancel()
 	if err != nil {
 		slog.Warn("ws writePump error", "user_id", c.userID, "err", err)
+		_ = conn.CloseNow()
 		return false
 	}
 	return true
