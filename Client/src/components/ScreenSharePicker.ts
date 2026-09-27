@@ -133,6 +133,8 @@ export function showScreenSharePicker(
         let activeTab: "screens" | "windows" = screens.length > 0 ? "screens" : "windows";
 
         const tabButtons = new Map<"screens" | "windows", HTMLButtonElement>();
+        /** The source last chosen in each tab, restored when the tab is shown. */
+        const tabSelection = new Map<"screens" | "windows", string>();
 
         function renderPanel(): void {
           while (panel.firstChild) panel.removeChild(panel.firstChild);
@@ -148,6 +150,7 @@ export function showScreenSharePicker(
 
         function selectSource(id: string): void {
           selectedSource = id;
+          tabSelection.set(activeTab, id);
           for (const card of panel.querySelectorAll<HTMLButtonElement>(".ssp-source")) {
             const on = card.dataset["sourceId"] === id;
             card.setAttribute("aria-checked", String(on));
@@ -196,10 +199,11 @@ export function showScreenSharePicker(
             btn.tabIndex = on ? 0 : -1;
           }
           renderPanel();
-          // Keep the selection on a card in this tab, so Go Live shares what
-          // the user sees and the radiogroup keeps a roving tab stop.
+          // Restore this tab's last choice (else its first card), so Go Live
+          // shares what the user sees and the radiogroup keeps a roving tab stop.
           const cards = [...panel.querySelectorAll<HTMLButtonElement>(".ssp-source")];
-          const shown = cards.find((c) => c.dataset["sourceId"] === selectedSource) ?? cards[0];
+          const remembered = tabSelection.get(id);
+          const shown = cards.find((c) => c.dataset["sourceId"] === remembered) ?? cards[0];
           if (shown?.dataset["sourceId"] !== undefined) {
             selectSource(shown.dataset["sourceId"]);
           } else {

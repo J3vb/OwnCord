@@ -91,6 +91,28 @@ describe("showScreenSharePicker", () => {
     await expect(picking).resolves.toMatchObject({ source: "window:9" });
   });
 
+  it("restores the source chosen in a tab when the user returns to it", async () => {
+    const picking = showScreenSharePicker({
+      sources: [
+        { id: "screen:1", kind: "screen", title: "Screen 1", thumbnail: null },
+        { id: "screen:2", kind: "screen", title: "Screen 2", thumbnail: null },
+        ...sources.slice(1),
+      ],
+      portal: false,
+      defaultQuality: "high",
+      defaultFps: 30,
+    });
+    const root = await mounted();
+    root.querySelector<HTMLButtonElement>('[data-source-id="screen:2"]')!.click();
+    clickTab(root, "Applications");
+    clickTab(root, "Screens");
+    const card = root.querySelector<HTMLButtonElement>('[data-source-id="screen:2"]')!;
+    expect(card.getAttribute("aria-checked")).toBe("true");
+    expect(card.tabIndex).toBe(0);
+    root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+    await expect(picking).resolves.toMatchObject({ source: "screen:2" });
+  });
+
   it("disables Go Live on a tab with nothing to share", async () => {
     const picking = showScreenSharePicker({
       sources: [sources[0]!],
