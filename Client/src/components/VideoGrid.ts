@@ -28,6 +28,14 @@ export interface TileConfig {
   readonly isScreenshare: boolean;
 }
 
+/** Someone in the call the host wants drawn as an avatar tile while they have
+ *  no camera tile up. The host owns `content` (and keeps it current). */
+export interface GridPerson {
+  readonly userId: number;
+  readonly label: string;
+  readonly content: HTMLElement;
+}
+
 export interface VideoGridComponent extends MountableComponent {
   addStream(userId: number, username: string, stream: MediaStream, config?: TileConfig): void;
   /** Update an already-open tile's label in place (e.g. a mid-call rename).
@@ -41,6 +49,9 @@ export interface VideoGridComponent extends MountableComponent {
   hasStreams(): boolean;
   setFocusedTile(tileId: number | null): void;
   getFocusedTileId(): number | null;
+  /** The people to draw as avatar tiles, after the streams. A person's tile
+   *  steps aside while their camera tile is up. Not counted by hasStreams. */
+  setPeople(people: readonly GridPerson[]): void;
 }
 
 /** Create a fresh volume icon element. */
@@ -120,22 +131,80 @@ export function createVideoGrid(): VideoGridComponent {
     { el: HTMLDivElement; config?: TileConfig; trackCleanup?: () => void }
   >();
   let focusedTileId: number | null = null;
+  let people: readonly GridPerson[] = [];
+  const personCells = new Map<number, HTMLDivElement>();
   let resizeObserver: ResizeObserver | null = null;
   let resizeRafId = 0;
 
   /** Apply JS-calculated tile sizes to all grid-mode cells. */
   function applyGridSizes(): void {
-    if (root === null || focusedTileId !== null || cells.size === 0) return;
+    const tiles = allTiles();
+    if (root === null || focusedTileId !== null || tiles.length === 0) return;
 
     const { width: cw, height: ch } = root.getBoundingClientRect();
     if (cw === 0 || ch === 0) return;
 
-    const layout = computeGridLayout(cw, ch, cells.size);
+    const layout = computeGridLayout(cw, ch, tiles.length);
 
-    for (const entry of cells.values()) {
-      entry.el.style.width = `${layout.tileW}px`;
-      entry.el.style.height = `${layout.tileH}px`;
+    for (const el of tiles) {
+      el.style.width = `${layout.tileW}px`;
+      el.style.height = `${layout.tileH}px`;
     }
+  }
+
+  /** Bring the avatar tiles in line with `people` and the open camera tiles:
+   *  one per person without a camera tile, reused across updates. */
+  function syncPeople(): void {
+    const wanted = new Set<number>();
+    for (const person of people) {
+      if (cells.has(person.userId)) continue;
+      wanted.add(person.userId);
+      let cell = personCells.get(person.userId);
+      if (cell === undefined) {
+        cell = createElement("div", {
+          class: "video-cell video-cell--avatar",
+          "data-person-id": String(person.userId),
+        });
+        personCells.set(person.userId, cell);
+      }
+      if (cell.firstChild !== person.content) {
+        while (cell.firstChild) cell.removeChild(cell.firstChild);
+        appendChildren(cell, person.content, createElement("div", { class: "video-username" }));
+      }
+      const label = cell.querySelector(".video-username");
+      if (label !== null) label.textContent = person.label;
+    }
+    for (const [id, cell] of personCells) {
+      if (wanted.has(id)) continue;
+      cell.remove();
+      personCells.delete(id);
+    }
+  }
+
+  /** Every tile in layout order: streams, then the avatar tiles. */
+  function allTiles(): HTMLDivElement[] {
+    const tiles = [...cells.values()].map((e) => e.el);
+    for (const person of people) {
+      const cell = personCells.get(person.userId);
+      if (cell !== undefined) tiles.push(cell);
+    }
+    return tiles;
+  }
+
+  /** Re-seat the tiles after a change: people follow the streams. */
+  function relayout(): void {
+    syncPeople();
+    if (root === null) return;
+    if (focusedTileId !== null) {
+      rebuildFocusLayout();
+      return;
+    }
+    for (const el of allTiles()) {
+      if (el.classList.contains("video-cell--avatar") || el.parentElement !== root) {
+        root.appendChild(el);
+      }
+    }
+    applyGridSizes();
   }
 
   /** Attach ended/mute/unmute listeners on the first video track to handle stale tiles. */
@@ -228,9 +297,9 @@ export function createVideoGrid(): VideoGridComponent {
     if (focusedTileId === null || cells.size === 0) {
       // No focus — use regular flex-wrap layout
       root.classList.remove("focus-mode");
-      for (const entry of cells.values()) {
-        entry.el.classList.remove("focused", "thumb");
-        root.appendChild(entry.el);
+      for (const el of allTiles()) {
+        el.classList.remove("focused", "thumb");
+        root.appendChild(el);
       }
       applyGridSizes();
       restoreFocusedControl(savedFocus);
@@ -240,9 +309,9 @@ export function createVideoGrid(): VideoGridComponent {
     root.classList.add("focus-mode");
 
     // Clear inline sizes on cells (focus mode uses CSS flex sizing)
-    for (const entry of cells.values()) {
-      entry.el.style.width = "";
-      entry.el.style.height = "";
+    for (const el of allTiles()) {
+      el.style.width = "";
+      el.style.height = "";
     }
 
     // Main area
@@ -263,6 +332,11 @@ export function createVideoGrid(): VideoGridComponent {
       entry.el.classList.add("thumb");
       stripArea.appendChild(entry.el);
     }
+    for (const el of allTiles()) {
+      if (!el.classList.contains("video-cell--avatar")) continue;
+      el.classList.add("thumb");
+      stripArea.appendChild(el);
+    }
 
     root.appendChild(mainArea);
     // Only show strip if there are thumbnails
@@ -280,15 +354,6 @@ export function createVideoGrid(): VideoGridComponent {
 
   function getFocusedTileIdFn(): number | null {
     return focusedTileId;
-  }
-
-  function updateLayout(): void {
-    if (root === null) return;
-    if (focusedTileId !== null) {
-      rebuildFocusLayout();
-      return;
-    }
-    applyGridSizes();
   }
 
   function addStream(
@@ -453,11 +518,7 @@ export function createVideoGrid(): VideoGridComponent {
     cells.set(userId, { el: cell, config });
     attachTrackLifecycle(userId, stream);
     root.appendChild(cell);
-    if (focusedTileId !== null) {
-      rebuildFocusLayout();
-    } else {
-      updateLayout();
-    }
+    relayout();
   }
 
   /** Update an already-open tile's label in place. No-op if the tile isn't
@@ -499,10 +560,11 @@ export function createVideoGrid(): VideoGridComponent {
       focusedTileId = firstKey ?? null;
     }
 
+    syncPeople();
     if (focusedTileId !== null || wasFocusMode) {
       rebuildFocusLayout();
     } else {
-      updateLayout();
+      relayout();
     }
     restoreFocusedControl(savedFocus);
   }
@@ -518,6 +580,11 @@ export function createVideoGrid(): VideoGridComponent {
 
   function hasStreams(): boolean {
     return cells.size > 0;
+  }
+
+  function setPeople(next: readonly GridPerson[]): void {
+    people = next;
+    relayout();
   }
 
   function mount(container: Element): void {
@@ -556,6 +623,8 @@ export function createVideoGrid(): VideoGridComponent {
     }
     cells.clear();
     focusedTileId = null;
+    people = [];
+    personCells.clear();
 
     if (root !== null) {
       root.remove();
@@ -573,5 +642,6 @@ export function createVideoGrid(): VideoGridComponent {
     hasStreams,
     setFocusedTile,
     getFocusedTileId: getFocusedTileIdFn,
+    setPeople,
   };
 }

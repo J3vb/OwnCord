@@ -69,7 +69,7 @@ import type { MessageController } from "./main-page/MessageController";
 import { createReactionController } from "./main-page/ReactionController";
 import type { ReactionController } from "./main-page/ReactionController";
 import { createVideoModeController } from "./main-page/VideoModeController";
-import type { VideoModeController } from "./main-page/VideoModeController";
+import type { VideoModeController, VideoPanelHost } from "./main-page/VideoModeController";
 import { createChannelController } from "./main-page/ChannelController";
 import type { ChannelController } from "./main-page/ChannelController";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
@@ -295,6 +295,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // The caller's side of a ring, and the in-DM panel that draws both sides.
   let outgoingCall: OutgoingCall | null = null;
   let callPanel: DmCallPanelComponent | null = null;
+  /** The loaded panel as the video controller's host: one object per panel,
+   *  since the controller tells hosts apart by identity. */
+  let callPanelHost: VideoPanelHost | null = null;
   /** "Join with video": turn the camera on once this call is connected. */
   let cameraOnJoin: number | null = null;
 
@@ -686,6 +689,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       slots: chatAreaResult.slots,
       videoGrid: chatAreaResult.videoGrid,
       getCurrentUserId,
+      // The DM call panel hosts the video of its own call (chat stays up).
+      panelHost: () => callPanelHost,
     });
 
     // The composer of the channel on screen, else the header's menu button
@@ -963,10 +968,19 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           }
           ringCallees(channelId);
         },
+        onVideoHostChange: () => videoModeCtrl?.checkVideoMode(),
+        videoGrid: chatAreaResult.videoGrid,
       });
+      // Published before mount: mounting reports whether it can host video,
+      // and the video controller reads the panel through callPanelHost.
+      callPanel = panel;
+      callPanelHost = {
+        ownsCall: (channelId) => panel.ownsCall(channelId),
+        element: () => panel.videoElement(),
+        setActive: (active) => panel.setVideoActive(active),
+      };
       panel.mount(chatAreaResult.callPanelSlot);
       children.push(panel);
-      callPanel = panel;
       panel.setOutgoing(outgoingCall?.current() ?? null);
       syncRingSurfaces();
     });
@@ -1081,6 +1095,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       ringCtrl = null;
       callBanner = null;
       callPanel = null;
+      callPanelHost = null;
       outgoingCall?.destroy();
       outgoingCall = null;
       cameraOnJoin = null;
@@ -1260,7 +1275,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             // text, dm and announcement all mount a chat surface and must
             // dismiss it, not just "text" (a dm/announcement switch used to
             // leave the grid covering an unrelated channel's chat).
-            if (active.type !== "voice") {
+            // The DM that owns the current call is the exception: its call
+            // panel shows the video above the chat (its own update re-seats
+            // the grid through onVideoHostChange).
+            const ownsCall =
+              active.type === "dm" && voiceStore.getState().currentChannelId === active.id;
+            if (active.type !== "voice" && !ownsCall) {
               videoModeCtrl?.showChat();
             }
             // Close DM profile sidebar when switching channels

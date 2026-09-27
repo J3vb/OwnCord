@@ -311,8 +311,15 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     (document.getElementById("s-motd") as HTMLInputElement).value = "Draft MOTD";
     booted.bridge.markSettingsChanged();
     expect(booted.bridge.state.settingsChanged).toBe(true);
+    const asked: string[] = [];
+    dom.window.confirm = (message?: string) => {
+      asked.push(String(message ?? ""));
+      return true;
+    };
 
     booted.bridge.navigateTo("backups");
+    expect(asked).toEqual(["Discard your unsaved changes?"]);
+    expect(booted.bridge.state.section).toBe("backups");
     expect(booted.bridge.state.settingsChanged).toBe(false);
   });
 });

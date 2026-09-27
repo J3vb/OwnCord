@@ -889,4 +889,66 @@ describe("VideoGrid", () => {
       expect(grid.hasStreams()).toBe(false);
     });
   });
+
+  describe("people without a camera (avatar tiles)", () => {
+    const person = (userId: number, label: string) => {
+      const content = document.createElement("div");
+      content.className = "test-avatar";
+      return { userId, label, content };
+    };
+    const avatarTiles = () => [...container.querySelectorAll<HTMLElement>(".video-cell--avatar")];
+
+    it("draws an avatar tile, with the host's content and a name, for each person", () => {
+      const otto = person(2, "Otto");
+      grid.setPeople([otto, person(1, "You")]);
+
+      const tiles = avatarTiles();
+      expect(tiles.map((t) => t.dataset.personId)).toEqual(["2", "1"]);
+      expect(tiles[0]!.contains(otto.content)).toBe(true);
+      expect(tiles[0]!.querySelector(".video-username")!.textContent).toBe("Otto");
+    });
+
+    it("puts streams first, and hides a person's avatar while their camera tile is up", () => {
+      grid.setPeople([person(2, "Otto"), person(1, "You")]);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+
+      expect(avatarTiles().map((t) => t.dataset.personId)).toEqual(["1"]);
+      const cells = [...container.querySelectorAll(".video-cell")];
+      expect(cells[0]!.getAttribute("data-user-id")).toBe("2");
+
+      grid.removeStream(2);
+      expect(avatarTiles().map((t) => t.dataset.personId)).toEqual(["2", "1"]);
+    });
+
+    it("keeps a person's avatar beside their screen share: only a camera replaces it", () => {
+      grid.setPeople([person(2, "Otto")]);
+      grid.addStream(2 + 1_000_000, "Otto's screen", fakeStream(), {
+        isSelf: false,
+        audioUserId: 2,
+        isScreenshare: true,
+      });
+      expect(avatarTiles().map((t) => t.dataset.personId)).toEqual(["2"]);
+    });
+
+    it("does not count people as streams", () => {
+      grid.setPeople([person(2, "Otto")]);
+      expect(grid.hasStreams()).toBe(false);
+    });
+
+    it("reuses a person's tile across updates, and drops people who left", () => {
+      const otto = person(2, "Otto");
+      grid.setPeople([otto, person(3, "Sam")]);
+      const before = avatarTiles()[0];
+
+      grid.setPeople([otto]);
+      expect(avatarTiles()).toHaveLength(1);
+      expect(avatarTiles()[0]).toBe(before);
+    });
+
+    it("clears every avatar tile when the host stops drawing people", () => {
+      grid.setPeople([person(2, "Otto")]);
+      grid.setPeople([]);
+      expect(avatarTiles()).toHaveLength(0);
+    });
+  });
 });

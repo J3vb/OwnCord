@@ -236,9 +236,12 @@ func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 		offset := queryInt(r, "offset", 0, 0, math.MaxInt32)
 		// q searches the whole log (actor, action, target type, detail) and
 		// action narrows it to one action, so the panel's search is not
-		// limited to the page it happened to fetch.
+		// limited to the page it happened to fetch. hide_signins=1 drops the
+		// sign-in and connection rows (the panel's Sign-ins chip, off by
+		// default).
 		query := strings.TrimSpace(r.URL.Query().Get("q"))
 		action := r.URL.Query().Get("action")
+		hideSignins := r.URL.Query().Get("hide_signins") == "1"
 		if !utf8.ValidString(query) || utf8.RuneCountInString(query) > maxAuditQueryRunes {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("q must be valid text of at most %d characters", maxAuditQueryRunes))
 			return
@@ -248,7 +251,7 @@ func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 			return
 		}
 
-		entries, err := settings.AuditLog(r.Context(), action, query, limit, offset)
+		entries, err := settings.AuditLog(r.Context(), action, query, hideSignins, limit, offset)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
 			return

@@ -67,7 +67,11 @@ function patchVoice(patch: Partial<ReturnType<typeof voiceStore.getState>>): voi
   voiceStore.flush();
 }
 
-type MockedOptions = { [K in keyof DmCallPanelOptions]: ReturnType<typeof vi.fn> };
+type MockedOptions = {
+  [K in keyof DmCallPanelOptions]-?: K extends "videoGrid"
+    ? { setPeople: ReturnType<typeof vi.fn> }
+    : ReturnType<typeof vi.fn>;
+};
 
 function options(): MockedOptions {
   return {
@@ -80,6 +84,8 @@ function options(): MockedOptions {
     onDecline: vi.fn(),
     onJoin: vi.fn(),
     onRingAgain: vi.fn(),
+    onVideoHostChange: vi.fn(),
+    videoGrid: { setPeople: vi.fn() },
   };
 }
 
@@ -477,5 +483,147 @@ describe("DmCallPanel — connected", () => {
     expect(root.hidden).toBe(false);
     setVoice(null, []);
     expect(root.hidden).toBe(true);
+  });
+});
+
+describe("DmCallPanel — video in the call", () => {
+  type Person = { userId: number; label: string; content: HTMLElement };
+  const lastPeople = (opts: MockedOptions): Person[] =>
+    (opts.videoGrid.setPeople.mock.calls.at(-1)?.[0] as Person[] | undefined) ?? [];
+
+  it("owns the call it is showing, and only that one", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    mount();
+    expect(panel!.ownsCall(DM)).toBe(true);
+    expect(panel!.ownsCall(7)).toBe(false);
+  });
+
+  it("does not own a call you are not in", () => {
+    setVoice(null, [vu(OTTO)]);
+    mount();
+    expect(panel!.ownsCall(DM)).toBe(false);
+    expect(panel!.videoElement()).toBeNull();
+  });
+
+  it("makes room for the grid in its stage while video is on, with the chat left alone", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    const el = panel!.videoElement()!;
+    expect(el).not.toBeNull();
+    expect(root.contains(el)).toBe(false);
+
+    panel!.setVideoActive(true);
+
+    expect(root.contains(el)).toBe(true);
+    expect(root.classList.contains("dm-call-panel--video")).toBe(true);
+    expect(root.querySelector(".dcp-stage")).toBeNull();
+    // The call controls stay under the video.
+    expect(q(root, "dcp-mute")).not.toBeNull();
+  });
+
+  it("hands the grid an avatar tile for everyone in the call, kept live in place", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { opts } = mount();
+    panel!.setVideoActive(true);
+
+    const people = lastPeople(opts);
+    expect(people.map((p) => [p.userId, p.label])).toEqual([
+      [SELF, "You"],
+      [OTTO, "Otto"],
+    ]);
+    const otto = people[1]!.content;
+    expect(otto.classList.contains("dcp-avatar")).toBe(true);
+
+    setVoice(DM, [vu(SELF), vu(OTTO, { speaking: true })]);
+    expect(otto.classList.contains("dcp-avatar--speaking")).toBe(true);
+  });
+
+  it("keeps keyboard focus on a control inside the video when someone joins", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { root } = mount();
+    panel!.setVideoActive(true);
+    const slider = document.createElement("input");
+    slider.type = "range";
+    panel!.videoElement()!.appendChild(slider);
+    slider.focus();
+
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+
+    expect(root.contains(slider)).toBe(true);
+    expect(document.activeElement).toBe(slider);
+  });
+
+  it("gives the grid nobody once video goes off", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { opts, root } = mount();
+    panel!.setVideoActive(true);
+    panel!.setVideoActive(false);
+
+    expect(lastPeople(opts)).toEqual([]);
+    expect(root.querySelector(".dcp-stage")).not.toBeNull();
+  });
+
+  it("collapsed, it shows no video and never expands on its own; Expand shows it", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { opts, root } = mount();
+    q(root, "dcp-collapse")!.click();
+    opts.onVideoHostChange.mockClear();
+
+    panel!.setVideoActive(true);
+    expect(panel!.videoElement()).toBeNull();
+    expect(root.classList.contains("dm-call-panel--collapsed")).toBe(true);
+    expect(q(root, "dcp-watch")).toBeNull();
+
+    q(root, "dcp-collapse")!.click();
+
+    expect(root.classList.contains("dm-call-panel--expanded")).toBe(true);
+    expect(root.contains(panel!.videoElement())).toBe(true);
+    expect(opts.onVideoHostChange).toHaveBeenCalled();
+  });
+
+  it("shows your own video while the call is still ringing, with the ring caption kept", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { opts, root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "ringing", pending: [OTTO] });
+    const el = panel!.videoElement()!;
+    expect(el).not.toBeNull();
+
+    panel!.setVideoActive(true);
+
+    expect(root.contains(el)).toBe(true);
+    expect(root.classList.contains("dm-call-panel--video")).toBe(true);
+    expect(q(root, "dcp-caption")!.textContent).toBe("Calling Otto…");
+    expect(q(root, "dcp-camera")).not.toBeNull();
+    const people = lastPeople(opts);
+    expect(people.map((p) => p.userId)).toEqual([SELF, OTTO]);
+    expect(people[0]!.content.classList.contains("dcp-avatar--ringing")).toBe(false);
+    expect(people[1]!.content.classList.contains("dcp-avatar--ringing")).toBe(true);
+  });
+
+  it("keeps your own video once the call went unanswered, with the callee still shown", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { opts, root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "declined", pending: [] });
+    panel!.setVideoActive(true);
+
+    const people = lastPeople(opts);
+    expect(people.map((p) => p.userId)).toEqual([SELF, OTTO]);
+    expect(people[1]!.content.classList.contains("dcp-avatar--ringing")).toBe(false);
+
+    expect(root.contains(panel!.videoElement())).toBe(true);
+    expect(q(root, "dcp-caption")!.textContent).toBe("Otto declined the call");
+    expect(q(root, "dcp-ring-again")).not.toBeNull();
+  });
+
+  it("tells its owner when it can or cannot host video any more", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { opts, root } = mount();
+    opts.onVideoHostChange.mockClear();
+
+    q(root, "dcp-collapse")!.click();
+    expect(opts.onVideoHostChange).toHaveBeenCalledTimes(1);
+
+    setVoice(null, []);
+    expect(opts.onVideoHostChange).toHaveBeenCalledTimes(2);
   });
 });

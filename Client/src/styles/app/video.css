@@ -25,6 +25,14 @@
   /* Size set by JS layout calculator — no fixed aspect-ratio */
 }
 
+/* A person without a camera, drawn by the host (the DM call panel). */
+.video-cell--avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+}
+
 .video-cell video {
   width: 100%;
   height: 100%;
