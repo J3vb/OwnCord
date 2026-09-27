@@ -201,6 +201,8 @@ describe("Server/admin/static — dialog dirty guard (UX-10)", () => {
     booted.bridge.dismissModal();
     expect(booted.modalVisible()).toBe(false);
     expect(asked.length).toBe(1);
+    expect(booted.bridge.state.modalDirty).toBe(false);
+    expect(unload(dom).defaultPrevented).toBe(false);
 
     // A later, clean dialog must close without a prompt: the flag is per-dialog.
     const asked2 = stubConfirm(dom, false);
@@ -286,6 +288,8 @@ describe("Server/admin/static — dialog dirty guard (UX-10)", () => {
 
     expect(asked).toEqual([]);
     expect(booted.modalVisible()).toBe(false);
+    expect(bridge.state.modalDirty).toBe(false);
+    expect(unload(dom!).defaultPrevented).toBe(false);
   });
 });
 
