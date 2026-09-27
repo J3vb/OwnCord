@@ -211,10 +211,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // demand — the dialog is its own lazy chunk, not part of startup — and
   // the dynamic import is the sanctioned lower-layer-to-UI seam (Queue.ts's
   // NsfwGate does the same).
-  setScreenSourcePicker(async (request) => {
-    const { showScreenSharePicker } = await import("@components/ScreenSharePicker");
-    return showScreenSharePicker(request);
-  });
+  setScreenSourcePicker((request) =>
+    import("@components/ScreenSharePicker").then((m) => m.showScreenSharePicker(request)),
+  );
 
   // The who-reacted tooltip fetches on hover; give it the live REST client the
   // same way the attachment renderer is given the server host.
