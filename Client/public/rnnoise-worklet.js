@@ -9,148 +9,19 @@ const FRAME_SIZE = 480;
 const OUTPUT_RING_CAPACITY = 50;
 const RN_NOISE_INT16_SCALE = 32768;
 
-// The C API the worklet calls. A build that exports these names directly
-// resolves by identity; the shipped @jitsi/rnnoise-wasm build minifies every
-// export to a one-letter name (`d`..`k`), so resolveExportNames below recovers
-// the mapping from the WASM name section (authoritative) or the Emscripten
-// wrapper's known table (fallback). Either way the worklet gets real function
-// references instead of failing the old literal export-name check.
-const REQUIRED_EXPORTS = [
-  "rnnoise_create",
-  "rnnoise_destroy",
-  "rnnoise_process_frame",
-  "malloc",
-  "free",
-];
-
-// Exports in @jitsi/rnnoise-wasm/dist/rnnoise.js's `Module["asm"]` table, e.g.
-// `_rnnoise_create = Module["asm"]["f"]`. Used only when the WASM has no name
-// section, which the shipped artifact in fact carries.
-const EMSCRIPTEN_MINIFIED_EXPORT_MAP = {
+// The shipped @jitsi/rnnoise-wasm build minifies every export to a one-letter
+// name; this is its `Module["asm"]` table from dist/rnnoise.js, e.g.
+// `_rnnoise_create = Module["asm"]["f"]`. The import object in _initWasm is
+// likewise tied to this build, so a different rnnoise.wasm needs both updated.
+const EXPORT_NAMES = {
+  memory: "c",
   __wasm_call_ctors: "d",
-  rnnoise_init: "e",
   rnnoise_create: "f",
   malloc: "g",
   rnnoise_destroy: "h",
   free: "i",
   rnnoise_process_frame: "j",
 };
-
-/**
- * Reads the WASM name section (custom section "name", subsection 1) and returns
- * a map of export name → canonical function name, e.g. `{ f: "rnnoise_create" }`.
- * Returns an empty map when the section is absent or malformed.
- * @param {Uint8Array} bytes - Raw WASM module bytes
- * @returns {Map<string, string>}
- */
-function parseNamedExports(bytes) {
-  const result = new Map();
-  try {
-    const cursor = { pos: 8 }; // magic (4) + version (4)
-    const readVarUint = () => {
-      let value = 0;
-      let shift = 0;
-      let byte;
-      do {
-        byte = bytes[cursor.pos++];
-        value |= (byte & 0x7f) << shift;
-        shift += 7;
-      } while (byte & 0x80);
-      return value >>> 0;
-    };
-    const readName = () => {
-      const length = readVarUint();
-      const name = new TextDecoder().decode(bytes.subarray(cursor.pos, cursor.pos + length));
-      cursor.pos += length;
-      return name;
-    };
-
-    const funcNames = new Map(); // function index -> canonical name
-    const funcExport = new Map(); // function index -> export name
-
-    while (cursor.pos < bytes.length) {
-      const sectionId = bytes[cursor.pos++];
-      const sectionSize = readVarUint();
-      const sectionEnd = cursor.pos + sectionSize;
-      if (sectionId === 7) {
-        const count = readVarUint();
-        for (let i = 0; i < count; i++) {
-          const exportName = readName();
-          const kind = bytes[cursor.pos++];
-          const index = readVarUint();
-          if (kind === 0) funcExport.set(index, exportName);
-        }
-      } else if (sectionId === 0) {
-        const customName = readName();
-        if (customName === "name") {
-          while (cursor.pos < sectionEnd) {
-            const subsectionId = bytes[cursor.pos++];
-            const subsectionSize = readVarUint();
-            const subsectionEnd = cursor.pos + subsectionSize;
-            if (subsectionId === 1) {
-              const count = readVarUint();
-              for (let i = 0; i < count; i++) {
-                const index = readVarUint();
-                funcNames.set(index, readName());
-              }
-            }
-            cursor.pos = subsectionEnd;
-          }
-        }
-      }
-      cursor.pos = sectionEnd;
-    }
-
-    for (const [index, canonical] of funcNames) {
-      const exportName = funcExport.get(index);
-      if (exportName !== undefined) result.set(exportName, canonical);
-    }
-  } catch {
-    // A truncated or hand-crafted module simply yields no mapping; the
-    // identity and minified-table fallbacks below still apply.
-  }
-  return result;
-}
-
-/**
- * Resolves each required canonical export name to the name the module actually
- * exports. Order: identity (already canonical), the name-section mapping, then
- * the known Emscripten minified table.
- * @param {Uint8Array} bytes - Raw WASM module bytes
- * @param {Array<{name: string, kind: string}>} moduleExports - WebAssembly.Module.exports()
- * @returns {Record<string, string>}
- */
-function resolveExportNames(bytes, moduleExports) {
-  const present = new Set(moduleExports.map((entry) => entry.name));
-  const named = parseNamedExports(bytes);
-  const resolved = {};
-  const candidates = [...REQUIRED_EXPORTS, "__wasm_call_ctors"];
-
-  for (const canonical of candidates) {
-    if (present.has(canonical)) {
-      resolved[canonical] = canonical;
-      continue;
-    }
-    for (const [exportName, name] of named) {
-      if (name === canonical && present.has(exportName)) {
-        resolved[canonical] = exportName;
-        break;
-      }
-    }
-    if (resolved[canonical] === undefined) {
-      const minified = EMSCRIPTEN_MINIFIED_EXPORT_MAP[canonical];
-      if (minified !== undefined && present.has(minified)) resolved[canonical] = minified;
-    }
-  }
-
-  for (const entry of moduleExports) {
-    if (entry.kind === "memory") {
-      resolved.memory = entry.name;
-      break;
-    }
-  }
-  return resolved;
-}
 
 class RNNoiseProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -221,15 +92,12 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
     let allocated = false;
     try {
       const module = await WebAssembly.compile(wasmBytes);
-      const moduleExports = WebAssembly.Module.exports(module);
-      const names = resolveExportNames(new Uint8Array(wasmBytes), moduleExports);
-
-      const missing = REQUIRED_EXPORTS.filter((name) => names[name] === undefined);
+      const present = new Set(WebAssembly.Module.exports(module).map((entry) => entry.name));
+      const missing = Object.entries(EXPORT_NAMES)
+        .filter(([, exportName]) => !present.has(exportName))
+        .map(([name, exportName]) => `${name} (${exportName})`);
       if (missing.length > 0) {
         throw new Error(`WASM module missing required RNNoise exports: ${missing.join(", ")}`);
-      }
-      if (names.memory === undefined) {
-        throw new Error("WASM module missing its memory export");
       }
 
       // The module exports its own memory and imports only the two Emscripten
@@ -256,23 +124,21 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
         },
       };
 
-      const { instance } = await WebAssembly.instantiate(wasmBytes, importObject);
+      const instance = await WebAssembly.instantiate(module, importObject);
       const exports = instance.exports;
-      memory = exports[names.memory];
+      memory = exports[EXPORT_NAMES.memory];
       this._heapF32 = new Float32Array(memory.buffer);
-      this._create = exports[names.rnnoise_create];
-      this._destroy = exports[names.rnnoise_destroy];
-      this._process = exports[names.rnnoise_process_frame];
-      this._malloc = exports[names.malloc];
-      this._free = exports[names.free];
+      this._create = exports[EXPORT_NAMES.rnnoise_create];
+      this._destroy = exports[EXPORT_NAMES.rnnoise_destroy];
+      this._process = exports[EXPORT_NAMES.rnnoise_process_frame];
+      this._malloc = exports[EXPORT_NAMES.malloc];
+      this._free = exports[EXPORT_NAMES.free];
       this._initialized = true;
 
       // Emscripten runs __wasm_call_ctors before any exported C function; the
       // RNNoise globals malloc reads during rnnoise_create are only initialized
       // here. The Emscripten wrapper does this on instantiation.
-      if (names.__wasm_call_ctors !== undefined) {
-        exports[names.__wasm_call_ctors]();
-      }
+      exports[EXPORT_NAMES.__wasm_call_ctors]();
 
       this._state = this._create();
       this._inputPtr = this._malloc(FRAME_SIZE * 4);
