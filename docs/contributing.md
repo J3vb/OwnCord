@@ -31,7 +31,7 @@ works the same on Windows, macOS and Linux.
 | Command                       | Description                                                                                                                   |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `npm run bootstrap`           | `npm ci` in all three package roots                                                                                           |
-| `npm run check`               | Everything CI gates on: server, client, Rust                                                                                  |
+| `npm run check`               | CI's static, unit and drift gates: server, client, Rust (not the Playwright, govulncheck, npm-audit or coverage-floor jobs)   |
 | `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift                                               |
 | `npm run check:client`        | Client only — typecheck, lint (warnings denied, import cycles), knip, coverage-gated unit + integration tests, bundle budgets |
 | `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                                                                 |
