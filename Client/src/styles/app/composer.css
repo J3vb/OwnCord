@@ -89,8 +89,10 @@
   background: var(--accent);
   transition: width 0.15s linear;
 }
-.attachment-preview-item > progress:indeterminate,
 .attachment-preview-item > progress:indeterminate::-webkit-progress-bar {
+  background: transparent;
+}
+.attachment-preview-item > progress:indeterminate {
   background: linear-gradient(
       90deg,
       var(--bg-overlay) 30%,
@@ -108,12 +110,14 @@
     background-position: 0 0;
   }
 }
+.reduced-motion .attachment-preview-item > progress::-webkit-progress-value {
+  transition: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .attachment-preview-item > progress::-webkit-progress-value {
     transition: none;
   }
-  .attachment-preview-item > progress:indeterminate,
-  .attachment-preview-item > progress:indeterminate::-webkit-progress-bar {
+  .attachment-preview-item > progress:indeterminate {
     animation: none;
   }
 }
