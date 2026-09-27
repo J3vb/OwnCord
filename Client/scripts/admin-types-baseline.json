@@ -1,0 +1,59 @@
+{
+  "_doc": "Admin-panel checkJs errors, keyed file -> \"<code>:<message>\" -> count. This list only shrinks: scripts/check-admin-types.mjs fails a new identity or a higher count, and fails a listed identity the source no longer produces until `node scripts/check-admin-types.mjs --update` removes it. Keys are file + code + message, never a line, so an edit above an error does not churn the file. TS2304 (undefined name) is pinned at zero.",
+  "files": {
+    "admin/static/js/boot.js": {
+      "2339:Property 'focus' does not exist on type 'Element'.": 1,
+      "2339:Property 'isContentEditable' does not exist on type 'EventTarget'.": 1,
+      "2339:Property 'tagName' does not exist on type 'EventTarget'.": 1
+    },
+    "admin/static/js/core.js": {
+      "2339:Property '_seq' does not exist on type '(html: any) => void'.": 5,
+      "2339:Property '_tt' does not exist on type 'Window & typeof globalThis'.": 3,
+      "2339:Property 'contains' does not exist on type 'EventTarget'.": 1,
+      "2339:Property 'focus' does not exist on type 'Element'.": 5,
+      "2339:Property 'inert' does not exist on type 'Element'.": 2,
+      "2339:Property 'relatedTarget' does not exist on type 'Event'.": 2,
+      "2339:Property 'value' does not exist on type 'HTMLElement'.": 1
+    },
+    "admin/static/js/members.js": {
+      "2339:Property 'click' does not exist on type 'Element'.": 1,
+      "2339:Property 'focus' does not exist on type 'Element'.": 2,
+      "2339:Property 'value' does not exist on type 'HTMLElement'.": 4
+    },
+    "admin/static/js/operations.js": {
+      "2339:Property 'disabled' does not exist on type 'HTMLElement'.": 3,
+      "2339:Property 'files' does not exist on type 'HTMLElement'.": 2,
+      "2339:Property 'files' does not exist on type '{ clearLogs: () => void; confirmRevokeToken: (id: any, label: any) => void; copyAllLogs: () => void; copyAuditLog: () => void; copyToken: (t: any) => void; createToken: () => Promise<void>; ... 18 more ...; pluginFileChosen(): void; }'.": 1,
+      "2339:Property 'focus' does not exist on type 'Element'.": 1,
+      "2339:Property 'value' does not exist on type 'HTMLElement'.": 3,
+      "2339:Property 'value' does not exist on type '{ clearLogs: () => void; confirmRevokeToken: (id: any, label: any) => void; copyAllLogs: () => void; copyAuditLog: () => void; copyToken: (t: any) => void; createToken: () => Promise<void>; ... 18 more ...; pluginFileChosen(): void; }'.": 3
+    },
+    "admin/static/js/roles-channels.js": {
+      "2339:Property 'checked' does not exist on type 'Element'.": 1,
+      "2339:Property 'checked' does not exist on type 'HTMLElement'.": 2,
+      "2339:Property 'disabled' does not exist on type 'Element'.": 1,
+      "2339:Property 'disabled' does not exist on type 'HTMLElement'.": 1,
+      "2339:Property 'files' does not exist on type 'HTMLElement'.": 2,
+      "2339:Property 'focus' does not exist on type 'Element'.": 2,
+      "2339:Property 'src' does not exist on type 'Element'.": 2,
+      "2339:Property 'tabIndex' does not exist on type 'Element'.": 1,
+      "2339:Property 'value' does not exist on type 'Element'.": 2,
+      "2339:Property 'value' does not exist on type 'HTMLElement | {}'.\n  Property 'value' does not exist on type 'HTMLElement'.": 2,
+      "2339:Property 'value' does not exist on type 'HTMLElement'.": 23,
+      "2363:The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.": 2
+    },
+    "admin/static/js/server.js": {
+      "2339:Property 'checked' does not exist on type 'HTMLElement'.": 2,
+      "2339:Property 'disabled' does not exist on type 'HTMLElement'.": 15,
+      "2339:Property 'value' does not exist on type 'HTMLElement'.": 4,
+      "2362:The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.": 1,
+      "2363:The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.": 1
+    },
+    "admin/static/js/setup.js": {
+      "2339:Property 'disabled' does not exist on type 'HTMLElement'.": 8,
+      "2339:Property 'focus' does not exist on type 'Element'.": 1,
+      "2339:Property 'href' does not exist on type 'HTMLElement'.": 1,
+      "2339:Property 'value' does not exist on type 'HTMLElement'.": 9
+    }
+  }
+}

@@ -136,6 +136,11 @@ const CHECK_CLIENT = [
   step("node", ["--test", "scripts/check-tauri-versions.test.mjs"]),
   step("node", ["scripts/check-tauri-versions.mjs"]),
   step("npm", ["run", "typecheck"], "Client"),
+  // ARCH-10 stage 1: the admin panel is Server-owned, so no tsconfig under
+  // Client/ covers it. This is a shrink-only checkJs ratchet over
+  // Server/admin/static/js, run from Client/ because that is where the
+  // TypeScript compiler and the script live.
+  step("npm", ["run", "check:admin-types"], "Client"),
   step("npm", ["run", "lint"], "Client"),
   step("npm", ["run", "knip"], "Client"),
   step("npm", ["run", "test:coverage"], "Client"),

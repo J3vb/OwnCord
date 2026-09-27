@@ -217,7 +217,7 @@ function lockModal(on){
   modalLocked=on;
   const inner=document.getElementById('modalInner');
   inner.setAttribute('aria-busy',String(on));
-  inner.querySelectorAll('[data-action="closeModal"],[data-action="closeModalAndRefresh"]').forEach(b=>{b.disabled=on});
+  inner.querySelectorAll('[data-action="closeModal"],[data-action="closeModalAndRefresh"]').forEach(b=>{if(b instanceof HTMLButtonElement)b.disabled=on});
 }
 function openModal(html){
   lockModal(false);
