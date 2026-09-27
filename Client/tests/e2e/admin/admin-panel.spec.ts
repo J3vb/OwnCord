@@ -75,14 +75,15 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page, adminS
     );
     const checks = page.locator("#healthChecks");
     const hasChecks = (await checks.count()) > 0;
+    const hashBefore = new URL(page.url()).hash;
     if (hasChecks) {
       if (!(await checks.evaluate((el) => el.hasAttribute("open")))) {
         await checks.locator(":scope > summary").click();
       }
       await expect(checks.locator("[data-signal]").first()).toBeVisible();
     }
-    // The disclosures are local state: they never write the #section hash.
-    expect(new URL(page.url()).hash).toBe("");
+    // The disclosures are local state: they never change the #section hash.
+    expect(new URL(page.url()).hash).toBe(hashBefore);
 
     // The shared accessibility checks, over this page.
     expect(await findUnnamedControls(page.locator("#content"))).toEqual([]);
