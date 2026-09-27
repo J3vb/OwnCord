@@ -22,6 +22,8 @@ function fakeRoom(state = "connected"): Room {
     state,
     on: vi.fn(),
     off: vi.fn(),
+    connect: vi.fn(async () => {}),
+    startAudio: vi.fn(async () => {}),
     disconnect: vi.fn(async () => {}),
   } as unknown as Room;
 }
@@ -52,7 +54,9 @@ function setup(initial: SessionState = { type: "idle" }) {
     reapplyMuteGain: vi.fn(),
     startTokenRefreshTimer: vi.fn(),
     syncModuleRooms: vi.fn(),
-    leaveVoice: vi.fn(),
+    leaveVoice: vi.fn(() => {
+      state = { type: "idle" };
+    }),
     handleVoiceTokenRefresh: vi.fn(),
     connectAndSetup: vi.fn(async () => true as const),
   };
@@ -130,6 +134,20 @@ describe("connectAndSetup", () => {
       channelId: 5,
       succeeded: false,
       stage: "resolve",
+    });
+    expect(host.leaveVoice).toHaveBeenCalledWith(true);
+  });
+
+  it("SRE-M2: records a failure after the room connected at stage activate", async () => {
+    const { host, join } = setup();
+    host.restoreLocalVoiceState.mockRejectedValueOnce(new Error("mic denied"));
+
+    await expect(join.connectAndSetup("t", "/livekit", 6)).resolves.toBe(false);
+
+    expect(voiceJoinSnapshot().lastJoins[0]).toMatchObject({
+      channelId: 6,
+      succeeded: false,
+      stage: "activate",
     });
   });
 

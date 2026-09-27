@@ -474,6 +474,17 @@ export class JoinOrchestration {
       return false;
     } catch (err) {
       log.error("Failed to connect to LiveKit", { url: resolvedUrl, error: err });
+      // SRE-M2: a thrown connect/setup failure is placed at the stage the
+      // attempt last reached (resolve / connect / activate) — but only while
+      // this attempt still owns the session (connecting with its generation,
+      // or connected with its room). A superseded attempt that happened to
+      // throw is churn, not a failure, and is abandoned in the finally below.
+      if (
+        this.ownsConnectAttempt(myGeneration) ||
+        (localRoom !== null && this.isStateConnected(channelId, localRoom))
+      ) {
+        failJoinAttempt(traceId);
+      }
       if (localRoom !== null) {
         // Drop this attempt's listeners BEFORE disconnecting: handleDisconnected
         // acts on the shared session state, so a failed attempt's Disconnected
@@ -508,13 +519,6 @@ export class JoinOrchestration {
         // key-holder election.
         this.leaveVoice(true);
         leaveVoiceChannel();
-      }
-      // SRE-M2: a thrown connect/setup failure is placed at the stage the
-      // attempt last reached (resolve / connect / activate) — but only while
-      // this attempt is still current. A superseded attempt that happened to
-      // throw is churn, not a failure, and is abandoned in the finally below.
-      if (this._state.type === "connecting" && this._state.joinGeneration === myGeneration) {
-        failJoinAttempt(traceId);
       }
       return false;
     } finally {

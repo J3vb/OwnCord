@@ -55,7 +55,12 @@ interface ActiveAttempt {
   retries: number;
   stage: JoinStage;
   /** Wall-clock ms at each phase boundary, for durations. */
-  phaseStarts: { resolve: number; keyExchange: number | null; connect: number | null };
+  phaseStarts: {
+    resolve: number;
+    keyExchange: number | null;
+    connect: number | null;
+    activate: number | null;
+  };
   timings: MutableTimings;
 }
 
@@ -160,7 +165,7 @@ export function beginJoinAttempt(channelId: number): number {
     urlKind: "unknown",
     retries: 0,
     stage: "resolve",
-    phaseStarts: { resolve: Date.now(), keyExchange: null, connect: null },
+    phaseStarts: { resolve: Date.now(), keyExchange: null, connect: null, activate: null },
     timings: emptyTimings(),
   };
   return id;
@@ -186,6 +191,7 @@ export function advanceJoinStage(id: number, stage: JoinStage): void {
       break;
     case "activate":
       if (a.phaseStarts.connect !== null) a.timings.connectMs = now - a.phaseStarts.connect;
+      a.phaseStarts.activate = now;
       break;
     case "resolve":
     case "live":
@@ -252,7 +258,7 @@ export function finishJoinAttempt(id: number): void {
   const a = active;
   if (a === null || a.id !== id) return;
   const now = Date.now();
-  if (a.phaseStarts.connect !== null) a.timings.activateMs = now - a.phaseStarts.connect;
+  if (a.phaseStarts.activate !== null) a.timings.activateMs = now - a.phaseStarts.activate;
   if (a.timings.e2eeMs === null) a.timings.e2eeMs = now - a.startedAt;
   a.stage = "live";
   const attempt = snapshotAttempt(a, true);
@@ -284,7 +290,13 @@ export function recordDecryptError(): void {
   decryptErrorCount++;
 }
 
-/** The connection self-test's per-stage results, newest run replacing. */
+/** Start a new connection self-test run, discarding the previous run's stages
+ *  so a cancelled or aborted run never mixes with an older one. */
+export function resetSelfTest(): void {
+  selfTest = null;
+}
+
+/** The connection self-test's per-stage results for the current run. */
 export function recordSelfTestStage(stage: string, status: string): void {
   selfTest ??= { updatedAt: Date.now(), stages: {} };
   selfTest.updatedAt = Date.now();

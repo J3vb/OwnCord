@@ -19,6 +19,7 @@ import {
   markLocalTrackPublished,
   recordDecryptError,
   recordSelfTestStage,
+  resetSelfTest,
   setJoinUrlKind,
   voiceJoinSnapshot,
 } from "@lib/voiceJoinTrace";
@@ -116,7 +117,7 @@ describe("voice join attempt", () => {
       resolveMs: 10,
       keyExchangeMs: 10,
       connectMs: 10,
-      activateMs: 20,
+      activateMs: 10,
       e2eeMs: 20,
     });
   });
@@ -189,7 +190,8 @@ describe("decrypt count and self-test", () => {
     expect(voiceJoinSnapshot().decryptErrorCount).toBe(before + 2);
   });
 
-  it("merges self-test stages across runs and replaces a changed stage", () => {
+  it("keeps a run's stages, replacing a changed stage", () => {
+    resetSelfTest();
     recordSelfTestStage("connection", "passed");
     recordSelfTestStage("signaling", "failed");
     recordSelfTestStage("signaling", "passed");
@@ -198,5 +200,15 @@ describe("decrypt count and self-test", () => {
       connection: "passed",
       signaling: "passed",
     });
+  });
+
+  it("drops the previous run's stages when a new run starts", () => {
+    recordSelfTestStage("connection", "passed");
+    recordSelfTestStage("signaling", "passed");
+    recordSelfTestStage("media", "passed");
+    resetSelfTest();
+    recordSelfTestStage("connection", "failed");
+
+    expect(voiceJoinSnapshot().selfTest?.stages).toEqual({ connection: "failed" });
   });
 });

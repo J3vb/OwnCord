@@ -1,6 +1,6 @@
 import { appendChildren, clearChildren, createElement } from "@lib/dom";
 import { settingsText as t } from "../../i18n/settings";
-import { recordSelfTestStage } from "@lib/voiceJoinTrace";
+import { recordSelfTestStage, resetSelfTest } from "@lib/voiceJoinTrace";
 import {
   diagnosticLabel,
   getConnectionDiagnosticsSessionSignal,
@@ -64,6 +64,7 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
       attempt = current;
       clearChildren(results);
       rows.clear();
+      resetSelfTest();
       start.disabled = true;
       microphone.disabled = true;
       cancel.hidden = false;
