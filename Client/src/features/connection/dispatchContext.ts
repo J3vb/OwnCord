@@ -48,12 +48,13 @@ export interface ReconnectClock {
   /** A server_restart announced a drop that no cancel has withdrawn yet. */
   restartAnnounced: boolean;
   /** RT-12: the voice channel to re-join after a planned restart. Recorded
-   *  from the restart notice while the session is still live, consumed once by
-   *  `ready`, and cleared by any path that means the user must NOT re-join
-   *  (a kick, a move, a ban, a leave, or an aborted restart). */
+   *  by the restart drop from the call the user is in at that moment, consumed
+   *  once by `ready`, and cleared by any path that means the user must NOT
+   *  re-join (a kick, a move, a ban or a leave). */
   voiceRejoinChannelId: number | null;
-  /** When the restart notice recorded `voiceRejoinChannelId` (Date.now()). */
-  voiceRejoinRecordedAt: number;
+  /** When the last rejoin-eligible restart notice arrived (Date.now()); null
+   *  when the last notice was not one, so the drop records no channel. */
+  voiceRejoinNoticeAt: number | null;
 }
 
 /** The socket surface a handler may use: send and disconnect, never subscribe. */
@@ -97,7 +98,7 @@ export function createReconnectClock(): ReconnectClock {
     serverClockSkewMs: 0,
     restartAnnounced: false,
     voiceRejoinChannelId: null,
-    voiceRejoinRecordedAt: 0,
+    voiceRejoinNoticeAt: null,
   };
 }
 

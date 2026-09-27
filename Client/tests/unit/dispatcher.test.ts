@@ -3464,12 +3464,16 @@ describe("WS Dispatcher", () => {
 
   // RT-12: a planned restart ends server-side voice membership (the hub wipes
   // voice_states on boot), so a plain reconnect leaves the user outside the
-  // call. The restart notice records the channel; once ready confirms we are
+  // call. The restart drop records the channel; once ready confirms we are
   // not in it, one normal voice_join puts us back.
   describe("RT-12: rejoin after a planned restart", () => {
-    function announceRestartAndDrop(reason = "update"): void {
+    function announceRestart(reason = "update"): void {
       mock.dispatch("server_restart", { reason, delay_seconds: 5 });
       expectConsole("warn", /\[dispatcher\] Server restarting/);
+    }
+
+    function announceRestartAndDrop(reason = "update"): void {
+      announceRestart(reason);
       mock.dispatchState("reconnecting");
     }
 
@@ -3537,6 +3541,52 @@ describe("WS Dispatcher", () => {
       expect(mock.ws.send).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: "voice_join" }),
       );
+    });
+
+    it("does not rejoin after a moderator kick during the countdown", async () => {
+      announceRestart();
+      mock.dispatch("voice_leave", { channel_id: 42, user_id: 5 });
+      mock.dispatch("voice_disconnected", { channel_id: 42, reason: "kicked" });
+      mock.dispatchState("reconnecting");
+      await vi.runAllTimersAsync();
+
+      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+
+      expect(mock.ws.send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_join" }),
+      );
+    });
+
+    it("does not rejoin after the user leaves voice during the countdown", async () => {
+      announceRestart();
+      mock.dispatch("voice_leave", { channel_id: 42, user_id: 5 });
+      mock.dispatchState("reconnecting");
+      await vi.runAllTimersAsync();
+
+      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+
+      expect(mock.ws.send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_join" }),
+      );
+    });
+
+    it("rejoins the channel the user switched to during the countdown", async () => {
+      announceRestart();
+      // The switch moves the store optimistically, then the server leaves the old channel.
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 43 }));
+      mock.dispatch("voice_leave", { channel_id: 42, user_id: 5 });
+      mock.dispatchState("reconnecting");
+      await vi.runAllTimersAsync();
+
+      readyAfterRestart([
+        { id: 42, name: "voice", type: "voice", category: null, position: 0 },
+        { id: 43, name: "voice-2", type: "voice", category: null, position: 1 },
+      ]);
+
+      expect(mock.ws.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_join", payload: { channel_id: 43 } }),
+      );
+      expect(voiceStore.getState().currentChannelId).toBe(43);
     });
 
     it("does not rejoin when the channel is gone from ready", async () => {

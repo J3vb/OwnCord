@@ -86,19 +86,13 @@ export function handleServerRestart(
   // same channel, and MainPage's banner counts down. A zero delay
   // (update_aborted) withdraws the announcement.
   clock.restartAnnounced = payload.delay_seconds > 0;
-  // RT-12: remember the voice channel we are in so a planned restart can put
-  // us back. The hub wipes voice_states on boot, so the resume cannot restore
-  // the membership the way it restores chat; a later ready sends one
-  // voice_join. Recorded here, while the session is still live, because the
-  // drop handler clears the store's currentChannelId. An aborted restart or a
-  // leave before the drop clears it again. A shutdown (a stop from outside the
-  // server) may last hours, so it never records a rejoin.
-  if (clock.restartAnnounced && REJOIN_REASONS.has(payload.reason)) {
-    clock.voiceRejoinChannelId = voiceStore.getState().currentChannelId;
-    clock.voiceRejoinRecordedAt = Date.now();
-  } else {
-    clock.voiceRejoinChannelId = null;
-  }
+  // RT-12: mark whether the coming drop may put us back in our call. The hub
+  // wipes voice_states on boot, so the resume cannot restore the membership
+  // the way it restores chat; the drop records the channel and a later ready
+  // sends one voice_join. A shutdown (a stop from outside the server) may last
+  // hours, so it never allows a rejoin.
+  clock.voiceRejoinNoticeAt =
+    clock.restartAnnounced && REJOIN_REASONS.has(payload.reason) ? Date.now() : null;
 }
 
 /**
@@ -111,20 +105,20 @@ export function handleServerRestart(
 export function handleRestartDrop(clock: ReconnectClock, state: ConnectionState): void {
   if (!clock.restartAnnounced || (state !== "reconnecting" && state !== "disconnected")) return;
   clock.restartAnnounced = false;
-  if (voiceStore.getState().currentChannelId !== null) {
+  // RT-12: record the call we are in now, before leaveVoiceChannel clears it,
+  // so a switch, join, kick or leave during the countdown is already settled.
+  const channelId = voiceStore.getState().currentChannelId;
+  clock.voiceRejoinChannelId = clock.voiceRejoinNoticeAt === null ? null : channelId;
+  if (channelId !== null) {
     void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
     leaveVoiceChannel();
-  } else {
-    // The user left voice (or was evicted) after the notice but before the
-    // drop: there is no call to return to, so forget the recorded channel.
-    clock.voiceRejoinChannelId = null;
   }
 }
 
 /**
  * RT-12: put the user back in the voice channel a planned restart took them
  * out of. The hub wipes voice_states on boot, so the resume cannot restore the
- * membership the way it restores chat; `handleServerRestart` recorded the
+ * membership the way it restores chat; `handleRestartDrop` recorded the
  * channel, and this runs once from `ready`. It sends one ordinary voice_join —
  * never after a kick, move, ban or leave, which clear the recorded channel —
  * and only when the channel still exists as a joinable voice channel.
@@ -135,9 +129,10 @@ export function rejoinVoiceAfterRestart(
   payload: Payload<"ready">,
 ): void {
   const channelId = clock.voiceRejoinChannelId;
+  const noticeAt = clock.voiceRejoinNoticeAt;
   clock.voiceRejoinChannelId = null;
-  if (channelId === null) return;
-  if (Date.now() - clock.voiceRejoinRecordedAt > REJOIN_WINDOW_MS) {
+  if (channelId === null || noticeAt === null) return;
+  if (Date.now() - noticeAt > REJOIN_WINDOW_MS) {
     log.info("Not rejoining voice after restart — the server was down too long", { channelId });
     return;
   }
