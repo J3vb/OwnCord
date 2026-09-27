@@ -275,10 +275,12 @@ in its header comments. The important choices it encodes:
   applying server updates from the admin panel** — it also repairs the
   update handoff when updating from older OwnCord releases, whose spawned
   replacement gets reaped by the cgroup cleanup.
-- `TimeoutStopSec=60` — the server drains gracefully on SIGTERM with a 30s
-  budget and a worst case of ≈55s, so systemd waits 60s before SIGKILLing a
-  wedged teardown; the server's own 90s restart backstop covers non-systemd
-  supervisors.
+- `TimeoutStopSec=60` — the server drains gracefully on SIGTERM, each
+  shutdown step on its own budget — up to 30s for the HTTP drain and 10s
+  for each other step — so one step that overruns cannot starve the next,
+  and the whole teardown is capped at 50s; a normal stop takes about 5–10s,
+  so systemd's 60s is only reached by a wedged teardown, which it SIGKILLs;
+  the server's own 90s restart backstop covers non-systemd supervisors.
 - `ReadWritePaths=/opt/owncord` under `ProtectSystem=strict` — the install
   directory must stay writable or the admin panel's self-update (which
   renames the new binary into place) breaks. `ProtectSystem=strict` mounts
@@ -1508,8 +1510,9 @@ open a circuit breaker that skips one tick and then retries:
 
 The server handles `Ctrl+C` (SIGINT) and `SIGTERM`:
 
-1. Shuts down the ACME listener, then drains in-flight HTTP handlers
-2. Stops the hub on the same 30-second budget: sends the restart notice,
+1. Shuts down the ACME listener, ends any open admin Logs stream, then
+   drains in-flight HTTP handlers
+2. Stops the hub on a budget of its own: sends the restart notice,
    stops the LiveKit process and closes every WebSocket connection
 3. Unregisters the signal handler, so a second `Ctrl+C` during steps 1–2 does
    not cut the drain short

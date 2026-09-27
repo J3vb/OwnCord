@@ -50,7 +50,7 @@ func startEventPersister(bgCtx context.Context, log *slog.Logger, cfg *config.Co
 // stopEventPersister drains the event persister and pruner. Registered
 // unconditionally, so a nil persister is the disabled case and must leave
 // bgCtx alone — Run's backstop close step cancels it instead. ctx is
-// App.Close's shutdown budget; the 5s cap is this step's share of it.
+// the event-persistence step's App.Close budget; the 5s cap sits within it.
 func stopEventPersister(ctx context.Context, log *slog.Logger, bgCancel context.CancelFunc, persister *ws.EventPersister, prunerDone <-chan struct{}) {
 	if persister == nil {
 		return
@@ -84,8 +84,8 @@ func newAuditWriter(bgCtx context.Context, database *db.DB) *db.AuditWriter {
 	return auditWriter
 }
 
-// stopAuditWriter drains the async audit writer, within its share of
-// App.Close's shutdown budget.
+// stopAuditWriter drains the async audit writer, within the audit-writer
+// step's own App.Close budget.
 func stopAuditWriter(ctx context.Context, auditWriter *db.AuditWriter) {
 	stopCtx, stopCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer stopCancel()

@@ -252,3 +252,56 @@ func TestHandleLogStream_SurvivesServerWriteTimeout(t *testing.T) {
 		t.Fatal("timed out waiting for the post-WriteTimeout log entry; stream appears severed by http.Server.WriteTimeout")
 	}
 }
+
+// TestHandleLogStream_EndsWhenTheServerShutsDown is SRV-06: an open admin Logs
+// tab held http.Server.Shutdown for its whole budget, because the stream only
+// returns when its client leaves and Shutdown waits for every active handler.
+// With EndStreams registered through RegisterOnShutdown, as the app registers
+// it, the drain finishes at once.
+func TestHandleLogStream_EndsWhenTheServerShutsDown(t *testing.T) {
+	database := newLogStreamTestDB(t)
+	logBuf := NewRingBuffer(64)
+
+	userID, err := database.CreateUser(context.Background(), "owner", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	tokenHash := auth.HashToken(token)
+	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	ticket, err := logTickets.issue(tokenHash)
+	if err != nil {
+		t.Fatalf("issue ticket: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/logs/stream", handleLogStream(database, logBuf))
+	srv := httptest.NewUnstartedServer(mux)
+	srv.Config.RegisterOnShutdown(logBuf.EndStreams)
+	srv.Start()
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/logs/stream?ticket=" + ticket)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	started := time.Now()
+	if err := srv.Config.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown = %v after %v, want nil: the open log stream held the drain", err, time.Since(started))
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("Shutdown took %v with a log stream open, want it to end the stream at once", elapsed)
+	}
+}
