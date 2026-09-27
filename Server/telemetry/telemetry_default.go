@@ -12,6 +12,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 )
 
+// SDKAvailable reports whether the real OpenTelemetry SDK is compiled in. It
+// is false in this default build, which is why Init installs a no-op provider
+// and telemetry.enabled is silently inert — internal/app logs a warning when
+// an operator sets the key on a build that cannot honour it (SRE-M1).
+const SDKAvailable = false
+
 // Init configures and installs the OpenTelemetry SDK based on cfg. In the
 // default build this installs a no-op provider so call sites have a usable
 // global handle without pulling in any external dependencies.

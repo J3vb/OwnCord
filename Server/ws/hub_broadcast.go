@@ -361,8 +361,10 @@ func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 // window would silently lose the overtaken events. The high queue remains for
 // unsequenced targeted messages only.
 func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
+	start := time.Now()
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()
+	defer h.observeSeqMuHold(start)
 
 	if h.dropsForPurgedUser(msg) || h.dropsForPurgedMessage(msg) {
 		return
@@ -385,6 +387,10 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		return
 	}
 
+	// Dispatch lag: enqueue→dispatch start, how long this frame waited for the
+	// single dispatch goroutine (SRV-04).
+	h.observeDispatchLag(bm.enqueuedAt)
+
 	// B5-7's content gate, resolved HERE — on the dispatch goroutine, at the
 	// head of the queue, before seqMu — rather than by whoever enqueued the
 	// frame. See resolveChannelContentGate and nsfwChannelID.
@@ -394,23 +400,18 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	// (below) so a slow logging sink never extends the critical section that
 	// serializes every broadcast.
 	seq, delivered, channelSend := func() (seq uint64, delivered int, channelSend bool) {
+		start := time.Now()
 		h.seqMu.Lock()
 		defer h.seqMu.Unlock()
+		defer h.observeSeqMuHold(start)
 
 		// Channel-scoped sends consult the topic limiter BEFORE a seq is
 		// allocated: a shed frame that consumed a seq would sit in the replay
 		// buffer as a number no client ever saw live, and since clients ack
-		// only max(seq), it could never be requested back. The limit is a
-		// sliding 1s window via the shared auth.RateLimiter (the deleted
-		// TopicRateLimiter was a token bucket with a full refill at each
-		// window boundary — sliding is stricter on boundary-straddling
-		// bursts, the same sustained rate).
-		if bm.recipients == nil && bm.channelID != 0 {
-			if !h.limiter.Allow("topic:"+string(ChannelTopic(bm.channelID)), topicRateLimitPerSecond, time.Second) {
-				slog.Warn("hub: topic rate limit exceeded, dropping message",
-					"channel_id", bm.channelID)
-				return 0, 0, false
-			}
+		// only max(seq), it could never be requested back. allowTopicFrame
+		// owns the shed handling (count + watermark, SRV-03).
+		if !h.allowTopicFrame(bm) {
+			return 0, 0, false
 		}
 
 		// A frame naming an erased user, produced by a request that read
@@ -481,16 +482,17 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	}()
 
 	// Instrumentation runs after seqMu is released: a metrics provider must
-	// never extend the critical section that serializes every broadcast.
-	// seq == 0 means the topic limiter shed the frame before delivery.
+	// never extend the critical section serializing every broadcast. The
+	// in-process histogram records the same latency as the OTel-only one.
+	// seq == 0 means the topic limiter shed the frame.
 	if seq != 0 {
 		m := telemetry.NewAppMetrics()
 		m.WSMessagesTotal.Add(context.Background(), 1)
 		if !bm.enqueuedAt.IsZero() {
 			m.WSBroadcastLatency.Record(context.Background(), time.Since(bm.enqueuedAt).Seconds())
 		}
+		h.recordBroadcastLatency(bm.enqueuedAt)
 	}
-
 	if channelSend {
 		slog.Debug("hub: channel broadcast",
 			"channel_id", bm.channelID, "delivered", delivered, "seq", seq)

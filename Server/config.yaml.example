@@ -18,6 +18,11 @@ server:
   #   - "10.0.0.0/8"
   #   - "172.16.0.0/12"
   #   - "192.168.0.0/16"
+  # pprof_enabled: false      # expose Go's pprof endpoints on a separate,
+  #                           # loopback-only listener (127.0.0.1:6060 by default)
+  #                           # for operator profiling. Off by default; never mounted
+  #                           # on the main router. A non-loopback pprof_addr is refused.
+  # pprof_addr: "127.0.0.1:6060"  # used only when pprof_enabled is true
   # browser_client_enabled: false  # host a browser client from this server.
   #                           # Owner opt-in, off by default. This build ships no
   #                           # browser assets, so turning it on hosts nothing yet.

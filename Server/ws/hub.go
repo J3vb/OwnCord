@@ -57,6 +57,12 @@ type Hub struct {
 	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
 	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
 
+	// latency is the shipped in-process metrics surface (SRE-M1): broadcast
+	// and dispatch-lag histograms, the max seqMu hold, the chat-ack histogram
+	// and the topic-shed counter. The zero value is usable, so no initializer
+	// is needed and the field costs no allocation on the hot path.
+	latency hubLatencyMetrics
+
 	// Phase B Step 7 — event persistence. nil = ring buffer only. Atomic
 	// because internal/app wires these one lifecycle stage after Run has
 	// started, which reads them on the broadcast/replay paths.

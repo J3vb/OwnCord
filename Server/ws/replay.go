@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -428,6 +429,7 @@ func (h *Hub) reconnectRegister(
 	replaySource string, persistedTail [][]byte, maxPersistedSeq uint64,
 ) ([][]byte, bool) {
 	var events [][]byte
+	start := time.Now()
 	h.seqMu.Lock()
 	switch replaySource {
 	case "buffer":
@@ -436,6 +438,7 @@ func (h *Hub) reconnectRegister(
 			// The buffer window closed between the earlier check and this
 			// lock (an extreme write burst evicted lastSeq) — there is
 			// nothing left to fall back to for this attempt but a full ready.
+			h.observeSeqMuHold(start)
 			h.seqMu.Unlock()
 			slog.Warn("ws handleReconnect: buffer window closed just before registration, forcing full ready",
 				"user_id", c.userID, "last_seq", lastSeq)
@@ -451,6 +454,7 @@ func (h *Hub) reconnectRegister(
 		case atomic.LoadUint64(&h.seq) == maxPersistedSeq:
 			events = persistedTail
 		default:
+			h.observeSeqMuHold(start)
 			h.seqMu.Unlock()
 			slog.Warn("ws handleReconnect: ring buffer cannot cover the post-flush tail just before registration, forcing full ready",
 				"user_id", c.userID, "max_persisted_seq", maxPersistedSeq)
@@ -473,6 +477,7 @@ func (h *Hub) reconnectRegister(
 	// already passed, so nothing else catches it before this resume commits
 	// to permissions computed before the change (OC-0206).
 	if h.mustFullResync(lastSeq) {
+		h.observeSeqMuHold(start)
 		h.seqMu.Unlock()
 		slog.Warn("ws handleReconnect: visibility changed during handshake, forcing full ready",
 			"user_id", c.userID, "last_seq", lastSeq)
@@ -484,6 +489,7 @@ func (h *Hub) reconnectRegister(
 		handleReconnectPostCheckPreRegisterRaceHook()
 	}
 	h.registerNow(c, allowedChannelIDs)
+	h.observeSeqMuHold(start)
 	h.seqMu.Unlock()
 	return events, true
 }

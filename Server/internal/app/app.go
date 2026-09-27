@@ -71,6 +71,7 @@ type App struct {
 	router      http.Handler
 	addr        string
 	srv         *http.Server
+	pprofSrv    *http.Server // opt-in loopback pprof listener (SRE-M1); nil unless enabled
 	ln          net.Listener
 	acmeSrv     *http.Server
 	persister   *ws.EventPersister

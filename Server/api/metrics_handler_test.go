@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -21,13 +22,21 @@ func buildMetricsRouter(allowedCIDRs []string) http.Handler {
 			ConnectedUsers: func() int { return 5 },
 			VoiceSessions:  func() int { return 2 },
 			BroadcastDrops: func() uint64 { return 0 },
-			LiveKitHealth:  func(_ context.Context) (bool, error) { return true, nil },
-			ReconnectTiers: func() (uint64, uint64, uint64) { return 7, 3, 1 },
-			Backpressure:   func() (uint64, uint64, uint64) { return 4, 9, 11 },
-			PersisterStats: func() (uint64, uint64, uint64, uint64, bool) { return 100, 2, 10, 1, true },
-			DBStats:        func() sql.DBStats { return sql.DBStats{WaitCount: 6, WaitDuration: 1500 * time.Millisecond} },
-			DBReaderStats:  func() sql.DBStats { return sql.DBStats{WaitCount: 3, WaitDuration: 700 * time.Millisecond} },
-			PermCache:      func() (uint64, uint64) { return 42, 8 },
+			TopicSheds:     func() uint64 { return 3 },
+			BroadcastMs: func() metrics.Summary {
+				return metrics.Summary{Count: 10, P50: 2, P95: 5, P99: 10, Max: 20}
+			},
+			DispatchLagMs:       func() metrics.Summary { return metrics.Summary{Count: 4, P95: 50, Max: 90} },
+			ChatAckMs:           func() metrics.Summary { return metrics.Summary{Count: 8, P95: 12, Max: 30} },
+			BroadcastQueueDepth: func() int { return 7 },
+			SeqMuMaxHoldMs:      func() float64 { return 210 },
+			LiveKitHealth:       func(_ context.Context) (bool, error) { return true, nil },
+			ReconnectTiers:      func() (uint64, uint64, uint64) { return 7, 3, 1 },
+			Backpressure:        func() (uint64, uint64, uint64) { return 4, 9, 11 },
+			PersisterStats:      func() (uint64, uint64, uint64, uint64, bool) { return 100, 2, 10, 1, true },
+			DBStats:             func() sql.DBStats { return sql.DBStats{WaitCount: 6, WaitDuration: 1500 * time.Millisecond} },
+			DBReaderStats:       func() sql.DBStats { return sql.DBStats{WaitCount: 3, WaitDuration: 700 * time.Millisecond} },
+			PermCache:           func() (uint64, uint64) { return 42, 8 },
 		}))
 	return r
 }
@@ -52,7 +61,9 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 	requiredFields := []string{
 		"uptime", "uptime_seconds", "goroutines",
 		"heap_alloc_mb", "heap_sys_mb", "num_gc",
-		"connected_users", "voice_sessions", "broadcast_drops", "livekit_healthy",
+		"connected_users", "voice_sessions", "broadcast_drops", "topic_sheds_total",
+		"ws_broadcast_ms", "ws_dispatch_lag_ms", "chat_send_ack_ms",
+		"hub_broadcast_queue_depth", "hub_seqmu_max_hold_ms", "livekit_healthy",
 		"reconnect_tier_buffer", "reconnect_tier_db", "reconnect_tier_full",
 		"backpressure_queue_disconnects", "backpressure_high_fallbacks", "backpressure_low_drops",
 		"db_writer_wait_count", "db_writer_wait_seconds",
@@ -72,6 +83,25 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 	}
 	if int(resp["voice_sessions"].(float64)) != 2 {
 		t.Errorf("voice_sessions = %v, want 2", resp["voice_sessions"])
+	}
+	if int(resp["topic_sheds_total"].(float64)) != 3 {
+		t.Errorf("topic_sheds_total = %v, want 3", resp["topic_sheds_total"])
+	}
+	if int(resp["hub_broadcast_queue_depth"].(float64)) != 7 {
+		t.Errorf("hub_broadcast_queue_depth = %v, want 7", resp["hub_broadcast_queue_depth"])
+	}
+	if got := resp["hub_seqmu_max_hold_ms"].(float64); got != 210 {
+		t.Errorf("hub_seqmu_max_hold_ms = %v, want 210", got)
+	}
+	bm, ok := resp["ws_broadcast_ms"].(map[string]any)
+	if !ok {
+		t.Fatalf("ws_broadcast_ms = %v, want object", resp["ws_broadcast_ms"])
+	}
+	if int(bm["p95"].(float64)) != 5 || int(bm["count"].(float64)) != 10 {
+		t.Errorf("ws_broadcast_ms p95/count = %v/%v, want 5/10", bm["p95"], bm["count"])
+	}
+	if ack, ok := resp["chat_send_ack_ms"].(map[string]any); !ok || int(ack["p95"].(float64)) != 12 {
+		t.Errorf("chat_send_ack_ms = %v, want p95 12", resp["chat_send_ack_ms"])
 	}
 	if resp["livekit_healthy"] != true {
 		t.Errorf("livekit_healthy = %v, want true", resp["livekit_healthy"])

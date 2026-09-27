@@ -1137,6 +1137,12 @@ have chosen the third stage as your normal state.
   "connected_users": 12,
   "voice_sessions": 3,
   "broadcast_drops": 0,
+  "topic_sheds_total": 0,
+  "ws_broadcast_ms": { "count": 1204, "p50": 1, "p95": 5, "p99": 20, "max": 210 },
+  "ws_dispatch_lag_ms": { "count": 1204, "p50": 0.5, "p95": 2, "p99": 10, "max": 90 },
+  "chat_send_ack_ms": { "count": 340, "p50": 2, "p95": 8, "p99": 25, "max": 60 },
+  "hub_broadcast_queue_depth": 0,
+  "hub_seqmu_max_hold_ms": 12,
   "livekit_healthy": true,
   "reconnect_tier_buffer": 120,
   "reconnect_tier_db": 4,
@@ -1163,7 +1169,16 @@ Signals worth watching as a community grows (see `docs/api.md` for full field
 descriptions):
 
 - `broadcast_drops` growing at all → the hub-wide broadcast queue overflowed
-  and sequenced events were lost; alert on any growth.
+  and sequenced events were lost; alert on any growth. `topic_sheds_total`
+  growing → a single channel exceeded the per-channel topic limit and frames
+  were shed before sequencing; replay cannot recover them, so alert on any
+  growth too.
+- `ws_dispatch_lag_ms.p95` climbing → the single hub dispatch goroutine is
+  falling behind its queue; `hub_broadcast_queue_depth` approaching 1024 is the
+  same signal from the other side.
+- `hub_seqmu_max_hold_ms` above ~100 ms → a critical section that serializes
+  every broadcast (a replay purge's full scan is the known one) is stalling
+  delivery.
 - `db_writer_wait_seconds` climbing faster than uptime → requests are queueing
   on SQLite's single write connection; the write path is saturating.
 - `db_reader_wait_seconds` growing → read queries are queueing behind all
