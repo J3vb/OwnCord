@@ -3250,8 +3250,8 @@ Nothing here is exported off the host.
   restart count appears in the detail. An externally managed LiveKit is
   probed over HTTP and reports `unreachable` as a warning when it does not
   answer; an unconfigured voice path is `unknown`.
-- The first disk level is reported at once, and a stopped dispatch loop as
-  soon as it is seen; every other level change, including a rate's first
+- The first disk or voice level is reported at once, and a stopped dispatch
+  loop as soon as it is seen; every other level change, including a rate's first
   warning, holds for two samples.
   A rate's `threshold` is its `attention.*` floor until it has learned a
   baseline, then the higher of the floor and three times that baseline.

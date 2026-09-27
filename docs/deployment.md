@@ -1251,8 +1251,10 @@ check-by-check walkthrough is in [Port Forwarding Guide](port-forwarding.md).
 ### Voice cannot join at all
 
 The supervised LiveKit process is down. `livekit_healthy: false` on
-`GET /api/v1/metrics`, and `GET /api/v1/livekit/health` answers
-`degraded` with the reason. The companion process restarts it with
+`GET /api/v1/metrics`, `GET /api/v1/livekit/health` answers
+`degraded` with the reason, and the Dashboard's attention panel raises its
+`voice` signal. LiveKit's own errors are the `livekit: ` lines in the server
+log. The companion process restarts it with
 exponential backoff (3 s up to 60 s) and gives up after ten consecutive rapid
 failures; the recovery steps are in
 [LiveKit Setup](livekit-setup.md).
