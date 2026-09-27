@@ -62,6 +62,7 @@ import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, resetChannelsStore } from "../../src/stores/channels.store";
 import { membersStore, setMembers } from "../../src/stores/members.store";
 import {
+  addOptimisticMessage,
   getChannelMessages,
   resetMessagesStore,
   setMessages,
@@ -162,19 +163,28 @@ function substitute(
       counter.n += 1;
       const n = counter.n;
       const [klass, type] = [m[1]!, m[2]!];
-      switch (klass) {
-        case "id":
-          return type === "string" ? `req-${n}` : 1000 + n;
-        case "seq":
-          return n;
-        case "token":
-          return `tok-${n}`;
-        case "ts":
-          // The real wire form: SQLite datetime('now'), naive UTC, which
-          // parseTimestamp parses by appending the Z.
-          return "2026-09-05 12:00:00";
+      switch (type) {
+        case "null":
+          return null;
+        case "number":
+          return klass === "id" ? 1000 + n : n;
+        case "bool":
+          return true;
+        case "string":
+          switch (klass) {
+            case "id":
+              return `req-${n}`;
+            case "token":
+              return `tok-${n}`;
+            case "ts":
+              // The real wire form: SQLite datetime('now'), naive UTC, which
+              // parseTimestamp parses by appending the Z.
+              return "2026-09-05 12:00:00";
+            default:
+              return `${klass}-${n}`;
+          }
         default:
-          return type === "number" ? n : `${klass}-${n}`;
+          throw new Error(`unsupported placeholder type: ${v}`);
       }
     }
     if (Array.isArray(v)) return v.map((item) => walk(item, key));
@@ -227,30 +237,35 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     vi.useRealTimers();
   });
 
+  /** Feed one frame, envelope id included, with its placeholders substituted.
+   *  `envelopeId` pins the envelope id the way `overrides` pin payload keys. */
+  function send(
+    frame: WireFrame["frame"],
+    overrides: Record<string, unknown>,
+    counter: { n: number },
+    envelopeId?: string,
+  ): void {
+    ws.simulateMessage(
+      frame.type as ServerMessage["type"],
+      substitute(frame.payload, overrides, counter) as never,
+      envelopeId ?? (substitute(frame.id, {}, counter) as string | undefined),
+    );
+  }
+
   /** Feed ONE server->client frame through the wired dispatcher. */
   function dispatch(
     journey: string,
     type: string,
     overrides: Record<string, unknown> = {},
+    envelopeId?: string,
   ): void {
-    const frame = s2cFrame(journey, type);
-    ws.simulateMessage(
-      frame.type as ServerMessage["type"],
-      substitute(frame.payload, overrides, { n: 0 }) as never,
-      frame.id,
-    );
+    send(s2cFrame(journey, type), overrides, { n: 0 }, envelopeId);
   }
 
   /** Feed a whole connection's s2c frames in order (smoke / multi-frame). */
   function replayConnection(journey: string, conn: string): void {
     const counter = { n: 0 };
-    for (const f of s2c(journey, conn)) {
-      ws.simulateMessage(
-        f.frame.type as ServerMessage["type"],
-        substitute(f.frame.payload, {}, counter) as never,
-        f.frame.id,
-      );
-    }
+    for (const f of s2c(journey, conn)) send(f.frame, {}, counter);
   }
 
   it("auth-failure: auth_error lands in uiStore and clears auth", () => {
@@ -277,17 +292,13 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     ]);
     expect(channelsStore.getState().roles).toHaveLength(4);
     expect(membersStore.getState().members.size).toBe(2);
-    const alice = [...membersStore.getState().members.values()].find(
-      (m) => m.username === "alice",
-    );
+    const alice = [...membersStore.getState().members.values()].find((m) => m.username === "alice");
     expect(alice?.displayName).toBe("Alice Fixture");
   });
 
   it("fresh-connect: member_join adds the joining user by name", () => {
     dispatch("fresh-connect", "member_join");
-    const alice = [...membersStore.getState().members.values()].find(
-      (m) => m.username === "alice",
-    );
+    const alice = [...membersStore.getState().members.values()].find((m) => m.username === "alice");
     expect(alice?.status).toBe("online");
   });
 
@@ -316,6 +327,26 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
   it("chat-send-fanout: the broadcast is appended with its fixture content", () => {
     dispatch("chat-send-fanout", "chat_message");
     expect(getChannelMessages(1).some((m) => m.content === "hello epoch one")).toBe(true);
+  });
+
+  it("chat-send-fanout: chat_send_ok confirms the pending send it acknowledges", () => {
+    const CORRELATION_ID = "send-1";
+    const MESSAGE_ID = 5002;
+    addOptimisticMessage({
+      correlationId: CORRELATION_ID,
+      channelId: 1,
+      user: { id: 1, username: "alice", avatar: null },
+      content: "hello epoch one",
+      replyTo: null,
+      timestamp: "2026-09-05 11:00:00",
+    });
+    dispatch("chat-send-fanout", "chat_send_ok", { message_id: MESSAGE_ID }, CORRELATION_ID);
+    const row = getChannelMessages(1).find((m) => m.content === "hello epoch one");
+    expect(row).toMatchObject({
+      id: MESSAGE_ID,
+      status: "sent",
+      timestamp: "2026-09-05 12:00:00",
+    });
   });
 
   it("chat-edit-delete: edit rewrites content, delete tombstones the row", () => {
@@ -373,10 +404,7 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     // two frames' generated user ids from colliding onto the same value.
     const counter = { n: 0 };
     for (const frame of s2cFrames("reaction-add-remove", "reaction_update")) {
-      ws.simulateMessage(
-        frame.type as ServerMessage["type"],
-        substitute(frame.payload, { message_id: MESSAGE_ID }, counter) as never,
-      );
+      send(frame, { message_id: MESSAGE_ID }, counter);
     }
     expect(getChannelMessages(1).find((m) => m.id === MESSAGE_ID)?.reactions).toEqual([]);
   });
@@ -432,10 +460,7 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
       (f) => (f.payload as { status?: string }).status === "online",
     );
     expect(online, "resume-replay: back-online presence frame").toBeDefined();
-    ws.simulateMessage(
-      "presence",
-      substitute(online!.payload, { user_id: USER_ID }, { n: 0 }) as never,
-    );
+    send(online!, { user_id: USER_ID }, { n: 0 });
     const bob = membersStore.getState().members.get(USER_ID);
     expect(bob?.status).toBe("online");
     expect(bob?.customStatus).toBe("fixture custom status");
@@ -477,12 +502,11 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
   it("every fixture connection replays end to end without a handler throw", () => {
     for (const [journey, tr] of FIXTURES) {
       for (const conn of Object.keys(tr.connections)) {
+        cleanup?.();
         resetStores();
         ws = createMockWsClient();
         cleanup = wireDispatcher(ws as unknown as WsClient);
         expect(() => replayConnection(journey, conn), `${journey}/${conn}`).not.toThrow();
-        cleanup();
-        cleanup = wireDispatcher(ws as unknown as WsClient);
         // auth-failure is the one journey whose handler deliberately logs an
         // error; claim it so the console guard does not fail the run.
         if (journey === "auth-failure") expectConsole("error", "Auth failed");
