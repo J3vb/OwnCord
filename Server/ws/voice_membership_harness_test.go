@@ -138,8 +138,9 @@ func (f *fakeSFU) handle(w http.ResponseWriter, r *http.Request) {
 	case "ListParticipants":
 		var req lkproto.ListParticipantsRequest
 		_ = proto.Unmarshal(body, &req)
-		var ps []*lkproto.ParticipantInfo
-		for _, id := range f.identities(req.GetRoom()) {
+		ids := f.identities(req.GetRoom())
+		ps := make([]*lkproto.ParticipantInfo, 0, len(ids))
+		for _, id := range ids {
 			ps = append(ps, &lkproto.ParticipantInfo{Identity: id})
 		}
 		marshal(&lkproto.ListParticipantsResponse{Participants: ps})
