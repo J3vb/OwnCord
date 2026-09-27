@@ -1119,8 +1119,11 @@ window.addEventListener("beforeunload", () => {
 });
 
 // Initial render (fire-and-forget — the initial page is "connect", whose
-// render branch is synchronous)
-void renderPage(activePage);
+// render branch is synchronous), then tell the native host's startup watchdog
+// the window came up.
+void renderPage(activePage).then(() =>
+  desktop.appProcess.reportReady().catch((err) => log.warn("Failed to report frontend ready", err)),
+);
 
 // Initialize window state persistence (fire-and-forget)
 void initWindowState();

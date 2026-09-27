@@ -4,11 +4,15 @@
 // The process plugin stays a dynamic `import()`: it is not part of the
 // startup chunk today, and this registry is statically reachable from the
 // entry.
+import { invoke } from "@tauri-apps/api/core";
 import type { AppProcess } from "../contracts/appProcess";
 
 export const appProcess: AppProcess = {
   async relaunch(): Promise<void> {
     const { relaunch } = await import("@tauri-apps/plugin-process");
     await relaunch();
+  },
+  async reportReady(): Promise<void> {
+    await invoke("frontend_ready");
   },
 };

@@ -222,6 +222,7 @@ import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
 // DOM setup written before it in source order — so this runs inside an async
 // beforeAll instead of a top-level import.
 // ---------------------------------------------------------------------------
+let startupInvokes: unknown[] = [];
 beforeAll(async () => {
   document.body.innerHTML = '<div id="app"></div>';
   await import("../../src/main");
@@ -230,6 +231,7 @@ beforeAll(async () => {
   // eventHandlers before any test fires it.
   await Promise.resolve();
   await Promise.resolve();
+  startupInvokes = mockInvoke.mock.calls.map((call) => call[0]);
 });
 
 beforeEach(() => {
@@ -252,6 +254,12 @@ async function loginAndReachAuthOk(
   emitTauriEvent("ws-state", "open");
   emitTauriEvent("ws-message", JSON.stringify({ type: "auth_ok", payload: authOkPayload }));
 }
+
+describe("main.ts startup", () => {
+  it("tells the native host once that the first page rendered", () => {
+    expect(startupInvokes.filter((cmd) => cmd === "frontend_ready")).toHaveLength(1);
+  });
+});
 
 describe("main.ts tray status-change listener (OC-0037)", () => {
   it("persists a tray-selected status through saveUserStatus, not just the wire", async () => {
