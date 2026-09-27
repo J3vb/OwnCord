@@ -92,7 +92,7 @@ const CANARIES: readonly Canary[] = [
 
 describe("custom lint-rule canaries (ARCH-06)", () => {
   for (const canary of CANARIES) {
-    it(`${canary.rule} is enabled and fires at ${canary.filePath}`, async () => {
+    it(`${canary.rule} is enabled at ${canary.filePath} and fires on its canary shape`, async () => {
       // Scope check: a rule that a refactor scoped away is disabled here, and
       // an inert rule is exactly the failure this canary exists to catch.
       const config = await eslint.calculateConfigForFile(path.join(clientRoot, canary.filePath));
