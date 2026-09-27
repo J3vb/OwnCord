@@ -23,25 +23,3 @@
   color: var(--text-micro);
   flex-shrink: 0;
 }
-
-/* Entry point to the admin panel's audit log. Deliberately quieter than the
-   Invite button beside it: it leaves the app for the browser. */
-.sidebar-audit-btn {
-  margin-left: 6px;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  border: 1px solid var(--border-strong, var(--border));
-  color: var(--text-muted);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    color var(--transition-fast),
-    border-color var(--transition-fast);
-  flex-shrink: 0;
-}
-.sidebar-audit-btn:hover {
-  color: var(--text-normal);
-  border-color: var(--accent);
-}
