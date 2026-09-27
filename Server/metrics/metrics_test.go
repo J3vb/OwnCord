@@ -27,6 +27,17 @@ func TestHistogram_QuantilesAndMax(t *testing.T) {
 	}
 }
 
+// A quantile never reads above the exact max, even when the max sits below
+// its bucket's upper bound.
+func TestHistogram_QuantilesCappedAtMax(t *testing.T) {
+	var h Histogram
+	h.Observe(3.1) // bucket bound 5
+	s := h.Snapshot()
+	if s.P50 != 3.1 || s.P95 != 3.1 || s.P99 != 3.1 || s.Max != 3.1 {
+		t.Fatalf("p50/p95/p99/max = %v/%v/%v/%v, want 3.1 for all", s.P50, s.P95, s.P99, s.Max)
+	}
+}
+
 func TestHistogram_EmptyIsZero(t *testing.T) {
 	var h Histogram
 	if got := h.Snapshot(); got.Count != 0 || got.Max != 0 {

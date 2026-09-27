@@ -21,8 +21,8 @@ import (
 var latencyBoundsMs = [...]float64{0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000}
 
 // Summary is a read-side snapshot of a Histogram. P50/P95/P99 are the upper
-// bound of the bucket the quantile falls into — a coarse but operator-usable
-// estimate from a fixed-bucket histogram; Max is exact.
+// bound of the bucket the quantile falls into, capped at Max — a coarse but
+// operator-usable estimate from a fixed-bucket histogram; Max is exact.
 type Summary struct {
 	Count uint64  `json:"count"`
 	P50   float64 `json:"p50"`
@@ -73,15 +73,16 @@ func (h *Histogram) Snapshot() Summary {
 	}
 }
 
-// quantile returns the upper bound of the bucket holding the q-quantile. When
-// the quantile lands in the +Inf bucket it falls back to the exact max.
+// quantile returns the upper bound of the bucket holding the q-quantile,
+// capped at the exact max so no quantile reads above max. When the quantile
+// lands in the +Inf bucket it is the exact max.
 func (h *Histogram) quantile(total uint64, q float64) float64 {
 	target := uint64(math.Ceil(float64(total) * q))
 	var cumulative uint64
 	for i := range latencyBoundsMs {
 		cumulative += h.buckets[i].Load()
 		if cumulative >= target {
-			return latencyBoundsMs[i]
+			return min(latencyBoundsMs[i], float64(h.max.Load())/1000)
 		}
 	}
 	return float64(h.max.Load()) / 1000

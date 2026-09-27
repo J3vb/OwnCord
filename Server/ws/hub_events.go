@@ -166,8 +166,8 @@ func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
 	for _, id := range ids {
 		set[id] = struct{}{}
 	}
-	start := time.Now()
 	h.seqMu.Lock()
+	start := time.Now()
 	defer h.seqMu.Unlock()
 	defer h.observeSeqMuHold(start)
 	h.purgedMessages = set
@@ -204,8 +204,8 @@ func (h *Hub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
 			return fmt.Errorf("purge replay: flush: %w", err)
 		}
 	}
-	start := time.Now()
 	h.seqMu.Lock()
+	start := time.Now()
 	defer h.seqMu.Unlock()
 	defer h.observeSeqMuHold(start)
 	if h.purgedUsers == nil {

@@ -564,8 +564,8 @@ func (h *Hub) bumpVisibilityWatermark() {
 // a not-yet-registered client. Do not call this while already holding
 // seqMu — nothing in the hub's own broadcast/purge/reconnect paths does.
 func (h *Hub) MarkVisibilityChanged() {
-	start := time.Now()
 	h.seqMu.Lock()
+	start := time.Now()
 	defer h.seqMu.Unlock()
 	defer h.observeSeqMuHold(start)
 	h.bumpVisibilityWatermark()

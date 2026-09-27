@@ -429,8 +429,8 @@ func (h *Hub) reconnectRegister(
 	replaySource string, persistedTail [][]byte, maxPersistedSeq uint64,
 ) ([][]byte, bool) {
 	var events [][]byte
-	start := time.Now()
 	h.seqMu.Lock()
+	start := time.Now()
 	switch replaySource {
 	case "buffer":
 		fresh := h.ReplayBuffer().EventsSinceFilteredContent(lastSeq, allowedChannelIDs, nsfwReadableChannelIDs)

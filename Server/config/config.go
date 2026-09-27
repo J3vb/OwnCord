@@ -515,7 +515,10 @@ server:
   # pprof_enabled: false      # expose Go's pprof endpoints on a separate
   #                           # listener bound to 127.0.0.1:6060 only, for
   #                           # operator profiling. Off by default; never mounted
-  #                           # on the main router.
+  #                           # on the main router. In Docker that is the
+  #                           # container's own loopback: reach it with e.g.
+  #                           # docker run --rm --network container:<name>
+  #                           # curlimages/curl http://127.0.0.1:6060/debug/pprof/
   # browser_client_enabled: false  # host a browser client from this server.
   #                           # Owner opt-in, off by default. This build ships no
   #                           # browser assets, so turning it on hosts nothing yet.

@@ -41,8 +41,8 @@ func TestTopicSheds_CountedAboveTheTopicRateLimit(t *testing.T) {
 func TestSeqMuMaxHold_ReadsTheLongestHold(t *testing.T) {
 	h := newEmitTestHub()
 
-	start := time.Now()
 	h.seqMu.Lock()
+	start := time.Now()
 	time.Sleep(200 * time.Millisecond)
 	h.observeSeqMuHold(start)
 	h.seqMu.Unlock()
@@ -51,12 +51,32 @@ func TestSeqMuMaxHold_ReadsTheLongestHold(t *testing.T) {
 		t.Fatalf("SeqMuMaxHoldMs = %v, want >= 200", got)
 	}
 	// A shorter hold must not lower the max.
-	start = time.Now()
 	h.seqMu.Lock()
+	start = time.Now()
 	h.observeSeqMuHold(start)
 	h.seqMu.Unlock()
 	if got := h.SeqMuMaxHoldMs(); got < 200 {
 		t.Fatalf("SeqMuMaxHoldMs = %v after a short hold, want it to stay >= 200", got)
+	}
+}
+
+// Time spent waiting for seqMu is not a hold: a short critical section that
+// queued behind a long one must record only its own hold.
+func TestSeqMuMaxHold_ExcludesLockWait(t *testing.T) {
+	h := newEmitTestHub()
+
+	h.seqMu.Lock()
+	done := make(chan struct{})
+	go func() {
+		h.MarkVisibilityChanged()
+		close(done)
+	}()
+	time.Sleep(150 * time.Millisecond)
+	h.seqMu.Unlock()
+	<-done
+
+	if got := h.SeqMuMaxHoldMs(); got >= 100 {
+		t.Fatalf("SeqMuMaxHoldMs = %v after a 150 ms wait and a near-zero hold, want < 100", got)
 	}
 }
 

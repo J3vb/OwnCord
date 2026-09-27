@@ -1142,12 +1142,12 @@ have chosen the third stage as your normal state.
   "ws_dispatch_lag_ms": { "count": 1204, "p50": 0.5, "p95": 2, "p99": 10, "max": 90 },
   "chat_send_ack_ms": { "count": 340, "p50": 2, "p95": 8, "p99": 25, "max": 60 },
   "voice_join_ms": {
-    "precheck": { "count": 12, "p50": 1, "p95": 2, "p99": 2, "max": 1.4 },
-    "leave": { "count": 12, "p50": 0.5, "p95": 5, "p99": 5, "max": 3.1 },
-    "persist": { "count": 12, "p50": 2, "p95": 5, "p99": 5, "max": 4.2 },
-    "token": { "count": 12, "p50": 0.5, "p95": 1, "p99": 1, "max": 0.8 },
-    "complete": { "count": 12, "p50": 2, "p95": 5, "p99": 5, "max": 4.9 },
-    "total": { "count": 12, "p50": 5, "p95": 20, "p99": 20, "max": 12.6 }
+    "precheck": { "count": 12, "p50": 1, "p95": 1.4, "p99": 1.4, "max": 1.4 },
+    "leave": { "count": 12, "p50": 0.5, "p95": 3.1, "p99": 3.1, "max": 3.1 },
+    "persist": { "count": 12, "p50": 2, "p95": 4.2, "p99": 4.2, "max": 4.2 },
+    "token": { "count": 12, "p50": 0.5, "p95": 0.8, "p99": 0.8, "max": 0.8 },
+    "complete": { "count": 12, "p50": 2, "p95": 4.9, "p99": 4.9, "max": 4.9 },
+    "total": { "count": 12, "p50": 5, "p95": 10, "p99": 12.6, "max": 12.6 }
   },
   "hub_broadcast_queue_depth": 0,
   "hub_seqmu_max_hold_ms": 12,

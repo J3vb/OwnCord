@@ -2931,12 +2931,12 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
   "ws_dispatch_lag_ms": { "count": 1204, "p50": 0.5, "p95": 2, "p99": 10, "max": 90 },
   "chat_send_ack_ms": { "count": 340, "p50": 2, "p95": 8, "p99": 25, "max": 60 },
   "voice_join_ms": {
-    "precheck": { "count": 12, "p50": 1, "p95": 2, "p99": 2, "max": 1.4 },
-    "leave": { "count": 12, "p50": 0.5, "p95": 5, "p99": 5, "max": 3.1 },
-    "persist": { "count": 12, "p50": 2, "p95": 5, "p99": 5, "max": 4.2 },
-    "token": { "count": 12, "p50": 0.5, "p95": 1, "p99": 1, "max": 0.8 },
-    "complete": { "count": 12, "p50": 2, "p95": 5, "p99": 5, "max": 4.9 },
-    "total": { "count": 12, "p50": 5, "p95": 20, "p99": 20, "max": 12.6 }
+    "precheck": { "count": 12, "p50": 1, "p95": 1.4, "p99": 1.4, "max": 1.4 },
+    "leave": { "count": 12, "p50": 0.5, "p95": 3.1, "p99": 3.1, "max": 3.1 },
+    "persist": { "count": 12, "p50": 2, "p95": 4.2, "p99": 4.2, "max": 4.2 },
+    "token": { "count": 12, "p50": 0.5, "p95": 0.8, "p99": 0.8, "max": 0.8 },
+    "complete": { "count": 12, "p50": 2, "p95": 4.9, "p99": 4.9, "max": 4.9 },
+    "total": { "count": 12, "p50": 5, "p95": 10, "p99": 12.6, "max": 12.6 }
   },
   "hub_broadcast_queue_depth": 0,
   "hub_seqmu_max_hold_ms": 12,
@@ -2996,9 +2996,9 @@ The distribution objects (`ws_broadcast_ms`, `ws_dispatch_lag_ms`,
 `hub_seqmu_max_hold_ms`) are the shipped, in-process metrics surface: they
 exist in **every** build, unlike the OpenTelemetry instruments below, which
 compile only with `-tags otel`. Each distribution reports `p50`, `p95`, `p99`
-(the upper bound of the fixed bucket the quantile falls into — a coarse but
-comparable estimate; buckets are 0.5 ms through 5 s, anything larger is exact
-max), `max` (exact) and `count`. `ws_broadcast_ms` is enqueue→fanout-done;
+(the upper bound of the fixed bucket the quantile falls into, capped at `max` —
+a coarse but comparable estimate; buckets are 0.5 ms through 5 s, anything
+larger is exact max), `max` (exact) and `count`. `ws_broadcast_ms` is enqueue→fanout-done;
 `ws_dispatch_lag_ms` is enqueue→dispatch-start, the direct signal for a
 contended dispatch loop; `chat_send_ack_ms` is a `chat_send` frame's arrival
 to its `chat_send_ok` being queued. `voice_join_ms` holds one such

@@ -361,8 +361,8 @@ func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 // window would silently lose the overtaken events. The high queue remains for
 // unsequenced targeted messages only.
 func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
-	start := time.Now()
 	h.seqMu.Lock()
+	start := time.Now()
 	defer h.seqMu.Unlock()
 	defer h.observeSeqMuHold(start)
 
@@ -400,8 +400,8 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	// (below) so a slow logging sink never extends the critical section that
 	// serializes every broadcast.
 	seq, delivered, channelSend := func() (seq uint64, delivered int, channelSend bool) {
-		start := time.Now()
 		h.seqMu.Lock()
+		start := time.Now()
 		defer h.seqMu.Unlock()
 		defer h.observeSeqMuHold(start)
 

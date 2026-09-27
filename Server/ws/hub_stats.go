@@ -77,13 +77,14 @@ type VoiceJoinPhases struct {
 // observeSeqMuHold records how long the current seqMu critical section was
 // held, in milliseconds. Call the sequence:
 //
-//	start := time.Now()
 //	h.seqMu.Lock()
+//	start := time.Now()
 //	defer h.seqMu.Unlock()
 //	defer h.observeSeqMuHold(start)
 //
-// Defers are LIFO, so observeSeqMuHold runs BEFORE the unlock — the hold is
-// measured while it is still held. Every seqMu critical section — seq
+// start is taken after Lock returns, so time spent waiting for the lock is
+// not counted as a hold. Defers are LIFO, so observeSeqMuHold runs BEFORE the
+// unlock — the hold is measured while it is still held. Every seqMu critical section — seq
 // allocation and fan-out, replay purge, visibility bumps, reconnect
 // registration — feeds hub_seqmu_max_hold_ms through this. It is a deferred
 // method call, not a returned closure, so the hot path allocates nothing.
