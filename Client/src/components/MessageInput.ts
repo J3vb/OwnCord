@@ -53,7 +53,12 @@ export interface MessageInputOptions {
 export interface ComposerDraft {
   readonly content: string;
   readonly replyTo: { readonly messageId: number; readonly username: string } | null;
-  readonly attachments: readonly { readonly id: string; readonly filename: string }[];
+  readonly attachments: readonly {
+    readonly id: string;
+    readonly filename: string;
+    /** Date.now() when the upload settled; ages the chip on restore. */
+    readonly uploadedAt: number;
+  }[];
 }
 
 export type MessageInputComponent = MountableComponent & {
@@ -183,6 +188,13 @@ const MAX_ATTACHMENTS = 10;
 // visibly instead of producing an optimistic row whose retry fails identically.
 // Counted in code points, not UTF-16 units -- see the guard in handleSend.
 const MAX_MESSAGE_LEN = 4000;
+// The server's maintenance sweep deletes unlinked attachments about an hour
+// after upload (Server/internal/app/maintenance.go), and a send silently skips
+// an id it no longer knows. A restored draft drops chips past this age, with
+// a margin under the sweep, rather than posting the message without the file.
+const DRAFT_ATTACHMENT_TTL_MS = 50 * 60 * 1000;
+/** Makes each composer's refusal-line id unique for aria-describedby. */
+let nextComposerId = 0;
 const ALLOWED_TYPES = [
   "image/",
   "video/",
@@ -241,6 +253,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
    *  sends rather than vanishing after a few seconds (A11Y-05), so it is one
    *  reused node, not a fresh one per call. */
   let uploadErrorEl: HTMLDivElement | null = null;
+  const uploadErrorId = `composer-refusal-${++nextComposerId}`;
   /** Set by mount() when file uploads are wired; backs openFilePicker(). */
   let openPicker: (() => void) | null = null;
   let mentionPopup: MentionAutocompleteComponent | null = null;
@@ -261,6 +274,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     filename: string;
     readonly previewEl: HTMLDivElement;
     owner?: Disposable;
+    uploadedAt?: number;
   }[] = [];
   /** References to picker close functions, set by mount() for destroy() to call. */
   let cleanupPickers: (() => void) | null = null;
@@ -487,9 +501,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "div",
       {
         class: "attachment-upload-error",
+        id: uploadErrorId,
       },
       message,
     );
+    textarea?.setAttribute("aria-describedby", uploadErrorId);
     // app.css only shows the preview bar via .visible -- without this an
     // error with no attachments already queued renders into a display:none
     // container and is never seen.
@@ -503,6 +519,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (uploadErrorEl === null) return;
     uploadErrorEl.remove();
     uploadErrorEl = null;
+    textarea?.removeAttribute("aria-describedby");
     if (
       attachmentPreviewBar !== null &&
       pendingAttachments.length === 0 &&
@@ -547,12 +564,18 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   function setDisabled(reason: string | null): void {
+    if (reason !== disabledReason && uploadErrorEl?.textContent === disabledReason) {
+      clearUploadError();
+    }
     disabledReason = reason;
     applyDisabledState();
   }
 
   function handleSend(): void {
-    if (disabledReason !== null) return;
+    if (disabledReason !== null) {
+      showUploadError(disabledReason);
+      return;
+    }
     if (textarea === null) return;
     const content = textarea.value.trim();
     const hasAttachments = pendingAttachments.length > 0;
@@ -637,6 +660,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
   async function handlePasteFile(file: File): Promise<void> {
     if (options.onUploadFile === undefined || attachmentPreviewBar === null) return;
+    if (disabledReason !== null) return;
 
     // Attachments queued during an edit are neither sent (the edit branch
     // never reads pendingAttachments) nor cleared -- they'd silently ride
@@ -728,6 +752,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       filename: file.name,
       previewEl: item,
       owner: uploadOwner as Disposable | undefined,
+      uploadedAt: undefined as number | undefined,
     };
     pendingAttachments.push(pending);
 
@@ -739,6 +764,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         pending.id = result.id;
         pending.filename = result.filename;
         pending.owner = undefined;
+        pending.uploadedAt = Date.now();
         item.classList.remove("uploading");
         spinner.remove();
       }
@@ -938,7 +964,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
             clearReply();
           }
         }
-        if (e.key === "ArrowUp" && textarea !== null && textarea.value.length === 0) {
+        if (
+          e.key === "ArrowUp" &&
+          disabledReason === null &&
+          textarea !== null &&
+          textarea.value.length === 0
+        ) {
           root?.dispatchEvent(new CustomEvent("edit-last-message", { bubbles: true }));
         }
       },
@@ -1182,12 +1213,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
    *  carry their server id; an in-flight upload is not carried (SRV-05 aborts
    *  it on unmount). */
   function getDraft(): ComposerDraft {
+    // An in-progress edit is dropped, not stashed: restored into a composer
+    // outside edit mode, its text would send as a duplicate new message.
+    if (state.editing !== null) return { content: "", replyTo: null, attachments: [] };
     return {
       content: textarea?.value ?? "",
       replyTo: state.replyTo,
-      attachments: pendingAttachments
-        .filter((a) => !a.id.startsWith("pending-"))
-        .map((a) => ({ id: a.id, filename: a.filename })),
+      attachments: pendingAttachments.flatMap((a) =>
+        a.uploadedAt === undefined
+          ? []
+          : [{ id: a.id, filename: a.filename, uploadedAt: a.uploadedAt }],
+      ),
     };
   }
 
@@ -1200,12 +1236,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       autoResize();
     }
     if (draft.replyTo !== null) setReplyTo(draft.replyTo.messageId, draft.replyTo.username);
-    for (const att of draft.attachments) addSettledAttachment(att);
+    const now = Date.now();
+    const live = draft.attachments.filter((a) => now - a.uploadedAt < DRAFT_ATTACHMENT_TTL_MS);
+    for (const att of live) addSettledAttachment(att);
+    if (live.length < draft.attachments.length) {
+      showUploadError(messagingText("error.draftAttachmentExpired"));
+    }
   }
 
   /** Render an already-uploaded attachment as a ready chip (no spinner), so a
    *  restored draft can send its ids without re-uploading. */
-  function addSettledAttachment(att: { id: string; filename: string }): void {
+  function addSettledAttachment(att: ComposerDraft["attachments"][number]): void {
     if (attachmentPreviewBar === null) return;
     if (pendingAttachments.some((a) => a.id === att.id)) return;
     const item = createElement("div", { class: "attachment-preview-item" });
@@ -1230,7 +1271,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     item.appendChild(removeBtn);
     attachmentPreviewBar.classList.add("visible");
     attachmentPreviewBar.appendChild(item);
-    pendingAttachments.push({ id: att.id, filename: att.filename, previewEl: item });
+    pendingAttachments.push({
+      id: att.id,
+      filename: att.filename,
+      previewEl: item,
+      uploadedAt: att.uploadedAt,
+    });
   }
 
   return {

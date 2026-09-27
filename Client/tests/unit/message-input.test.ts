@@ -623,7 +623,57 @@ describe("MessageInput", () => {
       const draft = comp.getDraft();
       expect(draft.content).toBe("half-written");
       expect(draft.replyTo).toEqual({ messageId: 7, username: "alice" });
-      expect(draft.attachments).toEqual([{ id: "srv-1", filename: "a.png" }]);
+      expect(draft.attachments).toEqual([
+        { id: "srv-1", filename: "a.png", uploadedAt: expect.any(Number) },
+      ]);
+      comp.destroy?.();
+    });
+
+    it("drops an in-progress edit instead of stashing it as a new-message draft", () => {
+      const opts = makeOptions();
+      const comp = createMessageInput(opts);
+      comp.mount(container);
+      comp.startEdit(5, "original text");
+
+      const draft = comp.getDraft();
+      expect(draft).toEqual({ content: "", replyTo: null, attachments: [] });
+
+      // Restored into a fresh composer, Enter must not repost the edit text.
+      comp.destroy?.();
+      const next = createMessageInput(opts);
+      next.mount(container);
+      next.restoreDraft(draft);
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(opts.onSend).not.toHaveBeenCalled();
+      next.destroy?.();
+    });
+
+    it("drops restored attachments past the server's unlinked-upload sweep, with one notice", () => {
+      const opts = makeOptions();
+      const comp = createMessageInput(opts);
+      comp.mount(container);
+      const now = Date.now();
+
+      comp.restoreDraft({
+        content: "with files",
+        replyTo: null,
+        attachments: [
+          { id: "old-1", filename: "old1.pdf", uploadedAt: now - 51 * 60 * 1000 },
+          { id: "old-2", filename: "old2.pdf", uploadedAt: now - 2 * 60 * 60 * 1000 },
+          { id: "fresh", filename: "fresh.pdf", uploadedAt: now - 10 * 60 * 1000 },
+        ],
+      });
+
+      const chips = container.querySelectorAll(".attachment-preview-item");
+      expect(chips.length).toBe(1);
+      expect(chips[0]!.textContent).toContain("fresh.pdf");
+      const notices = container.querySelectorAll(".attachment-upload-error");
+      expect(notices.length).toBe(1);
+      expect(notices[0]!.textContent).toMatch(/expired/i);
+
+      (container.querySelector(".send-btn") as HTMLButtonElement).click();
+      expect(opts.onSend).toHaveBeenCalledWith("with files", null, ["fresh"]);
       comp.destroy?.();
     });
 
@@ -634,7 +684,7 @@ describe("MessageInput", () => {
       comp.restoreDraft({
         content: "draft text",
         replyTo: { messageId: 9, username: "bob" },
-        attachments: [{ id: "srv-9", filename: "doc.pdf" }],
+        attachments: [{ id: "srv-9", filename: "doc.pdf", uploadedAt: Date.now() }],
       });
 
       const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
@@ -698,6 +748,73 @@ describe("MessageInput", () => {
       comp.setDisabled(null);
       (container.querySelector(".send-btn") as HTMLButtonElement).click();
       expect(opts.onSend).toHaveBeenCalledWith("queued", null, []);
+      comp.destroy?.();
+    });
+
+    it("shows the reason when Enter is pressed mid-sentence during reconnect", () => {
+      const opts = makeOptions();
+      const comp = createMessageInput(opts);
+      comp.mount(container);
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.value = "mid-sentence";
+      comp.setDisabled("Reconnecting…");
+
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      expect(opts.onSend).not.toHaveBeenCalled();
+      const reason = container.querySelector(".attachment-upload-error") as HTMLElement;
+      expect(reason.textContent).toBe("Reconnecting…");
+      expect(reason.closest(".attachment-preview-bar")!.classList.contains("visible")).toBe(true);
+      expect(textarea.getAttribute("aria-describedby")).toBe(reason.id);
+      expect(textarea.value).toBe("mid-sentence");
+
+      // Reconnected: the stale reason goes away and Enter sends.
+      comp.setDisabled(null);
+      expect(container.querySelector(".attachment-upload-error")).toBeNull();
+      expect(textarea.hasAttribute("aria-describedby")).toBe(false);
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(opts.onSend).toHaveBeenCalledWith("mid-sentence", null, []);
+      comp.destroy?.();
+    });
+
+    it("refuses a pasted file while gated", async () => {
+      const onUploadFile = vi.fn(async () => ({ id: "p1", url: "http://x", filename: "p.png" }));
+      const comp = createMessageInput(makeOptions({ onUploadFile }));
+      comp.mount(container);
+      comp.setDisabled("Not connected");
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      const pasteEvent = new Event("paste", { bubbles: true });
+      Object.defineProperty(pasteEvent, "clipboardData", {
+        value: {
+          items: [
+            {
+              kind: "file",
+              type: "image/png",
+              getAsFile: () => new File(["img"], "p.png", { type: "image/png" }),
+            },
+          ],
+        },
+      });
+
+      textarea.dispatchEvent(pasteEvent);
+      await Promise.resolve();
+
+      expect(onUploadFile).not.toHaveBeenCalled();
+      expect(container.querySelectorAll(".attachment-preview-item").length).toBe(0);
+      comp.destroy?.();
+    });
+
+    it("does not enter edit mode on ArrowUp while gated", () => {
+      const comp = createMessageInput(makeOptions());
+      comp.mount(container);
+      comp.setDisabled("Slow mode — 5s");
+      const listener = vi.fn();
+      container.addEventListener("edit-last-message", listener);
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+
+      expect(listener).not.toHaveBeenCalled();
       comp.destroy?.();
     });
   });
