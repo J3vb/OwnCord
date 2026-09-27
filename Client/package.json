@@ -15,6 +15,7 @@
     "build:desktop": "tsc -p tsconfig.build.json && vite build --config vite.config.desktop.ts",
     "build:budget": "vite build --config vite.config.desktop.ts --manifest --outDir dist-budget --emptyOutDir",
     "check:budgets": "node scripts/bundle-budget.mjs",
+    "check:admin-types": "node scripts/check-admin-types.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",

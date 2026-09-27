@@ -22,6 +22,8 @@ How code is written in OwnCord: formatting, language rules, naming, error handli
 
 **Compiler (`Client/tsconfig.json`).** Strictness flags: `strict: true`, `noUncheckedIndexedAccess`, `noImplicitOverride`. `noUnusedLocals`/`noUnusedParameters`, `noImplicitReturns` and `exactOptionalPropertyTypes` are off; unused names are ESLint's job. Other options: `esModuleInterop`, `forceConsistentCasingInFileNames`, `isolatedModules`, `resolveJsonModule`, `skipLibCheck`, `noEmit`; target/lib `ES2023`, `module: "ESNext"`, `moduleResolution: "bundler"`. `types: ["node"]` lets unit tests use Node globals; `tsconfig.build.json` resets `types` to `[]` so app code cannot. `tests/e2e` has its own `tsconfig.e2e.json` (`npm run typecheck:e2e`).
 
+The admin panel (`Server/admin/static/js`, Server-owned) is checked only by `npm run check:admin-types`, a non-strict `checkJs` program (`Client/tsconfig.admin.json`) driven by `Client/scripts/check-admin-types.mjs` against `Client/scripts/admin-types-baseline.json`. The baseline is a shrink-only ratchet keyed by file + diagnostic code + normalised message; a new error fails, and a fixed one must be removed with `--update` before the check passes again. TS2304/TS2552 (undefined name) are pinned at zero.
+
 **ESLint** (`Client/eslint.config.js`: `@eslint/js` `recommended` + `typescript-eslint` `recommendedTypeChecked`, plus):
 
 - `@typescript-eslint/no-floating-promises`: error. A promise must be awaited, handled with `.catch`, or explicitly `void`-ed (the default `ignoreVoid` accepts `void p()`).

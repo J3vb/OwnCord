@@ -546,6 +546,13 @@ jobs:
         # playwright configs so type rot cannot hide there.
         run: npx tsc -p tsconfig.e2e.json --noEmit
 
+      - name: Admin panel type check (ARCH-10)
+        # The panel (Server/admin/static/js) is Server-owned, so no tsconfig
+        # under Client/ covers it. This is a non-strict checkJs program with a
+        # shrink-only baseline: a new error fails, a fixed one must be removed
+        # from the baseline. See scripts/check-admin-types.mjs.
+        run: npm run check:admin-types
+
       - name: ESLint (type-aware rules)
         run: npx eslint src/
 

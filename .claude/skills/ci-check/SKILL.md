@@ -85,6 +85,7 @@ npm test
 npm run typecheck
 npm run typecheck:build   # tsconfig.build.json — the shipped app graph
 npm run typecheck:e2e     # tsconfig.e2e.json — tests/e2e, EXCLUDED from the main tsconfig
+npm run check:admin-types # Server/admin/static/js checkJs, shrink-only baseline
 npm run lint
 npm run build:budget && npm run check:budgets   # B7-7 gzip budgets; see bundle-budgets.json
 ```
