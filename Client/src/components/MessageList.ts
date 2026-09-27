@@ -17,6 +17,7 @@ import {
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { safetyStore } from "../features/safety/store";
+import { uiStore } from "@stores/ui.store";
 import { unobserveMedia } from "@lib/media-visibility";
 
 const log = createLogger("message-list");
@@ -1103,6 +1104,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     unsubscribers.push(
       safetyStore.subscribeSelector(
         (s) => s.timeout,
+        () => {
+          renderAll();
+        },
+      ),
+    );
+
+    // The delete action is disabled while the socket is down (CLI-08).
+    unsubscribers.push(
+      uiStore.subscribeSelector(
+        (s) => s.connectionStatus,
         () => {
           renderAll();
         },
