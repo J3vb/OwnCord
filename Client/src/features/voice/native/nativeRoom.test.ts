@@ -420,6 +420,53 @@ describe("NativeRoom room surface", () => {
     expect(disconnected).toHaveBeenCalledTimes(1);
   });
 
+  it("OC-0473: degrades on a remote decrypt failure that outlasts the grace window", async () => {
+    vi.useFakeTimers();
+    try {
+      const room = createNativeRoom(audio);
+      const encryptionError = vi.fn();
+      room.on("encryptionError", encryptionError);
+      await room.connect("u", "t");
+      const status = (identity: string, encrypted: boolean): void =>
+        emit({ session: 1, event: { type: "encryptionStatus", identity, encrypted } });
+      emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
+      emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+
+      // A rotation race: the peer's frames decrypt again inside the window.
+      status("user-2", false);
+      vi.advanceTimersByTime(2000);
+      status("user-2", true);
+      vi.advanceTimersByTime(5000);
+      expect(encryptionError).not.toHaveBeenCalled();
+
+      // A peer who leaves while failing is not reported.
+      status("user-3", false);
+      emit({ session: 1, event: { type: "participantDisconnected", identity: "user-3" } });
+      vi.advanceTimersByTime(5000);
+      expect(encryptionError).not.toHaveBeenCalled();
+
+      // The backend reports a transition once; a failure that persists degrades.
+      status("user-2", false);
+      vi.advanceTimersByTime(2999);
+      expect(encryptionError).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(encryptionError).toHaveBeenCalledTimes(1);
+      const [err, participant] = encryptionError.mock.calls[0]!;
+      expect(participant).toBe(room.remoteParticipants.get("user-2"));
+      // Not "InvalidKey:" — handleEncryptionError's own streak logic would
+      // swallow a single event as the start of a new streak.
+      expect((err as Error).message.startsWith("InvalidKey:")).toBe(false);
+
+      // Leaving the room drops a pending timer.
+      status("user-2", false);
+      await room.disconnect();
+      vi.advanceTimersByTime(5000);
+      expect(encryptionError).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("answers the Room calls the shared modules make without a browser", async () => {
     const room = createNativeRoom(audio);
     await expect(room.setE2EEEnabled(true)).resolves.toBeUndefined();
