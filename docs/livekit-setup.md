@@ -105,7 +105,7 @@ voice:
 | `livekit_url`           | LiveKit WebSocket URL                                                                                | `ws://localhost:7880`                  |
 | `livekit_binary`        | Path to `livekit-server` binary. Empty + auto-download off = assume externally managed               | `""`                                   |
 | `auto_download_livekit` | Download and manage a pinned `livekit-server` release automatically when `livekit_binary` is empty   | `true` in generated config             |
-| `livekit_version`       | Override the pinned auto-download release (e.g. `"1.13.5"`)                                          | `""` (built-in pin)                    |
+| `livekit_version`       | Override the pinned auto-download release (e.g. `"1.13.7"`)                                          | `""` (built-in pin)                    |
 | `node_ip`               | Public IP for WebRTC ICE candidates (remote users behind NAT)                                        | `""` (auto-detect)                     |
 | `advertise_internal_ip` | Also advertise LAN IPs — enable on dual-homed servers (LAN + public IP) so local clients can connect | `false`                                |
 | `quality`               | Default voice quality preset                                                                         | `"medium"`                             |

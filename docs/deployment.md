@@ -200,7 +200,7 @@ stopped.
 
 ### LiveKit in Docker
 
-LiveKit runs as its own container (`livekit/livekit-server:v1.13.5`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset and `voice.auto_download_livekit` false. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.
+LiveKit runs as its own container (`livekit/livekit-server:v1.13.7`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset and `voice.auto_download_livekit` false. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.
 
 ### Linux desktop voice
 

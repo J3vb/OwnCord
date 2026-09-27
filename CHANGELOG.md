@@ -104,6 +104,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Under the hood
 
+- **The pinned LiveKit SFU moves from 1.13.5 to 1.13.7**, as one bump in all three places that named the old release: the compose image an operator runs (`Server/docker-compose.yml`), the release the server auto-downloads (`ws.DefaultLiveKitVersion`) and the e2e/load harness that mirrors it. Patch release — no configuration change.
 - Release notes are now written for users. The tag's `CHANGELOG.md` section
   opens with a one-paragraph intro, then Highlights / Added / Changed / Fixed /
   Known issues, with internal changes in a short Under-the-hood list. The
