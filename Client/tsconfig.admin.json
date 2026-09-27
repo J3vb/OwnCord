@@ -3,7 +3,7 @@
   // and therefore absent from every other tsconfig here. It is compiled with a
   // deliberately loose, non-strict program: turning strict on today would bury
   // the signal in ~200 DOM-typing errors. `checkJs` catches the real class —
-  // an undefined global (TS2304, pinned at zero) — while the existing DOM
+  // an undefined global (TS2304/TS2552, pinned at zero) — while the existing DOM
   // errors are held flat by scripts/admin-types-baseline.json's shrink-only
   // ratchet. Driven by scripts/check-admin-types.mjs, not a bare `tsc -p`.
   //
