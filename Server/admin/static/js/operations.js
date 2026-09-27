@@ -182,7 +182,7 @@ async function renderDashboard(){
   // loaded certificate (not with TLS off or ACME before its first handshake).
   // Rarely needed, so it waits behind a disclosure.
   if(s.certificate_fingerprint){
-    html+='<details class="section-card disclose" id="certFingerprint"><summary class="section-card-header">'+I.chevronRight+'<h3>Certificate fingerprint</h3><span class="checks-sum">Show</span></summary><div class="section-card-body"><p class="card-note">Users compare this against the prompt their client shows before they accept the connection. Publish it out of band — another platform, a call. A mismatch is the one warning that means an interception attempt.</p><code class="hash">'+esc(s.certificate_fingerprint)+'</code></div></details>';
+    html+='<details class="section-card disclose" id="certFingerprintCard"><summary class="section-card-header">'+I.chevronRight+'<h3>Certificate fingerprint</h3><span class="checks-sum">Show</span></summary><div class="section-card-body"><p class="card-note">Users compare this against the prompt their client shows before they accept the connection. Publish it out of band — another platform, a call. A mismatch is the one warning that means an interception attempt.</p><code class="hash">'+esc(s.certificate_fingerprint)+'</code></div></details>';
   }
   // Recent audit — VIEW_AUDIT_LOG only.
   if(can(PERM.VIEW_AUDIT_LOG))try{
