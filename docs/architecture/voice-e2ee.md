@@ -136,7 +136,10 @@ and `tests/unit/platform/nativeVoice.suite.ts` pins the host contract.
 see Audio parity below), `native_voice_debug_info`. Room events
 arrive on one Tauri event, `native-voice`, tagged with the session id; the
 adapter maps them onto `RoomEvent`s (`Disconnected`, `ActiveSpeakersChanged`,
-`EncryptionError` for a non-`Ok` frame-cryptor state, participant join/leave).
+`EncryptionError` for a non-`Ok` frame-cryptor state — at once for the local
+identity, and for a remote peer only if no `Ok` follows within the web path's
+3 s decrypt grace, since the backend reports each transition once —
+participant join/leave).
 No audio `TrackSubscribed` is raised: there is no browser track. Capture and
 playout run in the Rust process on the session's own streams, with
 libwebrtc's APM (AEC/NS/AGC from the same preferences the web path uses) and

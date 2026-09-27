@@ -312,6 +312,15 @@ than 2.5 × 25 seconds without any frame from the server as a dead connection.
 
 Every 30 seconds, the server checks all clients. Any client with no activity (a message, or a Pong to the server's protocol Ping) for 90 seconds is forcibly disconnected. Normal chat activity also keeps the connection alive.
 
+### Client Silence Deadline
+
+The client treats any inbound frame (a `pong`, chat, presence) as proof that
+the socket still delivers. After 60 seconds with no inbound frame, it drops a
+half-open socket and reconnects. It does this only once a heartbeat ping has
+gone unanswered for at least 15 seconds. That rule keeps a minimised window,
+whose throttled heartbeat timer may not have sent a ping yet, from
+reconnecting for no reason.
+
 ---
 
 ## Reconnection with State Recovery
