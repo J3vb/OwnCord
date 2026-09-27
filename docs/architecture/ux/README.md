@@ -142,7 +142,7 @@ detail each; this is the index.
 | `voice_moved` / `voice_disconnected`                   | `voice.*` + `livekitSession`                                                                      | Follow a mod move by rejoining the new channel / tear down after a mod kick with an error toast naming the reason |
 | `voice_token` / `voice_e2ee_*`                         | `livekitSession.*`                                                                                | Drive the voice-join + securing indicators                                                                        |
 | `dm_channel_open` / `dm_channel_close`                 | `dm.*`                                                                                            | DM list add/remove                                                                                                |
-| `server_restart`                                       | none — the session is kept; the socket dropping after it leaves voice                             | Restart banner with countdown; reconnect into the same channel                                                    |
+| `server_restart`                                       | none — the session is kept; the socket dropping after it leaves voice                             | Restart banner with countdown; reconnect into the same channel and call (RT-12)                                   |
 | `error`                                                | `ui.setTransientError` (+ `clearAuth` on `BANNED`; `ui.setSessionReplaced` on `SESSION_REPLACED`) | Map the code → the reaction in §5                                                                                 |
 
 `call_incoming` / `call_declined` are deliberately _not_ routed through the
