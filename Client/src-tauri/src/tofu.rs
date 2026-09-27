@@ -13,7 +13,6 @@ use ring::digest::{digest, SHA256};
 use serde_json::Value;
 use std::sync::Arc;
 use tauri::{AppHandle, Runtime};
-use tauri_plugin_store::StoreExt;
 
 use crate::constants::CERTS_STORE;
 
@@ -355,8 +354,7 @@ pub(crate) fn load_stored_fingerprint<R: Runtime>(
     app: &AppHandle<R>,
     host: &str,
 ) -> Result<Option<String>, String> {
-    let store = app
-        .store(CERTS_STORE)
+    let store = crate::json_store::open(app, CERTS_STORE)
         .map_err(|e| format!("failed to open certs store: {e}"))?;
     Ok(store.get(host).and_then(|v| match v {
         Value::String(s) => Some(s),
