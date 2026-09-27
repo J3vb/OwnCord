@@ -39,5 +39,6 @@ export const dmCallText = defineCatalog("dmCall", {
   switchHint: "Joining leaves {channel}.",
   join: "Join call",
   switch: "Switch to this call",
+  watch: "Watch",
   speaking: "{name} is speaking",
 });

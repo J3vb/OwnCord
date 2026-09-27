@@ -576,3 +576,37 @@ test.describe("DM calls — call panel", () => {
     await expect(panel(page)).toBeVisible();
   });
 });
+
+test.describe("DM calls — video in the call panel", () => {
+  test("a stream in the DM's call opens its video area above the chat, with avatar tiles for everyone; collapsed it offers Watch", async ({
+    page,
+  }) => {
+    await boot(page);
+    await openDm(page);
+    await page.locator("[data-testid='call-btn']").click();
+    await emitWsMessage(page, inRoom(OTHER_USER_ID, { screenshare: true }));
+
+    const video = panel(page).locator("[data-testid='dcp-video']");
+    await expect(video).toBeVisible();
+    await expect(panel(page)).toHaveClass(/dm-call-panel--video/);
+    // Everyone in the call is a tile; the chat and composer stay usable.
+    await expect(video.locator(".video-cell--avatar")).toHaveCount(2);
+    await expect(video.locator(".video-cell--avatar .video-username")).toHaveText(["You", "Otto"]);
+    await expect(page.locator("[data-testid='messages-slot']")).toBeVisible();
+    await expect(page.locator("[data-testid='input-slot']")).toBeVisible();
+    expect(await findUnnamedControls(panel(page))).toEqual([]);
+
+    // Collapsed, a stream never reopens the panel on its own: Watch does.
+    await panel(page).locator("[data-testid='dcp-collapse']").click();
+    await expect(video).toBeHidden();
+    const watch = panel(page).locator("[data-testid='dcp-watch']");
+    await expect(watch).toBeVisible();
+    await watch.click();
+    await expect(video).toBeVisible();
+
+    // The stream ending takes the video area away again.
+    await emitWsMessage(page, inRoom(OTHER_USER_ID, { screenshare: false }));
+    await expect(video).toBeHidden();
+    await expect(panel(page).locator(".dcp-stage")).toBeVisible();
+  });
+});

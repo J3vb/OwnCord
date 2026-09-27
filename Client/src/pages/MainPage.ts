@@ -676,6 +676,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       slots: chatAreaResult.slots,
       videoGrid: chatAreaResult.videoGrid,
       getCurrentUserId,
+      // The DM call panel hosts the video of its own call (chat stays up).
+      panelHost: () => {
+        const panel = callPanel;
+        if (panel === null) return null;
+        return {
+          ownsCall: (channelId) => panel.ownsCall(channelId),
+          element: () => panel.videoElement(),
+          setActive: (active) => panel.setVideoActive(active),
+        };
+      },
     });
 
     // The composer of the channel on screen, else the header's menu button
@@ -953,10 +963,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           }
           ringCallees(channelId);
         },
+        onVideoHostChange: () => videoModeCtrl?.checkVideoMode(),
+        videoGrid: chatAreaResult.videoGrid,
       });
+      // Published before mount: mounting reports whether it can host video,
+      // and the video controller reads the panel through callPanel.
+      callPanel = panel;
       panel.mount(chatAreaResult.callPanelSlot);
       children.push(panel);
-      callPanel = panel;
       panel.setOutgoing(outgoingCall?.current() ?? null);
       syncRingSurfaces();
     });
@@ -1250,7 +1264,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             // text, dm and announcement all mount a chat surface and must
             // dismiss it, not just "text" (a dm/announcement switch used to
             // leave the grid covering an unrelated channel's chat).
-            if (active.type !== "voice") {
+            // The DM that owns the current call is the exception: its call
+            // panel shows the video above the chat (its own update re-seats
+            // the grid through onVideoHostChange).
+            const ownsCall =
+              active.type === "dm" && voiceStore.getState().currentChannelId === active.id;
+            if (active.type !== "voice" && !ownsCall) {
               videoModeCtrl?.showChat();
             }
             // Close DM profile sidebar when switching channels

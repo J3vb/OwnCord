@@ -232,6 +232,14 @@ call" strip for a call you are not in, and the connected stage (collapsible to
 one row). Its controls are the voice widget's callbacks; the widget's call name
 links back to the DM, and the DM list shows a phone glyph on a DM with a live call.
 
+While the open DM is the current call's DM, the panel is the call's only video
+surface: `VideoModeController` moves the shared `VideoGrid` into the panel's
+stage as soon as any camera or screen share is on (remote ones too, unlike the
+guild-channel rule that only your own video opens the grid), the chat stays
+visible below, and everyone without a camera is an avatar tile. Collapsed, the
+panel never reopens on its own; its row offers Watch. Anywhere else the grid
+behaves as in guild voice.
+
 `call_incoming` / `call_declined` are page-scoped listeners in `MainPage.ts`,
 not dispatcher handlers (see [README §4](README.md)).
 
