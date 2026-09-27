@@ -4,11 +4,21 @@
  * The Rust log deleted itself at every 10 MB rollover (tauri-plugin-log's
  * default KeepOne), so a bundle exported right after a rotation had no
  * history. `rotation_strategy(KeepSome(2))` keeps the previous file, and the
- * support bundle now carries it.
+ * support bundle now carries it plus the app.json environment facts.
  *
  * The scenario seeds an oversized `owncord-client.log` before launch so the
  * plugin's first write rotates it, then exports the real support bundle to a
  * path the test chooses by answering the OS save dialog's IPC call.
+ *
+ * Not covered here: the "frontend not ready" watchdog line. Producing it needs
+ * the initial document's module script to fail before `frontend_ready` is
+ * sent, and neither route reaches that window — an elevated WebView2 ignores
+ * runtime browser-argument env overrides (they are baked into the test config
+ * at build time), and a CDP `context.route` can only be installed after
+ * Playwright attaches, by which point the app has already loaded and called
+ * `frontend_ready` (observed in CI: "[startup] frontend ready after 1434 ms").
+ * The watchdog and its exact wording are pinned by a Rust unit test
+ * (`diagnostics::tests::not_ready_warning_names_the_condition`) instead.
  */
 
 import { test, expect } from "@playwright/test";
@@ -96,10 +106,21 @@ test("a Rust log rollover keeps the previous file, and the bundle carries the na
 
         const zip = await readFile(destination);
         expect(zip.length).toBeGreaterThan(0);
-        // The zip is store-only: entry names appear verbatim in the bytes.
+        // The zip is store-only, so every entry's bytes (including the JSON
+        // documents) appear verbatim in the archive.
         const names = zip.toString("latin1");
         expect(names).toContain("logs/owncord-client.log");
-        expect(names).toContain("app.json");
+        // The Rust log the bundle now carries is the active file the plugin
+        // recreated after rotating the seeded one: its `[startup]` line is in
+        // the archive.
+        expect(names).toContain("[startup]");
+        // app.json carries the environment facts CLI-03 added. The server
+        // version is null in this export because the bundle makes no server
+        // call (decision 7), with the reason recorded beside it.
+        expect(names).toContain('"os"');
+        expect(names).toContain('"userAgent"');
+        expect(names).toContain('"serverVersion": null');
+        expect(names).toContain("bundle makes no server call");
       },
       info,
     );
