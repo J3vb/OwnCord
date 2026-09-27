@@ -73,33 +73,89 @@ async function downloadSupportBundle(){
    the newest backup and every maintenance job once a minute, and keeps one
    deduplicated warning per signal with hysteresis; this only renders what
    GET /attention reports. Unknown is a measurement the server could not take
-   and is never drawn as healthy. */
+   and is never drawn or counted as healthy.
+   The dashboard answers "is anything wrong?" first: one headline, a card per
+   active warning, and every signal in a disclosure that starts open only when
+   one is not healthy. The disclosures never touch the #section hash. */
 const ATTN_STATUS={ok:['badge-green','Healthy'],warning:['badge-yellow','Warning'],critical:['badge-red','Critical'],unknown:['badge-muted','Unknown']};
 function attnBadge(s){const b=ATTN_STATUS[s]||ATTN_STATUS.unknown;return'<span class="badge '+b[0]+'">'+b[1]+'</span>'}
+const ATTN_TIME=new Intl.DateTimeFormat(undefined,{hour:'numeric',minute:'2-digit'});
+function attnWord(s){return(ATTN_STATUS[s]||ATTN_STATUS.unknown)[1]}
+function plural(n,one,many){return n+' '+(n===1?one:many)}
+function disclosure(summary,body,open,cls){return'<details class="disclose'+(cls?' '+cls:'')+'"'+(open?' open':'')+'><summary>'+I.chevronRight+summary+'</summary>'+body+'</details>'}
+/* Counts per status; anything the server did not name as ok, warning or
+   critical is unknown. */
+function attnCounts(signals){
+  const c={ok:0,warning:0,critical:0,unknown:0};
+  signals.forEach(g=>{c[ATTN_STATUS[g.status]?g.status:'unknown']++});
+  return c;
+}
+function attnWorst(c){return c.critical?'critical':c.warning?'warning':c.unknown?'unknown':'ok'}
+function attnWarningCard(w){
+  const rec=!!w.recovered_at;
+  return'<div class="attn-card attn-warning '+(rec?'ok':w.severity==='critical'?'crit':'warn')+'" data-id="'+esc(w.id)+'">'+statusIcon(rec?'ok':w.severity)+'<div class="attn-body">'
+    +'<h4>'+(rec?'<span class="badge badge-green">Recovered</span>':attnBadge(w.severity))+' <strong>'+esc(w.title)+'</strong></h4>'
+    +(w.action?'<p class="attn-next"><b>What to do:</b> <span class="attn-action">'+esc(w.action)+'</span></p>':'')
+    +'<div class="attn-meta"><span>First seen '+fmtLocal(w.first_observed)+' · last seen '+fmtLocal(w.last_observed)
+    +(w.occurrences>1?' · '+w.occurrences+' occurrences':'')+(rec?' · recovered '+fmtLocal(w.recovered_at):'')+'</span>'
+    +(w.detail?disclosure('Technical detail','<div class="attn-tech">'+esc(w.detail)+'</div>'):'')+'</div></div></div>';
+}
+/* One signal's plain value; the threshold and learning-period text stay in
+   the tooltip, and a non-healthy signal also shows its detail. */
+function attnSignalText(g){
+  const val=g.value||g.detail||'';
+  const more=g.status!=='ok'&&g.value&&g.detail?g.detail:'';
+  return{val,more,title:[g.value,g.threshold,g.detail].filter(Boolean).join(' · ')};
+}
+function renderChecks(signals,counts){
+  const jobs=signals.filter(g=>String(g.id).startsWith('job:')),services=signals.filter(g=>!String(g.id).startsWith('job:'));
+  const sum=[plural(signals.length,'check','checks')];
+  if(counts.critical)sum.push(counts.critical+' critical');
+  if(counts.warning)sum.push(plural(counts.warning,'warning','warnings'));
+  if(counts.unknown)sum.push(counts.unknown+' not measured');
+  let body='<div class="check-group">';
+  if(services.length){
+    body+='<div class="check-group-title">Services</div><div class="check-grid">';
+    services.forEach(g=>{const t=attnSignalText(g);
+      body+='<div class="check-tile" data-signal="'+esc(g.id)+'" title="'+esc(t.title)+'">'+statusIcon(g.status)+'<div><div class="lbl">'+esc(g.label)+'<span class="sr-only"> — <span class="st-word">'+attnWord(g.status)+'</span></span></div>'
+        +(t.val?'<div class="val">'+esc(t.val)+'</div>':'')+(t.more?'<div class="val">'+esc(t.more)+'</div>':'')+'</div></div>'});
+    body+='</div>';
+  }
+  if(jobs.length){
+    const jc=attnCounts(jobs);
+    const jobState=jc.critical+jc.warning?plural(jc.critical+jc.warning,'job is failing','jobs are failing')
+      :jc.unknown===jobs.length?'None has run yet':jc.unknown?(jc.ok+' ran on schedule · '+jc.unknown+' not run yet'):'All ran on schedule';
+    let list='<ul class="job-list">';
+    jobs.forEach(g=>{const t=attnSignalText(g);
+      list+='<li data-signal="'+esc(g.id)+'" title="'+esc(t.title)+'">'+statusIcon(g.status)+'<span>'+esc(String(g.label).replace(/^Maintenance: /,''))+'<span class="sr-only"> — <span class="st-word">'+attnWord(g.status)+'</span></span>'
+        +(g.status==='warning'||g.status==='critical'?'<span class="val"> · '+esc(t.val)+'</span>':'')+'</span></li>'});
+    body+='<div class="check-group-title">Background maintenance</div>'
+      +disclosure(statusIcon(attnWorst(jc))+'<span class="lbl">'+plural(jobs.length,'maintenance job','maintenance jobs')+'</span><span class="val">'+jobState+'</span>',list+'</ul>',jc.critical+jc.warning>0,'check-jobs');
+  }
+  body+='</div>';
+  return'<details class="section-card checks disclose" id="healthChecks"'+(attnWorst(counts)==='ok'?'':' open')+'><summary class="section-card-header">'+I.chevronRight+'<h3>All health checks</h3><span class="checks-sum">'+sum.join(' · ')+'</span></summary>'+body+'</details>';
+}
+/* The headline, the active and recently recovered warnings (#attentionPanel),
+   and the all-checks disclosure, returned apart so the dashboard can put the
+   stat cards between them. */
 function renderAttention(rep){
   const warnings=(rep&&rep.warnings)||[],signals=(rep&&rep.signals)||[];
-  const active=warnings.filter(w=>!w.recovered_at);
-  let html='<div class="section-card" id="attentionPanel"><div class="section-card-header"><h3>Attention'+(active.length?' ('+active.length+')':'')+'</h3><button class="btn btn-ghost" data-action="renderContent">Refresh</button></div><div class="section-card-body">';
-  if(!rep||!rep.evaluated_at)html+='<p class="attn-pending" style="color:var(--text-muted)">The server has not evaluated its health yet.</p>';
-  else{
-    html+='<div class="activity-time">Evaluated '+fmtLocal(rep.evaluated_at)+'</div>';
-    if(!active.length)html+='<p class="attn-none" style="margin-top:8px">No active warnings.</p>';
-  }
-  warnings.forEach(w=>{
-    const rec=!!w.recovered_at;
-    html+='<div class="activity-item attn-warning" data-id="'+esc(w.id)+'"><div>'+(rec?'<span class="badge badge-green">Recovered</span>':attnBadge(w.severity))+'</div><div>'
-      +'<div class="activity-text"><strong>'+esc(w.title)+'</strong>'+(w.detail?' — '+esc(w.detail):'')+'</div>'
-      +'<div class="activity-text attn-action">'+esc(w.action)+'</div>'
-      +'<div class="activity-time">First seen '+fmtLocal(w.first_observed)+' · last seen '+fmtLocal(w.last_observed)
-      +(w.occurrences>1?' · '+w.occurrences+' occurrences':'')+(rec?' · recovered '+fmtLocal(w.recovered_at):'')+'</div></div></div>';
-  });
-  html+='</div>';
-  if(signals.length){
-    html+='<div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Signal</th><th>Status</th><th>Measured</th><th>Detail</th></tr></thead><tbody>';
-    signals.forEach(g=>{html+='<tr data-signal="'+esc(g.id)+'"><td>'+esc(g.label)+'</td><td>'+attnBadge(g.status)+'</td><td>'+esc(g.value||'—')+'</td><td>'+esc([g.threshold,g.detail].filter(Boolean).join(' · '))+'</td></tr>'});
-    html+='</tbody></table></div>';
-  }
-  return html+'</div>';
+  const active=warnings.filter(w=>!w.recovered_at),recovered=warnings.filter(w=>w.recovered_at);
+  const counts=attnCounts(signals);
+  let tone,title,cls;
+  if(!rep||!rep.evaluated_at){tone='unknown';cls='attn-pending';title='Waiting for the first health check'}
+  else if(active.length){tone=active.some(w=>w.severity==='critical')?'critical':'warning';cls='attn-problems';title=active.length===1?'1 problem needs your attention':active.length+' problems need your attention'}
+  else{tone=attnWorst(counts)==='ok'?'ok':'unknown';cls='attn-none';title=tone==='ok'?'Everything is running normally':'No active warnings'}
+  const sub=rep&&rep.evaluated_at?'Checked '+fmtLocal(rep.evaluated_at,ATTN_TIME)+' · the server checks every minute':'The server checks its health once a minute after it starts.';
+  const chips=[['critical','critical','critical'],['warning','warning','warnings'],['ok','healthy','healthy'],['unknown','not measured','not measured']]
+    .filter(k=>counts[k[0]]).map(k=>'<span class="count-chip">'+statusIcon(k[0])+plural(counts[k[0]],k[1],k[2])+'</span>').join('');
+  let head='<section id="attentionPanel" aria-labelledby="attnTitle"><div class="health-hero '+({ok:'ok',warning:'warn',critical:'crit',unknown:'pending'})[tone]+'">'
+    +'<div class="health-hero-icon">'+statusIcon(tone)+'</div><div class="health-hero-text"><h2 class="health-hero-title '+cls+'" id="attnTitle">'+title+'</h2><div class="health-hero-sub">'+sub+'</div></div>'
+    +'<div class="health-hero-counts">'+(chips?'<span class="sr-only">Health checks: </span>'+chips:'')+'<button class="btn btn-ghost" data-action="renderContent">'+I.refresh+'Refresh</button></div></div>';
+  active.forEach(w=>{head+=attnWarningCard(w)});
+  if(recovered.length)head+=disclosure('Recently recovered ('+recovered.length+')',recovered.map(attnWarningCard).join(''),false,'attn-recovered');
+  head+='</section>';
+  return{head,checks:signals.length?renderChecks(signals,counts):''};
 }
 
 /* ═══ Dashboard ═══ */
@@ -107,26 +163,25 @@ async function renderDashboard(){
   try{state.cachedStats=await api('GET','/stats')}catch(e){return'<div class="page-title">Dashboard</div><p style="color:var(--text-danger)">Failed to load stats: '+esc(e.message)+'</p>'}
   /* Update checks are owner-only; skip the call for everyone else instead of
      spending a guaranteed 403 on every dashboard load. */
-  if(isOwner()){try{state.cachedUpdate=await api('GET','/updates')}catch(e){/* the banner is optional; the Updates page reports the failure */}}
+  if(isOwner()){try{state.cachedUpdate=await api('GET','/updates')}catch(e){/* the strip is optional; the Updates page reports the failure */}}
   const s=state.cachedStats;const u=state.cachedUpdate;
-  let html='<div class="page-title">Dashboard</div><div class="page-desc">Server overview and statistics</div>';
-  if(u&&u.update_available)html+='<div class="update-card" style="border-color:var(--accent);margin-bottom:20px"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">Update Available: '+esc(u.latest)+'</div><div class="update-notes">Current: '+esc(u.current)+' &mdash; <button class="btn btn-accent" style="margin-left:8px" data-action="navigateTo" data-args="'+actArgs('updates')+'">View Update</button></div></div></div>';
+  let html='<div class="page-title">Dashboard</div><div class="page-desc">How your server is doing right now</div>';
   /* Attention is server health detail: ADMINISTRATOR, like the route. */
+  let checks='';
   if(can(PERM.ADMINISTRATOR)){
-    try{html+=renderAttention(await api('GET','/attention'))}
-    catch(e){html+='<div class="section-card" id="attentionPanel"><div class="section-card-header"><h3>Attention</h3></div><div class="section-card-body"><p style="color:var(--text-danger)">Could not load attention state: '+esc(e.message)+'</p></div></div>'}
+    try{const a=renderAttention(await api('GET','/attention'));html+=a.head;checks=a.checks}
+    catch(e){html+='<section id="attentionPanel" class="section-card"><div class="section-card-body"><p style="color:var(--text-danger)">Could not load attention state: '+esc(e.message)+'</p><button class="btn btn-ghost" data-action="renderContent">Retry</button></div></section>'}
   }
-  html+='<div class="stat-grid">';
-  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Total Users</span><div class="stat-card-icon" style="background:rgba(92,195,137,.15);color:var(--text-positive)">'+I.users+'</div></div><div class="stat-card-value">'+(s.user_count||0)+'</div><div class="stat-card-sub">registered</div></div>';
-  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Messages</span><div class="stat-card-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.megaphone+'</div></div><div class="stat-card-value">'+(s.message_count||0).toLocaleString()+'</div><div class="stat-card-sub">total</div></div>';
-  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Channels</span><div class="stat-card-icon" style="background:rgba(242,184,75,.15);color:var(--text-warning)">'+I.channels+'</div></div><div class="stat-card-value">'+(s.channel_count||0)+'</div><div class="stat-card-sub">active</div></div>';
-  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Database</span><div class="stat-card-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.backup+'</div></div><div class="stat-card-value">'+fmtBytes(s.db_size_bytes||0)+'</div><div class="stat-card-sub">SQLite</div></div>';
-  html+='</div>';
+  if(u&&u.update_available)html+='<div class="update-strip">'+I.updates+'<span><strong>'+esc(u.latest)+' is available.</strong> <span class="muted">You are running '+esc(String(u.current||'').replace(/^v(?=\D)/,''))+'.</span></span><button class="btn btn-outline" data-action="navigateTo" data-args="'+actArgs('updates')+'">View update</button></div>';
+  const stat=(label,value)=>'<div class="stat-card"><div class="stat-card-label">'+label+'</div><div class="stat-card-value">'+value+'</div></div>';
+  html+='<div class="stat-grid compact">'+stat('Members',s.user_count||0)+stat('Messages',(s.message_count||0).toLocaleString())+stat('Channels',s.channel_count||0)+stat('Database',fmtBytes(s.db_size_bytes||0))+'</div>';
+  html+=checks;
   // The certificate users compare out of band before accepting the client's
   // trust prompt (BPR-051). Shown only when the server serves a statically
   // loaded certificate (not with TLS off or ACME before its first handshake).
+  // Rarely needed, so it waits behind a disclosure.
   if(s.certificate_fingerprint){
-    html+='<div class="section-card"><div class="section-card-header"><h3>Certificate Fingerprint</h3></div><div class="section-card-body"><p style="font-size:13px;color:var(--text-muted);margin:0 0 8px">Users compare this against the prompt their client shows before they accept the connection. Publish it out of band — another platform, a call. A mismatch is the one warning that means an interception attempt.</p><code style="display:block;word-break:break-all;font-size:13px">'+esc(s.certificate_fingerprint)+'</code></div></div>';
+    html+='<details class="section-card disclose" id="certFingerprint"><summary class="section-card-header">'+I.chevronRight+'<h3>Certificate fingerprint</h3><span class="checks-sum">Show</span></summary><div class="section-card-body"><p class="card-note">Users compare this against the prompt their client shows before they accept the connection. Publish it out of band — another platform, a call. A mismatch is the one warning that means an interception attempt.</p><code class="hash">'+esc(s.certificate_fingerprint)+'</code></div></details>';
   }
   // Recent audit — VIEW_AUDIT_LOG only.
   if(can(PERM.VIEW_AUDIT_LOG))try{
