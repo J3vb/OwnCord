@@ -171,12 +171,12 @@ Peer identity state lives in `voice.store` (per-participant
 `features/voice/e2eePeerState.ts` (driven by `lib/livekitE2EE.ts`) as
 announces are verified against the pinned identity keys (`lib/identity.ts`).
 
-| State        | Roster badge (`verifyPresentation()`, `components/ChannelSidebar.ts`)       | Interaction                               |
-| ------------ | --------------------------------------------------------------------------- | ----------------------------------------- |
-| `verified`   | Green shield; title "Identity verified · Safety number: {n}"                | none needed                               |
-| `changed`    | Amber shield-alert; title "Security key changed · Safety number: {n}"       | none — the change already raised a notice |
-| `unverified` | Neutral shield; no pinned key yet                                           | none — pins on first verified announce    |
-| `mismatch`   | Red shield-alert; title "Identity key changed — click to review and re-pin" | Click → blocking identity-mismatch modal  |
+| State        | Roster badge (`verifyPresentation()`, `components/ChannelSidebar.ts`)                                                          | Interaction                               |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| `verified`   | Green shield; title "Identity verified · Safety number: {n}"                                                                   | none needed                               |
+| `changed`    | Amber shield-alert; title "Security key changed · Safety number: {n}"                                                          | none — the change already raised a notice |
+| `unverified` | Neutral shield; no pinned key yet                                                                                              | none — pins on first verified announce    |
+| `mismatch`   | Red shield-alert; title "Blocked — unverified: this participant's key is missing or its signature is invalid. Click to review" | Click → blocking identity-mismatch modal  |
 
 A pinned peer whose published key changed is accepted automatically when the
 announce verifies against the new key (`verifyPeerAnnounce` in

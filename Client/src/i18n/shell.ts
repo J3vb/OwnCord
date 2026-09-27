@@ -103,7 +103,8 @@ export const shellText = defineCatalog("shell", {
 
   "identity.verified": "Identity verified",
   "identity.verifiedWithNumber": "Identity verified · Safety number: {safetyNumber}",
-  "identity.mismatch": "Identity key changed — click to review and re-pin",
+  "identity.mismatch":
+    "Blocked — unverified: this participant's key is missing or its signature is invalid. Click to review",
   "identity.keyChanged": "Security key changed · Safety number: {safetyNumber}",
   "identity.unknown":
     "Could not check this participant's identity — key storage is unavailable, so they are blocked for E2EE until it recovers",
