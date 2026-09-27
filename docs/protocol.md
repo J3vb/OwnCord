@@ -298,9 +298,19 @@ The server responds immediately:
 { "type": "pong" }
 ```
 
+### Server Protocol Ping
+
+Every 25 seconds the server sends a WebSocket protocol Ping frame (RFC 6455
+control frame, not a JSON message) and waits up to 25 seconds for the Pong.
+Browsers and WebSocket libraries answer it automatically, so a peer stays
+alive even when its app-level ping timer is throttled. A Pong counts as
+activity for the stale sweep below; a peer that misses a Pong is disconnected,
+so a silent peer is closed within 50 seconds. A client can treat a gap of more
+than 2.5 × 25 seconds without any frame from the server as a dead connection.
+
 ### Server Stale Client Sweep
 
-Every 30 seconds, the server checks all clients. Any client with no activity for 90 seconds is forcibly disconnected. Normal chat activity also keeps the connection alive.
+Every 30 seconds, the server checks all clients. Any client with no activity (a message, or a Pong to the server's protocol Ping) for 90 seconds is forcibly disconnected. Normal chat activity also keeps the connection alive.
 
 ### Client Silence Deadline
 
@@ -310,6 +320,16 @@ half-open socket and reconnects. It does this only once a heartbeat ping has
 gone unanswered for at least 15 seconds. That rule keeps a minimised window,
 whose throttled heartbeat timer may not have sent a ping yet, from
 reconnecting for no reason.
+
+### Desktop Transport Liveness
+
+The desktop client's Rust WebSocket proxy (`Client/src-tauri/src/ws_proxy.rs`)
+also sends a WebSocket protocol Ping every 25 seconds, which the server's read
+loop answers with a Pong. If no frame of any kind arrives for 62.5 seconds
+(2.5 ping intervals), the proxy closes the socket and the client reconnects.
+This catches a half-open connection that a firewall or NAT dropped silently,
+and does not depend on the webview's JSON ping timer, which the OS may throttle
+while the window is minimised. The JSON ping above is unchanged.
 
 ---
 
@@ -1380,12 +1400,16 @@ Rate limited: 1 per 60 seconds. Must be in a voice channel.
 
 ## Voice Moderation
 
-Four moderator commands act on another user's voice session. All four require
-`MUTE_MEMBERS` on the actor's role (`ADMINISTRATOR` bypasses the bit, never the
-hierarchy), the actor must strictly outrank the target by role position, and
-the target must currently be in a voice channel. Each is rate limited to 5/sec
-and written to the audit log (`voice_mod_mute`, `voice_mod_deafen`,
-`voice_mod_move`, `voice_mod_kick`, target type `user`).
+Four moderator commands act on another user's voice session. All four run
+`permissions.AuthorizeVoiceModerator` against the actor in the TARGET's channel:
+the actor's base role must hold `MUTE_MEMBERS` (`ADMINISTRATOR` bypasses the bit,
+never the hierarchy), and the effective permission after both override layers
+must hold `READ_MESSAGES | MUTE_MEMBERS`, so a channel-level deny holds and a
+room the actor cannot see cannot be moderated. For a DM call the actor must be a
+participant. The actor must strictly outrank the target by role position, and the
+target must currently be in a voice channel. Each is rate limited to 5/sec and
+written to the audit log (`voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`,
+`voice_mod_kick`, target type `user`).
 
 Failures: `FORBIDDEN` (missing bit, or target of equal/higher rank),
 `VOICE_ERROR` (target not in voice, not in the named channel, or not
@@ -1925,10 +1949,10 @@ tables below add per-type behavioral notes.
 | `voice_deafen`        | 2/sec                                | Refused with `SERVER_DEAFENED` while server deafened            |
 | `voice_camera`        | 2/sec                                | Requires USE_VIDEO                                              |
 | `voice_screenshare`   | 2/sec                                | Requires SHARE_SCREEN                                           |
-| `voice_mod_mute`      | 5/sec                                | Requires MUTE_MEMBERS + outranks target                         |
-| `voice_mod_deafen`    | 5/sec                                | Requires MUTE_MEMBERS + outranks target                         |
-| `voice_mod_move`      | 5/sec                                | Requires MUTE_MEMBERS + outranks target                         |
-| `voice_mod_kick`      | 5/sec                                | Requires MUTE_MEMBERS + outranks target                         |
+| `voice_mod_mute`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
+| `voice_mod_deafen`    | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
+| `voice_mod_move`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
+| `voice_mod_kick`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
 | `voice_token_refresh` | 1/60sec                              | Must be in voice                                                |
 | `voice_e2ee_announce` | 5/sec                                | ECDH pubkey announce                                            |
 | `voice_e2ee_offer`    | 64/sec outer, 5/sec per target       | Wrapped room key to target (budgeted per key rotation)          |

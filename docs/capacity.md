@@ -406,22 +406,29 @@ TLS delta rather than a configuration delta.
 ### Graceful shutdown under load
 
 The **workflow**, not k6, sends the stop: it waits until the connections are up
-and sending, `docker stop --time=90`s the container (a grace past the 30 s
-budget, so an overrun is measured rather than SIGKILLed), records the server's
-exit code and the drain wall clock, then starts the same container again — same
-cgroup, same flags, same data directory, so the second boot is the same server
-and not a lookalike.
+and sending, `docker stop --time=90`s the container (a grace past both the 30 s
+drill gate and the server's 50 s teardown cap, so an overrun is measured rather
+than SIGKILLed), records the server's exit code and the drain wall clock, then
+starts the same container again — same cgroup, same flags, same data directory,
+so the second boot is the same server and not a lookalike.
 
 - **Measures** the restart frame reaching every connection and the lead from
   frame arrival to the socket actually closing; the resume time after the second
   boot; the sends attempted during the drain; and the sends lost.
-- **Gated on** exit code 0, a drain inside the 30 s stop timeout, `sends_lost:
+- **Gated on** exit code 0, a drain inside 30 s, `sends_lost:
 count==0`, and no replay gap across the restart. A message that was sent,
   never acknowledged and absent from the channel history after the second boot
   is a **lost message** — a defect recorded in the findings ledger and
   published as "lost N of M" until it is fixed, not a number to round. The
   history is the only place to look: the post-restart resume is a full re-sync
   (next point), so no replay will ever carry a drain-window send.
+- **The 30 s drain gate is deliberately stricter than the server's cap.** The
+  server bounds its whole teardown at 50 s (`teardownBudget` in
+  `Server/internal/app/lifecycle.go`), of which the HTTP drain alone may take
+  30 s (`httpDrainBudget`) to let a slow upload or export finish. The drill has
+  no slow transfers in flight, so a normal restart must still finish well
+  inside 30 s; a drain between 30 s and 50 s fails the drill even though the
+  server would not have cut it short.
 - **Delivery and acknowledgement keep their `phase:pre-restart` and
   `phase:post-restart` tags**, with a separate `phase:recovery` for the stop,
   drain, outage and reconnects. The explicit windows below separate recovery
@@ -682,6 +689,14 @@ advance runs inside the message transaction. That halved writer waits and
 took ~7% off the aligned-burst p95 (318 → 297 ms locally). Spread sends are
 unchanged at 18 ms. These local figures are not reference-runner figures.
 
+**OC-0454 is declined by owner decision D-09 (Q14, 2026-09-26) as an accepted
+low, and this document does not budget the aligned burst.** The shape is a
+property of per-frame fan-out cost — one TLS record and one write syscall per
+frame per recipient — not a correctness defect, and a real population rarely
+presses Enter in unison. Reopen on a user-visible burst scenario where the
+acknowledgement tail costs someone; the fix then is a connection wrapper that
+coalesces queued frames into one flush.
+
 **Measurement-only rows — no budget is published for any of them, and this
 document does not invent one.**
 
@@ -837,7 +852,7 @@ The stop was sent 90 s into the run — 60 s of ramp plus 30 s at full fan-out.
 
 No message was lost: every one of the 250 drain-window sends was acknowledged
 before the socket closed, and all 100 connections came back and re-synced with
-no gap. The drain finished in a fifth of the 30 s budget under 100 connections
+no gap. The drain finished in a fifth of the 30 s drill gate under 100 connections
 and in-flight writes.
 
 The budget rows, and the two sides of the stop:

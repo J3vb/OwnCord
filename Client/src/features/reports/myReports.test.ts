@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OwnReportSummary } from "@lib/api";
 import { buildMyReportsSection, reportStateKey } from "./myReports";
 import { buildSafetyPane } from "./safetyPane";
+import { pinZone } from "../../../tests/helpers/tz-pin";
 
 interface Deferred {
   resolve: (rows: OwnReportSummary[]) => void;
@@ -19,8 +20,10 @@ const api = {
   },
 };
 let tab: AbortController;
+let restoreTZ: () => void;
 
 beforeEach(() => {
+  restoreTZ = pinZone("UTC");
   pending = [];
   signals = [];
   tab = new AbortController();
@@ -28,6 +31,7 @@ beforeEach(() => {
 afterEach(() => {
   tab.abort();
   document.body.replaceChildren();
+  restoreTZ();
 });
 
 const flush = () => new Promise((r) => setTimeout(r, 0));

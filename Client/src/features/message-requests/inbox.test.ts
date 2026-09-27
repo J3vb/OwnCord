@@ -16,6 +16,7 @@ import { setConnectionStatus } from "@stores/ui.store";
 import type { DispatchApi } from "../connection/dispatchContext";
 import { NAVIGATION_DESTINATIONS } from "../navigation/destinations";
 import { renderInbox } from "./Inbox";
+import { pinZone, tzPinHonored } from "../../../tests/helpers/tz-pin";
 import { messageRequestsStore, pendingRequestCount, resetMessageRequests } from "./store";
 import { buildInbox } from "./view";
 import { applyReadyDmRequests, handleDmRequest } from "./wsHandlers";
@@ -31,10 +32,10 @@ function item(id: number, content: string | null = `hello ${id}`): DmRequestList
       avatar: `https://tracker.example/avatar-${id}.png`,
     },
     preview:
-      content === null
-        ? null
-        : { message_id: 500 + id, content, timestamp: "2026-09-05T12:00:00Z" },
-    created_at: "2026-09-05T12:00:00Z",
+      content === null ? null : { message_id: 500 + id, content, timestamp: "2026-09-05 12:00:00" },
+    // The real wire form: SQLite's datetime('now'), space-separated and
+    // zone-less, passed through by the server (BUG-11).
+    created_at: "2026-09-05 12:00:00",
   };
 }
 
@@ -339,7 +340,9 @@ describe("inbox view", () => {
     const [erased, first] = rows();
     expect(first!.querySelector("h3")!.textContent).toBe("Stranger 1");
     expect(first!.querySelector(".requests-username")!.textContent).toBe("@stranger1");
-    expect(first!.querySelector("time")!.getAttribute("datetime")).toBe("2026-09-05T12:00:00Z");
+    // The datetime attribute is the canonical RFC3339 instant, not the raw
+    // zone-less SQLite string the server sent (BUG-11).
+    expect(first!.querySelector("time")!.getAttribute("datetime")).toBe("2026-09-05T12:00:00.000Z");
     expect(first!.querySelector(".requests-preview")!.textContent).toBe(hostile);
     // Sender erasure and a message with no text both still read sensibly.
     expect(erased!.querySelector("h3")!.textContent).toBe("Unknown user");
@@ -433,4 +436,37 @@ describe("inbox view", () => {
     expect(list().getAttribute("aria-label")).toBe("Pending message requests");
     expect(list().hidden).toBe(false);
   });
+
+  // BUG-11: the row's time was read with `new Date(createdAt)` on the raw
+  // SQLite string, so it rendered the digits as Berlin wall time instead of
+  // the server's UTC instant — a Berlin viewer saw 12:00 for 12:00Z. Pin
+  // Berlin and assert the correct instant and its Berlin rendering, which
+  // only holds once the row goes through parseTimestamp. The old code
+  // produced "Sep 5, 2026, 12:00 PM" here; the fix produces 2:00 PM.
+  const berlinPinHonored = tzPinHonored(
+    "Europe/Berlin",
+    () => new Date(2026, 0, 15).getTimezoneOffset() === -60,
+  );
+  describe.skipIf(!berlinPinHonored)(
+    "[BUG-11] a request's time is the server's instant, not the viewer's",
+    () => {
+      let restore: () => void;
+      beforeEach(() => {
+        restore = pinZone("Europe/Berlin");
+      });
+      afterEach(() => {
+        restore();
+      });
+
+      it("renders the UTC instant and a canonical RFC3339 datetime", () => {
+        expect(new Date(2026, 0, 15).getTimezoneOffset()).toBe(-60);
+        handleDmRequest(frame(1, "pending"));
+        open();
+        messageRequestsStore.flush();
+        const time = rows()[0]!.querySelector("time")!;
+        expect(time.getAttribute("datetime")).toBe("2026-09-05T12:00:00.000Z");
+        expect(time.textContent).toBe("Sep 5, 2026, 2:00 PM");
+      });
+    },
+  );
 });

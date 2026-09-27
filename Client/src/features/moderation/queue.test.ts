@@ -16,6 +16,7 @@ import type { FeatureViewContext } from "../navigation/destinations";
 import { renderModerationCenter } from "./Queue";
 import { noteQueueChange } from "./store";
 import { buildModerationCenter } from "./view";
+import { pinZone } from "../../../tests/helpers/tz-pin";
 
 const SPICY = 7;
 
@@ -32,6 +33,7 @@ let acks: number[];
 let ackResult: Promise<void>;
 let view: AbortController;
 let closed: number;
+let restoreTZ: () => void;
 
 function deferred<T>(bucket: Call<T>[], arg: string, signal?: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => bucket.push({ arg, signal, resolve, reject }));
@@ -59,8 +61,8 @@ function row(id: string, over: Partial<ModerationQueueRow> = {}): ModerationQueu
     state: "open",
     assignee_id: 0,
     outcome: "",
-    created_at: "2026-09-05T10:00:00Z",
-    updated_at: "2026-09-05T10:00:00Z",
+    created_at: "2026-09-05 10:00:00",
+    updated_at: "2026-09-05 10:00:00",
     ...over,
   };
 }
@@ -79,14 +81,14 @@ function detail(id: string, over: Partial<ModerationReportDetail> = {}): Moderat
     state: "open",
     assignee_id: 0,
     outcome: "",
-    created_at: "2026-09-05T10:00:00Z",
+    created_at: "2026-09-05 10:00:00",
     evidence: [
       {
         seq: 0,
         author_id: 2,
         content: `evidence of ${id}`,
         attachments: "[]",
-        captured_at: "2026-09-05T10:00:00Z",
+        captured_at: "2026-09-05 10:00:00",
       },
     ],
     ...over,
@@ -137,6 +139,7 @@ async function openReport(root: HTMLElement, id: string, d = detail(id)): Promis
 }
 
 beforeEach(() => {
+  restoreTZ = pinZone("UTC");
   lists = [];
   details = [];
   acks = [];
@@ -159,6 +162,7 @@ beforeEach(() => {
 afterEach(() => {
   view.abort();
   document.body.replaceChildren();
+  restoreTZ();
 });
 
 describe("the queue", () => {

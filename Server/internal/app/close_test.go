@@ -1,13 +1,17 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/config"
 )
 
 // The composite-close contract, as three properties. Before B3-3's rewrite
@@ -161,4 +165,102 @@ func TestStopHub_BoundedByTheShutdownBudget(t *testing.T) {
 // through. The stages are supplied by each test.
 func newTestApp() *App {
 	return &App{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+}
+
+// TestAppClose_GivesEveryStepItsOwnBudget is SRV-06: the steps used to share
+// one deadline, so an HTTP drain that overran it left the hub's restart
+// notice, the audit drain and the event flush running on an expired context.
+// A step that uses up its budget must leave the next step a live one, and
+// every step's duration is logged.
+func TestAppClose_GivesEveryStepItsOwnBudget(t *testing.T) {
+	var logs bytes.Buffer
+	a := &App{log: slog.New(slog.NewTextHandler(&logs, nil)), closeStepBudget: 50 * time.Millisecond}
+	auditCtxErr := errors.New("audit-writer step never ran")
+	a.onClose("audit-writer", func(ctx context.Context) error {
+		auditCtxErr = ctx.Err()
+		return nil
+	})
+	a.onClose("http", func(ctx context.Context) error {
+		<-ctx.Done() // an open stream holding the drain for the whole budget
+		return ctx.Err()
+	})
+
+	caller, cancel := context.WithCancel(context.Background())
+	cancel() // the caller's cancellation must not cut teardown short either
+	if err := a.Close(caller); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close() = %v, want the http step's own deadline", err)
+	}
+	if auditCtxErr != nil {
+		t.Errorf("audit-writer step ran on a dead context (%v): it inherited the http step's overrun", auditCtxErr)
+	}
+	for _, stage := range []string{"stage=http duration=", "stage=audit-writer duration="} {
+		if !strings.Contains(logs.String(), stage) {
+			t.Errorf("no duration logged for %s; log:\n%s", stage, logs.String())
+		}
+	}
+}
+
+// TestAppClose_HTTPDrainKeepsItsLongerBudget: the http step startHTTP
+// registers gets httpDrainBudget, matching the server's read and write
+// timeouts, so a slow request the server allows is not cut off at the 10s
+// every other step gets.
+func TestAppClose_HTTPDrainKeepsItsLongerBudget(t *testing.T) {
+	a := newTestApp()
+	a.cfg = &config.Config{}
+	if err := a.startHTTP(); err != nil {
+		t.Fatalf("startHTTP() = %v", err)
+	}
+	t.Cleanup(func() { _ = a.ln.Close() })
+
+	remaining := map[string]time.Duration{}
+	for i := range a.closers {
+		stage := a.closers[i].stage
+		a.closers[i].stop = func(ctx context.Context) error {
+			deadline, ok := ctx.Deadline()
+			if !ok {
+				t.Errorf("%s step ran without a deadline", stage)
+			}
+			remaining[stage] = time.Until(deadline)
+			return nil
+		}
+	}
+	if err := a.Close(context.Background()); err != nil {
+		t.Fatalf("Close() = %v", err)
+	}
+	within := func(stage string, budget time.Duration) {
+		if got := remaining[stage]; got > budget || got < budget-5*time.Second {
+			t.Errorf("%s step budget = %v, want %v", stage, got, budget)
+		}
+	}
+	within("http", 30*time.Second)
+	within("hub-notice", 10*time.Second)
+	within("listener", 10*time.Second)
+}
+
+// TestAppClose_OverallDeadlineCapsTheSteps: the step budgets add up (a 30s
+// drain plus 10s for each later step), so one overall deadline caps the walk
+// to keep a teardown inside systemd's stop timeout. Every step still runs.
+func TestAppClose_OverallDeadlineCapsTheSteps(t *testing.T) {
+	a := newTestApp()
+	a.closeStepBudget = 200 * time.Millisecond
+	a.teardownBudget = 300 * time.Millisecond
+	var ran []string
+	for _, stage := range []string{"database", "audit-writer", "http"} {
+		a.onClose(stage, func(ctx context.Context) error {
+			ran = append(ran, stage)
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	}
+
+	started := time.Now()
+	if err := a.Close(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close() = %v, want a deadline error", err)
+	}
+	if took := time.Since(started); took >= 500*time.Millisecond {
+		t.Errorf("Close took %v; the 300ms overall deadline should cap the 600ms of step budgets", took)
+	}
+	if want := []string{"http", "audit-writer", "database"}; !slices.Equal(ran, want) {
+		t.Errorf("steps run = %v, want %v", ran, want)
+	}
 }

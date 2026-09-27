@@ -62,6 +62,7 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 		startPumps := func() {
 			writeCtx, writeCancel := context.WithCancel(ctx)
 			go writePump(writeCtx, conn, c)
+			go pingPump(writeCtx, conn, c, pingInterval)
 			readPump(ctx, conn, hub, c)
 			c.closeSend()
 			writeCancel()
