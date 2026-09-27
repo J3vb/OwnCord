@@ -548,7 +548,7 @@ describe("DmCallPanel — video in the call", () => {
     expect(root.querySelector(".dcp-stage")).not.toBeNull();
   });
 
-  it("collapsed, it shows no video but a Watch chip that expands it; never on its own", () => {
+  it("collapsed, it shows no video and never expands on its own; Expand shows it", () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { opts, root } = mount();
     q(root, "dcp-collapse")!.click();
@@ -557,14 +557,40 @@ describe("DmCallPanel — video in the call", () => {
     panel!.setVideoActive(true);
     expect(panel!.videoElement()).toBeNull();
     expect(root.classList.contains("dm-call-panel--collapsed")).toBe(true);
+    expect(q(root, "dcp-watch")).toBeNull();
 
-    const watch = q(root, "dcp-watch")!;
-    expect(watch.textContent).toBe("Watch");
-    watch.click();
+    q(root, "dcp-collapse")!.click();
 
     expect(root.classList.contains("dm-call-panel--expanded")).toBe(true);
-    expect(panel!.videoElement()).not.toBeNull();
+    expect(root.contains(panel!.videoElement())).toBe(true);
     expect(opts.onVideoHostChange).toHaveBeenCalled();
+  });
+
+  it("shows your own video while the call is still ringing, with the ring caption kept", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { opts, root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "ringing", pending: [OTTO] });
+    const el = panel!.videoElement()!;
+    expect(el).not.toBeNull();
+
+    panel!.setVideoActive(true);
+
+    expect(root.contains(el)).toBe(true);
+    expect(root.classList.contains("dm-call-panel--video")).toBe(true);
+    expect(q(root, "dcp-caption")!.textContent).toBe("Calling Otto…");
+    expect(q(root, "dcp-camera")).not.toBeNull();
+    expect(lastPeople(opts).map((p) => p.userId)).toEqual([SELF]);
+  });
+
+  it("keeps your own video once the call went unanswered", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "declined", pending: [] });
+    panel!.setVideoActive(true);
+
+    expect(root.contains(panel!.videoElement())).toBe(true);
+    expect(q(root, "dcp-caption")!.textContent).toBe("Otto declined the call");
+    expect(q(root, "dcp-ring-again")).not.toBeNull();
   });
 
   it("tells its owner when it can or cannot host video any more", () => {

@@ -578,7 +578,7 @@ test.describe("DM calls — call panel", () => {
 });
 
 test.describe("DM calls — video in the call panel", () => {
-  test("a stream in the DM's call opens its video area above the chat, with avatar tiles for everyone; collapsed it offers Watch", async ({
+  test("a stream in the DM's call opens its video area above the chat, with avatar tiles for everyone; collapsed it waits for Expand", async ({
     page,
   }) => {
     await boot(page);
@@ -596,12 +596,11 @@ test.describe("DM calls — video in the call panel", () => {
     await expect(page.locator("[data-testid='input-slot']")).toBeVisible();
     expect(await findUnnamedControls(panel(page))).toEqual([]);
 
-    // Collapsed, a stream never reopens the panel on its own: Watch does.
-    await panel(page).locator("[data-testid='dcp-collapse']").click();
+    // Collapsed, a stream never reopens the panel on its own: Expand does.
+    const collapse = panel(page).locator("[data-testid='dcp-collapse']");
+    await collapse.click();
     await expect(video).toBeHidden();
-    const watch = panel(page).locator("[data-testid='dcp-watch']");
-    await expect(watch).toBeVisible();
-    await watch.click();
+    await collapse.click();
     await expect(video).toBeVisible();
 
     // The stream ending takes the video area away again.

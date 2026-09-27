@@ -137,7 +137,7 @@ export interface DmCallPanelComponent extends MountableComponent {
   readonly ownsCall: (channelId: number) => boolean;
   /** Where the call's video grid goes, or null while it cannot show one. */
   readonly videoElement: () => HTMLElement | null;
-  /** Any video is on in the call: make room for the grid (or offer Watch). */
+  /** Any video is on in the call: make room for the grid. */
   readonly setVideoActive: (active: boolean) => void;
 }
 
@@ -291,9 +291,9 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       case "live":
         return `live|${v.dm.channelId}|${v.inRoom.join(",")}|${String(v.otherChannelId)}`;
       case "outgoing":
-        return `outgoing|${v.dm.channelId}|${v.pending.join(",")}|${String(collapsed)}`;
+        return `outgoing|${v.dm.channelId}|${v.pending.join(",")}|${String(collapsed)}|${String(videoActive)}`;
       case "unanswered":
-        return `unanswered|${v.dm.channelId}|${v.reason}`;
+        return `unanswered|${v.dm.channelId}|${v.reason}|${String(videoActive)}`;
       case "connected":
         return `connected|${v.dm.channelId}|${v.inRoom.join(",")}|${String(collapsed)}|${String(videoActive)}`;
       default:
@@ -466,6 +466,20 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     return bar;
   }
 
+  /** The shared grid moves into videoEl (VideoModeController); everyone in
+   *  `ids` without a camera is an avatar tile in it, kept live by refresh(). */
+  function videoStage(dm: DmChannel, ids: readonly number[]): HTMLElement {
+    root.classList.add("dm-call-panel--video");
+    const me = currentUserId();
+    const voice = voiceStore.getState();
+    people = ids.map((id) => ({
+      userId: id,
+      label: resolvePerson(id, dm, voice, me).name,
+      content: avatar(id, dm, "lg"),
+    }));
+    return videoEl;
+  }
+
   // --- Per-state renders ----------------------------------------------------
 
   function renderIncoming(v: Extract<DmCallView, { kind: "incoming" }>): void {
@@ -542,11 +556,16 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       return;
     }
     root.classList.add("dm-call-panel--expanded");
-    const stage = createElement("div", { class: "dcp-stage" });
-    stage.appendChild(person(currentUserId(), v.dm));
-    const callees =
-      v.pending.length > 0 ? v.pending : v.dm.participants.map((p) => p.id).slice(0, 1);
-    for (const id of callees) stage.appendChild(person(id, v.dm, "dcp-avatar--ringing"));
+    let stage: HTMLElement;
+    if (videoActive) {
+      stage = videoStage(v.dm, [currentUserId()]);
+    } else {
+      stage = createElement("div", { class: "dcp-stage" });
+      stage.appendChild(person(currentUserId(), v.dm));
+      const callees =
+        v.pending.length > 0 ? v.pending : v.dm.participants.map((p) => p.id).slice(0, 1);
+      for (const id of callees) stage.appendChild(person(id, v.dm, "dcp-avatar--ringing"));
+    }
     appendChildren(
       body,
       topBar(d("calling"), "warn", true, true),
@@ -559,9 +578,14 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   function renderUnanswered(v: Extract<DmCallView, { kind: "unanswered" }>): void {
     root.classList.add("dm-call-panel--expanded");
     const name = callName(v.dm, currentUserId());
-    const stage = createElement("div", { class: "dcp-stage" });
-    stage.appendChild(person(currentUserId(), v.dm));
-    for (const p of v.dm.participants) stage.appendChild(person(p.id, v.dm));
+    let stage: HTMLElement;
+    if (videoActive) {
+      stage = videoStage(v.dm, [currentUserId()]);
+    } else {
+      stage = createElement("div", { class: "dcp-stage" });
+      stage.appendChild(person(currentUserId(), v.dm));
+      for (const p of v.dm.participants) stage.appendChild(person(p.id, v.dm));
+    }
     const actions = createElement("div", { class: "dcp-controls" });
     appendChildren(
       actions,
@@ -590,22 +614,13 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       return;
     }
     root.classList.add("dm-call-panel--expanded");
+    let stage: HTMLElement;
     if (videoActive) {
-      // The shared grid moves into videoEl (VideoModeController); everyone
-      // without a camera is an avatar tile in it, kept live by refresh().
-      root.classList.add("dm-call-panel--video");
-      const me = currentUserId();
-      const voice = voiceStore.getState();
-      people = v.inRoom.map((id) => ({
-        userId: id,
-        label: resolvePerson(id, v.dm, voice, me).name,
-        content: avatar(id, v.dm, "lg"),
-      }));
-      appendChildren(body, topBar(status, "", true, true), videoEl, callControls(false));
-      return;
+      stage = videoStage(v.dm, v.inRoom);
+    } else {
+      stage = createElement("div", { class: "dcp-stage" });
+      for (const id of v.inRoom) stage.appendChild(person(id, v.dm));
     }
-    const stage = createElement("div", { class: "dcp-stage" });
-    for (const id of v.inRoom) stage.appendChild(person(id, v.dm));
     appendChildren(body, topBar(status, "", true, true), stage, callControls(false));
   }
 
@@ -622,17 +637,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     appendChildren(text, statusEl, " · ", timer, speakingEl);
     const ctrl = callControls(true);
     ctrl.classList.add("dcp-controls--compact");
-    appendChildren(row, faces, text);
-    // A stream never expands the panel on its own; Watch does.
-    if (videoActive && view.kind === "connected") {
-      row.appendChild(
-        textButton(d("watch"), "btn-primary dcp-pill dcp-watch", "dcp-watch", () => {
-          collapsed = false;
-          update();
-        }),
-      );
-    }
-    appendChildren(row, ctrl, collapseButton());
+    appendChildren(row, faces, text, ctrl, collapseButton());
     body.appendChild(row);
   }
 
@@ -837,8 +842,11 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     return null;
   }
 
+  /** Collapsed, the panel shows no video (only ringing and connected
+   *  collapse); a stream never expands it on its own. */
   function videoElement(): HTMLElement | null {
-    return view.kind === "connected" && !collapsed ? videoEl : null;
+    if (inCallChannel() === null) return null;
+    return collapsed && view.kind !== "unanswered" ? null : videoEl;
   }
 
   return {
