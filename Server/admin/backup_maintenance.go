@@ -62,7 +62,8 @@ func MaintainBackups(ctx context.Context, database *db.DB, settings *service.Set
 // schedule interval, far longer than any VACUUM INTO keeps a temp unwritten.
 const staleBackupTempAge = 24 * time.Hour
 
-// pruneStaleBackupTemps removes the ".tmp" files killed backups left behind.
+// pruneStaleBackupTemps removes the ".tmp" files killed backups left behind,
+// along with SQLite's ".tmp-journal" sidecar VACUUM INTO writes beside each.
 // BackupToSafe removes its temp on every error it returns, so only a process
 // that died mid-VACUUM leaves one, and no *.db scan would ever reclaim it.
 func pruneStaleBackupTemps() {
@@ -73,7 +74,7 @@ func pruneStaleBackupTemps() {
 	cutoff := time.Now().Add(-staleBackupTempAge)
 	removed := 0
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".tmp" {
+		if ext := filepath.Ext(e.Name()); e.IsDir() || (ext != ".tmp" && ext != ".tmp-journal") {
 			continue
 		}
 		info, infoErr := e.Info()
