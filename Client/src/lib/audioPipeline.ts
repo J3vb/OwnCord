@@ -69,6 +69,8 @@ export class AudioPipeline {
   private vadGated = false;
   /** The user's input volume gain (0-2.0). VAD multiplies this by 0 or 1. */
   private currentInputGain = 1.0;
+  /** Last value passed to setVoiceSensitivity, so a repeat does not rebuild VAD. */
+  private voiceSensitivity: number | null = null;
 
   setRoom(room: Room | null): void {
     this.room = room;
@@ -290,6 +292,8 @@ export class AudioPipeline {
    */
   setVoiceSensitivity(sensitivity: number): void {
     const clamped = Math.max(0, Math.min(100, sensitivity));
+    if (clamped === this.voiceSensitivity) return;
+    this.voiceSensitivity = clamped;
     savePref("voiceSensitivity", clamped);
     // Restart VAD polling with the new threshold (pipeline stays intact)
     this.stopVadPolling();

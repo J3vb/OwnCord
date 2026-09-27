@@ -196,15 +196,23 @@ function buildVoiceAudioTabInner(
     return Math.round((1 - ratio) * 100);
   }
 
-  function applySensitivity(val: number): void {
+  function previewSensitivity(val: number): void {
     currentSensitivity = val;
-    savePref("voiceSensitivity", val);
-    setVoiceSensitivity(val);
     updateThresholdIndicator(val);
   }
 
+  function commitSensitivity(): void {
+    savePref("voiceSensitivity", currentSensitivity);
+    setVoiceSensitivity(currentSensitivity);
+  }
+
+  function applySensitivity(val: number): void {
+    previewSensitivity(val);
+    commitSensitivity();
+  }
+
   function onMove(ev: PointerEvent): void {
-    applySensitivity(sensitivityFromPointer(ev.clientX));
+    previewSensitivity(sensitivityFromPointer(ev.clientX));
   }
 
   // Drag the threshold handle
@@ -217,6 +225,7 @@ function buildVoiceAudioTabInner(
         meterThreshold.removeEventListener("pointermove", onMove);
         meterThreshold.removeEventListener("pointerup", onUp);
         meterThreshold.removeEventListener("pointercancel", onUp);
+        commitSensitivity();
       };
       meterThreshold.addEventListener("pointermove", onMove, { signal });
       meterThreshold.addEventListener("pointerup", onUp, { signal });
