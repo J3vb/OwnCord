@@ -221,12 +221,17 @@ rows keep the only handle on the blobs.
 
 **Backup** (`handleBackup`, `runScheduledBackup`): `BackupToSafe` refuses a
 destination outside the configured backup directory or one that already
-exists, runs `VACUUM INTO`, removes the partial file on any error (OC-0212),
-then `CheckBackupIntegrity` runs `integrity_check` on the result and removes
-it on failure; an audit row (`backup_create`) records the name. The scheduled
+exists, runs `VACUUM INTO` on the **reader** pool into a unique sibling `.tmp` file,
+publishes it with an atomic rename, and removes the partial temp file on any
+error (OC-0212), then `CheckBackupIntegrity` runs `integrity_check` on the
+result and removes it on failure; an audit row (`backup_create`) records the
+name. The scheduled
 path judges freshness by the newest `*.db` mtime and prunes by mtime after
 `backup_retention` days, never removing the newest file or a
-`pre_restore_*` safety copy. **Uploads are not
+`pre_restore_*` safety copy; it also removes `.tmp` files a killed backup
+left untouched for a day. Because the backup no longer holds the writer, an
+upload's quota charge (writer I/O under the quota mutex) no longer waits for
+it; that is how PERF-10 is satisfied. **Uploads are not
 in a backup** (`docs/trust-model.md`, "At rest"), and neither is `totp.key`
 (O7).
 

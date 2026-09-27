@@ -53,7 +53,43 @@ func MaintainBackups(ctx context.Context, database *db.DB, settings *service.Set
 			firstErr = err
 		}
 	}
+	pruneStaleBackupTemps()
 	return firstErr
+}
+
+// staleBackupTempAge is how long a backup's ".tmp" file must sit untouched
+// before the sweep treats it as the leftover of a killed run: the shortest
+// schedule interval, far longer than any VACUUM INTO keeps a temp unwritten.
+const staleBackupTempAge = 24 * time.Hour
+
+// pruneStaleBackupTemps removes the ".tmp" files killed backups left behind.
+// BackupToSafe removes its temp on every error it returns, so only a process
+// that died mid-VACUUM leaves one, and no *.db scan would ever reclaim it.
+func pruneStaleBackupTemps() {
+	entries, err := os.ReadDir(backupBaseDir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-staleBackupTempAge)
+	removed := 0
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".tmp" {
+			continue
+		}
+		info, infoErr := e.Info()
+		if infoErr != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		path := filepath.Join(backupBaseDir, e.Name())
+		if rmErr := os.Remove(path); rmErr != nil {
+			slog.Warn("backup maintenance: failed to remove stale backup temp", "path", path, "error", rmErr)
+			continue
+		}
+		removed++
+	}
+	if removed > 0 {
+		slog.Info("backup maintenance: removed stale backup temp files", "count", removed)
+	}
 }
 
 // runScheduledBackup takes a backup when the newest existing one is older

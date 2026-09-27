@@ -65,7 +65,7 @@ would not work otherwise.
 | Uploaded files             | the bytes you sent, unchanged, under `upload.storage_dir` — `Server/storage/storage.go:136`, `:157`; served by `Server/api/upload_handler.go:281`   | **Delivery** with permission checks (`upload_handler.go:293`), size caps                                                       |
 | Search index               | SQLite FTS5 over message text — `Server/migrations/001_initial_schema.sql:87-91`; queried at `Server/db/message_queries.go:385`                     | **Search** (`GET /api/v1/search`, `Server/api/channel_handler.go:79`). Test: `TestSearchMessages_FindsMatch`                   |
 | Names, times, who-is-where | `users`, `messages`, `sessions` rows (`001_initial_schema.sql:37-46`)                                                                               | **Everything** — routing, permissions, unread counts                                                                           |
-| Backups                    | a full plain copy of the database via `VACUUM INTO` — `Server/db/admin_queries.go:404`; written to `backup.dir` (`Server/config/config.go:275`)     | **Backup and restore** (`Server/admin/api.go:163-172`). There is no download endpoint; the backup lives on the operator's disk |
+| Backups                    | a full plain copy of the database via `VACUUM INTO` — `Server/db/backup_queries.go:101`; written to `backup.dir` (`Server/config/config.go:275`)    | **Backup and restore** (`Server/admin/api.go:163-172`). There is no download endpoint; the backup lives on the operator's disk |
 
 What the server does **not** keep in the clear:
 
@@ -351,7 +351,7 @@ Can, by design:
 - Read, search and delete any text or file on the server; export the text
   via the database backup. **Uploaded files are not in that backup** — it is
   `VACUUM INTO` of the SQLite file only (`Server/admin/handlers_backup.go:76-84`,
-  `Server/db/admin_queries.go:404`); `upload.storage_dir` must be backed up
+  `Server/db/backup_queries.go:101`); `upload.storage_dir` must be backed up
   separately or a restore loses every attachment.
 - See who is online, who is in which voice channel, session devices and IPs
   (`sessions` table, `001_initial_schema.sql:37-46`).

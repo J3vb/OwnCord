@@ -77,10 +77,12 @@ func handleBackup(database *db.DB) http.Handler {
 		timestamp := time.Now().UTC().Format("20060102_150405")
 		backupPath := filepath.Join(backupDir, "chatserver_"+timestamp+".db")
 
-		// Detached like the restore path's safety backup: an interrupted
-		// VACUUM INTO leaves a truncated .db that handleListBackups would
-		// present as restorable. BackupToSafe is rooted at the configured
-		// backup dir (SetBackupDir), not the historical hardcoded default.
+		// Detached like the restore path's safety backup. BackupToSafe runs
+		// the VACUUM on the reader pool and publishes the result with an
+		// atomic rename, so an interrupted backup leaves a .tmp the listing
+		// ignores rather than a truncated .db it would present as restorable.
+		// It is rooted at the configured backup dir (SetBackupDir), not the
+		// historical hardcoded default.
 		if err := database.BackupToSafe(context.WithoutCancel(r.Context()), backupPath, backupDir); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "backup failed")
 			return

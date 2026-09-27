@@ -335,10 +335,10 @@ func routerHealthDeps(cfg *config.Config, database *db.DB, getOnlineUsers *func(
 			if database == nil {
 				return nil
 			}
-			// Reader pool, not the writer: a scheduled backup's VACUUM INTO
-			// holds the sole writer connection for its whole duration, and
-			// the server keeps serving reads throughout — /health must not
-			// call that outage (see db.PingRead).
+			// Reader pool, not the writer: the writer is the single
+			// connection every mutation queues on, and a read-only SELECT 1
+			// there would report a writer queue as a liveness failure. Reads
+			// keep serving throughout (see db.PingRead).
 			return database.PingRead(ctx)
 		},
 		dispatchAlive: func() bool {
