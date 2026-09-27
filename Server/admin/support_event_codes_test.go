@@ -272,11 +272,11 @@ func TestSupportEventCodes_EveryWarnErrorLiteralIsCoded(t *testing.T) {
 	pkgs := map[string][]*ast.File{}
 	walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
+			return nil //nolint:nilerr // an unreadable entry is skipped, not fatal: the canary checks the source it can read
 		}
 		f, parseErr := parser.ParseFile(fset, path, nil, 0)
 		if parseErr != nil {
-			return nil
+			return nil //nolint:nilerr // a file that does not parse already fails the build, so it has no log call to check
 		}
 		pkgs[filepath.Dir(path)] = append(pkgs[filepath.Dir(path)], f)
 		return nil
@@ -348,8 +348,9 @@ func f(kind, line string, s step, t toggle, r reason, h hub) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	var got []string
-	for _, u := range uncodedLogMessages(fset, map[string][]*ast.File{"p": {f}}) {
+	uncovered := uncodedLogMessages(fset, map[string][]*ast.File{"p": {f}})
+	got := make([]string, 0, len(uncovered))
+	for _, u := range uncovered {
 		got = append(got, u.msg)
 	}
 	slices.Sort(got)

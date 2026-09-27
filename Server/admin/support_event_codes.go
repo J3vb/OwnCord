@@ -16,7 +16,7 @@ package admin
 // an entry for each constant that field is set to. A few messages are built
 // with a variable suffix and are covered by supportEventPrefixCodes
 // (support_redaction.go).
-var supportEventCodes = map[string]string{
+var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positive — log messages and event codes, not credentials
 	"ACME HTTP server error — HTTP-01 challenges and certificate renewal will fail until the next restart": "acme_http_server_error_http_01",
 	"ACME HTTP server shutdown error": "acme_http_server_shutdown_error",
 	"AllowedOrigins contains wildcard '*' — consider restricting to specific origins for production use": "allowed_origins_wildcard",
