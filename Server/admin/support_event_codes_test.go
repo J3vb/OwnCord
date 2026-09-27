@@ -316,7 +316,7 @@ type reason struct{ warnLog string }
 
 type hub struct{ log *slog.Logger }
 
-const companionPrefix = "livekit: "
+const dropPrefix = "hub: broadcast channel full, dropping "
 
 func f(kind, line string, s step, t toggle, r reason, h hub) {
 	slog.Warn("upload rejected")
@@ -327,7 +327,9 @@ func f(kind, line string, s step, t toggle, r reason, h hub) {
 	slog.Error(s.failLog)
 	slog.Error(t.updateLog)
 	slog.Warn(r.warnLog)
-	slog.Log(nil, slog.LevelWarn, companionPrefix+line)
+	slog.Log(nil, slog.LevelWarn, dropPrefix+line)
+	slog.Log(nil, slog.LevelWarn, "livekit companion output", "line", line)
+	slog.Error("livekit: failed to write config " + kind)
 	slog.Log(nil, slog.LevelInfo, line)
 	slog.With("k", kind).Warn("a chained failure")
 	slog.Default().Error("a default-logger failure")
@@ -353,7 +355,7 @@ func f(kind, line string, s step, t toggle, r reason, h hub) {
 	slices.Sort(got)
 	want := []string{
 		`"a new prefix " + kind`, "a brand new failure", "a new step failure", `kind + " rejected"`,
-		"a positional failure", "t.updateLog", "r.warnLog", "a chained failure", "a default-logger failure",
+		"a positional failure", "t.updateLog", `"livekit: failed to write config " + kind`, "r.warnLog", "a chained failure", "a default-logger failure",
 	}
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
@@ -370,17 +372,21 @@ func TestSupportEventCode_VoiceRefusalIsCoded(t *testing.T) {
 }
 
 // TestSupportEventCode_PrefixMatch covers a message built with a variable
-// suffix: the constant prefix must resolve, and an exact entry must win over a
-// prefix that also matches.
+// suffix: the constant prefix must resolve, and a message that merely shares a
+// component's wording (OwnCord's own "livekit: ..." supervisor lines) must not
+// be taken for LiveKit companion output.
 func TestSupportEventCode_PrefixMatch(t *testing.T) {
 	if got := supportEventCode("hub: broadcast channel full, dropping global message"); got != "broadcast_dropped" {
 		t.Fatalf("prefix-coded message = %q, want broadcast_dropped", got)
 	}
-	if got := supportEventCode("livekit: 2026-09-27T12:00:00Z WARN room closed"); got != "livekit_companion_log" {
+	if got := supportEventCode("livekit companion output"); got != "livekit_companion_log" {
 		t.Fatalf("companion line = %q, want livekit_companion_log", got)
 	}
-	if got := supportEventCode("livekit: process exited unexpectedly"); got != "livekit_process_exited" {
-		t.Fatalf("exact-coded message under a prefix = %q, want livekit_process_exited", got)
+	if got := supportEventCode("livekit: restarting process"); got != "log_event" {
+		t.Fatalf("supervisor message = %q, want log_event", got)
+	}
+	if got := supportEventCode("auto-generated key saved to disk"); got != "key_auto_generated" {
+		t.Fatalf("key generation = %q, want key_auto_generated", got)
 	}
 }
 

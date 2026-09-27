@@ -272,14 +272,14 @@ func TestLiveKitLogWriter_RoutesLinesThroughSlog(t *testing.T) {
 		"ice failed",
 		"level=WARN",
 		"port busy",
-		"level=WARN msg=\"livekit: 2024-01-01T00:00:00Z\\tWARN\\tlivekit\\trtc/transport.go:123\\tcould not handle ICE candidate",
-		"level=INFO msg=\"livekit: 2024-01-01T00:00:00Z\\tINFO\\tlivekit\\tstacktrace tracer ready\"",
+		"level=WARN msg=\"livekit companion output\" line=\"2024-01-01T00:00:00Z\\tWARN\\tlivekit\\trtc/transport.go:123\\tcould not handle ICE candidate",
+		"level=INFO msg=\"livekit companion output\" line=\"2024-01-01T00:00:00Z\\tINFO\\tlivekit\\tstacktrace tracer ready\"",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("slog output missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "level=INFO msg=\"\"") {
+	if strings.Contains(out, "line=\"\"") {
 		t.Errorf("blank line was logged:\n%s", out)
 	}
 }

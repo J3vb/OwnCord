@@ -30,10 +30,6 @@ func (p *LiveKitProcess) Status() LiveKitProcessStatus {
 	}
 }
 
-// liveKitLogPrefix identifies lines the supervisor writes on the companion's
-// behalf, so a reader can tell them from LiveKit's own output.
-const liveKitLogPrefix = "livekit: "
-
 // liveKitMaxLine caps one companion log line routed into slog, so a binary
 // that never emits a newline cannot grow the buffer without bound. LiveKit
 // lines are far shorter; the cap only ever truncates a misbehaving stream.
@@ -75,7 +71,7 @@ func (w *liveKitLogWriter) emit(line string) {
 	if len(line) > liveKitMaxLine {
 		line = line[:liveKitMaxLine] + "…(truncated)"
 	}
-	slog.Log(context.Background(), liveKitLineLevel(line), liveKitLogPrefix+line, "component", "livekit")
+	slog.Log(context.Background(), liveKitLineLevel(line), "livekit companion output", "line", line, "component", "livekit")
 }
 
 // liveKitLineLevel maps the level field LiveKit prints after its timestamp

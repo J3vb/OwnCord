@@ -144,9 +144,7 @@ func supportEvents(rb *RingBuffer) []supportEvent {
 var supportEventPrefixCodes = map[string]string{
 	"DeleteOtherSessions after ":             "deleteothersessions_after",
 	"DeleteOtherSessions retry after ":       "deleteothersessions_retry_after",
-	"auto-generated ":                        "key_auto_generated",
 	"hub: broadcast channel full, dropping ": "broadcast_dropped",
-	"livekit: ":                              "livekit_companion_log",
 }
 
 func supportEventCode(message string) string {
