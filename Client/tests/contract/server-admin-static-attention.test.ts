@@ -74,6 +74,14 @@ const REPORT = {
       threshold: "raise at 5000.0 ms/min",
       observed_at: "2026-09-23T12:00:00Z",
     },
+    {
+      id: "voice",
+      label: "Voice (LiveKit)",
+      status: "critical",
+      value: "gave up",
+      detail: "the companion exited 10 time(s) and the supervisor stopped restarting it",
+      observed_at: "2026-09-23T12:00:00Z",
+    },
   ],
   warnings: [
     {
@@ -140,6 +148,8 @@ describe("Server/admin/static — attention panel (RI-07)", () => {
     expect(badge("disk")).toBe("Unknown");
     expect(badge("backup")).toBe("Healthy");
     expect(badge("db_writer_wait")).toBe("Warning");
+    expect(badge("voice")).toBe("Critical");
+    expect(panel.querySelector('tr[data-signal="voice"]')?.textContent).toContain("gave up");
     expect(panel.querySelector('tr[data-signal="disk"]')?.textContent).toContain("not measured");
   });
 

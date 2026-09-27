@@ -34,6 +34,22 @@ func (h *Hub) LiveKitHealthCheck(ctx context.Context) (bool, error) {
 	return h.livekit.HealthCheck(ctx)
 }
 
+// LiveKitProcessStatus reports the supervised companion's local state
+// (running, restart count, gave-up). Managed is false when LiveKit is
+// externally managed (no companion), which callers must read as "don't
+// check" rather than "down". Reading it probes nothing.
+func (h *Hub) LiveKitProcessStatus() LiveKitProcessStatus {
+	if h.lkProcess == nil {
+		return LiveKitProcessStatus{}
+	}
+	return h.lkProcess.Status()
+}
+
+// LiveKitManaged reports whether OwnCord supervises the companion process.
+func (h *Hub) LiveKitManaged() bool {
+	return h.lkProcess != nil
+}
+
 // The LiveKit process manager arrives via HubOptions.LiveKitProcess (B3-4);
 // its only hub consumer is the voice_join guard reading IsRunning to fail
 // closed while the supervised SFU is down.

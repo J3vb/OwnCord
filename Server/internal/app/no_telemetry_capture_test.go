@@ -97,6 +97,14 @@ func TestNoAutomaticTelemetry_Capture(t *testing.T) {
 	rec := &dialRecorder{}
 	rec.install(t)
 
+	// The attention panel probes the external LiveKit at voice.livekit_url
+	// (default ws://localhost:7880). The recorder forces Go's own resolver,
+	// and on Windows that resolver's hosts file has no "localhost" entry, so
+	// it would send DNS queries that production (the Windows system
+	// resolver) never does. Naming the loopback address keeps the probe a
+	// loopback dial that needs no lookup on every OS.
+	t.Setenv("OWNCORD_VOICE_LIVEKIT_URL", "ws://127.0.0.1:7880")
+
 	port := freePort(t)
 	a := bootTestApp(t, strconv.Itoa(port), "")
 	ctx, cancel := context.WithCancel(context.Background())

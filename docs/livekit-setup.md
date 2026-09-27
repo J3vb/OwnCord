@@ -197,16 +197,16 @@ disconnects from LiveKit without sending a `voice_leave` message.
 
 ## 7. Troubleshooting
 
-| Symptom                                                          | Cause                                        | Fix                                                                                |
-| ---------------------------------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------- |
-| "voice not configured" error                                     | LiveKit client failed to initialize          | Check `livekit_api_key` and `livekit_api_secret` are set and secret is >= 32 chars |
-| "failed to generate voice token"                                 | API key/secret mismatch                      | Ensure `config.yaml` key/secret match what LiveKit is using                        |
-| Voice connects but no audio                                      | Firewall blocking UDP 50000-60000            | Open UDP port range in Windows Firewall                                            |
-| "backend unavailable" from `/livekit` proxy                      | LiveKit not running on port 7880             | Check `livekit_binary` path or start LiveKit manually                              |
-| "too many rapid failures, giving up" in logs                     | LiveKit binary crashes on startup            | Run `livekit-server --config data/livekit.yaml` manually to see errors             |
-| Mixed content / insecure WS error                                | Client using direct URL over HTTPS page      | Client should use the `/livekit` proxy path                                        |
-| Voice works via public IP but not on the LAN (dual-homed server) | LiveKit only advertises the public `node_ip` | Set `voice.advertise_internal_ip: true` so LAN host candidates are advertised too  |
-| `GET /api/v1/livekit/health` returns degraded                    | LiveKit server not reachable                 | Verify LiveKit is running: `curl http://localhost:7880`                            |
+| Symptom                                                          | Cause                                        | Fix                                                                                                                 |
+| ---------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| "voice not configured" error                                     | LiveKit client failed to initialize          | Check `livekit_api_key` and `livekit_api_secret` are set and secret is >= 32 chars                                  |
+| "failed to generate voice token"                                 | API key/secret mismatch                      | Ensure `config.yaml` key/secret match what LiveKit is using                                                         |
+| Voice connects but no audio                                      | Firewall blocking UDP 50000-60000            | Open UDP port range in Windows Firewall                                                                             |
+| "backend unavailable" from `/livekit` proxy                      | LiveKit not running on port 7880             | Check `livekit_binary` path or start LiveKit manually                                                               |
+| "too many rapid failures, giving up" in logs                     | LiveKit binary crashes on startup            | Read the `livekit: ` lines before it in the server log, or run `livekit-server --config data/livekit.yaml` manually |
+| Mixed content / insecure WS error                                | Client using direct URL over HTTPS page      | Client should use the `/livekit` proxy path                                                                         |
+| Voice works via public IP but not on the LAN (dual-homed server) | LiveKit only advertises the public `node_ip` | Set `voice.advertise_internal_ip: true` so LAN host candidates are advertised too                                   |
+| `GET /api/v1/livekit/health` returns degraded                    | LiveKit server not reachable                 | Verify LiveKit is running: `curl http://localhost:7880`                                                             |
 
 ---
 

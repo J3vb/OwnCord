@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
@@ -27,6 +28,12 @@ type LiveKitProcess struct {
 	dataDir    string
 	httpClient *http.Client // for health checks — no redirect following
 
+	// restarts counts companion relaunches after an unexpected exit; gaveUp
+	// is set when the backoff exhausted maxRetries and runLoop stopped. Both
+	// are read by the attention panel and the support bundle without probing.
+	restarts atomic.Int64
+	gaveUp   atomic.Bool
+
 	mu       syncutil.Mutex
 	cmd      *exec.Cmd
 	cancel   context.CancelFunc
@@ -34,6 +41,9 @@ type LiveKitProcess struct {
 	runDone  chan struct{} // closed by runLoop when cmd.Wait() returns
 	loopDone chan struct{} // closed when runLoop exits entirely
 }
+
+// LiveKitProcessStatus and the companion log writer live in
+// livekit_process_log.go.
 
 // NewLiveKitProcess creates a new process manager. It does not start the
 // process — call Start() to launch the LiveKit server.
@@ -316,6 +326,7 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath, binPath string) {
 		}
 
 		if err != nil {
+			p.restarts.Add(1)
 			slog.Error("livekit: process exited unexpectedly",
 				"error", err,
 				"rapid_failures", rapidFailures,
@@ -323,6 +334,7 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath, binPath string) {
 		}
 
 		if rapidFailures >= maxRetries {
+			p.gaveUp.Store(true)
 			slog.Error("livekit: too many rapid failures, giving up",
 				"rapid_failures", rapidFailures)
 			return
@@ -346,8 +358,12 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath, binPath string) {
 // newLiveKitCmd builds one companion launch for runLoop.
 func newLiveKitCmd(ctx context.Context, cfgPath, binPath string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, binPath, "--config", cfgPath) //nolint:gosec // G204: binary path from trusted server config or verified download
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Route the companion's stdout and stderr into slog rather than the
+	// server's own stdout, so LiveKit's ICE, port and key errors reach the
+	// ring buffer, the admin live log and the support bundle (SRE-05). One
+	// writer each: livekit-server uses separate goroutines for the two.
+	cmd.Stdout = &liveKitLogWriter{}
+	cmd.Stderr = &liveKitLogWriter{}
 	// Give LiveKit a short graceful shutdown window, then let os/exec
 	// kill and reap it before Stop allows an updater to start a successor.
 	cmd.Cancel = func() error { return stopLiveKitProcess(cmd.Process) }
