@@ -29,7 +29,13 @@ import { invalidateReactionUsers } from "../../components/message-list/reaction-
 import { parseTimestamp } from "../../components/message-list/formatting";
 import { notifyIncomingMessage } from "../../lib/notifications";
 import { mentionsCurrentUser } from "../../lib/mentions";
-import { activatePendingMessages, acknowledgePendingMessage } from "../../lib/pendingMessages";
+import { showToast } from "../../lib/toast";
+import { connectText } from "../../i18n/connect";
+import {
+  activatePendingMessages,
+  acknowledgePendingMessage,
+  pendingMessageBeforeRestore,
+} from "../../lib/pendingMessages";
 import type { DispatchApi, Payload, ReconnectClock } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 
@@ -377,7 +383,19 @@ export function handleMessagingError(payload: Payload<"error">, id: string | und
       // group, so flagging it there would gate an unrelated 1:1 DM.
       if (dm !== undefined && !dm.isGroup) setUserBlockedByThem(dm.recipient.id, true);
     }
-    markSendFailed(id, payload.code);
+    // OC-0476: a resent pre-restore id the server holds no receipt for is
+    // refused as BAD_REQUEST; say the server was restored, keeping the text.
+    // The toast lives here, with the connect catalog, to keep MainPage small.
+    const { pendingSends, messagesByChannel } = messagesStore.getState();
+    const clientMessageId = messagesByChannel
+      .get(pendingSends.get(id) ?? 0)
+      ?.find((m) => m.correlationId === id)?.clientMessageId;
+    const beforeRestore =
+      payload.code === "BAD_REQUEST" &&
+      clientMessageId !== undefined &&
+      pendingMessageBeforeRestore(clientMessageId);
+    if (beforeRestore) showToast(connectText("app.sendBeforeRestore"), "error");
+    markSendFailed(id, beforeRestore ? "BEFORE_RESTORE" : payload.code);
     return true;
   }
   // A failed optimistic reaction toggle: the pill reverting is the

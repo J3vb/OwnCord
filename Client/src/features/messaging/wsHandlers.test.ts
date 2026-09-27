@@ -10,11 +10,14 @@ import {
   addOptimisticMessage,
   resetMessagesStore,
 } from "../../stores/messages.store";
+import { activatePendingMessages, deactivatePendingMessages } from "../../lib/pendingMessages";
 import { createReconnectClock } from "../connection/dispatchContext";
 import type { Payload } from "../connection/dispatchContext";
 
 vi.mock("../../lib/notifications", () => ({ notifyIncomingMessage: vi.fn() }));
 import { notifyIncomingMessage } from "../../lib/notifications";
+vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+import { showToast } from "../../lib/toast";
 
 function chat(id: number, timestamp: string): Payload<"chat_message"> {
   return {
@@ -28,11 +31,14 @@ function chat(id: number, timestamp: string): Payload<"chat_message"> {
   };
 }
 
-function pendingSend(correlationId: string): void {
+const me = { id: 1, username: "me", avatar: null };
+
+function pendingSend(correlationId: string, clientMessageId?: string): void {
   addOptimisticMessage({
     correlationId,
+    clientMessageId,
     channelId: 1,
-    user: { id: 1, username: "me", avatar: null },
+    user: me,
     content: "draft",
     replyTo: null,
     timestamp: "2026-03-15T10:00:00Z",
@@ -98,6 +104,38 @@ describe("handleMessagingError", () => {
 
     expect(handleMessagingError({ code: "SLOW_MODE", message: "" }, "corr-1")).toBe(true);
     expect(messagesStore.getState().pendingSends.has("corr-1")).toBe(false);
+  });
+
+  it("labels a refused pre-restore retry and keeps its text (OC-0476)", () => {
+    const floor = Date.now() + 5 * 60 * 1000 + 1000;
+    activatePendingMessages({ host: "chat.example", userId: 1 }, me, true, floor);
+    try {
+      const beforeFloor = `${Date.now()}:${crypto.randomUUID()}`;
+      const afterFloor = `${floor}:${crypto.randomUUID()}`;
+      pendingSend("corr-old", beforeFloor);
+      pendingSend("corr-new", afterFloor);
+
+      handleMessagingError({ code: "BAD_REQUEST", message: "" }, "corr-old");
+      handleMessagingError({ code: "BAD_REQUEST", message: "" }, "corr-new");
+
+      const rows = messagesStore.getState().messagesByChannel.get(1)!;
+      expect(rows.find((m) => m.correlationId === "corr-old")).toMatchObject({
+        status: "failed",
+        errorCode: "BEFORE_RESTORE",
+        content: "draft",
+      });
+      expect(rows.find((m) => m.correlationId === "corr-new")).toMatchObject({
+        status: "failed",
+        errorCode: "BAD_REQUEST",
+      });
+      expect(showToast).toHaveBeenCalledOnce();
+      expect(showToast).toHaveBeenCalledWith(
+        "The server was restored — check the conversation before sending this again.",
+        "error",
+      );
+    } finally {
+      deactivatePendingMessages();
+    }
   });
 
   it("leaves an error with no matching send or reaction to the rest of the chain", () => {

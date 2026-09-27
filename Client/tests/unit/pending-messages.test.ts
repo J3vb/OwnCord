@@ -5,6 +5,7 @@ import {
   PENDING_MESSAGE_MAX_BYTES,
   PENDING_MESSAGE_MAX_COUNT,
   newClientMessageId,
+  pendingMessageBeforeRestore,
   pendingMessageExpired,
   type PendingMessageOwner,
   type PendingMessagePersistence,
@@ -182,6 +183,19 @@ describe("encrypted pending message queue lifecycle", () => {
     const queue = new PendingMessageQueue(owner, persistence, serialize, vi.fn());
     await expect(queue.put(textDraft())).rejects.toThrow("encrypted storage unavailable");
     expect(files.size).toBe(0);
+  });
+
+  it("detects a keyed id that predates the restore floor", () => {
+    const floor = Date.now() + 1000;
+    const before = `${Date.now()}:${crypto.randomUUID()}`;
+    const atFloor = `${floor}:${crypto.randomUUID()}`;
+    expect(pendingMessageBeforeRestore(before, floor)).toBe(true);
+    // An id at or after the floor is the server's accepted range.
+    expect(pendingMessageBeforeRestore(atFloor, floor)).toBe(false);
+    expect(pendingMessageBeforeRestore(before, 0)).toBe(false);
+    // A pre-floor id is still recovered and kept: its text must stay for copy,
+    // so the ordinary expiry predicate must NOT prune it.
+    expect(pendingMessageExpired(before, Date.now(), floor)).toBe(false);
   });
 
   it("uses the restored server's retry floor for new sends without changing old identities", async () => {

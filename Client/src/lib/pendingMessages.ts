@@ -51,6 +51,18 @@ export function pendingMessageExpired(
   );
 }
 
+/**
+ * Whether a keyed id predates the server's restore floor (the active queue's
+ * by default). Retry still resends it unchanged: the server deduplicates it
+ * when the restored database holds its receipt, and otherwise refuses it with
+ * BAD_REQUEST, which this lets the client label as a restore refusal while
+ * keeping the text (OC-0476).
+ */
+export function pendingMessageBeforeRestore(clientMessageId: string, floor = retryFloor): boolean {
+  if (floor <= 0 || !ID_PATTERN.test(clientMessageId)) return false;
+  return Number(clientMessageId.split(":", 1)[0]) < floor;
+}
+
 /** Serialization never evicts a newer unsent draft to make room for another. */
 function decode(value: string | null, now: number, floor: number): PendingTextMessage[] {
   if (value === null) return [];

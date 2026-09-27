@@ -57,6 +57,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Messages
 
+- **A message queued before a server restore now says why Retry was refused.** If the owner restores a backup, Retry on a draft saved just before it still sends it; when the restored server already has it the row reconciles, and otherwise the row now says the server was restored and asks you to check the conversation before sending it again, instead of a bare refusal. The text stays on the row.
 - **Half-written messages are no longer lost when you switch channels.** Each channel keeps its own draft — the text, the reply you had selected and any files you had staged — and restores it when you come back. And when the connection drops or slow mode gates the composer, the textarea is locked rather than disabled, so your caret stays exactly where you left it, and pressing Send says why it is blocked. An unfinished edit is not kept, and a file staged more than about 50 minutes ago must be attached again.
 - **Error toasts no longer vanish before you can read them.** Errors used to disappear after five seconds and could not be closed; they now stay until you dismiss them, with a close button. Any toast pauses its countdown while you hover or focus it, and repeated identical toasts show as one with a count instead of stacking.
 - Message Requests showed the wrong time for anyone not on UTC — the request's time was read as the viewer's local time instead of the server's instant, so it was off by their UTC offset.
