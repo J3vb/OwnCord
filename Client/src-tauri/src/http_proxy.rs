@@ -373,26 +373,21 @@ async fn run_data_phase<R: Runtime>(
     let mut counted = CountingStream::new(&mut *local, Arc::clone(&counter));
     let ticker = tokio::spawn({
         let app = app.clone();
-        let id = target.id.clone();
-        let total = target.total;
         let counter = Arc::clone(&counter);
         async move {
             loop {
                 tokio::time::sleep(UPLOAD_PROGRESS_INTERVAL).await;
-                emit_upload_progress(&app, &id, counter.load(Ordering::Relaxed), total);
+                emit_upload_progress(
+                    &app,
+                    &target.id,
+                    counter.load(Ordering::Relaxed),
+                    target.total,
+                );
             }
         }
     });
     let result = copy_with_deadline(&mut counted, tls, DATA_PHASE_TIMEOUT).await;
     ticker.abort();
-    // Land a final reading so the bar reaches 100% even when the copy finished
-    // inside one interval.
-    emit_upload_progress(
-        app,
-        &target.id,
-        counter.load(Ordering::Relaxed),
-        target.total,
-    );
     result
 }
 
