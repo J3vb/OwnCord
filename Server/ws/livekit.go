@@ -197,6 +197,26 @@ func (c *LiveKitClient) URL() string {
 // lkTimeout is the maximum duration for LiveKit SDK calls (remove, list, etc.).
 const lkTimeout = 5 * time.Second
 
+// ListParticipants returns the identities currently in a channel's room, for
+// RT-3's polling reconciler (voice_reconcile.go). A failure is returned, never
+// collapsed to an empty set: the reconciler must not read "the SFU did not
+// answer" as "the room is empty".
+func (c *LiveKitClient) ListParticipants(ctx context.Context, channelID int64) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
+	defer cancel()
+	resp, err := c.roomSvc.ListParticipants(ctx, &livekit.ListParticipantsRequest{
+		Room: RoomName(channelID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("livekit: listing participants: %w", err)
+	}
+	ids := make([]string, 0, len(resp.GetParticipants()))
+	for _, p := range resp.GetParticipants() {
+		ids = append(ids, p.GetIdentity())
+	}
+	return ids, nil
+}
+
 // RemoveParticipant forcefully disconnects a participant from a room.
 func (c *LiveKitClient) RemoveParticipant(ctx context.Context, channelID int64, userID int64, voiceJoinToken string) error {
 	roomName := RoomName(channelID)
