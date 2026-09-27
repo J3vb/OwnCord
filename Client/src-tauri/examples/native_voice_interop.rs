@@ -379,6 +379,9 @@ mod linux {
                     max_framerate: 30.0,
                     simulcast: false,
                 };
+                // Settle as for the after sample, so the first camera's
+                // sender threads are counted in the baseline too.
+                tokio::time::sleep(Duration::from_millis(500)).await;
                 emit(
                     serde_json::json!({ "event": { "type": "threads", "phase": "camera-before", "count": process_threads() } }),
                 );
