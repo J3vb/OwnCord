@@ -113,8 +113,8 @@ func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.C
 		stopAttention()
 		<-attentionDone
 		// Backstop for early returns below (see hub.GracefulStop defer above),
-		// and a bounded join so an in-flight tick (which can hold the writer —
-		// scheduled backups run VACUUM INTO) isn't still using the database
+		// and a bounded join so an in-flight tick (a scheduled backup's
+		// VACUUM INTO can run for seconds) isn't still using the database
 		// while the LIFO-later Close defer tears it down.
 		close(stopMaintenance)
 		select {
