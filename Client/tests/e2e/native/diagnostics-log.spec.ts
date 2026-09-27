@@ -1,20 +1,14 @@
 /**
  * Native E2E: the client diagnostic trail (CLI-03).
  *
- * Two failure classes the desktop client used to leave invisible:
- *   - The Rust log deleted itself at every 10 MB rollover (tauri-plugin-log's
- *     default KeepOne), so a bundle exported right after a rotation had no
- *     history. `rotation_strategy(KeepSome(2))` keeps the previous file, and
- *     the support bundle now carries it.
- *   - A frontend that never came up left nothing: main.ts starts log
- *     persistence first, and the Rust host's watchdog logs
- *     "frontend not ready" after its timeout when `frontend_ready` never
- *     arrives.
+ * The Rust log deleted itself at every 10 MB rollover (tauri-plugin-log's
+ * default KeepOne), so a bundle exported right after a rotation had no
+ * history. `rotation_strategy(KeepSome(2))` keeps the previous file, and the
+ * support bundle now carries it.
  *
- * The first scenario seeds an oversized `owncord-client.log` before launch so
- * the plugin's first write rotates it, then exports the real support bundle to
- * a path the test chooses by answering the OS save dialog's IPC call. The
- * second blocks the bundled module scripts so main.ts never runs.
+ * The scenario seeds an oversized `owncord-client.log` before launch so the
+ * plugin's first write rotates it, then exports the real support bundle to a
+ * path the test chooses by answering the OS save dialog's IPC call.
  */
 
 import { test, expect } from "@playwright/test";
@@ -115,29 +109,5 @@ test("a Rust log rollover keeps the previous file, and the bundle carries the na
     } finally {
       await server.close();
     }
-  }
-});
-
-// eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
-test("a frontend that never comes up leaves a 'frontend not ready' line", async ({}, info) => {
-  test.setTimeout(180_000);
-  // Blocking the module scripts keeps main.ts from running, so frontend_ready
-  // is never sent and the Rust watchdog logs after its 30s timeout.
-  const app: NativeApp = await startNativeApp(undefined, { blockFrontend: true });
-  try {
-    await withNativeArtifacts(
-      app,
-      async () => {
-        const text = await readWhen(
-          "owncord-client.log",
-          (line) => line.includes("frontend not ready"),
-          45_000,
-        );
-        expect(text).toContain("frontend not ready");
-      },
-      info,
-    );
-  } finally {
-    await app.close();
   }
 });

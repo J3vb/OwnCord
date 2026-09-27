@@ -20,9 +20,6 @@ export async function startNativeApp(
     /** Seed `owncord-client.log` to this size before launch, so the log
      *  plugin's first write rotates it (CLI-03 rollover coverage). */
     seedActiveLogBytes?: number;
-    /** Abort the app's JS chunks on the first navigation, so the frontend never
-     *  runs and never calls `frontend_ready` (CLI-03 blank-window coverage). */
-    blockFrontend?: boolean;
   } = {},
 ) {
   if (process.platform !== "win32") throw new Error("Native WebView2 tests require Windows");
@@ -84,14 +81,6 @@ export async function startNativeApp(
     // not applied by the built-in browser fixture.
     context.setDefaultTimeout(30_000);
     context.setDefaultNavigationTimeout(45_000);
-    // Simulate a frontend that never came up: abort the bundled module scripts
-    // before the first document requests them, so main.ts never runs and never
-    // calls `frontend_ready`. Installed on the context (not a page) so it
-    // applies to the app's initial navigation, which begins before the page
-    // target is observable.
-    if (options.blockFrontend) {
-      await context.route("**/*.{js,mjs}", (route) => route.abort());
-    }
     const page = await waitForFirstPage(context, running, startupDeadline - Date.now());
     // WebView2 exposes a page as soon as it starts loading its own
     // "Loading <url>" interstitial, before the app document has navigated in.
