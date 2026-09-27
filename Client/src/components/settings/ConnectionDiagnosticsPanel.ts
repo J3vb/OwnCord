@@ -68,7 +68,7 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
   const title = createElement("h3", { id: "connection-diagnostics-title" }, t("diagnostics.title"));
   const start = createElement(
     "button",
-    { class: "ac-btn secondary", type: "button", "data-testid": "diagnostics-start" },
+    { class: "ac-btn", type: "button", "data-testid": "diagnostics-start" },
     t("diagnostics.start"),
   );
   const cancel = createElement(
@@ -130,10 +130,9 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
     }
     row.dataset.status = result.status;
     finalStatus.set(result.stage, result.status);
-    // A passing stage needs no reading: its full sentence stays as detail.
-    // Anything else says in words what happened and what to do next.
+    // A passing stage needs no reading: its full sentence sits on a muted
+    // line below. Anything else says in words what happened and what to do next.
     const passed = result.status === "passed";
-    row.title = result.detail;
     row.replaceChildren(
       statusIcon(STATUS_KIND[result.status]),
       createElement("span", { class: "status-name" }, diagnosticLabel(result.stage)),
@@ -145,6 +144,7 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
           : t("diagnostics.result", { status: statusLabel(result.status), detail: result.detail }),
       ),
     );
+    if (passed) row.appendChild(createElement("span", { class: "status-detail" }, result.detail));
   }
 
   function reset(text: string): void {
@@ -152,6 +152,7 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
     rows.clear();
     finalStatus.clear();
     setText(start, t("diagnostics.start"));
+    start.classList.remove("secondary");
     showSummary(text);
   }
 
@@ -203,6 +204,7 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
           const done = completion([...finalStatus.values()]);
           showSummary(done.headline, done.kind, done.counts);
           setText(start, t("diagnostics.runAgain"));
+          start.classList.add("secondary");
         })
         .catch(() => {
           if (!alive || attempt !== current) return;

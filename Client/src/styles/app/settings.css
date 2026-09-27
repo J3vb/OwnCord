@@ -401,6 +401,12 @@ details.disclose > summary {
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }
+.status-detail {
+  flex: 1 0 100%;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
 details.disclose > summary {
   padding: var(--space-2) 0;
   list-style: none;

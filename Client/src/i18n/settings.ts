@@ -198,8 +198,7 @@ export const settingsText = defineCatalog("settings", {
   "logs.refreshDiagnostics": "Refresh Diagnostics",
   "logs.copyDiagnostics": "Copy Diagnostics",
   "logs.exportBundle": "Export Support Bundle",
-  "logs.bundleNote":
-    "Saves a zip on this computer with your log files, these diagnostics, your saved servers and display and voice settings. Nothing is uploaded, and passwords, tokens, recovery kits, recovery codes and 2FA secrets are never read into it. Log lines are exported verbatim, without redaction — read them before sharing.",
+  "logs.bundleNote": "Nothing is uploaded. Log lines are not redacted — read them before sharing.",
   "logs.bundleSaved": "Support bundle saved.",
   "logs.exportFailed": "Export failed: {error}",
   "logs.bundleReadme":

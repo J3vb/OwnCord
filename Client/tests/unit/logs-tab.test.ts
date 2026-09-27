@@ -481,7 +481,7 @@ describe("LogsTab", () => {
   });
 
   // B7-15c: the support bundle is exported locally and the UI says plainly
-  // that log lines go out verbatim.
+  // that log lines go out unredacted.
   describe("support bundle", () => {
     function build() {
       const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
@@ -489,10 +489,10 @@ describe("LogsTab", () => {
       return el;
     }
 
-    it("states that nothing is uploaded and that logs are exported verbatim", () => {
+    it("states that nothing is uploaded and that logs are not redacted", () => {
       const el = build();
       expect(el.textContent).toContain("Nothing is uploaded");
-      expect(el.textContent).toContain("Log lines are exported verbatim, without redaction");
+      expect(el.textContent).toContain("Log lines are not redacted — read them before sharing.");
       el.remove();
     });
 

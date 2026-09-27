@@ -106,8 +106,11 @@ describe("connection diagnostics session ownership in settings", () => {
       expect(passed.querySelector(".st-ic.st-ok svg")).not.toBeNull();
       expect(passed.querySelector(".status-name")!.textContent).toBe("Server connection");
       expect(passed.querySelector(".status-result")!.textContent).toBe("Passed");
-      // A passing stage keeps its full sentence as detail, off the scan line.
-      expect(passed.title).toContain("certificate-checked connection");
+      // A passing stage keeps its full sentence as a visible detail line.
+      expect(passed.querySelector(".status-detail")!.textContent).toContain(
+        "certificate-checked connection",
+      );
+      expect(passed.title).toBe("");
 
       // A stage that was not tested shows what to do next, in words.
       const media = row("media");
@@ -129,16 +132,18 @@ describe("connection diagnostics session ownership in settings", () => {
       expect(auth.querySelector(".status-result")!.textContent).toContain("sign in again");
     });
 
-    it("offers Run again as a secondary action once results are shown, and resets with them", async () => {
+    it("makes Start the primary action, then Run again secondary once results show, and resets with them", async () => {
       const startButton = () =>
         panel.element.querySelector<HTMLButtonElement>("[data-testid=diagnostics-start]")!;
       expect(startButton().textContent).toBe("Start connection test");
-      expect(startButton().classList.contains("secondary")).toBe(true);
+      expect(startButton().classList.contains("secondary")).toBe(false);
       start();
       await vi.waitFor(() => expect(startButton().textContent).toBe("Run again"));
+      expect(startButton().classList.contains("secondary")).toBe(true);
       scope.dispose();
       scope = new SessionScope({ host: "server.test", generation: 2 });
       expect(startButton().textContent).toBe("Start connection test");
+      expect(startButton().classList.contains("secondary")).toBe(false);
     });
 
     it("keeps the test's limits behind a closed disclosure", () => {
