@@ -364,6 +364,24 @@ details.disclose:not([open])>summary.section-card-header{border-bottom:none}
 .job-list .st-ic{width:14px;height:14px}
 .job-list .val{color:var(--text-muted)}
 
+/* Message retention: the policy as a sentence, exceptions only, the full
+   channel list behind a disclosure. */
+.ret-policy{display:flex;align-items:center;flex-wrap:wrap;gap:10px 14px}
+.ret-policy-text{flex:1 1 260px;min-width:0}
+.ret-policy-big{font-size:20px;font-weight:700;color:var(--header-primary)}
+.ret-policy-sub{font-size:13px;color:var(--text-muted);margin-top:2px;line-height:1.45}
+.ret-policy-sub strong{color:var(--text-warning)}
+.ret-edit{margin-top:12px;border-top:1px solid var(--border)}
+.ret-edit-ctrl{display:flex;gap:8px;align-items:center}.ret-edit-ctrl .form-input{width:110px}
+.ret-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;padding:12px 20px;border-top:1px solid var(--border);font-size:13px}
+.ret-row>svg{width:16px;height:16px;color:var(--text-muted);flex-shrink:0}
+.ret-row>.btn,.ret-row>.act-group{margin-left:auto}
+.ret-due{color:var(--text-danger)}
+.section-card-header+.ret-row{border-top:none}
+.ret-all>summary{padding:12px 20px;border-top:1px solid var(--border);font-size:13px;color:var(--text-muted)}
+.empty-line{display:flex;align-items:center;gap:10px;padding:16px 20px;font-size:13px;color:var(--text-muted)}
+.empty-line>svg{width:16px;height:16px;flex-shrink:0}
+
 /* Members (AO-4): tabs, the list, one Manage button plus an overflow menu per
    row. The menu is position:fixed (members.js places it) so the table's scroll
    wrapper cannot clip it. */
