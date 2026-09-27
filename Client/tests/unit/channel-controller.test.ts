@@ -17,6 +17,8 @@ const {
   mockIsIdle,
   mockScrollToMessage,
   mockSetDisabled,
+  mockGetDraft,
+  mockRestoreDraft,
 } = vi.hoisted(() => ({
   mockMessageListMount: vi.fn(),
   mockMessageListDestroy: vi.fn(),
@@ -38,6 +40,14 @@ const {
   mockIsIdle: vi.fn(() => true),
   mockScrollToMessage: vi.fn(() => true),
   mockSetDisabled: vi.fn(),
+  mockGetDraft: vi.fn<
+    () => {
+      content: string;
+      replyTo: { messageId: number; username: string } | null;
+      attachments: { id: string; filename: string }[];
+    }
+  >(() => ({ content: "", replyTo: null, attachments: [] })),
+  mockRestoreDraft: vi.fn(),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -87,6 +97,8 @@ vi.mock("@components/MessageInput", () => ({
       cancelEdit: vi.fn(),
       isIdle: mockIsIdle,
       setDisabled: mockSetDisabled,
+      getDraft: mockGetDraft,
+      restoreDraft: mockRestoreDraft,
     };
   }),
 }));
@@ -462,6 +474,104 @@ describe("createChannelController", () => {
     expect(mockInvalidateWindow).toHaveBeenCalledWith(99);
     // Each mount still asks for the tail exactly once.
     expect(opts.msgCtrl.loadMessages).toHaveBeenCalledTimes(3);
+  });
+
+  describe("per-channel composer drafts (UX-1)", () => {
+    it("captures the outgoing channel's draft before destroying it", () => {
+      const opts = makeOpts();
+      mockGetDraft.mockReturnValue({
+        content: "kept draft",
+        replyTo: { messageId: 7, username: "alice" },
+        attachments: [{ id: "srv-1", filename: "a.png" }],
+      });
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      ctrl.mountChannel(99, "random");
+
+      expect(mockGetDraft).toHaveBeenCalled();
+      expect(mockRestoreDraft).not.toHaveBeenCalledWith(
+        expect.objectContaining({ content: "kept draft" }),
+      );
+    });
+
+    it("restores a channel's draft when the user returns to it", () => {
+      const opts = makeOpts();
+      mockGetDraft.mockReturnValue({
+        content: "",
+        replyTo: null,
+        attachments: [],
+      });
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      // Capture a real draft for channel 42 while it is mounted.
+      mockGetDraft.mockReturnValue({
+        content: "back later",
+        replyTo: null,
+        attachments: [{ id: "srv-2", filename: "b.pdf" }],
+      });
+      ctrl.mountChannel(99, "random");
+      mockGetDraft.mockReturnValue({ content: "", replyTo: null, attachments: [] });
+      ctrl.mountChannel(42, "general");
+
+      expect(mockRestoreDraft).toHaveBeenCalledWith({
+        content: "back later",
+        replyTo: null,
+        attachments: [{ id: "srv-2", filename: "b.pdf" }],
+      });
+    });
+
+    it("does not restore a draft into a channel with none", () => {
+      const opts = makeOpts();
+      mockGetDraft.mockReturnValue({ content: "", replyTo: null, attachments: [] });
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockRestoreDraft.mockClear();
+
+      ctrl.mountChannel(99, "random");
+
+      expect(mockRestoreDraft).not.toHaveBeenCalled();
+    });
+
+    it("drops a restored reply target that no longer exists", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      mockGetDraft.mockReturnValue({
+        content: "reply draft",
+        replyTo: { messageId: 7, username: "alice" },
+        attachments: [],
+      });
+      ctrl.mountChannel(99, "random");
+      // Returning to 42: its messages are gone (deleted elsewhere) — the reply
+      // survives as text but the dangling target is dropped.
+      mockGetChannelMessages.mockReturnValue([]);
+      mockGetDraft.mockReturnValue({ content: "", replyTo: null, attachments: [] });
+      ctrl.mountChannel(42, "general");
+
+      expect(mockRestoreDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ content: "reply draft", replyTo: null }),
+      );
+    });
+
+    it("does not carry a draft across two channels into a third", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+
+      mockGetDraft.mockReturnValue({ content: "for 42", replyTo: null, attachments: [] });
+      ctrl.mountChannel(42, "general");
+      mockGetDraft.mockReturnValue({ content: "for 99", replyTo: null, attachments: [] });
+      ctrl.mountChannel(99, "random");
+      mockRestoreDraft.mockClear();
+      mockGetDraft.mockReturnValue({ content: "", replyTo: null, attachments: [] });
+      ctrl.mountChannel(7, "other");
+
+      expect(mockRestoreDraft).not.toHaveBeenCalledWith(
+        expect.objectContaining({ content: "for 42" }),
+      );
+    });
   });
 
   it("does not invalidate any window on the very first mount, which fetches exactly once", () => {

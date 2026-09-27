@@ -601,6 +601,107 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  // ── UX-1: per-channel drafts and focus retention ──
+
+  describe("draft capture and restore (UX-1)", () => {
+    it("captures the typed text, reply target and settled attachment ids", async () => {
+      const onUploadFile = vi.fn(async () => ({ id: "srv-1", url: "/f/1", filename: "a.png" }));
+      const comp = createMessageInput(makeOptions({ onUploadFile }));
+      comp.mount(container);
+
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.value = "half-written";
+      comp.setReplyTo(7, "alice");
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      Object.defineProperty(fileInput, "files", {
+        value: [new File(["x"], "a.png", { type: "image/png" })],
+        writable: true,
+      });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
+
+      const draft = comp.getDraft();
+      expect(draft.content).toBe("half-written");
+      expect(draft.replyTo).toEqual({ messageId: 7, username: "alice" });
+      expect(draft.attachments).toEqual([{ id: "srv-1", filename: "a.png" }]);
+      comp.destroy?.();
+    });
+
+    it("restores text, reply bar and attachment chips into a fresh composer", () => {
+      const comp = createMessageInput(makeOptions());
+      comp.mount(container);
+
+      comp.restoreDraft({
+        content: "draft text",
+        replyTo: { messageId: 9, username: "bob" },
+        attachments: [{ id: "srv-9", filename: "doc.pdf" }],
+      });
+
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      expect(textarea.value).toBe("draft text");
+      const replyBars = container.querySelectorAll(".reply-bar");
+      expect(replyBars[0]!.classList.contains("visible")).toBe(true);
+      expect(replyBars[0]!.textContent).toContain("bob");
+      expect(container.querySelectorAll(".attachment-preview-item").length).toBe(1);
+      // The restored chip is already uploaded: no spinner, and it rides send.
+      expect(
+        container.querySelector(".attachment-preview-item")!.classList.contains("uploading"),
+      ).toBe(false);
+      comp.destroy?.();
+    });
+
+    it("restores a draft with no reply or attachments", () => {
+      const comp = createMessageInput(makeOptions());
+      comp.mount(container);
+
+      comp.restoreDraft({ content: "just text", replyTo: null, attachments: [] });
+
+      expect((container.querySelector(".msg-textarea") as HTMLTextAreaElement).value).toBe(
+        "just text",
+      );
+      expect(container.querySelectorAll(".attachment-preview-item").length).toBe(0);
+      comp.destroy?.();
+    });
+  });
+
+  describe("focus retention while gated (UX-1)", () => {
+    it("keeps the caret and focus when the composer is disabled", () => {
+      const comp = createMessageInput(makeOptions());
+      comp.mount(container);
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.focus();
+      expect(document.activeElement).toBe(textarea);
+      textarea.value = "mid-sentence";
+
+      comp.setDisabled("Reconnecting…");
+
+      // Focus must survive: a `disabled` textarea drops it to <body> and loses
+      // the caret mid-sentence.
+      expect(document.activeElement).toBe(textarea);
+      expect(textarea.value).toBe("mid-sentence");
+      expect(textarea.getAttribute("aria-disabled")).toBe("true");
+      expect(textarea.readOnly).toBe(true);
+      comp.destroy?.();
+    });
+
+    it("refuses Send with the reason while gated, then sends once re-enabled", () => {
+      const opts = makeOptions();
+      const comp = createMessageInput(opts);
+      comp.mount(container);
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.value = "queued";
+
+      comp.setDisabled("Reconnecting…");
+      (container.querySelector(".send-btn") as HTMLButtonElement).click();
+      expect(opts.onSend).not.toHaveBeenCalled();
+
+      comp.setDisabled(null);
+      (container.querySelector(".send-btn") as HTMLButtonElement).click();
+      expect(opts.onSend).toHaveBeenCalledWith("queued", null, []);
+      comp.destroy?.();
+    });
+  });
+
   // ── File attachment via onUploadFile ──
 
   it("attach button is enabled when onUploadFile is provided", () => {

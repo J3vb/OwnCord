@@ -46,11 +46,25 @@ export interface MessageInputOptions {
   readonly disabledReason?: string | null;
 }
 
+/** A channel's unsent composer state, captured before a channel switch and
+ *  restored when the user returns (UX-1). Uploads settled before the switch
+ *  keep their server id; an upload still in flight is not carried (it is
+ *  cancelled on unmount, per SRV-05). */
+export interface ComposerDraft {
+  readonly content: string;
+  readonly replyTo: { readonly messageId: number; readonly username: string } | null;
+  readonly attachments: readonly { readonly id: string; readonly filename: string }[];
+}
+
 export type MessageInputComponent = MountableComponent & {
   setReplyTo(messageId: number, username: string): void;
   clearReply(): void;
   startEdit(messageId: number, content: string): void;
   cancelEdit(): void;
+  /** Capture the current unsent state so a channel switch can carry it. */
+  getDraft(): ComposerDraft;
+  /** Restore a previously captured draft into this (fresh) composer. */
+  restoreDraft(draft: ComposerDraft): void;
   /** True when the composer holds no text, reply, edit or attachment. */
   isIdle(): boolean;
   /**
@@ -502,7 +516,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   function applyDisabledState(): void {
     if (textarea === null) return;
     const disabled = disabledReason !== null;
-    textarea.disabled = disabled;
+    // UX-1 / DESIGN_SYSTEM "Disabled": a gated composer uses aria-disabled +
+    // readOnly rather than the `disabled` attribute, because disabling a
+    // focused element drops focus to <body> and loses the caret mid-sentence.
+    // Send is refused in handleSend() with the reason; the buttons stay
+    // `disabled` (they are not focus targets the user is typing into).
+    textarea.readOnly = disabled;
+    if (disabled) {
+      textarea.setAttribute("aria-disabled", "true");
+    } else {
+      textarea.removeAttribute("aria-disabled");
+    }
     textarea.placeholder = disabled
       ? disabledReason!
       : messagingText("composer.placeholder", { channel: options.channelName });
@@ -1154,6 +1178,61 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     openPicker?.();
   }
 
+  /** Capture the unsent state for a channel switch. Only settled attachments
+   *  carry their server id; an in-flight upload is not carried (SRV-05 aborts
+   *  it on unmount). */
+  function getDraft(): ComposerDraft {
+    return {
+      content: textarea?.value ?? "",
+      replyTo: state.replyTo,
+      attachments: pendingAttachments
+        .filter((a) => !a.id.startsWith("pending-"))
+        .map((a) => ({ id: a.id, filename: a.filename })),
+    };
+  }
+
+  /** Restore a captured draft into this composer: text, reply bar and an
+   *  already-uploaded chip per attachment. Idempotent per attachment id, so a
+   *  double restore cannot duplicate a chip. */
+  function restoreDraft(draft: ComposerDraft): void {
+    if (textarea !== null) {
+      textarea.value = draft.content;
+      autoResize();
+    }
+    if (draft.replyTo !== null) setReplyTo(draft.replyTo.messageId, draft.replyTo.username);
+    for (const att of draft.attachments) addSettledAttachment(att);
+  }
+
+  /** Render an already-uploaded attachment as a ready chip (no spinner), so a
+   *  restored draft can send its ids without re-uploading. */
+  function addSettledAttachment(att: { id: string; filename: string }): void {
+    if (attachmentPreviewBar === null) return;
+    if (pendingAttachments.some((a) => a.id === att.id)) return;
+    const item = createElement("div", { class: "attachment-preview-item" });
+    const icon = createElement("div", { class: "attachment-preview-file" });
+    icon.appendChild(createIcon("file-text", 16));
+    const nameEl = createElement("span", { class: "attachment-preview-name" }, att.filename);
+    appendChildren(item, icon, nameEl);
+    const removeBtn = createElement("button", {
+      class: "attachment-preview-remove",
+      "data-testid": "attachment-remove",
+      "aria-label": messagingText("attach.remove", { filename: att.filename }),
+    });
+    removeBtn.appendChild(createIcon("x", 14));
+    removeBtn.addEventListener(
+      "click",
+      (e) => {
+        e.stopPropagation();
+        removePreviewItem(item);
+      },
+      { signal },
+    );
+    item.appendChild(removeBtn);
+    attachmentPreviewBar.classList.add("visible");
+    attachmentPreviewBar.appendChild(item);
+    pendingAttachments.push({ id: att.id, filename: att.filename, previewEl: item });
+  }
+
   return {
     mount,
     destroy,
@@ -1164,5 +1243,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     isIdle,
     setDisabled,
     openFilePicker,
+    getDraft,
+    restoreDraft,
   };
 }

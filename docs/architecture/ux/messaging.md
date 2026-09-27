@@ -54,14 +54,22 @@ stateDiagram-v2
     SlowMode --> Enabled: cooldown elapsed
 ```
 
-| Composer state                                 | Presentation                                                                                                                        | Reason shown                                         |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `enabled`                                      | Editable textarea, attach + pickers active                                                                                          | —                                                    |
-| `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar                                                                                                 | "Only moderators can post in announcement channels." |
-| `no-permission`                                | Disabled bar                                                                                                                        | "You don't have permission to send messages here."   |
-| `offline`                                      | Disabled — "Reconnecting…" while retrying, "Not connected" when disconnected                                                        | connection status (README §3)                        |
-| `slow-mode`                                    | Disabled with a live countdown                                                                                                      | "Slow mode: wait Ns."                                |
-| `uploading`                                    | Send disabled until uploads settle or are removed (an in-flight upload's owner blocks `handleSend()`, `components/MessageInput.ts`) | per-attachment spinner                               |
+| Composer state                                 | Presentation                                                                                                                                 | Reason shown                                         |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `enabled`                                      | Editable textarea, attach + pickers active                                                                                                   | —                                                    |
+| `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar                                                                                                          | "Only moderators can post in announcement channels." |
+| `no-permission`                                | Disabled bar                                                                                                                                 | "You don't have permission to send messages here."   |
+| `offline`                                      | Gated — "Reconnecting…" while retrying, "Not connected" when disconnected; the textarea uses `aria-disabled` + `readOnly` so the caret stays | connection status (README §3)                        |
+| `slow-mode`                                    | Disabled with a live countdown                                                                                                               | "Slow mode: wait Ns."                                |
+| `uploading`                                    | Send disabled until uploads settle or are removed (an in-flight upload's owner blocks `handleSend()`, `components/MessageInput.ts`)          | per-attachment spinner                               |
+
+**Per-channel drafts (UX-1).** Switching away from a channel stashes its unsent
+state — text, reply target and staged upload ids — in `ChannelController`'s
+`draftByChannel`, and restores it when the user returns; a send that consumes
+the draft leaves nothing behind. Gating the composer (offline, slow mode, no
+permission) uses `aria-disabled` + `readOnly` rather than the `disabled`
+attribute, so a mid-sentence caret is never dropped to `<body>`; Send is
+refused with the reason instead.
 
 > **✓ Implemented (2026-07).** The server sends an authoritative per-channel
 > `can_send` in the ready payload (`ws/serve.go` `channelCanSend`, mirroring
