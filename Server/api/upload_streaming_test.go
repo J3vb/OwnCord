@@ -336,8 +336,7 @@ func dirByteSize(dir string) uint64 {
 	return total
 }
 
-// TestUpload_ConcurrentLargeBodiesNeverCrossTheFloor: four racers (the
-// per-user in-flight cap) each
+// TestUpload_ConcurrentLargeBodiesNeverCrossTheFloor: eight racers each
 // upload a body above the in-memory multipart threshold against a
 // free-space probe that reflects real bytes as they land in the storage dir
 // AND real bytes staged in the process temp dir — the same single volume a
@@ -346,8 +345,8 @@ func dirByteSize(dir string) uint64 {
 // at any observed probe reading. Against the unfixed handler, a body above
 // the in-memory threshold spools to the temp dir during ParseMultipartForm
 // and is never removed on the success path (httptest never runs the
-// server's own post-request multipart cleanup), so four successful,
-// unaccounted 12 MiB spills sit there alongside the four landed files —
+// server's own post-request multipart cleanup), so eight successful,
+// unaccounted 12 MiB spills sit there alongside the eight landed files —
 // real disk pressure this test's probe can see but the unfixed handler's
 // admission check never did.
 func TestUpload_ConcurrentLargeBodiesNeverCrossTheFloor(t *testing.T) {
@@ -355,12 +354,12 @@ func TestUpload_ConcurrentLargeBodiesNeverCrossTheFloor(t *testing.T) {
 
 	const size = 12 << 20 // above the 10 MiB in-memory multipart threshold
 	const floor = uint64(50 << 20)
-	// Sized so four racers' bytes landing exactly once (48 MiB total) fit
-	// comfortably (102 - 48 = 54 MiB, above the floor): a correct admission
-	// scheme can let all four through. Only counting the same bytes twice
+	// Sized so eight racers' bytes landing exactly once (96 MiB total) fit
+	// comfortably (150 - 96 = 54 MiB, above the floor): a correct admission
+	// scheme can let all eight through. Only counting the same bytes twice
 	// at rest (staged and landed) can drive the observed free space under the
 	// floor or strand headroom once the race is over.
-	const baseFree = uint64(102 << 20)
+	const baseFree = uint64(150 << 20)
 
 	real, err := storage.New(t.TempDir(), 50)
 	if err != nil {
@@ -394,7 +393,7 @@ func TestUpload_ConcurrentLargeBodiesNeverCrossTheFloor(t *testing.T) {
 	var wg sync.WaitGroup
 	var created, refused, other atomic.Int32
 	body := bytes.Repeat([]byte("y"), size)
-	for range 4 {
+	for range 8 {
 		wg.Go(func() {
 			<-start
 			rr := doUpload(t, h.router, h.token, "file", "f.bin", body)
@@ -412,15 +411,15 @@ func TestUpload_ConcurrentLargeBodiesNeverCrossTheFloor(t *testing.T) {
 	close(start)
 	wg.Wait()
 
-	// Four racers landing 12 MiB each (48 MiB) leaves 102 - 48 = 54 MiB
-	// free, above the 50 MiB floor, so all four fit and usually all four
+	// Eight racers landing 12 MiB each (96 MiB) leaves 150 - 96 = 54 MiB
+	// free, above the 50 MiB floor, so all eight fit and usually all eight
 	// are admitted. The exact count is timing: a racer judged between
 	// another's store write (the probe sees the bytes) and its Landed (the
 	// in-flight sum stops counting them) is refused for bytes counted twice
 	// — the safe side, the same window
 	// TestReserve_HeadroomRacersNeverOverAdmitWhileBytesLand documents.
-	if created.Load() < 1 || created.Load()+refused.Load() != 4 {
-		t.Fatalf("created %d, refused %d; want at least 1 created and them to add to 4", created.Load(), refused.Load())
+	if created.Load() < 1 || created.Load()+refused.Load() != 8 {
+		t.Fatalf("created %d, refused %d; want at least 1 created and them to add to 8", created.Load(), refused.Load())
 	}
 	if minFreeObserved.Load() < floor {
 		t.Fatalf("the observed free space dropped to %d bytes, under the %d floor", minFreeObserved.Load(), floor)

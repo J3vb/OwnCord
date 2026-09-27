@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // SRV-05 at the HTTP seam: the server's global ReadTimeout/WriteTimeout (30 s
@@ -188,13 +190,21 @@ func TestServeFile_SlowProgressingClientSurvivesWriteTimeout(t *testing.T) {
 }
 
 // TestUpload_ConcurrentUploadsPerUserCapped: a user already holding the
-// per-user cap of in-flight uploads (maxConcurrentUploadsPerUser, 4) is refused
-// another with 429 RATE_LIMITED, and a slot frees up once one of them finishes.
+// per-user cap of in-flight uploads (maxConcurrentUploadsPerUser, 10) is
+// refused another with 429 RATE_LIMITED, and a slot frees up once one of them
+// finishes. The per-minute limiter is reset between phases so only the
+// in-flight cap can refuse.
 func TestUpload_ConcurrentUploadsPerUserCapped(t *testing.T) {
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
-	router := buildUploadRouter(database, store, nil)
+	limiter := auth.NewRateLimiter()
+	router := buildUploadRouterWithLimiter(database, store, limiter, nil)
 	token := uploadCreateToken(t, database, "busy-uploader", 1)
+	user, err := database.GetUserByUsername(context.Background(), "busy-uploader")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resetRate := func() { limiter.Reset(context.Background(), auth.Key("upload", user.ID)) }
 
 	body, contentType := makeMultipartFile(t, "file", "held.txt", []byte("held upload"))
 	raw := body.Bytes()
@@ -235,14 +245,16 @@ func TestUpload_ConcurrentUploadsPerUserCapped(t *testing.T) {
 		return h
 	}
 
-	held := make([]heldUpload, 4)
+	held := make([]heldUpload, 10)
 	for i := range held {
 		held[i] = start(i)
 	}
 
-	rr := doUpload(t, router, token, "file", "fifth.txt", []byte("fifth"))
-	if rr.Code != http.StatusTooManyRequests || !strings.Contains(rr.Body.String(), "RATE_LIMITED") {
-		t.Fatalf("5th concurrent upload = %d %s, want 429 RATE_LIMITED", rr.Code, rr.Body.String())
+	resetRate()
+	rr := doUpload(t, router, token, "file", "eleventh.txt", []byte("eleventh"))
+	if rr.Code != http.StatusTooManyRequests || !strings.Contains(rr.Body.String(), "RATE_LIMITED") ||
+		!strings.Contains(rr.Body.String(), "in progress") {
+		t.Fatalf("11th concurrent upload = %d %s, want 429 RATE_LIMITED for uploads in progress", rr.Code, rr.Body.String())
 	}
 
 	if _, err := held[0].pw.Write(tail); err != nil {
@@ -253,6 +265,7 @@ func TestUpload_ConcurrentUploadsPerUserCapped(t *testing.T) {
 		t.Fatalf("finished upload = %d %s, want 201", rr.Code, rr.Body.String())
 	}
 
+	resetRate()
 	rr = doUpload(t, router, token, "file", "after.txt", []byte("after"))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("upload after a slot freed = %d %s, want 201", rr.Code, rr.Body.String())

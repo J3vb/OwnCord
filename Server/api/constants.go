@@ -73,9 +73,11 @@ const (
 	// trickling bytes, and each one holds a storage reservation of up to the
 	// per-file cap for its whole life, so without this bound one member could
 	// stack up enough reserved headroom to push every other user into the
-	// low-disk refusal. Four in flight bounds that member's reserved headroom
-	// to 4x the per-file cap.
-	maxConcurrentUploadsPerUser = 4
+	// low-disk refusal. It matches the desktop client's MAX_ATTACHMENTS
+	// (Client/src/components/MessageInput.ts), which starts every attachment's
+	// upload at once, so change the two together. Ten in flight bounds that
+	// member's reserved headroom to 10x the per-file cap.
+	maxConcurrentUploadsPerUser = 10
 
 	// emojiUploadRateLimitPerMinute is the maximum custom-emoji uploads per
 	// MANAGE_SERVER holder per minute. Lower than the attachment limit: every
