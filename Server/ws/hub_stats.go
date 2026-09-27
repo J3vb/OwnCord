@@ -114,9 +114,17 @@ func (h *Hub) recordBroadcastLatency(enqueuedAt time.Time) {
 // under the per-channel topic rate limit. The limit is a sliding 1s window via
 // the shared auth.RateLimiter (the deleted TopicRateLimiter was a token bucket
 // with a full refill at each window boundary — sliding is stricter on
-// boundary-straddling bursts, the same sustained rate). A shed frame is
-// counted here (topic_sheds_total, SRE-M1); SRV-03's follow-up recovery
-// (forcing a resync on a content shed) layers onto this same site.
+// boundary-straddling bursts, the same sustained rate).
+//
+// A shed frame is counted (topic_sheds_total, SRE-M1). SRV-03: for a
+// CONTENT-bearing frame (nsfwChannelID marks the kinds in contentBearingKinds)
+// it also ratchets the visibility watermark, so a client resuming from a seq at
+// or before this point takes the full-ready path and recovers the message from
+// the database — the shed frame consumed no seq, so replay can never carry it.
+// Metadata sheds are not ratcheted: they are ephemeral or reconstructed
+// elsewhere, and forcing a full resync on a metadata burst would be a herd for
+// nothing. bumpVisibilityWatermark is lock-free, so this is safe to call while
+// holding seqMu.
 func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 	if bm.recipients != nil || bm.channelID == 0 {
 		return true
@@ -125,7 +133,13 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 		return true
 	}
 	h.latency.topicSheds.Add(1)
-	slog.Warn("hub: topic rate limit exceeded, dropping message", "channel_id", bm.channelID)
+	if bm.nsfwChannelID != 0 {
+		h.bumpVisibilityWatermark()
+		slog.Warn("hub: topic rate limit shed a content frame, forcing resync on reconnect",
+			"channel_id", bm.channelID)
+	} else {
+		slog.Warn("hub: topic rate limit exceeded, dropping message", "channel_id", bm.channelID)
+	}
 	return false
 }
 
