@@ -204,15 +204,25 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   const pendingDeletes = new Map<string, { channelId: number; messageId: number }>();
 
   /** Put a failed edit's text back in the composer, but only while its own
-   *  channel is the mounted one — the row it belongs to may be gone by now,
-   *  and startEdit against another channel's composer would target the wrong
-   *  message id. Deferred a microtask because the synchronous disconnected
+   *  channel is the mounted one and the composer holds nothing of the user's
+   *  — the row it belongs to may be gone by now, and startEdit against
+   *  another channel's composer would target the wrong message id. At most
+   *  one edit lands; the error toast (when asked for) says the text is back
+   *  only if it is. Deferred a microtask because the synchronous disconnected
    *  path runs inside MessageInput.handleSend, whose own cancelEdit() (right
    *  after onEditMessage returns) would otherwise wipe the restored text. */
-  function restoreEdit(channelId: number, messageId: number, content: string): void {
+  function failEdits(edits: readonly TrackedEdit[], toast: boolean): void {
     queueMicrotask(() => {
-      if (currentChannelId === channelId && messageInput?.isIdle() === true) {
-        messageInput.startEdit(messageId, content);
+      const restored = edits.some((edit) => {
+        if (currentChannelId !== edit.channelId || messageInput?.isIdle() !== true) return false;
+        messageInput.startEdit(edit.messageId, edit.content);
+        return true;
+      });
+      if (toast) {
+        showToast(
+          messagingText(restored ? "toast.editFailedRestored" : "toast.editFailed"),
+          "error",
+        );
       }
     });
   }
@@ -839,8 +849,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // not toast success — the row would keep its old text, and the user
         // would never know to try again.
         if (uiStore.getState().connectionStatus !== "connected") {
-          restoreEdit(channelId, messageId, trimmed);
-          showToast(messagingText("toast.editFailed"), "error");
+          failEdits([{ channelId, messageId, content: trimmed }], true);
           return;
         }
         const id = ws.send({
@@ -1012,8 +1021,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         const edit = pendingEdits.get(id);
         if (edit !== undefined) {
           pendingEdits.delete(id);
-          restoreEdit(edit.channelId, edit.messageId, edit.content);
-          showToast(messagingText("toast.editFailed"), "error");
+          failEdits([edit], true);
           return;
         }
         if (pendingDeletes.delete(id)) {
@@ -1028,14 +1036,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     composerGatingUnsubs.push(
       ws.onStateChange((state) => {
         if (state === "connected") return;
-        const hadEdit = pendingEdits.size > 0;
-        for (const edit of pendingEdits.values()) {
-          restoreEdit(edit.channelId, edit.messageId, edit.content);
-        }
+        if (pendingEdits.size > 0) failEdits([...pendingEdits.values()], true);
         pendingEdits.clear();
         const hadDelete = pendingDeletes.size > 0;
         pendingDeletes.clear();
-        if (hadEdit) showToast(messagingText("toast.editFailed"), "error");
         if (hadDelete) showToast(messagingText("toast.deleteFailed"), "error");
       }),
     );
@@ -1048,7 +1052,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           const edit = pendingEdits.get(correlationId);
           if (edit !== undefined) {
             pendingEdits.delete(correlationId);
-            restoreEdit(edit.channelId, edit.messageId, edit.content);
+            failEdits([edit], false);
           }
           pendingDeletes.delete(correlationId);
         }

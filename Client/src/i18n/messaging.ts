@@ -123,7 +123,8 @@ export const messagingText = defineCatalog("messaging", {
   "toast.retryUnsupported":
     "This server cannot safely retry a saved message. Copy its text to send it again.",
   "toast.deleteConfirm": "Click delete again to confirm",
-  "toast.editFailed": "Couldn't edit the message — your text is back in the composer",
+  "toast.editFailed": "Couldn't edit the message",
+  "toast.editFailedRestored": "Couldn't edit the message — your text is back in the composer",
   "toast.deleteFailed": "Couldn't delete the message",
   "toast.pinned": "Message pinned",
   "toast.unpinned": "Message unpinned",

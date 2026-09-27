@@ -278,6 +278,7 @@ import {
 } from "@lib/pendingMessages";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
+import { messagingText } from "../../src/i18n/messaging";
 import { setActiveTimeout } from "../../src/features/safety/store";
 import {
   channelsStore,
@@ -2515,9 +2516,12 @@ describe("createChannelController", () => {
         ([frame]) => (frame as { type: string }).type === "chat_edit",
       );
       expect(sends).toHaveLength(0);
-      expect(opts.showToast).toHaveBeenCalledTimes(1);
-      expect(opts.showToast).toHaveBeenCalledWith(expect.stringContaining("edit"), "error");
       await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "new content"));
+      await vi.waitFor(() => expect(opts.showToast).toHaveBeenCalledTimes(1));
+      expect(opts.showToast).toHaveBeenCalledWith(
+        messagingText("toast.editFailedRestored"),
+        "error",
+      );
       ctrl.destroyChannel();
     });
 
@@ -2534,9 +2538,12 @@ describe("createChannelController", () => {
 
       onSendFailure(editId, "NETWORK");
 
-      expect(opts.showToast).toHaveBeenCalledTimes(1);
-      expect(opts.showToast).toHaveBeenCalledWith(expect.stringContaining("edit"), "error");
       await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "new content"));
+      await vi.waitFor(() => expect(opts.showToast).toHaveBeenCalledTimes(1));
+      expect(opts.showToast).toHaveBeenCalledWith(
+        messagingText("toast.editFailedRestored"),
+        "error",
+      );
       ctrl.destroyChannel();
     });
 
@@ -2596,9 +2603,12 @@ describe("createChannelController", () => {
       // drops: the frame can never be echoed.
       onState("reconnecting");
 
-      expect(opts.showToast).toHaveBeenCalledTimes(1);
-      expect(opts.showToast).toHaveBeenCalledWith(expect.stringContaining("edit"), "error");
       await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "new content"));
+      await vi.waitFor(() => expect(opts.showToast).toHaveBeenCalledTimes(1));
+      expect(opts.showToast).toHaveBeenCalledWith(
+        messagingText("toast.editFailedRestored"),
+        "error",
+      );
       ctrl.destroyChannel();
     });
 
@@ -2619,7 +2629,7 @@ describe("createChannelController", () => {
       await new Promise((r) => setTimeout(r, 0));
 
       expect(opts.showToast).toHaveBeenCalledTimes(1);
-      expect(opts.showToast).toHaveBeenCalledWith(expect.stringContaining("edit"), "error");
+      expect(opts.showToast).toHaveBeenCalledWith(messagingText("toast.editFailed"), "error");
       expect(mockStartEdit).not.toHaveBeenCalled();
       ctrl.destroyChannel();
     });
