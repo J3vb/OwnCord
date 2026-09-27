@@ -169,17 +169,50 @@ describe("ToastContainer", () => {
   });
 
   it("pauses an auto-dismiss timer while the toast has focus", () => {
+    document.body.appendChild(container);
     toast.show("Temporary", "info", 3000);
     const el = container.querySelector(".toast") as HTMLDivElement;
 
     vi.advanceTimersByTime(2000);
-    el.dispatchEvent(new FocusEvent("focusin"));
+    el.focus();
+    expect(document.activeElement).toBe(el);
     vi.advanceTimersByTime(5000);
     expect(container.querySelectorAll(".toast").length).toBe(1);
 
-    el.dispatchEvent(new FocusEvent("focusout"));
+    el.blur();
     vi.advanceTimersByTime(1400);
     expect(container.querySelectorAll(".toast").length).toBe(0);
+    container.remove();
+  });
+
+  it("does not restart a hovered toast's timer when a duplicate arrives", () => {
+    toast.show("Temporary", "info", 3000);
+    const el = container.querySelector(".toast") as HTMLDivElement;
+
+    el.dispatchEvent(new MouseEvent("mouseenter"));
+    toast.show("Temporary", "info", 3000);
+    vi.advanceTimersByTime(10_000);
+    expect(container.querySelectorAll(".toast").length).toBe(1);
+
+    // Leaving runs the full window the repeat topped up, then the fallback.
+    el.dispatchEvent(new MouseEvent("mouseleave"));
+    vi.advanceTimersByTime(3399);
+    expect(container.querySelectorAll(".toast").length).toBe(1);
+    vi.advanceTimersByTime(1);
+    expect(container.querySelectorAll(".toast").length).toBe(0);
+  });
+
+  it("keeps a toast held while it is still hovered after losing focus", () => {
+    document.body.appendChild(container);
+    toast.show("Temporary", "info", 3000);
+    const el = container.querySelector(".toast") as HTMLDivElement;
+
+    el.dispatchEvent(new MouseEvent("mouseenter"));
+    el.focus();
+    el.blur();
+    vi.advanceTimersByTime(10_000);
+    expect(container.querySelectorAll(".toast").length).toBe(1);
+    container.remove();
   });
 
   it("coalesces identical toasts into one with a count", () => {

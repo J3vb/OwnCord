@@ -63,9 +63,8 @@ test.describe("Toast Notifications", () => {
   });
 
   test("an error toast persists until dismissed", async ({ page }) => {
-    // Errors persist (UX-5): a 500 on the message-load path used to render
-    // inline, so drive a real error toast instead — an invalid-profile save
-    // answers with an error the settings form toasts.
+    // Errors persist (UX-5): drive a real error toast from a server WS
+    // `error` frame and check it outlives the old 5s auto-dismiss.
     await mockTauriFullSession(page);
     await page.goto("/");
     await navigateToMainPage(page);
@@ -79,6 +78,13 @@ test.describe("Toast Notifications", () => {
 
     const errorToast = page.locator("[data-testid='toast']", { hasText: "Too many requests" });
     await expect(errorToast).toBeVisible({ timeout: 5_000 });
+
+    // It waits to be dismissed, so it must sit clear of the composer.
+    const toastBox = await errorToast.boundingBox();
+    const composerBox = await page.locator("[data-testid='message-input']").boundingBox();
+    expect(toastBox).not.toBeNull();
+    expect(composerBox).not.toBeNull();
+    expect(toastBox!.y + toastBox!.height).toBeLessThan(composerBox!.y);
 
     // Well past the old 5s auto-dismiss, the error is still there…
     await page.waitForTimeout(6000);

@@ -1,5 +1,5 @@
 /**
- * Toast notification system — shows stacking notifications at bottom-centre.
+ * Toast notification system — shows stacking notifications at top-centre.
  * Supports info, error, success and warning types with auto-dismiss.
  *
  * Errors are the exception: they stay until dismissed, because a message
@@ -28,6 +28,9 @@ interface ToastEntry {
   remainingMs: number;
   /** When the current timer run started, for the pause arithmetic. */
   startedAt: number;
+  /** Pointer over the toast / focus within it; either holds the countdown. */
+  hovered: boolean;
+  focused: boolean;
   /** Duplicates of this toast coalesced into it. Starts at 1. */
   count: number;
   readonly countEl: HTMLSpanElement;
@@ -91,6 +94,7 @@ export function createToastContainer(): ToastContainer {
   /** Resume a paused auto-dismissing toast with its held time. */
   function resume(entry: ToastEntry): void {
     if (entry.type === "error" || entry.timer !== null) return;
+    if (entry.hovered || entry.focused) return;
     entry.startedAt = Date.now();
     entry.timer = setTimeout(() => {
       const current = toasts.find((t) => t.el === entry.el);
@@ -113,10 +117,12 @@ export function createToastContainer(): ToastContainer {
       existing.count++;
       setText(existing.countEl, String(existing.count));
       existing.countEl.hidden = false;
-      // Restart the window so the repeat gets its full read time.
+      // Restart the window so the repeat gets its full read time; a toast
+      // held by hover or focus only has its held time topped up.
       if (existing.timer !== null) clearTimeout(existing.timer);
       existing.timer = null;
-      armTimer(existing, durationMs);
+      if (existing.hovered || existing.focused) existing.remainingMs = durationMs;
+      else armTimer(existing, durationMs);
       return;
     }
 
@@ -128,9 +134,12 @@ export function createToastContainer(): ToastContainer {
       }
     }
 
+    // An auto-dismissing toast takes focus itself so the keyboard can hold it
+    // too; an error's close button is its focus stop.
     const el = createElement("div", {
       class: `toast toast-${type}`,
       "data-testid": "toast",
+      ...(type === "error" ? {} : { tabindex: "0" }),
     });
 
     const text = createElement("span", { class: "toast-text" });
@@ -164,16 +173,30 @@ export function createToastContainer(): ToastContainer {
       timer: null,
       remainingMs: durationMs,
       startedAt: 0,
+      hovered: false,
+      focused: false,
       count: 1,
       countEl,
     };
 
     // Pause the countdown while the user reads or reaches for the close
     // button. focusin/focusout bubble, so the toast hears them from the button.
-    el.addEventListener("mouseenter", () => pauseEntry(entry));
-    el.addEventListener("mouseleave", () => resume(entry));
-    el.addEventListener("focusin", () => pauseEntry(entry));
-    el.addEventListener("focusout", () => resume(entry));
+    el.addEventListener("mouseenter", () => {
+      entry.hovered = true;
+      pauseEntry(entry);
+    });
+    el.addEventListener("mouseleave", () => {
+      entry.hovered = false;
+      resume(entry);
+    });
+    el.addEventListener("focusin", () => {
+      entry.focused = true;
+      pauseEntry(entry);
+    });
+    el.addEventListener("focusout", () => {
+      entry.focused = false;
+      resume(entry);
+    });
     if (type === "error") {
       el.querySelector(".toast-close")!.addEventListener("click", () => removeToast(entry));
     }

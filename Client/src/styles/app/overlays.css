@@ -128,10 +128,14 @@
 }
 
 /* ── Toast Notification ── */
+/* Anchored at the top centre of the chat column, just below its 48px header,
+   so a toast that waits to be dismissed never sits over the composer. The
+   130px offset is half the 260px sidebar (responsive.css drops it below
+   800px, where the sidebar collapses). */
 .toast-container {
   position: fixed;
-  bottom: 24px;
-  left: 50%;
+  top: 56px;
+  left: calc(50% + 130px);
   transform: translateX(-50%);
   z-index: 9999;
   display: flex;
