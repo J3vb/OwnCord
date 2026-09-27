@@ -22,8 +22,9 @@ import (
 // transfer is cut; with them it completes.
 //
 // The real production timeouts are 30 s, so the test does not have to wait 30 s
-// for a deadline to elapse — it sets the server's timeouts to a few tens of
-// milliseconds and paces the peer just inside them.
+// for a deadline to elapse — it sets the server's timeouts to a quarter second
+// (headroom for the fsync and database work after the last body read on a slow
+// CI runner) and paces the peer well inside them.
 
 // slowReader hands the wrapped body out at most chunk bytes at a time, pausing
 // pause between chunks, so the request body arrives slowly but steadily.
@@ -93,11 +94,11 @@ func TestUpload_SlowProgressingBodySurvivesRequestTimeout(t *testing.T) {
 
 	content := bytes.Repeat([]byte("z"), 512<<10) // 512 KiB, several chunks
 	body, contentType := makeMultipartFile(t, "file", "slow.bin", content)
-	slow := &slowReader{r: body, chunk: 16 << 10, pause: 5 * time.Millisecond}
+	slow := &slowReader{r: body, chunk: 16 << 10, pause: 40 * time.Millisecond}
 
 	srv := httptest.NewUnstartedServer(router)
-	srv.Config.ReadTimeout = 40 * time.Millisecond
-	srv.Config.WriteTimeout = 40 * time.Millisecond
+	srv.Config.ReadTimeout = 250 * time.Millisecond
+	srv.Config.WriteTimeout = 250 * time.Millisecond
 	srv.Start()
 	defer srv.Close()
 
@@ -149,13 +150,13 @@ func TestServeFile_SlowProgressingClientSurvivesWriteTimeout(t *testing.T) {
 	if ln, ok := srv.Listener.(*net.TCPListener); ok {
 		srv.Listener = smallSendBufferListener{Listener: ln, size: 16 << 10}
 	}
-	srv.Config.ReadTimeout = 40 * time.Millisecond
-	srv.Config.WriteTimeout = 40 * time.Millisecond
+	srv.Config.ReadTimeout = 250 * time.Millisecond
+	srv.Config.WriteTimeout = 250 * time.Millisecond
 	srv.Start()
 	defer srv.Close()
 
-	// A client that reads at a bounded rate: 64 KiB every 10 ms (~6 MiB/s),
-	// so the whole 2 MiB takes about 320 ms — eight times the WriteTimeout —
+	// A client that reads at a bounded rate: 64 KiB every 40 ms (~1.6 MiB/s),
+	// so the whole 2 MiB takes at least 1.3 s — five times the WriteTimeout —
 	// without any single pause exceeding it.
 	client := &http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -163,7 +164,7 @@ func TestServeFile_SlowProgressingClientSurvivesWriteTimeout(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
-			return &slowConn{Conn: c, chunk: 64 << 10, pause: 10 * time.Millisecond}, nil
+			return &slowConn{Conn: c, chunk: 64 << 10, pause: 40 * time.Millisecond}, nil
 		},
 	}}
 	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/files/"+up.ID, nil)
