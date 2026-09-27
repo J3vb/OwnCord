@@ -72,6 +72,7 @@ and only when it changes something a contributor or fork holder must do
 - On Linux desktop, a call kept showing "Secured" when another participant's audio could not be decrypted — that participant was just silent. The indicator now drops after a few seconds, as it already did on Windows and macOS.
 - Switching microphones while muted (or with push-to-talk released) no longer starts audio processing on the muted mic — it kept running until you unmuted. Enhanced Noise Suppression now also turns on at your first unmute after joining muted or with push-to-talk.
 - Joining or reconnecting to voice with a chosen microphone no longer opens the system default first — for a moment you were transmitting from the wrong mic. The chosen one is now the only one opened.
+- On Linux desktop, unmuting after a connection drop that happened while you were muted left your mic silent until you rejoined — peers heard nothing although you showed as unmuted. Unmuting now works after such a reconnect.
 
 ### Accounts & admin
 

@@ -272,6 +272,11 @@ func (w *AuditWriter) Flush(ctx context.Context) error {
 	if w == nil || !w.started.Load() {
 		return nil
 	}
+	// select picks randomly among ready cases, so an already-cancelled
+	// barrier must fail here rather than race a ready flushReq send.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	reply := make(chan struct{})
 	select {
 	case w.flushReq <- reply:
