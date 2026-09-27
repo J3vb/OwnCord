@@ -95,18 +95,16 @@ func (d *DB) ListAllUsers(ctx context.Context, f UserListFilter, limit, offset i
 	for i := range rows {
 		r := &rows[i]
 		result = append(result, UserWithRole{
-			User: User{
-				ID:         r.ID,
-				Username:   r.Username,
-				Avatar:     r.Avatar,
-				RoleID:     r.RoleID,
-				Status:     r.Status,
-				CreatedAt:  r.CreatedAt,
-				LastSeen:   r.LastSeen,
-				Banned:     r.Banned != 0,
-				BanReason:  r.BanReason,
-				BanExpires: r.BanExpires,
-			},
+			ID:           r.ID,
+			Username:     r.Username,
+			Avatar:       r.Avatar,
+			RoleID:       r.RoleID,
+			Status:       r.Status,
+			CreatedAt:    r.CreatedAt,
+			LastSeen:     r.LastSeen,
+			Banned:       r.Banned != 0,
+			BanReason:    r.BanReason,
+			BanExpires:   r.BanExpires,
 			RoleName:     r.RoleName,
 			RolePosition: int(r.RolePosition),
 		})

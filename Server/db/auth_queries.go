@@ -522,16 +522,14 @@ func (d *DB) GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*Se
 		return nil, fmt.Errorf("GetSessionWithBanStatus: %w", err)
 	}
 	return &SessionWithBanStatus{
-		Session: Session{
-			ID:        row.ID,
-			UserID:    row.UserID,
-			TokenHash: row.Token,
-			Device:    derefString(row.Device),
-			IP:        derefString(row.IpAddress),
-			CreatedAt: row.CreatedAt,
-			LastUsed:  row.LastUsed,
-			ExpiresAt: row.ExpiresAt,
-		},
+		ID:         row.ID,
+		UserID:     row.UserID,
+		TokenHash:  row.Token,
+		Device:     derefString(row.Device),
+		IP:         derefString(row.IpAddress),
+		CreatedAt:  row.CreatedAt,
+		LastUsed:   row.LastUsed,
+		ExpiresAt:  row.ExpiresAt,
 		Banned:     row.Banned != 0,
 		BanReason:  row.BanReason,
 		BanExpires: row.BanExpires,

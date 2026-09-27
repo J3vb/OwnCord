@@ -33,7 +33,7 @@ go vet ./...
 go test -race ./...
 go test -tags deadlock -count=1 ./...     # CI runs the WHOLE tree here (ci.yml), not just ./ws/
 go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/...  # plain leg: logstream_alloc_test.go is !race && !deadlock
-golangci-lint run                        # CI pins v2.11.3 — check `golangci-lint --version` first
+golangci-lint run                        # CI pins v2.13.2 — check `golangci-lint --version` first
 
 # Generated output must not be stale. These are what `make sqlc-verify` and
 # `make protocol-verify` reduce to — make is not on PATH on a stock Windows box.
@@ -55,16 +55,16 @@ the thing to call green before pushing.
 confusingly.** A build older than this module's Go target refuses outright:
 
 ```
-can't load config: the Go language version (go1.25) used to build
-golangci-lint is lower than the targeted Go version (1.26.7)
+can't load config: the Go language version (go1.26) used to build
+golangci-lint is lower than the targeted Go version (1.27.1)
 ```
 
 That is the binary's age, not a missing gate — it reads like "cannot run
 here" and is not. Fetch the pinned version rather than skipping the step:
 
 ```bash
-curl -sSfL -o /tmp/glci.tgz https://github.com/golangci/golangci-lint/releases/download/v2.11.3/golangci-lint-2.11.3-linux-amd64.tar.gz
-tar xzf /tmp/glci.tgz -C /tmp && /tmp/golangci-lint-2.11.3-linux-amd64/golangci-lint --version
+curl -sSfL -o /tmp/glci.tgz https://github.com/golangci/golangci-lint/releases/download/v2.13.2/golangci-lint-2.13.2-linux-amd64.tar.gz
+tar xzf /tmp/glci.tgz -C /tmp && /tmp/golangci-lint-2.13.2-linux-amd64/golangci-lint --version
 ```
 
 A `windows-latest` `-race` failure inside `ws` that matches `runtime.scanstack`

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -294,8 +295,8 @@ func clientIPWithProxies(r *http.Request, trustedNets []*net.IPNet) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
 		leftmostValid := ""
-		for i := len(parts) - 1; i >= 0; i-- {
-			candidate := strings.TrimSpace(parts[i])
+		for _, part := range slices.Backward(parts) {
+			candidate := strings.TrimSpace(part)
 			if candidate == "" || net.ParseIP(candidate) == nil {
 				continue
 			}

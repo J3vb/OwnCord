@@ -198,8 +198,7 @@ func TestFetch_IPLiteralIsClassified(t *testing.T) {
 		// exists. The dial-time re-check would also refuse this, but its
 		// error arrives wrapped in a *url.Error from client.Do — which is
 		// how this case tells the two apart.
-		var wrapped *url.Error
-		if errors.As(err, &wrapped) {
+		if _, ok := errors.AsType[*url.Error](err); ok {
 			t.Errorf("literal %s was refused at dial time, not by the destination check: %v", host, err)
 		}
 	}

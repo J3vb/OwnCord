@@ -125,7 +125,7 @@ const CHECK_SERVER = [
     "golangci-lint",
     ["run", "./..."],
     "Server",
-    "golangci-lint not on PATH — CI pins v2.11.3",
+    "golangci-lint not on PATH — CI pins v2.13.2",
   ),
   ...PROTOCOL_VERIFY,
   ...SQLC_VERIFY,

@@ -104,6 +104,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Under the hood
 
+- **The server now builds with Go 1.27**, up from 1.26, in all five coupled places: the `golang:1.27-bookworm` build image, the `go`/`toolchain` lines in `Server/go.mod`, every `actions/setup-go` in CI, the `golangci-lint` pin, which had to move to v2.13.2 because the old v2.11.3 (built with Go 1.26) refuses to lint a module declaring Go 1.27, and the `govulncheck` pin, which moves from v1.1.4 to v1.8.0 because the old one panics while analysing a Go 1.27 build. Builders and contributors need Go 1.27+.
 - **The pinned LiveKit SFU moves from 1.13.5 to 1.13.7**, as one bump in all three places that named the old release: the compose image an operator runs (`Server/docker-compose.yml`), the release the server auto-downloads (`ws.DefaultLiveKitVersion`) and the e2e/load harness that mirrors it. Patch release — no configuration change.
 - Release notes are now written for users. The tag's `CHANGELOG.md` section
   opens with a one-paragraph intro, then Highlights / Added / Changed / Fixed /

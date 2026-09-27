@@ -24,7 +24,7 @@ asset table in [Deployment](deployment.md#building-from-source) for filenames.
 
 ## Prerequisites
 
-- Go 1.26+ (only if building server from source)
+- Go 1.27+ (only if building server from source)
 - Node.js 26.x (see `Client/.nvmrc`) and Rust (only if building client from
   source)
 - Docker + Compose v2 (Docker path only)

@@ -170,10 +170,8 @@ func (d *DB) ListPendingMessageRequests(ctx context.Context, recipientID int64) 
 	for i := range rows {
 		r := &rows[i]
 		out = append(out, MessageRequestView{
-			MessageRequest: MessageRequest{
-				ID: r.ID, SenderID: r.SenderID, RecipientID: r.RecipientID,
-				ChannelID: r.ChannelID, State: r.State, CreatedAt: r.CreatedAt, DecidedAt: r.DecidedAt,
-			},
+			ID: r.ID, SenderID: r.SenderID, RecipientID: r.RecipientID,
+			ChannelID: r.ChannelID, State: r.State, CreatedAt: r.CreatedAt, DecidedAt: r.DecidedAt,
 			SenderUsername:    r.SenderUsername,
 			SenderDisplayName: r.SenderDisplayName,
 			SenderAvatar:      r.SenderAvatar,

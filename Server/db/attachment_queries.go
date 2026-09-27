@@ -87,16 +87,14 @@ func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*Attachme
 		return nil, fmt.Errorf("GetAttachmentWithChannel: %w", err)
 	}
 	return &AttachmentAccess{
-		Attachment: Attachment{
-			ID:         r.ID,
-			MessageID:  r.MessageID,
-			Filename:   r.Filename,
-			StoredAs:   r.StoredAs,
-			MimeType:   r.MimeType,
-			Size:       r.Size,
-			UploadedAt: r.UploadedAt,
-			UploaderID: r.UploaderID,
-		},
+		ID:          r.ID,
+		MessageID:   r.MessageID,
+		Filename:    r.Filename,
+		StoredAs:    r.StoredAs,
+		MimeType:    r.MimeType,
+		Size:        r.Size,
+		UploadedAt:  r.UploadedAt,
+		UploaderID:  r.UploaderID,
 		ChannelID:   r.ChannelID,
 		ChannelType: derefString(r.Type),
 		ChannelNSFW: r.Nsfw != nil && *r.Nsfw != 0,
