@@ -7,11 +7,23 @@ import (
 	"time"
 )
 
-// nilDerefPanic triggers a nil pointer dereference and returns the recovered
-// panic value, which is the runtime.Error the classifier must recognise.
+// syntheticMemoryFault is the runtime.Error a nil dereference panics with,
+// built by hand for Windows, where recovering a real one is the
+// golang/go#81238 heap-corruption hazard the classifier exists to avoid.
+type syntheticMemoryFault struct{}
+
+func (syntheticMemoryFault) RuntimeError() {}
+func (syntheticMemoryFault) Error() string { return memoryFaultMessage }
+
+// nilDerefPanic returns the panic value of a nil pointer dereference, which is
+// the runtime.Error the classifier must recognise. Off Windows it triggers and
+// recovers a real one, proving the genuine runtime value matches.
 //
 //go:noinline
 func nilDerefPanic() (rec any) {
+	if runtime.GOOS == "windows" {
+		return syntheticMemoryFault{}
+	}
 	defer func() { rec = recover() }()
 	var p *int
 	_ = *p

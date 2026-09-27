@@ -7,8 +7,18 @@ import (
 	"time"
 )
 
+// syntheticMemoryFault is the runtime.Error a nil dereference panics with.
+// The test panics with it rather than dereferencing nil: recovering a real
+// fault on Windows can corrupt the test binary's heap (golang/go#81238).
+type syntheticMemoryFault struct{}
+
+func (syntheticMemoryFault) RuntimeError() {}
+func (syntheticMemoryFault) Error() string {
+	return "runtime error: invalid memory address or nil pointer dereference"
+}
+
 // TestPanicBreaker_HardwareFaultExitsOnFirstPanic pins SRE-08's Windows rule:
-// a nil dereference inside the dispatch loop is a hardware fault
+// a nil-dereference runtime.Error inside the dispatch loop is a hardware fault
 // (golang/go#81238) and must exit for a supervisor restart on the FIRST
 // occurrence, not wait for the three-panic breaker — the heap may already be
 // corrupt. The classifier (stackutil.Recovered) is what makes this Windows
@@ -26,8 +36,7 @@ func TestPanicBreaker_HardwareFaultExitsOnFirstPanic(t *testing.T) {
 
 	nsfwDispatchResolveRaceHook = func(channelID int64) {
 		if channelID == panicChannelID {
-			var p *int
-			_ = *p // a real nil dereference: a runtime memory fault
+			panic(syntheticMemoryFault{})
 		}
 	}
 	t.Cleanup(func() { nsfwDispatchResolveRaceHook = nil })
