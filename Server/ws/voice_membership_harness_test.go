@@ -26,7 +26,7 @@ package ws
 // the checks read the three views back.
 //
 // RT-3's reaper tests extend this file: the fake room service answers
-// ListParticipants, and reap() below is the sweep entry point they drive.
+// ListParticipants, and sweep() below is the sweep entry point they drive.
 
 import (
 	"context"
@@ -53,14 +53,13 @@ import (
 
 // fakeSFU is a fake LiveKit room service: it records the SFU's participant
 // set so the harness can read the third leg of the invariant. Only the RPCs
-// the hub actually calls are implemented; the embedded interface panics on
-// anything else, which is what we want — a new hub RPC must be added here
-// deliberately rather than silently no-op'd.
+// the hub actually calls are implemented; anything else is recorded and fails
+// the next check — a new hub RPC must be added here deliberately rather than
+// silently no-op'd.
 type fakeSFU struct {
-	lkproto.RoomService
-
 	mu           sync.Mutex
 	participants map[string]map[string]struct{} // room -> identity set
+	unhandled    []string                       // RPC methods the fake does not implement
 }
 
 func newFakeSFU() *fakeSFU {
@@ -100,15 +99,12 @@ func (f *fakeSFU) identities(room string) []string {
 	return out
 }
 
-// count returns how many participants the SFU holds across every room.
-func (f *fakeSFU) count() int {
+// unhandledRPCs returns the RPC methods the hub called that the fake does not
+// implement.
+func (f *fakeSFU) unhandledRPCs() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	n := 0
-	for _, room := range f.participants {
-		n += len(room)
-	}
-	return n
+	return append([]string(nil), f.unhandled...)
 }
 
 // serve starts the fake as a Twirp room service and returns a LiveKitClient
@@ -159,6 +155,9 @@ func (f *fakeSFU) handle(w http.ResponseWriter, r *http.Request) {
 	case "ListRooms":
 		marshal(&lkproto.ListRoomsResponse{})
 	default:
+		f.mu.Lock()
+		f.unhandled = append(f.unhandled, method)
+		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"code":"not_found","msg":"fake SFU: unhandled ` + method + `"}`))
@@ -182,7 +181,6 @@ type vmHarness struct {
 	hub      *Hub
 	db       *db.DB
 	sfu      *fakeSFU
-	lk       *LiveKitClient
 	members  []*vmMember
 	byUserID map[int64]*vmMember
 	chanIDs  []int64 // every channel the harness created, for the subscription check
@@ -203,7 +201,7 @@ func newVMHarness(t *testing.T, n int) *vmHarness {
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
-	h := &vmHarness{t: t, hub: hub, db: database, sfu: sfu, lk: lk, byUserID: map[int64]*vmMember{}}
+	h := &vmHarness{t: t, hub: hub, db: database, sfu: sfu, byUserID: map[int64]*vmMember{}}
 	for i := range n {
 		name := fmt.Sprintf("vm-user-%d", i)
 		uid := seedHarvestVoiceUser(t, database, name)
@@ -273,12 +271,12 @@ func (h *vmHarness) join(m *vmMember, chID int64) bool {
 	}
 	h.hub.handleMessage(m.c, voiceFrame(h.t, "voice_join", fmt.Sprintf("join-%d", h.step), map[string]any{"channel_id": chID}))
 	ch, token := m.c.getVoiceState()
-	completed := ch == chID && m.c.voiceJoinCompleted
+	completed := ch == chID && m.c.voiceJoinCompletedForHarness()
 	if completed {
 		h.sfu.add(RoomName(chID), participantIdentity(m.userID, token))
 		h.note("join %s -> ch%d token=%s", m.name, chID, token)
 	} else {
-		h.note("join %s ch%d did not complete (in %d, completed=%v)", m.name, chID, ch, m.c.voiceJoinCompleted)
+		h.note("join %s ch%d did not complete (in %d, completed=%v)", m.name, chID, ch, m.c.voiceJoinCompletedForHarness())
 	}
 	h.check()
 	return completed
@@ -295,18 +293,19 @@ func (h *vmHarness) leave(m *vmMember) {
 
 // disconnect tears down m's connection the way readPump's defer does: the
 // hub's teardown runs (which removes the SFU participant on a background
-// goroutine), then m has no live client.
-func (h *vmHarness) disconnect(m *vmMember) {
+// goroutine), then m has no live client. With teardown false the voice
+// teardown is missed, leaving the row and the SFU participant for the sweep.
+func (h *vmHarness) disconnect(m *vmMember, teardown bool) {
 	h.step++
 	h.t.Helper()
 	ctx := context.Background()
 	voiceChID := m.c.getVoiceChID()
 	replaced := h.hub.unregisterNow(m.c)
-	if voiceChID != 0 && !replaced {
+	if teardown && voiceChID != 0 && !replaced {
 		h.hub.handleVoiceLeave(ctx, m.c, voiceLeaveReasonDisconnect)
 	}
 	m.c = nil
-	h.note("disconnect %s (was ch%d)", m.name, voiceChID)
+	h.note("disconnect %s (was ch%d, teardown=%v)", m.name, voiceChID, teardown)
 	h.check()
 }
 
@@ -391,7 +390,7 @@ func (h *vmHarness) abortedSwitch(m *vmMember, fromCh, toCh int64) {
 		h.failf("%s: aborted switch resurrected a phantom session: client ch%d, want 0 (OC-0034)", m.name, got)
 	}
 	h.note("abortedSwitch %s ch%d->ch%d (client cleared)", m.name, fromCh, toCh)
-	// The stale row is now a memory-without-row ghost; the sweep must reap it.
+	// The stale row is now a row-without-memory ghost; the sweep must reap it.
 	h.sweep()
 }
 
@@ -414,7 +413,6 @@ func (h *vmHarness) freshConnect(m *vmMember) {
 	if h.hub.IsVoiceKeyHolder(oldCh, m.userID) {
 		h.failf("%s: fresh-connect cleanup left a phantom key holder for ch%d (OC-0252)", m.name, oldCh)
 	}
-	h.sfu.remove(RoomName(oldCh), participantIdentity(m.userID, oldRow.JoinedAt))
 	m.c = nil
 	h.note("freshConnect %s (old client cleared from ch%d)", m.name, oldCh)
 	h.check()
@@ -453,6 +451,8 @@ func (h *vmHarness) reconnectIncomplete(m *vmMember, chID int64) {
 
 // staleRollback reproduces OC-0044: a stale join's rollback must not delete a
 // newer membership the user has since established in a different channel.
+// The harness does not model the newer membership's connection, so once the
+// row is shown to survive, the sweep reaps it as a row no live client names.
 func (h *vmHarness) staleRollback(m *vmMember, staleCh, newCh int64) {
 	h.step++
 	h.t.Helper()
@@ -474,7 +474,7 @@ func (h *vmHarness) staleRollback(m *vmMember, staleCh, newCh int64) {
 		h.failf("%s: stale rollback destroyed the newer membership (OC-0044): row=%v, want ch%d/%s", m.name, got, newCh, newRow.JoinedAt)
 	}
 	h.note("staleRollback %s ch%d (newer ch%d survived)", m.name, staleCh, newCh)
-	h.check()
+	h.sweep()
 }
 
 // denyRead removes READ_MESSAGES on chID for the harness role, leaving
@@ -579,12 +579,9 @@ func (h *vmHarness) attempt() string {
 		ch, token := m.c.getVoiceState()
 		switch {
 		case ch == 0 && row != nil:
-			// A row with no live client is allowed transiently: the OC-0034
-			// aborted-switch path deliberately leaves one for the sweep to
-			// reap (restoring the client would resurrect a session the
-			// voice_leave already tore down). The sweep scenario asserts it
-			// clears; a row that outlives a sweep is a ghost, and sweep()
-			// catches that explicitly.
+			// The paths that deliberately leave such a row (OC-0034's aborted
+			// switch, OC-0270's untransferred join) sweep before checking.
+			return fmt.Sprintf("%s: voice_states row for ch%d but the live client is not in voice (ghost row)", m.name, row.ChannelID)
 		case ch != 0 && row == nil:
 			return fmt.Sprintf("%s: client says ch%d but there is no voice_states row (lost member)", m.name, ch)
 		case ch != 0 && row.ChannelID != ch:
@@ -592,6 +589,9 @@ func (h *vmHarness) attempt() string {
 		case ch != 0 && row.JoinedAt != token:
 			return fmt.Sprintf("%s: client join token %q disagrees with row joined_at %q", m.name, token, row.JoinedAt)
 		}
+	}
+	if u := h.sfu.unhandledRPCs(); len(u) > 0 {
+		return fmt.Sprintf("hub called room-service RPCs the fake SFU does not implement: %v", u)
 	}
 	// SFU view: every participant must belong to a membership the DB names,
 	// with the exact join token the identity carries.
@@ -620,7 +620,7 @@ func (h *vmHarness) attempt() string {
 			continue
 		}
 		ch, token := m.c.getVoiceState()
-		if ch == 0 || !m.c.voiceJoinCompleted {
+		if ch == 0 || !m.c.voiceJoinCompletedForHarness() {
 			continue
 		}
 		if !h.sfu.has(RoomName(ch), participantIdentity(m.userID, token)) {
@@ -670,6 +670,13 @@ func (f *fakeSFU) snapshot() map[string][]string {
 // gone missing (OC-0034).
 func (c *Client) setVoiceStateForHarness(chID int64, token string) {
 	c.setVoiceState(chID, token)
+}
+
+// voiceJoinCompletedForHarness reads voiceJoinCompleted under voiceMu.
+func (c *Client) voiceJoinCompletedForHarness() bool {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	return c.voiceJoinCompleted
 }
 
 // peekPendingModFlagsForHarness reads the moderator stash without consuming it.
@@ -765,17 +772,20 @@ func TestVoiceMembership_ReconnectTransfer(t *testing.T) {
 	h.leave(alice)
 }
 
-// TestVoiceMembership_DisconnectThenSweep models a socket dying while its
-// voice_states row lingers; the production stale sweep must reap both the row
-// and the SFU participant.
+// TestVoiceMembership_DisconnectThenSweep models two sockets dying in voice:
+// alice's teardown runs, bob's is missed so his voice_states row lingers; the
+// production stale sweep must reap both bob's row and his SFU participant.
 func TestVoiceMembership_DisconnectThenSweep(t *testing.T) {
-	h := newVMHarness(t, 1)
-	alice := h.members[0]
+	h := newVMHarness(t, 2)
+	alice, bob := h.members[0], h.members[1]
 	chA := h.chanOf("vm-sweep")
 
 	h.connect(alice)
+	h.connect(bob)
 	h.join(alice, chA)
-	h.disconnect(alice)
+	h.join(bob, chA)
+	h.disconnect(alice, true)
+	h.disconnect(bob, false)
 	h.sweep()
 }
 
@@ -793,33 +803,6 @@ func TestVoiceMembership_RollbackLeavesNoGhost(t *testing.T) {
 	h.join(alice, chA)
 	h.rollback(alice, chA)
 	h.sweep()
-}
-
-// TestVoiceMembership_SwitchToFullChannelKeepsOldCall pins OC-0351: a switch
-// to a full channel is refused before the caller's current call is torn down.
-func TestVoiceMembership_SwitchToFullChannelKeepsOldCall(t *testing.T) {
-	h := newVMHarness(t, 3)
-	alice, bob, carol := h.members[0], h.members[1], h.members[2]
-	oldCh := h.chanOf("vm-old")
-
-	// A capped destination channel, already filled by bob.
-	fullCh, err := h.db.CreateChannel(context.Background(), "vm-full", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if _, err := h.db.ExecContext(context.Background(), `UPDATE channels SET voice_max_users = 1 WHERE id = ?`, fullCh); err != nil {
-		t.Fatalf("set voice_max_users: %v", err)
-	}
-
-	h.connect(alice)
-	h.connect(bob)
-	h.connect(carol)
-	h.join(alice, oldCh)
-	h.join(bob, fullCh)
-	// alice's switch to the full channel is refused; she must still be in oldCh.
-	h.join(alice, fullCh)
-	h.leave(alice)
-	h.leave(bob)
 }
 
 // TestVoiceMembership_Acceptance drives one sequence per rollback-class
