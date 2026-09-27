@@ -536,9 +536,10 @@ export class E2EEManager {
    * `verifiedKey` — the bytes whose fingerprint the caller displayed and the
    * user confirmed out-of-band — overwriting the stored pin for {host,userId}
    * and clearing the mismatch block (the identity-key analogue of accepting a
-   * changed TLS cert). A legitimate key rotation (reinstall / new device /
-   * wiped keyring) is thus recoverable instead of a permanent lockout; the next
-   * announce re-verifies against the new pin.
+   * changed TLS cert). A changed key that verifies is re-pinned automatically
+   * in verifyPeerAnnounce; this path recovers a peer blocked for a key the
+   * server stopped delivering. The next announce re-verifies against the new
+   * pin.
    *
    * The verified key MUST be passed in, never re-read from membersStore here:
    * the store is server-writable (a `user_update` mutates it), so re-reading it
@@ -1021,6 +1022,7 @@ export class E2EEManager {
     this._e2eeEpoch = 0;
     this._pendingAnnounces.length = 0;
     this._blockedAnnounces.clear();
+    this._peers.keyChangedPeers.clear();
     this._epoch.clearKeyRotationTimer();
     this.clearReconnectConfirmTimer();
     // Reject (not resolve) so waiting setupKeyExchange sees a failure, not a

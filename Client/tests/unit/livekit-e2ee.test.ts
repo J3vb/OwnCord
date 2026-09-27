@@ -59,6 +59,7 @@ const mockMembers = vi.hoisted(() => new Map<number, { identityPublicKey: string
 
 vi.mock("@stores/members.store", () => ({
   membersStore: { getState: vi.fn(() => ({ members: mockMembers })) },
+  memberDisplayName: (m: { username?: string }) => m.username ?? "",
 }));
 
 const mockVoiceState = vi.hoisted(() => ({
@@ -99,6 +100,7 @@ import {
   exportPublicKey,
   computeRawKeyFingerprint,
   signEphemeralKey,
+  verifyEphemeralKeySignature,
 } from "@lib/e2eeCrypto";
 import { getOrCreateIdentityKeyPair, getIdentityPin, storeIdentityPin } from "@lib/identity";
 import { authStore } from "@stores/auth.store";
@@ -1704,11 +1706,10 @@ describe("E2EEManager", () => {
     await mgr.setupKeyExchange(true, 1); // holder in channel 1
 
     const NEW_IDENTITY = "new-identity-key-b64";
-    mockMembers.set(PEER_ID, { identityPublicKey: NEW_IDENTITY });
 
-    // The peer reinstalled (new identity key). A still has them pinned to
-    // their OLD identity key, so the announce under the new identity is
-    // blocked as a TOFU mismatch.
+    // A still has the peer pinned, but the server is not delivering their
+    // identity key, so the announce is blocked.
+    mockMembers.set(PEER_ID, { identityPublicKey: null });
     vi.mocked(getIdentityPin).mockResolvedValueOnce({
       status: "pinned",
       pin: "old-identity-key-b64",
@@ -1721,8 +1722,9 @@ describe("E2EEManager", () => {
     );
     vi.mocked(setPeerVerification).mockClear();
 
-    // The user confirms the fingerprint out of band and re-pins to the
-    // peer's new identity key.
+    // A key is delivered again; the user confirms its fingerprint out of band
+    // and re-pins to it.
+    mockMembers.set(PEER_ID, { identityPublicKey: NEW_IDENTITY });
     vi.mocked(getIdentityPin).mockResolvedValueOnce({ status: "pinned", pin: NEW_IDENTITY });
     const result = await mgr.rePinPeerIdentity(PEER_ID, NEW_IDENTITY);
 
@@ -1915,11 +1917,12 @@ describe("E2EEManager — HP-2 adversarial membership and key-change rules", () 
     );
   });
 
-  it("[HP-2] a second device's key, once trusted, overwrites the account pin — the first device then mismatches", async () => {
+  it("[HP-2] a second device's key overwrites the account pin automatically, and so does the first device's when it returns", async () => {
     // Pins are one per account ({host}:{userId}) while identity keys are per
     // install (identity.ts; migration 017 holds one identity_public_key per
-    // user). Trusting device 2 therefore evicts device 1's pin, and device
-    // 1's next announce is blocked as a mismatch. docs/trust-model.md
+    // user). A changed key whose announce verifies is accepted and re-pinned
+    // automatically, so two devices flip the one pin back and forth, each
+    // change flagged on the badge. docs/trust-model.md
     // §"What is end-to-end encrypted" states the flip-flop; this pins it.
     const DEVICE1 = "device1-identity-b64";
     const DEVICE2 = "device2-identity-b64";
@@ -1930,32 +1933,41 @@ describe("E2EEManager — HP-2 adversarial membership and key-change rules", () 
     await mgr.setupKeyExchange(true, 1);
     ws.send.mockClear();
 
-    // Device 2 announces: pinned key differs → blocked, nothing wrapped.
+    // Device 2 announces: pinned key differs, the announce verifies against
+    // the delivered key → accepted, the ONE slot is overwritten, keyed.
     await mgr.handleAnnounce(PEER_ID, "ZGV2aWNlMg==", "sig2");
     expect(setPeerVerification).toHaveBeenLastCalledWith(
-      expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
+      expect.objectContaining({ userId: PEER_ID, status: "changed" }),
     );
-    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
-
-    // The human clicks "Trust new key": the ONE slot is overwritten and the
-    // buffered announce replays against the new pin, so device 2 is keyed.
-    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: DEVICE2 });
-    expect(await mgr.rePinPeerIdentity(PEER_ID, DEVICE2)).toBe(true);
     expect(storeIdentityPin).toHaveBeenCalledTimes(1);
     expect(storeIdentityPin).toHaveBeenCalledWith("localhost:7880", String(PEER_ID), DEVICE2);
     expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
-    const importsBefore = vi.mocked(importPublicKey).mock.calls.length;
 
-    // Device 1 comes back (the server row carries its key again) and is the
-    // one that mismatches now — no offer, no key imported, no second pin.
+    // Device 1 comes back (the server row carries its key again): the same
+    // rule re-pins device 1's key.
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: DEVICE2 });
     mockMembers.set(PEER_ID, { identityPublicKey: DEVICE1 });
     await mgr.handleAnnounce(PEER_ID, "ZGV2aWNlMQ==", "sig1");
+    expect(storeIdentityPin).toHaveBeenCalledTimes(2);
+    expect(storeIdentityPin).toHaveBeenLastCalledWith("localhost:7880", String(PEER_ID), DEVICE1);
+    expect(setPeerVerification).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userId: PEER_ID, status: "changed" }),
+    );
+
+    // An announce that does not verify against the delivered key is still
+    // rejected — no offer, no key imported, no pin write.
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: DEVICE1 });
+    mockMembers.set(PEER_ID, { identityPublicKey: DEVICE2 });
+    vi.mocked(verifyEphemeralKeySignature).mockResolvedValueOnce(false);
+    const offersBefore = sendsOfType(ws, "voice_e2ee_offer").length;
+    const importsBefore = vi.mocked(importPublicKey).mock.calls.length;
+    await mgr.handleAnnounce(PEER_ID, "Zm9yZ2Vk", "bad-sig");
     expect(setPeerVerification).toHaveBeenLastCalledWith(
       expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
     );
-    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
+    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(offersBefore);
     expect(vi.mocked(importPublicKey).mock.calls.length).toBe(importsBefore);
-    expect(storeIdentityPin).toHaveBeenCalledTimes(1);
+    expect(storeIdentityPin).toHaveBeenCalledTimes(2);
   });
 
   it("[HP-2 / OC-0316] a peer whose socket dropped across a rotation is re-keyed with the rotated key when the server replays its announce", async () => {

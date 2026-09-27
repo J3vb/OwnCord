@@ -20,6 +20,8 @@ export const voiceText = defineCatalog("voice", {
   "encryption.unsecuredLabel": "End-to-end encryption failed — this call may not be protected",
   "encryption.secured": "🔒 Secured",
   "encryption.securedLabel": "End-to-end encrypted",
+  "identity.keyChanged":
+    "{name}'s security key changed. The call continues. If you didn't expect this, compare safety numbers with them.",
 
   "widget.channelFallback": "Voice Channel",
   "widget.volume": "Volume",

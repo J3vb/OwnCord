@@ -2231,7 +2231,20 @@ describe("ChannelSidebar voice identity badge", () => {
     expect(own!.getAttribute("title")).toContain("0123 4567 89AB CDEF");
   });
 
-  it("shows a mismatch badge for a peer whose identity key changed", () => {
+  it("shows a key-changed badge, not a plain verified one, after a changed key was accepted", () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "changed", "AB12 CD34");
+    sidebar.mount(container);
+
+    const badge = badgeFor(10);
+    expect(badge).not.toBeNull();
+    expect(badge!.classList.contains("changed")).toBe(true);
+    expect(badge!.getAttribute("title")).toContain("Security key changed");
+    expect(badge!.getAttribute("title")).toContain("AB12 CD34");
+    expect(badge!.getAttribute("title")).not.toContain("Identity verified");
+  });
+
+  it("shows a mismatch badge for a blocked peer", () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
     setPeerVerif(10, "mismatch", null);
     sidebar.mount(container);

@@ -3974,7 +3974,7 @@ describe("LiveKitSession", () => {
       expect(offerSends(ws)).toHaveLength(1);
     });
 
-    it("blocks and emits identity-tofu when the pinned identity key changed", async () => {
+    it("accepts a changed identity key automatically: verifies against it, re-pins, keys the peer", async () => {
       seedPeer("new-identity-b64");
       (getIdentityPin as any).mockResolvedValue({ status: "pinned", pin: "old-identity-b64" });
       const ws = { send: vi.fn() };
@@ -3983,14 +3983,14 @@ describe("LiveKitSession", () => {
 
       await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig");
 
-      expect(setPeerVerification).toHaveBeenCalledWith(
-        expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
+      // The announce must verify against the NEW key before it is pinned.
+      expect(verifyEphemeralKeySignature).toHaveBeenCalledTimes(1);
+      expect(storeIdentityPin).toHaveBeenCalledWith(HOST, String(PEER_ID), "new-identity-b64");
+      expect(setPeerVerification).toHaveBeenLastCalledWith(
+        expect.objectContaining({ userId: PEER_ID, status: "changed" }),
       );
-      // Blocked before verify — no pin overwrite, no signature check, no offer.
-      expect(storeIdentityPin).not.toHaveBeenCalled();
-      expect(verifyEphemeralKeySignature).not.toHaveBeenCalled();
-      expect(offerSends(ws)).toHaveLength(0);
-      expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(false);
+      expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(true);
+      expect(offerSends(ws)).toHaveLength(1);
     });
 
     it("fails closed when the pin store cannot be read (DC-08): rejects, never re-pins", async () => {
@@ -4061,10 +4061,9 @@ describe("LiveKitSession", () => {
       expect(storeIdentityPin).not.toHaveBeenCalled();
     });
 
-    it("re-pin recovers a mismatched peer so a later valid announce verifies", async () => {
-      // Peer legitimately rotated its identity key (reinstall / new device).
-      // Its pinned key mismatches the new published one → blocked.
-      seedPeer("new-identity-b64");
+    it("re-pin recovers a peer blocked for a missing key once a key is delivered again", async () => {
+      // The server stopped delivering a pinned peer's identity key → blocked.
+      seedPeer(null);
       (getIdentityPin as any).mockResolvedValue({ status: "pinned", pin: "old-identity-b64" });
       const ws = { send: vi.fn() };
       await joinAsKeyHolder(ws);
@@ -4074,19 +4073,15 @@ describe("LiveKitSession", () => {
       expect(setPeerVerification).toHaveBeenLastCalledWith(
         expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
       );
+      expect(offerSends(ws)).toHaveLength(0);
 
-      // User accepts the new key (analogous to accepting a changed TLS cert):
-      // re-pin overwrites the stored pin with the verified key and clears the
-      // mismatch block.
+      // A key is delivered again and the user trusts it: re-pin overwrites the
+      // stored pin with that key and replays the blocked announce against it.
+      seedPeer("new-identity-b64");
+      (getIdentityPin as any).mockResolvedValue({ status: "pinned", pin: "new-identity-b64" });
       const recovered = await session.rePinPeerIdentity(PEER_ID, "new-identity-b64");
       expect(recovered).toBe(true);
       expect(storeIdentityPin).toHaveBeenCalledWith(HOST, String(PEER_ID), "new-identity-b64");
-
-      // Store now holds the new pin; a fresh valid announce verifies.
-      (getIdentityPin as any).mockResolvedValue({ status: "pinned", pin: "new-identity-b64" });
-      (storeIdentityPin as any).mockClear();
-      ws.send.mockClear();
-      await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig");
 
       expect(setPeerVerification).toHaveBeenLastCalledWith(
         expect.objectContaining({ userId: PEER_ID, status: "verified" }),

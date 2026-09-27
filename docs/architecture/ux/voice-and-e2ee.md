@@ -167,15 +167,24 @@ forward-secrecy keypair rotation on reconnect are mechanics the user never sees.
 ## 7. E2EE identity verification surface
 
 Peer identity state lives in `voice.store` (per-participant
-`status: verified | unverified | mismatch` + `safetyNumber`), written by
+`status: verified | changed | unverified | mismatch | unknown` + `safetyNumber`), written by
 `features/voice/e2eePeerState.ts` (driven by `lib/livekitE2EE.ts`) as
 announces are verified against the pinned identity keys (`lib/identity.ts`).
 
-| State        | Roster badge (`verifyPresentation()`, `components/ChannelSidebar.ts`)       | Interaction                              |
-| ------------ | --------------------------------------------------------------------------- | ---------------------------------------- |
-| `verified`   | Green shield; title "Identity verified · Safety number: {n}"                | none needed                              |
-| `unverified` | Neutral shield; no pinned key yet                                           | none — pins on first verified announce   |
-| `mismatch`   | Red shield-alert; title "Identity key changed — click to review and re-pin" | Click → blocking identity-mismatch modal |
+| State        | Roster badge (`verifyPresentation()`, `components/ChannelSidebar.ts`)       | Interaction                               |
+| ------------ | --------------------------------------------------------------------------- | ----------------------------------------- |
+| `verified`   | Green shield; title "Identity verified · Safety number: {n}"                | none needed                               |
+| `changed`    | Amber shield-alert; title "Security key changed · Safety number: {n}"       | none — the change already raised a notice |
+| `unverified` | Neutral shield; no pinned key yet                                           | none — pins on first verified announce    |
+| `mismatch`   | Red shield-alert; title "Identity key changed — click to review and re-pin" | Click → blocking identity-mismatch modal  |
+
+A pinned peer whose published key changed is accepted automatically when the
+announce verifies against the new key (`verifyPeerAnnounce` in
+`features/voice/e2eePeerState.ts`): the pin is replaced, the change is logged
+at warn, and a warning toast naming the peer stays until dismissed
+(`showToast(…, "warning", Infinity)`). The peer keeps the `changed` badge
+for the rest of the call. `mismatch` is now only a pinned peer whose key is no
+longer delivered, or an announce that fails verification.
 
 The mismatch modal (`createIdentityMismatchModal()`, `components/CertMismatchModal.ts`;
 opened from `openIdentityMismatchModal()` in `components/ChannelSidebar.ts`) shows the **new key's fingerprint** so

@@ -49,16 +49,19 @@ export interface VoiceConfig {
  *  panel can show a verified/unverified badge and the out-of-band safety number.
  *  Written from livekitSession.ts as each peer's announce is verified.
  *   - "verified":   announce signature checked against the peer's pinned key.
+ *   - "changed":    as "verified", but the peer's key differed from the pin
+ *                   earlier this session and was accepted (and re-pinned)
+ *                   automatically; kept for the rest of the session.
  *   - "unverified": peer published no identity key (legacy) — pin-pending.
- *   - "mismatch":   the delivered identity key differs from the pinned one
- *                   (possible server MITM); the peer is blocked until re-pin.
+ *   - "mismatch":   a pinned peer's identity key is no longer delivered, or
+ *                   the announce signature did not verify; the peer is blocked.
  *   - "unknown":    the local pin store could not be read (keyring error), so
  *                   no trust decision was possible — the announce was rejected
  *                   (fail closed, DC-08). Distinct from "unverified" so a
  *                   storage fault never reads as "never pinned". */
 export interface PeerVerification {
   readonly userId: number;
-  readonly status: "verified" | "unverified" | "mismatch" | "unknown";
+  readonly status: "verified" | "changed" | "unverified" | "mismatch" | "unknown";
   /** Safety number (identity-key fingerprint) for out-of-band verification;
    *  null for legacy/unverified/mismatch/unknown peers. */
   readonly safetyNumber: string | null;

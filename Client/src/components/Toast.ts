@@ -4,6 +4,7 @@
  *
  * Errors are the exception: they stay until dismissed, because a message
  * that vanishes before it can be read or acted on is worse than none at all.
+ * Any other type can opt in to the same by passing `durationMs: Infinity`.
  * Every toast pauses its auto-dismiss countdown while hovered or focused, and
  * an identical repeat coalesces into the existing toast with a count instead
  * of stacking a duplicate.
@@ -22,7 +23,9 @@ interface ToastEntry {
   readonly el: HTMLDivElement;
   readonly message: string;
   readonly type: ToastType;
-  /** Auto-dismiss timer; null for an error (persists) or a paused toast. */
+  /** Stays until dismissed: an error, or a toast shown with an infinite duration. */
+  readonly sticky: boolean;
+  /** Auto-dismiss timer; null for a sticky or a paused toast. */
   timer: ReturnType<typeof setTimeout> | null;
   /** Countdown left when the timer was last cleared (ms). */
   remainingMs: number;
@@ -69,9 +72,9 @@ export function createToastContainer(): ToastContainer {
   }
 
   /** Run an auto-dismissing toast's countdown for its remaining time, unless
-   *  it is an error (persists until dismissed) or held by hover or focus. */
+   *  it is sticky (persists until dismissed) or held by hover or focus. */
   function resume(entry: ToastEntry): void {
-    if (entry.type === "error" || entry.timer !== null) return;
+    if (entry.sticky || entry.timer !== null) return;
     if (entry.hovered || entry.focused) return;
     entry.startedAt = Date.now();
     entry.timer = setTimeout(() => removeToast(entry), entry.remainingMs);
@@ -83,6 +86,7 @@ export function createToastContainer(): ToastContainer {
     durationMs: number = DEFAULT_DURATION_MS,
   ): void {
     if (root === null) return;
+    const sticky = type === "error" || durationMs === Infinity;
 
     // Coalesce an identical repeat (same type and text) into the toast
     // already on screen instead of stacking a duplicate — five copies of the
@@ -98,22 +102,22 @@ export function createToastContainer(): ToastContainer {
       return;
     }
 
-    // Evict the oldest toast when at capacity, sparing errors (they persist
-    // until dismissed): with every slot an error, a new non-error is the one
-    // that gives way, and only a new error displaces the oldest error.
+    // Evict the oldest toast when at capacity, sparing sticky ones (they
+    // persist until dismissed): with every slot sticky, a new auto-dismissing
+    // toast is the one that gives way, and only a new sticky one displaces
+    // the oldest sticky one.
     while (toasts.length >= MAX_TOASTS) {
-      const victim =
-        toasts.find((t) => t.type !== "error") ?? (type === "error" ? toasts[0] : undefined);
+      const victim = toasts.find((t) => !t.sticky) ?? (sticky ? toasts[0] : undefined);
       if (victim === undefined) return;
       removeToast(victim);
     }
 
     // An auto-dismissing toast takes focus itself so the keyboard can hold it
-    // too; an error's close button is its focus stop.
+    // too; a sticky toast's close button is its focus stop.
     const el = createElement("div", {
       class: `toast toast-${type}`,
       "data-testid": "toast",
-      ...(type === "error" ? {} : { tabindex: "0" }),
+      ...(sticky ? {} : { tabindex: "0" }),
     });
 
     el.appendChild(createElement("span", { class: "toast-text" }, message));
@@ -122,9 +126,9 @@ export function createToastContainer(): ToastContainer {
     const countEl = createElement("span", { class: "toast-count" });
     el.appendChild(countEl);
 
-    // Errors get a close button so they can be dismissed by hand. Other types
-    // clear themselves, so a button there would only add noise.
-    if (type === "error") {
+    // Sticky toasts get a close button so they can be dismissed by hand.
+    // Others clear themselves, so a button there would only add noise.
+    if (sticky) {
       // The aria-label names the button, so the glyph is never announced.
       const close = createElement(
         "button",
@@ -139,6 +143,7 @@ export function createToastContainer(): ToastContainer {
       el,
       message,
       type,
+      sticky,
       timer: null,
       remainingMs: durationMs,
       startedAt: 0,

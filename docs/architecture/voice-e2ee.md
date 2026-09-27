@@ -79,7 +79,8 @@ The wire flow (`voice_e2ee_announce` / `voice_e2ee_offer`)
 is specified in [protocol.md](../protocol.md) (Voice End-to-End Encryption
 section). Long-term identity: each user publishes an ECDSA identity public key
 (`users.identity_public_key`, migration 017); peers pin it on first contact
-and surface a blocking mismatch modal if it later changes (see
+and, if it later changes, accept the new key once the announce verifies
+against it, replacing the pin and showing a persistent notice (see
 [ux/voice-and-e2ee.md](ux/voice-and-e2ee.md)).
 
 **Source of truth:** `Server/ws/voice_e2ee.go`, `Server/ws/livekit.go`,

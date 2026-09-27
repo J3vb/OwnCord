@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const members = vi.hoisted(() => new Map<number, { identityPublicKey?: string }>());
+const members = vi.hoisted(
+  () => new Map<number, { identityPublicKey?: string; username?: string }>(),
+);
 vi.mock("../../stores/members.store", () => ({
   membersStore: { getState: () => ({ members }) },
+  memberDisplayName: (m: { username: string }) => m.username,
 }));
 vi.mock("../../stores/voice.store", () => ({ setPeerVerification: vi.fn() }));
+vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
 vi.mock("../../lib/identity", () => ({
   getIdentityPin: vi.fn(),
   storeIdentityPin: vi.fn(),
@@ -20,6 +24,7 @@ vi.mock("../../lib/logger", () => ({
 }));
 
 import { setPeerVerification } from "../../stores/voice.store";
+import { showToast } from "../../lib/toast";
 import { getIdentityPin, storeIdentityPin } from "../../lib/identity";
 import { verifyEphemeralKeySignature } from "../../lib/e2eeCrypto";
 import { E2EEPeerState } from "./e2eePeerState";
@@ -98,23 +103,59 @@ describe("verifyPeerAnnounce (F3 TOFU)", () => {
     expect(lastVerification()).toMatchObject({ userId: PEER, status: "unknown" });
   });
 
-  it("blocks and buffers a pinned peer whose delivered identity changed", async () => {
+  it("accepts a changed identity key that signed the announce, re-pins it and notifies once", async () => {
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: "old-id" });
+    members.set(PEER, { identityPublicKey: "new-id", username: "alice" });
+    const { peers } = setup();
+    await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current)).resolves.toBe(true);
+    expect(verifyEphemeralKeySignature).toHaveBeenCalledWith(
+      "idkey:new-id",
+      PEER,
+      new Uint8Array([4, 5]),
+      "sig",
+    );
+    expect(storeIdentityPin).toHaveBeenCalledWith("chat.example", String(PEER), "new-id");
+    expect(lastVerification()).toEqual({
+      userId: PEER,
+      status: "changed",
+      safetyNumber: "safety-number",
+      sessionFingerprint: "session-fp",
+    });
+    expect(peers.blockedAnnounces.size).toBe(0);
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(showToast).mock.lastCall?.[0]).toContain("alice");
+    expect(vi.mocked(showToast).mock.lastCall?.slice(1)).toEqual(["warning", Infinity]);
+
+    // A later announce verifies cleanly against the new pin: the badge keeps
+    // showing the change for the session, and the notice is not repeated.
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: "new-id" });
+    await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current)).resolves.toBe(true);
+    expect(storeIdentityPin).toHaveBeenCalledTimes(1);
+    expect(lastVerification()).toMatchObject({ status: "changed" });
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a changed identity key whose announce does not verify, keeping the old pin", async () => {
     vi.mocked(getIdentityPin).mockResolvedValueOnce({ status: "pinned", pin: "old-id" });
+    vi.mocked(verifyEphemeralKeySignature).mockResolvedValueOnce(false);
     members.set(PEER, { identityPublicKey: "new-id" });
     const { peers } = setup();
     await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current)).resolves.toBe(false);
     expect(lastVerification()).toMatchObject({ status: "mismatch", sessionFingerprint: null });
-    expect(peers.blockedAnnounces.get(PEER)).toEqual({
-      publicKeyBase64: EPHEMERAL,
-      signatureBase64: "sig",
-    });
+    expect(storeIdentityPin).not.toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
   });
 
-  it("blocks a pinned peer whose identity key the server stripped", async () => {
+  it("blocks and buffers a pinned peer whose identity key the server stripped", async () => {
     vi.mocked(getIdentityPin).mockResolvedValueOnce({ status: "pinned", pin: "old-id" });
     const { peers } = setup();
     await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current)).resolves.toBe(false);
     expect(lastVerification()).toMatchObject({ status: "mismatch" });
+    expect(peers.blockedAnnounces.get(PEER)).toEqual({
+      publicKeyBase64: EPHEMERAL,
+      signatureBase64: "sig",
+    });
+    expect(storeIdentityPin).not.toHaveBeenCalled();
   });
 
   it("accepts a never-pinned legacy peer as unverified, never verified", async () => {
