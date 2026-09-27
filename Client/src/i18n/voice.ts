@@ -93,6 +93,7 @@ export const voiceText = defineCatalog("voice", {
   "picker.qualityHint": "Defaults from Settings → Voice & Audio; applies to this share only.",
   "picker.frameRate": "Frame rate",
   "picker.fps": "{fps} fps",
+  "picker.fpsDefault": "Default ({fps} fps)",
   "picker.goLive": "Go Live",
   "picker.quality.low": "Low (720p)",
   "picker.quality.medium": "Medium (1080p)",

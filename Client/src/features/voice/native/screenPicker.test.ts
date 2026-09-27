@@ -78,6 +78,26 @@ describe("pickScreenSource", () => {
     });
   });
 
+  it("uncaps the size for Source at 60/120 fps and caps it at 1080p30 otherwise", async () => {
+    host.pick = () => ({ source: "screen:277", quality: "source", fps: 60 });
+    await expect(pickScreenSource()).resolves.toEqual({
+      source: "screen:277",
+      capture: { fps: 60, maxWidth: 0, maxHeight: 0 },
+      maxBitrate: 15_000_000,
+      maxFramerate: 60,
+    });
+    host.pick = () => ({ source: "screen:277", quality: "source", fps: 120 });
+    await expect(pickScreenSource()).resolves.toMatchObject({
+      capture: { fps: 120, maxWidth: 0, maxHeight: 0 },
+      maxFramerate: 120,
+    });
+    host.pick = () => ({ source: "screen:277", quality: "source", fps: 30 });
+    await expect(pickScreenSource()).resolves.toMatchObject({
+      capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
+      maxFramerate: 30,
+    });
+  });
+
   it("shows only the quality step on Wayland and hands the portal the pick", async () => {
     host.sources = { portal: true, sources: [] };
     host.pick = (opts) => {

@@ -1,6 +1,7 @@
 /* ── Screen share source picker (design state 12) ─────────────────────────
-   One dialog on every platform: Screens/Applications tabs with a thumbnail
-   per source, an Audio switch and a per-share quality override. Built on the
+   The Linux native share dialog: Screens/Applications tabs with a thumbnail
+   per source, an Audio note (native capture is video-only) and a per-share
+   quality override. Built on the
    shared .modal shell from login.css, so it inherits the dialog chrome and
    only widens the box for the source grid. */
 

@@ -19,12 +19,12 @@
  * catalog.
  */
 
-import { createElement, appendChildren } from "@lib/dom";
+import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import type { NativeVoiceScreenSource } from "../platform/contracts/nativeVoice";
 import { voiceText as t } from "../i18n/voice";
-import type { StreamQuality } from "@lib/screenShare";
+import { getEffectiveScreenShareFps, type StreamQuality } from "@lib/screenShare";
 
 export interface ScreenSharePick {
   /** The host source id, or "portal" on Wayland. */
@@ -47,7 +47,7 @@ interface QualityOption {
   readonly label: string;
 }
 
-const FPS_OPTIONS: readonly number[] = [30, 60, 120];
+const FPS_OPTIONS: readonly number[] = [60, 120];
 
 /** Linux native capture is video-only, so the Audio option is a note. */
 function buildAudioOption(): HTMLElement {
@@ -196,6 +196,16 @@ export function showScreenSharePicker(
             btn.tabIndex = on ? 0 : -1;
           }
           renderPanel();
+          // Keep the selection on a card in this tab, so Go Live shares what
+          // the user sees and the radiogroup keeps a roving tab stop.
+          const cards = [...panel.querySelectorAll<HTMLButtonElement>(".ssp-source")];
+          const shown = cards.find((c) => c.dataset["sourceId"] === selectedSource) ?? cards[0];
+          if (shown?.dataset["sourceId"] !== undefined) {
+            selectSource(shown.dataset["sourceId"]);
+          } else {
+            selectedSource = null;
+            updateGoLive();
+          }
           if (focus) tabButtons.get(id)?.focus();
         }
 
@@ -242,19 +252,7 @@ export function showScreenSharePicker(
         body.appendChild(tablist);
         body.appendChild(panel);
 
-        function initTab(): void {
-          for (const [tabId, btn] of tabButtons) {
-            const on = tabId === activeTab;
-            btn.setAttribute("aria-selected", String(on));
-            btn.tabIndex = on ? 0 : -1;
-          }
-          renderPanel();
-          // Pre-select the first source so the radiogroup always has a roving
-          // tab stop and Go Live has a target.
-          const first = panel.querySelector<HTMLButtonElement>(".ssp-source");
-          if (first?.dataset["sourceId"] !== undefined) selectSource(first.dataset["sourceId"]);
-        }
-        initTab();
+        setActiveTab(activeTab, false);
       }
     }
 
@@ -280,12 +278,18 @@ export function showScreenSharePicker(
       qualitySelect.value = selectedQuality;
       qualitySelect.addEventListener("change", () => {
         selectedQuality = qualitySelect.value as StreamQuality;
+        setText(defaultFpsOption, defaultFpsLabel());
       });
 
       const fpsSelect = createElement("select", {
         class: "ssp-select",
         "aria-label": t("picker.frameRate"),
       });
+      // 30 is the saved-prefs "default": each quality's own rate (5/15/30).
+      const defaultFpsLabel = (): string =>
+        t("picker.fpsDefault", { fps: getEffectiveScreenShareFps(selectedQuality, 30) });
+      const defaultFpsOption = createElement("option", { value: "30" }, defaultFpsLabel());
+      fpsSelect.appendChild(defaultFpsOption);
       for (const fps of FPS_OPTIONS) {
         fpsSelect.appendChild(
           createElement("option", { value: String(fps) }, t("picker.fps", { fps })),

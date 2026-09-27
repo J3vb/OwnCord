@@ -456,7 +456,17 @@ export async function enableScreenshare(
     const sendId = ws.send({ type: "voice_screenshare", payload: { enabled: true } });
     registerPendingVideoEnable(sendId, "screen");
     deps.reapplyAudioPipeline();
-    log.info("Screenshare enabled", { quality, fps: effectiveFps, maxBitrate });
+    // The Linux native track carries the dialog's per-share encoding, which
+    // replaces the saved prefs.
+    const picked = (
+      videoTrack as { publishEncoding?: { maxBitrate: number; maxFramerate: number } } | undefined
+    )?.publishEncoding;
+    log.info(
+      "Screenshare enabled",
+      picked !== undefined
+        ? { fps: picked.maxFramerate, maxBitrate: picked.maxBitrate }
+        : { quality, fps: effectiveFps, maxBitrate },
+    );
   } catch (err) {
     removeEndedListener?.();
     if ((state.generation ?? 0) !== generation) {

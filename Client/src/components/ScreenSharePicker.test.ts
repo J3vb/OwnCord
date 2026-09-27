@@ -70,6 +70,61 @@ describe("showScreenSharePicker", () => {
     await expect(picking).resolves.not.toHaveProperty("audio");
   });
 
+  it("keeps the selection on a visible card across tab switches", async () => {
+    const picking = showScreenSharePicker({
+      sources,
+      portal: false,
+      defaultQuality: "high",
+      defaultFps: 30,
+    });
+    const root = await mounted();
+    const checked = () =>
+      [...root.querySelectorAll<HTMLButtonElement>(".ssp-source")]
+        .filter((c) => c.getAttribute("aria-checked") === "true")
+        .map((c) => [c.dataset["sourceId"], c.tabIndex]);
+    clickTab(root, "Applications");
+    expect(checked()).toEqual([["window:9", 0]]);
+    clickTab(root, "Screens");
+    expect(checked()).toEqual([["screen:1", 0]]);
+    clickTab(root, "Applications");
+    root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+    await expect(picking).resolves.toMatchObject({ source: "window:9" });
+  });
+
+  it("disables Go Live on a tab with nothing to share", async () => {
+    const picking = showScreenSharePicker({
+      sources: [sources[0]!],
+      portal: false,
+      defaultQuality: "high",
+      defaultFps: 30,
+    });
+    const root = await mounted();
+    const goLive = root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!;
+    clickTab(root, "Applications");
+    expect(goLive.disabled).toBe(true);
+    clickTab(root, "Screens");
+    expect(goLive.disabled).toBe(false);
+    goLive.click();
+    await expect(picking).resolves.toMatchObject({ source: "screen:1" });
+  });
+
+  it("labels the default frame rate with the quality's own rate", async () => {
+    const picking = showScreenSharePicker({
+      sources,
+      portal: false,
+      defaultQuality: "low",
+      defaultFps: 30,
+    });
+    const root = await mounted();
+    const [quality, fps] = root.querySelectorAll<HTMLSelectElement>(".ssp-select");
+    expect(fps!.selectedOptions[0]!.textContent).toBe("Default (5 fps)");
+    quality!.value = "medium";
+    quality!.dispatchEvent(new Event("change"));
+    expect(fps!.selectedOptions[0]!.textContent).toBe("Default (15 fps)");
+    root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+    await expect(picking).resolves.toMatchObject({ quality: "medium", fps: 30 });
+  });
+
   it("carries the per-share quality and fps override", async () => {
     const picking = showScreenSharePicker({
       sources,
