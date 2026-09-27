@@ -1050,6 +1050,20 @@ export interface ServerInfoResponse {
   readonly retention?: { readonly messages_days: number };
 }
 
+/**
+ * The connected server's build version for the support bundle (CLI-03).
+ *
+ * C-2 keeps build identity off every unauthenticated endpoint, so the version
+ * is read from the admin-gated `GET /api/v1/diagnostics/connectivity`; a
+ * principal who may not read it gets `version: null` with a machine-readable
+ * `note` explaining why ("not permitted", "unavailable") rather than a widened
+ * server surface.
+ */
+export interface ServerVersionInfo {
+  readonly version: string | null;
+  readonly note: string | null;
+}
+
 /** Single channel object from REST API. */
 export interface ChannelResponse {
   readonly id: number;

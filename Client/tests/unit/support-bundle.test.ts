@@ -7,7 +7,7 @@ const { desktop } = vi.hoisted(() => ({
   desktop: {
     fileSaver: { pickSaveLocation: vi.fn(), writeFile: vi.fn() },
     appMetadata: { getVersion: vi.fn() },
-    logFiles: { readAll: vi.fn() },
+    logFiles: { readAll: vi.fn(), readNative: vi.fn() },
     settings: { load: vi.fn() },
   },
 }));
@@ -116,6 +116,9 @@ function sources(overrides: Partial<SupportBundleSources> = {}): SupportBundleSo
       { name: "2026-09-21.jsonl", text: '{"message":"one"}\n' },
       { name: "2026-09-22.jsonl", text: '{"message":"two"}\n' },
     ],
+    nativeLogs: [{ name: "owncord-client.log", text: "[startup] frontend ready after 42 ms\n" }],
+    serverVersion: { version: "2.0.0-beta.1", note: null },
+    environment: { platform: "Win32", userAgent: "Mozilla/5.0 (Windows) OwnCord" },
     profiles: [
       {
         id: "p1",
@@ -149,7 +152,48 @@ describe("buildSupportBundle", () => {
       "voice-diagnostics.json",
       "logs/2026-09-21.jsonl",
       "logs/2026-09-22.jsonl",
+      "logs/owncord-client.log",
     ]);
+  });
+
+  it("records OS, webview and server version in app.json (CLI-03)", () => {
+    const entries = readZip(buildSupportBundle(sources()));
+    const app = JSON.parse(text(entries.find((e) => e.name === "app.json")!.data));
+    expect(app).toEqual({
+      version: "1.2.3",
+      exportedAt: "2026-09-22T12:00:00.000Z",
+      os: "Win32",
+      userAgent: "Mozilla/5.0 (Windows) OwnCord",
+      serverVersion: "2.0.0-beta.1",
+    });
+  });
+
+  it("explains a server version the principal may not read, and never blocks the export", () => {
+    const entries = readZip(
+      buildSupportBundle(sources({ serverVersion: { version: null, note: "not permitted" } })),
+    );
+    const app = JSON.parse(text(entries.find((e) => e.name === "app.json")!.data));
+    expect(app.serverVersion).toBeNull();
+    expect(app.serverVersionNote).toBe("not permitted");
+  });
+
+  it("carries the Rust log verbatim with the JSONL logs", () => {
+    const entries = readZip(
+      buildSupportBundle(
+        sources({
+          nativeLogs: [
+            { name: "owncord-client.log", text: "[startup] frontend ready\n" },
+            { name: "owncord-client_2026-09-20_10-00-00.log", text: "[panic] boom\n" },
+          ],
+        }),
+      ),
+    );
+    expect(text(entries.find((e) => e.name === "logs/owncord-client.log")!.data)).toBe(
+      "[startup] frontend ready\n",
+    );
+    expect(
+      text(entries.find((e) => e.name === "logs/owncord-client_2026-09-20_10-00-00.log")!.data),
+    ).toBe("[panic] boom\n");
   });
 
   it("copies allowlisted settings and profile fields only", () => {
@@ -168,8 +212,6 @@ describe("buildSupportBundle", () => {
         },
       ],
     });
-    const app = JSON.parse(text(entries.find((e) => e.name === "app.json")!.data));
-    expect(app).toEqual({ version: "1.2.3", exportedAt: "2026-09-22T12:00:00.000Z" });
   });
 
   it("carries no planted token, password, kit secret, recovery code or TOTP secret", () => {
@@ -234,6 +276,9 @@ describe("exportSupportBundle", () => {
     vi.resetAllMocks();
     desktop.appMetadata.getVersion.mockResolvedValue("1.2.3");
     desktop.logFiles.readAll.mockResolvedValue([{ name: "2026-09-22.jsonl", text: "x\n" }]);
+    desktop.logFiles.readNative.mockResolvedValue([
+      { name: "owncord-client.log", text: "[startup] frontend ready\n" },
+    ]);
     desktop.settings.load.mockResolvedValue({ schemaVersion: 1, profiles: [] });
     desktop.fileSaver.writeFile.mockResolvedValue(undefined);
   });
@@ -243,6 +288,7 @@ describe("exportSupportBundle", () => {
 
     await expect(exportSupportBundle(desktop as never, {})).resolves.toBe(false);
     expect(desktop.logFiles.readAll).not.toHaveBeenCalled();
+    expect(desktop.logFiles.readNative).not.toHaveBeenCalled();
     expect(desktop.fileSaver.writeFile).not.toHaveBeenCalled();
   });
 
@@ -259,10 +305,35 @@ describe("exportSupportBundle", () => {
     expect(path).toBe("/tmp/bundle.zip");
     const entries = readZip(bytes);
     expect(entries.map((e) => e.name)).toContain("logs/2026-09-22.jsonl");
+    expect(entries.map((e) => e.name)).toContain("logs/owncord-client.log");
     expect(
       JSON.parse(text(entries.find((e) => e.name === "voice-diagnostics.json")!.data)),
     ).toEqual({ hasRoom: true });
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+
+  it("reads the server version through the provider and never blocks on its failure", async () => {
+    desktop.fileSaver.pickSaveLocation.mockResolvedValue("/tmp/bundle.zip");
+    const getServerVersion = vi.fn().mockRejectedValue(new Error("connection refused"));
+
+    await expect(exportSupportBundle(desktop as never, {}, getServerVersion)).resolves.toBe(true);
+
+    const [, bytes] = desktop.fileSaver.writeFile.mock.calls[0]! as [string, Uint8Array];
+    const app = JSON.parse(text(readZip(bytes).find((e) => e.name === "app.json")!.data));
+    expect(app.serverVersion).toBeNull();
+    expect(app.serverVersionNote).toBe("unavailable");
+  });
+
+  it("records the server version when the principal may read it", async () => {
+    desktop.fileSaver.pickSaveLocation.mockResolvedValue("/tmp/bundle.zip");
+    const getServerVersion = vi.fn().mockResolvedValue({ version: "2.0.0-beta.1", note: null });
+
+    await expect(exportSupportBundle(desktop as never, {}, getServerVersion)).resolves.toBe(true);
+
+    const [, bytes] = desktop.fileSaver.writeFile.mock.calls[0]! as [string, Uint8Array];
+    const app = JSON.parse(text(readZip(bytes).find((e) => e.name === "app.json")!.data));
+    expect(app.serverVersion).toBe("2.0.0-beta.1");
+    expect(app.serverVersionNote).toBeUndefined();
   });
 });

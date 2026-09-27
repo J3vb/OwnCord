@@ -1180,6 +1180,41 @@ describe("API Client", () => {
     });
   });
 
+  describe("getServerVersion (CLI-03)", () => {
+    it("reads the version from the admin-gated connectivity diagnostics", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ server: { version: "2.0.0-beta.1" } }));
+      await expect(api.getServerVersion()).resolves.toEqual({
+        version: "2.0.0-beta.1",
+        note: null,
+      });
+      expect(fetchCallUrl()).toContain("/api/v1/diagnostics/connectivity");
+    });
+
+    it("answers null with 'not permitted' when the principal may not read it", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 403,
+        statusText: "Forbidden",
+        json: () => Promise.resolve({ error: "FORBIDDEN", message: "insufficient permissions" }),
+        headers: new Headers(),
+      } as unknown as Response);
+      await expect(api.getServerVersion()).resolves.toEqual({
+        version: null,
+        note: "not permitted",
+      });
+      expectConsole("warn", /\[api\] API error/);
+    });
+
+    it("answers null with 'unavailable' on a transport failure, never rejecting", async () => {
+      mockFetch.mockRejectedValue(new Error("connection refused"));
+      await expect(api.getServerVersion()).resolves.toEqual({
+        version: null,
+        note: "unavailable",
+      });
+      expectConsole("error", /\[api\] API fetch failed/);
+    });
+  });
+
   describe("admin channel endpoints", () => {
     it("adminCreateChannel calls POST /admin/api/channels", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ id: 1, name: "general", type: "text" }));

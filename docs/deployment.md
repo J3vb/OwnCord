@@ -1382,7 +1382,14 @@ directory, which is the route in when the window never came up: the log then
 says `frontend not ready` 30 seconds after start, and a crash is logged as a
 `[panic]` line with a backtrace.
 
-Ask for the exported bundle first; it carries the log plus the diagnostic
+The desktop client keeps **two** logs, and the exported bundle carries both.
+The webview's own log is the rotating JSONL under `logs/*.jsonl`; the native
+host writes the log above, and the bundle includes it as
+`logs/owncord-client*.log`, newest first and tail-capped at 2 MB per file. The
+bundle also records your OS, webview and the connected server's version in
+`app.json`.
+
+Ask for the exported bundle first; it carries both logs plus the diagnostic
 sections the client can collect on its own.
 
 ## Verifying a Download

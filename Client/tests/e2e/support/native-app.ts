@@ -7,14 +7,23 @@ import {
   type TestInfo,
 } from "@playwright/test";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startProcess, stopProcess, waitForHttp } from "./process";
 
 export async function startNativeApp(
   binary = process.env.OWNCORD_E2E_CLIENT_BINARY,
-  options: { preserveProfile?: boolean; identifier?: string } = {},
+  options: {
+    preserveProfile?: boolean;
+    identifier?: string;
+    /** Seed `owncord-client.log` to this size before launch, so the log
+     *  plugin's first write rotates it (CLI-03 rollover coverage). */
+    seedActiveLogBytes?: number;
+    /** Abort the app's JS chunks on the first navigation, so the frontend never
+     *  runs and never calls `frontend_ready` (CLI-03 blank-window coverage). */
+    blockFrontend?: boolean;
+  } = {},
 ) {
   if (process.platform !== "win32") throw new Error("Native WebView2 tests require Windows");
   const exe = resolve(binary ?? "src-tauri/target/release/owncord-client.exe");
@@ -32,6 +41,21 @@ export async function startNativeApp(
       await rm(profile, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
   };
   if (!options.preserveProfile) await clearProfiles();
+  // Seed after the clear so the oversized active log is what the plugin opens.
+  // The log plugin's LogDir target is `{LOCALAPPDATA}/<identifier>/logs`, so
+  // seed there explicitly rather than at profiles[0] (which may be APPDATA).
+  if (options.seedActiveLogBytes !== undefined) {
+    const logDir = join(
+      process.env.LOCALAPPDATA ?? "",
+      options.identifier ?? "com.owncord.e2e",
+      "logs",
+    );
+    await mkdir(logDir, { recursive: true });
+    await writeFile(
+      join(logDir, "owncord-client.log"),
+      Buffer.alloc(options.seedActiveLogBytes, 0x61),
+    );
+  }
   // One budget for the whole app start. The first launch of a freshly built
   // exe on a cold Windows runner takes up to ~30s more than a warm one, and the
   // WebView2 browser process opens the CDP port well before the renderer
@@ -60,6 +84,14 @@ export async function startNativeApp(
     // not applied by the built-in browser fixture.
     context.setDefaultTimeout(30_000);
     context.setDefaultNavigationTimeout(45_000);
+    // Simulate a frontend that never came up: abort the bundled module scripts
+    // before the first document requests them, so main.ts never runs and never
+    // calls `frontend_ready`. Installed on the context (not a page) so it
+    // applies to the app's initial navigation, which begins before the page
+    // target is observable.
+    if (options.blockFrontend) {
+      await context.route("**/*.{js,mjs}", (route) => route.abort());
+    }
     const page = await waitForFirstPage(context, running, startupDeadline - Date.now());
     // WebView2 exposes a page as soon as it starts loading its own
     // "Loading <url>" interstitial, before the app document has navigated in.
