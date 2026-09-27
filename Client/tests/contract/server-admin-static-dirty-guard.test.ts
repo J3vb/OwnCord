@@ -266,6 +266,23 @@ describe("Server/admin/static — dialog dirty guard (UX-10)", () => {
     expect(bridge.state.modalDirty).toBe(true);
   });
 
+  it("marks the dialog dirty when a one-click placement sets the role position", async () => {
+    const booted = await boot();
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    const asked = stubConfirm(dom, false);
+    bridge.openModal(
+      '<div class="modal-body"><input id="rolePos" value="9"><button type="button" data-action="placeRoleAboveDefault" data-args="[3]">Place</button></div>',
+    );
+
+    (doc.querySelector('#modalInner [data-action="placeRoleAboveDefault"]') as HTMLElement).click();
+    expect((doc.getElementById("rolePos") as HTMLInputElement).value).toBe("3");
+    doc.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+    expect(asked.length).toBe(1);
+    expect(booted.modalVisible()).toBe(true);
+  });
+
   it("does not treat a typed-name confirmation field as unsaved work", async () => {
     const booted = await boot();
     dom = booted.dom;
