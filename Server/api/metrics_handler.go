@@ -167,31 +167,7 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 		if src.BroadcastDrops != nil {
 			metrics.BroadcastDrops = src.BroadcastDrops()
 		}
-		if src.TopicSheds != nil {
-			metrics.TopicSheds = src.TopicSheds()
-		}
-		if src.BroadcastMs != nil {
-			s := src.BroadcastMs()
-			metrics.BroadcastMs = &s
-		}
-		if src.DispatchLagMs != nil {
-			s := src.DispatchLagMs()
-			metrics.DispatchLagMs = &s
-		}
-		if src.ChatAckMs != nil {
-			s := src.ChatAckMs()
-			metrics.ChatAckMs = &s
-		}
-		if src.VoiceJoinMs != nil {
-			v := src.VoiceJoinMs()
-			metrics.VoiceJoinMs = &v
-		}
-		if src.BroadcastQueueDepth != nil {
-			metrics.BroadcastQueueDepth = src.BroadcastQueueDepth()
-		}
-		if src.SeqMuMaxHoldMs != nil {
-			metrics.SeqMuMaxHoldMs = src.SeqMuMaxHoldMs()
-		}
+		fillHubLatency(&metrics, src)
 		if src.LiveKitHealth != nil {
 			healthy, _ := src.LiveKitHealth(r.Context())
 			metrics.LiveKitHealthy = &healthy
@@ -250,5 +226,35 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, metrics)
+	}
+}
+
+// fillHubLatency copies the hub's latency distributions, queue depth, seqMu
+// hold and topic sheds into metrics.
+func fillHubLatency(metrics *ServerMetrics, src MetricsSources) {
+	if src.TopicSheds != nil {
+		metrics.TopicSheds = src.TopicSheds()
+	}
+	if src.BroadcastMs != nil {
+		s := src.BroadcastMs()
+		metrics.BroadcastMs = &s
+	}
+	if src.DispatchLagMs != nil {
+		s := src.DispatchLagMs()
+		metrics.DispatchLagMs = &s
+	}
+	if src.ChatAckMs != nil {
+		s := src.ChatAckMs()
+		metrics.ChatAckMs = &s
+	}
+	if src.VoiceJoinMs != nil {
+		v := src.VoiceJoinMs()
+		metrics.VoiceJoinMs = &v
+	}
+	if src.BroadcastQueueDepth != nil {
+		metrics.BroadcastQueueDepth = src.BroadcastQueueDepth()
+	}
+	if src.SeqMuMaxHoldMs != nil {
+		metrics.SeqMuMaxHoldMs = src.SeqMuMaxHoldMs()
 	}
 }

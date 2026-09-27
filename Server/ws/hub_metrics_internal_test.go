@@ -86,7 +86,7 @@ func TestBroadcastQueueDepth_TracksEnqueuedFrames(t *testing.T) {
 	if got := h.BroadcastQueueDepth(); got != 0 {
 		t.Fatalf("empty queue depth = %d, want 0", got)
 	}
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		h.broadcast <- broadcastMsg{channelID: 0}
 	}
 	if got := h.BroadcastQueueDepth(); got != 5 {

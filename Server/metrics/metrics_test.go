@@ -10,7 +10,7 @@ import (
 // reported quantiles are that bucket's upper bound, and Max is exact.
 func TestHistogram_QuantilesAndMax(t *testing.T) {
 	var h Histogram
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		h.Observe(3) // bucket bound 5
 	}
 	h.Observe(750) // bucket bound 1000, and the exact max

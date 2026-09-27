@@ -141,11 +141,14 @@ func (h *Hub) SeqMuMaxHoldMs() float64 { return h.latency.seqMuHold.Millis() }
 // topic limiter before a sequence number was assigned.
 func (h *Hub) TopicShedCount() uint64 { return h.latency.topicSheds.Load() }
 
-// BroadcastMs, DispatchLagMs and ChatAckMs return the current latency
-// distributions for the metrics endpoint and the load run.
-func (h *Hub) BroadcastMs() metrics.Summary   { return h.latency.broadcast.Snapshot() }
+// BroadcastMs returns the current enqueue-to-fanout-done latency distribution.
+func (h *Hub) BroadcastMs() metrics.Summary { return h.latency.broadcast.Snapshot() }
+
+// DispatchLagMs returns the current enqueue-to-dispatch lag distribution.
 func (h *Hub) DispatchLagMs() metrics.Summary { return h.latency.dispatchLag.Snapshot() }
-func (h *Hub) ChatAckMs() metrics.Summary     { return h.latency.chatAck.Snapshot() }
+
+// ChatAckMs returns the current chat send-to-ack latency distribution.
+func (h *Hub) ChatAckMs() metrics.Summary { return h.latency.chatAck.Snapshot() }
 
 // VoiceJoinMs returns the per-phase voice join distributions.
 func (h *Hub) VoiceJoinMs() VoiceJoinPhases {

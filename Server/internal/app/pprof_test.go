@@ -60,8 +60,8 @@ func stopPprof(t *testing.T, a *App) {
 	for _, c := range a.closers {
 		if c.stage == "pprof" {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
 			_ = c.stop(ctx)
+			cancel()
 			return
 		}
 	}
