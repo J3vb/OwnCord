@@ -401,7 +401,11 @@ pub struct NativeSession {
     key_provider: KeyProvider,
     /// Set by `enable_audio`: the processing capture and playout share.
     apm: Option<Arc<Apm>>,
-    mic: Option<LocalTrackPublication>,
+    /// The published microphone track — not its publication: a full
+    /// reconnect republishes the same track under a new publication and
+    /// detaches the old one, so muting through a stored publication would
+    /// silently skip the track.
+    mic: Option<LocalAudioTrack>,
     /// The published microphone's source, fed by `capture` (none when the
     /// interop example published a synthetic one).
     mic_source: Option<NativeAudioSource>,
@@ -527,7 +531,7 @@ impl NativeSession {
     /// while muted so the system's in-use indicator goes out — the same
     /// contract as `stopMicTrackOnMute` on the web path.
     pub async fn set_microphone(&mut self, enabled: bool) -> Result<(), String> {
-        let Some(publication) = &self.mic else {
+        let Some(track) = &self.mic else {
             if !enabled {
                 return Ok(());
             }
@@ -549,9 +553,9 @@ impl NativeSession {
             if let Some(source) = &self.mic_source {
                 self.capture.start(source.clone())?;
             }
-            publication.unmute();
+            track.unmute();
         } else {
-            publication.mute();
+            track.mute();
             self.capture.stop();
         }
         Ok(())
@@ -561,11 +565,10 @@ impl NativeSession {
     /// capture's source; the interop example passes a synthetic sine.
     pub async fn publish_audio(&mut self, source: RtcAudioSource) -> Result<(), String> {
         let track = LocalAudioTrack::create_audio_track("microphone", source);
-        let publication = self
-            .room
+        self.room
             .local_participant()
             .publish_track(
-                LocalTrack::Audio(track),
+                LocalTrack::Audio(track.clone()),
                 TrackPublishOptions {
                     source: TrackSource::Microphone,
                     ..Default::default()
@@ -573,7 +576,7 @@ impl NativeSession {
             )
             .await
             .map_err(|e| e.to_string())?;
-        self.mic = Some(publication);
+        self.mic = Some(track);
         Ok(())
     }
 
@@ -819,11 +822,12 @@ impl NativeSession {
         self.capture.stop();
         self.release_camera().await;
         self.release_screen().await;
-        if let Some(publication) = self.mic.take() {
+        // The track's sid follows a republish; a stored publication's would not.
+        if let Some(track) = self.mic.take() {
             let _ = self
                 .room
                 .local_participant()
-                .unpublish_track(&publication.sid())
+                .unpublish_track(&track.sid())
                 .await;
         }
         if let Err(e) = self.room.close().await {
@@ -892,8 +896,8 @@ async fn forward_events(
 /// slot's live publication, or return the sid to unpublish when it does not —
 /// the video was stopped (slot emptied) or a newer one replaced it while the
 /// SDK was between its unpublish and publish, leaving a publication nobody can
-/// drive. A non-video republish returns `None`: the microphone is tracked by
-/// `NativeSession` itself, not here.
+/// drive. A non-video republish returns `None`: `NativeSession` holds the
+/// microphone's track, which the SDK carries into the new publication itself.
 fn apply_republish(
     slot: &mut Option<VideoPublication>,
     source: TrackSource,
