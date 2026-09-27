@@ -10952,12 +10952,18 @@
       "evidence": "Client/src-tauri/src/native_voice/session.rs:229-232: `RoomEvent::E2eeStateChanged { participant, state } => Event::EncryptionStatus { identity: participant.identity()..., encrypted: state == EncryptionState::Ok }`, emitted for every participant. Client/src/features/voice/native/nativeRoom.ts:626-632: `if (!event.encrypted && event.identity === this.localParticipant.identity) this.emit(RoomEvent.EncryptionError, ...)`, so remote identities are dropped. Client/src/lib/roomEventHandlers.ts:237-256: the web handler degrades after a 3 s InvalidKey streak from a remote participant. The ledger has no entry for native E2EE status surfacing (the only native entries are OC-0089/0105/0169/0215/0343/0353/0359).",
       "suggestedFix": "In nativeRoom.apply's encryptionStatus case, forward remote failures as `this.emit(RoomEvent.EncryptionError, new Error(\"InvalidKey: native decrypt failure\"), this.participant(event.identity))` so the shared handleEncryptionError grace and streak logic applies unchanged. Optionally carry the raw state in the event so a MissingKey from a key rotation is tolerated the same way.",
       "confidence": "medium",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25",
       "hunt": "b9-exit-audit-2026-09-25",
       "lens": "voice-media",
       "finder": "b9-exit-audit",
-      "note": "Cross-exam correction: the SDK's on_state_changed fires once per transition, so forwarding one event into handleEncryptionError lands inside DECRYPT_GRACE_MS and never degrades. The fix needs a per-identity timer (degrade if no Ok arrives within the grace window)."
+      "note": "Cross-exam correction: the SDK's on_state_changed fires once per transition, so forwarding one event into handleEncryptionError lands inside DECRYPT_GRACE_MS and never degrades. The fix needs a per-identity timer (degrade if no Ok arrives within the grace window).",
+      "fixed": "2026-09-27",
+      "fix": {
+        "commit": "0d4d267e",
+        "test": "Client/src/features/voice/native/nativeRoom.test.ts",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0474",

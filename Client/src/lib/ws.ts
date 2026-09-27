@@ -100,6 +100,17 @@ export function setActiveChannelProvider(fn: (() => number | null) | null): void
 const DEFAULT_MAX_RECONNECT_DELAY = 30_000;
 const DEFAULT_MAX_MESSAGE_SIZE = 1_048_576; // 1MB
 const HEARTBEAT_INTERVAL_MS = 30_000;
+// CLI-01: a half-open socket delivers nothing inbound while `transport.send`
+// still resolves against the local buffer, so the state machine would sit on
+// "connected" forever. A server's RFC 6455 control ping is answered inside the
+// Rust proxy and never reaches JS, so for every server this app-side deadline
+// reconnects when no frame at all arrives for 60 s: one missed app-level
+// heartbeat window (30 s) plus margin, under the ~75 s Reconnecting target.
+const SERVER_SILENCE_RECONNECT_MS = 60_000;
+// Silence only counts once a heartbeat ping has gone unanswered this long: a
+// minimised webview throttles the heartbeat setInterval, so a quiet socket may
+// simply not have been asked for a pong yet.
+const PONG_GRACE_MS = 15_000;
 
 function uuid(): string {
   return crypto.randomUUID();
@@ -187,6 +198,11 @@ export function createWsClient({
   let reconnectAttempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  // CLI-01: fires when no inbound frame has arrived for
+  // SERVER_SILENCE_RECONNECT_MS while the socket still reports open.
+  let livenessTimer: ReturnType<typeof setTimeout> | null = null;
+  // When the oldest heartbeat ping sent since the last inbound frame went out.
+  let unansweredPingAt: number | null = null;
   let intentionalClose = false;
   let certMismatchBlock = false; // blocks reconnect on TOFU mismatch
   // Mirror of the proxy's own open/closed state, kept here because the
@@ -255,6 +271,7 @@ export function createWsClient({
       if (proxyOpen) {
         try {
           sendRaw(JSON.stringify({ type: "ping", payload: {} }));
+          unansweredPingAt ??= Date.now();
         } catch (err) {
           log.warn("Heartbeat ping send failed", err);
         }
@@ -269,8 +286,47 @@ export function createWsClient({
     }
   }
 
+  // CLI-01: re-arm the silence deadline. Called after auth_ok and on every
+  // inbound frame, so any traffic — pong, chat, presence — proves the socket
+  // is still delivering bytes. A half-open socket delivers nothing, so the
+  // timer survives to fire.
+  function armLiveness(): void {
+    if (livenessTimer !== null) clearTimeout(livenessTimer);
+    unansweredPingAt = null;
+    livenessTimer = setTimeout(onLivenessDeadline, SERVER_SILENCE_RECONNECT_MS);
+  }
+
+  function onLivenessDeadline(): void {
+    livenessTimer = null;
+    if (intentionalClose || !proxyOpen || state !== "connected") return;
+    const pingAgeMs = unansweredPingAt === null ? 0 : Date.now() - unansweredPingAt;
+    if (pingAgeMs < PONG_GRACE_MS) {
+      livenessTimer = setTimeout(onLivenessDeadline, PONG_GRACE_MS - pingAgeMs);
+      return;
+    }
+    log.warn("No inbound frame within the liveness deadline; forcing reconnect", {
+      silenceMs: SERVER_SILENCE_RECONNECT_MS,
+      host: config?.host ?? "unknown",
+    });
+    // Tear down like an observed close: the next connect's ws_connect drops
+    // the stale Rust sender (which closes the half-open socket) and dials.
+    proxyOpen = false;
+    stopHeartbeat();
+    scheduleReconnect();
+  }
+
+  function stopLiveness(): void {
+    if (livenessTimer !== null) {
+      clearTimeout(livenessTimer);
+      livenessTimer = null;
+    }
+  }
+
   function scheduleReconnect(retryAfterMs?: number): void {
     if (intentionalClose || certMismatchBlock || !config) return;
+    // One timer at a time: the CLI-01 silence deadline and an observed close
+    // can race, and a second timer would redial twice.
+    if (reconnectTimer !== null) return;
     const delay = getReconnectDelay(retryAfterMs);
     log.info("WebSocket reconnecting", {
       delayMs: delay,
@@ -310,6 +366,10 @@ export function createWsClient({
       log.warn("Failed to parse WS message", { bytes: raw.length });
       return;
     }
+
+    // Any parsed inbound frame proves the socket is delivering bytes — refresh
+    // the CLI-01 silence deadline, even for a frame the size guard drops below.
+    armLiveness();
 
     // The size guard runs AFTER parsing (raw is already fully materialized
     // in memory either way, so this costs nothing) and exempts the handshake
@@ -380,6 +440,7 @@ export function createWsClient({
       setState("connected");
       reconnectAttempt = 0;
       startHeartbeat();
+      armLiveness();
     }
 
     dispatch(msg);
@@ -479,6 +540,7 @@ export function createWsClient({
         certBlocked: certMismatchBlock,
       });
       stopHeartbeat();
+      stopLiveness();
       if (!intentionalClose) {
         scheduleReconnect(retryHint?.retryAfterMs);
       } else {
@@ -502,6 +564,7 @@ export function createWsClient({
     // host) must not inherit a stale block from a previous connection.
     certMismatchBlock = false;
     cancelReconnect();
+    stopLiveness();
 
     setState("connecting");
 
@@ -595,6 +658,7 @@ export function createWsClient({
     certMismatchBlock = false;
     cancelReconnect();
     stopHeartbeat();
+    stopLiveness();
     proxyOpen = false;
     void disconnectProxy();
     setState("disconnected");

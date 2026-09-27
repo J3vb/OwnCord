@@ -90,13 +90,14 @@ Planning documents are not trackers. Do not read a defect count out of one.
 | Phase order and gates      | [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md)             |
 | Current measured baseline  | [b9-entry-baseline-2026-09-23](b9-entry-baseline-2026-09-23.md)                 |
 
-Current ledger summary (updated 2026-09-26): **467 fixed / 4 open / 7 declined / 1 duplicate = 479**
+Current ledger summary (updated 2026-09-27): **468 fixed / 3 open / 7 declined / 1 duplicate = 479**
 (The B9 exit audit is filed as `OC-0460`–`OC-0479`: thirteen findings fixed by
 PRs [#1802](https://github.com/J3vb/OwnCord/pull/1802),
 [#1798](https://github.com/J3vb/OwnCord/pull/1798) and
 [#1800](https://github.com/J3vb/OwnCord/pull/1800), two declined as
-screen-reader-only work, and four left open for after the beta (`OC-0473`,
-`OC-0474`, `OC-0476`, `OC-0478`). `OC-0454` is declined by owner decision D-09
+screen-reader-only work, `OC-0473` fixed by
+[#1858](https://github.com/J3vb/OwnCord/pull/1858), and three left open for after the
+beta (`OC-0474`, `OC-0476`, `OC-0478`). `OC-0454` is declined by owner decision D-09
 (Q14), an accepted low with a reopen trigger; `OC-0479`, stale `.golangci.yml`
 comments, is fixed by #1800.
 OC-0455 to OC-0457, the product causes of the fullstack media e2e flakes, and

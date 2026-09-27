@@ -214,6 +214,7 @@ contract:
 ```mermaid
 stateDiagram-v2
     Connected --> Reconnecting: socket closed (unintentional)
+    Connected --> Reconnecting: silence deadline (see protocol.md)
     Reconnecting --> Reconnecting: backoff retry (1,2,4,…,30s)
     Reconnecting --> Resyncing: socket open → auth{last_seq}
     Resyncing --> Connected: replay (dedup) or full ready
