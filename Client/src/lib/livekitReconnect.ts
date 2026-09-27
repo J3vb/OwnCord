@@ -68,9 +68,24 @@ export interface ReconnectDeps {
   clearPendingReconnectFields: () => void;
 }
 
-/** Max auto-reconnect attempts before giving up and showing error. */
-const MAX_RECONNECT_ATTEMPTS = 2;
-const RECONNECT_DELAY_MS = 3000;
+/** Auto-reconnect budget, sized to outlast a companion LiveKit restart.
+ *
+ *  RT-9: the companion SFU restarts with exponential backoff (3 s, doubling,
+ *  up to 60 s in `Server/ws/livekit_process.go`) plus its own start-up, so a
+ *  2-attempt, 3 s-apart loop (about 6 s) gave up while the SFU was still
+ *  coming back and ejected every call. This loop retries for about 27 s (a
+ *  3 s-doubling backoff capped at 6 s), so it is still trying past a companion's
+ *  3 s + 6 s + 12 s restart ladder, and the 6 s cap keeps the retry gap small
+ *  enough to resume the call promptly within the 30 s bar. The status badge
+ *  shows "Reconnecting voice…" for the whole window. */
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BASE_DELAY_MS = 3000;
+const RECONNECT_MAX_DELAY_MS = 6000;
+
+/** Delay before attempt `attempt` (1-based): 3 s, doubling, capped at 6 s. */
+function reconnectDelayMs(attempt: number): number {
+  return Math.min(RECONNECT_BASE_DELAY_MS * 2 ** (attempt - 1), RECONNECT_MAX_DELAY_MS);
+}
 
 /** True while an in-flight reconnect attempt has been superseded. */
 function reconnectSuperseded(
@@ -107,8 +122,9 @@ export async function attemptAutoReconnect(
       attempt,
       maxAttempts: MAX_RECONNECT_ATTEMPTS,
     });
+    // RT-9: exponential backoff so the loop outlasts a companion restart.
     // oxlint-disable-next-line no-await-in-loop -- intentional sequential polling with backoff delay
-    await new Promise((r) => setTimeout(r, RECONNECT_DELAY_MS));
+    await new Promise((r) => setTimeout(r, reconnectDelayMs(attempt)));
     // If user manually left or joined a different channel during the delay, abort.
     if (superseded()) {
       log.info("Auto-reconnect aborted — user left or channel changed");
