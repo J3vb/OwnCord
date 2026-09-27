@@ -44,14 +44,23 @@ const log = createLogger("ChannelSidebar");
 /** Icon, color, and tooltip for a peer's E2EE identity verification badge
  *  (F3 TOFU). The states mirror the voice store's PeerVerification:
  *  a green shield-check when the announce signature verified against the pinned
- *  key, a muted shield when the peer published no key (legacy), a red
- *  shield-alert when the delivered key differs from the pinned one, and an
- *  amber shield-question when the local pin store could not be read (DC-08). */
+ *  key, an amber shield-alert when it verified against a changed key that was
+ *  accepted automatically, a muted shield when the peer published no key
+ *  (legacy), a red shield-alert when the peer is blocked (pinned key no longer
+ *  delivered, or a bad signature), and an amber shield-question when the local
+ *  pin store could not be read (DC-08). */
 function verifyPresentation(v: PeerVerification): {
   icon: IconName;
   color: string;
   title: string;
 } {
+  if (v.status === "changed") {
+    return {
+      icon: "shield-alert",
+      color: "var(--yellow, #f0b232)",
+      title: shellText("identity.keyChanged", { safetyNumber: v.safetyNumber ?? "" }),
+    };
+  }
   if (v.status === "verified") {
     return {
       icon: "shield-check",

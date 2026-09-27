@@ -227,8 +227,8 @@ const e2eeVerifiedStatusLiteral = {
     schema: [],
     messages: {
       dynamicStatus:
-        "The `status` passed here must be a string literal ('verified' | 'unverified' | 'mismatch' | " +
-        "'unknown'), not a computed expression. Add a new literal call site for this outcome instead of " +
+        "The `status` passed here must be a string literal ('verified' | 'changed' | 'unverified' | " +
+        "'mismatch' | 'unknown'), not a computed expression. Add a new literal call site for this outcome instead of " +
         "deriving the status dynamically — that is what keeps 'verified' provably tied to a real signature check.",
     },
   },

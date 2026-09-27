@@ -1512,8 +1512,9 @@ keypair, published via `PATCH /api/v1/users/me` (`identity_public_key`) and
 distributed in the `ready` / `member_join` / `user_update` member payloads.
 Peers pin the key on first sight (trust-on-first-use) and verify each
 announce's `signature` against the pin, so a malicious server cannot swap
-`user_id ↔ ephemeral pubkey` after first contact. A later key change is
-surfaced to the user as a TOFU mismatch.
+`user_id ↔ ephemeral pubkey` without the announce failing verification. A
+later identity-key change is accepted once the announce verifies against the
+new key; the pin is replaced and the change is surfaced to the user.
 
 ### voice_e2ee_announce (Client -> Server)
 

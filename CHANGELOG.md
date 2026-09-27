@@ -79,6 +79,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Voice
 
+- **A call no longer waits for you to click "Trust New Key" when someone's security key changed** (for example after they reinstalled or used a new device). You couldn't hear them until you clicked. The new key is now accepted automatically and a notice naming that person stays until you dismiss it; their roster badge shows the change for the rest of the call. Compare safety numbers with them if you didn't expect it.
 - **The admin panel now shows whether LiveKit is healthy.** Nothing in Attention, Diagnostics or health reported it, so "voice doesn't work" meant reading the server's stdout by hand. A supervised LiveKit that is down now warns, one whose crashes stopped its restarts is critical, and an external LiveKit is health-probed; the restart count is in the support bundle too.
 - **LiveKit's own output now goes to the server log.** Its ICE, port and key errors were written straight to the process's stdout, so the admin live log and the support bundle never saw them; each line is now logged with a `livekit` source.
 - Linux desktop voice works against a server on the same Docker host again — the client tried LiveKit's Docker-internal hostname, which does not resolve outside the container network, and now uses the same rule as the other platforms: only a loopback `ws:`/`http:` address is used directly, anything else goes through the `/livekit` tunnel.

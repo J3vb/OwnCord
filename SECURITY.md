@@ -223,9 +223,13 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
   SFU relays ciphertext only.
 - Each install holds a long-lived ECDSA P-256 identity key per account and
   server (keychain account `identity:{userId}@{host}`). Peers pin one key per
-  account (`{host}:{userId}`) on first sight (trust-on-first-use) and block
-  with a mismatch modal if it later changes, so a user's second device shows
-  up as a key change until verified out of band.
+  account (`{host}:{userId}`) on first sight (trust-on-first-use). A later
+  change is accepted automatically once the peer's announce verifies against
+  the new key: the pin is replaced, and the user gets a persistent notice
+  naming the peer plus a "key changed" roster badge for the rest of the call,
+  so they can compare safety numbers out of band. A user's second device
+  shows up the same way. A pinned peer whose key is no longer delivered is
+  blocked until re-pinned.
 - The key holder rotates the room key whenever a participant leaves, so a
   departed member cannot decrypt what follows (forward secrecy), and also
   rotates it on a timer while the call runs.

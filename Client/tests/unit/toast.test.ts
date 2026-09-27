@@ -150,6 +150,17 @@ describe("ToastContainer", () => {
     expect(container.querySelectorAll(".toast-error").length).toBe(0);
   });
 
+  it("keeps a non-error toast shown with an infinite duration until it is dismissed", () => {
+    toast.show("Key changed", "warning", Infinity);
+
+    vi.advanceTimersByTime(60_000);
+    expect(container.querySelectorAll(".toast-warning").length).toBe(1);
+
+    (container.querySelector(".toast-warning .toast-close") as HTMLButtonElement).click();
+    vi.advanceTimersByTime(400);
+    expect(container.querySelectorAll(".toast-warning").length).toBe(0);
+  });
+
   it("pauses an auto-dismiss timer while the pointer is over the toast", () => {
     toast.show("Temporary", "info", 3000);
     const el = container.querySelector(".toast") as HTMLDivElement;
