@@ -10,6 +10,7 @@ describe("createReconnectClock", () => {
       serverClockSkewMs: 0,
       restartAnnounced: false,
       voiceRejoinChannelId: null,
+      voiceRejoinRecordedAt: 0,
     });
   });
 

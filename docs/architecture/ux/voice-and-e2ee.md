@@ -167,8 +167,11 @@ forward-secrecy keypair rotation on reconnect are mechanics the user never sees.
 boot, so a client resumes chat but not voice. `handleServerRestart`
 (`features/connection/wsHandlers.ts`) records the channel while the session is
 still live, and `ready` then sends one ordinary `voice_join` if that channel is
-still a joinable voice channel. A kick, move, ban or leave cancels the pending
-rejoin, so the user is never put back into a call that was deliberately ended.
+still a joinable voice channel or DM call. Only an `update`, `backup_restore`
+or `setup` notice records it (never a `shutdown` from outside the server), and a
+`ready` more than ten minutes after the notice discards it. A kick, move, ban or
+leave cancels the pending rejoin, so the user is never put back into a call that
+was deliberately ended.
 
 ---
 

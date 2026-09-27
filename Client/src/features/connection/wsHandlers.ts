@@ -9,7 +9,8 @@ import {
 } from "../../stores/ui.store";
 import { channelsStore } from "../../stores/channels.store";
 import { voiceStore, leaveVoiceChannel, joinVoiceChannel } from "../../stores/voice.store";
-import { PROTOCOL_EPOCH } from "../../lib/protocolTypes";
+import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
+import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";
 import { connectText } from "../../i18n/connect";
 import { livekitSession, log } from "./dispatchContext";
@@ -63,6 +64,15 @@ export function handleAuthError(
   clearAuth(epochRefusal ? "protocol_epoch" : "user");
 }
 
+const REJOIN_REASONS: ReadonlySet<ServerRestartReasonValue> = new Set([
+  ServerRestartReason.UPDATE,
+  ServerRestartReason.BACKUP_RESTORE,
+  ServerRestartReason.SETUP,
+]);
+
+/** A ready later than this after the notice does not rejoin: the call is over. */
+const REJOIN_WINDOW_MS = 10 * 60_000;
+
 export function handleServerRestart(
   clock: ReconnectClock,
   payload: Payload<"server_restart">,
@@ -81,9 +91,11 @@ export function handleServerRestart(
   // the membership the way it restores chat; a later ready sends one
   // voice_join. Recorded here, while the session is still live, because the
   // drop handler clears the store's currentChannelId. An aborted restart or a
-  // leave before the drop clears it again.
-  if (clock.restartAnnounced) {
+  // leave before the drop clears it again. A shutdown (a stop from outside the
+  // server) may last hours, so it never records a rejoin.
+  if (clock.restartAnnounced && REJOIN_REASONS.has(payload.reason)) {
     clock.voiceRejoinChannelId = voiceStore.getState().currentChannelId;
+    clock.voiceRejoinRecordedAt = Date.now();
   } else {
     clock.voiceRejoinChannelId = null;
   }
@@ -125,8 +137,13 @@ export function rejoinVoiceAfterRestart(
   const channelId = clock.voiceRejoinChannelId;
   clock.voiceRejoinChannelId = null;
   if (channelId === null) return;
+  if (Date.now() - clock.voiceRejoinRecordedAt > REJOIN_WINDOW_MS) {
+    log.info("Not rejoining voice after restart — the server was down too long", { channelId });
+    return;
+  }
+  const isDmCall = (payload.dm_channels ?? []).some((dm) => dm.channel_id === channelId);
   const channel = payload.channels.find((c) => c.id === channelId);
-  if (channel === undefined || channel.type !== "voice") {
+  if (!isDmCall && (channel === undefined || channel.type !== "voice")) {
     log.info("Not rejoining voice after restart — channel is gone or no longer a voice channel", {
       channelId,
     });

@@ -3467,15 +3467,16 @@ describe("WS Dispatcher", () => {
   // call. The restart notice records the channel; once ready confirms we are
   // not in it, one normal voice_join puts us back.
   describe("RT-12: rejoin after a planned restart", () => {
-    function announceRestartAndDrop(): void {
-      mock.dispatch("server_restart", { reason: "update", delay_seconds: 5 });
+    function announceRestartAndDrop(reason = "update"): void {
+      mock.dispatch("server_restart", { reason, delay_seconds: 5 });
       expectConsole("warn", /\[dispatcher\] Server restarting/);
       mock.dispatchState("reconnecting");
     }
 
-    function readyAfterRestart(channels: unknown[]): void {
+    function readyAfterRestart(channels: unknown[], dmChannels: unknown[] = []): void {
       mock.dispatch("ready", {
         channels,
+        dm_channels: dmChannels,
         members: [{ id: 5, username: "me", avatar: null, role: "member", status: "online" }],
         // The restarted hub wiped voice_states: we are not in the call.
         voice_states: [],
@@ -3543,6 +3544,53 @@ describe("WS Dispatcher", () => {
       await vi.runAllTimersAsync();
 
       readyAfterRestart([{ id: 7, name: "general", type: "text", category: null, position: 0 }]);
+
+      expect(mock.ws.send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_join" }),
+      );
+    });
+
+    it("rejoins a DM call, which ready lists under dm_channels", async () => {
+      announceRestartAndDrop("backup_restore");
+      await vi.runAllTimersAsync();
+
+      readyAfterRestart(
+        [],
+        [
+          {
+            channel_id: 42,
+            recipient: { id: 6, username: "friend", avatar: "", status: "online" },
+            recipients: [{ id: 6, username: "friend", avatar: "", status: "online" }],
+            last_message_id: null,
+            last_message: "",
+            last_message_at: "",
+            unread_count: 0,
+          },
+        ],
+      );
+
+      expect(mock.ws.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_join", payload: { channel_id: 42 } }),
+      );
+    });
+
+    it("does not rejoin after a shutdown from outside the server", async () => {
+      announceRestartAndDrop("shutdown");
+      await vi.runAllTimersAsync();
+
+      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+
+      expect(mock.ws.send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_join" }),
+      );
+    });
+
+    it("does not rejoin when ready arrives more than 10 minutes after the notice", async () => {
+      announceRestartAndDrop();
+      await vi.runAllTimersAsync();
+      vi.setSystemTime(Date.now() + 10 * 60_000 + 1);
+
+      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
 
       expect(mock.ws.send).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: "voice_join" }),
