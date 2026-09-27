@@ -36,6 +36,18 @@ const log = createLogger("roomEventHandlers");
 const DECRYPT_GRACE_MS = 3000;
 const DECRYPT_STREAK_RESET_MS = 2500;
 
+/** RT-9: the status a room that has just finished joining reports. The key
+ *  can arrive over WS after the SFU dropped and livekit-client is already
+ *  retrying on its own; that room reads "reconnecting" until
+ *  RoomEvent.Reconnected clears it (handleSdkReconnected). */
+export function setJoinedVoiceStatus(room: import("livekit-client").Room): void {
+  setVoiceStatus(
+    room.state === "reconnecting" || room.state === "signalReconnecting"
+      ? "reconnecting"
+      : "connected",
+  );
+}
+
 // --- Callback types ---
 
 type RemoteVideoCallback = (userId: number, stream: MediaStream, isScreenshare: boolean) => void;

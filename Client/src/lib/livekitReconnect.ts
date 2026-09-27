@@ -2,10 +2,11 @@
 // Owns the retry loop, supersession detection, and reconnect state transitions.
 
 import { Room } from "livekit-client";
-import { leaveVoiceChannel, setVoiceStatus } from "@stores/voice.store";
+import { leaveVoiceChannel } from "@stores/voice.store";
 import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { logIceConnectionInfo } from "@lib/livekitDiagnostics";
+import { setJoinedVoiceStatus } from "@lib/roomEventHandlers";
 import { releaseRoom } from "../features/voice/releaseRoom";
 import { voiceText } from "../i18n/voice";
 
@@ -209,7 +210,7 @@ export async function attemptAutoReconnect(
         lastUrl: url,
         lastDirectUrl: directUrl,
       });
-      setVoiceStatus("connected");
+      setJoinedVoiceStatus(newRoom);
       logIceConnectionInfo(newRoom);
       newRoom.startAudio().catch((err) => log.debug("Failed to start audio after reconnect", err));
       // RT-6: the saved input goes in before the mic is re-captured, as on

@@ -1295,6 +1295,49 @@ describe("LiveKitSession", () => {
       },
     );
 
+    // RT-9: the key can arrive over WS while the SFU is already gone and the
+    // SDK is retrying on its own; the join must not then claim "connected".
+    it.each(["reconnecting", "signalReconnecting"])(
+      "writes reconnecting, not connected, when the joined room is already SDK-%s",
+      async (roomState) => {
+        session.setServerHost("localhost:7880");
+        session.setWsClient({ send: vi.fn() } as any);
+        mockRoom.state = roomState;
+        (setVoiceStatus as any).mockClear();
+
+        await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+
+        expect(statusCalls()).not.toContain("connected");
+        expect(statusCalls().at(-1)).toBe("reconnecting");
+      },
+    );
+
+    it("writes reconnecting, not connected, when the auto-reconnected room is already SDK-reconnecting", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 7,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      mockRoom.state = "signalReconnecting";
+      (setVoiceStatus as any).mockClear();
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        7,
+        "ws://localhost:7880",
+        new AbortController().signal,
+      );
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(statusCalls()).not.toContain("connected");
+      expect(statusCalls().at(-1)).toBe("reconnecting");
+    });
+
     it("writes connected after a successful auto-reconnect", async () => {
       (session as any)._state = {
         type: "reconnecting",

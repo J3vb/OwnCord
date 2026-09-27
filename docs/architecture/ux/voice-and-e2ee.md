@@ -55,19 +55,19 @@ stateDiagram-v2
     securing --> failed: e2ee_timeout (no key within ~15s)
     joining --> reconnecting: transient connect failure (retry ≤3)
     connected --> reconnecting: socket/room drop
-    reconnecting --> connected: re-announce key + rejoin (backoff ladder ≤33s, outlasts a companion restart)
+    reconnecting --> connected: re-announce key + rejoin (backoff ladder ≈27s, outlasts a companion restart)
     reconnecting --> failed: attempts exhausted
     connected --> idle: leave
     failed --> idle: auto-leave + error
 ```
 
-| Status         | Presentation                                                           | Notes                                                                                                                                                                                                                                                                             |
-| -------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `joining`      | Voice widget shows "Connecting…"; channel roster shows self pending    | `handleVoiceToken` → `connectAndSetup`                                                                                                                                                                                                                                            |
-| `securing`     | "Securing connection…" indicator (lock, in-progress)                   | Non-key-holders block here until a room key arrives (10 s + 5 s retry, the "securing" key-exchange block in `connectAndSetup` (`features/voice/joinOrchestration.ts`) / `E2EEManager.setupKeyExchange` (`lib/livekitE2EE.ts`))                                                    |
-| `connected`    | "Voice connected · secured 🔒" + elapsed timer (from `joinedAt`)       | E2EE active; per-user tiles live                                                                                                                                                                                                                                                  |
-| `reconnecting` | "Reconnecting voice…"; controls frozen, not torn down                  | Keypair regenerated for forward secrecy (`attemptAutoReconnect()` → `reannounceForReconnect()`, `lib/livekitSession.ts`). RT-9: six attempts with a 3 s-doubling backoff capped at 6 s (about 33 s) so the loop outlasts a companion LiveKit restart instead of ejecting the call |
-| `failed`       | Toast "Voice connection lost" / "Couldn't secure the call"; auto-leave | `onErrorCallback` fires                                                                                                                                                                                                                                                           |
+| Status         | Presentation                                                           | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `joining`      | Voice widget shows "Connecting…"; channel roster shows self pending    | `handleVoiceToken` → `connectAndSetup`                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `securing`     | "Securing connection…" indicator (lock, in-progress)                   | Non-key-holders block here until a room key arrives (10 s + 5 s retry, the "securing" key-exchange block in `connectAndSetup` (`features/voice/joinOrchestration.ts`) / `E2EEManager.setupKeyExchange` (`lib/livekitE2EE.ts`))                                                                                                                                                                                                         |
+| `connected`    | "Voice connected · secured 🔒" + elapsed timer (from `joinedAt`)       | E2EE active; per-user tiles live                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `reconnecting` | "Reconnecting voice…"; controls frozen, not torn down                  | Keypair regenerated for forward secrecy (`attemptAutoReconnect()` → `reannounceForReconnect()`, `lib/livekitSession.ts`). RT-9: five attempts with a 3 s-doubling backoff capped at 6 s (about 27 s) so the loop outlasts a companion LiveKit restart instead of ejecting the call. Also shown while livekit-client retries on its own (`RoomEvent.SignalReconnecting`/`Reconnecting` until `Reconnected`, `lib/roomEventHandlers.ts`) |
+| `failed`       | Toast "Voice connection lost" / "Couldn't secure the call"; auto-leave | `onErrorCallback` fires                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 **Target rules:**
 
@@ -157,9 +157,10 @@ Per-user volume is adjustable and persisted (`userVolume_{id}` in the Rust store
 
 ## 6. Token refresh & reconnect (invisible)
 
-Token refresh (23 h timer) and voice reconnect (≤2 attempts, 3 s apart) should be
-**invisible on success**. Only exhaustion surfaces: "Voice connection lost —
-failed to reconnect" + auto-leave. The 60 s token-refresh response guard and the
+Token refresh (23 h timer) and voice reconnect (five attempts, 3 s-doubling
+backoff capped at 6 s, about 27 s) should be **invisible on success** beyond the
+"Reconnecting voice…" badge while a reconnect runs. Only exhaustion surfaces:
+"Voice connection lost — failed to reconnect" + auto-leave. The 60 s token-refresh response guard and the
 forward-secrecy keypair rotation on reconnect are mechanics the user never sees.
 
 ---

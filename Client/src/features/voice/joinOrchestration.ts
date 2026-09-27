@@ -15,6 +15,7 @@ import type { DeviceManager } from "../../lib/deviceManager";
 import type { E2EEManager } from "../../lib/livekitE2EE";
 import type { SessionState } from "./sessionState";
 import { detachRoom, releaseRoom } from "./releaseRoom";
+import { setJoinedVoiceStatus } from "../../lib/roomEventHandlers";
 import { voiceText } from "../../i18n/voice";
 import {
   abandonJoinAttempt,
@@ -401,7 +402,7 @@ export class JoinOrchestration {
           lastDirectUrl: directUrl,
         });
         // Room connected and E2EE key ready — the call is now secured.
-        setVoiceStatus("connected");
+        setJoinedVoiceStatus(localRoom);
         // Optimistic startAudio — may succeed if the join was triggered by a
         // recent user gesture. If not, the AudioPlaybackStatusChanged handler
         // will register a click-to-unlock fallback.
