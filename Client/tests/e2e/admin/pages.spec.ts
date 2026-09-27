@@ -207,6 +207,24 @@ test("Server logs: the live stream connects", async ({ page, seededAdminServer }
   // opens the stream. "Connected" means the ticket route and stream both work.
   await expect(page.locator("#logStatusText")).toHaveText("Connected", { timeout: 15_000 });
   await expect(page.locator("#logDot")).toHaveClass(/dot-live/);
+  // The connection state leads the toolbar, not the foot of the page.
+  await expect(page.locator(".log-toolbar #logStatusText")).toBeVisible();
+
+  // The backfill carries this session's own requests, as chips with the
+  // full attrs behind a details toggle rather than inline JSON.
+  const request = page.locator("#logOutput .log-line", { has: page.locator(".log-req") }).first();
+  await expect(request).toBeVisible({ timeout: 15_000 });
+  await expect(request.locator(".log-req")).toContainText("/admin/api/");
+  await request.locator(".log-more > summary").click();
+  await expect(request.locator(".log-more pre")).toContainText('"status"');
+  const { ratio } = await textContrast(request.locator(".log-req"));
+  expect(ratio).toBeGreaterThanOrEqual(Q1.text);
+
+  // A level switched off is struck through, not only paler.
+  const debug = page.locator('.level-toggle[data-level="DEBUG"]');
+  await debug.click();
+  await expect(debug).toHaveAttribute("aria-pressed", "false");
+  await expect(debug).toHaveCSS("text-decoration-line", "line-through");
 });
 
 test("API tokens: a created token is shown once and listed", async ({
