@@ -153,11 +153,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   // Entries are dropped once a send consumes them or the user clears them.
   const draftByChannel = new Map<number, ComposerDraft>();
 
-  // The report dialog's closing restores focus to its Report button; the
-  // composer is the fallback when a re-render has replaced the row.
-  const fallbackFocus = (): HTMLElement | null =>
-    slots.inputSlot.querySelector<HTMLElement>("textarea");
-
   // Optimistic send: keep the raw payload per correlation id so a failed send
   // can be retried (including its attachments). Controller-scoped rather than
   // per-mount: correlation ids are globally unique (crypto.randomUUID), and a
@@ -831,7 +826,15 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         if (msg === undefined) return;
         import("../../features/reports/openers").then(
           ({ openMessageReport }) => {
-            if (!signal.aborted) openMessageReport({ api, msg, signal, fallbackFocus });
+            if (signal.aborted) return;
+            // The dialog's closing restores focus to the Report button; the
+            // composer is the fallback when a re-render has replaced the row.
+            openMessageReport({
+              api,
+              msg,
+              signal,
+              fallbackFocus: () => slots.inputSlot.querySelector<HTMLElement>("textarea"),
+            });
           },
           () => showToast(reportEntryText("reportLoadFailed"), "error"),
         );
