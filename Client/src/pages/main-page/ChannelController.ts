@@ -564,17 +564,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         showToast(messagingText("toast.retryExpired"), "error");
         return;
       }
-      // OC-0476: an id that predates the server's restore floor can never be
-      // accepted — the server already refuses it as BAD_REQUEST. Refuse the
-      // resend here with the server's reason and keep the row's text for copy
-      // or discard, instead of a Retry that is a dead end.
-      if (
-        draft.clientMessageId &&
-        pendingMessageBeforeRestore(draft.clientMessageId, pendingMessageRetryFloor(owner))
-      ) {
-        showToast(messagingText("send.beforeRestore"), "error");
-        return;
-      }
       if (draft.clientMessageId && !supportsMessageDeduplication(owner)) {
         showToast(messagingText("toast.retryUnsupported"), "error");
         return;
@@ -1123,6 +1112,16 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           const edit = untrack(pendingEdits, correlationId);
           if (edit !== undefined) failEdits([edit], false);
           untrack(pendingDeletes, correlationId);
+          // OC-0476: a resent pre-restore id that the server could not
+          // deduplicate is refused; the dispatcher labels the row.
+          const refused = draftByCorrelation.get(correlationId)?.clientMessageId;
+          if (
+            payload.code === "BAD_REQUEST" &&
+            refused !== undefined &&
+            pendingMessageBeforeRestore(refused, pendingMessageRetryFloor(owner))
+          ) {
+            showToast(messagingText("send.beforeRestore"), "error");
+          }
         }
         if (payload.code !== "SLOW_MODE") return;
         if (!sentToMountedChannel(correlationId)) return;

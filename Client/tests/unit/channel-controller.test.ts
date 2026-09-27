@@ -723,7 +723,12 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
-    it("refuses to retry a recovered draft whose id predates the restore floor (OC-0476)", async () => {
+    async function retryPreFloorDraft(): Promise<{
+      opts: ChannelControllerOptions;
+      ctrl: ReturnType<typeof createChannelController>;
+      beforeFloorId: string;
+      handler: (event: string) => (payload: never, correlationId?: string) => void;
+    }> {
       const owner = { host: "chat.example", userId: 1 };
       const user = { id: 1, username: "tester", avatar: null };
       const floor = Date.now() + 5 * 60 * 1000 + 1000;
@@ -744,17 +749,60 @@ describe("createChannelController", () => {
       vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
+      const listeners = [...vi.mocked(opts.ws.on).mock.calls];
+      const handler = (event: string) =>
+        listeners.find(([type]) => type === event)![1] as (
+          payload: never,
+          correlationId?: string,
+        ) => void;
       vi.clearAllMocks();
 
       capturedMessageListOpts.onRetry(`recovered:${beforeFloorId}`);
 
-      // Retry is refused: no resend, and the user is told why.
+      // The server decides: Retry resends the same logical id unchanged.
+      await vi.waitFor(() =>
+        expect(
+          vi.mocked(opts.ws.send).mock.calls.filter(([frame]) => frame.type === "chat_send"),
+        ).toHaveLength(1),
+      );
+      const [resent] = vi
+        .mocked(opts.ws.send)
+        .mock.calls.find(([frame]) => frame.type === "chat_send")!;
+      expect(resent.payload).toMatchObject({
+        client_message_id: beforeFloorId,
+        content: "queued before the restore",
+      });
+      return { opts, ctrl, beforeFloorId, handler };
+    }
+
+    it("reconciles a pre-restore draft whose retry the server deduplicates (OC-0476)", async () => {
+      const { opts, ctrl, beforeFloorId, handler } = await retryPreFloorDraft();
+
+      handler("chat_send_ok")(
+        { message_id: 7, client_message_id: beforeFloorId, deduplicated: true } as never,
+        "cid-2",
+      );
+
+      expect(opts.showToast).not.toHaveBeenCalled();
+      expect(mockMarkSendFailed).not.toHaveBeenCalled();
+      ctrl.destroyChannel();
+    });
+
+    it("says the server was restored when it refuses a pre-restore retry (OC-0476)", async () => {
+      const { opts, ctrl, handler } = await retryPreFloorDraft();
+
+      handler("error")(
+        { code: "BAD_REQUEST", message: "review the pending message" } as never,
+        "cid-2",
+      );
+
+      expect(opts.showToast).toHaveBeenCalledOnce();
+      expect(opts.showToast).toHaveBeenCalledWith(messagingText("send.beforeRestore"), "error");
+      // No resend loop: the refusal leaves the one failed row for the user.
+      await Promise.resolve();
       expect(
         vi.mocked(opts.ws.send).mock.calls.filter(([frame]) => frame.type === "chat_send"),
-      ).toHaveLength(0);
-      expect(opts.showToast).toHaveBeenCalledWith(expect.stringContaining("restored"), "error");
-      // The row's text is kept (not discarded) for copy/discard.
-      expect(mockRemoveOptimistic).not.toHaveBeenCalled();
+      ).toHaveLength(1);
       ctrl.destroyChannel();
     });
 

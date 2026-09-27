@@ -177,6 +177,8 @@ function sendErrorReason(code: string | null): string {
       return messagingText("send.recovered");
     case "BAD_REQUEST":
       return messagingText("send.rejected");
+    case "BEFORE_RESTORE":
+      return messagingText("send.beforeRestore");
     default:
       return messagingText("send.failed");
   }

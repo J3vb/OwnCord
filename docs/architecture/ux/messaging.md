@@ -119,12 +119,12 @@ sequenceDiagram
     end
 ```
 
-| Optimistic state       | Presentation                                                                                     | Transition                                |
-| ---------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| `pending`              | Row shown dimmed with a subtle "sending" affordance                                              | `chat_send_ok` → `sent`; error → `failed` |
-| `sent`                 | Normal row; the subsequent `chat_message` broadcast reconciles (same `id`), never duplicates     | —                                         |
-| `failed`               | Row marked failed with **Retry** and **Delete draft**; content preserved                         | Retry re-sends with a new correlation id  |
-| `failed` (pre-restore) | Row kept with its text; Retry refuses and says the server was restored, asking for a new message | no resend (OC-0476)                       |
+| Optimistic state       | Presentation                                                                                   | Transition                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `pending`              | Row shown dimmed with a subtle "sending" affordance                                            | `chat_send_ok` → `sent`; error → `failed` |
+| `sent`                 | Normal row; the subsequent `chat_message` broadcast reconciles (same `id`), never duplicates   | —                                         |
+| `failed`               | Row marked failed with **Retry** and **Delete draft**; content preserved                       | Retry re-sends with a new correlation id  |
+| `failed` (pre-restore) | Row kept with its text; says the server was restored — check the conversation before resending | Retry re-sends the same id (OC-0476)      |
 
 **Reconciliation contract:** the correlation id (`ws.ts` per-send UUID, echoed as
 `chat_send_ok.id`) is the join key. `addMessage` from the broadcast must detect an

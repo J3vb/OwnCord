@@ -185,7 +185,7 @@ describe("encrypted pending message queue lifecycle", () => {
     expect(files.size).toBe(0);
   });
 
-  it("flags a keyed id that predates the restore floor as unretriable", () => {
+  it("detects a keyed id that predates the restore floor", () => {
     const floor = Date.now() + 1000;
     const before = `${Date.now()}:${crypto.randomUUID()}`;
     const atFloor = `${floor}:${crypto.randomUUID()}`;

@@ -52,14 +52,13 @@ export function pendingMessageExpired(
 }
 
 /**
- * Whether a keyed id predates the server's restore floor. The server refuses
- * such a send with BAD_REQUEST ("review the pending message before sending it
- * again") because a backup restore may have committed a message under this id
- * that the client never saw. The draft is still recovered and its text kept
- * for copy/discard; this only makes Retry refuse rather than resend a doomed
- * id, matching docs/protocol.md's "retain expired text" contract (OC-0476).
+ * Whether a keyed id predates the server's restore floor (the active queue's
+ * by default). Retry still resends it unchanged: the server deduplicates it
+ * when the restored database holds its receipt, and otherwise refuses it with
+ * BAD_REQUEST, which this lets the client label as a restore refusal while
+ * keeping the text (OC-0476).
  */
-export function pendingMessageBeforeRestore(clientMessageId: string, floor = 0): boolean {
+export function pendingMessageBeforeRestore(clientMessageId: string, floor = retryFloor): boolean {
   if (floor <= 0 || !ID_PATTERN.test(clientMessageId)) return false;
   return Number(clientMessageId.split(":", 1)[0]) < floor;
 }

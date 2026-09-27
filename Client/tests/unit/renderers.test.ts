@@ -401,6 +401,26 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("says a refused pre-restore retry was caused by the restore (OC-0476)", () => {
+      const msg = makeMessage({
+        status: "failed",
+        correlationId: "c4",
+        id: 0,
+        content: "queued before the restore",
+        errorCode: "BEFORE_RESTORE",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
+        "The server was restored — check the conversation before sending this again.",
+      );
+      expect(el.textContent).toContain("queued before the restore");
+
+      ac.abort();
+    });
+
     it("renders deleted message with italic text", () => {
       const msg = makeMessage({ deleted: true });
       const ac = new AbortController();
