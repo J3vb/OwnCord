@@ -64,9 +64,8 @@ func TestBootMarker_CorruptFileIsNotClean(t *testing.T) {
 	}
 }
 
-// TestBootMarker_MissingOnCleanStartup pins that a clean marker is not
-// rewritten as a fresh start: the successor keeps reading clean until it
-// writes its own running marker.
+// TestBootMarker_MissingFileIsUnknown pins that a missing marker file (a
+// first start) reads as not recorded, so the panel reports unknown.
 func TestBootMarker_MissingFileIsUnknown(t *testing.T) {
 	if st := readBootMarker(filepath.Join(t.TempDir(), bootMarkerRelPath)); st.Recorded {
 		t.Fatalf("a missing marker read as recorded: %+v", st)

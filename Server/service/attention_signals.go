@@ -309,14 +309,14 @@ func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 func (s *AttentionService) evalBootStatus(now time.Time) {
 	sig := AttentionSignal{ID: "last_exit", Label: "Last server exit", ObservedAt: now}
 	title := "The server did not shut down cleanly"
-	action := "Check Server Logs for a panic or an out-of-memory kill just before the restart, and Server Logs or the boot marker under the data directory for the time it happened. A kill -9 or a crash is not a graceful shutdown."
+	action := "Server Logs start empty after a restart, so check the host's service or container log (journald, docker logs, or the Windows Event Log) after the previous run's start time for a panic, a hardware-fault exit or an out-of-memory kill; the boot marker data/boot.json records only when that run started. A kill -9 or a crash is not a graceful shutdown."
 	switch {
 	case !s.boot.Recorded:
 		sig.Status, sig.Detail = AttentionStatusUnknown, "no record from a previous run"
 	case s.boot.Unclean:
 		sig.Status = AttentionStatusWarning
 		if !s.boot.StartedAt.IsZero() {
-			sig.Value = "stopped " + s.boot.StartedAt.UTC().Format("2006-01-02 15:04 UTC") + " without a clean shutdown"
+			sig.Value = "run started " + s.boot.StartedAt.UTC().Format("2006-01-02 15:04 UTC") + " did not shut down cleanly"
 		} else {
 			sig.Value = "previous run ended without a clean shutdown"
 		}

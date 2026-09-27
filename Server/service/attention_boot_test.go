@@ -27,6 +27,10 @@ func TestAttention_UncleanExitWarns(t *testing.T) {
 	if w.Title == "" || w.Action == "" || w.Detail == "" {
 		t.Fatalf("warning = %+v, want a title, an action and a detail", w)
 	}
+	wantValue := "run started " + started.UTC().Format("2006-01-02 15:04 UTC") + " did not shut down cleanly"
+	if got := signal(t, rep, "last_exit").Value; got != wantValue {
+		t.Fatalf("last_exit value = %q, want %q", got, wantValue)
+	}
 }
 
 // A clean previous shutdown is ok and raises nothing; the first start on a
