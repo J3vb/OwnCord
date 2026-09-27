@@ -446,10 +446,11 @@ func (a *App) startHTTP() error {
 		return nil
 	})
 	// The hub stops right after the drain — it notifies clients, closes
-	// every socket once the notice window ends and then stops LiveKit — as a step of its own, so its notice
-	// window keeps its budget however long the drain took (SRV-06). The later
-	// "hub" step then only joins the dispatch loop. The notice names the
-	// restart's intent, so clients hear "update" rather than "shutdown".
+	// every socket once the notice window ends and then stops LiveKit — as a
+	// step of its own, so its notice window keeps its budget however long the
+	// drain took (SRV-06). The later "hub" step then only joins the dispatch
+	// loop. The notice names the restart's intent, so clients hear "update"
+	// rather than "shutdown".
 	a.onClose("hub-notice", func(ctx context.Context) error {
 		a.hub.GracefulStopContext(ctx, a.deps.Restart.noticeReason())
 		return nil

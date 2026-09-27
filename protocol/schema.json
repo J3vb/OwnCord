@@ -140,11 +140,36 @@
       "go": "RestartReason",
       "ts": "ServerRestartReason",
       "values": [
-        { "wire": "update", "go": "RestartReasonUpdate", "ts": "UPDATE", "note": "an admin applied a server update" },
-        { "wire": "update_aborted", "go": "RestartReasonUpdateAborted", "ts": "UPDATE_ABORTED", "note": "with delay_seconds 0: cancels an announced update restart" },
-        { "wire": "backup_restore", "go": "RestartReasonBackupRestore", "ts": "BACKUP_RESTORE", "note": "an admin restored a backup" },
-        { "wire": "setup", "go": "RestartReasonSetup", "ts": "SETUP", "note": "the setup wizard finished" },
-        { "wire": "shutdown", "go": "RestartReasonShutdown", "ts": "SHUTDOWN", "note": "a stop or restart from outside the server (signal, supervisor)" }
+        {
+          "wire": "update",
+          "go": "RestartReasonUpdate",
+          "ts": "UPDATE",
+          "note": "an admin applied a server update"
+        },
+        {
+          "wire": "update_aborted",
+          "go": "RestartReasonUpdateAborted",
+          "ts": "UPDATE_ABORTED",
+          "note": "with delay_seconds 0: cancels an announced update restart"
+        },
+        {
+          "wire": "backup_restore",
+          "go": "RestartReasonBackupRestore",
+          "ts": "BACKUP_RESTORE",
+          "note": "an admin restored a backup"
+        },
+        {
+          "wire": "setup",
+          "go": "RestartReasonSetup",
+          "ts": "SETUP",
+          "note": "the setup wizard finished"
+        },
+        {
+          "wire": "shutdown",
+          "go": "RestartReasonShutdown",
+          "ts": "SHUTDOWN",
+          "note": "a stop or restart from outside the server (signal, supervisor)"
+        }
       ]
     }
   ]

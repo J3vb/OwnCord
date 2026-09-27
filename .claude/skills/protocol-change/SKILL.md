@@ -8,13 +8,15 @@ description: Add or change a WebSocket message type in OwnCord. Use before editi
 `protocol/schema.json` is the source of truth. Both constant files are
 generated from it by `Server/cmd/genprotocol/`.
 
-**The schema holds message-type NAMES only.** Route by what you are changing —
+**The schema holds message-type NAMES and a few closed value sets (`enums`,
+e.g. `server_restart.reason`) only.** Route by what you are changing —
 most payload work never touches it, and sending a field change through the
 regenerate cycle below is wasted work:
 
 | Change                                                   | What to edit                                                                                                           |
 | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | New message type                                         | schema + regenerate (steps below)                                                                                      |
+| New or changed value of a schema `enums` field           | schema `enums` + regenerate (steps below)                                                                              |
 | New or changed payload **field** on an existing type     | `Server/ws/command.go`/`messages.go`, `Client/src/lib/protocolTypes.ts`, `docs/protocol.md` — no schema, no regenerate |
 | Content inside an opaque blob the server relays verbatim | `docs/protocol.md` only; often zero Go change                                                                          |
 
