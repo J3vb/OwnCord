@@ -1380,7 +1380,7 @@ The Tauri client uses NSIS installer updates:
 #### Client support bundle and logs
 
 When a _user_ has a problem, the desktop client can write its own support bundle
-without contacting the server: **Settings → Logs → Export**. It is a local zip
+without contacting the server: **Settings → Diagnostics & logs → Export Support Bundle**. It is a local zip
 you choose where to save; like the server bundle it uploads nothing, but unlike
 it the client log lines are copied verbatim (the client logger does not redact),
 so review it before sharing — the Diagnostics & logs tab says so too.

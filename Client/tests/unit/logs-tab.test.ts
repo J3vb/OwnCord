@@ -242,6 +242,20 @@ describe("LogsTab", () => {
     });
   });
 
+  it("Copy Diagnostics copies the voice state as of the click, not as of the build", async () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
+    vi.mocked(getSessionDebugInfo).mockReturnValue({ hasRoom: true } as never);
+    Array.from(el.querySelectorAll("button"))
+      .find((b) => b.textContent === "Copy Diagnostics")!
+      .click();
+
+    expect(JSON.parse(writeText.mock.calls[0]![0] as string)).toEqual({ hasRoom: true });
+  });
+
   it("filter level persists via owncord:settings prefix", () => {
     mockGetLogBuffer.mockReturnValue([]);
     localStorage.clear();
@@ -448,7 +462,7 @@ describe("LogsTab", () => {
     mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "initial")]);
     const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
     const el = handle.build();
-    expect(el.textContent).toContain("1 entries");
+    expect(el.textContent).toContain("1 entry ·");
 
     mockGetLogBuffer.mockReturnValue([
       makeMockEntry("info", "initial"),
@@ -461,7 +475,7 @@ describe("LogsTab", () => {
     refreshBtn.click();
 
     expect(el.textContent).toContain("2 entries");
-    expect(el.textContent).not.toContain("1 entries");
+    expect(el.textContent).not.toContain("1 entry ·");
   });
 
   it("Refresh Diagnostics button re-renders diagnostics panel", () => {
@@ -491,8 +505,10 @@ describe("LogsTab", () => {
 
     it("states that nothing is uploaded and that logs are not redacted", () => {
       const el = build();
-      expect(el.textContent).toContain("Nothing is uploaded");
-      expect(el.textContent).toContain("Log lines are not redacted — read them before sharing.");
+      expect(el.textContent).toContain(
+        "Saves a zip of your logs, diagnostics and settings on this computer. Nothing is uploaded.",
+      );
+      expect(el.textContent).toContain("Log lines are not redacted, so read them before sharing.");
       el.remove();
     });
 
@@ -554,7 +570,7 @@ describe("LogsTab", () => {
       mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "a")]);
       const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
       const summary = disclosure(el, "Client logs").querySelector("summary")!;
-      expect(summary.textContent).toContain("1 entries · 0 warnings · 0 errors");
+      expect(summary.textContent).toContain("1 entry · 0 warnings · 0 errors");
       mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "a"), makeMockEntry("warn", "b")]);
       listener();
       expect(summary.textContent).toContain("2 entries · 1 warning · 0 errors");

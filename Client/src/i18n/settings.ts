@@ -177,7 +177,7 @@ export const settingsText = defineCatalog("settings", {
   "diagnostics.status.running": "Running",
   "diagnostics.status.failed": "Failed",
 
-  "logs.entries": "{count} entries",
+  "logs.entries": { one: "{count} entry", other: "{count} entries" },
   "logs.warnings": { one: "{count} warning", other: "{count} warnings" },
   "logs.errors": { one: "{count} error", other: "{count} errors" },
   "logs.clientLogs": "Client logs",
@@ -198,7 +198,8 @@ export const settingsText = defineCatalog("settings", {
   "logs.refreshDiagnostics": "Refresh Diagnostics",
   "logs.copyDiagnostics": "Copy Diagnostics",
   "logs.exportBundle": "Export Support Bundle",
-  "logs.bundleNote": "Nothing is uploaded. Log lines are not redacted — read them before sharing.",
+  "logs.bundleNote":
+    "Saves a zip of your logs, diagnostics and settings on this computer. Nothing is uploaded. Log lines are not redacted, so read them before sharing.",
   "logs.bundleSaved": "Support bundle saved.",
   "logs.exportFailed": "Export failed: {error}",
   "logs.bundleReadme":

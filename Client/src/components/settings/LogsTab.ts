@@ -138,6 +138,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     diagCopy.addEventListener(
       "click",
       () => {
+        refreshDiag();
         void navigator.clipboard
           .writeText(diagPanel.textContent ?? "")
           .then(() => {
