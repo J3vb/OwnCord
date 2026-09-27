@@ -36,7 +36,7 @@ ignore = [
 ]
 # --- Linux native voice (livekit), added with the phase-0 build plumbing ---
 #
-# No new ignore is needed. The whole Linux-only tree — livekit 0.9.1 and its
+# No new ignore is needed. The whole Linux-only tree — livekit 0.9.3 and its
 # livekit-* crates, webrtc-sys, libwebrtc — is Apache-2.0, already allowed
 # above; prost/pbjson/zip/scratch and the rest are Apache-2.0 or MIT. The
 # scanner is clean on them, so an exception here would be an unused entry that

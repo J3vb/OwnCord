@@ -2,10 +2,10 @@
 name = "owncord-client"
 version = "2.0.0-beta.1"
 edition = "2021"
-# Effective minimum: tauri 2.11 declares rust-version = "1.77.2", so the crate
+# Effective minimum: tauri 2.12 declares rust-version = "1.90", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
 # warning instead of silently following whatever toolchain is installed.
-rust-version = "1.77.2"
+rust-version = "1.90"
 description = "OwnCord Desktop Client"
 # Not published to any registry: this crate is built in place by `tauri build`.
 # cargo-deny reads this with licenses.private.ignore below, so its absent
