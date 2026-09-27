@@ -60,6 +60,15 @@ type fakeSFU struct {
 	mu           sync.Mutex
 	participants map[string]map[string]struct{} // room -> identity set
 	unhandled    []string                       // RPC methods the fake does not implement
+	listFails    bool                           // when set, ListParticipants answers an error
+}
+
+// setListFailure makes ListParticipants answer an error until cleared, to
+// model a transient/unavailable SFU for the reconciler's failure handling.
+func (f *fakeSFU) setListFailure(v bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.listFails = v
 }
 
 func newFakeSFU() *fakeSFU {
@@ -138,6 +147,15 @@ func (f *fakeSFU) handle(w http.ResponseWriter, r *http.Request) {
 	case "ListParticipants":
 		var req lkproto.ListParticipantsRequest
 		_ = proto.Unmarshal(body, &req)
+		f.mu.Lock()
+		fails := f.listFails
+		f.mu.Unlock()
+		if fails {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"code":"internal","msg":"fake SFU: ListParticipants failure"}`))
+			return
+		}
 		ids := f.identities(req.GetRoom())
 		ps := make([]*lkproto.ParticipantInfo, 0, len(ids))
 		for _, id := range ids {

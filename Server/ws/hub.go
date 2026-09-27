@@ -109,8 +109,14 @@ type Hub struct {
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
 	// goroutines (startSweep): a tick that arrives while the previous sweep
 	// is still running is skipped rather than stacked.
-	sessionSweepInFlight atomic.Bool
-	voiceSweepInFlight   atomic.Bool
+	sessionSweepInFlight   atomic.Bool
+	voiceSweepInFlight     atomic.Bool
+	voiceReconcileInFlight atomic.Bool
+
+	// voiceReconcile is RT-3's cross-tick memory: consecutive ticks each
+	// exact SFU identity has been missing, so a membership is reaped only
+	// after the grace window (voice_reconcile.go).
+	voiceReconcile voiceReconcileState
 
 	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
 	reconnectTierBuf  atomic.Uint64
@@ -297,6 +303,10 @@ func (h *Hub) Run() {
 					h.startSweep(&h.sessionSweepInFlight, h.sweepRevokedSessions)
 				case <-voiceSweepTicker.C:
 					h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
+					// RT-3: reconcile SFU membership by polling, on the same
+					// 60s cadence. Separate in-flight guard from the sweep, so
+					// a slow ListParticipants never suppresses the ghost sweep.
+					h.startSweep(&h.voiceReconcileInFlight, h.reconcileVoiceMembership)
 				}
 			}
 		}()
