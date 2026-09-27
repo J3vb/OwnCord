@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createRingController, RING_TIMEOUT_MS } from "@lib/call-ring";
-import type { RingState } from "@lib/call-ring";
+import { createRingController, createOutgoingCall, RING_TIMEOUT_MS } from "@lib/call-ring";
+import type { RingState, OutgoingCallState } from "@lib/call-ring";
 
 /**
  * Statechart harness. The timer is injected rather than faked globally so a
@@ -200,5 +200,126 @@ describe("ring controller — destroy", () => {
     const h = harness();
     h.ctrl.destroy();
     expect(h.chimes).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Outgoing call — the caller's side
+// ---------------------------------------------------------------------------
+
+function outgoingHarness() {
+  const states: Array<OutgoingCallState | null> = [];
+  let pending: (() => void) | null = null;
+  let pendingMs = 0;
+  let cleared = 0;
+  const call = createOutgoingCall({
+    onChange: (s) => states.push(s),
+    setTimer: (fn, ms) => {
+      pending = fn;
+      pendingMs = ms;
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    },
+    clearTimer: () => {
+      cleared += 1;
+      pending = null;
+    },
+  });
+  return {
+    call,
+    states,
+    fireTimeout: () => pending?.(),
+    timerFn: () => pending,
+    timerMs: () => pendingMs,
+    armed: () => pending !== null,
+    clearedCount: () => cleared,
+  };
+}
+
+describe("outgoing call", () => {
+  it("rings the callees and arms the same 30s window the callees ring for", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9]);
+
+    expect(h.call.current()).toEqual({ channelId: 5, phase: "ringing", pending: [9] });
+    expect(h.timerMs()).toBe(RING_TIMEOUT_MS);
+  });
+
+  it("moves to no-answer when the window runs out", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9]);
+    h.fireTimeout();
+
+    expect(h.call.current()?.phase).toBe("no-answer");
+  });
+
+  it("moves to declined when the only callee declines, and stops the timer", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9]);
+    h.call.declined(5, 9);
+
+    expect(h.call.current()).toEqual({ channelId: 5, phase: "declined", pending: [] });
+    expect(h.armed()).toBe(false);
+  });
+
+  it("in a group, a decline only takes that callee off the list", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9, 10]);
+    h.call.declined(5, 9);
+
+    expect(h.call.current()).toEqual({ channelId: 5, phase: "ringing", pending: [10] });
+    expect(h.armed()).toBe(true);
+
+    h.call.declined(5, 10);
+    expect(h.call.current()?.phase).toBe("declined");
+  });
+
+  it("ignores a decline for another channel or from someone not being rung", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9]);
+    h.call.declined(6, 9);
+    h.call.declined(5, 42);
+
+    expect(h.call.current()?.phase).toBe("ringing");
+    expect(h.states).toHaveLength(1);
+  });
+
+  it("a late timer firing after a decline changes nothing", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9]);
+    const late = h.timerFn();
+    h.call.declined(5, 9);
+    late?.();
+
+    expect(h.call.current()?.phase).toBe("declined");
+  });
+
+  it("Ring again restarts the window from a declined call", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9]);
+    h.call.declined(5, 9);
+    h.call.start(5, [9]);
+
+    expect(h.call.current()).toEqual({ channelId: 5, phase: "ringing", pending: [9] });
+    expect(h.armed()).toBe(true);
+  });
+
+  it("clear ends it and stops the timer; clearing twice reports once", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9]);
+    h.call.clear();
+    h.call.clear();
+
+    expect(h.call.current()).toBeNull();
+    expect(h.armed()).toBe(false);
+    expect(h.states.filter((s) => s === null)).toHaveLength(1);
+  });
+
+  it("destroy is a clear", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9]);
+    h.call.destroy();
+
+    expect(h.call.current()).toBeNull();
+    expect(h.armed()).toBe(false);
   });
 });

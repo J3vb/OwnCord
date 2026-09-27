@@ -11,6 +11,7 @@
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
+import { findUnnamedControls, focusIndicator } from "./support/b9-accessibility";
 import {
   buildTauriMockScript,
   MOCK_LOGIN_RESPONSE,
@@ -188,6 +189,7 @@ async function expectRingingWithChime(page: Page): Promise<void> {
 }
 
 const banner = (page: Page) => page.locator("[data-testid='incoming-call-banner']");
+const panel = (page: Page) => page.locator("[data-testid='dm-call-panel']");
 const voiceWidget = (page: Page) => page.locator("[data-testid='voice-widget'].visible");
 
 function incoming(fromUserId = OTHER_USER_ID, username = "otheruser", channelId = DM_CHANNEL_ID) {
@@ -374,7 +376,9 @@ test.describe("DM calls — starting a call", () => {
     ).toBeLessThan(
       frames.findIndex((f) => f.type === ring.type && f.payload?.channel_id === DM_CHANNEL_ID),
     );
-    await expect(page.locator("[data-testid='toast']", { hasText: "Calling" })).toBeVisible();
+    // The caller's feedback is the call panel, not a toast.
+    await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
+    await expect(panel(page).locator("[data-testid='dcp-caption']")).toHaveText("Calling Otto…");
 
     // Call state: the DM call is live in the voice widget.
     await expect(voiceWidget(page)).toBeVisible({ timeout: 5_000 });
@@ -399,5 +403,165 @@ test.describe("DM calls — starting a call", () => {
 
     await expect(banner(page)).toBeVisible();
     await expect(page.locator("[data-testid='incoming-call-title']")).toHaveText("Otto is calling");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The in-DM call panel
+// ---------------------------------------------------------------------------
+
+/** Someone else's voice_state in the DM's voice channel. */
+function inRoom(userId = OTHER_USER_ID, extra: Record<string, unknown> = {}) {
+  return {
+    type: "voice_state",
+    payload: {
+      user_id: userId,
+      channel_id: DM_CHANNEL_ID,
+      username: "otheruser",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+      ...extra,
+    },
+  };
+}
+
+test.describe("DM calls — call panel", () => {
+  test("the caller sees the ring, hears the decline, can ring again, and the call comes up when the callee joins", async ({
+    page,
+  }) => {
+    await boot(page);
+    await openDm(page);
+    await page.locator("[data-testid='call-btn']").click();
+    await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
+    await expect(panel(page)).toHaveAttribute("aria-label", "Call with Otto");
+
+    // The callee's decline reaches the caller (the server sends it to every
+    // other DM participant); the caller stays in the room.
+    await emitWsMessage(page, {
+      type: "call_declined",
+      payload: { channel_id: DM_CHANNEL_ID, from_user: OTHER_USER_ID, username: "otheruser" },
+    });
+    await expect(panel(page)).toHaveAttribute("data-state", "unanswered");
+    await expect(panel(page).locator("[data-testid='dcp-caption']")).toHaveText(
+      "Otto declined the call",
+    );
+    await expect(voiceWidget(page)).toBeVisible();
+
+    const ringsBefore = (await sentFrames(page)).filter((f) => f.type === "call_ring").length;
+    await panel(page).locator("[data-testid='dcp-ring-again']").click();
+    await expect
+      .poll(async () => (await sentFrames(page)).filter((f) => f.type === "call_ring").length)
+      .toBe(ringsBefore + 1);
+    await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
+
+    await emitWsMessage(page, inRoom(OTHER_USER_ID, { speaking: true }));
+    await expect(panel(page)).toHaveAttribute("data-state", "connected");
+    await expect(panel(page).locator(".dcp-person")).toHaveCount(2);
+    await expect(panel(page).locator(`.dcp-avatar[data-user-id='${OTHER_USER_ID}']`)).toHaveClass(
+      /dcp-avatar--speaking/,
+    );
+  });
+
+  test("Leave call from the panel leaves the DM's voice channel", async ({ page }) => {
+    await boot(page);
+    await openDm(page);
+    await page.locator("[data-testid='call-btn']").click();
+    await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
+
+    await panel(page).locator("[data-testid='dcp-leave']").click();
+    await waitForSent(page, "voice_leave");
+    await expect(panel(page)).toBeHidden();
+    await expect(voiceWidget(page)).toBeHidden();
+  });
+
+  test("a ring for the open DM is answered in the panel, and the banner stays hidden until you look elsewhere", async ({
+    page,
+  }) => {
+    await boot(page, { chime: true });
+    await openDm(page);
+    await emitWsMessage(page, incoming());
+
+    await expect(panel(page)).toHaveAttribute("data-state", "incoming");
+    await expect(panel(page).locator("[data-testid='dcp-caption']")).toHaveText("Otto is calling…");
+    await expect(banner(page)).toBeHidden();
+    await expect.poll(() => chimeCount(page), { timeout: 3_000 }).toBeGreaterThan(0);
+
+    // Looking at another DM hands the ring back to the banner.
+    await page.locator(".dm-item[data-channel-id='101']").click();
+    await expect(banner(page)).toBeVisible();
+    await page.locator(`.dm-item[data-channel-id='${DM_CHANNEL_ID}']`).click();
+    await expect(banner(page)).toBeHidden();
+
+    await panel(page).locator("[data-testid='dcp-accept']").click();
+    await sentTo(page, "voice_join", DM_CHANNEL_ID);
+    await expect(panel(page)).toHaveAttribute("data-state", "connected");
+    await expectChimeSilent(page);
+  });
+
+  test("Decline in the panel answers call_decline and leaves a Join strip while the call goes on", async ({
+    page,
+  }) => {
+    await boot(page);
+    await openDm(page);
+    await emitWsMessage(page, inRoom());
+    await emitWsMessage(page, incoming());
+    await expect(panel(page)).toHaveAttribute("data-state", "incoming");
+
+    await panel(page).locator("[data-testid='dcp-decline']").click();
+    await sentTo(page, "call_decline", DM_CHANNEL_ID);
+
+    await expect(panel(page)).toHaveAttribute("data-state", "live");
+    await expect(panel(page)).toContainText("Otto is in a call");
+    await expect(page.locator(`[data-testid='dm-in-call-${DM_CHANNEL_ID}']`)).toBeVisible();
+
+    await panel(page).locator("[data-testid='dcp-join']").click();
+    await sentTo(page, "voice_join", DM_CHANNEL_ID);
+    await expect(panel(page)).toHaveAttribute("data-state", "connected");
+  });
+
+  test("the panel's controls are named, keyboard-reachable and show a focus ring; collapse keeps focus", async ({
+    page,
+  }) => {
+    await boot(page);
+    await openDm(page);
+    await page.locator("[data-testid='call-btn']").click();
+    await emitWsMessage(page, inRoom());
+    await expect(panel(page)).toHaveAttribute("data-state", "connected");
+
+    expect(await findUnnamedControls(panel(page))).toEqual([]);
+
+    const mute = panel(page).locator("[data-testid='dcp-mute']");
+    await page.keyboard.press("Tab");
+    await mute.focus();
+    expect((await focusIndicator(page)).problems).toEqual([]);
+    await page.keyboard.press("Enter");
+    await expect(mute).toHaveAttribute("aria-pressed", "true");
+    await waitForSent(page, "voice_mute", (f) => f.payload?.muted === true);
+
+    const collapse = panel(page).locator("[data-testid='dcp-collapse']");
+    await collapse.focus();
+    await page.keyboard.press("Enter");
+    await expect(panel(page)).toHaveClass(/dm-call-panel--collapsed/);
+    await expect(collapse).toBeFocused();
+    await expect(collapse).toHaveAttribute("aria-expanded", "false");
+    expect(await findUnnamedControls(panel(page))).toEqual([]);
+  });
+
+  test("the voice widget's call name opens the DM the call belongs to", async ({ page }) => {
+    await boot(page);
+    await openDm(page);
+    await page.locator("[data-testid='call-btn']").click();
+    await expect(voiceWidget(page)).toBeVisible({ timeout: 5_000 });
+
+    await page.locator(".dm-item[data-channel-id='101']").click();
+    await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("thirduser");
+    await expect(panel(page)).toBeHidden();
+
+    await voiceWidget(page).locator("[data-testid='vw-channel-link']").click();
+    await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("otheruser");
+    await expect(panel(page)).toBeVisible();
   });
 });

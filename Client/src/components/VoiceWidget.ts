@@ -32,6 +32,8 @@ export interface VoiceWidgetOptions {
   onDeafenToggle(): void;
   onCameraToggle(): void;
   onScreenshareToggle(): void;
+  /** Open the DM a DM call belongs to. Without it the call name is plain text. */
+  onOpenCall?(channelId: number): void;
 }
 
 /** Connection-quality colour, used both for the signal bars (a fill, where
@@ -53,13 +55,13 @@ const QUALITY_BARS: Record<QualityLevel, number> = {
 
 /** Header status text per voice-session lifecycle state
  *  (docs/architecture/ux/voice-and-e2ee.md §2). */
-function headerStatusText(status: VoiceStatus): string {
+export function headerStatusText(status: VoiceStatus): string {
   // i18n-exempt: catalog key assembled from the VoiceStatus wire value
   return t(`status.${status}`);
 }
 
 /** Format milliseconds elapsed into HH:MM:SS or MM:SS. */
-function formatElapsed(ms: number): string {
+export function formatElapsed(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
@@ -78,7 +80,9 @@ function swapIcon(btn: HTMLButtonElement, name: IconName): void {
 export function createVoiceWidget(options: VoiceWidgetOptions): MountableComponent {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
-  let channelNameEl: HTMLSpanElement | null = null;
+  let channelNameEl: HTMLElement | null = null;
+  /** The call the name link opens; read at click time. */
+  let linkedChannelId: number | null = null;
   let statusLabel: HTMLSpanElement | null = null;
   let securedBadge: HTMLSpanElement | null = null;
   let controlsRow: HTMLDivElement | null = null;
@@ -270,6 +274,14 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     // looked at yet would otherwise label the call "Voice Channel".
     const channel = channelsStore.getState().channels.get(channelId);
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+    // A DM call's name is a link back to the DM, where the call panel is.
+    const asLink = dm !== undefined && options.onOpenCall !== undefined;
+    if (asLink !== channelNameEl instanceof HTMLButtonElement) {
+      const next = asLink ? createChannelLink() : createElement("span", { class: "vw-channel" });
+      channelNameEl.replaceWith(next);
+      channelNameEl = next;
+    }
+    linkedChannelId = asLink ? channelId : null;
     setText(
       channelNameEl,
       dm !== undefined ? dmDisplayName(dm) : (channel?.name ?? t("widget.channelFallback")),
@@ -373,6 +385,23 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     btn.appendChild(createIcon(icon, 18));
     btn.addEventListener("click", handler, { signal: disposable.signal });
     return btn;
+  }
+
+  function createChannelLink(): HTMLButtonElement {
+    const link = createElement("button", {
+      type: "button",
+      class: "vw-channel vw-channel-link",
+      title: t("call.goToCall"),
+      "data-testid": "vw-channel-link",
+    });
+    link.addEventListener(
+      "click",
+      () => {
+        if (linkedChannelId !== null) options.onOpenCall?.(linkedChannelId);
+      },
+      { signal: disposable.signal },
+    );
+    return link;
   }
 
   function mount(container: Element): void {

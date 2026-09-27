@@ -44,6 +44,8 @@ export interface ChatAreaResult {
     readonly inputSlot: HTMLDivElement;
     readonly videoGridSlot: HTMLDivElement;
   };
+  /** Holds the DM call panel, between the header and the messages. */
+  readonly callPanelSlot: HTMLDivElement;
   /** The VideoGrid component instance. */
   readonly videoGrid: VideoGridComponent;
   /** The chat header channel-name element (updated reactively). */
@@ -156,6 +158,11 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   chatArea.appendChild(chatHeader.element);
 
   // --- Slots ---
+  const callPanelSlot = createElement("div", {
+    class: "call-panel-slot",
+    "data-testid": "call-panel-slot",
+    style: "display:contents",
+  });
   const messagesSlot = createElement("div", {
     class: "messages-slot",
     "data-testid": "messages-slot",
@@ -179,7 +186,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   videoGrid.mount(videoGridSlot);
   children.push(videoGrid);
 
-  appendChildren(chatArea, messagesSlot, typingSlot, inputSlot, videoGridSlot);
+  appendChildren(chatArea, callPanelSlot, messagesSlot, typingSlot, inputSlot, videoGridSlot);
 
   // --- DM profile sidebar slot (sits beside chatArea in the .app flex row) ---
   const dmProfileSlot = createElement("div", {
@@ -190,6 +197,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   return {
     chatArea,
     slots: { messagesSlot, typingSlot, inputSlot, videoGridSlot },
+    callPanelSlot,
     videoGrid,
     chatHeaderName,
     chatHeaderRefs: chatHeader.refs,

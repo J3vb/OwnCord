@@ -217,10 +217,13 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       destroy: vi.fn(),
     };
     const chatArea = document.createElement("div");
+    const callPanelSlot = document.createElement("div");
+    chatArea.appendChild(callPanelSlot);
     capturedChatAreaRef.current = { chatArea, slots, dmProfileSlot, videoGrid };
     return {
       chatArea,
       slots,
+      callPanelSlot,
       videoGrid,
       chatHeaderName: document.createElement("span"),
       chatHeaderRefs: {
@@ -814,6 +817,85 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // banner clearing means ringCtrl.accept() ran and nothing rejoins) — the
     // ring has to survive so the user can accept again once reconnected.
     expect(banner.style.display).not.toBe("none");
+  });
+
+  function openOneToOneDm(id: number): void {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(id, dmChannel(id, "dm-bob"));
+      return { ...prev, channels: ch, activeChannelId: id };
+    });
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: id,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
+          name: "",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+  }
+
+  it("answers a ring for the open DM in the call panel and hides the banner, handing it back when you look elsewhere", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    // The panel is a lazy chunk.
+    await vi.dynamicImportSettled();
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "bob" });
+
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("incoming");
+    expect(banner.style.display).toBe("none");
+
+    // Another channel on screen: the banner is the only way to answer.
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 7 }));
+    channelsStore.flush();
+    expect(banner.style.display).not.toBe("none");
+
+    // Settings over the DM hides the panel, so the banner answers there too.
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+    channelsStore.flush();
+    expect(banner.style.display).toBe("none");
+    uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
+    uiStore.flush();
+    expect(banner.style.display).not.toBe("none");
+  });
+
+  it("tells the caller when the callee declines, and Ring again rings once more", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    // The panel is a lazy chunk.
+    await vi.dynamicImportSettled();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("outgoing");
+
+    ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
+    expect(panel.dataset.state).toBe("unanswered");
+
+    vi.mocked(ws.send).mockClear();
+    (panel.querySelector('[data-testid="dcp-ring-again"]') as HTMLElement).click();
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
+    expect(panel.dataset.state).toBe("outgoing");
+
+    // The call timer is the page's to stop.
+    page.destroy?.();
   });
 
   it("shows the caller's nickname on the incoming-call banner, not the raw username (OC-0303)", () => {

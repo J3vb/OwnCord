@@ -217,13 +217,20 @@ DM voice is the same voice machinery on the DM's voice channel, plus a ring
 layer (no server-side call state — presence in the DM voice channel _is_ the
 call):
 
-| Event                      | Reaction                                                                                                                                            |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Outgoing: user clicks Call | `call_ring` sent (rate-limited 1/3 s server-side); caller joins the DM voice channel                                                                |
-| Incoming: `call_incoming`  | `components/IncomingCallBanner.ts` banner + ring chime (`lib/notifications.ts`), driven by the `lib/call-ring.ts` state machine (30 s auto-timeout) |
-| Accept                     | Join the DM voice channel; banner clears                                                                                                            |
-| Decline                    | `call_decline` sent → other participants' ringing stops via `call_declined`                                                                         |
-| Timeout / caller leaves    | Banner clears silently                                                                                                                              |
+| Event                      | Reaction                                                                                                                                                                                                                                              |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Outgoing: user clicks Call | Caller joins the DM voice channel, then `call_ring` is sent (rate-limited 1/3 s server-side); the call panel shows "Calling…" and a 30 s no-answer window (`createOutgoingCall`, `lib/call-ring.ts`)                                                  |
+| Incoming: `call_incoming`  | Ring chime (`lib/notifications.ts`) driven by the `lib/call-ring.ts` state machine (30 s auto-timeout). With the ringing DM open, the call panel is the answer surface and the banner stays hidden; anywhere else, `components/IncomingCallBanner.ts` |
+| Accept                     | Join the DM voice channel; ring clears. "Join with video" also turns the camera on once connected                                                                                                                                                     |
+| Decline                    | `call_decline` sent → the ringer's panel says "declined" (a group decline only drops that callee), other callees' ringing stops via `call_declined`                                                                                                   |
+| Timeout / caller leaves    | Ring clears silently; the caller's panel says "didn't answer" and stays in the call with Ring again / Leave call                                                                                                                                      |
+
+The DM call panel (`components/DmCallPanel.ts`, between the chat header and the
+messages) shows while the open DM has a ring in flight, an outgoing ring, or
+anyone in its voice channel: outgoing, declined/no answer, incoming, a "Join
+call" strip for a call you are not in, and the connected stage (collapsible to
+one row). Its controls are the voice widget's callbacks; the widget's call name
+links back to the DM, and the DM list shows a phone glyph on a DM with a live call.
 
 `call_incoming` / `call_declined` are page-scoped listeners in `MainPage.ts`,
 not dispatcher handlers (see [README §4](README.md)).

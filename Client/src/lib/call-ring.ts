@@ -125,3 +125,92 @@ export function createRingController(opts: RingControllerOptions): RingControlle
     destroy: () => stopRinging(),
   };
 }
+
+/**
+ * Outgoing-call state: the caller's side of a ring.
+ *
+ *      (none) --start--> ringing --every callee declined--> declined
+ *                                --30s, nobody joined-----> no-answer
+ *      any    --clear--> (none)   someone joined, or the caller left
+ *
+ * The server holds no call record, so the caller's only signals are the
+ * callees' call_declined frames and the room filling up; everything else is
+ * this client's own 30s window, the same RING_TIMEOUT_MS the callees ring for.
+ * A declined or unanswered call leaves the caller in the room (Ring again),
+ * so `clear` is the only way back to (none).
+ */
+export type OutgoingCallPhase = "ringing" | "declined" | "no-answer";
+
+export interface OutgoingCallState {
+  readonly channelId: number;
+  readonly phase: OutgoingCallPhase;
+  /** Callees who have neither joined nor declined. */
+  readonly pending: readonly number[];
+}
+
+export interface OutgoingCallOptions {
+  readonly onChange: (state: OutgoingCallState | null) => void;
+  /** Test seam for the 30s timer. */
+  readonly setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  readonly clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
+}
+
+export interface OutgoingCall {
+  /** A ring went out (or went out again) to these callees. */
+  readonly start: (channelId: number, calleeIds: readonly number[]) => void;
+  /** A callee's call_declined arrived. Ignored for any other channel. */
+  readonly declined: (channelId: number, userId: number) => void;
+  /** Someone joined, or the caller left: the ring is over. */
+  readonly clear: () => void;
+  readonly current: () => OutgoingCallState | null;
+  readonly destroy: () => void;
+}
+
+export function createOutgoingCall(opts: OutgoingCallOptions): OutgoingCall {
+  const setTimer = opts.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
+  const clearTimer = opts.clearTimer ?? ((h) => clearTimeout(h));
+
+  let state: OutgoingCallState | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  function stopTimer(): void {
+    if (timer === null) return;
+    clearTimer(timer);
+    timer = null;
+  }
+
+  function set(next: OutgoingCallState | null): void {
+    state = next;
+    opts.onChange(next);
+  }
+
+  function start(channelId: number, calleeIds: readonly number[]): void {
+    stopTimer();
+    timer = setTimer(() => {
+      timer = null;
+      if (state?.phase === "ringing") set({ ...state, phase: "no-answer" });
+    }, RING_TIMEOUT_MS);
+    set({ channelId, phase: "ringing", pending: [...calleeIds] });
+  }
+
+  function declined(channelId: number, userId: number): void {
+    if (state === null || state.channelId !== channelId || state.phase !== "ringing") return;
+    const pending = state.pending.filter((id) => id !== userId);
+    if (pending.length === state.pending.length) return;
+    // In a group a decline only takes that person off the list: the call
+    // is still ringing for everyone else.
+    if (pending.length > 0) {
+      set({ ...state, pending });
+      return;
+    }
+    stopTimer();
+    set({ ...state, phase: "declined", pending });
+  }
+
+  function clear(): void {
+    stopTimer();
+    if (state !== null) set(null);
+  }
+
+  return { start, declined, clear, current: () => state, destroy: clear };
+}

@@ -419,6 +419,25 @@ describe("DmSidebar", () => {
     sidebar.destroy?.();
   });
 
+  it("shows a named phone glyph on a DM with a live call, and drops it when the call ends", () => {
+    const sidebar = createDmSidebar({
+      conversations: [makeConvo({ inCall: true }), makeConvo({ channelId: 101 })],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+
+    const glyph = container.querySelector("[data-testid='dm-in-call-100']");
+    expect(glyph).not.toBeNull();
+    expect(glyph!.getAttribute("aria-label")).toBe("Call in progress");
+    expect(container.querySelector("[data-testid='dm-in-call-101']")).toBeNull();
+
+    sidebar.update([makeConvo({ inCall: false })]);
+    expect(container.querySelector("[data-testid='dm-in-call-100']")).toBeNull();
+
+    sidebar.destroy?.();
+  });
+
   it("cleans up on destroy", () => {
     const sidebar = createDmSidebar({
       conversations: [],

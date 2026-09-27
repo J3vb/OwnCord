@@ -145,7 +145,6 @@ export const accountText = defineCatalog("account", {
   "notice.message":
     "A sign-in to your account you have not reviewed: {session}{more}. Review your devices in Settings > Account.",
 
-  "toast.calling": "Calling…",
   "voice.canAnswerWhileReconnecting": "Can't answer while reconnecting",
   "toast.passwordChanged": "Password changed successfully",
   "toast.passwordChangeFailed": "Failed to change password",
