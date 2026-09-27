@@ -191,6 +191,25 @@ describe("Server/admin/static — dialog dirty guard (UX-10)", () => {
     expect(doc.getElementById("before")).toBeNull();
   });
 
+  it("ignores the change event an edited field fires after Escape closed its dialog", async () => {
+    const booted = await boot();
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    stubConfirm(dom, true);
+    bridge.openModal('<div class="modal-body"><input id="banReason" value=""></div>');
+    const input = doc.getElementById("banReason") as HTMLInputElement;
+    input.value = "spam";
+    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    expect(bridge.state.modalDirty).toBe(true);
+
+    doc.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(booted.modalVisible()).toBe(false);
+    input.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+
+    expect(bridge.state.modalDirty).toBe(false);
+    expect(unload(dom).defaultPrevented).toBe(false);
+  });
+
   it("closes a dirty dialog once the discard is confirmed, and forgets the dirt", async () => {
     const booted = await boot();
     dom = booted.dom;

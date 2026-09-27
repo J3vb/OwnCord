@@ -271,7 +271,7 @@ function closeModal(){
 const MODAL_TRANSIENT_INPUTS=new Set(['typedConfirm','restoreConfirm','eraseConfirm','updateBackupFirst']);
 const MODAL_NAV_SELECTS=new Set(['permTarget','explainUser','explainAction']);
 function modalEditMarksDirty(el){
-  return el instanceof HTMLElement&&!MODAL_TRANSIENT_INPUTS.has(el.id)&&!MODAL_NAV_SELECTS.has(el.id);
+  return document.getElementById('modal').classList.contains('visible')&&el instanceof HTMLElement&&!MODAL_TRANSIENT_INPUTS.has(el.id)&&!MODAL_NAV_SELECTS.has(el.id);
 }
 document.getElementById('modal').addEventListener('input',e=>{if(modalEditMarksDirty(e.target))markModalDirty()});
 document.getElementById('modal').addEventListener('change',e=>{if(modalEditMarksDirty(e.target))markModalDirty()});
