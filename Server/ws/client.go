@@ -79,7 +79,7 @@ type Client struct {
 	// the freshly computed allowed-channel set, and never on a fresh connect.
 	authChannelID int64
 	connectedAt   time.Time      // when the WS connection was established
-	remoteAddr    string         // client IP:port from the HTTP upgrade request
+	remoteAddr    string         // client IP resolved through trusted_proxies (clientip.Resolve), no port
 	msgCount      int            // count of messages processed; resets after session check
 	msgsReceived  int64          // total messages received over the lifetime of this connection
 	msgsSent      int64          // total messages sent over the lifetime of this connection

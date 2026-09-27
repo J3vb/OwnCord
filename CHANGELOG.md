@@ -106,6 +106,7 @@ and only when it changes something a contributor or fork holder must do
 - The admin audit log's Export CSV could hand a spreadsheet a formula — a cell such as a username starting with `=`, `+`, `-` or `@` now gets a leading `'` so it opens as text.
 - The audit log's Copy page button could hand a spreadsheet a formula the same way — its tab-separated cells get the same leading `'` as Export CSV.
 - **A server that was killed or crashed now says so on the next start.** The Dashboard's attention panel gains a "Last server exit" signal: it warns when the previous run did not shut down cleanly and names when that run started and the last panic it recovered, so an unexplained restart is visible instead of silent. A normal restart or update clears it. On Windows specifically, a nil-pointer or invalid-address crash during a request or WebSocket message now exits for the supervisor to restart rather than running on possibly damaged memory (a Go runtime limitation); every other panic is still recovered as before.
+- **Behind a reverse proxy, the log and audit trail now name the real client instead of the proxy.** With `trusted_proxies` configured — the recommended deployment — the access log, the WebSocket connect log and the `ws_connect` audit row recorded the proxy's address. They now record the client's, the same address the rate limiter and lockouts already used.
 
 ### Desktop app
 

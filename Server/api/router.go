@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"slices"
 	"time"
@@ -373,8 +374,12 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 	// id before dispatch: the span must already exist for the panic record to
 	// carry trace_id (OC-0346).
 	r.Use(telemetry.HTTPMiddleware())
-	r.Use(recoverer)     // slog-routing panic recovery (replaces chi's stderr-only Recoverer)
-	r.Use(requestLogger) // structured request/response logging
+	r.Use(recoverer) // slog-routing panic recovery (replaces chi's stderr-only Recoverer)
+	// SRE-11: the access log is proxy-aware, so the recommended reverse-proxy
+	// deployment records the real client rather than the proxy hop. Parsed
+	// once here, never on the request path.
+	proxyNets := parseCIDRList(cfg.Server.TrustedProxies)
+	r.Use(requestLogger(proxyNets)) // structured request/response logging
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
 	r.Use(MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPrefixes...))
 
@@ -846,39 +851,46 @@ func recoverer(next http.Handler) http.Handler {
 
 // requestLogger logs every HTTP request with method, path, status, and duration.
 // Health checks are logged at Debug level to avoid noise.
-func requestLogger(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-		next.ServeHTTP(ww, r)
-		elapsed := time.Since(start)
-		status := ww.Status()
+//
+// clientIPWithProxies resolves the logged client_ip through the operator's
+// trusted_proxies, so the recommended reverse-proxy deployment records the
+// real client rather than the proxy hop (SRE-11). proxyNets is parsed once at
+// construction, never on the request path.
+func requestLogger(proxyNets []*net.IPNet) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+			next.ServeHTTP(ww, r)
+			elapsed := time.Since(start)
+			status := ww.Status()
 
-		// Health checks at Debug level; errors at Warn; everything else at Info.
-		path := r.URL.Path
-		reqID := middleware.GetReqID(r.Context())
-		attrs := []any{
-			"method", r.Method,
-			"path", truncateForLog(path, maxLoggedPathLen),
-			"status", status,
-			"duration_ms", elapsed.Milliseconds(),
-			"bytes", ww.BytesWritten(),
-			"client_ip", clientIP(r),
-		}
-		if reqID != "" {
-			attrs = append(attrs, "req_id", reqID)
-		}
-		switch {
-		case path == "/health" || path == "/api/v1/health":
-			slog.Debug("http request", attrs...)
-		case status >= 500:
-			slog.Error("http request", attrs...)
-		case status >= 400:
-			slog.Warn("http request", attrs...)
-		default:
-			slog.Info("http request", attrs...)
-		}
-	})
+			// Health checks at Debug level; errors at Warn; everything else at Info.
+			path := r.URL.Path
+			reqID := middleware.GetReqID(r.Context())
+			attrs := []any{
+				"method", r.Method,
+				"path", truncateForLog(path, maxLoggedPathLen),
+				"status", status,
+				"duration_ms", elapsed.Milliseconds(),
+				"bytes", ww.BytesWritten(),
+				"client_ip", clientIPWithProxies(r, proxyNets),
+			}
+			if reqID != "" {
+				attrs = append(attrs, "req_id", reqID)
+			}
+			switch {
+			case path == "/health" || path == "/api/v1/health":
+				slog.Debug("http request", attrs...)
+			case status >= 500:
+				slog.Error("http request", attrs...)
+			case status >= 400:
+				slog.Warn("http request", attrs...)
+			default:
+				slog.Info("http request", attrs...)
+			}
+		})
+	}
 }
 
 // writeJSON encodes v as JSON and writes it to w with the given status code.
