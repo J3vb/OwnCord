@@ -384,7 +384,7 @@ function accessTabHasEdits(){
   return (pc.roles||[]).some(role=>{
     if((role.permissions&ADMIN_BIT)!==0)return false;
     const box=document.getElementById('permRole'+role.role_id);
-    if(!box)return false;
+    if(!(box instanceof HTMLInputElement))return false;
     return box.checked!==((role.deny&0x2)===0);
   });
 }
