@@ -308,12 +308,14 @@ if (!["spread", "aligned"].includes(CHURN_PHASE)) {
 
 // This VU's offset within the CHURN_MS period for its leave+rejoin tick.
 // aligned: every VU at 0, the shared grid (the deliberate burst). spread:
-// VU n sits at (n-1)/VOICE_VUS through the period, so the cohort's joins
-// arrive staggered like an ordinary population's churn and the voice-join
-// budget measures one join rather than 25 queued behind each other.
+// VU n sits at (n-1)/(VOICE_VUS + OBS_VUS) through the period — the voice
+// cohort's ids span that many slots, whichever id the observer took — so the
+// cohort's joins arrive staggered like an ordinary population's churn and the
+// voice-join budget measures one join rather than 25 queued behind each other.
 function churnOffsetMs(vuId) {
   if (CHURN_PHASE === "aligned" || VOICE_VUS <= 0) return 0;
-  return Math.round(((vuId - 1) % VOICE_VUS) * (CHURN_MS / VOICE_VUS));
+  const slots = VOICE_VUS + OBS_VUS;
+  return Math.round(((vuId - 1) % slots) * (CHURN_MS / slots));
 }
 
 // A voice_state frame names its sender by username (`loadtest<vuId>`), which

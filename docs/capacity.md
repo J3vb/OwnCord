@@ -118,7 +118,8 @@ with at least twice it as headroom, so a busier runner does not turn a published
 promise into a flake. That headroom is a property of the steady shape:
 the operational profile runs a storm, a 25-way voice churn and upload pressure
 alongside the same fan-out, and there the acknowledgement p99 has been measured
-_at or over_ its budget (ramp p99 299 ms and tls-off upload p99 301 ms against 300).
+_at or over_ its budget (ramp p99 299 ms, and tls-off upload p99 301 ms against
+300, filed as OC-0481).
 The budgets do not move for that — a busy-runner tail is a finding, not a
 number to loosen (see the operational section). `auth_time` is the one steady
 row with the least room on purpose: its floor is bcrypt at cost 12, roughly a

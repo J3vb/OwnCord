@@ -241,8 +241,10 @@ test("voice churn is spread across the cohort by default, aligned as a named bur
     /K6_VOICE_CHURN_PHASE/,
   );
 
-  // Spread (default): VU n sits at (n-1)/VOICE_VUS through the period. With
-  // VOICE_VUS=5 the offsets are 0, 2000, 4000, 6000, 8000 ms. Start partway
+  // Spread (default): VU n sits at (n-1)/(VOICE_VUS + OBS_VUS) through the
+  // period. With VOICE_VUS=4 plus the observer's slot the offsets are 0, 2000,
+  // 4000, 6000, 8000 ms, and VU 5 (a voice VU whenever the observer holds a
+  // lower id) gets its own slot rather than sharing VU 1's. Start partway
   // through a period (t=0.5 s), so the first tick waits for this VU's own
   // offset rather than the epoch boundary — the arithmetic the sign of JS `%`
   // would otherwise get wrong.
@@ -250,9 +252,10 @@ test("voice churn is spread across the cohort by default, aligned as a named bur
     [1, 9500],
     [2, 1500],
     [3, 3500],
+    [5, 7500],
   ]) {
     const h = harness(
-      { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "5" },
+      { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "4" },
       vu,
     );
     h.at(0.5);
@@ -270,7 +273,7 @@ test("voice churn is spread across the cohort by default, aligned as a named bur
       {
         K6_PROFILE: "operational",
         K6_VOICE_CHANNEL_ID: "9",
-        K6_VOICE_VUS: "5",
+        K6_VOICE_VUS: "4",
         K6_VOICE_CHURN_PHASE: "aligned",
       },
       vu,
@@ -285,7 +288,7 @@ test("voice churn is spread across the cohort by default, aligned as a named bur
   // the epoch grid: a frame from VU 2 (offset 2000) seen 50 ms after that
   // offset is a 50 ms delivery, not 2050 ms.
   const spread = harness(
-    { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "5" },
+    { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "4" },
     1,
   );
   spread.at(2.05);
@@ -297,7 +300,7 @@ test("voice churn is spread across the cohort by default, aligned as a named bur
     {
       K6_PROFILE: "operational",
       K6_VOICE_CHANNEL_ID: "9",
-      K6_VOICE_VUS: "5",
+      K6_VOICE_VUS: "4",
       K6_VOICE_CHURN_PHASE: "aligned",
     },
     1,
@@ -309,7 +312,7 @@ test("voice churn is spread across the cohort by default, aligned as a named bur
 
   // A username this run did not mint measures nothing rather than guessing.
   const foreign = harness(
-    { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "5" },
+    { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "4" },
     1,
   );
   foreign.at(2.05);
@@ -321,7 +324,7 @@ test("voice churn is spread across the cohort by default, aligned as a named bur
   // gates spread churn (and capacity) and is dropped only under aligned; the
   // count sanity gate stays either way.
   const budgeted = harness(
-    { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "5" },
+    { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "4" },
     1,
   );
   assert.equal(
@@ -333,7 +336,7 @@ test("voice churn is spread across the cohort by default, aligned as a named bur
     {
       K6_PROFILE: "operational",
       K6_VOICE_CHANNEL_ID: "9",
-      K6_VOICE_VUS: "5",
+      K6_VOICE_VUS: "4",
       K6_VOICE_CHURN_PHASE: "aligned",
     },
     1,
