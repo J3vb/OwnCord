@@ -9,6 +9,8 @@
 // navigates to the section it names, reusing the same permission gate a click
 // does. A fragment that is unknown or names a section the principal may not
 // open leaves the page as it is and puts the current section back in the URL.
+// Leaving a page by any route — a nav click or back/forward — closes an open
+// dialog through its discard guard and asks before dropping Settings edits.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
 import { adminPanelHtml } from "../helpers/admin-panel";
@@ -21,6 +23,7 @@ window.__test = {
   get state(){return state},
   enterApp: enterApp,
   navigateTo: navigateTo,
+  openModal: openModal,
   nav: NAV
 };
 </script>`;
@@ -33,6 +36,7 @@ interface Bridge {
   state: any;
   enterApp: () => Promise<void>;
   navigateTo: (id: string) => void;
+  openModal: (html: string) => void;
   nav: { id?: string }[];
 }
 
@@ -84,6 +88,31 @@ function boot(me: object = OWNER_ME): {
   bridge.state.me = me;
   const tick = () => new Promise<void>((resolve) => dom.window.setTimeout(resolve, 0));
   return { dom, bridge, doc: dom.window.document, tick };
+}
+
+/** Replaces window.confirm and records the messages it was asked. */
+function stubConfirm(dom: JSDOM, answer: boolean): string[] {
+  const asked: string[] = [];
+  dom.window.confirm = (message?: string) => {
+    asked.push(String(message ?? ""));
+    return answer;
+  };
+  return asked;
+}
+
+/** Opens Settings, waits for its form, and types into the server name. */
+async function editSettings(booted: ReturnType<typeof boot>): Promise<HTMLInputElement> {
+  booted.bridge.navigateTo("settings");
+  let input: HTMLInputElement | null = null;
+  for (let i = 0; i < 20 && !input; i++) {
+    await booted.tick();
+    input = booted.doc.querySelector<HTMLInputElement>("#s-server_name");
+  }
+  if (!input) throw new Error("the Settings form never rendered");
+  input.value = "Renamed";
+  input.dispatchEvent(new booted.dom.window.Event("input", { bubbles: true }));
+  expect(booted.bridge.state.settingsChanged).toBe(true);
+  return input;
 }
 
 describe("Server/admin/static — hash history (UX-12a)", () => {
@@ -176,5 +205,101 @@ describe("Server/admin/static — hash history (UX-12a)", () => {
     expect(booted.bridge.state.section).toBe("dashboard");
     expect(booted.dom.window.location.hash).toBe("#dashboard");
     expect(booted.dom.window.history.length).toBe(entries);
+  });
+
+  it("asks before the back button discards edited Settings, and stays when declined", async () => {
+    const booted = boot();
+    dom = booted.dom;
+    booted.bridge.navigateTo("dashboard");
+    const input = await editSettings(booted);
+    const asked = stubConfirm(booted.dom, false);
+
+    booted.dom.window.location.hash = "#dashboard";
+    await booted.tick();
+
+    expect(asked).toEqual(["Discard your unsaved changes?"]);
+    expect(booted.bridge.state.section).toBe("settings");
+    expect(booted.bridge.state.settingsChanged).toBe(true);
+    expect(input.isConnected).toBe(true);
+    expect(input.value).toBe("Renamed");
+    expect(booted.dom.window.location.hash).toBe("#settings");
+  });
+
+  it("leaves edited Settings on the back button once the discard is confirmed", async () => {
+    const booted = boot();
+    dom = booted.dom;
+    booted.bridge.navigateTo("dashboard");
+    await editSettings(booted);
+    const asked = stubConfirm(booted.dom, true);
+
+    booted.dom.window.location.hash = "#dashboard";
+    await booted.tick();
+
+    expect(asked.length).toBe(1);
+    expect(booted.bridge.state.section).toBe("dashboard");
+    expect(booted.bridge.state.settingsChanged).toBe(false);
+    expect(booted.dom.window.location.hash).toBe("#dashboard");
+  });
+
+  it("asks before a nav click discards edited Settings", async () => {
+    const booted = boot();
+    dom = booted.dom;
+    await editSettings(booted);
+    const asked = stubConfirm(booted.dom, false);
+    const dashboard = Array.from(booted.doc.querySelectorAll<HTMLElement>(".nav-item")).find((b) =>
+      b.textContent?.includes("Dashboard"),
+    );
+    expect(dashboard).toBeTruthy();
+
+    dashboard!.click();
+
+    expect(asked).toEqual(["Discard your unsaved changes?"]);
+    expect(booted.bridge.state.section).toBe("settings");
+    expect(booted.dom.window.location.hash).toBe("#settings");
+  });
+
+  it("asks before the back button discards an edited dialog, and closes it once confirmed", async () => {
+    const booted = boot();
+    dom = booted.dom;
+    booted.bridge.navigateTo("dashboard");
+    booted.bridge.navigateTo("audit");
+    booted.bridge.openModal('<input class="form-input" id="dialogField">');
+    const modal = booted.doc.getElementById("modal")!;
+    const field = booted.doc.getElementById("dialogField") as HTMLInputElement;
+    field.value = "draft";
+    field.dispatchEvent(new booted.dom.window.Event("input", { bubbles: true }));
+
+    const declined = stubConfirm(booted.dom, false);
+    booted.dom.window.location.hash = "#dashboard";
+    await booted.tick();
+
+    expect(declined).toEqual(["Discard your unsaved changes?"]);
+    expect(booted.bridge.state.section).toBe("audit");
+    expect(modal.classList.contains("visible")).toBe(true);
+    expect(booted.dom.window.location.hash).toBe("#audit");
+
+    const confirmed = stubConfirm(booted.dom, true);
+    booted.dom.window.location.hash = "#dashboard";
+    await booted.tick();
+
+    expect(confirmed.length).toBe(1);
+    expect(booted.bridge.state.section).toBe("dashboard");
+    expect(modal.classList.contains("visible")).toBe(false);
+  });
+
+  it("closes an unedited dialog without asking when the back button leaves its page", async () => {
+    const booted = boot();
+    dom = booted.dom;
+    booted.bridge.navigateTo("dashboard");
+    booted.bridge.navigateTo("audit");
+    booted.bridge.openModal("<p>Details</p>");
+    const asked = stubConfirm(booted.dom, false);
+
+    booted.dom.window.location.hash = "#dashboard";
+    await booted.tick();
+
+    expect(asked).toEqual([]);
+    expect(booted.bridge.state.section).toBe("dashboard");
+    expect(booted.doc.getElementById("modal")!.classList.contains("visible")).toBe(false);
   });
 });

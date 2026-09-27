@@ -339,8 +339,9 @@ function hashSection(){
   if(!state.me)return;
   const id=sectionFromHash();
   if(id&&id!==state.section&&sectionAllowed(id))navigateTo(id);
-  else if(location.hash!=='#'+state.section)history.replaceState(null,'','#'+state.section);
+  else replaceHash();
 }
+function replaceHash(){if(location.hash!=='#'+state.section)history.replaceState(null,'','#'+state.section)}
 window.addEventListener('hashchange',hashSection);
 
 async function enterApp(){
@@ -352,7 +353,7 @@ async function enterApp(){
   /* Reflect the section actually opened without adding a history entry: a
      stale or forbidden fragment is replaced by the real one, so the address
      bar never names a page that is not on screen. */
-  if(location.hash!=='#'+state.section)history.replaceState(null,'','#'+state.section);
+  replaceHash();
 }
 
 /* ═══ Nav ═══ */
@@ -506,11 +507,19 @@ document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='visible'&&state.me)refreshBadges(true);
 });
 
+/* Leaving the page — a nav click, a link, or the browser's back and forward
+   buttons — closes an open dialog through dismissModal() and asks before
+   discarding an edited Settings form. Declining stays put. */
+function leaveSection(){
+  if(document.getElementById('modal').classList.contains('visible')&&!dismissModal())return false;
+  return !state.settingsChanged||confirm('Discard your unsaved changes?');
+}
 function navigateTo(id){
   if(!sectionAllowed(id)){showToast('You do not have permission to open that section','error');return}
+  if(!leaveSection()){replaceHash();return}
   try{
     if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}}
-    if(state.section==='settings'&&id!=='settings')state.settingsChanged=false;
+    state.settingsChanged=false;
     state.section=id;renderNav();renderContent();closeNav();syncHash(id);
   }catch(err){
     console.error('[Admin] Tab navigation failed for "'+id+'":', err);
