@@ -1,7 +1,8 @@
 /**
  * Probe and restore for `process.env.TZ` pins, for the regression blocks that
  * can only be written in a specific zone (OC-0315's east-of-UTC replay gate,
- * the DST day boundaries in renderers).
+ * the DST day boundaries in renderers, BUG-11's Berlin inbox row), plus
+ * `pinZone` for whole-file pins that neither probe nor throw.
  *
  * `process.env.TZ = ...` only reaches Date's local-time engine on a process
  * main thread. In a worker-thread pool the assignment succeeds and Date
