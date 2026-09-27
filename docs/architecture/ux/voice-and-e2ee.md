@@ -108,14 +108,15 @@ switch profiles (HFP to A2DP), which is audible in playback. Muting has to stop
 the OS capture rather than only mute the publication, so the profile switch is
 the accepted cost.
 
-| Control state  | Presentation                                                                               |
-| -------------- | ------------------------------------------------------------------------------------------ |
-| mic muted      | Mic-slash icon on self tile + control bar                                                  |
-| deafened       | Headphone-slash; implies muted styling                                                     |
-| listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`) |
-| camera on      | Self video tile in the grid                                                                |
-| screenshare on | Screen tile; a stop-share affordance always visible                                        |
-| speaking       | Green ring on the speaking user's tile/avatar (from LiveKit's ActiveSpeakers)              |
+| Control state  | Presentation                                                                                                                                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| mic muted      | Mic-slash icon on self tile + control bar                                                                                                                                                                                                        |
+| deafened       | Headphone-slash; implies muted styling                                                                                                                                                                                                           |
+| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the widget's own mute/deafen controls are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `components/ChannelSidebar.ts`, `components/VoiceWidget.ts` |
+| listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`)                                                                                                                                                       |
+| camera on      | Self video tile in the grid                                                                                                                                                                                                                      |
+| screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                              |
+| speaking       | Green ring on the speaking user's tile/avatar (from LiveKit's ActiveSpeakers)                                                                                                                                                                    |
 
 **Mic-permission failure** (`restoreLocalVoiceState`): on denied/absent mic, set
 `listenOnly` and surface the specific reason ("Microphone permission denied" /
