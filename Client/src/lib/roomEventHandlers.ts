@@ -13,6 +13,7 @@ import {
   setSpeakers,
   leaveVoiceChannel,
   setEncryptionDegraded,
+  setVoiceStatus,
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { parseUserId } from "../features/voice/sessionState";
@@ -86,6 +87,8 @@ export interface RoomEventHandlers {
   readonly handleActiveSpeakersChanged: (speakers: Participant[]) => void;
   readonly handleAudioPlaybackChanged: () => void;
   readonly handleDisconnected: (reason?: DisconnectReason) => void;
+  readonly handleSdkReconnecting: () => void;
+  readonly handleSdkReconnected: () => void;
   readonly handleEncryptionError: (error: Error, participant?: Participant) => void;
   readonly removeAutoplayUnlock: () => void;
 }
@@ -226,6 +229,21 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     if (isUnexpected) deps.getOnErrorCallback()?.(voiceText("event.voiceDisconnected"));
   };
 
+  /** RT-9: livekit-client (and the native room) retry a dropped signal socket
+   *  on their own — RoomEvent.SignalReconnecting / Reconnecting — before they
+   *  give up with Disconnected, and an SFU restart spends most of its window
+   *  there. Only the connected session room moves the badge, and only between
+   *  "connected" and "reconnecting", so a join still securing its key and the
+   *  retry loop's own attempt rooms are left alone. */
+  const handleSdkReconnecting = (): void => {
+    if (deps.getRoom() !== null && voiceStore.getState().voiceStatus === "connected")
+      setVoiceStatus("reconnecting");
+  };
+  const handleSdkReconnected = (): void => {
+    if (deps.getRoom() !== null && voiceStore.getState().voiceStatus === "reconnecting")
+      setVoiceStatus("connected");
+  };
+
   /** OC-0002: livekit-client's E2eeManager emits RoomEvent.EncryptionError
    *  when the per-room E2EE worker dies (onWorkerError — CSP blocking a
    *  lazily-loaded chunk, WASM load failure, WebView2 quirk) or when an
@@ -276,6 +294,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     handleActiveSpeakersChanged,
     handleAudioPlaybackChanged,
     handleDisconnected,
+    handleSdkReconnecting,
+    handleSdkReconnected,
     handleEncryptionError,
     removeAutoplayUnlock,
   };

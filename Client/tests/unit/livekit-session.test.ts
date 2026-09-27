@@ -21,6 +21,7 @@ const mockVoiceState = vi.hoisted(() => ({
   // the server's voice_config event. Empty by default; tests exercising the
   // audio-bitrate publish path populate an entry for the channel under test.
   voiceConfigs: new Map<number, { bitrate: number }>(),
+  voiceStatus: "idle",
 }));
 
 /** Backing cell for the mocked voice.store PTT-poller-live flag. Boxed so the
@@ -59,6 +60,9 @@ vi.mock("livekit-client", () => ({
     TrackSubscribed: "trackSubscribed",
     TrackUnsubscribed: "trackUnsubscribed",
     Disconnected: "disconnected",
+    Reconnecting: "reconnecting",
+    SignalReconnecting: "signalReconnecting",
+    Reconnected: "reconnected",
     ActiveSpeakersChanged: "activeSpeakersChanged",
     AudioPlaybackStatusChanged: "audioPlaybackStatusChanged",
     EncryptionError: "encryptionError",
@@ -340,6 +344,7 @@ describe("LiveKitSession", () => {
     mockVoiceState.pttGated = false;
     mockVoiceState.currentChannelId = 1;
     mockVoiceState.voiceConfigs = new Map();
+    mockVoiceState.voiceStatus = "idle";
     session = new LiveKitSession();
     // Reset mockRoom state
     mockRoom.state = "connected";
@@ -1262,6 +1267,33 @@ describe("LiveKitSession", () => {
       expect((session as any)._state.type).toBe("reconnecting");
       expect(setVoiceStatus).toHaveBeenCalledWith("reconnecting");
     });
+
+    // RT-9: livekit-client (and the native room) retry a dropped signal
+    // socket on their own before any Disconnected, so the SDK's reconnecting
+    // phase must reach the widget too.
+    it.each(["reconnecting", "signalReconnecting"])(
+      "writes reconnecting while the SDK retries (%s), then connected once it recovers",
+      async (event) => {
+        session.setServerHost("localhost:7880");
+        session.setWsClient({ send: vi.fn() } as any);
+        const handlers = new Map<string, Array<() => void>>();
+        mockRoom.on.mockImplementation((name: string, handler: () => void) => {
+          handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+          return mockRoom;
+        });
+        await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+        mockVoiceState.voiceStatus = "connected";
+        (setVoiceStatus as any).mockClear();
+
+        for (const h of handlers.get(event) ?? []) h();
+        expect(statusCalls()).toEqual(["reconnecting"]);
+
+        mockVoiceState.voiceStatus = "reconnecting";
+        for (const h of handlers.get("reconnected") ?? []) h();
+        expect(statusCalls()).toEqual(["reconnecting", "connected"]);
+        expect((session as any)._state.type).toBe("connected");
+      },
+    );
 
     it("writes connected after a successful auto-reconnect", async () => {
       (session as any)._state = {

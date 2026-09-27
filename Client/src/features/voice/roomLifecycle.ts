@@ -247,6 +247,9 @@ export class RoomLifecycle {
     onRoom(newRoom, RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
     onRoom(newRoom, RoomEvent.TrackUnsubscribed, this._eventHandlers.handleTrackUnsubscribed);
     onRoom(newRoom, RoomEvent.Disconnected, this._eventHandlers.handleDisconnected);
+    onRoom(newRoom, RoomEvent.SignalReconnecting, this._eventHandlers.handleSdkReconnecting);
+    onRoom(newRoom, RoomEvent.Reconnecting, this._eventHandlers.handleSdkReconnecting);
+    onRoom(newRoom, RoomEvent.Reconnected, this._eventHandlers.handleSdkReconnected);
     onRoom(
       newRoom,
       RoomEvent.ActiveSpeakersChanged,

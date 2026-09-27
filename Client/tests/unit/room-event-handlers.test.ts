@@ -843,3 +843,44 @@ describe("handleDisconnected", () => {
     }).not.toThrow();
   });
 });
+
+// ── handleSdkReconnecting / handleSdkReconnected (RT-9) ────────────────────
+
+// livekit-client retries a dropped signal socket on its own before it ever
+// emits Disconnected (an SFU restart spends most of its window here), so the
+// widget must read "reconnecting" during that phase, not "connected".
+describe("handleSdkReconnecting / handleSdkReconnected", () => {
+  function setStatus(voiceStatus: "securing" | "connected" | "reconnecting"): void {
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus }));
+  }
+
+  it("shows reconnecting while the SDK retries a connected room, then connected once it recovers", () => {
+    const h = build();
+    setStatus("connected");
+
+    h.handlers.handleSdkReconnecting();
+    expect(voiceStore.getState().voiceStatus).toBe("reconnecting");
+
+    h.handlers.handleSdkReconnected();
+    expect(voiceStore.getState().voiceStatus).toBe("connected");
+  });
+
+  it("leaves a join that is still securing alone", () => {
+    const h = build();
+    setStatus("securing");
+
+    h.handlers.handleSdkReconnecting();
+    h.handlers.handleSdkReconnected();
+
+    expect(voiceStore.getState().voiceStatus).toBe("securing");
+  });
+
+  it("ignores events from a room that is not the connected session room", () => {
+    const h = build({ getRoom: () => null, isReconnecting: () => true });
+    setStatus("reconnecting");
+
+    h.handlers.handleSdkReconnected();
+
+    expect(voiceStore.getState().voiceStatus).toBe("reconnecting");
+  });
+});
