@@ -1060,7 +1060,8 @@ default `info`). `OWNCORD_LOGGING_LEVEL` overrides it without editing
 `config.yaml`.
 
 A LiveKit that OwnCord supervises logs through the same pipeline, as
-`livekit: ` lines with `component=livekit`. An external LiveKit, including
+`livekit companion output` entries with `component=livekit` and LiveKit's own
+line in the `line` attribute. An external LiveKit, including
 the Docker `livekit` service, logs only to its own stdout: read it with
 `docker compose logs livekit` (or wherever that process's supervisor puts
 stdout). Its output is not in the admin live log or the support bundle.
@@ -1218,8 +1219,8 @@ The ZIP holds six fixed files: `build.json` (application/Go version, OS and
 architecture), `configuration.json` (an explicit scalar allowlist from the
 running startup configuration), `database.json` (applied migration names,
 table names and row counts), `health.json` (a database, memory and hub
-snapshot), `events.json` (up to 200 recent log records, mapped to fixed
-event codes; Warn/Error records are kept in preference to lower levels, so a
+snapshot), `events.json` (up to 200 recent log records, each mapped to a fixed
+event code; Warn/Error records are kept in preference to lower levels, so a
 routine INFO burst cannot push a failure out of the bundle) and
 `manifest.json` (sizes, hashes and the omission report).
 What it deliberately does not hold: no message content, no attachments or
@@ -1279,8 +1280,8 @@ check-by-check walkthrough is in [Port Forwarding Guide](port-forwarding.md).
 The supervised LiveKit process is down. `livekit_healthy: false` on
 `GET /api/v1/metrics`, `GET /api/v1/livekit/health` answers
 `degraded` with the reason, and the Dashboard's attention panel raises its
-`voice` signal. LiveKit's own errors are the `livekit: ` lines in the server
-log. The companion process restarts it with
+`voice` signal. LiveKit's own errors are the `livekit companion output` entries
+(`component=livekit`, text in the `line` attribute) in the server log. The companion process restarts it with
 exponential backoff (3 s up to 60 s) and gives up after ten consecutive rapid
 failures; the recovery steps are in
 [LiveKit Setup](livekit-setup.md).
