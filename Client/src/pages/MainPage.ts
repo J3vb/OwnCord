@@ -1203,10 +1203,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // Subscribe to voice store for camera/screenshare state changes, voice
     // channel switches, and remote-tile identity changes (not speaking ticks)
-    // The grid's own actions: its focus view sizes the DM call panel, and the
-    // cover on your own screen-share preview stops the share.
+    // The cover on your own screen-share preview stops the share.
     chatAreaResult.videoGrid.setCallbacks({
-      onFocusChange: (tileId) => callPanel?.setVideoFocus(tileId !== null),
       onStopSharing: () => {
         if (voiceStore.getState().localScreenshare) voiceKeybindActions.onScreenshareToggle();
       },

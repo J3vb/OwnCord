@@ -92,6 +92,8 @@ describe("VideoGrid", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetScreenshareAudioMuted.mockReturnValue(false);
+    mockGetScreenshareAudioVolume.mockReturnValue(1);
     // ResizeObserver is not available in JSDOM
     globalThis.ResizeObserver ??= class {
       observe(): void {
@@ -973,8 +975,6 @@ describe("VideoGrid", () => {
     const select = (id: number) => cell(id).querySelector<HTMLButtonElement>(".video-cell-select")!;
 
     it("makes each tile a named button that opens it in focus view", () => {
-      const onFocusChange = vi.fn();
-      grid.setCallbacks({ onFocusChange });
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
       grid.addStream(3, "Sam", fakeStream(), camera());
 
@@ -985,7 +985,6 @@ describe("VideoGrid", () => {
 
       expect(grid.getFocusedTileId()).toBe(SCREEN);
       expect(cell(SCREEN).classList.contains("focused")).toBe(true);
-      expect(onFocusChange).toHaveBeenLastCalledWith(SCREEN);
       // The focused tile needs no "watch" button; the filmstrip thumbs keep theirs.
       expect(select(SCREEN).hidden).toBe(true);
       expect(select(3).hidden).toBe(false);
@@ -994,8 +993,6 @@ describe("VideoGrid", () => {
     });
 
     it("offers Back to grid in focus view, which leaves it", () => {
-      const onFocusChange = vi.fn();
-      grid.setCallbacks({ onFocusChange });
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
       grid.addStream(3, "Sam", fakeStream(), camera());
       expect(cell(SCREEN).querySelector<HTMLElement>("[data-tile-control='grid']")!.hidden).toBe(
@@ -1008,7 +1005,6 @@ describe("VideoGrid", () => {
       back.click();
 
       expect(grid.getFocusedTileId()).toBeNull();
-      expect(onFocusChange).toHaveBeenLastCalledWith(null);
       expect(container.querySelector(".video-grid.focus-mode")).toBeNull();
     });
 
@@ -1083,6 +1079,29 @@ describe("VideoGrid", () => {
       const labels = [...menu.querySelectorAll("[role='menuitem']")].map((m) => m.textContent);
       expect(labels).toEqual(expect.arrayContaining(["Mute stream", "Stop watching"]));
       menu.remove();
+    });
+
+    it("Unmute stream in the menu brings a stream muted at 0 back at 100%", async () => {
+      mockGetScreenshareAudioMuted.mockReturnValue(true);
+      mockGetScreenshareAudioVolume.mockReturnValue(0);
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+      cell(SCREEN).dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+      await vi.dynamicImportSettled();
+
+      const menu = document.querySelector<HTMLElement>(".video-tile-menu")!;
+      const unmute = [...menu.querySelectorAll<HTMLElement>("[role='menuitem']")].find(
+        (m) => m.textContent === "Unmute stream",
+      )!;
+      unmute.click();
+
+      expect(mockSetScreenshareAudioVolume).toHaveBeenLastCalledWith(2, 1);
+      expect(mockMuteScreenshareAudio).toHaveBeenLastCalledWith(2, false);
+      expect(cell(SCREEN).querySelector("output")!.textContent).toBe("100%");
+      expect(cell(SCREEN).querySelector(".video-tile-overlay")!.classList.contains("muted")).toBe(
+        false,
+      );
     });
 
     it("opens the same menu from the keyboard (Shift+F10) on the tile's button", async () => {

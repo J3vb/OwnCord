@@ -626,20 +626,4 @@ describe("DmCallPanel — video in the call", () => {
     setVoice(null, []);
     expect(opts.onVideoHostChange).toHaveBeenCalledTimes(2);
   });
-
-  it("grows to the whole chat column while a stream is in focus view, and gives it back after", () => {
-    setVoice(DM, [vu(SELF), vu(OTTO)]);
-    const { root } = mount();
-    panel!.setVideoActive(true);
-
-    panel!.setVideoFocus(true);
-    expect(root.classList.contains("dm-call-panel--focus")).toBe(true);
-    panel!.setVideoFocus(false);
-    expect(root.classList.contains("dm-call-panel--focus")).toBe(false);
-
-    // Collapsing gives the chat back even while a stream is focused.
-    panel!.setVideoFocus(true);
-    q(root, "dcp-collapse")!.click();
-    expect(root.classList.contains("dm-call-panel--focus")).toBe(false);
-  });
 });

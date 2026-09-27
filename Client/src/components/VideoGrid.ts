@@ -36,8 +36,6 @@ export interface TileConfig {
 
 /** What the grid reports back to its owner. */
 export interface VideoGridCallbacks {
-  /** The focused tile changed (null: back to the grid layout). */
-  readonly onFocusChange?: (tileId: number | null) => void;
   /** Stop sharing, from the cover on your own screen-share preview. */
   readonly onStopSharing?: () => void;
 }
@@ -406,7 +404,6 @@ export function createVideoGrid(): VideoGridComponent {
   function setFocusedTile(tileId: number | null): void {
     focusedTileId = tileId;
     rebuildFocusLayout();
-    callbacks.onFocusChange?.(tileId);
   }
 
   function getFocusedTileIdFn(): number | null {

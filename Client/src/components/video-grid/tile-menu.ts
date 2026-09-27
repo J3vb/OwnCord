@@ -111,8 +111,13 @@ export function showTileMenu(opts: TileMenuOptions): void {
     );
     muteItem.addEventListener("click", () => {
       muted = !muted;
+      let volume = Math.round(getScreenshareAudioVolume(id) * 100);
+      if (!muted && volume === 0) {
+        volume = 100;
+        setScreenshareAudioVolume(id, 1);
+      }
       muteScreenshareAudio(id, muted);
-      opts.onVolumeChange(Math.round(getScreenshareAudioVolume(id) * 100), muted);
+      opts.onVolumeChange(volume, muted);
       closeMenu();
     });
     menu.append(muteItem, createElement("div", { class: "context-menu-sep" }));
