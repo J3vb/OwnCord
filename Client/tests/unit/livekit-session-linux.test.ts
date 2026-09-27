@@ -225,6 +225,8 @@ globalThis.Worker = vi.fn(function () {
 import { LiveKitSession } from "../../src/lib/livekitSession";
 import { setVoiceStatus, setListenOnly } from "@stores/voice.store";
 import { nativeCounters } from "../../src/features/voice/native/counters";
+import { setScreenSourcePicker } from "../../src/features/voice/native/screenPickerSlot";
+import { showScreenSharePicker } from "../../src/components/ScreenSharePicker";
 
 const names = () => host.commands.map(([n]) => n);
 const emit = (envelope: NativeVoiceEnvelope) => {
@@ -259,8 +261,13 @@ describe("LiveKitSession on the Linux native backend", () => {
     session = new LiveKitSession();
     session.setWsClient({ send: vi.fn(), on: vi.fn() } as never);
     session.setServerHost("chat.example");
+    // MainPage registers the screen-share dialog through the layer slot
+    // (ARCH-06); mirror that here so the native share path reaches the real
+    // dialog. The UI is a separate layer, so this test does not mount it.
+    setScreenSourcePicker((request) => showScreenSharePicker(request));
   });
   afterEach(() => {
+    setScreenSourcePicker(null);
     session.cleanupAll();
   });
 

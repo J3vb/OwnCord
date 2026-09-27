@@ -512,9 +512,116 @@ describe("SidebarArea", () => {
 
       const inviteBtn = container.querySelector("[data-testid='invite-btn']");
       expect(inviteBtn).not.toBeNull();
-      expect(inviteBtn!.textContent).toBe("Invite");
+      expect(inviteBtn!.getAttribute("aria-label")).toBe("Invite");
 
       cleanup(result);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Server header actions
+  // -------------------------------------------------------------------------
+  //
+  // Invite, Audit Log and Moderation are one row of quiet icon buttons in a
+  // single group. The permission-gated ones hide inside it, so the row keeps
+  // one edge whether it holds one action or three.
+
+  describe("server header actions", () => {
+    const destinations = (): NonNullable<SidebarAreaOptions["destinations"]> => ({
+      moderation: { build: () => document.createElement("div") },
+    });
+
+    function signInAs(permissions: number): void {
+      setRoles([{ id: 9, name: "R", color: null, permissions }]);
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 9, username: "U", avatar: null, role: "R" },
+      }));
+    }
+
+    function mount(): ReturnType<typeof createSidebarArea> {
+      const result = createSidebarArea({ ...defaultOpts(), destinations: destinations() });
+      container.appendChild(result.sidebarWrapper);
+      return result;
+    }
+
+    function visibleActions(result: ReturnType<typeof createSidebarArea>): HTMLButtonElement[] {
+      const group = result.sidebarWrapper.querySelector(
+        ".unified-sidebar-header > .sidebar-header-actions",
+      );
+      expect(group).not.toBeNull();
+      return [...group!.querySelectorAll<HTMLButtonElement>(":scope > button")].filter(
+        (b) => b.style.display !== "none",
+      );
+    }
+
+    const testIds = (buttons: HTMLButtonElement[]): Array<string | null> =>
+      buttons.map((b) => b.getAttribute("data-testid"));
+
+    it("shows a plain member Invite alone", () => {
+      signInAs(Permission.SEND_MESSAGES);
+      const result = mount();
+      expect(testIds(visibleActions(result))).toEqual(["invite-btn"]);
+      cleanup(result);
+    });
+
+    it("adds Audit Log for VIEW_AUDIT_LOG alone", () => {
+      signInAs(Permission.VIEW_AUDIT_LOG);
+      const result = mount();
+      expect(testIds(visibleActions(result))).toEqual(["invite-btn", "audit-log-btn"]);
+      cleanup(result);
+    });
+
+    it("adds Moderation for MODERATE_MEMBERS alone", () => {
+      signInAs(Permission.MODERATE_MEMBERS);
+      const result = mount();
+      expect(testIds(visibleActions(result))).toEqual(["invite-btn", "moderation-btn"]);
+      cleanup(result);
+    });
+
+    it("shows all three, in order, for an owner", () => {
+      signInAs(Permission.ADMINISTRATOR);
+      const result = mount();
+      expect(testIds(visibleActions(result))).toEqual([
+        "invite-btn",
+        "audit-log-btn",
+        "moderation-btn",
+      ]);
+      cleanup(result);
+    });
+
+    it("names each icon button and gives it a tooltip, with no visible text", () => {
+      signInAs(Permission.ADMINISTRATOR);
+      const result = mount();
+      const names = visibleActions(result).map((b) => {
+        expect(b.getAttribute("type")).toBe("button");
+        expect(b.textContent).toBe("");
+        expect(b.getAttribute("title")).toBeTruthy();
+        const icon = b.querySelector("svg");
+        expect(icon?.getAttribute("aria-hidden")).toBe("true");
+        return b.getAttribute("aria-label");
+      });
+      expect(names).toEqual(["Invite", "Audit Log", "Moderation"]);
+      cleanup(result);
+    });
+
+    it("keeps every action a focusable native button", () => {
+      signInAs(Permission.ADMINISTRATOR);
+      const result = mount();
+      for (const b of visibleActions(result)) {
+        expect(b.tagName).toBe("BUTTON");
+        expect(b.tabIndex).toBe(0);
+        b.focus();
+        expect(document.activeElement).toBe(b);
+      }
+      cleanup(result);
+    });
+
+    it("keeps the group on one row, on the header's trailing edge", () => {
+      expect(keyword(cascadedDeclaration(".sidebar-header-actions", "flex-wrap"))).toBe("nowrap");
+      expect(cascadedDeclaration(".sidebar-header-actions", "margin-left")?.value).toMatchObject({
+        value: { type: "auto" },
+      });
     });
   });
 
@@ -3005,7 +3112,7 @@ describe("SidebarArea", () => {
         const result = mount({ destinations: destinations() });
         const btn = q(result, "moderation-btn");
         expect(btn?.style.display).not.toBe("none");
-        expect(btn?.textContent).toBe("Moderation");
+        expect(btn?.getAttribute("aria-label")).toBe("Moderation");
         expect(btn?.tagName).toBe("BUTTON");
         expect(btn?.previousElementSibling).toBe(q(result, "audit-log-btn"));
         cleanup(result);

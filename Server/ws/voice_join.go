@@ -58,15 +58,18 @@ var voiceJoinPostTokenRaceHook func(*Client)
 // on the "voice join" line so an operator can correlate a token with the arrival
 // that produced it (SRE-M2). Empty when the frame carried none.
 func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMessage, reqID string) {
+	start := time.Now()
 	channelID, ch, ok := h.voiceJoinPrecheck(ctx, c, payload)
 	if !ok {
 		return
 	}
+	precheckDone := time.Now()
 
 	wasServerMuted, wasServerDeafened, wasServerMutedBy, ok := h.voiceJoinLeaveCurrent(ctx, c, channelID)
 	if !ok {
 		return
 	}
+	leaveDone := time.Now()
 
 	state, ok := h.voiceJoinPersist(ctx, c, ch, channelID)
 	if !ok {
@@ -80,6 +83,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	}
 
 	state = h.voiceJoinRestoreModFlags(ctx, c, channelID, state, wasServerMuted, wasServerDeafened, wasServerMutedBy)
+	persistDone := time.Now()
 
 	if !h.voiceJoinGrantToken(ctx, c, channelID, state) {
 		// OC-0420: voiceJoinRestoreModFlags above just wrote these flags into
@@ -89,8 +93,11 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 		return
 	}
+	tokenDone := time.Now()
 
-	h.voiceJoinComplete(ctx, c, ch, channelID, state, reqID)
+	if h.voiceJoinComplete(ctx, c, ch, channelID, state, reqID) {
+		h.latency.voiceJoin.observe(start, precheckDone, leaveDone, persistDone, tokenDone, time.Now())
+	}
 }
 
 // restorePendingModFlags puts a moderator mute/deafen stash back onto c after
@@ -461,8 +468,9 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, c *Client, channelID int6
 
 // voiceJoinComplete finishes a join that survived every guard: voice topic
 // subscription, key-holder election, the joiner's own voice_state fan-out, the
-// existing participants' states and E2EE keys, and voice_config.
-func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, channelID int64, state *db.VoiceState, reqID string) {
+// existing participants' states and E2EE keys, and voice_config. Returns false
+// when the join was superseded or rolled back instead of completing.
+func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, channelID int64, state *db.VoiceState, reqID string) bool {
 	// Voice channel state itself was already set above (BUG-088), immediately
 	// after the DB row committed — which also means a concurrent eviction (the
 	// revocation sweep, a participant_left webhook, a moderator kick/move) can
@@ -496,7 +504,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 		curChID, _ := c.getVoiceState()
 		slog.Info("ws handleVoiceJoin: join superseded before completion",
 			"user_id", c.userID, "channel_id", channelID, "current_channel_id", curChID)
-		return
+		return false
 	}
 
 	// Subscribe to voice topic for voice-scoped events.
@@ -532,7 +540,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 		slog.Error("ws handleVoiceJoin ChannelStates", "err", err)
 		h.rollbackVoiceJoin(ctx, c, channelID, state.JoinedAt, true)
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
-		return
+		return false
 	}
 	for _, vs := range existing {
 		if vs.UserID == c.userID {
@@ -581,6 +589,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 		"channel_users", len(existing),
 		"channel_max", maxUsers,
 	)
+	return true
 }
 
 // handleVoiceTokenRefreshV2 is the V2 (pure) handler for voice_token_refresh.
