@@ -209,8 +209,21 @@ for (const media of [false, true]) {
         await input.press("Enter");
         await expect(bob.locator(".msg-text", { hasText: next })).toHaveCount(1);
         if (media) {
-          await joinVoice(alice);
-          await joinVoice(bob);
+          // RT-12: both callers were in the call before the update; after the
+          // restart they come back on their own — no channel click — with
+          // decoded media. The manual joinVoice calls are gone on purpose: a
+          // click would pass even if the automatic rejoin never fired.
+          for (const page of [alice, bob]) {
+            await expect(page.locator(".voice-widget.visible .vw-channel")).toHaveText(
+              "voice-one",
+              {
+                timeout: 60_000,
+              },
+            );
+            await expect(page.locator(".voice-widget.visible")).toContainText("Voice Connected", {
+              timeout: 60_000,
+            });
+          }
           await expectDecodedMedia(alice);
           await expectDecodedMedia(bob);
         }

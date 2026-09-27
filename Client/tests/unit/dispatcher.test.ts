@@ -3462,6 +3462,105 @@ describe("WS Dispatcher", () => {
     expect(voiceStore.getState().currentChannelId).toBe(42);
   });
 
+  // RT-12: a planned restart ends server-side voice membership (the hub wipes
+  // voice_states on boot), so a plain reconnect leaves the user outside the
+  // call. The restart notice records the channel; once ready confirms we are
+  // not in it, one normal voice_join puts us back.
+  describe("RT-12: rejoin after a planned restart", () => {
+    function announceRestartAndDrop(): void {
+      mock.dispatch("server_restart", { reason: "update", delay_seconds: 5 });
+      expectConsole("warn", /\[dispatcher\] Server restarting/);
+      mock.dispatchState("reconnecting");
+    }
+
+    function readyAfterRestart(channels: unknown[]): void {
+      mock.dispatch("ready", {
+        channels,
+        members: [{ id: 5, username: "me", avatar: null, role: "member", status: "online" }],
+        // The restarted hub wiped voice_states: we are not in the call.
+        voice_states: [],
+        roles: [],
+      });
+    }
+
+    beforeEach(() => {
+      authStore.setState((prev) => ({
+        ...prev,
+        isAuthenticated: true,
+        user: { id: 5, username: "me", avatar: null, role: "member" },
+      }));
+      voiceStore.setState((prev) => ({
+        ...prev,
+        currentChannelId: 42,
+        voiceStatus: "connected",
+      }));
+      vi.mocked(mock.ws.send).mockClear();
+      vi.mocked(mockLeaveVoice).mockClear();
+    });
+
+    it("sends one voice_join for the channel we were in when ready shows we left", async () => {
+      announceRestartAndDrop();
+      await vi.runAllTimersAsync();
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+
+      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+
+      expect(mock.ws.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_join", payload: { channel_id: 42 } }),
+      );
+      expect(voiceStore.getState().currentChannelId).toBe(42);
+    });
+
+    it("does not rejoin after a moderator kick", async () => {
+      announceRestartAndDrop();
+      // The kick lands before ready: it must cancel the pending rejoin.
+      mock.dispatch("voice_disconnected", { channel_id: 42, reason: "kicked" });
+      await vi.runAllTimersAsync();
+
+      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+
+      expect(mock.ws.send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_join" }),
+      );
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+    });
+
+    it("does not rejoin after the user leaves voice", async () => {
+      announceRestartAndDrop();
+      // The user leaves for real: a self voice_leave cancels the rejoin.
+      mock.dispatch("voice_leave", { channel_id: 42, user_id: 5 });
+      await vi.runAllTimersAsync();
+
+      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+
+      expect(mock.ws.send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_join" }),
+      );
+    });
+
+    it("does not rejoin when the channel is gone from ready", async () => {
+      announceRestartAndDrop();
+      await vi.runAllTimersAsync();
+
+      readyAfterRestart([{ id: 7, name: "general", type: "text", category: null, position: 0 }]);
+
+      expect(mock.ws.send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_join" }),
+      );
+    });
+
+    it("does not rejoin an ordinary reconnect with no restart announced", async () => {
+      mock.dispatchState("reconnecting");
+      await vi.runAllTimersAsync();
+
+      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+
+      expect(mock.ws.send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_join" }),
+      );
+    });
+  });
+
   it("wires error BANNED to clear auth and show error", () => {
     authStore.setState((prev) => ({
       ...prev,

@@ -9,6 +9,7 @@ describe("createReconnectClock", () => {
       lastReconnectHandshakeAt: null,
       serverClockSkewMs: 0,
       restartAnnounced: false,
+      voiceRejoinChannelId: null,
     });
   });
 

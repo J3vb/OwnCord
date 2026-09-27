@@ -8,7 +8,7 @@ import {
   setSessionReplaced,
 } from "../../stores/ui.store";
 import { channelsStore } from "../../stores/channels.store";
-import { voiceStore, leaveVoiceChannel } from "../../stores/voice.store";
+import { voiceStore, leaveVoiceChannel, joinVoiceChannel } from "../../stores/voice.store";
 import { PROTOCOL_EPOCH } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";
 import { connectText } from "../../i18n/connect";
@@ -76,6 +76,17 @@ export function handleServerRestart(
   // same channel, and MainPage's banner counts down. A zero delay
   // (update_aborted) withdraws the announcement.
   clock.restartAnnounced = payload.delay_seconds > 0;
+  // RT-12: remember the voice channel we are in so a planned restart can put
+  // us back. The hub wipes voice_states on boot, so the resume cannot restore
+  // the membership the way it restores chat; a later ready sends one
+  // voice_join. Recorded here, while the session is still live, because the
+  // drop handler clears the store's currentChannelId. An aborted restart or a
+  // leave before the drop clears it again.
+  if (clock.restartAnnounced) {
+    clock.voiceRejoinChannelId = voiceStore.getState().currentChannelId;
+  } else {
+    clock.voiceRejoinChannelId = null;
+  }
 }
 
 /**
@@ -91,7 +102,47 @@ export function handleRestartDrop(clock: ReconnectClock, state: ConnectionState)
   if (voiceStore.getState().currentChannelId !== null) {
     void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
     leaveVoiceChannel();
+  } else {
+    // The user left voice (or was evicted) after the notice but before the
+    // drop: there is no call to return to, so forget the recorded channel.
+    clock.voiceRejoinChannelId = null;
   }
+}
+
+/**
+ * RT-12: put the user back in the voice channel a planned restart took them
+ * out of. The hub wipes voice_states on boot, so the resume cannot restore the
+ * membership the way it restores chat; `handleServerRestart` recorded the
+ * channel, and this runs once from `ready`. It sends one ordinary voice_join —
+ * never after a kick, move, ban or leave, which clear the recorded channel —
+ * and only when the channel still exists as a joinable voice channel.
+ */
+export function rejoinVoiceAfterRestart(
+  clock: ReconnectClock,
+  ws: DispatchWs,
+  payload: Payload<"ready">,
+): void {
+  const channelId = clock.voiceRejoinChannelId;
+  clock.voiceRejoinChannelId = null;
+  if (channelId === null) return;
+  const channel = payload.channels.find((c) => c.id === channelId);
+  if (channel === undefined || channel.type !== "voice") {
+    log.info("Not rejoining voice after restart — channel is gone or no longer a voice channel", {
+      channelId,
+    });
+    return;
+  }
+  // A live membership already in the payload means the rejoin is unnecessary
+  // (or the user re-joined manually while ready was in flight).
+  const currentUserId = authStore.getState().user?.id ?? 0;
+  if (
+    payload.voice_states.some((vs) => vs.user_id === currentUserId && vs.channel_id === channelId)
+  ) {
+    return;
+  }
+  log.info("Rejoining voice channel after planned restart", { channelId });
+  joinVoiceChannel(channelId);
+  ws.send({ type: "voice_join", payload: { channel_id: channelId } });
 }
 
 /**

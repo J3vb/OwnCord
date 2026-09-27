@@ -14,8 +14,13 @@ import {
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
-import { livekitSession } from "../connection/dispatchContext";
-import type { DispatchApi, DispatchWs, Payload } from "../connection/dispatchContext";
+import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
+import type {
+  DispatchApi,
+  DispatchWs,
+  Payload,
+  ReconnectClock,
+} from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
 
@@ -210,10 +215,17 @@ export function handleVoiceState(payload: Payload<"voice_state">): void {
 // A moderator moved this client: tear the media session down and re-join the
 // destination through the ordinary join path (the server already removed us
 // from the old room and broadcast voice_leave).
-export function handleVoiceMoved(ws: DispatchWs, payload: Payload<"voice_moved">): void {
+export function handleVoiceMoved(
+  ws: DispatchWs,
+  payload: Payload<"voice_moved">,
+  clock?: ReconnectClock,
+): void {
   log.info("Moved to another voice channel by a moderator", {
     toChannelId: payload.to_channel_id,
   });
+  // RT-12: a move is a deliberate membership change, so a pending
+  // restart-rejoin for the old channel must not fire.
+  if (clock !== undefined) cancelVoiceRejoin(clock);
   void livekitSession().then(({ leaveVoice }) => {
     leaveVoice(false);
     leaveVoiceChannel();
@@ -224,7 +236,10 @@ export function handleVoiceMoved(ws: DispatchWs, payload: Payload<"voice_moved">
 
 // A moderator disconnected this client from voice. voice_leave has already
 // cleared the store; this only surfaces the reason.
-export function handleVoiceDisconnected(payload: Payload<"voice_disconnected">): void {
+export function handleVoiceDisconnected(
+  payload: Payload<"voice_disconnected">,
+  clock?: ReconnectClock,
+): void {
   // OC-0031: this can arrive well after the kick already tore the
   // session down at the SFU (queued behind a backed-up outbound send
   // buffer) — by the time it's delivered the user may have already
@@ -248,13 +263,16 @@ export function handleVoiceDisconnected(payload: Payload<"voice_disconnected">):
     });
     return;
   }
+  // RT-12: a kick is a deliberate membership change, so a pending
+  // restart-rejoin must not put the user back.
+  if (clock !== undefined) cancelVoiceRejoin(clock);
   log.info("Disconnected from voice by a moderator", { channelId: payload.channel_id });
   void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
   leaveVoiceChannel();
   showToast(payload.reason || connectText("voice.disconnected"), "error");
 }
 
-export function handleVoiceLeave(payload: Payload<"voice_leave">): void {
+export function handleVoiceLeave(payload: Payload<"voice_leave">, clock?: ReconnectClock): void {
   // OC-0283: removeVoiceUser() below always mutates the roster before
   // handleParticipantLeft below runs, and a pre-mutation snapshot (the
   // OC-0239 attempt this replaced) reads "still present" on every
@@ -300,6 +318,12 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">): void {
   if (shouldTeardownSession) {
     leaveVoiceChannel();
   }
+  // RT-12: a self voice_leave means the user is out of voice for real — their
+  // own Disconnect, or a server-initiated eviction. Either way a pending
+  // restart-rejoin must not fire. Cancelled on `isSelf` rather than the
+  // channel match above: the restart drop already nulled currentChannelId, so
+  // `shouldTeardownSession` is false here while the rejoin is still pending.
+  if (isSelf && clock !== undefined) cancelVoiceRejoin(clock);
 }
 
 export function handleVoiceConfig(payload: Payload<"voice_config">): void {

@@ -163,6 +163,13 @@ backoff capped at 6 s, about 27 s) should be **invisible on success** beyond the
 "Voice connection lost — failed to reconnect" + auto-leave. The 60 s token-refresh response guard and the
 forward-secrecy keypair rotation on reconnect are mechanics the user never sees.
 
+**A planned restart returns the call (RT-12).** The hub wipes `voice_states` on
+boot, so a client resumes chat but not voice. `handleServerRestart`
+(`features/connection/wsHandlers.ts`) records the channel while the session is
+still live, and `ready` then sends one ordinary `voice_join` if that channel is
+still a joinable voice channel. A kick, move, ban or leave cancels the pending
+rejoin, so the user is never put back into a call that was deliberately ended.
+
 ---
 
 ## 7. E2EE identity verification surface
