@@ -564,8 +564,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   function setDisabled(reason: string | null): void {
-    if (reason !== disabledReason && uploadErrorEl?.textContent === disabledReason) {
-      clearUploadError();
+    if (uploadErrorEl !== null && uploadErrorEl.textContent === disabledReason) {
+      if (reason === null) clearUploadError();
+      else setText(uploadErrorEl, reason);
     }
     disabledReason = reason;
     applyDisabledState();

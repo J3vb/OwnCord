@@ -751,6 +751,25 @@ describe("MessageInput", () => {
       comp.destroy?.();
     });
 
+    it("keeps the refusal line in sync as the slow-mode countdown ticks", () => {
+      const opts = makeOptions();
+      const comp = createMessageInput(opts);
+      comp.mount(container);
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.value = "next message";
+      comp.setDisabled("Slow mode — 5s");
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      comp.setDisabled("Slow mode — 4s");
+
+      const reason = container.querySelector(".attachment-upload-error") as HTMLElement | null;
+      expect(reason).not.toBeNull();
+      expect(reason!.textContent).toBe("Slow mode — 4s");
+      expect(textarea.getAttribute("aria-describedby")).toBe(reason!.id);
+      expect(opts.onSend).not.toHaveBeenCalled();
+      comp.destroy?.();
+    });
+
     it("shows the reason when Enter is pressed mid-sentence during reconnect", () => {
       const opts = makeOptions();
       const comp = createMessageInput(opts);
