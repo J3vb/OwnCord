@@ -64,7 +64,7 @@ func TestHandleVoiceLeave_DoesNotWaitOnLiveKitRemoval(t *testing.T) {
 
 	left := make(chan struct{})
 	go func() {
-		h.handleVoiceLeave(context.Background(), c)
+		h.handleVoiceLeave(context.Background(), c, voiceLeaveReasonDisconnect)
 		close(left)
 	}()
 	select {

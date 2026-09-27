@@ -167,7 +167,7 @@ func TestHandleVoiceJoin_AbortedSwitchDoesNotResurrectVoiceTopicSubscription(t *
 		t.Fatalf("create trigger: %v", err)
 	}
 
-	h.handleVoiceJoin(ctx, c, json.RawMessage(fmt.Sprintf(`{"channel_id": %d}`, chB)))
+	h.handleVoiceJoin(ctx, c, json.RawMessage(fmt.Sprintf(`{"channel_id": %d}`, chB)), "")
 
 	if got := c.getVoiceChID(); got != 0 {
 		t.Fatalf("aborted switch resurrected client voice state at channel %d, want 0 — voice_leave for channel %d was already broadcast to this client (OC-0034)", got, chA)

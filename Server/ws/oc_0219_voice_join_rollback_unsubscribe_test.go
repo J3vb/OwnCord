@@ -72,7 +72,7 @@ func TestVoiceJoin_GetChannelVoiceStatesError_UnsubscribesVoiceTopic(t *testing.
 	defer func() { voiceJoinPostTokenRaceHook = nil }()
 
 	payload, _ := json.Marshal(map[string]any{"channel_id": chID})
-	h.handleVoiceJoin(context.Background(), c, json.RawMessage(payload))
+	h.handleVoiceJoin(context.Background(), c, json.RawMessage(payload), "")
 
 	if !hookRan {
 		t.Fatal("voiceJoinPostTokenRaceHook never fired — test setup is broken, not exercising the join path")

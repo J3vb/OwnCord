@@ -114,6 +114,12 @@ and only when it changes something a contributor or fork holder must do
   Known issues, with internal changes in a short Under-the-hood list. The
   release workflow copies it to the GitHub release page as-is, so a release no
   longer first publishes a wall of internal text.
+- Server log lines for voice gained triage detail: a `voice join` line now
+  carries the joining frame's `req_id`, and every `voice leave` line carries
+  the reason it ran (`client`, `switch`, `disconnect`, `handshake`,
+  `moderator`, `dm_leave`, `blocked`, `token_refresh`, `revoked`), so a
+  "voice won't connect" report can be traced to the path that tore the
+  session down.
 
 ## v2.0.0-beta.1
 

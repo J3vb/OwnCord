@@ -211,7 +211,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		// still-permitted channel may have committed while it ran. The
 		// eviction is conditional on the client still being in the checked
 		// channel — never on whatever channel it is in by now.
-		if !h.handleVoiceLeaveIfStillIn(ctx, c, chID) {
+		if !h.handleVoiceLeaveIfStillIn(ctx, c, chID, voiceLeaveReasonRevoked) {
 			continue
 		}
 		slog.Warn("sweepStaleVoiceStates: evicted participant whose CONNECT_VOICE was revoked",

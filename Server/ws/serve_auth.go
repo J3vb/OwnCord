@@ -176,7 +176,7 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 		// participant, and a stale E2EE key-holder entry all survive this
 		// connection's death until the next sweep (up to 60s).
 		if voiceChID != 0 {
-			h.handleVoiceLeave(cleanupCtx, c)
+			h.handleVoiceLeave(cleanupCtx, c, voiceLeaveReasonHandshake)
 		}
 	}
 	// shouldMarkOffline re-checks h.clients rather than trusting the

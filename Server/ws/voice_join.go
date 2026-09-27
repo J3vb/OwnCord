@@ -53,7 +53,11 @@ var voiceJoinPostTokenRaceHook func(*Client)
 // 7. Sends existing voice states to the joiner.
 // 8. Broadcasts voice_state to all clients.
 // 9. Sends voice_config to the joiner.
-func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMessage) {
+//
+// reqID is the joining frame's client-supplied request id (envelope.id), logged
+// on the "voice join" line so an operator can correlate a token with the arrival
+// that produced it (SRE-M2). Empty when the frame carried none.
+func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMessage, reqID string) {
 	channelID, ch, ok := h.voiceJoinPrecheck(ctx, c, payload)
 	if !ok {
 		return
@@ -86,7 +90,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		return
 	}
 
-	h.voiceJoinComplete(ctx, c, ch, channelID, state)
+	h.voiceJoinComplete(ctx, c, ch, channelID, state, reqID)
 }
 
 // restorePendingModFlags puts a moderator mute/deafen stash back onto c after
@@ -250,7 +254,7 @@ func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, c *Client, channelID in
 
 	// If user is already in a different voice channel, leave it first.
 	if currentChID > 0 {
-		h.handleVoiceLeave(ctx, c)
+		h.handleVoiceLeave(ctx, c, voiceLeaveReasonSwitch)
 
 		// BUG-088: Verify old voice state is actually cleared before joining
 		// the new channel. If the DB delete failed (retry still running in
@@ -458,7 +462,7 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, c *Client, channelID int6
 // voiceJoinComplete finishes a join that survived every guard: voice topic
 // subscription, key-holder election, the joiner's own voice_state fan-out, the
 // existing participants' states and E2EE keys, and voice_config.
-func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, channelID int64, state *db.VoiceState) {
+func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, channelID int64, state *db.VoiceState, reqID string) {
 	// Voice channel state itself was already set above (BUG-088), immediately
 	// after the DB row committed — which also means a concurrent eviction (the
 	// revocation sweep, a participant_left webhook, a moderator kick/move) can
@@ -570,6 +574,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 		"user_id", c.userID,
 		"username", c.user.Username,
 		"channel_id", channelID,
+		"req_id", reqID,
 		"remote", c.remoteAddr,
 		"livekit_url", lkURL,
 		"quality", quality,
@@ -611,19 +616,21 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	ch, chErr := d.Reader.GetChannel(ctx, channelID)
 	if chErr != nil || ch == nil {
 		return Result{
-			Error:      ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
-			LeaveVoice: true,
+			Error:            ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
+			LeaveVoice:       true,
+			LeaveVoiceReason: voiceLeaveReasonTokenRefresh,
 		}
 	}
 	sub, subErr := channelSubject(ctx, d.Reader, d.Permissions, d.PermSvc, userID, ch, true)
 	if subErr != nil {
 		return Result{
-			Error:      ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
-			LeaveVoice: true,
+			Error:            ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
+			LeaveVoice:       true,
+			LeaveVoiceReason: voiceLeaveReasonTokenRefresh,
 		}
 	}
 	if joinErr := permissions.CanJoinVoice(sub); joinErr != nil {
-		return Result{Error: joinDenial(joinErr), LeaveVoice: true}
+		return Result{Error: joinDenial(joinErr), LeaveVoice: true, LeaveVoiceReason: voiceLeaveReasonTokenRefresh}
 	}
 
 	// A cached join token identifies the session; it does not capture a

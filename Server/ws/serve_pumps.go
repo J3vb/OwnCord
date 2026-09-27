@@ -214,7 +214,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 			// cleaning here would delete the replacement's DB row whenever
 			// teardown snapshots voiceChID before the transfer zeroes it.
 			if voiceChID != 0 && !replaced {
-				hub.handleVoiceLeave(cleanupCtx, c)
+				hub.handleVoiceLeave(cleanupCtx, c, voiceLeaveReasonDisconnect)
 			}
 			c.mu.Lock()
 			received := c.msgsReceived
