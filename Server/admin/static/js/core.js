@@ -311,15 +311,20 @@ function openModal(html){
    dialog body set state.modalDirty, and the operator's own dismissals — a
    Cancel or × button, the scrim, or Escape — go through dismissModal(), which
    asks before discarding. closeModal() stays the internal close, for callers
-   that have finished their work. Two channel-access drawer paths can still
-   drop edits without asking and are a deferred follow-up: Clear override
-   closes the drawer through closeModal(), discarding pending Access-tab
-   edits, and switching the permission target repaints the matrix, discarding
-   override edits made for the previous target. */
+   that have finished their work. The two channel-access drawer paths that
+   would drop edits without closing go through confirmDiscardModal() first:
+   Clear override would close the drawer over pending Access-tab edits, and
+   switching the permission target repaints the matrix over edits made for the
+   previous target. */
 function markModalDirty(){state.modalDirty=true}
+/* The one dialog discard confirm, so every path that would drop a dirty
+   dialog's edits asks the same question. */
+function confirmDiscardModal(){
+  return !state.modalDirty||confirm('Discard your unsaved changes?');
+}
 function dismissModal(){
   if(modalLocked)return false;
-  if(state.modalDirty&&!confirm('Discard your unsaved changes?'))return false;
+  if(!confirmDiscardModal())return false;
   closeModal();
   return true;
 }
