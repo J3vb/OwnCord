@@ -113,7 +113,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		return
 	}
 
-	h.handleMessageApply(c, env, result)
+	h.handleMessageApply(c, env, reqID, result)
 }
 
 // handleMessageSessionRecheck performs handleMessage's periodic session
@@ -208,7 +208,7 @@ func (h *Hub) handleMessageDecode(c *Client, raw []byte) (envelope, string, stri
 
 // handleMessageApply applies the client state mutations and side effects that a
 // successful V2 Result asks for.
-func (h *Hub) handleMessageApply(c *Client, env envelope, result Result) {
+func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result Result) {
 	// Apply client state mutations and side effects.
 	if result.SetChannelID != nil {
 		h.applySetChannelID(c, *result.SetChannelID)
@@ -239,12 +239,6 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, result Result) {
 		h.handleVoiceLeave(c.ctx, c, result.LeaveVoiceReason)
 	}
 	if result.JoinVoice {
-		// req_id is client-controlled; cap it to the same 64 chars
-		// handleMessageDecode uses before it reaches a log line (SRE-M2).
-		reqID := env.ID
-		if len(reqID) > 64 {
-			reqID = reqID[:64]
-		}
 		h.handleVoiceJoin(c.ctx, c, env.Payload, reqID)
 	}
 }

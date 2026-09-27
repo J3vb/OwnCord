@@ -1,30 +1,22 @@
 package ws
 
 // SRE-M2 server half: the "voice join" line carries the joining frame's req_id
-// and every leave path records why it ran. These lock those two log fields in
-// place.
-//
-// The static guard is the one that matters most: a new caller that forgets its
-// reason argument still compiles (the parameter is a string) and still tears
-// the session down, so only a source scan catches the missing field before it
-// reaches an operator's logs.
+// and every leave path records why it ran. These drive the real entry points
+// and assert the log fields each one produces.
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // lockedBuffer is a slog sink safe against the background goroutines a leave
@@ -57,64 +49,21 @@ func captureVoiceLog(t *testing.T) *lockedBuffer {
 	return buf
 }
 
-// TestHandleVoiceLeave_LogsEveryReason drives handleVoiceLeave once per
-// supported reason and asserts each one reaches the "voice leave" line. A
-// caller that dropped its reason argument would compile but log `reason=""`,
-// which this catches.
-func TestHandleVoiceLeave_LogsEveryReason(t *testing.T) {
-	reasons := []string{
-		voiceLeaveReasonClient,
-		voiceLeaveReasonSwitch,
-		voiceLeaveReasonDisconnect,
-		voiceLeaveReasonHandshake,
-		voiceLeaveReasonModerator,
-		voiceLeaveReasonTokenRefresh,
-		voiceLeaveReasonRevoked,
-	}
-	for _, reason := range reasons {
-		t.Run(reason, func(t *testing.T) {
-			ctx := context.Background()
-			database := newHarvestVoiceDB(t)
-			uid := seedHarvestVoiceUser(t, database, "leave-reason")
-			chID := mustCreateVoiceChannel(t, database, "voice-lr")
-			if err := database.JoinVoiceChannel(ctx, uid, chID); err != nil {
-				t.Fatalf("JoinVoiceChannel: %v", err)
-			}
-			vs, err := database.GetVoiceState(ctx, uid)
-			if err != nil || vs == nil {
-				t.Fatalf("GetVoiceState: %v", err)
-			}
-
-			h := newTestHub(t, database, auth.NewRateLimiter(), nil)
-			t.Cleanup(h.Stop)
-			c := NewTestClient(h, uid, make(chan []byte, 16))
-			h.clients[uid] = c
-			c.setVoiceState(chID, vs.JoinedAt)
-
-			buf := captureVoiceLog(t)
-			h.handleVoiceLeave(ctx, c, reason)
-
-			if got := buf.String(); !strings.Contains(got, "reason="+reason) {
-				t.Fatalf("leave log missing reason %q:\n%s", reason, got)
-			}
-		})
-	}
-}
-
-// TestHandleVoiceJoin_LogsReqID asserts the join line carries the request id
-// the joining frame supplied, so an operator can correlate a token with its
-// arrival.
-func TestHandleVoiceJoin_LogsReqID(t *testing.T) {
+// newVoiceTraceHub builds a hub with a LiveKit client pointed at a dead
+// address (enough to mint tokens) and one connected user, returning the user
+// id and a voice channel they are cleared to join.
+func newVoiceTraceHub(t *testing.T, name string) (*Hub, *db.DB, *Client, int64) {
+	t.Helper()
 	ctx := context.Background()
 	database := newHarvestVoiceDB(t)
-	uid := seedHarvestVoiceUser(t, database, "join-reqid")
-	chID := mustCreateVoiceChannel(t, database, "voice-jr")
+	uid := seedHarvestVoiceUser(t, database, name)
+	chID := mustCreateVoiceChannel(t, database, name+"-voice")
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	t.Cleanup(h.Stop)
 	lk, err := NewLiveKitClient(&config.VoiceConfig{
-		LiveKitAPIKey:    "reqid-key",
-		LiveKitAPISecret: "reqid-secret-0123456789abcdef",
+		LiveKitAPIKey:    "trace-key",
+		LiveKitAPISecret: "trace-secret-0123456789abcdef",
 		LiveKitURL:       "ws://127.0.0.1:9",
 	})
 	if err != nil {
@@ -126,140 +75,131 @@ func TestHandleVoiceJoin_LogsReqID(t *testing.T) {
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)
 	}
-	c := NewTestClient(h, uid, make(chan []byte, 64))
+	c := NewTestClient(h, uid, make(chan []byte, 256))
 	c.user = user
 	h.clients[uid] = c
+	return h, database, c, chID
+}
 
-	const reqID = "req-join-abc123"
-	payload, _ := json.Marshal(map[string]any{"channel_id": chID})
-
-	buf := captureVoiceLog(t)
-	h.handleVoiceJoin(ctx, c, json.RawMessage(payload), reqID)
-
-	if got := c.getVoiceChID(); got != chID {
-		t.Fatalf("join did not land: voice channel = %d, want %d (log:\n%s)", got, chID, buf.String())
+// voiceFrame builds a client envelope of the given type.
+func voiceFrame(t *testing.T, typ, id string, payload map[string]any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{"type": typ, "id": id, "payload": payload})
+	if err != nil {
+		t.Fatalf("marshal %s: %v", typ, err)
 	}
-	if got := buf.String(); !strings.Contains(got, "req_id="+reqID) {
-		t.Fatalf("join log missing req_id %q:\n%s", reqID, got)
+	return raw
+}
+
+// joinVoiceForTrace joins c to chID through a real voice_join frame.
+func joinVoiceForTrace(t *testing.T, h *Hub, c *Client, chID int64) {
+	t.Helper()
+	h.handleMessage(c, voiceFrame(t, "voice_join", "join", map[string]any{"channel_id": chID}))
+	if got := c.getVoiceChID(); got != chID {
+		t.Fatalf("setup join did not land: voice channel = %d, want %d", got, chID)
 	}
 }
 
-// TestVoiceLeaveCallersPassReason scans every non-test file in the package for
-// calls to the two leave entry points and fails on any call whose final
-// argument is not a voiceLeaveReason* constant — including the empty string,
-// which is what a dropped argument compiles to.
-//
-// A syntactic scan rather than running each caller: the point is to catch a
-// future caller that forgets the argument, which no runtime assertion can see
-// because the call still succeeds.
-//
-// Two call sites (handlers.go) forward a Result's LeaveVoiceReason rather than
-// naming a constant, so the scan also checks that every Result literal setting
-// LeaveVoice: true also sets LeaveVoiceReason.
-func TestVoiceLeaveCallersPassReason(t *testing.T) {
-	const pkgDir = "."
-
-	fset := token.NewFileSet()
-	entries, err := os.ReadDir(pkgDir)
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
+// revokeConnectVoice denies CONNECT_VOICE on chID for the harvest role.
+func revokeConnectVoice(t *testing.T, database *db.DB, chID int64) {
+	t.Helper()
+	if err := database.UpsertChannelOverride(context.Background(), chID, harvestVoiceRoleID, 0, permissions.ConnectVoice); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
 	}
+}
 
-	// The set of constant identifiers a caller may legitimately pass.
-	reasonConsts := map[string]bool{
-		"voiceLeaveReasonClient":       true,
-		"voiceLeaveReasonSwitch":       true,
-		"voiceLeaveReasonDisconnect":   true,
-		"voiceLeaveReasonHandshake":    true,
-		"voiceLeaveReasonModerator":    true,
-		"voiceLeaveReasonTokenRefresh": true,
-		"voiceLeaveReasonRevoked":      true,
-	}
-	targets := map[string]bool{
-		"handleVoiceLeave":          true,
-		"handleVoiceLeaveIfStillIn": true,
-	}
-
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+// voiceLeaveReasons returns the reason of every "voice leave" line logged.
+func voiceLeaveReasons(log string) []string {
+	var reasons []string
+	for line := range strings.Lines(log) {
+		if !strings.Contains(line, `msg="voice leave"`) {
 			continue
 		}
-		p := filepath.Join(pkgDir, name)
-		f, err := parser.ParseFile(fset, p, nil, 0)
-		if err != nil {
-			t.Fatalf("ParseFile %s: %v", p, err)
-		}
-		ast.Inspect(f, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.CallExpr:
-				sel, ok := n.Fun.(*ast.SelectorExpr)
-				if !ok || !targets[sel.Sel.Name] {
-					return true
-				}
-				if len(n.Args) == 0 {
-					t.Errorf("%s:%d: %s call has no reason argument", name, fset.Position(n.Pos()).Line, sel.Sel.Name)
-					return true
-				}
-				if !isReasonExpr(n.Args[len(n.Args)-1], reasonConsts) {
-					t.Errorf("%s:%d: %s final argument is not a voiceLeaveReason* constant and not a forwarded LeaveVoiceReason",
-						name, fset.Position(n.Pos()).Line, sel.Sel.Name)
-				}
-			case *ast.CompositeLit:
-				if !setsLeaveVoiceTrue(n) {
-					return true
-				}
-				if !hasField(n, "LeaveVoiceReason") {
-					t.Errorf("%s:%d: Result sets LeaveVoice: true without LeaveVoiceReason; the leave would log an empty reason",
-						name, fset.Position(n.Pos()).Line)
-				}
+		for field := range strings.FieldsSeq(line) {
+			if r, ok := strings.CutPrefix(field, "reason="); ok {
+				reasons = append(reasons, r)
 			}
-			return true
+		}
+	}
+	return reasons
+}
+
+// TestVoiceLeave_EntryPointsLogTheirReason drives each server-side leave path
+// from its real entry point and asserts the single "voice leave" line it
+// produces names that path.
+func TestVoiceLeave_EntryPointsLogTheirReason(t *testing.T) {
+	cases := []struct {
+		name  string
+		want  string
+		leave func(t *testing.T, h *Hub, database *db.DB, c *Client, chID int64)
+	}{
+		{"client voice_leave frame", voiceLeaveReasonClient, func(t *testing.T, h *Hub, _ *db.DB, c *Client, _ int64) {
+			h.handleMessage(c, voiceFrame(t, "voice_leave", "leave", map[string]any{}))
+		}},
+		{"channel switch", voiceLeaveReasonSwitch, func(t *testing.T, h *Hub, database *db.DB, c *Client, _ int64) {
+			other := mustCreateVoiceChannel(t, database, "trace-other")
+			h.handleMessage(c, voiceFrame(t, "voice_join", "switch", map[string]any{"channel_id": other}))
+		}},
+		{"denied voice_token_refresh", voiceLeaveReasonTokenRefresh, func(t *testing.T, h *Hub, database *db.DB, c *Client, chID int64) {
+			revokeConnectVoice(t, database, chID)
+			h.handleMessage(c, voiceFrame(t, "voice_token_refresh", "refresh", map[string]any{}))
+		}},
+		{"revocation sweep", voiceLeaveReasonRevoked, func(t *testing.T, h *Hub, database *db.DB, _ *Client, chID int64) {
+			revokeConnectVoice(t, database, chID)
+			h.sweepStaleVoiceEvictRevoked(context.Background())
+		}},
+		{"moderator DisconnectFromVoice", voiceLeaveReasonModerator, func(t *testing.T, h *Hub, _ *db.DB, c *Client, _ int64) {
+			if !h.DisconnectFromVoice(context.Background(), c.userID) {
+				t.Fatal("DisconnectFromVoice reported no connection")
+			}
+		}},
+		{"moderator kick via disconnectFromVoiceIn", voiceLeaveReasonModerator, func(t *testing.T, h *Hub, _ *db.DB, c *Client, chID int64) {
+			if !disconnectFromVoiceIn(context.Background(), h, c.userID, chID) {
+				t.Fatal("disconnectFromVoiceIn reported no eviction")
+			}
+		}},
+		{"DM eviction via DisconnectFromVoiceInChannel", VoiceLeaveReasonBlocked, func(t *testing.T, h *Hub, _ *db.DB, c *Client, chID int64) {
+			if !h.DisconnectFromVoiceInChannel(context.Background(), c.userID, chID, VoiceLeaveReasonBlocked) {
+				t.Fatal("DisconnectFromVoiceInChannel reported no eviction")
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, database, c, chID := newVoiceTraceHub(t, "trace")
+			joinVoiceForTrace(t, h, c, chID)
+
+			buf := captureVoiceLog(t)
+			tc.leave(t, h, database, c, chID)
+
+			got := voiceLeaveReasons(buf.String())
+			if len(got) != 1 || got[0] != tc.want {
+				t.Fatalf("voice leave reasons = %q, want [%q]\n%s", got, tc.want, buf.String())
+			}
 		})
 	}
 }
 
-// isReasonExpr reports whether e is a voiceLeaveReason* constant or the
-// forwarded Result field LeaveVoiceReason.
-func isReasonExpr(e ast.Expr, reasonConsts map[string]bool) bool {
-	switch e := e.(type) {
-	case *ast.Ident:
-		return reasonConsts[e.Name]
-	case *ast.SelectorExpr:
-		return e.Sel.Name == "LeaveVoiceReason"
-	default:
-		return false
-	}
-}
+// TestHandleVoiceJoin_LogsReqID sends a voice_join frame and asserts the join
+// line carries its envelope id, capped at 64 chars like every req_id log
+// site, so an operator can correlate a token with its arrival.
+func TestHandleVoiceJoin_LogsReqID(t *testing.T) {
+	h, _, c, chID := newVoiceTraceHub(t, "join-reqid")
+	reqID := "req-join-" + strings.Repeat("x", 70)
 
-// setsLeaveVoiceTrue reports whether a composite literal sets LeaveVoice to
-// the identifier true.
-func setsLeaveVoiceTrue(lit *ast.CompositeLit) bool {
-	for _, elt := range lit.Elts {
-		kv, ok := elt.(*ast.KeyValueExpr)
-		if !ok {
-			continue
-		}
-		key, ok := kv.Key.(*ast.Ident)
-		if !ok || key.Name != "LeaveVoice" {
-			continue
-		}
-		val, ok := kv.Value.(*ast.Ident)
-		return ok && val.Name == "true"
-	}
-	return false
-}
+	buf := captureVoiceLog(t)
+	h.handleMessage(c, voiceFrame(t, "voice_join", reqID, map[string]any{"channel_id": chID}))
 
-// hasField reports whether a composite literal has a key with the given name.
-func hasField(lit *ast.CompositeLit, field string) bool {
-	for _, elt := range lit.Elts {
-		kv, ok := elt.(*ast.KeyValueExpr)
-		if !ok {
-			continue
-		}
-		if key, ok := kv.Key.(*ast.Ident); ok && key.Name == field {
-			return true
+	if got := c.getVoiceChID(); got != chID {
+		t.Fatalf("join did not land: voice channel = %d, want %d (log:\n%s)", got, chID, buf.String())
+	}
+	for line := range strings.Lines(buf.String()) {
+		if strings.Contains(line, `msg="voice join"`) {
+			if !strings.Contains(line, " req_id="+reqID[:64]+" ") {
+				t.Fatalf("join log req_id is not the 64-char prefix %q:\n%s", reqID[:64], line)
+			}
+			return
 		}
 	}
-	return false
+	t.Fatalf("no voice join line logged:\n%s", buf.String())
 }

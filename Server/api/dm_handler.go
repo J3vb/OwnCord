@@ -59,7 +59,7 @@ func markDMVisibilityChanged(broadcaster DMBroadcaster) {
 // reached by type assertion so the handler stays usable with the
 // SendToUser-only test doubles the package already has.
 type dmVoiceEvictor interface {
-	DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64) bool
+	DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64, reason string) bool
 }
 
 // The production broadcaster must keep satisfying it: a type assertion that
@@ -254,7 +254,7 @@ func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.Handle
 			// participant left — is evicted here.
 			if result.Left {
 				if ve, ok := broadcaster.(dmVoiceEvictor); ok {
-					ve.DisconnectFromVoiceInChannel(context.WithoutCancel(r.Context()), user.ID, channelID)
+					ve.DisconnectFromVoiceInChannel(context.WithoutCancel(r.Context()), user.ID, channelID, ws.VoiceLeaveReasonDMLeave)
 				}
 			}
 		}
@@ -437,7 +437,7 @@ func evictBlockedUserFromVoice(ctx context.Context, svc *service.Services, broad
 		return
 	}
 	if exists {
-		ve.DisconnectFromVoiceInChannel(ctx, targetID, chID)
+		ve.DisconnectFromVoiceInChannel(ctx, targetID, chID, ws.VoiceLeaveReasonBlocked)
 	}
 }
 

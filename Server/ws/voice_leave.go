@@ -23,8 +23,14 @@ const (
 	// (unregisterFailedHandshake, serve_auth.go).
 	voiceLeaveReasonHandshake = "handshake"
 	// voiceLeaveReasonModerator is a server-driven eviction: moderator kick,
-	// move, or timeout (DisconnectFromVoice / DisconnectFromVoiceInChannel).
+	// move, or timeout (DisconnectFromVoice / disconnectFromVoiceIn).
 	voiceLeaveReasonModerator = "moderator"
+	// VoiceLeaveReasonDMLeave is a user leaving a group DM whose call they
+	// are in, including the last participant closing it (api DM handler).
+	VoiceLeaveReasonDMLeave = "dm_leave"
+	// VoiceLeaveReasonBlocked is a user evicted from a 1:1 DM call because
+	// the other participant blocked them (api block handler).
+	VoiceLeaveReasonBlocked = "blocked"
 	// voiceLeaveReasonTokenRefresh is a refused voice_token_refresh whose
 	// permission was revoked, which evicts rather than merely denying a token.
 	voiceLeaveReasonTokenRefresh = "token_refresh"

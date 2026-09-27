@@ -170,7 +170,7 @@ func requireTargetInChannel(state *db.VoiceState, channelID int64) *Result {
 // satisfies this optional extension and disconnectFromVoiceIn prefers it,
 // falling back to the unscoped method for any other implementation.
 type voiceChannelDisconnector interface {
-	DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64) bool
+	DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64, reason string) bool
 }
 
 // The production moderator must keep satisfying it: a type assertion that
@@ -197,7 +197,7 @@ var _ voiceServerMuteLocker = (*Hub)(nil)
 // the target has no connection on this node or has already left that channel.
 func disconnectFromVoiceIn(ctx context.Context, mod VoiceModerator, targetID, channelID int64) bool {
 	if scoped, ok := mod.(voiceChannelDisconnector); ok {
-		return scoped.DisconnectFromVoiceInChannel(ctx, targetID, channelID)
+		return scoped.DisconnectFromVoiceInChannel(ctx, targetID, channelID, voiceLeaveReasonModerator)
 	}
 	return mod.DisconnectFromVoice(ctx, targetID)
 }
@@ -627,13 +627,14 @@ func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 // committed on the target's own goroutine after the moderator's checks either
 // loses the race outright or is left untouched — never evicted in place of the
 // channel that was checked. Reports false in both of those cases, which the
-// callers already treat as "user is not connected".
-func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64) bool {
+// callers already treat as "user is not connected". reason is the caller's
+// voiceLeaveReason* / VoiceLeaveReason* constant for the "voice leave" line.
+func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64, reason string) bool {
 	c := h.GetClient(userID)
 	if c == nil {
 		return false
 	}
-	return h.handleVoiceLeaveIfStillIn(ctx, c, channelID, voiceLeaveReasonModerator)
+	return h.handleVoiceLeaveIfStillIn(ctx, c, channelID, reason)
 }
 
 // SetPendingVoiceModFlags stashes a moderator-imposed mute/deafen on
