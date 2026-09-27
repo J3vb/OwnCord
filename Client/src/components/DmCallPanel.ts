@@ -467,15 +467,20 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   }
 
   /** The shared grid moves into videoEl (VideoModeController); everyone in
-   *  `ids` without a camera is an avatar tile in it, kept live by refresh(). */
-  function videoStage(dm: DmChannel, ids: readonly number[]): HTMLElement {
+   *  `ids` without a camera is an avatar tile in it, kept live by refresh();
+   *  the `ringing` ones keep their dimmed pulse. */
+  function videoStage(
+    dm: DmChannel,
+    ids: readonly number[],
+    ringing: readonly number[] = [],
+  ): HTMLElement {
     root.classList.add("dm-call-panel--video");
     const me = currentUserId();
     const voice = voiceStore.getState();
     people = ids.map((id) => ({
       userId: id,
       label: resolvePerson(id, dm, voice, me).name,
-      content: avatar(id, dm, "lg"),
+      content: avatar(id, dm, "lg", ringing.includes(id) ? "dcp-avatar--ringing" : ""),
     }));
     return videoEl;
   }
@@ -556,14 +561,15 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       return;
     }
     root.classList.add("dm-call-panel--expanded");
+    const me = currentUserId();
+    const callees =
+      v.pending.length > 0 ? v.pending : v.dm.participants.map((p) => p.id).slice(0, 1);
     let stage: HTMLElement;
     if (videoActive) {
-      stage = videoStage(v.dm, [currentUserId()]);
+      stage = videoStage(v.dm, [me, ...callees], callees);
     } else {
       stage = createElement("div", { class: "dcp-stage" });
-      stage.appendChild(person(currentUserId(), v.dm));
-      const callees =
-        v.pending.length > 0 ? v.pending : v.dm.participants.map((p) => p.id).slice(0, 1);
+      stage.appendChild(person(me, v.dm));
       for (const id of callees) stage.appendChild(person(id, v.dm, "dcp-avatar--ringing"));
     }
     appendChildren(
@@ -578,13 +584,13 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   function renderUnanswered(v: Extract<DmCallView, { kind: "unanswered" }>): void {
     root.classList.add("dm-call-panel--expanded");
     const name = callName(v.dm, currentUserId());
+    const ids = [currentUserId(), ...v.dm.participants.map((p) => p.id)];
     let stage: HTMLElement;
     if (videoActive) {
-      stage = videoStage(v.dm, [currentUserId()]);
+      stage = videoStage(v.dm, ids);
     } else {
       stage = createElement("div", { class: "dcp-stage" });
-      stage.appendChild(person(currentUserId(), v.dm));
-      for (const p of v.dm.participants) stage.appendChild(person(p.id, v.dm));
+      for (const id of ids) stage.appendChild(person(id, v.dm));
     }
     const actions = createElement("div", { class: "dcp-controls" });
     appendChildren(

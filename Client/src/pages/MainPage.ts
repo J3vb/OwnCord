@@ -68,7 +68,7 @@ import type { MessageController } from "./main-page/MessageController";
 import { createReactionController } from "./main-page/ReactionController";
 import type { ReactionController } from "./main-page/ReactionController";
 import { createVideoModeController } from "./main-page/VideoModeController";
-import type { VideoModeController } from "./main-page/VideoModeController";
+import type { VideoModeController, VideoPanelHost } from "./main-page/VideoModeController";
 import { createChannelController } from "./main-page/ChannelController";
 import type { ChannelController } from "./main-page/ChannelController";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
@@ -285,6 +285,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // The caller's side of a ring, and the in-DM panel that draws both sides.
   let outgoingCall: OutgoingCall | null = null;
   let callPanel: DmCallPanelComponent | null = null;
+  /** The loaded panel as the video controller's host: one object per panel,
+   *  since the controller tells hosts apart by identity. */
+  let callPanelHost: VideoPanelHost | null = null;
   /** "Join with video": turn the camera on once this call is connected. */
   let cameraOnJoin: number | null = null;
 
@@ -677,15 +680,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       videoGrid: chatAreaResult.videoGrid,
       getCurrentUserId,
       // The DM call panel hosts the video of its own call (chat stays up).
-      panelHost: () => {
-        const panel = callPanel;
-        if (panel === null) return null;
-        return {
-          ownsCall: (channelId) => panel.ownsCall(channelId),
-          element: () => panel.videoElement(),
-          setActive: (active) => panel.setVideoActive(active),
-        };
-      },
+      panelHost: () => callPanelHost,
     });
 
     // The composer of the channel on screen, else the header's menu button
@@ -967,8 +962,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         videoGrid: chatAreaResult.videoGrid,
       });
       // Published before mount: mounting reports whether it can host video,
-      // and the video controller reads the panel through callPanel.
+      // and the video controller reads the panel through callPanelHost.
       callPanel = panel;
+      callPanelHost = {
+        ownsCall: (channelId) => panel.ownsCall(channelId),
+        element: () => panel.videoElement(),
+        setActive: (active) => panel.setVideoActive(active),
+      };
       panel.mount(chatAreaResult.callPanelSlot);
       children.push(panel);
       panel.setOutgoing(outgoingCall?.current() ?? null);
@@ -1085,6 +1085,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       ringCtrl = null;
       callBanner = null;
       callPanel = null;
+      callPanelHost = null;
       outgoingCall?.destroy();
       outgoingCall = null;
       cameraOnJoin = null;

@@ -579,14 +579,21 @@ describe("DmCallPanel — video in the call", () => {
     expect(root.classList.contains("dm-call-panel--video")).toBe(true);
     expect(q(root, "dcp-caption")!.textContent).toBe("Calling Otto…");
     expect(q(root, "dcp-camera")).not.toBeNull();
-    expect(lastPeople(opts).map((p) => p.userId)).toEqual([SELF]);
+    const people = lastPeople(opts);
+    expect(people.map((p) => p.userId)).toEqual([SELF, OTTO]);
+    expect(people[0]!.content.classList.contains("dcp-avatar--ringing")).toBe(false);
+    expect(people[1]!.content.classList.contains("dcp-avatar--ringing")).toBe(true);
   });
 
-  it("keeps your own video once the call went unanswered", () => {
+  it("keeps your own video once the call went unanswered, with the callee still shown", () => {
     setVoice(DM, [vu(SELF)]);
-    const { root } = mount();
+    const { opts, root } = mount();
     panel!.setOutgoing({ channelId: DM, phase: "declined", pending: [] });
     panel!.setVideoActive(true);
+
+    const people = lastPeople(opts);
+    expect(people.map((p) => p.userId)).toEqual([SELF, OTTO]);
+    expect(people[1]!.content.classList.contains("dcp-avatar--ringing")).toBe(false);
 
     expect(root.contains(panel!.videoElement())).toBe(true);
     expect(q(root, "dcp-caption")!.textContent).toBe("Otto declined the call");

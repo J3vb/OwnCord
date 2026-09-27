@@ -134,6 +134,7 @@ const {
         setFocusedTile: ReturnType<typeof vi.fn>;
         getFocusedTileId: ReturnType<typeof vi.fn>;
         setLabel: ReturnType<typeof vi.fn>;
+        setPeople: ReturnType<typeof vi.fn>;
       };
     },
   },
@@ -938,6 +939,64 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 7 }));
     channelsStore.flush();
     expect(panelVideo!.contains(slots.videoGridSlot)).toBe(false);
+
+    page.destroy?.();
+  });
+
+  it("keeps the DM call panel's video up across repeated video changes, never switching it off in between", async () => {
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    const vu = (userId: number, username: string, extra = {}) => ({
+      userId,
+      username,
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+      ...extra,
+    });
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceUsers: new Map([
+        [
+          50,
+          new Map([
+            [1, vu(1, "alice")],
+            [10, vu(10, "bob", { screenshare: true })],
+          ]),
+        ],
+      ]),
+    }));
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    voiceStore.flush();
+
+    const mute = document.querySelector('[data-testid="dcp-mute"]');
+    expect(mute).not.toBeNull();
+    const setPeople = capturedChatAreaRef.current!.videoGrid.setPeople;
+    setPeople.mockClear();
+
+    for (const extra of [{ screenshare: true, camera: true }, { screenshare: true }]) {
+      voiceStore.setState((prev) => ({
+        ...prev,
+        voiceUsers: new Map([
+          [
+            50,
+            new Map([
+              [1, vu(1, "alice")],
+              [10, vu(10, "bob", extra)],
+            ]),
+          ],
+        ]),
+      }));
+      voiceStore.flush();
+    }
+
+    expect(setPeople).not.toHaveBeenCalledWith([]);
+    expect(document.querySelector('[data-testid="dcp-mute"]')).toBe(mute);
 
     page.destroy?.();
   });
