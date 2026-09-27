@@ -11071,10 +11071,11 @@
       "lens": "code-health",
       "finder": "b9-exit-audit",
       "fixed": "2026-09-27",
-      "fix": {
-        "test": "Client/tests/unit/eslint-rules.test.ts",
-        "revertProof": "self-reported"
-      },
+       "fix": {
+         "commit": "a7328b8017d59c6ff755804c1a69d054fe51d46a",
+         "test": "Client/tests/unit/eslint-rules.test.ts",
+         "revertProof": "self-reported"
+       },
       "note": "Fixed in Phase B lane B6 (ARCH-06): isStoreModuleSource now also matches features/*/store.ts and bare ./store, and STORE_MUTATOR_PREFIX gained apply|note|begin|fail|refresh, so a page-local ws.on writing any of the three B9 stores is flagged. RuleTester cases added for applyFrame, beginSnapshot/applySnapshot, noteQueueChange, addNotice/setActiveTimeout; eslint-rules-canary.test.ts asserts the rule is enabled at a real production path and fires there. Cross-exam: latent at find time (no page-local ws.on wrote a feature store); the rule still does not cover member-call writes or handlers passed by reference."
     },
     {
