@@ -359,10 +359,14 @@ describeAutostartSuite(async () => {
 }, failEveryTest);
 
 describeAppProcessSuite(async () => {
-  const subject = { relaunch: async () => undefined } as unknown as AppProcess;
+  const subject = {
+    relaunch: async () => undefined,
+    reportReady: async () => undefined,
+  } as unknown as AppProcess;
   const native: AppProcessNativeControl = {
     failWith: () => undefined,
     relaunches: () => 0,
+    readyReports: () => 0,
   };
   return { subject, native };
 }, failEveryTest);

@@ -185,6 +185,7 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "stop_livekit_proxy":
         case "ptt_set_key":
         case "ptt_stop":
+        case "frontend_ready":
         case "plugin:window|set_title":
         case "plugin:window|is_maximized":
         case "plugin:window|set_focus":
