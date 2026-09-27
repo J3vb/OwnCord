@@ -147,6 +147,27 @@ describe("connection diagnostics session ownership in settings", () => {
       expect(row("media").textContent).toContain("Join a call with another person");
     });
 
+    it("keeps a focused stage focused as its result arrives, described by its full sentence", async () => {
+      let resolve!: (value: unknown) => void;
+      health.mockReturnValue(
+        new Promise((done) => {
+          resolve = done;
+        }),
+      );
+      start();
+      await vi.waitFor(() => expect(row("connection").dataset.status).toBe("running"));
+      const focused = stepButton("connection");
+      focused.focus();
+      resolve({});
+      await vi.waitFor(() => expect(status()).toContain("Test complete"));
+      expect(stepButton("connection")).toBe(focused);
+      expect(document.activeElement).toBe(focused);
+      expect(focused.getAttribute("aria-label")).toBe("Server — Server connection, Passed");
+      expect(focused.querySelector(".st-ic.st-ok svg")).not.toBeNull();
+      const described = document.getElementById(focused.getAttribute("aria-describedby")!)!;
+      expect(described.textContent).toContain("certificate-checked connection");
+    });
+
     it("shows the failing stage's detail below the row, beside a critical icon", async () => {
       getMe.mockRejectedValue(new Error("401"));
       start();

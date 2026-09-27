@@ -174,38 +174,50 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
   function renderRow(result: DiagnosticResult): void {
     let row = rows.get(result.stage);
     if (!row) {
+      const stage = result.stage;
       row = createElement("li", {
         class: "diag-step",
-        "data-testid": `diagnostic-${result.stage}`,
+        "data-testid": `diagnostic-${stage}`,
       });
-      rows.set(result.stage, row);
+      const sentence = createElement("span", {
+        class: "sr-only",
+        id: `diagnostic-${stage}-detail`,
+      });
+      const button = createElement("button", {
+        class: "diag-step-btn",
+        type: "button",
+        "aria-describedby": sentence.id,
+      });
+      button.append(
+        statusIcon(STATUS_KIND[result.status]),
+        createElement("span", { class: "diag-step-label" }, t(SHORT_LABEL_KEYS[stage])),
+      );
+      button.addEventListener(
+        "click",
+        () => {
+          picked = stage;
+          paintSelection();
+        },
+        { signal },
+      );
+      row.append(button, sentence);
+      rows.set(stage, row);
       results.appendChild(row);
     }
     row.dataset.status = result.status;
     finalStatus.set(result.stage, result.status);
     details.set(result.stage, result.detail);
-    const button = createElement("button", {
-      class: "diag-step-btn",
-      type: "button",
-      "aria-label": t("diagnostics.stepName", {
+    const button = row.querySelector("button")!;
+    button.setAttribute(
+      "aria-label",
+      t("diagnostics.stepName", {
         label: t(SHORT_LABEL_KEYS[result.stage]),
         stage: diagnosticLabel(result.stage),
         status: statusLabel(result.status),
       }),
-    });
-    button.append(
-      statusIcon(STATUS_KIND[result.status]),
-      createElement("span", { class: "diag-step-label" }, t(SHORT_LABEL_KEYS[result.stage])),
     );
-    button.addEventListener(
-      "click",
-      () => {
-        picked = result.stage;
-        paintSelection();
-      },
-      { signal },
-    );
-    row.replaceChildren(button, createElement("span", { class: "sr-only" }, result.detail));
+    setStatusIcon(button.querySelector<HTMLElement>(".st-ic")!, STATUS_KIND[result.status]);
+    setText(row.querySelector(".sr-only")!, result.detail);
     paintSelection();
   }
 
