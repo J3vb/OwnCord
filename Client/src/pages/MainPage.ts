@@ -427,9 +427,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   }
 
   /** Send a ring and start (or restart) the caller's 30s window. The panel
-   *  is the caller's feedback: it shows "Calling…" from here on. */
+   *  is the caller's feedback: it shows "Calling…" from here on, unless the
+   *  call is already answered (a redial from inside a live call). */
   function ringCallees(channelId: number): void {
     ws.send({ type: "call_ring", payload: { channel_id: channelId } });
+    const roster = voiceStore.getState().voiceUsers.get(channelId);
+    const self = getCurrentUserId();
+    if (roster !== undefined && [...roster.keys()].some((id) => id !== self)) return;
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
     outgoingCall?.start(channelId, dm?.participants.map((p) => p.id) ?? []);
   }

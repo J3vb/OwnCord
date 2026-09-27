@@ -899,6 +899,49 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
   });
 
+  it("redialing from inside a live call rings but leaves no outgoing ring behind", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    const vu = (userId: number, username: string) => ({
+      userId,
+      username,
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    const roster = (ids: Array<[number, string]>) =>
+      new Map([[50, new Map(ids.map(([id, name]) => [id, vu(id, name)]))]]);
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceUsers: roster([
+        [1, "alice"],
+        [10, "bob"],
+      ]),
+    }));
+    voiceStore.flush();
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    // The panel is a lazy chunk.
+    await vi.dynamicImportSettled();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("connected");
+
+    // Bob hangs up before any other voice change: the panel must not start
+    // "Calling bob…" about someone who was just in the call.
+    voiceStore.setState((prev) => ({ ...prev, voiceUsers: roster([[1, "alice"]]) }));
+    voiceStore.flush();
+    expect(panel.dataset.state).toBe("connected");
+
+    page.destroy?.();
+  });
+
   it("shows the caller's nickname on the incoming-call banner, not the raw username (OC-0303)", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
