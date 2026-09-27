@@ -106,6 +106,7 @@ export class AudioPipeline {
     if (this.room === null) return;
     const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
     if (micPub?.track === undefined) return;
+    if (micPub.track.isMuted) return;
     if (micPub.track.getProcessor() !== undefined) return;
     const processor = createRNNoiseProcessor();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LocalTrack.setProcessor uses wide generic, but AudioProcessorOptions is guaranteed at runtime with webAudioMix

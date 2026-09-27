@@ -526,6 +526,24 @@ describe("AudioPipeline", () => {
       await pipeline.applyNoiseSuppressor();
       expect(setProcessor).toHaveBeenCalled();
     });
+
+    it("OC-0474: attaches nothing while the mic track is muted", async () => {
+      const setProcessor = vi.fn().mockResolvedValue(undefined);
+      const mockRoom = {
+        localParticipant: {
+          getTrackPublication: vi.fn().mockReturnValue({
+            track: {
+              isMuted: true,
+              getProcessor: vi.fn().mockReturnValue(undefined),
+              setProcessor,
+            },
+          }),
+        },
+      } as any;
+      pipeline.setRoom(mockRoom);
+      await pipeline.applyNoiseSuppressor();
+      expect(setProcessor).not.toHaveBeenCalled();
+    });
   });
 
   describe("removeNoiseSuppressor with track", () => {
