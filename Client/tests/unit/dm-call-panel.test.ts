@@ -538,6 +538,21 @@ describe("DmCallPanel — video in the call", () => {
     expect(otto.classList.contains("dcp-avatar--speaking")).toBe(true);
   });
 
+  it("keeps keyboard focus on a control inside the video when someone joins", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { root } = mount();
+    panel!.setVideoActive(true);
+    const slider = document.createElement("input");
+    slider.type = "range";
+    panel!.videoElement()!.appendChild(slider);
+    slider.focus();
+
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+
+    expect(root.contains(slider)).toBe(true);
+    expect(document.activeElement).toBe(slider);
+  });
+
   it("gives the grid nobody once video goes off", () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { opts, root } = mount();

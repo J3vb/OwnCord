@@ -701,7 +701,11 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
 
     if (hadFocus) {
       const same =
-        focusId === "" ? null : body.querySelector<HTMLElement>(`[data-testid="${focusId}"]`);
+        active.isConnected && videoEl.contains(active)
+          ? active
+          : focusId === ""
+            ? null
+            : body.querySelector<HTMLElement>(`[data-testid="${focusId}"]`);
       if (same !== null) same.focus();
       else if (!root.hidden) root.focus();
     }
