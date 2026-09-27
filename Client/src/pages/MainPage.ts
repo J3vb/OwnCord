@@ -60,6 +60,7 @@ import {
 import { setMarkReadSender } from "@lib/read-state";
 import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setAudioVolumeHost } from "@lib/audioElements";
+import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
@@ -203,6 +204,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // the sidebar; register the sender once instead of threading ws through.
   setMarkReadSender((channelId) => {
     ws.send({ type: "mark_read", payload: { channel_id: channelId } });
+  });
+
+  // The native screen-share picker adapter is a lower layer and may not import
+  // a component (ARCH-06); the UI registers the dialog here. It is loaded on
+  // demand — the dialog belongs to the native voice chunk, not startup — and
+  // the dynamic import is the sanctioned lower-layer-to-UI seam (Queue.ts's
+  // NsfwGate does the same).
+  setScreenSourcePicker(async (request) => {
+    const { showScreenSharePicker } = await import("@components/ScreenSharePicker");
+    return showScreenSharePicker(request);
   });
 
   // The who-reacted tooltip fetches on hover; give it the live REST client the
@@ -1342,6 +1353,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // that can silently mark an unrelated channel read on the NEXT
       // connection (OC-0418).
       setMarkReadSender(null);
+      // The native screen-share picker is registered per page; drop it so a
+      // torn-down connection cannot leave the next page's dialog pointed at a
+      // dead one (a share with none registered resolves to cancelled).
+      setScreenSourcePicker(null);
       channelCtrl?.destroyChannel();
       channelCtrl = null;
 

@@ -23,14 +23,9 @@ const host = vi.hoisted(
 vi.mock("../../../platform/desktop", () => ({
   desktop: { nativeVoice: { screenSources: () => Promise.resolve(host.sources) } },
 }));
-// The picker component itself is covered by its own test; here we pin the
-// adapter's mapping from the dialog's choice to the host capture settings.
-vi.mock("../../../components/ScreenSharePicker", () => ({
-  showScreenSharePicker: (opts: { sources: unknown[]; portal: boolean }) =>
-    Promise.resolve(host.pick(opts)),
-}));
 
 import { pickScreenSource } from "./screenPicker";
+import { setScreenSourcePicker } from "./screenPickerSlot";
 
 const x11: NativeVoiceScreenSources = {
   portal: false,
@@ -49,8 +44,13 @@ describe("pickScreenSource", () => {
   beforeEach(() => {
     host.sources = x11;
     host.pick = () => null;
+    // The UI layer (MainPage) registers the dialog; this test registers a
+    // stand-in so the adapter's mapping from the dialog's choice to the host
+    // capture settings is pinned without depending on the component.
+    setScreenSourcePicker((opts) => Promise.resolve(host.pick(opts)));
   });
   afterEach(() => {
+    setScreenSourcePicker(null);
     document.body.replaceChildren();
   });
 
@@ -110,6 +110,11 @@ describe("pickScreenSource", () => {
 
   it("resolves null when the dialog is dismissed", async () => {
     host.pick = () => null;
+    await expect(pickScreenSource()).resolves.toBeNull();
+  });
+
+  it("resolves null when no picker is registered (headless), without touching the host", async () => {
+    setScreenSourcePicker(null);
     await expect(pickScreenSource()).resolves.toBeNull();
   });
 });
