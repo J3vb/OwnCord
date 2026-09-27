@@ -61,7 +61,7 @@ stateDiagram-v2
 | `no-permission`                                | Disabled bar                                                                                                                                 | "You don't have permission to send messages here."   |
 | `offline`                                      | Gated — "Reconnecting…" while retrying, "Not connected" when disconnected; the textarea uses `aria-disabled` + `readOnly` so the caret stays | connection status (README §3)                        |
 | `slow-mode`                                    | Disabled with a live countdown                                                                                                               | "Slow mode: wait Ns."                                |
-| `uploading`                                    | Send disabled until uploads settle or are removed (an in-flight upload's owner blocks `handleSend()`, `components/MessageInput.ts`)          | per-attachment spinner                               |
+| `uploading`                                    | Send disabled until uploads settle or are removed (an in-flight upload's owner blocks `handleSend()`, `components/MessageInput.ts`)          | per-attachment progress bar                          |
 
 **Per-channel drafts (UX-1).** Switching away from a channel stashes its unsent
 state — text, reply target and staged upload ids — in `ChannelController`'s

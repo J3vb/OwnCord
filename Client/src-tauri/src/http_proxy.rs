@@ -343,8 +343,8 @@ fn upload_progress_target(raw: &[u8]) -> Option<UploadTarget> {
     Some(UploadTarget { id, total })
 }
 
-/// The ONE call site for `upload-progress` events, crate-wide (tauri-typegen
-/// emits a binding per `emit` it finds; more than one duplicates it).
+/// Emit one `upload-progress` event. The payload shape is the webview's
+/// `UploadProgress` (`src/platform/contracts/http.ts`); keep the two in step.
 fn emit_upload_progress<R: Runtime>(app: &AppHandle<R>, id: &str, sent: u64, total: u64) {
     let _ = app.emit(
         "upload-progress",
