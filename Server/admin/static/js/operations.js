@@ -244,16 +244,21 @@ async function reloadAudit(page){
 }
 
 function copyAuditLog(){
-  const lines=state.auditCache.map(e=>(e.created_at||'')+'\t'+(e.actor_name||e.actor_id)+'\t'+(e.action||'')+'\t'+(e.target_type||'')+(e.target_id?' #'+e.target_id:'')+'\t'+(e.detail||''));
+  const lines=state.auditCache.map(e=>[e.created_at||'',e.actor_name||e.actor_id,e.action||'',(e.target_type||'')+(e.target_id?' #'+e.target_id:''),e.detail||''].map(formulaGuard).join('\t'));
   navigator.clipboard.writeText(lines.join('\n')).then(()=>showToast('Copied '+lines.length+' entries','info')).catch(()=>showToast('Copy failed','error'));
 }
 
-/* Quotes one CSV cell. A leading =, +, -, @, tab or CR is prefixed with '
-   so spreadsheet apps read the cell as text, not a formula. */
+/* A leading =, +, -, @, tab or CR is prefixed with ' so spreadsheet apps
+   read the cell as text, not a formula. Both the Copy page clipboard rows
+   and the CSV export wrap their cells with this. */
+function formulaGuard(v){
+  const s=String(v||'');
+  return /^[=+\-@\t\r]/.test(s)?"'"+s:s;
+}
+
+/* Quotes one formula-guarded CSV cell. */
 function csvQ(v){
-  let s=String(v||'');
-  if(/^[=+\-@\t\r]/.test(s))s="'"+s;
-  return '"'+s.replace(/"/g,'""')+'"';
+  return '"'+formulaGuard(v).replace(/"/g,'""')+'"';
 }
 
 function exportAuditCSV(){
