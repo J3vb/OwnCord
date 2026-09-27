@@ -8,9 +8,9 @@
 // count and the connection self-test's per-stage result are what
 // `voice-diagnostics.json` then carries.
 //
-// A leaf module with no runtime imports, so the join orchestration, the room
-// event handlers, the connection diagnostics and the debug-info builder can all
-// reach it without a cycle.
+// A leaf module whose only runtime import is the logger, so the join
+// orchestration, the room event handlers, the connection diagnostics and the
+// debug-info builder can all reach it without a cycle.
 import { createLogger } from "./logger";
 
 const log = createLogger("voiceJoinTrace");
