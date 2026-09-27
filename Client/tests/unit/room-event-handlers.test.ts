@@ -560,6 +560,33 @@ describe("handleEncryptionError", () => {
     expect(voiceJoinSnapshot().decryptErrorCount).toBe(before + 1);
   });
 
+  it("SRE-M2: counts a native decrypt failure from a remote participant", () => {
+    const h = build();
+    const bob = { identity: "bob", isLocal: false } as Participant;
+    const before = voiceJoinSnapshot().decryptErrorCount;
+
+    h.handlers.handleEncryptionError(new Error("native decrypt failure"), bob);
+
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+    expect(voiceJoinSnapshot().decryptErrorCount).toBe(before + 1);
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+  });
+
+  it("SRE-M2: does not count an error with no remote participant as a decrypt failure", () => {
+    const h = build();
+    const before = voiceJoinSnapshot().decryptErrorCount;
+
+    h.handlers.handleEncryptionError(new Error("worker crashed"));
+    h.handlers.handleEncryptionError(new Error("InvalidKey: local"), {
+      identity: "me",
+      isLocal: true,
+    } as Participant);
+
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+    expect(voiceJoinSnapshot().decryptErrorCount).toBe(before);
+  });
+
   it("marks encryption degraded even when no participant is attributed", () => {
     const h = build();
 

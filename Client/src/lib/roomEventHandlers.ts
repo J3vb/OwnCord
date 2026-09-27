@@ -244,12 +244,12 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
    */
   const decryptStreaks = new WeakMap<Participant, { start: number; last: number }>();
   const handleEncryptionError = (error: Error, participant?: Participant): void => {
+    // SRE-M2: every receive-side decrypt failure (any error attributed to a
+    // remote sender, native or web) counts toward the diagnostics total — a
+    // tolerated rotation race is still a dropped frame and the count is what
+    // tells a report whether the grace window is being hit constantly.
+    if (participant && !participant.isLocal) recordDecryptError();
     if (participant && !participant.isLocal && error.message.startsWith("InvalidKey:")) {
-      // SRE-M2: every receive-side decrypt failure counts toward the
-      // diagnostics total — a tolerated rotation race is still a dropped
-      // frame and the count is what tells a report whether the grace window
-      // is being hit constantly.
-      recordDecryptError();
       const now = Date.now();
       const prev = decryptStreaks.get(participant);
       const start = prev && now - prev.last <= DECRYPT_STREAK_RESET_MS ? prev.start : now;
