@@ -317,14 +317,11 @@ function renderPermMatrix(){
      snapshot to tell whether a switch would discard edits. */
   if(sel)sel.dataset.painted=val;
   if(!val){box.innerHTML='<p class="drawer-intro">Pick a role or member above to edit its per-channel permissions.</p>';return}
-  const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
-  let allow=0,deny=0,adminNote='';
-  if(kind==='r'){
-    const role=pc.roles.find(r=>r.role_id===tid);
-    if(role){allow=role.allow;deny=role.deny;if((role.permissions&ADMIN_BIT)!==0)adminNote='This role holds Administrator — every override below is bypassed.'}
-  }else{
-    const o=pc.users.find(u=>u.user_id===tid);
-    if(o){allow=o.allow;deny=o.deny}
+  const {allow,deny}=snapshotOverrideMasks(val);
+  let adminNote='';
+  if(val.charAt(0)==='r'){
+    const role=pc.roles.find(r=>r.role_id===parseInt(val.slice(2),10));
+    if(role&&(role.permissions&ADMIN_BIT)!==0)adminNote='This role holds Administrator — every override below is bypassed.';
   }
   let html='';
   if(adminNote)html+='<p style="color:var(--text-warning);font-size:12px;margin:0 0 8px">'+esc(adminNote)+'</p>';

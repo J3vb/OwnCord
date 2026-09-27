@@ -312,7 +312,7 @@ function openModal(html){
    Cancel or × button, the scrim, or Escape — go through dismissModal(), which
    asks before discarding. closeModal() stays the internal close, for callers
    that have finished their work. The two channel-access drawer paths that
-   would drop edits without closing go through confirmDiscardModal() first:
+   drop edits outside dismissModal() go through confirmDiscardModal() first:
    Clear override would close the drawer over pending Access-tab edits, and
    switching the permission target repaints the matrix over edits made for the
    previous target. */
