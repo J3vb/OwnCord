@@ -16,6 +16,8 @@ import type { Payload } from "../connection/dispatchContext";
 
 vi.mock("../../lib/notifications", () => ({ notifyIncomingMessage: vi.fn() }));
 import { notifyIncomingMessage } from "../../lib/notifications";
+vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+import { showToast } from "../../lib/toast";
 
 function chat(id: number, timestamp: string): Payload<"chat_message"> {
   return {
@@ -126,6 +128,11 @@ describe("handleMessagingError", () => {
         status: "failed",
         errorCode: "BAD_REQUEST",
       });
+      expect(showToast).toHaveBeenCalledOnce();
+      expect(showToast).toHaveBeenCalledWith(
+        "The server was restored — check the conversation before sending this again.",
+        "error",
+      );
     } finally {
       deactivatePendingMessages();
     }

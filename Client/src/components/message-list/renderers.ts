@@ -16,6 +16,7 @@ import type { MessageListOptions } from "../MessageList";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { messagingText } from "../../i18n/messaging";
 import { shellText } from "../../i18n/shell";
+import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
 
 /** Cached value of the developerMode preference. Invalidated on pref change. */
@@ -178,7 +179,7 @@ function sendErrorReason(code: string | null): string {
     case "BAD_REQUEST":
       return messagingText("send.rejected");
     case "BEFORE_RESTORE":
-      return messagingText("send.beforeRestore");
+      return connectText("app.sendBeforeRestore");
     default:
       return messagingText("send.failed");
   }

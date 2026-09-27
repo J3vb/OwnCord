@@ -788,7 +788,7 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
-    it("says the server was restored when it refuses a pre-restore retry (OC-0476)", async () => {
+    it("does not resend a pre-restore retry the server refuses (OC-0476)", async () => {
       const { opts, ctrl, handler } = await retryPreFloorDraft();
 
       handler("error")(
@@ -796,8 +796,6 @@ describe("createChannelController", () => {
         "cid-2",
       );
 
-      expect(opts.showToast).toHaveBeenCalledOnce();
-      expect(opts.showToast).toHaveBeenCalledWith(messagingText("send.beforeRestore"), "error");
       // No resend loop: the refusal leaves the one failed row for the user.
       await Promise.resolve();
       expect(

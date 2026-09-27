@@ -29,6 +29,8 @@ import { invalidateReactionUsers } from "../../components/message-list/reaction-
 import { parseTimestamp } from "../../components/message-list/formatting";
 import { notifyIncomingMessage } from "../../lib/notifications";
 import { mentionsCurrentUser } from "../../lib/mentions";
+import { showToast } from "../../lib/toast";
+import { connectText } from "../../i18n/connect";
 import {
   activatePendingMessages,
   acknowledgePendingMessage,
@@ -383,6 +385,7 @@ export function handleMessagingError(payload: Payload<"error">, id: string | und
     }
     // OC-0476: a resent pre-restore id the server holds no receipt for is
     // refused as BAD_REQUEST; say the server was restored, keeping the text.
+    // The toast lives here, with the connect catalog, to keep MainPage small.
     const { pendingSends, messagesByChannel } = messagesStore.getState();
     const clientMessageId = messagesByChannel
       .get(pendingSends.get(id) ?? 0)
@@ -391,6 +394,7 @@ export function handleMessagingError(payload: Payload<"error">, id: string | und
       payload.code === "BAD_REQUEST" &&
       clientMessageId !== undefined &&
       pendingMessageBeforeRestore(clientMessageId);
+    if (beforeRestore) showToast(connectText("app.sendBeforeRestore"), "error");
     markSendFailed(id, beforeRestore ? "BEFORE_RESTORE" : payload.code);
     return true;
   }

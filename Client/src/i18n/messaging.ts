@@ -92,8 +92,6 @@ export const messagingText = defineCatalog("messaging", {
   "send.network": "Connection problem — delivery not confirmed",
   "send.unconfirmed": "Delivery not confirmed — check the conversation before retrying",
   "send.recovered": "Recovered pending message — retry when you're ready",
-  "send.beforeRestore":
-    "The server was restored — check the conversation before sending this again.",
   "send.rejected": "Message rejected",
   "send.failed": "Failed to send",
   "message.deleted": "[message deleted]",
