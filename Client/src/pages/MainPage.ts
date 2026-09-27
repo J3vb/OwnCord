@@ -1004,6 +1004,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     unsubscribers.push(
       ws.on("call_incoming", (payload) => {
         try {
+          // Being in the room already answers the ring (a redial from
+          // someone in the call re-rings everyone else in the DM).
+          if (voiceStore.getState().currentChannelId === payload.channel_id) return;
           // A call in the DM you are already sitting in still rings: the
           // channel being open does not mean the app has focus, and Discord
           // rings there too.

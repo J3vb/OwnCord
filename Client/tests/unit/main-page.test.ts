@@ -265,6 +265,7 @@ import {
 import { desktop } from "../../src/platform/desktop";
 import { saveUserStatus } from "../../src/lib/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
+import { startRingChime } from "../../src/lib/notifications";
 
 function resetStores(): void {
   channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
@@ -1067,6 +1068,25 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     expect(banner.style.display).toBe("none");
     expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "call_decline" }));
+  });
+
+  it("does not ring for the channel this client is already in", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50 }));
+    voiceStore.flush();
+
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    vi.mocked(startRingChime).mockClear();
+
+    // Someone else in the call redials the DM: the server rings everyone
+    // else in it, this client included.
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    expect(banner.style.display).toBe("none");
+    expect(startRingChime).not.toHaveBeenCalled();
   });
 
   it("clears settingsOpen on destroy so the next page (e.g. ConnectPage after logout) doesn't inherit a stale open overlay", () => {
