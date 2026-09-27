@@ -72,17 +72,25 @@ pub fn frontend_ready(state: tauri::State<'_, FrontendReady>) {
     }
 }
 
+/// The warning the watchdog logs when the frontend has not called
+/// `frontend_ready` by [`FRONTEND_READY_TIMEOUT`]. Kept as its own function so
+/// a unit test can pin the exact wording ("frontend not ready") the support
+/// bundle and the docs point at, without a running Tauri app.
+fn frontend_not_ready_warning() -> String {
+    format!(
+        "[startup] frontend not ready {} s after start; the window may be blank \
+         (a frontend load or script error). The tray's Open Log Folder shows this log.",
+        FRONTEND_READY_TIMEOUT.as_secs()
+    )
+}
+
 /// Log a warning if the frontend has not called `frontend_ready` in time.
 pub fn spawn_frontend_watchdog<R: Runtime>(app: &AppHandle<R>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FRONTEND_READY_TIMEOUT).await;
         if !app.state::<FrontendReady>().ready.load(Ordering::SeqCst) {
-            log::warn!(
-                "[startup] frontend not ready {} s after start; the window may be blank \
-                 (a frontend load or script error). The tray's Open Log Folder shows this log.",
-                FRONTEND_READY_TIMEOUT.as_secs()
-            );
+            log::warn!("{}", frontend_not_ready_warning());
         }
     });
 }
@@ -105,5 +113,15 @@ mod tests {
         assert!(state.mark_ready().is_some(), "the first call logs");
         assert!(state.mark_ready().is_none(), "a repeat call is silent");
         assert!(state.ready.load(Ordering::SeqCst));
+    }
+
+    // The warning names the condition the support bundle's README and the
+    // deployment docs point an operator at, so its wording is pinned.
+    #[test]
+    fn not_ready_warning_names_the_condition() {
+        let warning = frontend_not_ready_warning();
+        assert!(warning.contains("frontend not ready"), "{warning}");
+        assert!(warning.contains("may be blank"), "{warning}");
+        assert!(warning.contains("Open Log Folder"), "{warning}");
     }
 }
