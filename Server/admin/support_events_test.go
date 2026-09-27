@@ -46,6 +46,30 @@ func TestSupportEvents_PrefersWarnAndAboveUnderNoise(t *testing.T) {
 	}
 }
 
+// TestSupportEvents_WarnSurvivesRingOverflow pins that an INFO burst longer
+// than the whole log ring still cannot evict an earlier failure.
+func TestSupportEvents_WarnSurvivesRingOverflow(t *testing.T) {
+	rb := NewRingBuffer(2000)
+	rb.Write(LogEntry{Timestamp: ts(0), Level: "WARN", Message: "backup maintenance failed"})
+	for i := range 2500 {
+		rb.Write(LogEntry{Timestamp: ts(i + 1), Level: "INFO", Message: "http request"})
+	}
+
+	events := supportEvents(rb)
+
+	if len(events) != supportEventsMax {
+		t.Fatalf("events.json kept %d records, want %d", len(events), supportEventsMax)
+	}
+	if events[0].Event != "backup_maintenance_failed" || events[0].Level != "WARN" {
+		t.Fatalf("WARN evicted by an INFO burst longer than the ring; first event %+v", events[0])
+	}
+	for i := 1; i < len(events); i++ {
+		if want := ts(2500 - supportEventsMax + 1 + i); events[i].Level != "INFO" || events[i].Timestamp != want {
+			t.Fatalf("event %d = %+v, want the INFO at %s", i, events[i], want)
+		}
+	}
+}
+
 // TestSupportEvents_CapsTotalSize pins that the timeline stays bounded even
 // under a flood of WARN records, so a bundle cannot grow without limit.
 func TestSupportEvents_CapsTotalSize(t *testing.T) {

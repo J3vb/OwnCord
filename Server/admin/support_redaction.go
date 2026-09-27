@@ -92,7 +92,7 @@ func supportEvents(rb *RingBuffer) []supportEvent {
 	if rb == nil {
 		return []supportEvent{}
 	}
-	entries := rb.Snapshot()
+	entries := rb.supportSnapshot()
 	type candidate struct {
 		event supportEvent
 		warn  bool
