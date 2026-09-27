@@ -68,6 +68,15 @@ const (
 	// uploadRateLimitPerMinute is the maximum file uploads per user per minute.
 	uploadRateLimitPerMinute = 10
 
+	// maxConcurrentUploadsPerUser caps how many uploads one user may have in
+	// flight at once. An upload may now live up to transferMaxLifetime while
+	// trickling bytes, and each one holds a storage reservation of up to the
+	// per-file cap for its whole life, so without this bound one member could
+	// stack up enough reserved headroom to push every other user into the
+	// low-disk refusal. Four in flight bounds that member's reserved headroom
+	// to 4x the per-file cap.
+	maxConcurrentUploadsPerUser = 4
+
 	// emojiUploadRateLimitPerMinute is the maximum custom-emoji uploads per
 	// MANAGE_SERVER holder per minute. Lower than the attachment limit: every
 	// accepted upload fans an emoji_update out to every connected session.

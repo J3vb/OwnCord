@@ -175,8 +175,9 @@ func TestUploadQuota_LowDiskIs507BeforeTheBodyIsSpooled(t *testing.T) {
 }
 
 // TestUploadQuota_ConcurrentRacersThroughTheHandler drives the exactly-k
-// proof through the real route under -race: eight parallel POSTs (under the
-// ten-per-minute limiter) with room for three.
+// proof through the real route under -race: four parallel POSTs (the
+// per-user in-flight cap, under the ten-per-minute limiter) with room for
+// three.
 func TestUploadQuota_ConcurrentRacersThroughTheHandler(t *testing.T) {
 	const size = 1000
 	h := newQuotaHarness(t, nil)
@@ -190,7 +191,7 @@ func TestUploadQuota_ConcurrentRacersThroughTheHandler(t *testing.T) {
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	var created, refused, other atomic.Int32
-	for range 8 {
+	for range 4 {
 		wg.Go(func() {
 			<-start
 			rr := doUpload(t, h.router, h.token, "file", "f.bin", bytes.Repeat([]byte("y"), size))
@@ -207,8 +208,8 @@ func TestUploadQuota_ConcurrentRacersThroughTheHandler(t *testing.T) {
 	}
 	close(start)
 	wg.Wait()
-	if created.Load() != 3 || refused.Load() != 5 {
-		t.Fatalf("created %d, refused %d; want exactly 3 and 5", created.Load(), refused.Load())
+	if created.Load() != 3 || refused.Load() != 1 {
+		t.Fatalf("created %d, refused %d; want exactly 3 and 1", created.Load(), refused.Load())
 	}
 	if got := h.used(t); got != 3*size {
 		t.Fatalf("counter = %d, want %d", got, 3*size)

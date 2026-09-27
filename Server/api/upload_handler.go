@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -174,7 +175,35 @@ func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store Fil
 	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
 }
 
+// uploadSlots counts each user's in-flight uploads against
+// maxConcurrentUploadsPerUser.
+type uploadSlots struct {
+	mu sync.Mutex
+	n  map[int64]int
+}
+
+func (s *uploadSlots) acquire(userID int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.n[userID] >= maxConcurrentUploadsPerUser {
+		return false
+	}
+	s.n[userID]++
+	return true
+}
+
+func (s *uploadSlots) release(userID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.n[userID] <= 1 {
+		delete(s.n, userID)
+		return
+	}
+	s.n[userID]--
+}
+
 func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {
+	slots := &uploadSlots{n: make(map[int64]int)}
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
@@ -185,6 +214,11 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "upload rate limit exceeded, try again later")
 			return
 		}
+		if !slots.acquire(user.ID) {
+			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many uploads in progress, wait for one to finish")
+			return
+		}
+		defer slots.release(user.ID)
 
 		// SRV-05: the server's global 30 s ReadTimeout/WriteTimeout bound the
 		// WHOLE request, so a 25 MB upload on a slow uplink is cut mid-body

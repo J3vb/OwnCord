@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -183,5 +184,77 @@ func TestServeFile_SlowProgressingClientSurvivesWriteTimeout(t *testing.T) {
 	}
 	if !bytes.Equal(got, content) {
 		t.Fatalf("downloaded %d bytes, want %d (truncated by WriteTimeout)", len(got), len(content))
+	}
+}
+
+// TestUpload_ConcurrentUploadsPerUserCapped: a user already holding the
+// per-user cap of in-flight uploads (maxConcurrentUploadsPerUser, 4) is refused
+// another with 429 RATE_LIMITED, and a slot frees up once one of them finishes.
+func TestUpload_ConcurrentUploadsPerUserCapped(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "busy-uploader", 1)
+
+	body, contentType := makeMultipartFile(t, "file", "held.txt", []byte("held upload"))
+	raw := body.Bytes()
+	head, tail := raw[:len(raw)/2], raw[len(raw)/2:]
+
+	type heldUpload struct {
+		pw   *io.PipeWriter
+		done chan *httptest.ResponseRecorder
+	}
+	// start opens an upload and hands the handler the first half of its body,
+	// so it is provably in flight (it has read from the body) and then blocks
+	// waiting for the rest.
+	start := func(i int) heldUpload {
+		pr, pw := io.Pipe()
+		t.Cleanup(func() { _ = pw.CloseWithError(io.ErrUnexpectedEOF) })
+		h := heldUpload{pw: pw, done: make(chan *httptest.ResponseRecorder, 1)}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", pr)
+		req.Header.Set("Content-Type", contentType)
+		req.Header.Set("Authorization", "Bearer "+token)
+		go func() {
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, req)
+			h.done <- rr
+		}()
+		wrote := make(chan error, 1)
+		go func() {
+			_, err := pw.Write(head)
+			wrote <- err
+		}()
+		select {
+		case err := <-wrote:
+			if err != nil {
+				t.Fatalf("upload %d: writing body: %v", i, err)
+			}
+		case rr := <-h.done:
+			t.Fatalf("upload %d ended before reading its body: %d %s", i, rr.Code, rr.Body.String())
+		}
+		return h
+	}
+
+	held := make([]heldUpload, 4)
+	for i := range held {
+		held[i] = start(i)
+	}
+
+	rr := doUpload(t, router, token, "file", "fifth.txt", []byte("fifth"))
+	if rr.Code != http.StatusTooManyRequests || !strings.Contains(rr.Body.String(), "RATE_LIMITED") {
+		t.Fatalf("5th concurrent upload = %d %s, want 429 RATE_LIMITED", rr.Code, rr.Body.String())
+	}
+
+	if _, err := held[0].pw.Write(tail); err != nil {
+		t.Fatalf("finishing upload 0: %v", err)
+	}
+	_ = held[0].pw.Close()
+	if rr := <-held[0].done; rr.Code != http.StatusCreated {
+		t.Fatalf("finished upload = %d %s, want 201", rr.Code, rr.Body.String())
+	}
+
+	rr = doUpload(t, router, token, "file", "after.txt", []byte("after"))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("upload after a slot freed = %d %s, want 201", rr.Code, rr.Body.String())
 	}
 }
