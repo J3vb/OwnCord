@@ -61,16 +61,177 @@
   color: var(--on-accent);
 }
 
+/* ── Tile chrome (PR 3): the tile is one button; its controls sit above it ── */
+.video-cell-select {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+/* The tile clips its children, so the ring is drawn inside it. */
+.video-cell-select:focus-visible {
+  outline-offset: -3px;
+}
+.video-cell-select[hidden],
+.video-tile-btn[hidden] {
+  display: none;
+}
+.video-label {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  /* Above the self-share cover and the stopped card: whose tile it is. */
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 16px);
+  pointer-events: none;
+}
+.video-label .video-username {
+  position: static;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.video-cell.focused .video-label {
+  top: 8px;
+  bottom: auto;
+}
+.video-live {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-fill);
+  color: var(--on-fill);
+  font-size: var(--font-size-xxs);
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+.video-cell--speaking {
+  box-shadow: 0 0 0 2px var(--text-positive);
+}
+.video-tile-nav {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.video-cell:hover .video-tile-nav,
+.video-cell:focus-within .video-tile-nav,
+.video-cell.focused .video-tile-nav,
+.video-cell.focused .video-tile-overlay {
+  opacity: 1;
+}
+.video-tile-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--scrim);
+  color: var(--on-fill);
+}
+.video-tile-btn:hover {
+  background: var(--scrim-strong);
+}
+.tile-volume-value {
+  min-width: 3.5ch;
+  color: var(--on-fill);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+/* Stopped watching / preview hidden: the stream stays, drawn as a card. */
+.video-cell--stopped {
+  background: var(--bg-secondary);
+}
+.video-stopped {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.video-watch-btn {
+  pointer-events: auto;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-active);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.video-watch-btn:hover {
+  background: var(--bg-hover);
+}
+/* Your own screen share: what is going out, never a hall of mirrors. */
+.video-self-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  background: var(--scrim-strong);
+  color: var(--on-fill);
+  text-align: center;
+  pointer-events: none;
+}
+.video-self-title {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+.video-self-detail {
+  font-size: var(--font-size-xs);
+}
+.video-self-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+.video-self-actions button {
+  padding: 4px 12px;
+  font-size: var(--font-size-xs);
+}
+.video-cell--stopped .video-self-cover {
+  display: none;
+}
+/* Filmstrip thumbs keep only the name and the LIVE badge. */
+.video-focus-strip .video-tile-nav,
+.video-focus-strip .video-tile-overlay,
+.video-focus-strip .video-self-detail,
+.video-focus-strip .video-self-actions {
+  display: none;
+}
+
 /* ── Video tile overlay (mute button) ── */
 .video-tile-overlay {
   position: absolute;
-  bottom: 0;
-  right: 0;
-  padding: 6px;
+  bottom: 6px;
+  right: 6px;
+  padding: 2px 10px 2px 2px;
   display: flex;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
   z-index: 2;
+  border-radius: var(--radius-pill);
+  background: var(--scrim);
   opacity: 0;
   transition: opacity 0.15s;
 }

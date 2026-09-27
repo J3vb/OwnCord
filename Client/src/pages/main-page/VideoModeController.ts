@@ -5,7 +5,11 @@
 
 import { voiceStore } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
-import { getLocalCameraStream, getLocalScreenshareStream } from "@lib/livekitSession";
+import {
+  getLocalCameraStream,
+  getLocalScreenshareStream,
+  hasLocalScreenshareAudio,
+} from "@lib/livekitSession";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import type { VideoGridComponent } from "@components/VideoGrid";
 import { shellText } from "../../i18n/shell";
@@ -277,7 +281,12 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
             screenshareUserId,
             myName ? shellText("tile.nameScreen", { name: myName }) : shellText("tile.yourScreen"),
             localStream,
-            { isSelf: true, audioUserId: currentUserId, isScreenshare: true },
+            {
+              isSelf: true,
+              audioUserId: currentUserId,
+              isScreenshare: true,
+              hasAudio: hasLocalScreenshareAudio(),
+            },
           );
           localScreenshareTileAdded = true;
         }

@@ -51,6 +51,30 @@
   margin: 4px 0;
 }
 
+/* A labelled slider row (the video tile menu's stream and voice volumes). */
+.context-menu-label {
+  padding: 6px 10px 2px;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.context-menu-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 6px;
+}
+.context-menu-range input {
+  flex: 1;
+  accent-color: var(--accent);
+}
+.context-menu-range .slider-val {
+  min-width: 3.5ch;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Submenu trigger inside the voice-user menu: anchors the absolutely
    positioned .context-menu__submenu flyout to this row. */
 .context-menu-item--submenu {

@@ -135,6 +135,8 @@ const {
         getFocusedTileId: ReturnType<typeof vi.fn>;
         setLabel: ReturnType<typeof vi.fn>;
         setPeople: ReturnType<typeof vi.fn>;
+        setSpeaking: ReturnType<typeof vi.fn>;
+        setCallbacks: ReturnType<typeof vi.fn>;
       };
     },
   },
@@ -215,6 +217,8 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       getFocusedTileId: vi.fn(() => null),
       setLabel: vi.fn(),
       setPeople: vi.fn(),
+      setSpeaking: vi.fn(),
+      setCallbacks: vi.fn(),
       mount: vi.fn(),
       destroy: vi.fn(),
     };
@@ -656,7 +660,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     // The already-open tile must pick up the new name without the tile
     // being torn down and re-created (no new addStream call for tile 200).
-    expect(videoGrid.setLabel).toHaveBeenCalledWith(200, "Robert");
+    expect(videoGrid.setLabel).toHaveBeenCalledWith(200, "Robert", "Robert");
   });
 
   it('keeps "(You)" on the self-view tile when the server echoes our own voice_state (OC-0375)', () => {
@@ -702,8 +706,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // "alice (You)". The relabel loop walks the whole roster, self included, so
     // it must produce the same self label — not the bare remote form, which
     // would leave your own tile indistinguishable from a participant's.
-    expect(videoGrid.setLabel).not.toHaveBeenCalledWith(1, "alice");
-    expect(videoGrid.setLabel).toHaveBeenCalledWith(1, "alice (You)");
+    expect(videoGrid.setLabel).not.toHaveBeenCalledWith(1, "alice", "alice");
+    expect(videoGrid.setLabel).toHaveBeenCalledWith(1, "alice (You)", "alice");
   });
 
   it("brackets a bare IPv6 host when building the auto-updater URL (OC-0332)", () => {
@@ -999,6 +1003,103 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(document.querySelector('[data-testid="dcp-mute"]')).toBe(mute);
 
     page.destroy?.();
+  });
+
+  it("rings the video tiles of whoever is speaking in the current call", () => {
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    const grid = capturedChatAreaRef.current!.videoGrid;
+
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([
+        [
+          9,
+          new Map([
+            [
+              10,
+              {
+                userId: 10,
+                username: "bob",
+                muted: false,
+                deafened: false,
+                speaking: true,
+                camera: true,
+                screenshare: false,
+              },
+            ],
+            [
+              11,
+              {
+                userId: 11,
+                username: "cy",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: true,
+                screenshare: false,
+              },
+            ],
+          ]),
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+
+    const last = grid.setSpeaking.mock.calls.at(-1)![0] as ReadonlySet<number>;
+    expect([...last]).toEqual([10]);
+  });
+
+  it("stops your screen share from the grid's self-preview cover, and names remote tiles for their controls", async () => {
+    const { disableScreenshare } = await import("@lib/livekitSession");
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    const grid = capturedChatAreaRef.current!.videoGrid;
+    const cbs = grid.setCallbacks.mock.calls.at(-1)![0] as { onStopSharing: () => void };
+
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localScreenshare: true }));
+    cbs.onStopSharing();
+    expect(disableScreenshare).toHaveBeenCalled();
+
+    // A remote tile carries the person's name for its control labels.
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(10, {
+        id: 10,
+        username: "bob",
+        displayName: "Bobby",
+        avatar: null,
+        role: "member",
+        status: "online",
+      });
+      return { ...prev, members };
+    });
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map([
+        [
+          9,
+          new Map([
+            [
+              10,
+              {
+                userId: 10,
+                username: "bob",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: true,
+              },
+            ],
+          ]),
+        ],
+      ]),
+    }));
+    capturedOnRemoteVideo.current!(10, {} as MediaStream, true);
+    const config = grid.addStream.mock.calls.at(-1)![3] as { name?: string };
+    expect(config.name).toBe("Bobby");
   });
 
   it("tells the caller when the callee declines, and Ring again rings once more", async () => {

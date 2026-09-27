@@ -32,6 +32,7 @@ const ALL_ICON_NAMES: IconName[] = [
   "x",
   "eye",
   "eye-off",
+  "layout-grid",
   "play",
   "pause",
   "check",
