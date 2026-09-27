@@ -13,7 +13,7 @@ describe("B9-20 catalogs", () => {
       ["account", "appearance", "notifications", "voice", "logs"].map((k) =>
         settingsText(`tabs.${k}` as "tabs.account"),
       ),
-    ).toEqual(["Account", "Appearance", "Notifications", "Voice & Audio", "Logs"]);
+    ).toEqual(["Account", "Appearance", "Notifications", "Voice & Audio", "Diagnostics & logs"]);
   });
 
   it("types a parameter and formats a number parameter in the settings catalog", () => {

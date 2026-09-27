@@ -6,7 +6,7 @@
 // through JoinHost, so the class stays the facade the suites drive.
 import type { Room } from "livekit-client";
 import { voiceStore, leaveVoiceChannel, setVoiceStatus } from "../../stores/voice.store";
-import { loadPref } from "../../components/settings/helpers";
+import { loadPref } from "@lib/preferences";
 import { createLogger } from "../../lib/logger";
 import { logIceConnectionInfo } from "../../lib/livekitDiagnostics";
 import type { AudioPipeline } from "../../lib/audioPipeline";

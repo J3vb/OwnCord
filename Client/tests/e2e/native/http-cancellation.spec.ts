@@ -84,7 +84,7 @@ test("native connection diagnostics cancel delayed HTTP headers and response bod
           });
           httpGate.hold(phase);
           const started = await page.evaluate(() => window.__nativeHttpReads!.started);
-          await page.getByRole("button", { name: "Start connection test", exact: true }).click();
+          await page.getByTestId("diagnostics-start").click();
           // The preceding real health check has a 5s production budget.
           await expect.poll(httpGate.isHeld, { timeout: 8000 }).toBe(true);
           if (phase === "body") {
@@ -111,7 +111,7 @@ test("native connection diagnostics cancel delayed HTTP headers and response bod
           await page.waitForTimeout(1100);
           // Complete another real request/heartbeat cycle before checking the
           // error collector, allowing late body-read and cleanup replies to land.
-          await page.getByRole("button", { name: "Start connection test", exact: true }).click();
+          await page.getByTestId("diagnostics-start").click();
           await expect(page.getByTestId("diagnostics-status")).toContainText("Test complete");
           for (const stage of ["connection", "authentication", "websocket"])
             await expect(page.getByTestId(`diagnostic-${stage}`)).toHaveAttribute(

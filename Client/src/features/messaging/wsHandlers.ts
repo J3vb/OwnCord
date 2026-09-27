@@ -26,7 +26,7 @@ import { dmStore, updateDmLastMessage, updateDmLastMessagePreview } from "../../
 import { setUserBlockedByThem } from "../../stores/blocks.store";
 import type { ConnectionState } from "../../lib/ws";
 import { invalidateReactionUsers } from "../../components/message-list/reaction-tooltip";
-import { parseTimestamp } from "../../components/message-list/formatting";
+import { parseTimestamp } from "@lib/formatting";
 import { notifyIncomingMessage } from "../../lib/notifications";
 import { mentionsCurrentUser } from "../../lib/mentions";
 import { showToast } from "../../lib/toast";

@@ -6,6 +6,7 @@
  */
 
 import { createElement, setText, clearChildren } from "@lib/dom";
+import { createIcon, type IconName } from "@lib/icons";
 import { isTextLikeChannel } from "@lib/types";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
@@ -58,6 +59,25 @@ import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
 
 const log = createLogger("SidebarArea");
+
+/** A server-header icon button: named by its aria-label, the title is its
+ *  hover tooltip. */
+function headerAction(
+  label: string,
+  hint: string,
+  icon: IconName,
+  testId: string,
+): HTMLButtonElement {
+  const btn = createElement("button", {
+    type: "button",
+    class: "sidebar-header-action",
+    title: hint,
+    "aria-label": label,
+    "data-testid": testId,
+  });
+  btn.appendChild(createIcon(icon, 16));
+  return btn;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -195,21 +215,20 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   serverHeader.appendChild(serverIcon);
   serverHeader.appendChild(serverInfoCol);
 
-  // Invite button in the server header (proper styled button)
+  // Invite, Audit Log and Moderation: one row of quiet icon buttons.
+  const headerActions = createElement("div", { class: "sidebar-header-actions" });
+
   const headerInviteCtrl = createInviteManagerController({ api, getRoot });
-  const headerInviteBtn = createElement(
-    "button",
-    {
-      class: "sidebar-invite-btn",
-      title: shellText("invite.invitePeople"),
-      "data-testid": "invite-btn",
-    },
+  const headerInviteBtn = headerAction(
     shellText("invite.invite"),
+    shellText("invite.invitePeople"),
+    "user-plus",
+    "invite-btn",
   );
   headerInviteBtn.addEventListener("click", () => {
     void headerInviteCtrl.open();
   });
-  serverHeader.appendChild(headerInviteBtn);
+  headerActions.appendChild(headerInviteBtn);
   unsubscribers.push(() => {
     headerInviteCtrl.cleanup();
   });
@@ -227,14 +246,11 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // Rendered once per mount and kept in sync with the role list: `ready` may
   // land after this header is built, and a moderator whose role only becomes
   // known then would never see the entry otherwise.
-  const auditBtn = createElement(
-    "button",
-    {
-      class: "sidebar-audit-btn",
-      title: shellText("audit.hint"),
-      "data-testid": "audit-log-btn",
-    },
+  const auditBtn = headerAction(
     shellText("audit.label"),
+    shellText("audit.hint"),
+    "scroll-text",
+    "audit-log-btn",
   );
   auditBtn.addEventListener("click", () => {
     const host = api.getConfig().host ?? "";
@@ -251,15 +267,11 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // MODERATE_MEMBERS, and only once the Moderation Center ships.
   let moderationBtn: HTMLButtonElement | null = null;
   if (opts.destinations?.moderation !== undefined) {
-    const btn = createElement(
-      "button",
-      {
-        type: "button",
-        class: "sidebar-audit-btn",
-        title: navigationText("moderation.entryHint"),
-        "data-testid": "moderation-btn",
-      },
+    const btn = headerAction(
       navigationText("moderation.title"),
+      navigationText("moderation.entryHint"),
+      "shield",
+      "moderation-btn",
     );
     btn.addEventListener("click", () => opts.onOpenView?.("moderation", btn));
     unsubscribers.push(trackCurrentView(btn, "moderation"));
@@ -273,8 +285,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     }
   };
   syncAuditBtn();
-  serverHeader.appendChild(auditBtn);
-  if (moderationBtn !== null) serverHeader.appendChild(moderationBtn);
+  headerActions.appendChild(auditBtn);
+  if (moderationBtn !== null) headerActions.appendChild(moderationBtn);
+  serverHeader.appendChild(headerActions);
   // The permission is derived from the signed-in user's role plus the role
   // list, so both have to be watched.
   unsubscribers.push(

@@ -9,7 +9,7 @@ import { createElement, setText, appendChildren, clearChildren } from "@lib/dom"
 import type { MountableComponent } from "@lib/safe-render";
 import type { SearchResultItem } from "@lib/types";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { parseTimestamp } from "@components/message-list/formatting";
+import { parseTimestamp } from "@lib/formatting";
 import { messagingText } from "../i18n/messaging";
 
 // ---------------------------------------------------------------------------

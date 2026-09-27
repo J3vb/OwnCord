@@ -44,8 +44,9 @@ vi.mock("@lib/icons", () => ({
   },
 }));
 
-vi.mock("@components/settings/helpers", () => ({
+vi.mock("@lib/preferences", () => ({
   loadPref: loadPrefMock,
+  savePref: vi.fn(),
 }));
 
 // The real broker wrapper (fetchExternalImage + its FIFO cache) runs against

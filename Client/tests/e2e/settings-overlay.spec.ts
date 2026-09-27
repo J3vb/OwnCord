@@ -5,6 +5,7 @@ import {
   openSettings,
   switchSettingsTab,
 } from "./helpers";
+import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/b9-accessibility";
 
 // ---------------------------------------------------------------------------
 // Tests: Settings Overlay — structure
@@ -263,10 +264,10 @@ test.describe("Settings — Keybinds Tab", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: Settings — Logs tab
+// Tests: Settings — Diagnostics & logs tab
 // ---------------------------------------------------------------------------
 
-test.describe("Settings — Logs Tab", () => {
+test.describe("Settings — Diagnostics & logs Tab", () => {
   test.beforeEach(async ({ page }) => {
     await mockTauriFullSession(page);
     await page.goto("/");
@@ -275,8 +276,45 @@ test.describe("Settings — Logs Tab", () => {
     await switchSettingsTab(page, "Logs");
   });
 
-  test("shows log viewer", async ({ page }) => {
+  test("names every control, rings the disclosure summaries and keeps status text readable", async ({
+    page,
+  }) => {
+    const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
+    await pane
+      .getByRole("checkbox", { name: "Include a brief microphone permission check" })
+      .uncheck();
+    await page.getByTestId("diagnostics-start").click();
+    await expect(page.getByTestId("diagnostics-status")).toContainText("Test complete", {
+      timeout: 15_000,
+    });
+    expect(await findUnnamedControls(pane)).toEqual([]);
+
+    const failures: string[] = [];
+    for (const selector of [
+      ".summary-line .disclose-count",
+      ".status-result",
+      "summary .disclose-count",
+    ]) {
+      const { ratio } = await textContrast(pane.locator(selector).first());
+      if (ratio < Q1.text) failures.push(`${selector} ${ratio.toFixed(2)}`);
+    }
+    expect(failures).toEqual([]);
+
+    // Keyboard focus on a disclosure summary draws the shared focus ring.
+    const summary = pane.locator("summary", { hasText: "Client logs" });
+    await summary.focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    await expect(summary).toBeFocused();
+    expect((await focusIndicator(page)).problems).toEqual([]);
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".log-viewer")).toBeVisible();
+  });
+
+  test("shows log viewer once the client logs disclosure is opened", async ({ page }) => {
     const logViewer = page.locator(".log-viewer");
+    await expect(logViewer).toBeHidden();
+    await page.locator("summary", { hasText: "Client logs" }).click();
     await expect(logViewer).toBeVisible();
   });
 });

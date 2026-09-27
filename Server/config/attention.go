@@ -15,9 +15,9 @@ type AttentionConfig struct {
 	WriterWaitMsPerMin int `yaml:"writer_wait_ms_per_min"`
 	// ReconnectsPerMin warns when clients resume sessions faster than this.
 	ReconnectsPerMin int `yaml:"reconnects_per_min"`
-	// DeliveryDropsPerMin warns when hub broadcast drops plus send-queue
-	// overflow disconnects exceed this rate. Low-priority typing and presence
-	// drops are not counted.
+	// DeliveryDropsPerMin warns when hub broadcast drops, per-channel topic
+	// sheds and send-queue overflow disconnects together exceed this rate.
+	// Low-priority typing and presence drops are not counted.
 	DeliveryDropsPerMin int `yaml:"delivery_drops_per_min"`
 }
 

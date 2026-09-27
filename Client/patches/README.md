@@ -1,12 +1,17 @@
 # Dependency patches
 
-## `@tauri-apps/plugin-http` 2.5.9
+## `@tauri-apps/plugin-http` 2.7.0
 
 The JavaScript SDK leaves request and response abort listeners attached after
 their work finishes. Aborting an in-flight body read also lets its late completion
 write to a terminated stream or drop the same Rust response resource again. Those
 discarded cleanup promises can cause unhandled rejections during session changes
 and connection-test cancellation.
+
+2.7.0 improved this (it swallows the request/body cancellation rejections and
+makes `dropBody` idempotent) but still fails the boundary regressions: 28 of 34
+fail against the unmodified release. The patch remains, ported onto 2.7.0's
+entry points.
 
 The patch changes both published entry points (`dist-js/index.js` and
 `dist-js/index.cjs`). It removes finished listeners, releases response resources
@@ -24,7 +29,7 @@ ignored. Normal null-body responses and response metadata retain upstream
 behavior; general request-resource and normal null-body resource reclamation are
 outside this cancellation patch.
 
-The dependency is pinned to 2.5.9. `npm ci` runs
+The dependency is pinned to 2.7.0. `npm ci` runs
 `patch-package --error-on-fail --error-on-warn`, so either a failed patch or a
 package-version mismatch fails installation. After intentionally editing the two
 installed entry points, regenerate from `Client/` with:

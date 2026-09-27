@@ -492,7 +492,8 @@ cert management), three things matter:
    LiveKit. An HTTP reverse proxy never carries this traffic.
 3. **Tell OwnCord about the proxy.** Set `server.trusted_proxies` to the
    proxy's own address(es) (e.g. `["10.0.0.2/32"]`) so client IPs come from
-   `X-Forwarded-For` for rate limiting and the admin IP allowlist. List only
+   `X-Forwarded-For` for rate limiting, the admin IP allowlist, the access
+   and WebSocket logs, and the `ws_connect` audit row. List only
    the proxy hops, never client networks. A proxy on the same host is
    `["127.0.0.1/32", "::1/128"]`: without it the allowlist sees the proxy's
    loopback address on every request, and the server warns about this shape
@@ -1137,6 +1138,20 @@ have chosen the third stage as your normal state.
   "connected_users": 12,
   "voice_sessions": 3,
   "broadcast_drops": 0,
+  "topic_sheds_total": 0,
+  "ws_broadcast_ms": { "count": 1204, "p50": 1, "p95": 5, "p99": 20, "max": 210 },
+  "ws_dispatch_lag_ms": { "count": 1204, "p50": 0.5, "p95": 2, "p99": 10, "max": 90 },
+  "chat_send_ack_ms": { "count": 340, "p50": 2, "p95": 10, "p99": 50, "max": 60 },
+  "voice_join_ms": {
+    "precheck": { "count": 12, "p50": 1, "p95": 1.4, "p99": 1.4, "max": 1.4 },
+    "leave": { "count": 12, "p50": 0.5, "p95": 3.1, "p99": 3.1, "max": 3.1 },
+    "persist": { "count": 12, "p50": 2, "p95": 4.2, "p99": 4.2, "max": 4.2 },
+    "token": { "count": 12, "p50": 0.5, "p95": 0.8, "p99": 0.8, "max": 0.8 },
+    "complete": { "count": 12, "p50": 2, "p95": 4.9, "p99": 4.9, "max": 4.9 },
+    "total": { "count": 12, "p50": 5, "p95": 12.6, "p99": 12.6, "max": 12.6 }
+  },
+  "hub_broadcast_queue_depth": 0,
+  "hub_seqmu_max_hold_ms": 12,
   "livekit_healthy": true,
   "reconnect_tier_buffer": 120,
   "reconnect_tier_db": 4,
@@ -1163,7 +1178,16 @@ Signals worth watching as a community grows (see `docs/api.md` for full field
 descriptions):
 
 - `broadcast_drops` growing at all → the hub-wide broadcast queue overflowed
-  and sequenced events were lost; alert on any growth.
+  and sequenced events were lost; alert on any growth. `topic_sheds_total`
+  growing → a single channel exceeded the per-channel topic limit and frames
+  were shed before sequencing; replay cannot recover them, so alert on any
+  growth too.
+- `ws_dispatch_lag_ms.p95` climbing → the single hub dispatch goroutine is
+  falling behind its queue; `hub_broadcast_queue_depth` approaching 1024 is the
+  same signal from the other side.
+- `hub_seqmu_max_hold_ms` above ~100 ms → a critical section that serializes
+  every broadcast (a replay purge's full scan is the known one) is stalling
+  delivery.
 - `db_writer_wait_seconds` climbing faster than uptime → requests are queueing
   on SQLite's single write connection; the write path is saturating.
 - `db_reader_wait_seconds` growing → read queries are queueing behind all
@@ -1379,10 +1403,10 @@ The Tauri client uses NSIS installer updates:
 #### Client support bundle and logs
 
 When a _user_ has a problem, the desktop client can write its own support bundle
-without contacting the server: **Settings → Logs → Export**. It is a local zip
+without contacting the server: **Settings → Diagnostics & logs → Export Support Bundle**. It is a local zip
 you choose where to save; like the server bundle it uploads nothing, but unlike
 it the client log lines are copied verbatim (the client logger does not redact),
-so review it before sharing — the Logs tab says so too.
+so review it before sharing — the Diagnostics & logs tab says so too.
 
 The raw client log lives per user:
 

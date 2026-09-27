@@ -2,7 +2,7 @@ import { request, expect } from "@playwright/test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
-import { freePort, freeUdpPort, startProcess, stopProcess, waitForHttp } from "./process";
+import { freePorts, freeUdpPort, startProcess, stopProcess, waitForHttp } from "./process";
 
 export const TEST_PASSWORD = "OwnCord-E2E-pass-123!";
 
@@ -20,9 +20,11 @@ export async function startTestServer(
   if (options.livekit && !livekit)
     throw new Error("OWNCORD_E2E_LIVEKIT_BINARY is required for media tests");
   const directory = await mkdtemp(join(tmpdir(), "owncord-e2e-"));
-  const port = await freePort();
-  const livekitPort = await freePort();
-  const rtcPort = await freePort();
+  const {
+    server: port,
+    livekit: livekitPort,
+    rtc: rtcPort,
+  } = await freePorts("server", "livekit", "rtc");
   const rtcUdpPort = options.livekit ? await freeUdpPort() : 0;
   const dataDir = join(directory, "data");
   await mkdir(dataDir);

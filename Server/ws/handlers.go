@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -27,6 +28,7 @@ func (h *Hub) HandleVoiceLeaveForTest(c *Client) {
 
 // handleMessage parses the envelope and dispatches to the appropriate handler.
 func (h *Hub) handleMessage(c *Client, raw []byte) {
+	receivedAt := time.Now()
 	// kickClient (hub_sweep.go and the ban/expiry paths below) removes c from
 	// the hub and closes its send channels, but never touches the underlying
 	// connection or signals readPump — readPump keeps calling handleMessage
@@ -113,7 +115,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		return
 	}
 
-	h.handleMessageApply(c, env, reqID, result)
+	h.handleMessageApply(c, env, reqID, result, receivedAt)
 }
 
 // handleMessageSessionRecheck performs handleMessage's periodic session
@@ -207,8 +209,9 @@ func (h *Hub) handleMessageDecode(c *Client, raw []byte) (envelope, string, stri
 }
 
 // handleMessageApply applies the client state mutations and side effects that a
-// successful V2 Result asks for.
-func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result Result) {
+// successful V2 Result asks for. receivedAt is when handleMessage read the
+// frame, used to time the send→ack round trip (chat_send_ok).
+func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result Result, receivedAt time.Time) {
 	// Apply client state mutations and side effects.
 	if result.SetChannelID != nil {
 		h.applySetChannelID(c, *result.SetChannelID)
@@ -228,6 +231,12 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 	}
 	if result.Reply != nil {
 		c.sendMsg(result.Reply)
+		// chat_send_ack_ms measures the send→ack round trip for chat_send
+		// only; other reply kinds (command replies) are not the figure the
+		// load run compares against k6.
+		if env.Type == MsgTypeChatSend {
+			h.latency.chatAck.Observe(float64(time.Since(receivedAt)) / float64(time.Millisecond))
+		}
 	}
 	if len(result.Events) > 0 {
 		h.EmitEvents(c.ctx, result.Events)

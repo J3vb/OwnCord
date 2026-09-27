@@ -10,7 +10,7 @@
 // analyser that's independent of LiveKit's track lifecycle.
 
 import { Track, type Room, type LocalAudioTrack } from "livekit-client";
-import { loadPref, savePref } from "@components/settings/helpers";
+import { loadPref, savePref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { createRNNoiseProcessor } from "@lib/noise-suppression";
 import { voiceText } from "../i18n/voice";

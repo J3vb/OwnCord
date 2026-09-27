@@ -18,7 +18,7 @@ import { showToast } from "@lib/toast";
 import { setActiveChannel } from "@stores/channels.store";
 import { setMessagePinned } from "@stores/messages.store";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
-import { resolveAuthor } from "@components/message-list/formatting";
+import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { shellText } from "../../i18n/shell";
 
