@@ -914,10 +914,11 @@ async function renderEmoji(){
   html+='<button class="btn btn-accent" data-action="uploadEmoji">'+I.upload+' Upload</button>';
   html+='</div></div></div>';
 
+  /* Nothing installed: one line instead of an empty table. */
+  if(!list.length)return html+'<section class="section-card" aria-labelledby="emoji-installed-h"><div class="section-card-header"><h3 id="emoji-installed-h">Installed</h3></div><div class="empty-line">'+I.smile+'<span>No custom emoji yet. Upload one above.</span></div></section>';
   html+='<div class="section-card"><div class="section-card-header"><h3>Installed ('+list.length+')</h3><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Refresh</button></div><div class="section-card-body no-pad">';
   html+='<table class="tbl"><thead><tr><th style="width:60px">Preview</th><th>Shortcode</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!list.length)html+='<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:24px">No custom emoji yet</td></tr>';
-  else list.forEach(function(e){
+  list.forEach(function(e){
     html+='<tr><td><img alt="'+esc(e.shortcode)+'" data-emoji-url="'+esc(e.url)+'" style="width:32px;height:32px;object-fit:contain"></td>';
     html+='<td style="font-family:var(--font-mono)">:'+esc(e.shortcode)+':</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn danger" title="Delete" aria-label="Delete" data-action="confirmDeleteEmoji" data-args="'+actArgs(e.id,e.shortcode)+'">'+I.trash+'</button></div></td></tr>';

@@ -242,13 +242,50 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     // The owner-only backup policy moved to Backups & restore.
     expect(content.querySelector("#s-backup_schedule")).toBeNull();
     expect(content.querySelector("#s-backup_retention")).toBeNull();
-    // Every control has an accessible name.
+    // Every control has an accessible name: a label pointing at it, or (the
+    // registration radio cards) a label wrapping it.
     for (const el of content.querySelectorAll("input, select")) {
-      expect(content.querySelector(`label[for="${el.id}"]`), el.id).not.toBeNull();
+      const named = el.id ? content.querySelector(`label[for="${el.id}"]`) : el.closest("label");
+      expect(named, el.id || (el as HTMLInputElement).value).not.toBeNull();
     }
     expect(content.querySelector("#s-require_2fa")?.getAttribute("aria-labelledby")).toBe(
       "s-require_2fa-name",
     );
+  });
+
+  // UX clarity: registration is four radio cards with what each means, fed
+  // into the same change tracking as every other field.
+  it("edits registration through radio cards that drive the save bar", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const group = document.getElementById("s-registration_mode")!;
+    expect(group.tagName).toBe("FIELDSET");
+    expect(group.querySelector("legend")?.textContent).toBe("Who can join");
+    const radios = [...group.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(radios.map((r) => r.value)).toEqual(["closed", "invite", "approval", "open"]);
+    expect(radios.find((r) => r.checked)?.value).toBe("closed");
+    expect(radios[2]!.closest("label")?.textContent).toContain("wait in Members");
+
+    const save = document.getElementById("saveSettingsBtn") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    radios[3]!.checked = true;
+    radios[3]!.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(save.disabled).toBe(false);
+    expect(booted.bridge.state.settingsChanged).toBe(true);
+    radios[0]!.checked = true;
+    radios[0]!.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(save.disabled).toBe(true);
+
+    radios[3]!.checked = true;
+    radios[3]!.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    calls.length = 0;
+    await booted.bridge.saveSettings();
+    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+      registration_mode: "open",
+    });
   });
 
   it("drives the save bar from the actual difference, so reverting an edit clears it", async () => {

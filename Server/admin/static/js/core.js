@@ -176,6 +176,8 @@ const SIGNIN_ACTIONS=['user_login','ws_connect'];
    drawn as healthy. */
 const STATUS_ICON={ok:['st-ok','circleCheck'],warning:['st-warn','triangleAlert'],critical:['st-crit','circleX'],unknown:['st-pending','circleDashed']};
 function statusIcon(s){const v=STATUS_ICON[s]||STATUS_ICON.unknown;return'<span class="st-ic '+v[0]+'" aria-hidden="true">'+I[v[1]]+'</span>'}
+/* An empty page section: what the thing is, and the one action that starts it. */
+function emptyState(icon,title,body,action){return'<section class="section-card empty-state"><div class="empty-state-icon" aria-hidden="true">'+icon+'</div><h3>'+esc(title)+'</h3><p>'+esc(body)+'</p>'+(action||'')+'</section>'}
 /* Roles are createable now, so the four seeded ids are a fallback, not the set.
    Anything role-shaped prefers the live list (state.roleList, filled by the
    Roles section and by openEditUser) and only then the seeded map — otherwise a

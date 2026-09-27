@@ -77,6 +77,10 @@ test("Emoji: an uploaded emoji appears in the installed list", async ({
   await signInAsOwner(page, seededAdminServer);
   await navigate(page, "Emoji");
 
+  // Nothing installed yet: one line, not an empty table.
+  await expect(page.locator(".empty-line")).toContainText("No custom emoji yet");
+  await expect(page.locator(".tbl")).toHaveCount(0);
+
   await page.locator("#emojiShortcode").fill("e2etest");
   await page.locator("#emojiFile").setInputFiles({
     name: "pixel.png",
@@ -103,6 +107,28 @@ test("Settings: a saved server name persists across a reload", async ({
   await expect(page.locator("#adminShell")).toBeVisible({ timeout: 10_000 });
   await navigate(page, "Settings");
   await expect(page.locator("#s-server_name")).toHaveValue("E2E Server");
+});
+
+test("Settings: registration is chosen from radio cards and persists", async ({
+  page,
+  seededAdminServer,
+}) => {
+  await signInAsOwner(page, seededAdminServer);
+  await navigate(page, "Settings");
+
+  const group = page.getByRole("group", { name: "Who can join" });
+  await group.getByRole("radio", { name: /Approval/ }).check();
+  await expect(page.locator("#settingsSaveState")).toHaveText("Unsaved changes");
+  await page.locator("#saveSettingsBtn").click();
+  await expect(page.locator("#settingsSaveState")).toHaveText("All changes saved");
+
+  await page.reload();
+  await expect(page.locator("#adminShell")).toBeVisible({ timeout: 10_000 });
+  await navigate(page, "Settings");
+  await expect(group.getByRole("radio", { name: /Approval/ })).toBeChecked();
+  // Approval points at where waiting accounts are decided.
+  await page.getByRole("button", { name: "Members › Pending" }).click();
+  await expect(page.getByRole("tab", { name: /Pending/ })).toHaveAttribute("aria-selected", "true");
 });
 
 test("Retention: a server-wide window is previewed and applied", async ({
@@ -172,9 +198,15 @@ test("Backups: a manual backup appears in the history", async ({ page, seededAdm
   await signInAsOwner(page, seededAdminServer);
   await navigate(page, "Backups & restore");
 
+  // The page answers first: when the last backup was taken.
+  await expect(page.locator("#backupStatus .status-line-title")).toBeVisible();
+
   await page.getByRole("button", { name: /Create backup now/ }).click();
 
   await expect(page.locator(".tbl tbody tr", { hasText: /\.db/ })).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator("#backupStatus .status-line-title")).toContainText("Last backup");
+  const { ratio } = await textContrast(page.locator("#backupStatus .status-line-sub"));
+  expect(ratio).toBeGreaterThanOrEqual(Q1.text);
 });
 
 test("Updates: the page reports the current version and rechecks", async ({
@@ -189,8 +221,12 @@ test("Updates: the page reports the current version and rechecks", async ({
   await signInAsOwner(page, seededAdminServer);
   await navigate(page, "Updates");
 
-  await expect(page.locator(".update-card", { hasText: "Current version" })).toContainText("dev");
-  await expect(page.locator(".update-card", { hasText: "Up to date" })).toBeVisible();
+  // One line says whether this is current, with the version as the top bar
+  // writes it.
+  await expect(page.locator("#updateStatus .status-line-title")).toHaveText(
+    "You are on the latest version",
+  );
+  await expect(page.locator("#updateStatus .status-line-sub")).toHaveText("Running dev.");
 
   const recheck = page.waitForResponse(
     (res) => res.url().endsWith("/admin/api/updates") && res.request().method() === "GET",
@@ -234,6 +270,10 @@ test("API tokens: a created token is shown once and listed", async ({
   await signInAsOwner(page, seededAdminServer);
   await navigate(page, "API tokens");
 
+  // No tokens yet: what one is for and the one action, not an empty table.
+  await expect(page.locator(".empty-state h3")).toHaveText("No API tokens yet");
+  await expect(page.locator(".tbl")).toHaveCount(0);
+
   await page.getByRole("button", { name: /Create Token/ }).click();
   await page.locator("#tokLabel").fill("e2e-token");
   await page.locator(".modal-footer .btn-accent", { hasText: "Create" }).click();
@@ -256,4 +296,7 @@ test("Plugins: the page lists against the real plugin API", async ({ page, seede
     page.locator(".section-card", { hasText: "Plugin runtime is disabled" }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Installed" })).toBeVisible();
+  // Nothing installed: one line, with no Refresh and no empty table.
+  await expect(page.locator(".empty-line")).toContainText("No plugins installed");
+  await expect(page.getByRole("button", { name: /Refresh/ })).toHaveCount(0);
 });
