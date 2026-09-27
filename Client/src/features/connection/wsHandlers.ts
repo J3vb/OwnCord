@@ -8,8 +8,9 @@ import {
   setSessionReplaced,
 } from "../../stores/ui.store";
 import { channelsStore } from "../../stores/channels.store";
-import { voiceStore, leaveVoiceChannel } from "../../stores/voice.store";
-import { PROTOCOL_EPOCH } from "../../lib/protocolTypes";
+import { voiceStore, leaveVoiceChannel, joinVoiceChannel } from "../../stores/voice.store";
+import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
+import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";
 import { connectText } from "../../i18n/connect";
 import { livekitSession, log } from "./dispatchContext";
@@ -63,6 +64,15 @@ export function handleAuthError(
   clearAuth(epochRefusal ? "protocol_epoch" : "user");
 }
 
+const REJOIN_REASONS: ReadonlySet<ServerRestartReasonValue> = new Set([
+  ServerRestartReason.UPDATE,
+  ServerRestartReason.BACKUP_RESTORE,
+  ServerRestartReason.SETUP,
+]);
+
+/** A ready later than this after the notice does not rejoin: the call is over. */
+const REJOIN_WINDOW_MS = 10 * 60_000;
+
 export function handleServerRestart(
   clock: ReconnectClock,
   payload: Payload<"server_restart">,
@@ -76,6 +86,13 @@ export function handleServerRestart(
   // same channel, and MainPage's banner counts down. A zero delay
   // (update_aborted) withdraws the announcement.
   clock.restartAnnounced = payload.delay_seconds > 0;
+  // RT-12: mark whether the coming drop may put us back in our call. The hub
+  // wipes voice_states on boot, so the resume cannot restore the membership
+  // the way it restores chat; the drop records the channel and a later ready
+  // sends one voice_join. A shutdown (a stop from outside the server) may last
+  // hours, so it never allows a rejoin.
+  clock.voiceRejoinNoticeAt =
+    clock.restartAnnounced && REJOIN_REASONS.has(payload.reason) ? Date.now() : null;
 }
 
 /**
@@ -88,10 +105,56 @@ export function handleServerRestart(
 export function handleRestartDrop(clock: ReconnectClock, state: ConnectionState): void {
   if (!clock.restartAnnounced || (state !== "reconnecting" && state !== "disconnected")) return;
   clock.restartAnnounced = false;
-  if (voiceStore.getState().currentChannelId !== null) {
+  // RT-12: record the call we are in now, before leaveVoiceChannel clears it,
+  // so a switch, join, kick or leave during the countdown is already settled.
+  const channelId = voiceStore.getState().currentChannelId;
+  clock.voiceRejoinChannelId = clock.voiceRejoinNoticeAt === null ? null : channelId;
+  if (channelId !== null) {
     void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
     leaveVoiceChannel();
   }
+}
+
+/**
+ * RT-12: put the user back in the voice channel a planned restart took them
+ * out of. The hub wipes voice_states on boot, so the resume cannot restore the
+ * membership the way it restores chat; `handleRestartDrop` recorded the
+ * channel, and this runs once from `ready`. It sends one ordinary voice_join —
+ * never after a kick, move, ban or leave, which clear the recorded channel —
+ * and only when the channel still exists as a joinable voice channel.
+ */
+export function rejoinVoiceAfterRestart(
+  clock: ReconnectClock,
+  ws: DispatchWs,
+  payload: Payload<"ready">,
+): void {
+  const channelId = clock.voiceRejoinChannelId;
+  const noticeAt = clock.voiceRejoinNoticeAt;
+  clock.voiceRejoinChannelId = null;
+  if (channelId === null || noticeAt === null) return;
+  if (Date.now() - noticeAt > REJOIN_WINDOW_MS) {
+    log.info("Not rejoining voice after restart — the server was down too long", { channelId });
+    return;
+  }
+  const isDmCall = (payload.dm_channels ?? []).some((dm) => dm.channel_id === channelId);
+  const channel = payload.channels.find((c) => c.id === channelId);
+  if (!isDmCall && (channel === undefined || channel.type !== "voice")) {
+    log.info("Not rejoining voice after restart — channel is gone or no longer a voice channel", {
+      channelId,
+    });
+    return;
+  }
+  // A live membership already in the payload means the rejoin is unnecessary
+  // (or the user re-joined manually while ready was in flight).
+  const currentUserId = authStore.getState().user?.id ?? 0;
+  if (
+    payload.voice_states.some((vs) => vs.user_id === currentUserId && vs.channel_id === channelId)
+  ) {
+    return;
+  }
+  log.info("Rejoining voice channel after planned restart", { channelId });
+  joinVoiceChannel(channelId);
+  ws.send({ type: "voice_join", payload: { channel_id: channelId } });
 }
 
 /**
