@@ -171,7 +171,10 @@ npm run tauri build
 
 ### Core verification commands
 
-Everything CI gates on, from the repository root:
+The local mirror of CI's static, unit and drift gates, from the repository
+root — it does **not** run the Playwright jobs, govulncheck, npm audit, the
+coverage-floor scripts, `typecheck:e2e` or the tag-gated Go tests; see
+[AGENTS.md](AGENTS.md#commands) for the exact split:
 
 ```bash
 npm run check                  # server + client + Rust

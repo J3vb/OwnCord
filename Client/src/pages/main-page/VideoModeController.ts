@@ -21,10 +21,24 @@ export interface VideoModeSlots {
   readonly videoGridSlot: HTMLDivElement;
 }
 
+/** The DM call panel, as a place to show video. While the open DM is the
+ *  voice channel's own DM, its panel is the only video surface: the grid moves
+ *  into it (chat stays visible) and never takes over the chat column. */
+export interface VideoPanelHost {
+  /** True while the open DM is this voice channel's DM. */
+  ownsCall(channelId: number): boolean;
+  /** Where the grid goes, or null while the panel cannot show it (collapsed). */
+  element(): HTMLElement | null;
+  /** Whether any video is on in the call, so the panel can make room for it. */
+  setActive(active: boolean): void;
+}
+
 export interface VideoModeControllerOptions {
   readonly slots: VideoModeSlots;
   readonly videoGrid: VideoGridComponent;
   readonly getCurrentUserId: () => number;
+  /** The DM call panel, once it has loaded (it is a lazy chunk). */
+  readonly panelHost?: () => VideoPanelHost | null;
 }
 
 export interface VideoModeController {
@@ -70,6 +84,40 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
    *  still true. Cleared once local video actually goes off, or when the
    *  grid is opened again through any other path. */
   let userDismissedVideo = false;
+  /** Where the grid slot lives in the chat column, to put it back after the
+   *  DM call panel has hosted it. */
+  let slotHome: { parent: Node; next: Node | null } | null = null;
+  /** The panel last told that video is on, so it is told when it is off. */
+  let activeHost: VideoPanelHost | null = null;
+
+  /** Move the grid into the panel (or keep it there). */
+  function hostInPanel(el: HTMLElement): void {
+    const slot = slots.videoGridSlot;
+    if (slot.parentNode !== el) {
+      if (slotHome === null && slot.parentNode !== null) {
+        slotHome = { parent: slot.parentNode, next: slot.nextSibling };
+      }
+      el.appendChild(slot);
+    }
+    slot.style.display = "block";
+  }
+
+  /** Put the grid back in the chat column, hidden unless video mode shows it. */
+  function returnFromPanel(): void {
+    const slot = slots.videoGridSlot;
+    if (slotHome !== null) {
+      const { parent, next } = slotHome;
+      slotHome = null;
+      parent.insertBefore(slot, next !== null && next.parentNode === parent ? next : null);
+    }
+    if (!videoMode) slot.style.display = "none";
+  }
+
+  function tellHost(host: VideoPanelHost | null, active: boolean): void {
+    if (activeHost !== null && activeHost !== host) activeHost.setActive(false);
+    activeHost = active ? host : null;
+    host?.setActive(active);
+  }
 
   function showVideoGrid(): void {
     userDismissedVideo = false;
@@ -126,7 +174,10 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
       }
       lastChannelId = channelId;
     }
+    const host = opts.panelHost?.() ?? null;
     if (channelId === null) {
+      returnFromPanel();
+      tellHost(host, false);
       // Not a dismissal: leaving voice can clear currentChannelId before
       // localCamera/localScreenshare go false, and this early return skips
       // the reset below — showChat() here would strand userDismissedVideo
@@ -136,6 +187,8 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     }
     const channelUsers = voice.voiceUsers.get(channelId);
     if (!channelUsers) {
+      returnFromPanel();
+      tellHost(host, false);
       closeVideoGrid();
       return;
     }
@@ -155,18 +208,32 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     if (!anyVideoOn) {
       anyVideoOn = videoGrid.hasStreams();
     }
+    const localVideoOn = voice.localCamera || voice.localScreenshare;
+    const panel = host !== null && host.ownsCall(channelId) ? host : null;
+    if (panel !== null) {
+      // The DM's own call: the panel shows every stream, remote ones too,
+      // with the chat still in view. Collapsed, it shows none and the chat
+      // is never covered.
+      closeVideoGrid();
+      tellHost(panel, anyVideoOn);
+      const el = anyVideoOn ? panel.element() : null;
+      if (el !== null) hostInPanel(el);
+      else returnFromPanel();
+    } else {
+      returnFromPanel();
+      tellHost(host, false);
+    }
     // Auto-close video grid when no streams remain
     if (!anyVideoOn) {
       closeVideoGrid();
     }
     // BUG-105: Auto-open video grid only for LOCAL camera/screenshare.
     // Remote streams require manual click (Discord-style behavior).
-    const localVideoOn = voice.localCamera || voice.localScreenshare;
     if (!localVideoOn) {
       // Nothing left to dismiss — the next camera/screenshare start should
       // auto-open the grid again.
       userDismissedVideo = false;
-    } else if (!videoMode && !userDismissedVideo) {
+    } else if (!videoMode && !userDismissedVideo && panel === null) {
       showVideoGrid();
     }
 
@@ -241,6 +308,8 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   }
 
   function destroy(): void {
+    returnFromPanel();
+    tellHost(null, false);
     closeVideoGrid();
     focusedTileId = null;
     localTileAdded = false;

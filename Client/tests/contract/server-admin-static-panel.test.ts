@@ -28,6 +28,9 @@ window.__test = {
   myPosition: myPosition,
   renderUsers: renderUsers,
   renderAudit: renderAudit,
+  renderDashboard: renderDashboard,
+  auditSentence: auditSentence,
+  actionLabels: ACTION_LABEL,
   renderTokens: renderTokens,
   openRoleModal: openRoleModal,
   renderRetention: renderRetention,
@@ -66,6 +69,9 @@ interface Bridge {
   myPosition: () => number;
   renderUsers: () => Promise<string>;
   renderAudit: () => Promise<string>;
+  renderDashboard: () => Promise<string>;
+  auditSentence: (e: any) => string;
+  actionLabels: Record<string, string>;
   renderTokens: () => Promise<string>;
   openRoleModal: (id: number | null) => void;
   renderRetention: () => Promise<string>;
@@ -595,6 +601,154 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toContain("limit=51");
   });
 
+  // Each label is written for the target the server records with it: a
+  // self-target, a target without an id and a numbered object must all leave
+  // a complete sentence.
+  it("reads every recorded target shape as a complete sentence", async () => {
+    const rowsIn: [string, string, number, string?][] = [
+      ["session_revoke_all", "user", 1],
+      ["setting_change", "setting", 0],
+      ["registration_mode_change", "setting", 0],
+      ["retention_policy_change", "setting", 0],
+      ["role_reorder", "role", 0],
+      ["role_create", "role", 5],
+      ["message_delete", "message", 55],
+      ["session_revoke", "session", 12],
+      ["invite_create", "invite", 3],
+      ["emoji_delete", "emoji", 5],
+      ["api_token_create", "api_token", 3],
+      ["api_token_revoke", "api_token", 0],
+      ["appeal_assign", "appeal", 3],
+      ["appeal_submit", "moderation_action", 4],
+      ["permission_preview", "channel", 3],
+      ["account_deleted", "user", 0],
+      ["plugin_install", "plugin", 0],
+      ["voice_mod_kick", "user", 9],
+      ["backup_create", "server", 0],
+      ["user_ban", "user", 0, "tok"],
+    ];
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/audit-log?"))
+        return {
+          json: rowsIn.map(([action, target_type, target_id, subject_token], i) => ({
+            id: rowsIn.length - i,
+            action,
+            actor_id: 1,
+            actor_name: "owner",
+            target_type,
+            target_id,
+            subject_token,
+            detail: "",
+            created_at: "2020-01-02 10:00:00",
+          })),
+        };
+      return { json: {} };
+    };
+    const booted = await boot([], respond);
+    dom = booted.dom;
+    const doc = booted.dom.window.document;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+    booted.bridge.state.section = "audit";
+    doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
+
+    expect(
+      [...doc.querySelectorAll("#auditTbody tr.audit-row .audit-what")].map((r) => r.textContent),
+    ).toEqual([
+      "owner signed out all their sessions",
+      "owner changed a server setting",
+      "owner changed who can join",
+      "owner changed the message retention policy",
+      "owner reordered the roles",
+      "owner created role #5",
+      "owner deleted a message #55",
+      "owner signed out a session #12",
+      "owner created an invite #3",
+      "owner removed an emoji #5",
+      "owner created an API token #3",
+      "owner revoked an API token",
+      "owner took an appeal #3",
+      "owner appealed a moderation action #4",
+      "owner previewed permissions for channel #3",
+      "owner deleted an account",
+      "owner installed a plugin",
+      "owner disconnected user #9",
+      "owner took a backup",
+      "owner banned an erased account",
+    ]);
+  });
+
+  // No row may end on a dangling word, whatever target the server records:
+  // an id of 0, an erased account, the actor themselves, a setting or the
+  // server. Nor may an actor without a user row read as a bare number.
+  it("completes every action's sentence for every target and actor shape", async () => {
+    const booted = await boot([], (p) =>
+      p === "/setup/status" ? { json: { needs_setup: false } } : { json: {} },
+    );
+    dom = booted.dom;
+    const { bridge } = booted;
+    const div = booted.dom.window.document.createElement("div");
+    const text = (e: object) => {
+      div.innerHTML = bridge.auditSentence(e);
+      return div.textContent!;
+    };
+    const shapes = [
+      { target_type: "user", target_id: 0 },
+      { target_type: "user", target_id: 0, subject_token: "tok" },
+      { target_type: "user", target_id: 1 },
+      { target_type: "channel", target_id: 0 },
+      { target_type: "role", target_id: 0 },
+      { target_type: "setting", target_id: 0 },
+      { target_type: "server", target_id: 0 },
+      { target_type: "", target_id: 0 },
+    ];
+    const codes = Object.keys(bridge.actionLabels);
+    expect(codes.length).toBeGreaterThan(50);
+    for (const action of codes) {
+      const label = bridge.actionLabels[action]!;
+      for (const shape of shapes) {
+        const sentence = text({ action, actor_id: 1, actor_name: "owner", ...shape });
+        expect(sentence, action).not.toMatch(/[{}]|\b(of|to|for|on|with|from|at|by)$/);
+        if (label.endsWith(" {t}"))
+          expect(sentence, action).not.toBe(`owner ${label.slice(0, -4)}`);
+      }
+    }
+
+    const backup = { action: "backup_create", target_type: "server", target_id: 0 };
+    expect(text({ ...backup, actor_id: 0, actor_name: "" })).toBe("The server took a backup");
+    expect(
+      text({
+        action: "identity_key_update",
+        actor_id: 0,
+        actor_name: "",
+        actor_token: "tok",
+        target_type: "user",
+        target_id: 0,
+        subject_token: "tok",
+      }),
+    ).toBe("An erased account changed their encryption key");
+    expect(text({ ...backup, actor_id: 9, actor_name: "" })).toBe("user #9 took a backup");
+  });
+
+  // Every client connection writes user_login and ws_connect, so the
+  // dashboard's five-row Recent activity would read as sign-ins only.
+  it("hides sign-ins and connections from the dashboard's Recent activity", async () => {
+    const calls: FetchCall[] = [];
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/audit-log?")) return { json: [] };
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+
+    await booted.bridge.renderDashboard();
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=5&offset=0&hide_signins=1",
+    );
+  });
+
   // AO-7. Search and the action filter used to run over the fetched page of
   // 50 only, so an older match was unreachable. They are now GET /audit-log
   // q and action parameters, and a keystroke refetches without re-rendering
@@ -636,7 +790,7 @@ describe("Server/admin/static — panel behaviour", () => {
     booted.bridge.state.section = "audit";
     booted.bridge.state.auditPage = 2;
     doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
-    expect(doc.querySelectorAll("#auditTbody tr")).toHaveLength(50);
+    expect(doc.querySelectorAll("#auditTbody tr.audit-row")).toHaveLength(50);
 
     const search = doc.querySelector<HTMLInputElement>(".filter-search")!;
     expect(search.maxLength).toBe(100);
@@ -649,8 +803,8 @@ describe("Server/admin/static — panel behaviour", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 350));
 
     const fetched = calls.find((c) => c.path.startsWith("/audit-log?"))?.path;
-    expect(fetched).toBe("/audit-log?limit=51&offset=0&q=needle%20%26%20co");
-    const rows = doc.querySelectorAll("#auditTbody tr");
+    expect(fetched).toBe("/audit-log?limit=51&offset=0&q=needle%20%26%20co&hide_signins=1");
+    const rows = doc.querySelectorAll("#auditTbody tr.audit-row");
     expect(rows).toHaveLength(1);
     expect(rows[0]!.textContent).toContain("removed #needle & co");
     expect(doc.querySelector(".pagination-info")!.textContent).toBe("Page 1 · 1 matching entry");
@@ -672,7 +826,109 @@ describe("Server/admin/static — panel behaviour", () => {
     select.dispatchEvent(new window.Event("change", { bubbles: true }));
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=0&q=needle%20%26%20co&action=channel_delete",
+      "/audit-log?limit=51&offset=0&q=needle%20%26%20co&action=channel_delete&hide_signins=1",
+    );
+  });
+
+  // UX clarity: each row reads as a sentence with the raw code kept in its
+  // tooltip, rows sit under day headings, and sign-in and connection rows are
+  // hidden on the server until the Sign-ins chip is pressed or the action
+  // filter names one of them.
+  it("reads audit rows as sentences and hides sign-ins until asked", async () => {
+    const calls: FetchCall[] = [];
+    const now = new Date().toISOString();
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/audit-log?")) {
+        return {
+          json: [
+            {
+              id: 3,
+              action: "channel_delete",
+              actor_id: 1,
+              actor_name: "owner",
+              target_type: "channel",
+              target_id: 7,
+              detail: "",
+              created_at: now,
+            },
+            {
+              id: 2,
+              action: "profile_update",
+              actor_id: 1,
+              actor_name: "owner",
+              target_type: "user",
+              target_id: 1,
+              detail: "",
+              created_at: "2020-01-02 10:00:00",
+            },
+            {
+              id: 1,
+              action: "made_up_thing",
+              actor_id: 2,
+              actor_name: "bob",
+              target_type: "server",
+              target_id: 0,
+              detail: "",
+              created_at: "2020-01-02 09:00:00",
+            },
+          ],
+          headers: { "X-Audit-Actions": '["channel_delete","user_login"]' },
+        };
+      }
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { window } = booted.dom;
+    const doc = window.document;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+    booted.bridge.state.section = "audit";
+    doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=51&offset=0&hide_signins=1",
+    );
+
+    const rows = [...doc.querySelectorAll("#auditTbody tr.audit-row")];
+    expect(rows.map((r) => r.querySelector(".audit-what")!.textContent)).toEqual([
+      "owner deleted channel #7",
+      "owner updated their profile",
+      "bob made up thing",
+    ]);
+    expect(rows.map((r) => r.getAttribute("title"))).toEqual([
+      "channel_delete",
+      "profile_update",
+      "made_up_thing",
+    ]);
+    const days = [...doc.querySelectorAll("#auditTbody tr.audit-day")].map((r) => r.textContent);
+    expect(days).toHaveLength(2);
+    expect(days[0]).toBe("Today");
+
+    const chip = doc.querySelector<HTMLButtonElement>("#auditSignins")!;
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+    calls.length = 0;
+    chip.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=51&offset=0",
+    );
+
+    // Filtering on a sign-in action shows it even with the chip off.
+    chip.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    calls.length = 0;
+    const select = doc.querySelector<HTMLSelectElement>("#auditAction")!;
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "All Actions",
+      "Channel delete",
+      "User login",
+    ]);
+    select.value = "user_login";
+    select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=51&offset=0&action=user_login",
     );
   });
 
@@ -714,7 +970,7 @@ describe("Server/admin/static — panel behaviour", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toContain("offset=50");
     expect(booted.bridge.state.auditPage).toBe(2);
-    expect(doc.querySelectorAll("#auditTbody tr")).toHaveLength(50);
+    expect(doc.querySelectorAll("#auditTbody tr.audit-row")).toHaveLength(50);
   });
 
   // A failed search used to leave the old query's rows on screen; and a page
@@ -755,7 +1011,7 @@ describe("Server/admin/static — panel behaviour", () => {
     doc.querySelector<HTMLButtonElement>('[data-action="turnAuditPage"][data-args="[1]"]')!.click();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=50&q=foo",
+      "/audit-log?limit=51&offset=50&q=foo&hide_signins=1",
     );
 
     fail = true;
@@ -772,7 +1028,7 @@ describe("Server/admin/static — panel behaviour", () => {
     doc.querySelector<HTMLButtonElement>('#auditResults [data-action="reloadAudit"]')!.click();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=0&q=foo&action=channel_delete",
+      "/audit-log?limit=51&offset=0&q=foo&action=channel_delete&hide_signins=1",
     );
   });
 

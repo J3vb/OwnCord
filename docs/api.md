@@ -3610,13 +3610,16 @@ Remove a channel's override so the server window applies again. Audited as
 Read the audit trail, newest first.
 
 **Auth:** `VIEW_AUDIT_LOG`
-**Query params:** `limit` (default 50, 1–500), `offset` (default 0), and two
+**Query params:** `limit` (default 50, 1–500), `offset` (default 0), and three
 optional filters that narrow the whole log before paging:
 
 - `q`: case-insensitive (ASCII) substring of the actor's name, the action, the
   target type or the detail. Surrounding whitespace is trimmed; at most 100
   characters.
 - `action`: one exact action name, such as `channel_delete`; at most 64 bytes.
+- `hide_signins`: `1` drops the sign-in and connection rows (`user_login`,
+  `ws_connect`); any other value keeps them. The admin panel sends it while
+  its Sign-ins filter is off, which is the default.
 
 An over-long or non-UTF-8 `q` or `action` is `400 BAD_REQUEST`.
 

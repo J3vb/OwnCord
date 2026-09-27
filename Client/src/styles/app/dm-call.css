@@ -316,6 +316,29 @@
   color: var(--header-primary);
 }
 
+/* The call's video: the shared grid moves in here (VideoModeController), so
+   the chat stays visible below. */
+/* The grid sizes its tiles from the room it is given, so the panel must not
+   grow to fit them: it keeps its share of the chat column. */
+.dm-call-panel--video {
+  min-height: 0;
+}
+.dcp-video {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dcp-video .video-grid {
+  background: transparent;
+}
+/* An avatar tile's avatar shrinks with the tile (the filmstrip is 90px). */
+.video-cell--avatar .dcp-avatar--lg {
+  width: min(80px, 55%);
+  height: auto;
+  aspect-ratio: 1;
+}
+
 /* The DM list's live-call glyph. */
 .dm-in-call {
   display: inline-flex;
