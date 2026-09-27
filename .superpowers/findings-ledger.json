@@ -11185,7 +11185,7 @@
       "finder": "planning-panel",
       "fixed": "2026-09-27",
       "fix": {
-        "commit": "PENDING",
+        "commit": "58c81b6bc1ca4e7502645d7e2a250decf2937f3b",
         "test": "Client/tests/unit/member-list.test.ts, Client/tests/unit/sidebar-area.test.ts, Client/tests/e2e/user-profile.spec.ts",
         "revertProof": "self-reported"
       },
