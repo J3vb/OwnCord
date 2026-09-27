@@ -4,6 +4,7 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -158,6 +159,13 @@ type Hub struct {
 	// the handshake's bearer-token resolution, the sweep's session verdicts
 	// and the connect audit row. Required.
 	authn SocketAuthenticator
+
+	// trustedProxyNets is server.trusted_proxies parsed once at construction
+	// (SRE-11): the handshake resolves the client address for its log line and
+	// the ws_connect audit row through it, so the recommended reverse-proxy
+	// deployment records the client rather than the proxy hop. Empty means
+	// RemoteAddr is used and a client-supplied header is ignored.
+	trustedProxyNets []*net.IPNet
 
 	// voice is the voice family's service (readers.go's VoiceStore): every
 	// voice_states read and write the join, moderation, control and sweep

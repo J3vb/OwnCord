@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/plugin"
@@ -89,6 +90,13 @@ type HubOptions struct {
 	// restart-required. Empty or not one of voiceQualities' keys falls back
 	// to "medium", same as an invalid per-channel override does.
 	VoiceQuality string
+
+	// TrustedProxies is server.trusted_proxies: the proxy hop(s) whose
+	// X-Forwarded-For/X-Real-IP may be trusted when resolving the client
+	// address for the handshake log and the ws_connect audit row (SRE-11).
+	// Parsed once at construction; nil/empty means RemoteAddr is used and a
+	// client-supplied header is ignored.
+	TrustedProxies []string
 }
 
 // NewHub creates a Hub ready to be started with Run, validating that the
@@ -163,6 +171,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		voiceMod:            newVoiceModLocks(),
 		presence:            opts.Presence,
 		authn:               opts.Auth,
+		trustedProxyNets:    clientip.ParseCIDRList(opts.TrustedProxies),
 		broadcast:           make(chan broadcastMsg, 1024),
 		clientEvents:        make(chan clientEvent, 64),
 		stop:                make(chan struct{}),

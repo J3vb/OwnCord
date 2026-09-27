@@ -10,11 +10,12 @@ import (
 
 // This file gives the first-run setup endpoint the same proxy-aware client
 // IP resolution every other session-creating path uses
-// (api.clientIPWithProxies, used by register/login/AdminIPRestrict/rate
-// limiting). admin cannot import api — api imports admin, and that would be
-// a cycle — so the algorithm is reproduced here rather than shared. Keep it
-// in lockstep with api/middleware.go's clientIPWithProxies/parseCIDRList/
-// ipInNets if that logic ever changes (OC-0274).
+// (clientip.Resolve — the shared resolver under Server/clientip, used by
+// api's middleware and the WebSocket handshake). admin cannot import api —
+// api imports admin, and that would be a cycle — so the algorithm is
+// reproduced here rather than shared. Keep it
+// in lockstep with clientip.Resolve/ParseCIDRList/InNets
+// if that logic ever changes (OC-0274).
 
 // setupParseCIDRList parses CIDR strings into networks, skipping invalid
 // entries with a warning — a misconfigured entry must not take the server
