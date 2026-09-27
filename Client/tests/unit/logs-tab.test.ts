@@ -561,6 +561,20 @@ describe("LogsTab", () => {
       expect(logs.querySelectorAll(".log-entry")).toHaveLength(4);
     });
 
+    it("scrolls to the newest entry when the client logs are opened", () => {
+      mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "a"), makeMockEntry("info", "b")]);
+      const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
+      const logs = disclosure(el, "Client logs");
+      const viewer = logs.querySelector<HTMLElement>(".log-viewer")!;
+      Object.defineProperty(viewer, "scrollHeight", { value: 480 });
+      Object.defineProperty(viewer, "scrollTop", { value: 0, writable: true });
+
+      logs.open = true;
+      logs.dispatchEvent(new Event("toggle"));
+
+      expect(viewer.scrollTop).toBe(480);
+    });
+
     it("updates the summary counts as live entries arrive", () => {
       let listener: () => void = () => {};
       mockAddLogListener.mockImplementation((...args: unknown[]) => {

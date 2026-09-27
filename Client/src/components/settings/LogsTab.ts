@@ -343,6 +343,13 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     );
     logListEl = createElement("div", { class: "log-viewer" });
     appendChildren(logs.details, controls, logListEl);
+    logs.details.addEventListener(
+      "toggle",
+      () => {
+        if (logs.details.open && logListEl !== null) logListEl.scrollTop = logListEl.scrollHeight;
+      },
+      { signal: buildSignal },
+    );
     section.appendChild(logs.details);
 
     renderLogEntries();
