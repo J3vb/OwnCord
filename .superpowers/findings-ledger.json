@@ -10976,12 +10976,18 @@
       "evidence": "Client/src/lib/deviceManager.ts:209-235: after `room.switchActiveDevice(\"audioinput\", deviceId)` (or cycleMicForDeviceSwitch, which returns early when isMicPolicyGated()), it runs `this.audioPipeline?.setupAudioPipeline()` and then `applyNoiseSuppressor()`/`removeNoiseSuppressor()` with no mute or gate check. Lines 142-146 do the same in the hot-plug fallback. Client/src/lib/audioPipeline.ts:136-200: setupAudioPipeline has no mute guard; it creates an AudioContext, calls sender.replaceTrack(dest track) and startVadPolling(). Lines 254-255 state 'The pipeline only exists when unmuted \u2014 muting tears it down entirely'. Client/src/features/voice/mediaControl.ts:205-219: the mute path tears the pipeline down and calls setMicrophoneEnabled(false). Client/src/features/voice/roomLifecycle.ts:190-197: stopMicTrackOnMute: true. The ledger has OC-0113 (Default mic selection) and OC-0277 (RNNoise restart), but none for this.",
       "suggestedFix": "In DeviceManager.switchInputDevice and the handleDeviceChange fallback, rebuild the pipeline and re-apply RNNoise only when `!isMicPolicyGated()`. The unmute path (applyMicMuteState(false) \u2192 setupAudioPipeline) already rebuilds on the fresh track. Alternatively, have setupAudioPipeline return early when the mic publication isMuted or its mediaStreamTrack.readyState === \"ended\".",
       "confidence": "medium",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25",
       "hunt": "b9-exit-audit-2026-09-25",
       "lens": "voice-media",
       "finder": "b9-exit-audit",
-      "note": "Cross-exam: the leak lasts until the next unmute (for PTT users, the next PTT press), not the rest of the session. The track has ended, so there is no privacy impact."
+      "note": "Cross-exam: the leak lasts until the next unmute (for PTT users, the next PTT press), not the rest of the session. The track has ended, so there is no privacy impact.",
+      "fixed": "2026-09-27",
+      "fix": {
+        "commit": "9f129527",
+        "test": "Client/tests/unit/audio-pipeline-core.test.ts; Client/tests/unit/device-manager.test.ts",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0475",

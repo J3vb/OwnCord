@@ -79,14 +79,14 @@ baselines and scorecards.
 
 | Status    |   Count |
 | --------- | ------: |
-| Fixed     |     469 |
-| Open      |       4 |
+| Fixed     |     470 |
+| Open      |       3 |
 | Declined  |       7 |
 | Duplicate |       1 |
 | **Total** | **481** |
 
-As of 2026-09-27 the four open findings are `OC-0474`, `OC-0476`,
-`OC-0478` and `OC-0481` (all low, none B9-tagged); `OC-0473` is fixed by #1858; `OC-0454` is declined by owner decision
+As of 2026-09-27 the three open findings are `OC-0476`, `OC-0478` and
+`OC-0481` (all low, none B9-tagged); `OC-0473` is fixed by #1858 and `OC-0474` by #1865; `OC-0454` is declined by owner decision
 D-09 (Q14, an accepted low with a reopen trigger — see `.superpowers/findings-ledger.json`),
 and `OC-0479` (stale `.golangci.yml` comments) is fixed by #1800.
 
