@@ -512,7 +512,9 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     // Stream quality is the 3rd select (index 2)
-    const qualitySelect = el.querySelectorAll("select")[2] as HTMLSelectElement;
+    const qualitySelect = el.querySelector(
+      'select[aria-label="Stream Quality"]',
+    ) as HTMLSelectElement;
     qualitySelect.value = "low";
     qualitySelect.dispatchEvent(new Event("change"));
 
@@ -529,7 +531,9 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     // Screen share FPS is the 4th select (index 3)
-    const fpsSelect = el.querySelectorAll("select")[3] as HTMLSelectElement;
+    const fpsSelect = el.querySelector(
+      'select[aria-label="Screen Share FPS"]',
+    ) as HTMLSelectElement;
     expect(fpsSelect.value).toBe("30"); // default
     fpsSelect.value = "60";
     fpsSelect.dispatchEvent(new Event("change"));
@@ -537,6 +541,91 @@ describe("VoiceAudioTab UI structure", () => {
     const saved = localStorage.getItem("owncord:settings:screenShareFps");
     expect(saved).toBe("60");
     ac.abort();
+  });
+
+  describe("device and processing cards", () => {
+    function build(): { el: HTMLDivElement; ac: AbortController } {
+      stubNavigator();
+      const ac = new AbortController();
+      const el = createVoiceAudioTab(ac.signal).build();
+      document.body.appendChild(el);
+      return { el, ac };
+    }
+    const cardNamed = (el: HTMLElement, title: string): HTMLElement =>
+      [...el.querySelectorAll<HTMLElement>("section.settings-card")].find(
+        (c) => c.querySelector(".settings-card-head h3")!.textContent === title,
+      )!;
+
+    it("groups the tab into Microphone, Speakers, Camera & screen share and Voice processing", () => {
+      const { el, ac } = build();
+      const titles = [...el.querySelectorAll(".settings-card-head h3")].map((h) => h.textContent);
+      expect(titles).toEqual([
+        "Microphone",
+        "Speakers",
+        "Camera & screen share",
+        "Voice processing",
+      ]);
+      const mic = cardNamed(el, "Microphone");
+      expect(mic.querySelector('select[aria-label="Input Device"]')).not.toBeNull();
+      expect(mic.querySelector('input[aria-label="Input Volume"]')).not.toBeNull();
+      expect(mic.querySelector(".mic-meter-threshold")).not.toBeNull();
+      const speakers = cardNamed(el, "Speakers");
+      expect(speakers.querySelector('select[aria-label="Output Device"]')).not.toBeNull();
+      expect(speakers.querySelector('input[aria-label="Output Volume"]')).not.toBeNull();
+      const camera = cardNamed(el, "Camera & screen share");
+      for (const name of ["Video Device", "Stream Quality", "Screen Share FPS"]) {
+        expect(camera.querySelector(`select[aria-label="${name}"]`), name).not.toBeNull();
+      }
+      expect(camera.querySelector("video")).not.toBeNull();
+      expect(cardNamed(el, "Voice processing").querySelectorAll(".toggle")).toHaveLength(4);
+      ac.abort();
+    });
+
+    it("nests Enhanced Noise Suppression under the Noise Suppression it builds on", () => {
+      const { el, ac } = build();
+      const labels = [...cardNamed(el, "Voice processing").querySelectorAll(".setting-label")].map(
+        (l) => l.textContent,
+      );
+      expect(labels).toEqual([
+        "Echo Cancellation",
+        "Noise Suppression",
+        "Enhanced Noise Suppression",
+        "Automatic Gain Control",
+      ]);
+      const enhanced = el
+        .querySelector('.toggle[aria-label="Enhanced Noise Suppression"]')!
+        .closest(".setting-row")!;
+      expect(enhanced.classList.contains("nested")).toBe(true);
+      ac.abort();
+    });
+
+    it("labels the camera preview Camera off until a camera is chosen", () => {
+      const { el, ac } = build();
+      const label = el.querySelector<HTMLElement>(".camera-preview-label")!;
+      expect(label.textContent).toBe("Camera off");
+      expect(label.hidden).toBe(false);
+      ac.abort();
+    });
+
+    it("states the input sensitivity beside the meter, and follows the handle", () => {
+      localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+      const { el, ac } = build();
+      const value = el.querySelector<HTMLElement>("[data-testid='sensitivity-value']")!;
+      expect(value.textContent).toBe("50%");
+      el.querySelector(".mic-meter-threshold")!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+      );
+      expect(value.textContent).toBe("45%");
+      ac.abort();
+    });
+
+    it("shows the microphone's state as a pill: no input while the meter hears nothing", async () => {
+      const { el, ac } = build();
+      const pill = el.querySelector<HTMLElement>("[data-testid='mic-status']")!;
+      await vi.waitFor(() => expect(pill.textContent).toBe("No input"));
+      expect(pill.querySelector(".st-ic.st-pending")).not.toBeNull();
+      ac.abort();
+    });
   });
 
   it("contains audio processing toggles", () => {
@@ -671,11 +760,13 @@ describe("VoiceAudioTab UI structure", () => {
 
     // Wait for devices to load
     await vi.waitFor(() => {
-      const videoSelect = el.querySelectorAll("select")[4] as HTMLSelectElement;
+      const videoSelect = el.querySelector(
+        'select[aria-label="Video Device"]',
+      ) as HTMLSelectElement;
       expect(videoSelect.querySelectorAll("option").length).toBeGreaterThan(1);
     });
 
-    const videoSelect = el.querySelectorAll("select")[4] as HTMLSelectElement;
+    const videoSelect = el.querySelector('select[aria-label="Video Device"]') as HTMLSelectElement;
     videoSelect.value = "cam-1";
     videoSelect.dispatchEvent(new Event("change"));
 
@@ -870,9 +961,12 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    // Should not throw — mic meter stays empty
+    // Should not throw — mic meter stays empty, and the pill says why.
     await new Promise((r) => setTimeout(r, 0));
     expectConsole("warn", /\[VoiceAudioTab\] Mic access denied or unavailable/);
+    const pill = el.querySelector<HTMLElement>("[data-testid='mic-status']")!;
+    expect(pill.textContent).toBe("No microphone access");
+    expect(pill.querySelector(".st-ic.st-warn")).not.toBeNull();
     ac.abort();
   });
 
@@ -963,7 +1057,9 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const qualitySelect = el.querySelectorAll("select")[2] as HTMLSelectElement;
+    const qualitySelect = el.querySelector(
+      'select[aria-label="Stream Quality"]',
+    ) as HTMLSelectElement;
     expect(qualitySelect.value).toBe("low");
     ac.abort();
   });
@@ -1054,7 +1150,9 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
 
   it("hides the input volume and sensitivity controls and explains why", async () => {
     const tab = await mount();
-    const headings = [...tab.element.querySelectorAll("h3")].map((h) => h.textContent);
+    const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
+      (h) => h.textContent,
+    );
     expect(headings).not.toContain("Input Volume");
     expect(headings).not.toContain("Input Sensitivity");
     // The engine's playout mixer applies output volume.

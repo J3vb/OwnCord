@@ -277,6 +277,14 @@ export const settingsText = defineCatalog("settings", {
   "diagnostics.detail.connectionRefused":
     "The server could not be reached through the normal certificate-checked connection. Check the server address and any certificate prompt, then retry.",
 
+  "voiceAudio.card.microphone": "Microphone",
+  "voiceAudio.card.speakers": "Speakers",
+  "voiceAudio.card.camera": "Camera & screen share",
+  "voiceAudio.card.processing": "Voice processing",
+  "voiceAudio.mic.hearing": "Hearing you",
+  "voiceAudio.mic.noInput": "No input",
+  "voiceAudio.mic.noAccess": "No microphone access",
+  "voiceAudio.previewOff": "Camera off",
   "voiceAudio.inputDevice": "Input Device",
   "voiceAudio.default": "Default",
   "voiceAudio.inputVolume": "Input Volume",
