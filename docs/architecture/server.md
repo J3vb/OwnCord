@@ -136,8 +136,12 @@ sequenceDiagram
 `app.StartRuntime` invokes as its route-mounting step over the already-built
 runtime, so the chain is assembled at mount time rather than at construction;
 note that chi's `middleware.RealIP` is deliberately omitted — client IP is resolved via
-`clientIPWithProxies` against configured trusted proxies instead, so spoofed
-`X-Real-IP`/`X-Forwarded-For` headers are not trusted by default. Authentication
+`clientip.Resolve` (extracted from `api/middleware.go` in SRE-11) against configured
+trusted proxies instead, so spoofed
+`X-Real-IP`/`X-Forwarded-For` headers are not trusted by default. The same resolver
+feeds the access log, the WebSocket handshake log and the `ws_connect` audit row, so
+the recommended reverse-proxy deployment records the client rather than the proxy hop
+on every path. Authentication
 is bearer-token (SHA-256-hashed opaque tokens); authorization is enforced at two
 deliberate scopes (D13): `RequirePermission` middleware gates the two
 channel-less routes on server-wide role permissions via

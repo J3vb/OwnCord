@@ -23,9 +23,15 @@ import { createElement } from "@lib/dom";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import { blocksStore, setBlockedByMe, setUserBlockedByMe } from "@stores/blocks.store";
 import { setActiveChannel } from "@stores/channels.store";
-import { addDmChannel, clearDmUnread, dmStore, type DmChannel } from "@stores/dm.store";
+import {
+  addDmChannel,
+  addDmToChannelsStore,
+  clearDmUnread,
+  dmChannelFromPayload,
+  dmStore,
+  type DmChannel,
+} from "@stores/dm.store";
 import { setActiveDmUser, setSidebarMode } from "@stores/ui.store";
-import { addDmToChannelsStore, dmChannelFromPayload } from "../../pages/main-page/SidebarDmHelpers";
 import { messageRequestsText as t } from "../../i18n/messageRequests";
 import type { MessageRequest } from "./api";
 import { applyFrame } from "./store";

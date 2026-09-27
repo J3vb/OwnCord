@@ -7,12 +7,12 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -252,85 +252,11 @@ func clientIP(r *http.Request) string {
 }
 
 // clientIPWithProxies returns the real client IP for rate-limiting purposes.
-//
-// Security model:
-//   - Always parse the actual connecting address from r.RemoteAddr.
-//   - Only honour X-Real-IP or X-Forwarded-For if the connecting address matches
-//     one of the trustedNets. This prevents clients from forging their IP to
-//     bypass rate limits.
-//   - If trustedNets is empty (the default), RemoteAddr is always used.
-//
-// trustedNets is the pre-parsed trusted-proxy list — parse the configured CIDR
-// strings ONCE at middleware/handler construction with parseCIDRList (W3-3a);
-// never parse on the request path.
+// Since SRE-11 the algorithm itself lives in the clientip package, because
+// the WebSocket handshake needs the identical resolution and ws cannot import
+// api. The behaviour is unchanged; api/clientip_test.go still pins it.
 func clientIPWithProxies(r *http.Request, trustedNets []*net.IPNet) string {
-	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		// RemoteAddr without port (e.g. Unix socket or test stub) — use as-is.
-		remoteHost = r.RemoteAddr
-	}
-
-	if len(trustedNets) == 0 {
-		return remoteHost
-	}
-
-	if !ipInNets(remoteHost, trustedNets) {
-		return remoteHost
-	}
-
-	// Prefer X-Forwarded-For when coming from a trusted proxy. Unlike
-	// X-Real-IP — which the project's own documented nginx and Caddy
-	// reverse-proxy recipes forward verbatim from whatever the client sent,
-	// rather than overwriting — every proxy fronting this server sets
-	// X-Forwarded-For with the true peer appended, so the anti-spoof walk
-	// below is authoritative and a client-injected X-Real-IP can never
-	// override it (OC-0240).
-	//
-	// Walk from the RIGHT and skip entries that are themselves trusted
-	// proxies. The first non-trusted, valid address is the real client.
-	// Taking the leftmost entry (BUG-112) would trust a client-supplied
-	// value: a client can prepend a spoofed IP
-	// (`X-Forwarded-For: <spoofed>, <real>`) that the proxy then appends to,
-	// letting it forge per-IP rate-limit and lockout keys.
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		leftmostValid := ""
-		for _, part := range slices.Backward(parts) {
-			candidate := strings.TrimSpace(part)
-			if candidate == "" || net.ParseIP(candidate) == nil {
-				continue
-			}
-			leftmostValid = candidate
-			if ipInNets(candidate, trustedNets) {
-				continue // our own proxy hop, keep walking left
-			}
-			return candidate
-		}
-		// Every entry fell inside trustedCIDRs — a config that covers client
-		// networks too (e.g. trusted_proxies: 10.0.0.0/8 with LAN clients).
-		// Falling back to RemoteAddr here would collapse ALL clients behind
-		// the proxy into one rate-limit/lockout bucket, so one user's failed
-		// logins would lock out everyone. The leftmost valid entry is the
-		// furthest-upstream hop — the best distinct per-client key available
-		// under such a config. trusted_proxies must list only proxy hops;
-		// startup validation warns about entries that cannot be proxies.
-		if leftmostValid != "" {
-			return leftmostValid
-		}
-	}
-
-	// Fall back to X-Real-IP only when X-Forwarded-For was absent or wholly
-	// unusable. BUG-112 / OC-0240: still validate the extracted IP to prevent
-	// spoofed rate-limit keys — this header is untrustworthy on its own since
-	// the documented deployment recipes never overwrite it, so it is only
-	// ever used as a last resort, never ahead of X-Forwarded-For.
-	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-		if net.ParseIP(xri) != nil {
-			return xri
-		}
-	}
-
-	return remoteHost
+	return clientip.Resolve(r, trustedNets)
 }
 
 // parseCIDRList parses CIDR strings into networks, skipping invalid entries
@@ -338,32 +264,19 @@ func clientIPWithProxies(r *http.Request, trustedNets []*net.IPNet) string {
 // called once per middleware/handler at construction (startup), never on the
 // request path (W3-3a).
 func parseCIDRList(cidrs []string) []*net.IPNet {
-	nets := make([]*net.IPNet, 0, len(cidrs))
 	for _, c := range cidrs {
-		_, n, err := net.ParseCIDR(c)
-		if err != nil {
+		if _, _, err := net.ParseCIDR(c); err != nil {
 			slog.Warn("ignoring invalid CIDR entry (use address/prefix notation, e.g. 10.0.0.1/32)",
 				"cidr", c, "error", err)
-			continue
 		}
-		nets = append(nets, n)
 	}
-	return nets
+	return clientip.ParseCIDRList(cidrs)
 }
 
 // ipInNets reports whether ipStr (a plain IP, no port) falls inside any of
 // the parsed networks.
 func ipInNets(ipStr string, nets []*net.IPNet) bool {
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return false
-	}
-	for _, n := range nets {
-		if n.Contains(ip) {
-			return true
-		}
-	}
-	return false
+	return clientip.InNets(ipStr, nets)
 }
 
 // AdminIPRestrict returns middleware that blocks requests from IPs not in the

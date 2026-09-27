@@ -46,6 +46,20 @@ export interface ApiClientConfig {
   readonly token?: string;
 }
 
+/**
+ * Per-request options for the internal `doFetch`. `onUploadProgress` tags a
+ * multipart upload with a fresh id so the native transport's `upload-progress`
+ * ticks can be matched to this request, and receives the matching ones as a
+ * 0–1 fraction.
+ */
+interface RequestOptions {
+  skipUnauthorized?: boolean;
+  token?: string;
+  multipart?: boolean;
+  detached?: boolean;
+  onUploadProgress?: (fraction: number) => void;
+}
+
 /** API client error with parsed error body. */
 export class ApiClientError extends Error {
   readonly status: number;
@@ -396,7 +410,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-    opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean; detached?: boolean },
+    opts?: RequestOptions,
   ): Promise<T> {
     const snapshot = config;
     // A detached request is owned by its caller's signal alone, so ending the
@@ -419,6 +433,22 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       const init: RequestInit = { method, headers, signal: transport.signal };
       if (body !== undefined)
         init.body = opts?.multipart ? (body as FormData) : JSON.stringify(body);
+      // Subscribe before the request goes out (the proxy can emit as soon as
+      // the body starts moving) and let the request scope unsubscribe it.
+      if (opts?.onUploadProgress !== undefined) {
+        // The Rust proxy echoes this id back in its upload-progress events, so
+        // the caller can tell its own upload's ticks from any other in flight.
+        const id = crypto.randomUUID();
+        headers["X-Upload-Id"] = id;
+        const onProgress = opts.onUploadProgress;
+        const unsubscribe = desktop.http.onUploadProgress((p) => {
+          if (p.id === id) {
+            // A 0–1 fraction; the native <progress> renders and announces it.
+            onProgress(p.total > 0 ? Math.min(1, Math.max(0, p.sent / p.total)) : 0);
+          }
+        });
+        owner.addCleanup(unsubscribe);
+      }
       const origin = await owner.run(ensureHttpProxy(snapshot.host));
       owner.assertCurrent();
       log.debug(`${label} →`, { method, path });
@@ -468,7 +498,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-    opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean; detached?: boolean },
+    opts?: RequestOptions,
   ): Promise<T> {
     return doFetch<T>("API", "/api/v1", method, path, body, signal, opts);
   }
@@ -1048,11 +1078,24 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     // ── File Uploads ──────────────────────────────────────
 
-    uploadFile(file: File, signal?: AbortSignal): Promise<UploadResponse> {
+    /**
+     * Upload one file. `onProgress` receives a 0–1 fraction for this upload
+     * only, correlated by an id the client generates; the callback is not
+     * called at all when the native transport reports none (e.g. a browser
+     * adapter with no progress channel).
+     */
+    uploadFile(
+      file: File,
+      signal?: AbortSignal,
+      onProgress?: (fraction: number) => void,
+    ): Promise<UploadResponse> {
       const formData = new FormData();
       formData.append("file", file);
 
-      return request<UploadResponse>("POST", "/uploads", formData, signal, { multipart: true });
+      return request<UploadResponse>("POST", "/uploads", formData, signal, {
+        multipart: true,
+        onUploadProgress: onProgress,
+      });
     },
 
     // ── Invites ───────────────────────────────────────────

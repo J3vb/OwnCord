@@ -709,14 +709,18 @@ jobs:
       # rather than the machine -- they are inconclusive, not a ceiling. Same
       # posture as the run's own obs_ws_conn_rejects == 0, which makes the
       # same claim about the connection cap.
+      #
+      # Read the counter from metrics-after.json (SRE-M1), not the server log:
+      # the JSON figure is the same number the Attention panel alerts on, so
+      # the gate can no longer drift from what an operator sees. A missing or
+      # unreadable snapshot fails the gate rather than passing it.
       - name: Assert the ceiling search never hit the topic limiter
         if: always() && inputs.profile == 'ceiling-search' && matrix.leg == 'constrained'
         run: |
-          if [ ! -f "$WORK/server.log" ]; then
-            echo "::error::no server.log to check for topic-limiter shedding"
+          if ! shed=$(jq -er '.topic_sheds_total' "$WORK/metrics-after.json" 2>/dev/null); then
+            echo "::error::metrics-after.json is missing or has no topic_sheds_total, so topic-limiter shedding cannot be checked"
             exit 1
           fi
-          shed=$(grep -c 'topic rate limit exceeded' "$WORK/server.log" || true)
           if [ "$shed" != "0" ]; then
             echo "::error::$shed frame(s) were shed by topicRateLimitPerSecond. The search is shaped to stay under it (CEILING_CHANNELS=$CEILING_CHANNELS), so this means the shaping is wrong: the steps above the first shed are INCONCLUSIVE, not a server ceiling. Widen K6_CEILING_CHANNELS and re-run; do NOT publish these steps as the hardware ceiling."
             exit 1

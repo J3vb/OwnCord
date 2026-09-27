@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync/atomic"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -564,6 +565,8 @@ func (h *Hub) bumpVisibilityWatermark() {
 // seqMu — nothing in the hub's own broadcast/purge/reconnect paths does.
 func (h *Hub) MarkVisibilityChanged() {
 	h.seqMu.Lock()
+	start := time.Now()
 	defer h.seqMu.Unlock()
+	defer h.observeSeqMuHold(start)
 	h.bumpVisibilityWatermark()
 }

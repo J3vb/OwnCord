@@ -4,6 +4,7 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,6 +58,12 @@ type Hub struct {
 	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
 	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
 
+	// latency is the shipped in-process metrics surface (SRE-M1): broadcast
+	// and dispatch-lag histograms, the max seqMu hold, the chat-ack histogram
+	// and the topic-shed counter. The zero value is usable, so no initializer
+	// is needed and the field costs no allocation on the hot path.
+	latency hubLatencyMetrics
+
 	// Phase B Step 7 — event persistence. nil = ring buffer only. Atomic
 	// because internal/app wires these one lifecycle stage after Run has
 	// started, which reads them on the broadcast/replay paths.
@@ -108,8 +115,11 @@ type Hub struct {
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
 	// goroutines (startSweep): a tick that arrives while the previous sweep
 	// is still running is skipped rather than stacked.
-	sessionSweepInFlight atomic.Bool
-	voiceSweepInFlight   atomic.Bool
+	sessionSweepInFlight   atomic.Bool
+	voiceSweepInFlight     atomic.Bool
+	voiceReconcileInFlight atomic.Bool
+
+	voiceReconcile voiceReconcileState // RT-3 (voice_reconcile.go)
 
 	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
 	reconnectTierBuf  atomic.Uint64
@@ -158,6 +168,13 @@ type Hub struct {
 	// the handshake's bearer-token resolution, the sweep's session verdicts
 	// and the connect audit row. Required.
 	authn SocketAuthenticator
+
+	// trustedProxyNets is server.trusted_proxies parsed once at construction
+	// (SRE-11): the handshake resolves the client address for its log line and
+	// the ws_connect audit row through it, so the recommended reverse-proxy
+	// deployment records the client rather than the proxy hop. Empty means
+	// RemoteAddr is used and a client-supplied header is ignored.
+	trustedProxyNets []*net.IPNet
 
 	// voice is the voice family's service (readers.go's VoiceStore): every
 	// voice_states read and write the join, moderation, control and sweep
@@ -289,6 +306,8 @@ func (h *Hub) Run() {
 					h.startSweep(&h.sessionSweepInFlight, h.sweepRevokedSessions)
 				case <-voiceSweepTicker.C:
 					h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
+					// RT-3 has its own guard: a slow ListParticipants never suppresses the ghost sweep.
+					h.startSweep(&h.voiceReconcileInFlight, h.reconcileVoiceMembership)
 				}
 			}
 		}()

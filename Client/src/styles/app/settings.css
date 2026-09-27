@@ -315,6 +315,162 @@
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* ── Status-first settings patterns (cards, status rows, disclosures) ── */
+.settings-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.settings-card-head,
+.settings-toolbar,
+.summary-line,
+details.disclose > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.summary-line,
+details.disclose > summary {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.settings-card-head h3 {
+  margin: 0 auto 0 0;
+  font-size: var(--font-size-md);
+  color: var(--header-primary);
+}
+.settings-card-head .ac-btn,
+.settings-toolbar .ac-btn,
+.settings-toolbar .setting-label {
+  margin: 0;
+}
+.settings-toolbar {
+  margin: var(--space-2) 0;
+}
+.summary-line {
+  margin-top: var(--space-3);
+}
+.disclose-count {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.st-ic {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.st-ic[hidden] {
+  display: none;
+}
+.st-ic.st-ok {
+  color: var(--text-positive);
+}
+.st-ic.st-warn {
+  color: var(--text-warning);
+}
+.st-ic.st-crit {
+  color: var(--text-danger);
+}
+.st-ic.st-pending {
+  color: var(--text-muted);
+}
+.status-list {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+.status-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.status-name {
+  flex: 0 1 170px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.status-result {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.status-detail {
+  flex: 1 0 100%;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+details.disclose > summary {
+  padding: var(--space-2) 0;
+  list-style: none;
+  cursor: pointer;
+}
+/* base.css rings buttons, inputs and links; a summary needs the same ring. */
+details.disclose > summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+details.disclose > summary::-webkit-details-marker {
+  display: none;
+}
+details.disclose > summary .icon {
+  color: var(--text-muted);
+  transition: transform 0.15s;
+}
+details.disclose[open] > summary .icon {
+  transform: rotate(90deg);
+}
+.settings-select {
+  background: var(--bg-input);
+  color: var(--text-normal);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+}
+.log-viewer,
+.diag-state {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.log-viewer {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.diag-state,
+.log-data {
+  margin: 0;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+.log-entry {
+  padding: 4px 8px;
+  margin: 2px 0;
+  border-left: 3px solid;
+  line-height: 1.4;
+}
+.log-debug {
+  color: var(--text-muted);
+}
+.log-info {
+  color: var(--text-positive);
+}
+.log-warn {
+  color: var(--text-warning);
+}
+.log-error {
+  color: var(--text-danger);
+}
 .account-delete-confirm {
   background: color-mix(in srgb, var(--red) 6%, transparent);
   border: 1px solid color-mix(in srgb, var(--red) 20%, transparent);

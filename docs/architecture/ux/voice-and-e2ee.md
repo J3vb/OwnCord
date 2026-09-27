@@ -208,8 +208,9 @@ trust action entirely (a blind accept is refused).
 - **Stream preview:** `lib/streamPreview.ts` renders a hover/focus live preview
   of a **remote** participant's camera or screenshare in the voice channel
   sidebar (300 ms debounce, attached from `components/ChannelSidebar.ts`). There
-  is no pre-share preview of your own stream anywhere — that step is the OS
-  `getDisplayMedia` picker dialog.
+  is no pre-share preview of your own stream in the app on Windows — that step
+  is the OS `getDisplayMedia` picker dialog; on Linux it is the "Share your
+  screen" dialog (`components/ScreenSharePicker.ts`).
 
 ## 9. DM calls (ring)
 

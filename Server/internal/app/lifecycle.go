@@ -83,6 +83,7 @@ func (a *App) stages() []stage {
 		{"event-persistence", a.startEventPersistence},
 		{"audit-writer", a.startAuditWriter},
 		{"maintenance", a.startMaintenance},
+		{"pprof", a.startPprof},
 		{"acme", a.startACME},
 		{"signals", a.startSignals},
 		{"http", a.startHTTP},
@@ -121,10 +122,9 @@ func (a *App) Run(ctx context.Context) (err error) {
 	})
 
 	defer func() {
-		// Close gives every step its own budget and ignores ctx's
-		// cancellation, so teardown runs in full even when the caller's
-		// context is what ended the server, while still carrying whatever
-		// values that context holds.
+		// Close gives every step its own budget and ignores ctx's cancellation,
+		// so teardown runs in full even when the caller's context is what ended
+		// the server, while still carrying whatever values that context holds.
 		if closeErr := a.Close(ctx); closeErr != nil && err == nil {
 			err = closeErr
 		}

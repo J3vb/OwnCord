@@ -131,7 +131,7 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
-      # Held at an exact version by Client/patches/@tauri-apps+plugin-http+2.5.9.patch.
+      # Held at an exact version by Client/patches/@tauri-apps+plugin-http+2.7.0.patch.
       # postinstall runs patch-package --error-on-fail --error-on-warn, so any bump
       # fails npm ci on a patch-version mismatch before a single test runs. Client/patches/README.md
       # says the pin lifts only when an upstream release passes the SDK boundary

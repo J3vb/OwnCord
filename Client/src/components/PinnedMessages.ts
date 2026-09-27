@@ -7,7 +7,7 @@ import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
-import { parseTimestamp } from "@components/message-list/formatting";
+import { parseTimestamp } from "@lib/formatting";
 import { messagingText } from "../i18n/messaging";
 
 export interface PinnedMessage {

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/plugin"
@@ -166,7 +167,9 @@ func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
 		set[id] = struct{}{}
 	}
 	h.seqMu.Lock()
+	start := time.Now()
 	defer h.seqMu.Unlock()
+	defer h.observeSeqMuHold(start)
 	h.purgedMessages = set
 	dropped := h.replayBuf.RemoveWhere(func(data []byte) bool { return eventNamesMessage(data, set) })
 	var rows int64
@@ -202,7 +205,9 @@ func (h *Hub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
 		}
 	}
 	h.seqMu.Lock()
+	start := time.Now()
 	defer h.seqMu.Unlock()
+	defer h.observeSeqMuHold(start)
 	if h.purgedUsers == nil {
 		h.purgedUsers = make(map[int64]struct{})
 	}
