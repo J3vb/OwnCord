@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ type attentionFixture struct {
 	alive    bool
 	schedule string
 	last     time.Time
+	voice    *VoiceHealth
 }
 
 func newAttentionFixture(t *testing.T) *attentionFixture {
@@ -44,6 +46,12 @@ func newAttentionFixture(t *testing.T) *attentionFixture {
 		DispatchAlive:  func() bool { return f.alive },
 		BackupSchedule: func(context.Context) (string, error) { return f.schedule, nil },
 		LastBackup:     func() (time.Time, error) { return f.last, nil },
+		VoiceHealth: func(context.Context) VoiceHealth {
+			if f.voice == nil {
+				return VoiceHealth{Managed: false}
+			}
+			return *f.voice
+		},
 	})
 	return f
 }
@@ -529,5 +537,75 @@ func TestBackupScheduleInterval(t *testing.T) {
 		if got := BackupScheduleInterval(schedule); got != want {
 			t.Errorf("BackupScheduleInterval(%q) = %v, want %v", schedule, got, want)
 		}
+	}
+}
+
+// SRE-04: a managed companion that is not running raises, and a stopped one
+// warns; an externally managed LiveKit is unknown, never healthy.
+func TestAttention_VoiceSignal(t *testing.T) {
+	f := newAttentionFixture(t)
+
+	// No source at all (bare service) is unknown, never healthy.
+	bare := NewAttentionService(AttentionThresholds{}, AttentionSources{})
+	bare.Evaluate(context.Background(), f.now)
+	wantStatus(t, bare.Report(), "voice", AttentionStatusUnknown)
+
+	// External LiveKit with no probe (unconfigured) is unknown.
+	f.voice = &VoiceHealth{}
+	wantStatus(t, f.step(), "voice", AttentionStatusUnknown)
+
+	// External LiveKit that answered its health probe: ok.
+	reachable := true
+	f.voice = &VoiceHealth{Reachable: &reachable}
+	wantStatus(t, f.step(), "voice", AttentionStatusOK)
+
+	// External LiveKit that did not answer: warning after two samples.
+	unreachable := false
+	f.voice = &VoiceHealth{Reachable: &unreachable}
+	f.step()
+	rep := f.step()
+	wantStatus(t, rep, "voice", AttentionStatusWarning)
+
+	// Recovery needs two samples too.
+	unreachable = true
+	f.step()
+	rep = f.step()
+	wantStatus(t, rep, "voice", AttentionStatusOK)
+
+	// Managed and running with no restarts: ok.
+	f.voice = &VoiceHealth{Managed: true, Running: true}
+	wantStatus(t, f.step(), "voice", AttentionStatusOK)
+
+	// Managed, running, but it restarted after an unexpected exit: still ok,
+	// the restart count is in the detail.
+	f.voice = &VoiceHealth{Managed: true, Running: true, Restarts: 2}
+	rep = f.step()
+	wantStatus(t, rep, "voice", AttentionStatusOK)
+	if got := signal(t, rep, "voice").Detail; !strings.Contains(got, "restarted 2") {
+		t.Fatalf("voice detail = %q, want the restart count", got)
+	}
+
+	// Managed and not running: warning after two samples.
+	f.voice = &VoiceHealth{Managed: true, Running: false}
+	f.step() // one sample holds the ok level (attentionSustain)
+	rep = f.step()
+	wantStatus(t, rep, "voice", AttentionStatusWarning)
+	if w := warning(rep, "voice"); w == nil {
+		t.Fatal("not-running companion raised no warning")
+	}
+
+	// Managed and gave up: critical after two samples.
+	f.voice = &VoiceHealth{Managed: true, Running: false, Restarts: 10, GaveUp: true}
+	f.step()
+	rep = f.step()
+	wantStatus(t, rep, "voice", AttentionStatusCritical)
+
+	// Recovery clears it after two samples.
+	f.voice = &VoiceHealth{Managed: true, Running: true}
+	f.step()
+	rep = f.step()
+	wantStatus(t, rep, "voice", AttentionStatusOK)
+	if w := warning(rep, "voice"); w == nil || w.RecoveredAt == nil {
+		t.Fatalf("voice warning did not recover: %+v", warning(rep, "voice"))
 	}
 }

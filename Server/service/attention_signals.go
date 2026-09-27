@@ -237,6 +237,71 @@ func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 	s.settle(sig, title, action)
 }
 
+// evalVoice reports the LiveKit voice path's health and restart state
+// (SRE-04). A managed companion that is not running — a crash loop that gave
+// up, or a start that never succeeded — is the failure class users report
+// most, so it warns, and a companion whose restarts exhausted the backoff is
+// critical. An externally managed LiveKit is health-probed and warns when it
+// does not answer; an unconfigured voice path is unknown, never healthy.
+func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
+	sig := AttentionSignal{ID: "voice", Label: "Voice (LiveKit)", ObservedAt: now}
+	title := "Voice is unavailable"
+	action := "Check Server Logs for livekit: lines (LiveKit output is now logged). If OwnCord manages the LiveKit process and it gave up, fix its config or binary and restart the server; otherwise confirm the external LiveKit is reachable at voice.livekit_url."
+	if r.voice == nil {
+		sig.Status, sig.Detail = AttentionStatusUnknown, "voice health is not measured on this server"
+		s.settle(sig, title, action)
+		return
+	}
+	v := *r.voice
+	if !v.Managed {
+		// External LiveKit: a probe answer warns when unreachable; no probe
+		// (unconfigured) is unknown.
+		if v.Reachable == nil {
+			sig.Status, sig.Detail = AttentionStatusUnknown, "LiveKit is not configured"
+			s.settle(sig, title, action)
+			return
+		}
+		raw := AttentionStatusOK
+		if !*v.Reachable {
+			raw = AttentionStatusWarning
+		}
+		sig.Status = s.voice.settle(raw, attentionSustain)
+		if sig.Status == AttentionStatusWarning {
+			sig.Value = "unreachable"
+			sig.Detail = "the external LiveKit server did not answer its health probe; check it at voice.livekit_url"
+		} else {
+			sig.Value = "external, reachable"
+		}
+		s.settle(sig, title, action)
+		return
+	}
+	// Hysteresis like the disk signal: the first measured level commits at
+	// once, every later change needs attentionSustain samples, so one
+	// noisy minute neither raises nor clears.
+	raw := AttentionStatusOK
+	switch {
+	case v.GaveUp:
+		raw = AttentionStatusCritical
+	case !v.Running:
+		raw = AttentionStatusWarning
+	}
+	sig.Status = s.voice.settle(raw, attentionSustain)
+	switch sig.Status {
+	case AttentionStatusCritical:
+		sig.Value = "gave up"
+		sig.Detail = fmt.Sprintf("the companion exited %d time(s) and the supervisor stopped restarting it", v.Restarts)
+	case AttentionStatusWarning:
+		sig.Value = "not running"
+		sig.Detail = "the supervised LiveKit process is not running; voice joins are refused"
+	default:
+		sig.Value = "running"
+		if v.Restarts > 0 {
+			sig.Detail = fmt.Sprintf("restarted %d time(s) after an unexpected exit", v.Restarts)
+		}
+	}
+	s.settle(sig, title, action)
+}
+
 func (s *AttentionService) evalJobs(now time.Time) {
 	for _, j := range s.jobs {
 		sig := AttentionSignal{ID: "job:" + j.label, Label: "Maintenance: " + j.label, ObservedAt: now}

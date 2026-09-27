@@ -67,6 +67,21 @@ type AttentionThresholds struct {
 	DeliveryDropsPerMin   float64
 }
 
+// VoiceHealth is the LiveKit voice path's state, as the attention panel reads
+// it. A managed companion reports its supervisor state (Running/Restarts/
+// GaveUp); externally managed LiveKit reports Reachable from a health probe.
+// Reading it never invents a value: an unconfigured voice path is Managed
+// false with no probe, which the panel reports as unknown.
+type VoiceHealth struct {
+	Managed  bool
+	Running  bool
+	Restarts int
+	GaveUp   bool
+	// Reachable is the external LiveKit health probe's answer. Nil when not
+	// probed (managed, or unconfigured).
+	Reachable *bool
+}
+
 // AttentionSources are the in-process readings the panel reuses. Every
 // counter is cumulative since start; a nil source reports unknown.
 type AttentionSources struct {
@@ -77,6 +92,11 @@ type AttentionSources struct {
 	DispatchAlive  func() bool
 	BackupSchedule func(context.Context) (string, error)
 	LastBackup     func() (time.Time, error)
+	// VoiceHealth reports the LiveKit voice path's state. It receives the
+	// sample context so an external LiveKit can be probed with a bounded
+	// timeout. Nil (no voice, or a bare test service) reports unknown, never
+	// healthy.
+	VoiceHealth func(context.Context) VoiceHealth
 }
 
 // AttentionSignal is one measurement and its current status.
@@ -132,6 +152,7 @@ type AttentionService struct {
 	writerWait  attentionRate
 	reconnects  attentionRate
 	delivery    attentionRate
+	voice       attentionLevel
 	jobs        []*attentionJob
 }
 
@@ -224,6 +245,7 @@ type attentionReadings struct {
 	scheduleErr   error
 	lastBackup    time.Time
 	lastBackupErr error
+	voice         *VoiceHealth
 }
 
 func (s *AttentionService) read(ctx context.Context) attentionReadings {
@@ -258,6 +280,10 @@ func (s *AttentionService) read(ctx context.Context) attentionReadings {
 	if s.src.LastBackup != nil {
 		r.lastBackup, r.lastBackupErr = s.src.LastBackup()
 	}
+	if s.src.VoiceHealth != nil {
+		v := s.src.VoiceHealth(ctx)
+		r.voice = &v
+	}
 	return r
 }
 
@@ -287,6 +313,7 @@ func (s *AttentionService) Evaluate(ctx context.Context, now time.Time) {
 		dead:   !r.dispatchAlive,
 	})
 	s.evalBackup(r, now)
+	s.evalVoice(r, now)
 	s.evalJobs(now)
 	for id, w := range s.warnings {
 		if w.RecoveredAt != nil && now.Sub(*w.RecoveredAt) > attentionRecoveredKeep {

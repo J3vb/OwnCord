@@ -3190,8 +3190,8 @@ The dashboard's attention panel (RI-07): server-side health signals and the
 deduplicated warnings raised from them. The server samples once a minute
 (the free space on the data volume, the SQLite writer pool's cumulative wait,
 reconnect resumes, hub broadcast drops plus send-queue overflow disconnects, the newest
-backup file and each maintenance job's last run); this route only reads that
-state. Thresholds and hysteresis are in
+backup file, the LiveKit voice path's state and each maintenance job's last
+run); this route only reads that state. Thresholds and hysteresis are in
 [server-configuration.md](server-configuration.md#admin-attention-panel-attention).
 Nothing here is exported off the host.
 
@@ -3242,8 +3242,14 @@ Nothing here is exported off the host.
   disk space with `attention.disk_warn_free_mb` and `server.min_free_disk_mb`
   both `0`).
   It is never reported as healthy and neither raises nor clears a warning.
-- `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `backup`,
-  and `job:<name>` for each maintenance step.
+- `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `voice`,
+  `backup`, and `job:<name>` for each maintenance step.
+- `voice` reports LiveKit. An OwnCord-managed companion reports its
+  supervisor's local state — `running`, plus a `not running` warning when it is
+  down and a `gave up` critical when the backoff stopped restarting it; a
+  restart count appears in the detail. An externally managed LiveKit is
+  probed over HTTP and reports `unreachable` as a warning when it does not
+  answer; an unconfigured voice path is `unknown`.
 - The first disk level is reported at once, and a stopped dispatch loop as
   soon as it is seen; every other level change, including a rate's first
   warning, holds for two samples.

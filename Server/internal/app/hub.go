@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/url"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/api"
@@ -131,16 +131,13 @@ func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *ws.LiveKitProcess, bool
 		return lk, ws.NewLiveKitProcess(&cfg.Voice, &cfg.TLS, cfg.Server.DataDir), true
 	}
 
-	// Warn if LiveKit is externally managed and webhook may be blocked by admin CIDRs.
-	lkHost := ""
-	if u, parseErr := url.Parse(cfg.Voice.LiveKitURL); parseErr == nil {
-		lkHost = u.Hostname()
-	}
-	if lkHost != "" && lkHost != "localhost" && lkHost != "127.0.0.1" && lkHost != "::1" {
-		slog.Warn("LiveKit is externally managed but webhook endpoint is admin-IP-restricted — "+
-			"add the LiveKit server's IP to livekit_webhook_allowed_cidrs or webhooks will be silently dropped",
-			"livekit_host", lkHost)
-	}
+	// No webhook warning here: the generated livekit.yaml (and the shipped
+	// example) set no `webhook:` block, so an externally managed LiveKit never
+	// calls OwnCord's webhook in the shipped configuration. Warning on the
+	// admin-CIDR gate anyway told operators to fix a setting that was not the
+	// problem. The gate stays on the route itself; a hand-managed
+	// `livekit.yaml` that does configure a webhook is the operator's to reason
+	// about, documented in docs/deployment.md.
 	return lk, nil, true
 }
 
@@ -168,5 +165,33 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 			return settings.Setting(ctx, "backup_schedule")
 		},
 		LastBackup: admin.NewestBackup,
+		VoiceHealth: func(ctx context.Context) service.VoiceHealth {
+			// OwnCord-managed companion: report the supervisor's own state,
+			// which probes nothing. Elsewhere (or voice unconfigured) the
+			// hub's LiveKit client is external; probe its health with a
+			// bounded context, or report unconfigured when there is none.
+			if hub.LiveKitManaged() {
+				status := hub.LiveKitProcessStatus()
+				return service.VoiceHealth{
+					Managed:  true,
+					Running:  status.Running,
+					Restarts: status.Restarts,
+					GaveUp:   status.GaveUp,
+				}
+			}
+			if hub.URL() == "" {
+				return service.VoiceHealth{}
+			}
+			probeCtx, cancel := context.WithTimeout(ctx, liveKitAttentionProbeTimeout)
+			defer cancel()
+			reachable, _ := hub.LiveKitHealthCheck(probeCtx)
+			return service.VoiceHealth{Reachable: &reachable}
+		},
 	})
 }
+
+// liveKitAttentionProbeTimeout bounds the external LiveKit health probe the
+// attention sampler runs once a minute, so a hung external server cannot
+// stall the sample. The probe already carries its own 3s HTTP timeout; this is
+// the outer bound for the whole call.
+const liveKitAttentionProbeTimeout = 3 * time.Second
