@@ -89,6 +89,7 @@ and only when it changes something a contributor or fork holder must do
 - Joining or reconnecting to voice with a chosen microphone no longer opens the system default first — for a moment you were transmitting from the wrong mic. The chosen one is now the only one opened.
 - On Linux desktop, unmuting after a connection drop that happened while you were muted left your mic silent until you rejoined — peers heard nothing although you showed as unmuted. Unmuting now works after such a reconnect.
 - **Enhanced Noise Suppression now actually runs.** Its audio-worklet path rejected the shipped RNNoise module over its minified export names and fell back to the deprecated ScriptProcessorNode on every call. The worklet now resolves the real function names, so the modern path loads.
+- Dragging the voice sensitivity slider restarted voice detection at every step — about 200 times per drag. It now applies once, when you let go.
 
 ### Accounts & admin
 

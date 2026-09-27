@@ -805,18 +805,54 @@ describe("VoiceAudioTab UI structure", () => {
     mockSetVoiceSensitivity.mockClear();
 
     threshold.dispatchEvent(new PointerEvent("pointermove", { pointerId: 1, clientX: 10 }));
-    expect(mockSetVoiceSensitivity).toHaveBeenCalledTimes(1);
 
     // The OS claims the touch gesture as a pan and fires pointercancel
-    // instead of pointerup.
+    // instead of pointerup; the value the handle shows is applied then.
     threshold.dispatchEvent(new PointerEvent("pointercancel", { pointerId: 1 }));
+    expect(mockSetVoiceSensitivity).toHaveBeenCalledTimes(1);
+    const handlePosition = threshold.style.left;
 
     mockSetVoiceSensitivity.mockClear();
     threshold.dispatchEvent(new PointerEvent("pointermove", { pointerId: 1, clientX: 50 }));
+    threshold.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
 
     // Without a pointercancel listener, onMove stays attached and this
-    // would call setVoiceSensitivity again with no button held.
+    // would move the handle and apply sensitivity again with no button held.
+    expect(threshold.style.left).toBe(handlePosition);
     expect(mockSetVoiceSensitivity).not.toHaveBeenCalled();
+
+    ac.abort();
+  });
+
+  it("applies and persists sensitivity once per drag, on release", () => {
+    stubNavigator();
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+
+    const meterBar = el.querySelector(".mic-meter-bar") as HTMLElement;
+    const threshold = el.querySelector(".mic-meter-threshold") as HTMLElement;
+    (threshold as unknown as { setPointerCapture: (id: number) => void }).setPointerCapture =
+      vi.fn();
+    vi.spyOn(meterBar, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      width: 200,
+    } as DOMRect);
+
+    threshold.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, clientX: 0 }));
+    for (let x = 1; x <= 200; x++) {
+      threshold.dispatchEvent(new PointerEvent("pointermove", { pointerId: 1, clientX: x }));
+    }
+
+    expect(threshold.getAttribute("aria-valuetext")).toBe("Sensitivity 0%");
+    expect(mockSetVoiceSensitivity).not.toHaveBeenCalled();
+
+    threshold.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
+
+    expect(mockSetVoiceSensitivity).toHaveBeenCalledTimes(1);
+    expect(mockSetVoiceSensitivity).toHaveBeenCalledWith(0);
+    expect(localStorage.getItem("owncord:settings:voiceSensitivity")).toBe("0");
 
     ac.abort();
   });
