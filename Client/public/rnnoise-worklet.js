@@ -27,8 +27,6 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
 
-    /** @type {boolean} */
-    this._initialized = false;
     /** @type {(() => number) | null} */
     this._create = null;
     /** @type {((state: number) => void) | null} */
@@ -133,7 +131,6 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
       this._process = exports[EXPORT_NAMES.rnnoise_process_frame];
       this._malloc = exports[EXPORT_NAMES.malloc];
       this._free = exports[EXPORT_NAMES.free];
-      this._initialized = true;
 
       // Emscripten runs __wasm_call_ctors before any exported C function; the
       // RNNoise globals malloc reads during rnnoise_create are only initialized
@@ -211,7 +208,7 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
    * @private
    */
   _cleanup() {
-    if (this._initialized && this._state && this._destroy && this._free) {
+    if (this._state && this._destroy && this._free) {
       try {
         this._destroy(this._state);
         this._free(this._inputPtr);
