@@ -498,8 +498,8 @@ within the Ubuntu 22.04 floor of 2.35.
 ### Audio parity: per-user volume
 
 **Why an own mixer.** Per-user volume on the web path is livekit-client's
-`RemoteParticipant.setVolume` (a gain node). The Rust SDK (livekit 0.9.1,
-libwebrtc 0.3.48, and still 0.9.2 / 0.3.49) exposes no per-track gain: the
+`RemoteParticipant.setVolume` (a gain node). The Rust SDK (livekit 0.9.3,
+libwebrtc 0.3.50) exposes no per-track gain: the
 device module mixes every remote track itself, and libwebrtc's own per-receiver
 `AudioSourceInterface::SetVolume` is not bound. So the device module's playout
 stays in its synthetic mode (the module is never acquired since the capture

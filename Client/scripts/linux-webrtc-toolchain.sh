@@ -50,8 +50,9 @@ set -euo pipefail
 exec 3>&1 1>&2
 
 # libwebrtc tag: must match webrtc-sys-build's WEBRTC_TAG for the webrtc-sys
-# version livekit 0.9.1 resolves to (0.3.45 -> webrtc-89d790b). A crate bump
-# moves this and the digests below together.
+# version livekit 0.9.3 resolves to (0.3.47, whose webrtc-sys-build 0.3.19 still
+# pins webrtc-89d790b). A crate bump that moves the tag moves this and the
+# digests below together.
 WEBRTC_TAG="webrtc-89d790b"
 # apt.llvm.org's repository signing key, pinned by full fingerprint.
 LLVM_KEY_FPR="6084F3CF814B57C1CF12EFD515CF4D18AF4F7421"
