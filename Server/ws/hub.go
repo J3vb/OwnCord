@@ -262,14 +262,9 @@ func (h *Hub) Run() {
 					hardware := stackutil.Recovered(r)
 					breaker := panicCount >= 3
 					if hardware || breaker {
-						// The hub's state after a hardware fault, or after
-						// three panics in a minute, is unknown, and a stopped
-						// dispatch loop is invisible from the outside:
-						// registerNow keeps admitting clients that can never
-						// receive a broadcast. Exit and let the process
-						// supervisor restart us (fatalFn is os.Exit(1) in
-						// production; tests substitute a no-op and rely on
-						// the Stop below).
+						// State is unknown, and a dead loop is invisible from
+						// outside, so exit for a supervisor restart (see
+						// fatalFn; tests substitute a no-op and rely on Stop).
 						slog.Error("hub: stopping and exiting for supervisor restart",
 							"hardware_fault", hardware, "panic_count", panicCount)
 						h.Stop()
