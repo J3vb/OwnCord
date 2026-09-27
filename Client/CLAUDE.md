@@ -71,7 +71,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   which is a lint guard, not the whole invariant: keep the dispatcher the only
   writer by hand. Every custom rule has a canary in
   `tests/unit/eslint-rules-canary.test.ts` that fails if its scope stops
-  covering the module it guards (ARCH-11).
+  covering the module it guards (ARCH-06).
 - `src/` has **no import cycles**: `npm run lint:cycles` (oxlint `import/no-cycle`)
   runs at `--max-warnings=0`, so a new cycle fails `npm run lint`. When a
   lower-level module has to trigger a higher one, invert the edge rather than

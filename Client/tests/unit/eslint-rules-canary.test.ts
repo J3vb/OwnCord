@@ -1,4 +1,4 @@
-// ARCH-11 canaries: every custom lint rule in eslint-rules.js must stay
+// ARCH-06 canaries: every custom lint rule in eslint-rules.js must stay
 // enabled by the real eslint.config.js at the production module it guards, and
 // must still fire on its shape. A canary fails if the rule's scope stops
 // covering that module, or if the rule stops firing on its shape. #1587 showed how
@@ -90,7 +90,7 @@ const CANARIES: readonly Canary[] = [
   },
 ];
 
-describe("custom lint-rule canaries (ARCH-11)", () => {
+describe("custom lint-rule canaries (ARCH-06)", () => {
   for (const canary of CANARIES) {
     it(`${canary.rule} is enabled and fires at ${canary.filePath}`, async () => {
       // Scope check: a rule that a refactor scoped away is disabled here, and
