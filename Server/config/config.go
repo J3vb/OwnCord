@@ -271,15 +271,11 @@ type ServerConfig struct {
 	// PprofEnabled exposes Go's pprof HTTP endpoints on a SEPARATE listener
 	// for operator-directed profiling (SRE-M1). Off by default, and
 	// deliberately never mounted on the main router: a profiling endpoint
-	// exposes heap contents and can burn CPU, so it is its own bound socket
-	// on PprofAddr and nothing else. The listener refuses a non-loopback
-	// bind address, so enabling it is not one typo away from a public
-	// profiler. See docs/server-configuration.md.
+	// exposes heap contents and can burn CPU, so it is its own socket bound
+	// to the fixed loopback address 127.0.0.1:6060 and nothing else; reach
+	// it remotely through an SSH port-forward. See
+	// docs/server-configuration.md.
 	PprofEnabled bool `yaml:"pprof_enabled"`
-	// PprofAddr is the opt-in pprof listener's address, used only when
-	// PprofEnabled is true. Defaults to 127.0.0.1:6060. A non-loopback host
-	// is refused at startup; use SSH port-forwarding to reach it remotely.
-	PprofAddr string `yaml:"pprof_addr"`
 	// LiveKitWebhookAllowedCIDRs gates the LiveKit webhook and health
 	// endpoints. The webhook already authenticates cryptographically (LiveKit
 	// JWT signature over the body hash) — this perimeter is defence-in-depth,
@@ -426,7 +422,6 @@ func defaults() Config {
 			WAFCRSMode:    "detect",
 			RestartMode:   "auto",
 			MinFreeDiskMB: 256,
-			PprofAddr:     "127.0.0.1:6060",
 		},
 		Database: DatabaseConfig{
 			Type: "sqlite",
@@ -517,11 +512,10 @@ server:
   #   - "10.0.0.0/8"
   #   - "172.16.0.0/12"
   #   - "192.168.0.0/16"
-  # pprof_enabled: false      # expose Go's pprof endpoints on a separate,
-  #                           # loopback-only listener (127.0.0.1:6060 by default)
-  #                           # for operator profiling. Off by default; never mounted
-  #                           # on the main router. A non-loopback pprof_addr is refused.
-  # pprof_addr: "127.0.0.1:6060"  # used only when pprof_enabled is true
+  # pprof_enabled: false      # expose Go's pprof endpoints on a separate
+  #                           # listener bound to 127.0.0.1:6060 only, for
+  #                           # operator profiling. Off by default; never mounted
+  #                           # on the main router.
   # browser_client_enabled: false  # host a browser client from this server.
   #                           # Owner opt-in, off by default. This build ships no
   #                           # browser assets, so turning it on hosts nothing yet.

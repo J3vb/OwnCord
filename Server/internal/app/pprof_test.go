@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -14,30 +15,6 @@ import (
 
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
-// pprofLoopbackAddr must accept only explicit loopback hosts. ":6060" binds
-// every interface and "0.0.0.0:6060" is public; both must be refused, or the
-// opt-in profiler becomes an accidental public one.
-func TestPprofLoopbackAddr(t *testing.T) {
-	cases := []struct {
-		addr string
-		want bool
-	}{
-		{"127.0.0.1:6060", true},
-		{"localhost:6060", true},
-		{"[::1]:6060", true},
-		{":6060", false},
-		{"0.0.0.0:6060", false},
-		{"192.168.1.5:6060", false},
-		{"example.com:6060", false},
-		{"not-an-address", false},
-	}
-	for _, tc := range cases {
-		if got := pprofLoopbackAddr(tc.addr); got != tc.want {
-			t.Errorf("pprofLoopbackAddr(%q) = %v, want %v", tc.addr, got, tc.want)
-		}
-	}
 }
 
 // A disabled pprof block starts no listener and registers no close step.
@@ -51,22 +28,18 @@ func TestStartPprof_DisabledIsNoop(t *testing.T) {
 	}
 }
 
-// A non-loopback address is refused before any bind happens.
-func TestStartPprof_RefusesNonLoopback(t *testing.T) {
-	a := &App{cfg: &config.Config{Server: config.ServerConfig{PprofEnabled: true, PprofAddr: "0.0.0.0:6060"}}, log: discardLogger()}
-	if err := a.startPprof(); err == nil {
-		t.Fatal("startPprof bound a non-loopback address, want a refusal")
-	}
-	if a.pprofSrv != nil {
-		t.Fatal("a refused pprof start left a listener behind")
-	}
-}
-
-// An enabled loopback pprof block serves the profiler on its own socket and
-// shuts down with the app.
+// An enabled pprof block binds only a loopback address, serves the profiler on
+// its own socket and shuts down with the app.
 func TestStartPprof_ServesOnLoopback(t *testing.T) {
+	host, _, err := net.SplitHostPort(pprofAddr)
+	if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
+		t.Fatalf("pprofAddr = %q, want an explicit loopback IP", pprofAddr)
+	}
 	addr := fmt.Sprintf("127.0.0.1:%d", freePort(t))
-	a := &App{cfg: &config.Config{Server: config.ServerConfig{PprofEnabled: true, PprofAddr: addr}}, log: discardLogger()}
+	prev := pprofAddr
+	pprofAddr = addr
+	t.Cleanup(func() { pprofAddr = prev })
+	a := &App{cfg: &config.Config{Server: config.ServerConfig{PprofEnabled: true}}, log: discardLogger()}
 	if err := a.startPprof(); err != nil {
 		t.Fatalf("startPprof: %v", err)
 	}

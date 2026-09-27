@@ -9,20 +9,21 @@ import (
 	"time"
 )
 
+// pprofAddr is the pprof listener's loopback address. A variable only so tests
+// can bind a free loopback port.
+var pprofAddr = "127.0.0.1:6060"
+
 // startPprof starts the opt-in pprof listener (SRE-M1). It is off by default,
 // on its own socket bound to loopback, and deliberately never mounted on the
 // main router: a profiling endpoint exposes heap contents and can burn CPU, so
-// the operator must ask for it and must reach the host to use it. A
-// non-loopback address is refused at startup rather than silently exposing the
-// profiler. Nothing runs when the key is unset.
+// the operator must ask for it and must reach the host to use it. The address
+// is fixed to loopback, not configurable, so enabling it can never expose the
+// profiler off-host. Nothing runs when the key is unset.
 func (a *App) startPprof() error {
 	if !a.cfg.Server.PprofEnabled {
 		return nil
 	}
-	addr := a.cfg.Server.PprofAddr
-	if !pprofLoopbackAddr(addr) {
-		return errors.New("server.pprof_addr " + addr + " is not a loopback host:port; pprof exposes heap contents and CPU burn, so it only binds loopback (use an SSH port-forward)")
-	}
+	addr := pprofAddr
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -46,21 +47,6 @@ func (a *App) startPprof() error {
 		}
 	}()
 	return nil
-}
-
-// pprofLoopbackAddr reports whether addr is a host:port whose host is an
-// explicit loopback address or "localhost". An empty host (":6060") binds
-// every interface and is refused.
-func pprofLoopbackAddr(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil || host == "" {
-		return false
-	}
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // pprofMux mounts exactly Go's net/http/pprof handlers. It is built here rather
