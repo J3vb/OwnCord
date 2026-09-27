@@ -132,6 +132,7 @@ and only when it changes something a contributor or fork holder must do
 - The sidebar's Invite, Audit Log and Moderation buttons wrapped unevenly onto two rows under the server name — they are now one quiet row of icon buttons beside it, each with a tooltip.
 - Settings no longer paints every action in the accent colour: routine actions (clear a cache, reset consent, clear a push-to-talk key) are now quieter secondary buttons, and **Clear All Cache & Restart** is marked as destructive in red. The empty **Debug** heading under Advanced no longer shows in release builds.
 - **Settings › Logs is now Diagnostics & logs, and it answers first.** The connection test opens with one line ("Everything tested is working" or "2 problems found") and shows the checks left to right as one row of steps with status icons; the failing (or picked) step's detail sits below the row. The support bundle has its own Get help card, and the raw client logs and voice engine state sit behind collapsible sections whose headers show the entry, warning and error counts.
+- **Settings › Account leads with a Security card.** Two-factor, recovery kit, password and signed-in devices each get one row with a status icon and words ("Disabled — anyone with your password can sign in"), and the card counts the recommended steps left. The change-password form and the device list open on demand, Status is one "Show me as" select, and account deletion sits in a closed "Delete account" section at the bottom.
 
 ### Under the hood
 

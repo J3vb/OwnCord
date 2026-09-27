@@ -99,8 +99,10 @@ test.describe("Settings — Account Tab", () => {
     expect(count).toBeGreaterThanOrEqual(2);
   });
 
-  test("has Change Password button", async ({ page }) => {
+  test("opens the Change Password form on demand", async ({ page }) => {
     const changePwBtn = page.locator(".ac-btn", { hasText: "Change Password" });
+    await expect(changePwBtn).toBeHidden();
+    await page.getByTestId("password-change-toggle").click();
     await expect(changePwBtn).toBeVisible();
   });
 });

@@ -34,7 +34,9 @@ export const accountText = defineCatalog("account", {
   "avatar.unreadable": "That file could not be read as an image.",
   "avatar.tooWide": "Avatar must be at most {width}x{height} pixels.",
 
-  "password.sectionTitle": "Password and Authentication",
+  "password.sectionTitle": "Password",
+  "password.set": "Set",
+  "password.changeToggle": "Change…",
   "password.old": "Old password",
   "password.new": "New password",
   "password.confirm": "Confirm new password",
@@ -66,18 +68,18 @@ export const accountText = defineCatalog("account", {
   "totp.disabling": "Disabling...",
   "totp.disableFailed": "Failed to disable 2FA.",
   "totp.requiredByServer": "2FA is required by this server and cannot be disabled",
-  "totp.sectionTitle": "Two-Factor Authentication",
+  "totp.sectionTitle": "Two-factor authentication",
+  "totp.offHint": "— anyone with your password can sign in",
   "totp.enabled": "Enabled",
   "totp.disabled": "Disabled",
 
   "status.online": "Online",
   "status.idle": "Idle",
-  "status.idleDesc": "You will appear as idle",
   "status.dnd": "Do Not Disturb",
-  "status.dndDesc": "You will not receive desktop notifications",
   "status.invisible": "Invisible",
-  "status.invisibleDesc": "You will appear offline but still have full access",
   "status.sectionTitle": "Status",
+  "status.showMeAs": "Show me as",
+  "status.hint": "Do Not Disturb also silences desktop notifications",
 
   "devices.thisDevice": "This device",
   "devices.detail": "{ip} · Last used {time}",
@@ -87,7 +89,9 @@ export const accountText = defineCatalog("account", {
     "Device signed out. Its requests are refused now, and its current connection closes within about 30 seconds.",
   "devices.signedOut": "Device signed out. It can no longer connect.",
   "devices.signOutFailed": "Failed to sign out the device.",
-  "devices.sectionTitle": "Devices",
+  "devices.sectionTitle": "Signed-in devices",
+  "devices.count": { one: "{count} device", other: "{count} devices" },
+  "devices.manage": "Manage",
   "devices.description":
     "Every device signed in to your account. A device you sign out can no longer connect.",
   "devices.loading": "Loading devices...",
@@ -99,7 +103,11 @@ export const accountText = defineCatalog("account", {
 
   "retention.sectionTitle": "Message Retention",
 
-  "delete.sectionTitle": "Danger Zone",
+  "security.title": "Security",
+  "security.steps": { one: "{count} recommended step", other: "{count} recommended steps" },
+  "security.allSet": "All set",
+
+  "delete.sectionTitle": "Delete account",
   "delete.description": "Permanently delete your account and all associated data.",
   "delete.button": "Delete Account",
   "delete.confirm": "Confirm Delete",
@@ -124,7 +132,8 @@ export const accountText = defineCatalog("account", {
   "recovery.enrolled": "Enrolled",
   "recovery.used": "Used",
   "recovery.notSetUp": "Not set up",
-  "recovery.kitTitle": "Recovery Kit",
+  "recovery.kitTitle": "Recovery kit",
+  "recovery.missingHint": "— you could be locked out if you lose your password",
   "recovery.kitDescription":
     "A recovery kit signs you back in if you lose your password and your two-factor device. Keep it offline: anyone with it and your username can take over this account. Creating a new kit replaces the old one, and a kit works once.",
   "recovery.replaceKit": "Replace recovery kit",

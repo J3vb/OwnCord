@@ -382,7 +382,7 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
-    const inputs = container.querySelectorAll("input[type='password']");
+    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "oldpass123";
     (inputs[1] as HTMLInputElement).value = "short";
     (inputs[2] as HTMLInputElement).value = "short";
@@ -401,7 +401,7 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
-    const inputs = container.querySelectorAll("input[type='password']");
+    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "oldpass123";
     (inputs[1] as HTMLInputElement).value = "newpassword123";
     (inputs[2] as HTMLInputElement).value = "differentpassword";
@@ -420,7 +420,7 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
-    const inputs = container.querySelectorAll("input[type='password']");
+    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "";
     (inputs[1] as HTMLInputElement).value = "newpassword123";
     (inputs[2] as HTMLInputElement).value = "newpassword123";
@@ -449,7 +449,7 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
     overlay.mount(container);
 
-    const inputs = container.querySelectorAll("input[type='password']");
+    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "oldpass123";
     (inputs[1] as HTMLInputElement).value = "newpassword123";
     (inputs[2] as HTMLInputElement).value = "newpassword123";
@@ -478,7 +478,7 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
     overlay.mount(container);
 
-    const inputs = container.querySelectorAll("input[type='password']");
+    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "oldpass123";
     (inputs[1] as HTMLInputElement).value = "newpassword123";
     (inputs[2] as HTMLInputElement).value = "newpassword123";
@@ -513,7 +513,7 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
     overlay.mount(container);
 
-    const inputs = container.querySelectorAll("input[type='password']");
+    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "oldpass123";
     (inputs[1] as HTMLInputElement).value = "newpassword123";
     (inputs[2] as HTMLInputElement).value = "newpassword123";
@@ -546,7 +546,7 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
     overlay.mount(container);
 
-    const inputs = container.querySelectorAll("input[type='password']");
+    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "wrongold";
     (inputs[1] as HTMLInputElement).value = "newpassword123";
     (inputs[2] as HTMLInputElement).value = "newpassword123";
@@ -1080,58 +1080,26 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
-    const statusLabels = container.querySelectorAll(".settings-status-label");
-    const labels = Array.from(statusLabels).map((el) => el.textContent);
+    const select = container.querySelector<HTMLSelectElement>("[data-testid='status-select']")!;
+    const labels = Array.from(select.options).map((o) => o.textContent);
     expect(labels).toContain("Invisible");
     expect(labels).not.toContain("Offline");
 
     overlay.destroy?.();
   });
 
-  it("status rows have role=button and tabindex for keyboard access", () => {
+  // The status is a native <select> with a <label>: the browser owns its
+  // keyboard handling, so the test drives its change event.
+  it("status select is labelled and reports the chosen status", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
-    const rows = container.querySelectorAll(".settings-status-option");
-    expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) {
-      expect(row.getAttribute("role")).toBe("button");
-      expect(row.getAttribute("tabindex")).toBe("0");
-    }
-
-    overlay.destroy?.();
-  });
-
-  it("status row activates on Enter key", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-
-    const rows = container.querySelectorAll(".settings-status-option");
-    const idleRow = Array.from(rows).find(
-      (r) => r.querySelector(".settings-status-label")?.textContent === "Idle",
-    ) as HTMLElement;
-    expect(idleRow).toBeDefined();
-    idleRow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-
-    expect(idleRow.classList.contains("active")).toBe(true);
+    const select = container.querySelector<HTMLSelectElement>("[data-testid='status-select']")!;
+    expect(select.tagName).toBe("SELECT");
+    expect(select.labels?.[0]?.textContent).toBe("Show me as");
+    select.value = "idle";
+    select.dispatchEvent(new Event("change"));
     expect(defaultOptions.onStatusChange).toHaveBeenCalledWith("idle");
-
-    overlay.destroy?.();
-  });
-
-  it("status row activates on Space key", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-
-    const rows = container.querySelectorAll(".settings-status-option");
-    const dndRow = Array.from(rows).find(
-      (r) => r.querySelector(".settings-status-label")?.textContent === "Do Not Disturb",
-    ) as HTMLElement;
-    expect(dndRow).toBeDefined();
-    dndRow.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
-
-    expect(dndRow.classList.contains("active")).toBe(true);
-    expect(defaultOptions.onStatusChange).toHaveBeenCalledWith("dnd");
 
     overlay.destroy?.();
   });

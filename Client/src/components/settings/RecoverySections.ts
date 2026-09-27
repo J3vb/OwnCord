@@ -13,6 +13,7 @@ import { errorText } from "@lib/api";
 import type { RecoveryKitStatus } from "@lib/api";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { accountText as t } from "../../i18n/account";
+import { createStatusRow, setStatusIcon, type StatusKind } from "./status";
 
 const MUTED = "color:var(--text-muted);font-size:13px;margin-bottom:12px";
 // --text-danger is the qualified error-text token; --red (the fill) reads
@@ -118,7 +119,8 @@ function buildPasswordConfirm(
   const element = createElement("div", {});
   const trigger = createElement(
     "button",
-    { class: "ac-btn", "data-testid": `${opts.testIdPrefix}-btn` },
+    // Secondary: in the Security card, turning on two-factor is the one accent step.
+    { class: "ac-btn secondary", "data-testid": `${opts.testIdPrefix}-btn` },
     opts.triggerLabel,
   );
   const area = createElement("div", { style: "display:none" });
@@ -140,11 +142,7 @@ function buildPasswordConfirm(
     { class: "ac-btn", "data-testid": `${opts.testIdPrefix}-submit` },
     opts.submitLabel,
   );
-  const cancelBtn = createElement(
-    "button",
-    { class: "ac-btn", style: "background:var(--bg-active)" },
-    t("recovery.cancel"),
-  );
+  const cancelBtn = createElement("button", { class: "ac-btn secondary" }, t("recovery.cancel"));
   appendChildren(btnRow, submitBtn, cancelBtn);
   appendChildren(area, pwInput, errorEl, btnRow);
 
@@ -296,24 +294,19 @@ function statusLabel(status: RecoveryKitStatus | null): {
 export function buildRecoveryKitSection(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
-): HTMLDivElement {
-  const wrapper = createElement("div", { "data-testid": "recovery-kit-section" });
-  const separator = createElement("div", { class: "settings-separator" });
-  const headerRow = createElement("div", {
-    style: "display:flex;align-items:center;gap:8px;margin-bottom:4px",
-  });
-  const header = createElement(
-    "div",
-    { class: "settings-section-title", style: "margin-bottom:0" },
+  onState: (state: StatusKind) => void,
+): HTMLLIElement {
+  const { row, icon, result, body } = createStatusRow(
     t("recovery.kitTitle"),
+    "recovery-kit-section",
   );
+  // The state word keeps its test hook; the hint says what a missing kit risks.
   const badge = createElement("span", {
+    class: "status-state",
     "data-testid": "recovery-kit-status",
-    style:
-      "font-size:12px;padding:2px 8px;border-radius:4px;font-weight:600;" +
-      "background:var(--bg-tertiary);color:var(--text-muted)",
   });
-  appendChildren(headerRow, header, badge);
+  const missingHint = createElement("span", {}, t("recovery.missingHint"));
+  result.append(badge, " ", missingHint);
 
   const description = createElement("div", { style: MUTED }, t("recovery.kitDescription"));
   const statusError = createElement("div", { style: ERROR, role: "alert" });
@@ -321,11 +314,12 @@ export function buildRecoveryKitSection(
 
   function paint(status: RecoveryKitStatus | null): void {
     const { text, enrolled } = statusLabel(status);
-    // Qualified status tokens rather than white on the --green fill (3.2:1,
-    // below Q1's 4.5:1); the badge's word carries the state (B9-23).
+    // The word carries the state; the icon only repeats it (B9-23).
     setText(badge, text);
-    badge.style.background = "var(--bg-tertiary)";
-    badge.style.color = enrolled ? "var(--text-positive)" : "var(--text-muted)";
+    missingHint.hidden = status === null || enrolled;
+    const state: StatusKind = status === null ? "pending" : enrolled ? "ok" : "warn";
+    setStatusIcon(icon, state);
+    onState(state);
     confirm.setTriggerLabel(enrolled ? t("recovery.replaceKit") : t("recovery.createKit"));
   }
 
@@ -375,14 +369,6 @@ export function buildRecoveryKitSection(
 
   paint(null);
   refresh();
-  appendChildren(
-    wrapper,
-    separator,
-    headerRow,
-    description,
-    statusError,
-    confirm.element,
-    slot.element,
-  );
-  return wrapper;
+  appendChildren(body, description, statusError, confirm.element, slot.element);
+  return row;
 }

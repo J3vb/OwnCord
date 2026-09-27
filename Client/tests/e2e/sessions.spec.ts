@@ -18,6 +18,9 @@ test.describe("Signed-in devices", () => {
     await expect(toast).toContainText("Settings > Account");
 
     await openSettings(page);
+    // The Security card counts the devices; Manage lists them.
+    await expect(page.getByTestId("sessions-section")).toContainText("2 devices");
+    await page.getByTestId("sessions-manage").click();
     const rows = page.locator("[data-testid='session-row']");
     await expect(rows).toHaveCount(2);
     const current = rows.filter({ hasText: "This device" });

@@ -202,6 +202,8 @@ test.describe("B9-23 account settings feedback and disclosure", () => {
     ]);
 
     const pane = accountPane(page);
+    // The form opens on demand from the Security card.
+    await pane.getByTestId("password-change-toggle").click();
     await pane.locator("#pw-old").fill("wrongold");
     await pane.locator("#pw-new").fill("newpassword123");
     await pane.locator("#pw-confirm").fill("newpassword123");
@@ -220,10 +222,51 @@ test.describe("B9-23 account settings feedback and disclosure", () => {
     expect(ratio).toBeGreaterThanOrEqual(Q1.text);
   });
 
+  for (const theme of ["dark", "neon-glow", "midnight", "light"] as const) {
+    for (const highContrast of [false, true]) {
+      test(`${theme}${highContrast ? " + High Contrast" : ""}: the Security card's status text reads at 4.5:1`, async ({
+        page,
+      }) => {
+        await page.addInitScript(
+          ({ theme, highContrast }) => {
+            localStorage.setItem("owncord:theme:active", theme);
+            localStorage.setItem("owncord:settings:highContrast", JSON.stringify(highContrast));
+          },
+          { theme, highContrast },
+        );
+        await bootAccount(page, [
+          {
+            pattern: "/api/v1/users/me/recovery-kit",
+            status: 200,
+            body: { enrolled: false, used_at: null },
+          },
+        ]);
+        const card = accountPane(page).getByTestId("security-card");
+        await expect(card.getByTestId("security-summary")).toHaveText("2 recommended steps");
+        const failures: string[] = [];
+        for (const selector of [
+          "[data-testid='security-summary']",
+          ".status-name",
+          ".status-state",
+          ".status-result",
+        ]) {
+          const { ratio } = await textContrast(card.locator(selector).first());
+          if (ratio < Q1.text) failures.push(`${selector} ${ratio.toFixed(2)}`);
+        }
+        const danger = accountPane(page).locator("details.danger-zone > summary");
+        const { ratio } = await textContrast(danger);
+        if (ratio < Q1.text) failures.push(`danger summary ${ratio.toFixed(2)}`);
+        expect(failures).toEqual([]);
+      });
+    }
+  }
+
   test("the deletion disclosure is labelled, and its error is announced", async ({ page }) => {
     await bootAccount(page);
     const pane = accountPane(page);
 
+    // Account deletion sits behind its own closed disclosure.
+    await pane.locator("summary", { hasText: "Delete account" }).click();
     await pane.locator("[data-testid='delete-account-trigger']").click();
     const confirmArea = pane.locator("[data-testid='delete-account-confirm-area']");
     await expect(confirmArea).toBeVisible();
@@ -310,6 +353,10 @@ test.describe("B9-23 account reflow", () => {
     await switchSettingsTab(page, "Account");
 
     const pane = accountPane(page);
+    // Open every on-demand form and disclosure, so all of them are measured.
+    await pane.getByTestId("password-change-toggle").click();
+    await pane.getByTestId("sessions-manage").click();
+    await pane.locator("summary", { hasText: "Delete account" }).click();
     expect(await findUnnamedControls(pane)).toEqual([]);
 
     // Every control is reachable and none is clipped by an ancestor.

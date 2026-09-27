@@ -49,3 +49,56 @@ export function createDisclosure(label: string): {
   details.appendChild(summary);
   return { details, count };
 }
+
+/**
+ * A status row: icon, name and result on one line, then a full-width body.
+ * The caller paints the icon (`setStatusIcon`), fills the result and adds any
+ * action between result and body.
+ */
+export function createStatusRow(
+  name: string,
+  testId: string,
+): { row: HTMLLIElement; icon: HTMLSpanElement; result: HTMLSpanElement; body: HTMLDivElement } {
+  const row = createElement("li", { class: "status-item", "data-testid": testId });
+  const icon = statusIcon("pending");
+  const result = createElement("span", { class: "status-result" });
+  const body = createElement("div", { class: "status-body" });
+  row.append(icon, createElement("span", { class: "status-name" }, name), result, body);
+  return { row, icon, result, body };
+}
+
+let revealIds = 0;
+
+/**
+ * A secondary button that shows and hides `panel` (hidden to start), with
+ * aria-expanded and aria-controls kept in step.
+ */
+export function createRevealToggle(
+  label: string,
+  panel: HTMLElement,
+  signal: AbortSignal,
+  testId: string,
+): HTMLButtonElement {
+  if (panel.id === "") panel.id = `settings-reveal-${++revealIds}`;
+  panel.hidden = true;
+  const button = createElement(
+    "button",
+    {
+      class: "ac-btn secondary",
+      type: "button",
+      "aria-expanded": "false",
+      "aria-controls": panel.id,
+      "data-testid": testId,
+    },
+    label,
+  );
+  button.addEventListener(
+    "click",
+    () => {
+      panel.hidden = !panel.hidden;
+      button.setAttribute("aria-expanded", String(!panel.hidden));
+    },
+    { signal },
+  );
+  return button;
+}

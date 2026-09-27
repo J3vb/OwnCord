@@ -500,6 +500,7 @@ test.describe("Settings > Account — delete account", () => {
     const confirmArea = page.locator("[data-testid='delete-account-confirm-area']");
     await expect(confirmArea).toBeHidden();
 
+    await page.locator("summary", { hasText: "Delete account" }).click();
     await page.locator("[data-testid='delete-account-trigger']").click();
     await expect(confirmArea).toBeVisible();
     // The disclosure is rendered, and it is the destructive copy.
@@ -536,6 +537,7 @@ test.describe("Settings > Account — delete account", () => {
       },
     ]);
 
+    await page.locator("summary", { hasText: "Delete account" }).click();
     await page.locator("[data-testid='delete-account-trigger']").click();
     await page.locator("[data-testid='delete-account-password']").fill("nope");
     await page.locator("[data-testid='delete-account-confirm']").focus();

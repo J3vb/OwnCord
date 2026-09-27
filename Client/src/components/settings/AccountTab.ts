@@ -24,6 +24,14 @@ import {
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { buildRecoveryKitSection, buildRegenerateCodes, buildShownOnce } from "./RecoverySections";
 import { outcomeEl, showOutcome } from "./helpers";
+import {
+  createDisclosure,
+  createRevealToggle,
+  createStatusRow,
+  setStatusIcon,
+  statusIcon,
+  type StatusKind,
+} from "./status";
 import { accountText as t } from "../../i18n/account";
 
 const log = createLogger("AccountTab");
@@ -201,7 +209,7 @@ function buildAvatarUploader(
   });
   const uploadBtn = createElement(
     "button",
-    { class: "ac-btn", "data-testid": "avatar-upload-btn" },
+    { class: "ac-btn secondary", "data-testid": "avatar-upload-btn" },
     t("profile.changeAvatar"),
   );
   const errorEl = outcomeEl("error", "avatar-error");
@@ -372,18 +380,20 @@ function passwordField(
   return { wrapper, input };
 }
 
-function buildPasswordSection(
-  options: SettingsOverlayOptions,
-  signal: AbortSignal,
-): HTMLDivElement {
-  const wrapper = createElement("div", {});
-
-  const separator = createElement("div", { class: "settings-separator" });
-  const pwHeader = createElement(
-    "div",
-    { class: "settings-section-title" },
+function buildPasswordSection(options: SettingsOverlayOptions, signal: AbortSignal): HTMLLIElement {
+  const { row, icon, result, body } = createStatusRow(
     t("password.sectionTitle"),
+    "password-section",
   );
+  setStatusIcon(icon, "ok");
+  setText(result, t("password.set"));
+  // The form opens on demand: changing a password is rare.
+  const wrapper = createElement("div", {});
+  row.insertBefore(
+    createRevealToggle(t("password.changeToggle"), wrapper, signal, "password-change-toggle"),
+    body,
+  );
+  body.appendChild(wrapper);
 
   const oldField = passwordField("pw-old", t("password.old"), t("password.old"));
   const newField = passwordField("pw-new", t("password.new"), t("password.new"));
@@ -460,17 +470,8 @@ function buildPasswordSection(
     { signal },
   );
 
-  appendChildren(
-    wrapper,
-    separator,
-    pwHeader,
-    oldField.wrapper,
-    newField.wrapper,
-    confirmField.wrapper,
-    pwError,
-    pwBtn,
-  );
-  return wrapper;
+  appendChildren(wrapper, oldField.wrapper, newField.wrapper, confirmField.wrapper, pwError, pwBtn);
+  return row;
 }
 
 // ---------------------------------------------------------------------------
@@ -709,14 +710,7 @@ function buildTotpDisableView(
     { class: "ac-btn account-delete-btn" },
     t("totp.confirmDisable"),
   );
-  const cancelBtn = createElement(
-    "button",
-    {
-      class: "ac-btn",
-      style: "background:var(--bg-active)",
-    },
-    t("recovery.cancel"),
-  );
+  const cancelBtn = createElement("button", { class: "ac-btn secondary" }, t("recovery.cancel"));
   appendChildren(btnRow, confirmBtn, cancelBtn);
   appendChildren(confirmArea, pwInput, errorEl, btnRow);
 
@@ -779,28 +773,19 @@ function buildTotpDisableView(
   return wrapper;
 }
 
-function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal): HTMLDivElement {
-  const wrapper = createElement("div", { "data-testid": "totp-section" });
-
-  const separator = createElement("div", { class: "settings-separator" });
-  const headerRow = createElement("div", {
-    style: "display:flex;align-items:center;gap:8px;margin-bottom:4px",
-  });
-  const header = createElement(
-    "div",
-    {
-      class: "settings-section-title",
-      style: "margin-bottom:0",
-    },
-    t("totp.sectionTitle"),
-  );
-
+function buildTotpSection(
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+  onState: (state: StatusKind) => void,
+): HTMLLIElement {
+  const { row, icon, result, body } = createStatusRow(t("totp.sectionTitle"), "totp-section");
+  // The state word keeps its test hook; the hint says what "off" means.
   const statusBadge = createElement("span", {
+    class: "status-state",
     "data-testid": "totp-status-badge",
-    style: "font-size:12px;padding:2px 8px;border-radius:4px;font-weight:600",
   });
-
-  appendChildren(headerRow, header, statusBadge);
+  const offHint = createElement("span", {}, t("totp.offHint"));
+  result.append(statusBadge, " ", offHint);
 
   const contentArea = createElement("div", {});
 
@@ -811,12 +796,12 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
     // elsewhere, move it to the first rebuilt control instead.
     const restoreFocus = afterSubmit && focusIsOurs(contentArea);
 
-    // Status text uses the qualified --text-* tokens, not white on the
-    // --green fill (3.2:1, below Q1's 4.5:1 for this 12px bold text); the
-    // words "Enabled"/"Disabled" carry the state, colour is not the signal.
+    // The words "Enabled"/"Disabled" carry the state; the icon only repeats it.
     statusBadge.textContent = enabled ? t("totp.enabled") : t("totp.disabled");
-    statusBadge.style.background = "var(--bg-tertiary)";
-    statusBadge.style.color = enabled ? "var(--text-positive)" : "var(--text-muted)";
+    offHint.hidden = enabled;
+    const state: StatusKind = enabled ? "ok" : "warn";
+    setStatusIcon(icon, state);
+    onState(state);
 
     while (contentArea.firstChild) {
       contentArea.removeChild(contentArea.firstChild);
@@ -849,103 +834,57 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
       log.warn("Failed to refresh TOTP status — showing cached state", err);
     });
 
-  appendChildren(wrapper, separator, headerRow, contentArea);
-  return wrapper;
+  body.appendChild(contentArea);
+  return row;
 }
 
 // ---------------------------------------------------------------------------
 // Status selector builder
 // ---------------------------------------------------------------------------
 
-interface StatusOption {
-  readonly value: UserStatus;
-  readonly label: string;
-  readonly description: string;
-  readonly color: string;
-}
-
-const STATUS_OPTIONS: readonly StatusOption[] = [
-  { value: "online", label: t("status.online"), description: "", color: "#3ba55d" },
-  { value: "idle", label: t("status.idle"), description: t("status.idleDesc"), color: "#faa61a" },
-  {
-    value: "dnd",
-    label: t("status.dnd"),
-    description: t("status.dndDesc"),
-    color: "#ed4245",
-  },
-  {
-    // Its own status now, not "offline" relabeled: the server stores it as
-    // chosen, shows everyone else offline, and honours it across reconnects.
-    value: "invisible",
-    label: t("status.invisible"),
-    description: t("status.invisibleDesc"),
-    color: "#747f8d",
-  },
+const STATUS_OPTIONS: readonly { readonly value: UserStatus; readonly label: string }[] = [
+  { value: "online", label: t("status.online") },
+  { value: "idle", label: t("status.idle") },
+  { value: "dnd", label: t("status.dnd") },
+  // Its own status now, not "offline" relabeled: the server stores it as
+  // chosen, shows everyone else offline, and honours it across reconnects.
+  { value: "invisible", label: t("status.invisible") },
 ];
 
+/** One labelled select; only Do Not Disturb's side effect needs saying. */
 function buildStatusSelector(options: SettingsOverlayOptions, signal: AbortSignal): HTMLDivElement {
   const wrapper = createElement("div", {});
-  const separator = createElement("div", { class: "settings-separator" });
-  const sectionTitle = createElement(
-    "div",
-    { class: "settings-section-title" },
-    t("status.sectionTitle"),
+  const row = createElement("div", { class: "setting-row" });
+  const info = createElement("div", {});
+  appendChildren(
+    info,
+    createElement("label", { class: "setting-label", for: "status-select" }, t("status.showMeAs")),
+    createElement("div", { class: "setting-desc" }, t("status.hint")),
   );
-  const optionsList = createElement("div", { class: "settings-status-options" });
-
-  const currentStatus = loadUserStatus();
-  const rowElements = new Map<UserStatus, HTMLDivElement>();
-
+  const select = createElement("select", {
+    class: "settings-select",
+    id: "status-select",
+    "data-testid": "status-select",
+  });
   for (const opt of STATUS_OPTIONS) {
-    const isActive = opt.value === currentStatus;
-    const row = createElement("div", {
-      class: `settings-status-option${isActive ? " active" : ""}`,
-      role: "button",
-      tabindex: "0",
-      "aria-pressed": isActive ? "true" : "false",
-    });
-
-    const dot = createElement("div", { class: "settings-status-dot" });
-    dot.style.background = opt.color;
-
-    const labelWrap = createElement("div", {});
-    const labelEl = createElement("div", { class: "settings-status-label" }, opt.label);
-    appendChildren(labelWrap, labelEl);
-    if (opt.description.length > 0) {
-      const descEl = createElement("div", { class: "settings-status-desc" }, opt.description);
-      labelWrap.appendChild(descEl);
-    }
-
-    appendChildren(row, dot, labelWrap);
-
-    const selectStatus = (): void => {
-      for (const [, el] of rowElements) {
-        el.classList.remove("active");
-        el.setAttribute("aria-pressed", "false");
-      }
-      row.classList.add("active");
-      row.setAttribute("aria-pressed", "true");
-      saveUserStatus(opt.value);
-      options.onStatusChange(opt.value);
-    };
-
-    row.addEventListener("click", selectStatus, { signal });
-    row.addEventListener(
-      "keydown",
-      (e: KeyboardEvent) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          selectStatus();
-        }
-      },
-      { signal },
-    );
-
-    rowElements.set(opt.value, row);
-    optionsList.appendChild(row);
+    select.appendChild(createElement("option", { value: opt.value }, opt.label));
   }
-
-  appendChildren(wrapper, separator, sectionTitle, optionsList);
+  select.value = loadUserStatus();
+  select.addEventListener(
+    "change",
+    () => {
+      const status = select.value as UserStatus;
+      saveUserStatus(status);
+      options.onStatusChange(status);
+    },
+    { signal },
+  );
+  appendChildren(row, info, select);
+  appendChildren(
+    wrapper,
+    createElement("div", { class: "settings-section-title" }, t("status.sectionTitle")),
+    row,
+  );
   return wrapper;
 }
 
@@ -1016,22 +955,15 @@ function buildSessionRow(
   return row;
 }
 
-function buildSessionsSection(
-  options: SettingsOverlayOptions,
-  signal: AbortSignal,
-): HTMLDivElement {
-  const wrapper = createElement("div", { "data-testid": "sessions-section" });
-  const separator = createElement("div", { class: "settings-separator" });
-  const header = createElement(
-    "div",
-    { class: "settings-section-title" },
+function buildSessionsSection(options: SettingsOverlayOptions, signal: AbortSignal): HTMLLIElement {
+  const { row, icon, result, body } = createStatusRow(
     t("devices.sectionTitle"),
+    "sessions-section",
   );
-  const description = createElement(
-    "div",
-    { style: "color:var(--text-muted);font-size:13px;margin-bottom:12px" },
-    t("devices.description"),
-  );
+  const panel = createElement("div", {});
+  row.insertBefore(createRevealToggle(t("devices.manage"), panel, signal, "sessions-manage"), body);
+  body.appendChild(panel);
+  const description = createElement("div", { class: "setting-desc" }, t("devices.description"));
   const list = createElement("div", { class: "session-list", "data-testid": "sessions-list" });
   const status = createElement(
     "div",
@@ -1042,16 +974,22 @@ function buildSessionsSection(
   function load(): void {
     list.replaceChildren(status);
     setText(status, t("devices.loading"));
+    setText(result, t("devices.loading"));
+    setStatusIcon(icon, "pending");
     void options
       .onListSessions()
       .then((sessions) => {
         if (signal.aborted) return;
         list.replaceChildren(...sessions.map((s) => buildSessionRow(s, options, signal)));
+        setText(result, t("devices.count", { count: sessions.length }));
+        setStatusIcon(icon, "ok");
       })
       .catch((err: unknown) => {
         if (signal.aborted) return;
         log.warn("Failed to list sessions", err);
         setText(status, t("devices.loadFailed"));
+        setText(result, t("devices.loadFailed"));
+        setStatusIcon(icon, "warn");
       });
   }
 
@@ -1081,11 +1019,7 @@ function buildSessionsSection(
     { class: "ac-btn account-delete-btn", "data-testid": "sessions-revoke-all-confirm" },
     t("devices.signOutEverywhere"),
   );
-  const cancelBtn = createElement(
-    "button",
-    { class: "ac-btn", style: "background:var(--bg-active)" },
-    t("recovery.cancel"),
-  );
+  const cancelBtn = createElement("button", { class: "ac-btn secondary" }, t("recovery.cancel"));
   appendChildren(btnRow, confirmBtn, cancelBtn);
   appendChildren(confirmArea, warning, errorEl, btnRow);
 
@@ -1112,10 +1046,10 @@ function buildSessionsSection(
       setText(errorEl, "");
       void options
         .onRevokeAllSessions()
-        .then((result) => {
+        .then((revoked) => {
           // A revoked current session is handled by the page: auth is
           // cleared and the app leaves. Otherwise refresh what is left.
-          if (result.current_session_revoked || signal.aborted) return;
+          if (revoked.current_session_revoked || signal.aborted) return;
           closeConfirm();
           load();
         })
@@ -1131,9 +1065,9 @@ function buildSessionsSection(
     { signal },
   );
 
-  appendChildren(wrapper, separator, header, description, list, revokeAllBtn, confirmArea);
+  appendChildren(panel, description, list, revokeAllBtn, confirmArea);
   load();
-  return wrapper;
+  return row;
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,18 +1093,10 @@ function buildRetentionSection(notice: string): HTMLDivElement {
 function buildDeleteAccountSection(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
-): HTMLDivElement {
-  const wrapper = createElement("div", {});
-
-  const separator = createElement("div", { class: "settings-separator" });
-  const header = createElement(
-    "div",
-    {
-      class: "settings-section-title",
-      style: "color:var(--text-danger)",
-    },
-    t("delete.sectionTitle"),
-  );
+): HTMLDetailsElement {
+  // Rarely needed and irreversible: behind a closed disclosure, last.
+  const { details: wrapper } = createDisclosure(t("delete.sectionTitle"));
+  wrapper.classList.add("danger-zone");
 
   const description = createElement(
     "div",
@@ -1237,14 +1163,7 @@ function buildDeleteAccountSection(
     },
     t("delete.confirm"),
   );
-  const cancelBtn = createElement(
-    "button",
-    {
-      class: "ac-btn",
-      style: "background:var(--bg-active)",
-    },
-    t("recovery.cancel"),
-  );
+  const cancelBtn = createElement("button", { class: "ac-btn secondary" }, t("recovery.cancel"));
 
   appendChildren(btnRow, confirmBtn, cancelBtn);
   appendChildren(confirmArea, warningText, passwordLabel, passwordInput, errorEl, btnRow);
@@ -1303,8 +1222,55 @@ function buildDeleteAccountSection(
     { signal },
   );
 
-  appendChildren(wrapper, separator, header, description, deleteBtn, confirmArea);
+  appendChildren(wrapper, description, deleteBtn, confirmArea);
   return wrapper;
+}
+
+// ---------------------------------------------------------------------------
+// Security card: the account's protection at a glance, forms on demand
+// ---------------------------------------------------------------------------
+
+function buildSecurityCard(options: SettingsOverlayOptions, signal: AbortSignal): HTMLElement {
+  const card = createElement("section", {
+    class: "settings-card account-security",
+    "data-testid": "security-card",
+    "aria-labelledby": "account-security-title",
+  });
+  const head = createElement("div", { class: "settings-card-head" });
+  const pill = createElement("span", { class: "status-pill", "data-testid": "security-summary" });
+  const pillIcon = statusIcon("pending");
+  const pillText = createElement("span", {});
+  pill.append(pillIcon, pillText);
+  appendChildren(
+    head,
+    createElement("h3", { id: "account-security-title" }, t("security.title")),
+    pill,
+  );
+
+  // Two-factor and the recovery kit are the recommended steps; the pill
+  // counts the ones still open.
+  const states = new Map<string, StatusKind>();
+  const report =
+    (key: string) =>
+    (state: StatusKind): void => {
+      states.set(key, state);
+      const open = [...states.values()].filter((s) => s === "warn").length;
+      const known = states.size === 2 && ![...states.values()].includes("pending");
+      pill.hidden = open === 0 && !known;
+      setStatusIcon(pillIcon, open > 0 ? "warn" : "ok");
+      setText(pillText, open > 0 ? t("security.steps", { count: open }) : t("security.allSet"));
+    };
+
+  const list = createElement("ul", { class: "status-list" });
+  appendChildren(
+    list,
+    buildTotpSection(options, signal, report("totp")),
+    buildRecoveryKitSection(options, signal, report("recovery")),
+    buildPasswordSection(options, signal),
+    buildSessionsSection(options, signal),
+  );
+  appendChildren(card, head, list);
+  return card;
 }
 
 // ---------------------------------------------------------------------------
@@ -1352,9 +1318,6 @@ export function buildAccountTab(
     ),
   );
 
-  // Status selector
-  section.appendChild(buildStatusSelector(options, signal));
-
   // Inline edit form
   const editForm = createElement("div", {
     class: "setting-row",
@@ -1369,11 +1332,7 @@ export function buildAccountTab(
     "aria-describedby": "username-edit-error",
   });
   const saveBtn = createElement("button", { class: "ac-btn" }, t("common.save"));
-  const cancelBtn = createElement(
-    "button",
-    { class: "ac-btn", style: "background:var(--bg-active)" },
-    t("recovery.cancel"),
-  );
+  const cancelBtn = createElement("button", { class: "ac-btn secondary" }, t("recovery.cancel"));
   appendChildren(editForm, editInput, saveBtn, cancelBtn);
 
   const usernameError = outcomeEl("error");
@@ -1435,17 +1394,9 @@ export function buildAccountTab(
 
   section.appendChild(editForm);
 
-  // Password section
-  section.appendChild(buildPasswordSection(options, signal));
-
-  // Two-factor authentication section
-  section.appendChild(buildTotpSection(options, signal));
-
-  // Recovery kit
-  section.appendChild(buildRecoveryKitSection(options, signal));
-
-  // Signed-in devices
-  section.appendChild(buildSessionsSection(options, signal));
+  // Security state first, then status, retention and the danger zone.
+  section.appendChild(buildSecurityCard(options, signal));
+  section.appendChild(buildStatusSelector(options, signal));
 
   const retention = options.getRetentionNotice?.() ?? null;
   if (retention !== null) section.appendChild(buildRetentionSection(retention));
