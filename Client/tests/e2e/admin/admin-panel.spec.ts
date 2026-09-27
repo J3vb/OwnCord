@@ -2,6 +2,13 @@ import type { Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test, expect } from "./fixtures";
+import {
+  Q1,
+  findUnnamedControls,
+  focusIndicator,
+  keyboardReachable,
+  textContrast,
+} from "../support/b9-accessibility";
 
 // One atomic user journey with a fresh process/database on EVERY attempt.
 // Retries must replay setup, not silently replace the wizard with login.
@@ -56,8 +63,39 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page, adminS
     // Token persisted in localStorage by the wizard → straight into the app.
     await expect(page.locator("#adminShell")).toBeVisible({ timeout: 10_000 });
 
-    const usersCard = page.locator(".stat-card", { hasText: "Total Users" });
+    const usersCard = page.locator(".stat-card", { hasText: "Members" });
     await expect(usersCard.locator(".stat-card-value")).toHaveText("1");
+  });
+
+  await test.step("dashboard opens with one health headline from the live attention state", async () => {
+    // A fresh server may not have evaluated yet; either way the headline is
+    // one sentence, and a report with signals lists them under All health checks.
+    await expect(page.locator("#attentionPanel #attnTitle")).toHaveText(
+      /^(Waiting for the first health check|Everything is running normally|\d+ problems? needs? your attention)$/,
+    );
+    const checks = page.locator("#healthChecks");
+    const hasChecks = (await checks.count()) > 0;
+    const hashBefore = new URL(page.url()).hash;
+    if (hasChecks) {
+      if (!(await checks.evaluate((el) => el.hasAttribute("open")))) {
+        await checks.locator(":scope > summary").click();
+      }
+      await expect(checks.locator("[data-signal]").first()).toBeVisible();
+    }
+    // The disclosures are local state: they never change the #section hash.
+    expect(new URL(page.url()).hash).toBe(hashBefore);
+
+    // The shared accessibility checks, over this page.
+    expect(await findUnnamedControls(page.locator("#content"))).toEqual([]);
+    for (const text of hasChecks ? [".health-hero-sub", ".count-chip"] : [".health-hero-sub"]) {
+      const { ratio } = await textContrast(page.locator(text).first());
+      expect(ratio, text).toBeGreaterThanOrEqual(Q1.text);
+    }
+    if (hasChecks) {
+      const summary = checks.locator(":scope > summary");
+      expect(await keyboardReachable(page, summary)).toBe(true);
+      expect((await focusIndicator(page)).problems).toEqual([]);
+    }
   });
 
   await test.step("channel create shows up in the channel table", async () => {
@@ -90,8 +128,29 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page, adminS
     await expect(page.locator("#adminShell")).toBeVisible({ timeout: 10_000 });
 
     await navigate(page, "Audit Log");
-    await expect(page.locator(".badge", { hasText: "channel_create" }).first()).toBeVisible();
-    await expect(page.locator(".badge", { hasText: "channel_update" }).first()).toBeVisible();
+    // Each row reads as a sentence; the raw action code stays in its tooltip.
+    const created = page.locator('tr.audit-row[data-audit-action="channel_create"]').first();
+    await expect(created).toBeVisible();
+    await expect(created.locator(".audit-what")).toContainText("created");
+    await expect(created).toHaveAttribute("title", "channel_create");
+    await expect(
+      page.locator('tr.audit-row[data-audit-action="channel_update"]').first(),
+    ).toContainText("edited");
+
+    // Sign-in and connection rows are hidden until the Sign-ins chip is on.
+    const signins = page.locator("#auditSignins");
+    await expect(signins).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator('tr.audit-row[data-audit-action="ws_connect"]')).toHaveCount(0);
+    await expect(page.locator('tr.audit-row[data-audit-action="user_login"]')).toHaveCount(0);
+    await signins.click();
+    await expect(signins).toHaveAttribute("aria-pressed", "true");
+    await expect(created).toBeVisible();
+
+    expect(await findUnnamedControls(page.locator("#content"))).toEqual([]);
+    expect(await keyboardReachable(page, signins)).toBe(true);
+    expect((await focusIndicator(page)).problems).toEqual([]);
+    const { ratio } = await textContrast(created.locator(".audit-time"));
+    expect(ratio).toBeGreaterThanOrEqual(Q1.text);
   });
 
   await test.step("support preview requires confirmation and downloads the exact reviewed archive", async () => {
@@ -125,7 +184,9 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page, adminS
       expect(createHash("sha256").update(bytes).digest("hex")).toBe(preview.sha256);
       await expect(page.locator("#support-preview")).toHaveCount(0);
       await navigate(page, "Audit Log");
-      await expect(page.locator(".badge", { hasText: "support_bundle_create" })).toBeVisible();
+      await expect(
+        page.locator('tr.audit-row[data-audit-action="support_bundle_create"]'),
+      ).toContainText("created a support bundle");
     } finally {
       page.off("download", onDownload);
     }

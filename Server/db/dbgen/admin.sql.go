@@ -85,20 +85,22 @@ SELECT a.id, a.actor_id, COALESCE(u.username, '') AS actor_name, a.action,
 FROM audit_log a
 LEFT JOIN users u ON u.id = a.actor_id
 WHERE (CAST(?1 AS TEXT) = '' OR a.action = ?1)
-  AND (CAST(?2 AS TEXT) = ''
-       OR instr(lower(COALESCE(u.username, '')), lower(?2)) > 0
-       OR instr(lower(a.action), lower(?2)) > 0
-       OR instr(lower(a.target_type), lower(?2)) > 0
-       OR instr(lower(a.detail), lower(?2)) > 0)
+  AND (CAST(?2 AS INTEGER) = 0 OR a.action NOT IN ('user_login', 'ws_connect'))
+  AND (CAST(?3 AS TEXT) = ''
+       OR instr(lower(COALESCE(u.username, '')), lower(?3)) > 0
+       OR instr(lower(a.action), lower(?3)) > 0
+       OR instr(lower(a.target_type), lower(?3)) > 0
+       OR instr(lower(a.detail), lower(?3)) > 0)
 ORDER BY a.id DESC
-LIMIT ?4 OFFSET ?3
+LIMIT ?5 OFFSET ?4
 `
 
 type GetAuditLogParams struct {
-	Action    string `json:"action"`
-	Query     string `json:"query"`
-	RowOffset int64  `json:"rowOffset"`
-	RowLimit  int64  `json:"rowLimit"`
+	Action      string `json:"action"`
+	HideSignins int64  `json:"hideSignins"`
+	Query       string `json:"query"`
+	RowOffset   int64  `json:"rowOffset"`
+	RowLimit    int64  `json:"rowLimit"`
 }
 
 type GetAuditLogRow struct {
@@ -117,10 +119,12 @@ type GetAuditLogRow struct {
 // An empty action or query matches every row. action is an exact match;
 // query is a case-insensitive (ASCII) substring of the actor name, action,
 // target type or detail. instr, not LIKE, so the caller's text carries no
-// wildcards to escape.
+// wildcards to escape. A non-zero hide_signins drops the sign-in and
+// connection rows (user_login, ws_connect) that dominate a quiet server's log.
 func (q *Queries) GetAuditLog(ctx context.Context, arg GetAuditLogParams) ([]GetAuditLogRow, error) {
 	rows, err := q.db.QueryContext(ctx, getAuditLog,
 		arg.Action,
+		arg.HideSignins,
 		arg.Query,
 		arg.RowOffset,
 		arg.RowLimit,

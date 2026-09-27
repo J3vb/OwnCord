@@ -785,3 +785,50 @@ func TestAdminAPI_Setup_InvalidBody(t *testing.T) {
 		t.Errorf("invalid body status = %d, want 400", w.Code)
 	}
 }
+
+// TestAdminAPI_AuditLog_HideSignins pins the panel's Sign-ins chip:
+// hide_signins=1 drops the user_login and ws_connect rows from the whole log
+// before paging; without it, the rows and an action filter for them are
+// untouched.
+func TestAdminAPI_AuditLog_HideSignins(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+	ctx := context.Background()
+
+	uid, _ := database.CreateUser(ctx, "quiet", "hash", 1)
+	_ = database.LogAudit(ctx, uid, "channel_create", "channel", 1, "created #general")
+	for i := range 30 {
+		_ = database.LogAudit(ctx, uid, "user_login", "user", uid, "")
+		_ = database.LogAudit(ctx, uid, "ws_connect", "user", int64(i), "")
+	}
+
+	get := func(t *testing.T, query string) []map[string]any {
+		t.Helper()
+		w := doRequest(t, handler, http.MethodGet, "/audit-log?"+query, token, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET /audit-log?%s status = %d, want 200; body: %s", query, w.Code, w.Body.String())
+		}
+		var entries []map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &entries); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return entries
+	}
+
+	// The one real change sits behind 60 newer sign-in rows, so hiding them
+	// only on the fetched page would leave the first page empty.
+	got := get(t, "limit=5&q=quiet&hide_signins=1")
+	if len(got) != 1 || got[0]["action"] != "channel_create" {
+		t.Fatalf("hide_signins=1 = %v, want only the channel_create row", got)
+	}
+	if got := get(t, "limit=500&q=quiet"); len(got) != 61 {
+		t.Fatalf("without hide_signins = %d rows, want all 61", len(got))
+	}
+	if got := get(t, "limit=500&q=quiet&hide_signins=0"); len(got) != 61 {
+		t.Fatalf("hide_signins=0 = %d rows, want all 61", len(got))
+	}
+	if got := get(t, "limit=500&action=ws_connect"); len(got) != 30 {
+		t.Fatalf("action=ws_connect = %d rows, want 30", len(got))
+	}
+}

@@ -328,21 +328,27 @@ func (d *DB) persistAuditsTx(ctx context.Context, entries []AuditEntry) error {
 
 // GetAuditLog returns audit log entries ordered newest-first with pagination.
 func (d *DB) GetAuditLog(ctx context.Context, limit, offset int) ([]AuditEntry, error) {
-	return d.SearchAuditLog(ctx, "", "", limit, offset)
+	return d.SearchAuditLog(ctx, "", "", false, limit, offset)
 }
 
 // SearchAuditLog is GetAuditLog narrowed to one action (exact) and to rows
 // whose actor name, action, target type or detail contains query (ASCII
-// case-insensitive). An empty action or query does not narrow.
+// case-insensitive). An empty action or query does not narrow. hideSignins
+// drops the user_login and ws_connect rows.
 //
 // ponytail: a substring scan over the whole table, fine at an admin's page
 // rate; an FTS5 index over audit_log is the upgrade if the table outgrows it.
-func (d *DB) SearchAuditLog(ctx context.Context, action, query string, limit, offset int) ([]AuditEntry, error) {
+func (d *DB) SearchAuditLog(ctx context.Context, action, query string, hideSignins bool, limit, offset int) ([]AuditEntry, error) {
+	var hide int64
+	if hideSignins {
+		hide = 1
+	}
 	rows, err := d.q.GetAuditLog(ctx, dbgen.GetAuditLogParams{
-		Action:    action,
-		Query:     query,
-		RowLimit:  int64(limit),
-		RowOffset: int64(offset),
+		Action:      action,
+		HideSignins: hide,
+		Query:       query,
+		RowLimit:    int64(limit),
+		RowOffset:   int64(offset),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("SearchAuditLog: %w", err)
