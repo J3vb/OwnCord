@@ -18,6 +18,7 @@ import { createElement, setText } from "@lib/dom";
 import { appealsText as at } from "../../i18n/appeals";
 import { formatWhen, safetyText as t } from "../../i18n/safety";
 import { refreshOwnModeration, safetyStore } from "./store";
+import { createDisclosure } from "../settings/status";
 
 export type AppealsApi = Pick<ApiClient, "fileAppeal" | "withdrawAppeal">;
 
@@ -144,16 +145,13 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
   actions.append(primary, cancel);
   panel.append(panelTitle, panelReason, fields, warning, panelStatus, actions);
 
-  root.append(
-    heading,
+  // The rules matter when appealing, not on every visit: behind a disclosure.
+  const rules = createDisclosure(at("appeals.rulesSummary"));
+  rules.details.append(
     createElement("p", { class: "setting-desc" }, at("appeals.hint")),
     createElement("p", { class: "setting-desc" }, t("appeals.unavailable")),
-    panel,
-    status,
-    retry,
-    list,
-    announcer,
   );
+  root.append(heading, rules.details, panel, status, retry, list, announcer);
 
   let open: Panel | null = null;
   let pending = false;

@@ -172,6 +172,13 @@ describe("filing an appeal", () => {
     expect(pane.textContent).toContain("goes only to this server's moderators");
     expect(pane.textContent).toContain("Kicks can't be appealed");
     expect(pane.textContent).toContain("contact the server's operator directly");
+    // Those rules wait behind a closed "How appeals work" disclosure.
+    const rules = [...pane.querySelectorAll("details")].find((d) =>
+      d.querySelector("summary")!.textContent.startsWith("How appeals work"),
+    )!;
+    expect(rules.open).toBe(false);
+    expect(rules.textContent).toContain("Kicks can't be appealed");
+    expect(rules.textContent).toContain("goes only to this server's moderators");
     ac.abort();
   });
 

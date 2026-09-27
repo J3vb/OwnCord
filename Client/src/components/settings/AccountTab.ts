@@ -31,7 +31,7 @@ import {
   setStatusIcon,
   statusIcon,
   type StatusKind,
-} from "./status";
+} from "../../features/settings/status";
 import { accountText as t } from "../../i18n/account";
 
 const log = createLogger("AccountTab");

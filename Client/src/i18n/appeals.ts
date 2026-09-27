@@ -7,6 +7,7 @@ import { defineCatalog } from "./format";
  */
 export const appealsText = defineCatalog("appeals", {
   "appeals.heading": "Appeals",
+  "appeals.rulesSummary": "How appeals work",
   "appeals.hint":
     "Your appeal goes only to this server's moderators. You can appeal each action once, and file up to 3 appeals in 24 hours.",
   "appeals.loading": "Loading your appeals…",
