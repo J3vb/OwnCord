@@ -54,14 +54,14 @@ stateDiagram-v2
     SlowMode --> Enabled: cooldown elapsed
 ```
 
-| Composer state                                 | Presentation                                                                                                                               | Reason shown                                         |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| `enabled`                                      | Editable textarea, attach + pickers active                                                                                                 | —                                                    |
-| `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar                                                                                                        | "Only moderators can post in announcement channels." |
-| `no-permission`                                | Disabled bar                                                                                                                               | "You don't have permission to send messages here."   |
-| `offline`                                      | Disabled — "Reconnecting…" while retrying, "Not connected" when disconnected                                                               | connection status (README §3)                        |
-| `slow-mode`                                    | Disabled with a live countdown                                                                                                             | "Slow mode: wait Ns."                                |
-| `uploading`                                    | Send disabled until uploads settle or are removed (already the `pendingUploadCount` guard in `handleSend()`, `components/MessageInput.ts`) | per-attachment spinner                               |
+| Composer state                                 | Presentation                                                                                                                        | Reason shown                                         |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `enabled`                                      | Editable textarea, attach + pickers active                                                                                          | —                                                    |
+| `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar                                                                                                 | "Only moderators can post in announcement channels." |
+| `no-permission`                                | Disabled bar                                                                                                                        | "You don't have permission to send messages here."   |
+| `offline`                                      | Disabled — "Reconnecting…" while retrying, "Not connected" when disconnected                                                        | connection status (README §3)                        |
+| `slow-mode`                                    | Disabled with a live countdown                                                                                                      | "Slow mode: wait Ns."                                |
+| `uploading`                                    | Send disabled until uploads settle or are removed (an in-flight upload's owner blocks `handleSend()`, `components/MessageInput.ts`) | per-attachment spinner                               |
 
 > **✓ Implemented (2026-07).** The server sends an authoritative per-channel
 > `can_send` in the ready payload (`ws/serve.go` `channelCanSend`, mirroring
