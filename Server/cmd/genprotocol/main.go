@@ -30,12 +30,23 @@ type message struct {
 	GoTrailingComment string `json:"go_trailing_comment,omitempty"`
 }
 
+// enum is a closed set of wire values for one payload field. The Go side
+// gets a named string type, the TypeScript side a const object and its value
+// union, so neither can send a value the other does not know.
+type enum struct {
+	Name   string    `json:"name"`
+	Go     string    `json:"go"`
+	TS     string    `json:"ts"`
+	Values []message `json:"values"`
+}
+
 type schema struct {
 	Comment        string    `json:"$comment"`
 	Version        int       `json:"version"`
 	ProtocolEpoch  int       `json:"protocol_epoch"`
 	ClientToServer []message `json:"client_to_server"`
 	ServerToClient []message `json:"server_to_client"`
+	Enums          []enum    `json:"enums"`
 }
 
 func main() {
@@ -68,8 +79,8 @@ func main() {
 	if err := os.WriteFile(*tsOut, []byte(renderTS(s)), 0o644); err != nil {
 		log.Fatalf("write %s: %v", *tsOut, err)
 	}
-	fmt.Printf("generated %s (%d client→server, %d server→client) and %s\n",
-		*goOut, len(s.ClientToServer), len(s.ServerToClient), *tsOut)
+	fmt.Printf("generated %s (%d client→server, %d server→client, %d enums) and %s\n",
+		*goOut, len(s.ClientToServer), len(s.ServerToClient), len(s.Enums), *tsOut)
 }
 
 // validate rejects duplicate identifiers and empty fields early so a bad
@@ -93,6 +104,29 @@ func validate(s schema) error {
 				return fmt.Errorf("duplicate TS key %q within one direction", m.TS)
 			}
 			tsNames[m.TS] = true
+		}
+	}
+	for _, e := range s.Enums {
+		if e.Name == "" || e.Go == "" || e.TS == "" || len(e.Values) == 0 {
+			return fmt.Errorf("enum %+v: name, go, ts and at least one value are required", e)
+		}
+		if goNames[e.Go] {
+			return fmt.Errorf("duplicate Go identifier %q", e.Go)
+		}
+		goNames[e.Go] = true
+		tsNames, wires := map[string]bool{}, map[string]bool{}
+		for _, v := range e.Values {
+			if v.Wire == "" || v.Go == "" || v.TS == "" {
+				return fmt.Errorf("enum %s value %+v: wire, go, and ts are all required", e.Name, v)
+			}
+			if goNames[v.Go] {
+				return fmt.Errorf("duplicate Go identifier %q", v.Go)
+			}
+			goNames[v.Go] = true
+			if tsNames[v.TS] || wires[v.Wire] {
+				return fmt.Errorf("enum %s: duplicate value %q/%q", e.Name, v.TS, v.Wire)
+			}
+			tsNames[v.TS], wires[v.Wire] = true, true
 		}
 	}
 	return nil
@@ -132,6 +166,18 @@ func renderGo(s schema) ([]byte, error) {
 	b.WriteString("\n")
 	writeBlock("Server → Client message types (sent in broadcasts/responses).", s.ServerToClient)
 
+	for _, e := range s.Enums {
+		fmt.Fprintf(&b, "\n// %s is the closed set of values for %s.\ntype %s string\n\nconst (\n", e.Go, e.Name, e.Go)
+		for _, v := range e.Values {
+			fmt.Fprintf(&b, "\t%s %s = %q", v.Go, e.Go, v.Wire)
+			if v.Note != "" {
+				b.WriteString(" // " + v.Note)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString(")\n")
+	}
+
 	return format.Source([]byte(b.String()))
 }
 
@@ -170,5 +216,21 @@ func renderTS(s schema) string {
 	b.WriteString("// " + strings.Repeat("-", 75) + "\n\n")
 	b.WriteString("export const MessageType = {\n  ...ServerMessageType,\n  ...ClientMessageType,\n} as const;\n\n")
 	b.WriteString("export type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];\n")
+
+	for _, e := range s.Enums {
+		b.WriteString("\n// " + strings.Repeat("-", 75) + "\n")
+		b.WriteString("// " + e.Name + " — the closed set of values\n")
+		b.WriteString("// " + strings.Repeat("-", 75) + "\n\n")
+		b.WriteString("export const " + e.TS + " = {\n")
+		for _, v := range e.Values {
+			b.WriteString("  " + v.TS + ": " + fmt.Sprintf("%q", v.Wire) + ",")
+			if v.Note != "" {
+				b.WriteString(" // " + v.Note)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("} as const;\n\n")
+		b.WriteString("export type " + e.TS + "Value = (typeof " + e.TS + ")[keyof typeof " + e.TS + "];\n")
+	}
 	return b.String()
 }

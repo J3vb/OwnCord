@@ -12,7 +12,7 @@ import (
 func TestGracefulStopContext_IdleSkipsNoticeWait(t *testing.T) {
 	h := &Hub{stop: make(chan struct{})}
 	start := time.Now()
-	h.GracefulStopContext(context.Background())
+	h.GracefulStopContext(context.Background(), RestartReasonShutdown)
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("idle GracefulStop took %v, want fast (no notice sleep)", elapsed)
 	}
@@ -32,7 +32,7 @@ func TestGracefulStopContext_BudgetBoundsNoticeWait(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	h.GracefulStopContext(ctx)
+	h.GracefulStopContext(ctx, RestartReasonShutdown)
 	elapsed := time.Since(start)
 	if elapsed >= 5*time.Second {
 		t.Fatalf("GracefulStopContext ignored the ctx budget (took %v)", elapsed)

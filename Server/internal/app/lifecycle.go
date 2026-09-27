@@ -24,6 +24,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // closeStepBudget bounds each close step on its own, except the HTTP drain —
@@ -323,14 +324,14 @@ func (a *App) startHub() error {
 		rt.Services.PushDispatch = dispatcher
 	}
 	a.onClose("hub", func(ctx context.Context) error {
-		return stopHub(ctx, a.runtime.Hub)
+		return stopHub(ctx, a.runtime.Hub, a.deps.Restart.noticeReason())
 	})
 	return nil
 }
 
 // dispatchHub is the slice of *ws.Hub the hub close step drives.
 type dispatchHub interface {
-	GracefulStopContext(ctx context.Context)
+	GracefulStopContext(ctx context.Context, reason ws.RestartReason)
 	Done() <-chan struct{}
 }
 
@@ -339,8 +340,8 @@ type dispatchHub interface {
 // loop, and on an early start failure the goroutine StartRuntime spawned may
 // not even have been scheduled yet — without the join, Run returned with the
 // loop still alive and Close went on to release what it reads.
-func stopHub(ctx context.Context, hub dispatchHub) error {
-	hub.GracefulStopContext(ctx)
+func stopHub(ctx context.Context, hub dispatchHub, reason ws.RestartReason) error {
+	hub.GracefulStopContext(ctx, reason)
 	select {
 	case <-hub.Done():
 		return nil
@@ -447,9 +448,10 @@ func (a *App) startHTTP() error {
 	// The hub stops right after the drain — it notifies clients, stops
 	// LiveKit and closes every socket — as a step of its own, so its notice
 	// window keeps its budget however long the drain took (SRV-06). The later
-	// "hub" step then only joins the dispatch loop.
+	// "hub" step then only joins the dispatch loop. The notice names the
+	// restart's intent, so clients hear "update" rather than "shutdown".
 	a.onClose("hub-notice", func(ctx context.Context) error {
-		a.hub.GracefulStopContext(ctx)
+		a.hub.GracefulStopContext(ctx, a.deps.Restart.noticeReason())
 		return nil
 	})
 	a.onCloseWithin("http", httpDrainBudget, func(ctx context.Context) error {

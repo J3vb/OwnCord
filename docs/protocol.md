@@ -1835,13 +1835,28 @@ and the ringer's own 30s window already covers it.
 }
 ```
 
+`reason` is one of a closed set, generated from `protocol/schema.json`
+(`ws.RestartReason`, `ServerRestartReason`):
+
+| `reason`         | Sent when                                                                  |
+| ---------------- | -------------------------------------------------------------------------- |
+| `update`         | an admin applied a server update                                           |
+| `update_aborted` | with `delay_seconds` 0: the staged update failed, the restart is cancelled |
+| `backup_restore` | an admin restored a backup                                                 |
+| `setup`          | the setup wizard finished                                                  |
+| `shutdown`       | a stop or restart from outside the server (a signal, a supervisor)         |
+
+A restart the admin panel starts is announced twice: once by the admin
+action, and again by the hub as the server stops, both naming the same
+`reason`. A stop from outside is announced once, as `shutdown`.
+
 A positive `delay_seconds` announces that the socket is about to drop. The
 desktop client keeps the session for every `reason`: it counts down,
 reconnects with the same token once the server is back and returns to the
-channel it was in. Voice ends only when the server actually stops, on the
-hub's final `shutdown` notice; an earlier admin announcement leaves the call
-alone. A zero `delay_seconds` cancels an earlier announcement
-(`update_aborted`).
+channel it was in. Voice ends when the socket actually drops after an
+announcement, since the server's voice state goes with the process; the
+announcement alone leaves the call, because an update can still be aborted.
+A zero `delay_seconds` cancels an earlier announcement (`update_aborted`).
 
 ---
 

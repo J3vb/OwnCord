@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -288,7 +289,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		}
 
 		// Notify clients that the server is restarting.
-		hub.BroadcastServerRestart("backup_restore", 5)
+		hub.BroadcastServerRestart(ws.RestartReasonBackupRestore, 5)
 
 		// Checkpoint the WAL and close the database connection before overwriting
 		// to prevent corruption from concurrent writes (BUG-096).
