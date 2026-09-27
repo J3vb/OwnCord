@@ -1961,7 +1961,7 @@ Revoke an invite by its code string.
 Upload a file as multipart form data.
 
 **Auth:** Required
-**Rate limit:** 10 requests/minute
+**Rate limit:** 10 requests/minute, and at most 10 uploads in flight per user (`429 RATE_LIMITED` beyond that)
 **Body size limit:** 100 MiB
 **Content-Type:** `multipart/form-data`
 

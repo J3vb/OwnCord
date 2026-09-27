@@ -54,6 +54,15 @@ and only when it changes something a contributor or fork holder must do
 - Message Requests showed the wrong time for anyone not on UTC — the request's time was read as the viewer's local time instead of the server's instant, so it was off by their UTC offset.
 - **Editing or deleting a message no longer claims success while offline.** Both used to show a "Message deleted" / "Message edited" toast the moment they were sent, so a moderator acting during a blip could think a message was gone when the frame had been dropped. Success is now confirmed by the server's echo; a dropped frame reports one error, and an edit's text is put back in an empty composer so it can be sent again. The delete button is disabled, with the reason shown, while the connection is down.
 
+### Messages & files
+
+- **Large attachments no longer fail on a slow connection.** Uploads and
+  downloads used to be cut after 30 seconds no matter how steadily they were
+  moving, so a 25 MB file on a 1 Mbit/s uplink was lost mid-transfer and a
+  download stopped without an error. The server now keeps a transfer alive
+  while it is making progress and gives up on one that has stalled; any
+  single transfer is still closed after 10 minutes.
+
 ### Voice
 
 - Linux desktop voice works against a server on the same Docker host again — the client tried LiveKit's Docker-internal hostname, which does not resolve outside the container network, and now uses the same rule as the other platforms: only a loopback `ws:`/`http:` address is used directly, anything else goes through the `/livekit` tunnel.

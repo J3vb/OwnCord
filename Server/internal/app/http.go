@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/api"
 )
 
 // startACMEServer starts the ACME HTTP-01 challenge server when Let's Encrypt
@@ -85,6 +87,7 @@ func shutdownServers(shutdownCtx context.Context, log *slog.Logger, srv, acmeSrv
 		}
 	}
 
+	srv.RegisterOnShutdown(api.CancelInFlightTransfers(srv))
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
