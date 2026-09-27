@@ -208,7 +208,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   // The native screen-share picker adapter is a lower layer and may not import
   // a component (ARCH-06); the UI registers the dialog here. It is loaded on
-  // demand — the dialog belongs to the native voice chunk, not startup — and
+  // demand — the dialog is its own lazy chunk, not part of startup — and
   // the dynamic import is the sanctioned lower-layer-to-UI seam (Queue.ts's
   // NsfwGate does the same).
   setScreenSourcePicker(async (request) => {
