@@ -15,6 +15,7 @@ vi.mock("../../lib/logger", () => ({
 
 import { JoinOrchestration, type JoinHost } from "./joinOrchestration";
 import { onRoom } from "./releaseRoom";
+import { voiceJoinSnapshot } from "../../lib/voiceJoinTrace";
 
 function fakeRoom(state = "connected"): Room {
   return {
@@ -115,6 +116,21 @@ describe("connectAndSetup", () => {
     expect(room.disconnect).toHaveBeenCalled();
     expect(host.leaveVoice).not.toHaveBeenCalled();
     expect(getState()).toEqual({ type: "connecting", pendingJoin: null, joinGeneration: 99 });
+  });
+
+  it("SRE-M2: records a URL-resolution failure at stage resolve and its url kind", async () => {
+    const { host, join } = setup();
+    host.resolveLiveKitUrl.mockRejectedValueOnce(new Error("proxy refused"));
+
+    await expect(join.connectAndSetup("t", "/livekit", 5, "ws://127.0.0.1:7880")).resolves.toBe(
+      false,
+    );
+
+    expect(voiceJoinSnapshot().lastJoins[0]).toMatchObject({
+      channelId: 5,
+      succeeded: false,
+      stage: "resolve",
+    });
   });
 
   it("leaves no devicechange listener behind for a Room superseded before connect", async () => {

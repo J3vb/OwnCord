@@ -17,6 +17,11 @@ import {
 import { createLogger } from "@lib/logger";
 import { parseUserId } from "../features/voice/sessionState";
 import { detachRoom } from "../features/voice/releaseRoom";
+import {
+  markFirstRemoteTrackSubscribed,
+  markLocalTrackPublished,
+  recordDecryptError,
+} from "@lib/voiceJoinTrace";
 import type { AudioElements } from "@lib/audioElements";
 import { voiceText } from "../i18n/voice";
 
@@ -96,6 +101,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   }
 
   const handleLocalTrackPublished = (publication: LocalTrackPublication): void => {
+    // SRE-M2: join-relative ms for the first local track publication.
+    markLocalTrackPublished();
     if (publication.source === Track.Source.Microphone) {
       const { localMuted, localDeafened } = voiceStore.getState();
       if (localMuted || localDeafened) {
@@ -110,6 +117,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     publication: RemoteTrackPublication,
     participant: RemoteParticipant,
   ): void => {
+    // SRE-M2: join-relative ms for the first remote track subscription.
+    markFirstRemoteTrackSubscribed();
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
       deps.getAudioElements().handleTrackSubscribedAudio(track, publication, participant);
@@ -236,6 +245,11 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   const decryptStreaks = new WeakMap<Participant, { start: number; last: number }>();
   const handleEncryptionError = (error: Error, participant?: Participant): void => {
     if (participant && !participant.isLocal && error.message.startsWith("InvalidKey:")) {
+      // SRE-M2: every receive-side decrypt failure counts toward the
+      // diagnostics total — a tolerated rotation race is still a dropped
+      // frame and the count is what tells a report whether the grace window
+      // is being hit constantly.
+      recordDecryptError();
       const now = Date.now();
       const prev = decryptStreaks.get(participant);
       const start = prev && now - prev.last <= DECRYPT_STREAK_RESET_MS ? prev.start : now;

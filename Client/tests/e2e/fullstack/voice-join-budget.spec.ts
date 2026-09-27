@@ -46,6 +46,29 @@ async function timeJoin(page: Page): Promise<number> {
   return Date.now() - start;
 }
 
+/** The client's own join timeline for the join just made, from the production
+ *  `__owncord.lkDebug()` introspection (SRE-M2). */
+async function joinTimings(page: Page): Promise<Record<string, number | null>> {
+  return page.evaluate(() => {
+    const info = (
+      window as unknown as {
+        __owncord: {
+          lkDebug: () => {
+            voiceJoin?: { lastJoins?: Array<{ timings?: Record<string, number | null> }> };
+          };
+        };
+      }
+    ).__owncord.lkDebug();
+    return info.voiceJoin?.lastJoins?.[0]?.timings ?? {};
+  });
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)]!;
+}
+
 test("voice join reaches decoded remote media within the budget", async ({
   alice,
   bob,
@@ -54,6 +77,7 @@ test("voice join reaches decoded remote media within the budget", async ({
   await joinVoice(bob);
 
   const samples: number[] = [];
+  const phaseSamples: Record<string, number[]> = {};
   for (let i = 0; i < SAMPLES; i++) {
     if (i > 0) {
       await alice.locator(".voice-widget.visible button[aria-label='Disconnect']").click();
@@ -68,16 +92,23 @@ test("voice join reaches decoded remote media within the budget", async ({
     // No open peer is still decoding, so any audio counted is this join's.
     await expect.poll(async () => (await mediaStats(alice)).audioSamples).toBe(0);
     samples.push(await timeJoin(alice));
+    for (const [phase, ms] of Object.entries(await joinTimings(alice))) {
+      if (typeof ms === "number") (phaseSamples[phase] ??= []).push(ms);
+    }
   }
 
-  const median = [...samples].sort((a, b) => a - b)[Math.floor(SAMPLES / 2)]!;
-  const result = { samplesMs: samples, medianMs: median, budgetMs };
+  const phaseMedians = Object.fromEntries(
+    Object.entries(phaseSamples).map(([phase, values]) => [phase, median(values)]),
+  );
+  const medianMs = median(samples)!;
+  const result = { samplesMs: samples, medianMs, budgetMs, phaseMedians };
   console.log(`voice-join: ${JSON.stringify(result)}`);
   await info.attach("voice-join", {
     body: JSON.stringify(result, null, 2),
     contentType: "application/json",
   });
-  expect(median, `median voice join ${median} ms over budget ${budgetMs} ms`).toBeLessThanOrEqual(
-    budgetMs,
-  );
+  expect(
+    medianMs,
+    `median voice join ${medianMs} ms over budget ${budgetMs} ms`,
+  ).toBeLessThanOrEqual(budgetMs);
 });

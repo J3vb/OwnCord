@@ -16,6 +16,16 @@ import type { E2EEManager } from "../../lib/livekitE2EE";
 import type { SessionState } from "./sessionState";
 import { detachRoom, releaseRoom } from "./releaseRoom";
 import { voiceText } from "../../i18n/voice";
+import {
+  abandonJoinAttempt,
+  advanceJoinStage,
+  beginJoinAttempt,
+  classifyJoinUrl,
+  countJoinRetry,
+  failJoinAttempt,
+  finishJoinAttempt,
+  setJoinUrlKind,
+} from "../../lib/voiceJoinTrace";
 
 // Same logger tag as before the extraction, so the join log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -189,6 +199,10 @@ export class JoinOrchestration {
     this.setState({ type: "connecting", pendingJoin: null, joinGeneration: myGeneration });
     // "joining" = connecting to the room; the E2EE "securing" phase is set below.
     setVoiceStatus("joining");
+    // SRE-M2: one timeline line per attempt. beginJoinAttempt abandons any
+    // unfinished previous attempt without recording it — a superseded join is
+    // normal churn, not a failure.
+    const traceId = beginJoinAttempt(channelId);
     let resolvedUrl = "";
     // Track the room being built in this attempt so we can disconnect it on
     // supersession without touching the shared state (which may already have
@@ -206,7 +220,11 @@ export class JoinOrchestration {
       this._deviceManager.setAudioPipeline(this._audioPipeline);
       this._deviceManager.setOnError(this._onError);
       this._deviceManager.setOnToast(this._onError);
+      // SRE-M2: the failure stage a URL-resolution failure lands at is
+      // "resolve" (the stage beginJoinAttempt opens on), so a resolve throw is
+      // recorded as a resolve failure by the catch below without moving on.
       resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
+      setJoinUrlKind(traceId, classifyJoinUrl(resolvedUrl, directUrl, url));
 
       // Checkpoint 1: after URL resolution (may be slow for TLS proxy init).
       if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
@@ -227,6 +245,7 @@ export class JoinOrchestration {
       // Non-key-holders block here waiting for the key holder's offer (up to
       // ~15s); key holders pass through near-instantly.
       setVoiceStatus("securing");
+      advanceJoinStage(traceId, "keyExchange");
       const keyExchangeOk = await this._e2ee.setupKeyExchange(isKeyHolder ?? false, channelId);
       if (!keyExchangeOk) {
         // setupKeyExchange() also returns false when clearState() aborted the
@@ -274,10 +293,18 @@ export class JoinOrchestration {
           // never runs for that next call since `_room` is null here (OC-0001).
           this._e2ee.clearState();
         }
+        // SRE-M2: the key exchange is a real failure stage (timeout / aborted
+        // exchange), recorded so a report can place it.
+        failJoinAttempt(traceId);
         return false;
       }
 
+      // SRE-M2: entering "connect" ends the key-exchange phase; the connect
+      // phase start is set once, before the first attempt, so a retry re-runs
+      // the connect without resetting the phase clock.
+      advanceJoinStage(traceId, "connect");
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        if (attempt > 1) countJoinRetry(traceId);
         try {
           // oxlint-disable-next-line no-await-in-loop -- sequential retry: must attempt connect before checking result
           await localRoom.connect(resolvedUrl, token);
@@ -359,6 +386,9 @@ export class JoinOrchestration {
       }
       // If the room was discarded (stale join superseded by pending), skip setup.
       if (localRoom !== null) {
+        // SRE-M2: the room connected; the remaining work (device switches,
+        // local voice state, pipeline) is the "activate" phase.
+        advanceJoinStage(traceId, "activate");
         log.info("Connected to LiveKit room", { channelId, url: resolvedUrl });
         logIceConnectionInfo(localRoom);
         // Atomic transition to "connected" — all connection fields set together.
@@ -438,6 +468,7 @@ export class JoinOrchestration {
         this.reapplyMuteGain();
         this.startTokenRefreshTimer();
         log.info("Voice session active", { channelId });
+        finishJoinAttempt(traceId);
         return true;
       }
       return false;
@@ -478,6 +509,13 @@ export class JoinOrchestration {
         this.leaveVoice(true);
         leaveVoiceChannel();
       }
+      // SRE-M2: a thrown connect/setup failure is placed at the stage the
+      // attempt last reached (resolve / connect / activate) — but only while
+      // this attempt is still current. A superseded attempt that happened to
+      // throw is churn, not a failure, and is abandoned in the finally below.
+      if (this._state.type === "connecting" && this._state.joinGeneration === myGeneration) {
+        failJoinAttempt(traceId);
+      }
       return false;
     } finally {
       // Only clear "connecting" back to "idle" if we are still in the connecting
@@ -490,6 +528,10 @@ export class JoinOrchestration {
           this.setState({ type: "idle" });
         }
       }
+      // SRE-M2: every exit path that did not record the attempt (success or a
+      // placed failure) leaves it superseded — drop it silently rather than
+      // report a live join as failed.
+      abandonJoinAttempt(traceId);
     }
   }
 
