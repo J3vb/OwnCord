@@ -246,7 +246,7 @@ func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 	sig := AttentionSignal{ID: "voice", Label: "Voice (LiveKit)", ObservedAt: now}
 	title := "Voice is unavailable"
-	action := "Check Server Logs for livekit: lines (the managed LiveKit's output is logged there). If it gave up, fix its config or binary and restart the server."
+	action := "Check Server Logs for \"livekit companion output\" entries (component=livekit; the managed LiveKit's own line is in their line attribute). If it gave up, fix its config or binary and restart the server."
 	if r.voice == nil {
 		sig.Status, sig.Detail = AttentionStatusUnknown, "voice health is not measured on this server"
 		s.settle(sig, title, action)
