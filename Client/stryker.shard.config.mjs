@@ -32,6 +32,7 @@ export const shards = {
     "src/features/voice/native/videoRenderer.ts",
     "src/features/voice/native/cameraUplink.ts",
     "src/features/voice/native/screenPicker.ts",
+    "src/features/voice/native/screenPickerSlot.ts",
     "src/features/voice/native/screenTrack.ts",
     "src/features/voice/releaseRoom.ts",
   ], // 2901 mutants (before the D6 additions)
