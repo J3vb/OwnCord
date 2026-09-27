@@ -522,7 +522,7 @@ func (h *Hub) computeAllowedChannels(ctx context.Context, database VisibilityRea
 // bumpVisibilityWatermark ratchets visibilityChangeSeq up to the current seq,
 // never down. Every writer (RefreshChannelVisibility,
 // revokeUnreadableChannels, DMChannelOpenEvent in emit.go, and SRV-03's
-// content-shed paths in hub_stats.go and replay.go) must go through
+// content-shed paths in hub_stats.go) must go through
 // this instead of a plain Store: a plain Store(Load(&h.seq)) lets a writer
 // that read an older h.seq — e.g. one that spent time in a per-topic DB loop
 // — finish and overwrite a concurrently stored higher watermark with its

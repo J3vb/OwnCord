@@ -143,6 +143,27 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 	return false
 }
 
+// queueDropState records content-bearing frames the full broadcast queue
+// dropped in enqueue (SRV-03): dropped counts them, applied is how many
+// applyQueueContentDrops has settled into the resync watermark. applied is
+// guarded by seqMu.
+type queueDropState struct {
+	dropped atomic.Uint64
+	applied uint64
+}
+
+// recordQueueDrop counts a frame enqueue dropped on a full broadcast queue. A
+// content-bearing one is also left for applyQueueContentDrops to settle into
+// the resync watermark under seqMu (SRV-03).
+func (h *Hub) recordQueueDrop(bm broadcastMsg, kind string) {
+	h.broadcastDrops.Add(1)
+	if bm.nsfwChannelID != 0 {
+		h.queueDrops.dropped.Add(1)
+	}
+	slog.Warn("hub: broadcast channel full, dropping "+kind,
+		"channel_id", bm.channelID, "msg_len", len(bm.msg))
+}
+
 // applyQueueContentDrops is SRV-03's recovery for a content-bearing frame the
 // full broadcast queue dropped in enqueue. Unlike a topic shed, that frame's
 // place in the seq stream lies behind every frame still queued ahead of it, so
@@ -150,17 +171,28 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 // current seq, and the drop only counts as settled once the queue is seen
 // empty — every frame queued before it has been sequenced by then. That proof
 // holds only on the dispatch goroutine, so deliverBroadcast is the sole caller,
-// under seqMu after each frame; reconnectRegister bumps for an unsettled drop
-// but never settles it.
+// under seqMu after each frame; mustFullResyncAtRegister bumps for an
+// unsettled drop but never settles it.
 func (h *Hub) applyQueueContentDrops() {
-	n := h.queueContentDrops.Load()
-	if n == h.queueContentDropsApplied {
+	n := h.queueDrops.dropped.Load()
+	if n == h.queueDrops.applied {
 		return
 	}
 	h.bumpVisibilityWatermark()
 	if len(h.broadcast) == 0 {
-		h.queueContentDropsApplied = n
+		h.queueDrops.applied = n
 	}
+}
+
+// mustFullResyncAtRegister is reconnectRegister's final watermark check, run
+// under seqMu. An unsettled queue drop (SRV-03) ratchets the watermark first,
+// so a resume racing the dispatch of the frames ahead of it still takes the
+// full-ready path.
+func (h *Hub) mustFullResyncAtRegister(lastSeq uint64) bool {
+	if h.queueDrops.dropped.Load() != h.queueDrops.applied {
+		h.bumpVisibilityWatermark()
+	}
+	return h.mustFullResync(lastSeq)
 }
 
 // BroadcastQueueDepth is the number of frames currently waiting on the hub's

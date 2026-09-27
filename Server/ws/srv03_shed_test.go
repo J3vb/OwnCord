@@ -166,7 +166,7 @@ func TestQueueContentDrop_ResumeMidDispatchDoesNotSettleDrop(t *testing.T) {
 	for range 2 {
 		h.deliverBroadcast(broadcastMsg{msg: []byte(`{"type":"server_filler"}`)})
 	}
-	h.queueContentDrops.Add(1)
+	h.queueDrops.dropped.Add(1)
 
 	c := NewTestClient(h, 2, make(chan []byte, 8))
 	if _, ok := h.ReconnectRegisterForTest(c, atomic.LoadUint64(&h.seq), nil); ok {
