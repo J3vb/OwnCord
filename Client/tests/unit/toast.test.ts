@@ -219,7 +219,7 @@ describe("ToastContainer", () => {
     for (let i = 0; i < 5; i++) toast.show("Same error", "error");
 
     expect(container.querySelectorAll(".toast").length).toBe(1);
-    const count = container.querySelector("[data-testid='toast-count']");
+    const count = container.querySelector(".toast-count");
     expect(count).not.toBeNull();
     expect(count!.textContent).toBe("5");
     expect(container.querySelector(".toast")!.textContent).toContain("Same error");

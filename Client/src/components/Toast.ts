@@ -47,7 +47,7 @@ function pauseEntry(entry: ToastEntry): void {
   if (entry.timer === null) return;
   clearTimeout(entry.timer);
   entry.timer = null;
-  entry.remainingMs = Math.max(0, entry.remainingMs - (Date.now() - entry.startedAt));
+  entry.remainingMs -= Date.now() - entry.startedAt;
 }
 
 export function createToastContainer(): ToastContainer {
@@ -58,48 +58,23 @@ export function createToastContainer(): ToastContainer {
     const idx = toasts.indexOf(entry);
     if (idx === -1) return;
 
-    if (entry.timer !== null) clearTimeout(entry.timer);
+    pauseEntry(entry);
     toasts.splice(idx, 1);
 
-    // Remove .show first and wait for the CSS opacity transition to finish
+    // Remove .show first and let the 0.3 s CSS opacity transition finish.
+    // A timer rather than transitionend: a toast removed before it was
+    // shown never transitions.
     entry.el.classList.remove("show");
-    entry.el.addEventListener(
-      "transitionend",
-      () => {
-        if (entry.el.parentNode !== null) {
-          entry.el.remove();
-        }
-      },
-      { once: true },
-    );
-
-    // Fallback removal in case transitionend never fires
-    setTimeout(() => {
-      if (entry.el.parentNode !== null) {
-        entry.el.remove();
-      }
-    }, 400);
+    setTimeout(() => entry.el.remove(), 400);
   }
 
-  function armTimer(entry: ToastEntry, durationMs: number): void {
-    if (entry.type === "error") return; // errors persist until dismissed
-    entry.remainingMs = durationMs;
-    entry.startedAt = Date.now();
-    entry.timer = setTimeout(() => {
-      const current = toasts.find((t) => t.el === entry.el);
-      if (current !== undefined) removeToast(current);
-    }, durationMs);
-  }
-
-  /** Resume a paused auto-dismissing toast with its held time. */
+  /** Run an auto-dismissing toast's countdown for its remaining time, unless
+   *  it is an error (persists until dismissed) or held by hover or focus. */
   function resume(entry: ToastEntry): void {
     if (entry.type === "error" || entry.timer !== null) return;
     if (entry.hovered || entry.focused) return;
     entry.startedAt = Date.now();
-    entry.timer = setTimeout(() => {
-      const current = toasts.find((t) => t.el === entry.el);
-      if (current !== undefined) removeToast(current);
-    }, entry.remainingMs);
+    entry.timer = setTimeout(() => removeToast(entry), entry.remainingMs);
   }
 
   function show(
@@ -114,15 +89,12 @@ export function createToastContainer(): ToastContainer {
     // same error show as one with a count.
     const existing = toasts.find((t) => t.type === type && t.message === message);
     if (existing !== undefined) {
-      existing.count++;
-      setText(existing.countEl, String(existing.count));
-      existing.countEl.hidden = false;
+      setText(existing.countEl, String(++existing.count));
       // Restart the window so the repeat gets its full read time; a toast
       // held by hover or focus only has its held time topped up.
-      if (existing.timer !== null) clearTimeout(existing.timer);
-      existing.timer = null;
-      if (existing.hovered || existing.focused) existing.remainingMs = durationMs;
-      else armTimer(existing, durationMs);
+      pauseEntry(existing);
+      existing.remainingMs = durationMs;
+      resume(existing);
       return;
     }
 
@@ -130,12 +102,10 @@ export function createToastContainer(): ToastContainer {
     // until dismissed): with every slot an error, a new non-error is the one
     // that gives way, and only a new error displaces the oldest error.
     while (toasts.length >= MAX_TOASTS) {
-      const oldest = toasts.find((t) => t.type !== "error");
-      if (oldest === undefined && type !== "error") return;
-      const victim = oldest ?? toasts[0];
-      if (victim !== undefined) {
-        removeToast(victim);
-      }
+      const victim =
+        toasts.find((t) => t.type !== "error") ?? (type === "error" ? toasts[0] : undefined);
+      if (victim === undefined) return;
+      removeToast(victim);
     }
 
     // An auto-dismissing toast takes focus itself so the keyboard can hold it
@@ -146,27 +116,22 @@ export function createToastContainer(): ToastContainer {
       ...(type === "error" ? {} : { tabindex: "0" }),
     });
 
-    const text = createElement("span", { class: "toast-text" });
-    setText(text, message);
-    el.appendChild(text);
+    el.appendChild(createElement("span", { class: "toast-text" }, message));
 
-    // A coalesced duplicate bumps this; hidden until then.
-    const countEl = createElement("span", {
-      class: "toast-count",
-      "data-testid": "toast-count",
-    });
-    countEl.hidden = true;
+    // A coalesced duplicate fills this in; CSS hides it while empty.
+    const countEl = createElement("span", { class: "toast-count" });
     el.appendChild(countEl);
 
     // Errors get a close button so they can be dismissed by hand. Other types
     // clear themselves, so a button there would only add noise.
     if (type === "error") {
-      const close = createElement("button", {
-        class: "toast-close",
-        type: "button",
-        "aria-label": shellText("toast.dismiss"),
-      });
-      close.appendChild(createElement("span", { "aria-hidden": "true" }, "\u00d7"));
+      // The aria-label names the button, so the glyph is never announced.
+      const close = createElement(
+        "button",
+        { class: "toast-close", type: "button", "aria-label": shellText("toast.dismiss") },
+        "\u00d7",
+      );
+      close.addEventListener("click", () => removeToast(entry));
       el.appendChild(close);
     }
 
@@ -201,13 +166,9 @@ export function createToastContainer(): ToastContainer {
       entry.focused = false;
       resume(entry);
     });
-    if (type === "error") {
-      el.querySelector(".toast-close")!.addEventListener("click", () => removeToast(entry));
-    }
-
     toasts.push(entry);
     root.appendChild(el);
-    armTimer(entry, durationMs);
+    resume(entry);
 
     // Trigger .show on the next frame so the CSS opacity transition plays
     requestAnimationFrame(() => {

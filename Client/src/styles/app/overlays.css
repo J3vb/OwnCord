@@ -188,6 +188,9 @@
   font-weight: 600;
   text-align: center;
 }
+.toast-count:empty {
+  display: none;
+}
 .toast-close {
   flex-shrink: 0;
   margin-left: 4px;
