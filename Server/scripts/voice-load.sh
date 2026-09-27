@@ -20,7 +20,7 @@
 #   SUBSCRIBERS      subscribers                     (default 25)
 #   DURATION         steady-state duration           (default 60s)
 #   LOSS_BUDGET      max packet loss percent, inclusive (default 1)
-#   LIVEKIT_VERSION  SFU version recorded in the report (default 1.13.5)
+#   LIVEKIT_VERSION  SFU version recorded in the report (default 1.13.7)
 #   REPORT           output path                     (default reports/voice-load.txt)
 #
 # WHY --layout 5x5 IS NOT OPTIONAL. `lk load-test` defaults to
@@ -49,7 +49,7 @@ PUBLISHERS="${PUBLISHERS:-25}"
 SUBSCRIBERS="${SUBSCRIBERS:-25}"
 DURATION="${DURATION:-60s}"
 LOSS_BUDGET="${LOSS_BUDGET:-1}"
-LIVEKIT_VERSION="${LIVEKIT_VERSION:-1.13.5}" # ws.DefaultLiveKitVersion
+LIVEKIT_VERSION="${LIVEKIT_VERSION:-1.13.7}" # ws.DefaultLiveKitVersion
 LIVEKIT_URL="${LIVEKIT_URL:-http://127.0.0.1:7880}"
 REPORT="${REPORT:-reports/voice-load.txt}"
 ROOM="${ROOM:-capacity-$(date +%s)}"

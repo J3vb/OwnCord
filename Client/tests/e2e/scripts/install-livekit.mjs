@@ -4,25 +4,25 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
 // Fixed release and archive digests: never execute a floating download.
-const release = "1.13.5";
+const release = "1.13.7";
 // Keyed by `${platform}-${arch}`; the arm64 pair serves B7-17's ARM64
 // artifact smoke. Digests match the release's own checksums.txt.
 const archives = {
   "linux-x64": [
     "linux_amd64.tar.gz",
-    "c020fac437b7cc9b776eef1ad5ea8af77be9acfa07602eca20a3a44930dfbc70",
+    "6634aeeb2fb1366b6723708ae4320b9d5408106a4c63457c5e845ae3979c90e2",
   ],
   "linux-arm64": [
     "linux_arm64.tar.gz",
-    "332015305518765fe05bad74fc3a9d9583e635e7dd130de3c4fc563d69c550f3",
+    "5d167fdf52cf43c0c72972f25325364479f41f854bfef651056eab2504da5de9",
   ],
   "win32-x64": [
     "windows_amd64.zip",
-    "3ec7eaa76ef64063bf21f78364733703e0969612cb92ffd60661ed45fa4a8906",
+    "e539e7d2f75807b9c9202cd2a0bf2cb3d52fc4c52978a6953e0f47bc339fe77f",
   ],
   "win32-arm64": [
     "windows_arm64.zip",
-    "9a0facddf31346f22854a1beaeaaa2c623c165078c54765115b249d771eb0b66",
+    "8379c89b9973dc52577710b293f6190644bd6fad0c415df4279a24ea54df2363",
   ],
 };
 const target = archives[`${process.platform}-${process.arch}`];

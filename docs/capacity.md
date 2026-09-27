@@ -93,9 +93,11 @@ Everything else is the shipped default. The non-defaults are:
 | `voice.livekit_binary`                          | mounted SFU | Pins the SFU version and removes the container's need for egress and a CA bundle                                   |
 | `voice.node_ip` / `voice.advertise_internal_ip` | loopback    | See above — single-machine ICE, not a deployment setting                                                           |
 
-The SFU is **livekit-server 1.13.5**, the release the server itself downloads
+The SFU is **livekit-server 1.13.7**, the release the server itself downloads
 (`ws.DefaultLiveKitVersion`). Measuring a different SFU release than the product
-ships would measure something no owner ever runs.
+ships would measure something no owner ever runs. The qualifying runs recorded
+below predate the 1.13.7 pin and were measured against **1.13.5**; the blocks
+name the release each was run on.
 
 ## Latency budgets
 

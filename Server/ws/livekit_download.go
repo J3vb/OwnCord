@@ -29,7 +29,7 @@ import (
 
 // DefaultLiveKitVersion is the livekit-server release the server downloads
 // when voice.livekit_version is not set. Bump deliberately with releases.
-const DefaultLiveKitVersion = "1.13.5"
+const DefaultLiveKitVersion = "1.13.7"
 
 // livekitDownloadBase is the release download URL prefix. Package variable so
 // tests can point it at a local httptest server.

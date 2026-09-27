@@ -80,7 +80,7 @@ env:
   # (ws.DefaultLiveKitVersion), same value and same reason as
   # load-baseline.yml's: phase S kills what the product would have started, so
   # measuring a different SFU release would measure something no owner runs.
-  LIVEKIT_VERSION: "1.13.5"
+  LIVEKIT_VERSION: "1.13.7"
 
 jobs:
   upgrade-rehearsal:
