@@ -45,11 +45,12 @@ export function syncOsMotionListener(enabled: boolean): void {
 
   owner = new Disposable();
   const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-  const apply = (osReduces: boolean): void => {
-    document.documentElement.classList.toggle("reduced-motion", osReduces || manualPreference());
-  };
   apply(mq.matches);
   mq.addEventListener("change", (e: MediaQueryListEvent) => apply(e.matches), {
     signal: owner.signal,
   });
+}
+
+function apply(osReduces: boolean): void {
+  document.documentElement.classList.toggle("reduced-motion", osReduces || manualPreference());
 }

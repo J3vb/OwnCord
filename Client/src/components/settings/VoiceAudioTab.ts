@@ -203,15 +203,16 @@ function buildVoiceAudioTabInner(
     updateThresholdIndicator(val);
   }
 
+  function onMove(ev: PointerEvent): void {
+    applySensitivity(sensitivityFromPointer(ev.clientX));
+  }
+
   // Drag the threshold handle
   meterThreshold.addEventListener(
     "pointerdown",
     (e: PointerEvent) => {
       e.preventDefault();
       meterThreshold.setPointerCapture(e.pointerId);
-      const onMove = (ev: PointerEvent): void => {
-        applySensitivity(sensitivityFromPointer(ev.clientX));
-      };
       const onUp = (): void => {
         meterThreshold.removeEventListener("pointermove", onMove);
         meterThreshold.removeEventListener("pointerup", onUp);

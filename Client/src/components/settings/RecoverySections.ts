@@ -66,19 +66,19 @@ export function buildShownOnce(
   // control that is still the focus. The region holds no secret.
   const copyStatus = createElement("div", { class: "sr-only", role: "status" });
   let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+  const restore = (label: string): void => {
+    setText(copyBtn, label);
+    setText(copyStatus, label);
+    if (copyResetTimer !== null) clearTimeout(copyResetTimer);
+    copyResetTimer = setTimeout(() => {
+      setText(copyBtn, opts.copyLabel);
+      setText(copyStatus, "");
+      copyResetTimer = null;
+    }, 1500);
+  };
   copyBtn.addEventListener(
     "click",
     () => {
-      const restore = (label: string): void => {
-        setText(copyBtn, label);
-        setText(copyStatus, label);
-        if (copyResetTimer !== null) clearTimeout(copyResetTimer);
-        copyResetTimer = setTimeout(() => {
-          setText(copyBtn, opts.copyLabel);
-          setText(copyStatus, "");
-          copyResetTimer = null;
-        }, 1500);
-      };
       // Read the node, not a captured copy: after clear() there is nothing
       // left to copy, and no closure keeps the secret alive.
       const text = code.textContent ?? "";

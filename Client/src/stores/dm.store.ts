@@ -246,8 +246,8 @@ export function dmDisplayName(dm: DmChannel): string {
  * showing stale status/name for the rest of the session.
  */
 export function updateDmParticipant(userId: number, patch: Partial<DmUser>): void {
+  const patchUser = (u: DmUser): DmUser => (u.id === userId ? { ...u, ...patch } : u);
   dmStore.setState((prev) => {
-    const patchUser = (u: DmUser): DmUser => (u.id === userId ? { ...u, ...patch } : u);
     let changed = false;
     const channels = prev.channels.map((c) => {
       if (c.recipient.id !== userId && c.participants.every((p) => p.id !== userId)) {

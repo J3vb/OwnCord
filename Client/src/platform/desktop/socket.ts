@@ -18,6 +18,24 @@ import type {
 
 const log = createLogger("ws");
 
+// Invokes each unsub handle in `unsubs`, tolerating handles that throw or
+// return a rejected promise (the native resource may already have been
+// invalidated after disconnect).
+function unsubscribeAll(unsubs: ReadonlyArray<() => void>): void {
+  for (const unsub of unsubs) {
+    try {
+      const result = unsub() as unknown;
+      if (result instanceof Promise) {
+        result.catch((err) => {
+          log.warn("Failed to unsubscribe Tauri event listener", err);
+        });
+      }
+    } catch (err) {
+      log.debug("Sync unsubscribe error (safe to ignore)", err);
+    }
+  }
+}
+
 /**
  * The native socket connection: the four proxy commands (`ws_connect`,
  * `ws_send`, `ws_disconnect`, `accept_cert_fingerprint`) and the four event
@@ -72,24 +90,6 @@ function createSocketConnection(): SocketConnection {
       tauriListen = event.listen;
     } catch {
       log.warn("Tauri APIs not available — WebSocket proxy will not work");
-    }
-  }
-
-  // Invokes each unsub handle in `unsubs`, tolerating handles that throw or
-  // return a rejected promise (the native resource may already have been
-  // invalidated after disconnect).
-  function unsubscribeAll(unsubs: ReadonlyArray<() => void>): void {
-    for (const unsub of unsubs) {
-      try {
-        const result = unsub() as unknown;
-        if (result instanceof Promise) {
-          result.catch((err) => {
-            log.warn("Failed to unsubscribe Tauri event listener", err);
-          });
-        }
-      } catch (err) {
-        log.debug("Sync unsubscribe error (safe to ignore)", err);
-      }
     }
   }
 
