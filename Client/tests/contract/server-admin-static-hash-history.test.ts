@@ -8,7 +8,7 @@
 // back/forward buttons move between sections; a hashchange from the browser
 // navigates to the section it names, reusing the same permission gate a click
 // does. A fragment that is unknown or names a section the principal may not
-// open changes nothing.
+// open leaves the page as it is and puts the current section back in the URL.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
 import { adminPanelHtml } from "../helpers/admin-panel";
@@ -21,7 +21,6 @@ window.__test = {
   get state(){return state},
   enterApp: enterApp,
   navigateTo: navigateTo,
-  sectionFromHash: sectionFromHash,
   nav: NAV
 };
 </script>`;
@@ -34,13 +33,35 @@ interface Bridge {
   state: any;
   enterApp: () => Promise<void>;
   navigateTo: (id: string) => void;
-  sectionFromHash: () => string;
   nav: { id?: string }[];
 }
 
 const ADMINISTRATOR = 0x40000000;
+const OWNER_ME = {
+  id: 1,
+  username: "ada",
+  role_name: "Owner",
+  permissions: ADMINISTRATOR,
+  role_position: 100,
+  is_owner: true,
+  server_name: "Lab",
+  version: "1.2.0",
+};
+// A moderation-only principal: dashboard yes, tokens (owner-only) no.
+const MODERATOR_ME = {
+  id: 2,
+  username: "mo",
+  role_name: "Moderator",
+  permissions: 0x8000000,
+  role_position: 60,
+};
 
-function boot(): { dom: JSDOM; bridge: Bridge; doc: Document; tick: () => Promise<void> } {
+function boot(me: object = OWNER_ME): {
+  dom: JSDOM;
+  bridge: Bridge;
+  doc: Document;
+  tick: () => Promise<void>;
+} {
   const dom = new JSDOM(ADMIN_HTML, {
     url: "http://localhost:8080/admin",
     runScripts: "dangerously",
@@ -50,17 +71,7 @@ function boot(): { dom: JSDOM; bridge: Bridge; doc: Document; tick: () => Promis
         const p = String(input).replace(/^\/admin\/api/, "");
         let json: unknown = {};
         if (p === "/setup/status") json = { needs_setup: false };
-        else if (p === "/me")
-          json = {
-            id: 1,
-            username: "ada",
-            role_name: "Owner",
-            permissions: ADMINISTRATOR,
-            role_position: 100,
-            is_owner: true,
-            server_name: "Lab",
-            version: "1.2.0",
-          };
+        else if (p === "/me") json = me;
         // The list routes the page renders read return arrays, not {}.
         else if (p.startsWith("/registrations") || p.startsWith("/users")) json = [];
         else if (p.startsWith("/roles")) json = [];
@@ -70,12 +81,7 @@ function boot(): { dom: JSDOM; bridge: Bridge; doc: Document; tick: () => Promis
   });
   const bridge = (dom.window as unknown as { __test: Bridge }).__test;
   expect(bridge).toBeTruthy();
-  bridge.state.me = {
-    id: 1,
-    permissions: ADMINISTRATOR,
-    role_position: 100,
-    is_owner: true,
-  };
+  bridge.state.me = me;
   const tick = () => new Promise<void>((resolve) => dom.window.setTimeout(resolve, 0));
   return { dom, bridge, doc: dom.window.document, tick };
 }
@@ -121,20 +127,19 @@ describe("Server/admin/static — hash history (UX-12a)", () => {
     await booted.tick();
 
     expect(booted.bridge.state.section).toBe("dashboard");
-    expect(booted.bridge.sectionFromHash()).toBe("");
+    expect(booted.dom.window.location.hash).toBe("#dashboard");
   });
 
   it("ignores a hashchange naming a section the principal may not open", async () => {
-    const booted = boot();
+    const booted = boot(MODERATOR_ME);
     dom = booted.dom;
-    // A moderation-only principal: dashboard yes, tokens (owner-only) no.
-    booted.bridge.state.me = { id: 2, permissions: 0x8000000, role_position: 60 };
     booted.bridge.navigateTo("dashboard");
 
     booted.dom.window.location.hash = "#tokens";
     await booted.tick();
 
     expect(booted.bridge.state.section).toBe("dashboard");
+    expect(booted.dom.window.location.hash).toBe("#dashboard");
   });
 
   it("does not add a history entry when re-opening the current section", async () => {
@@ -157,5 +162,17 @@ describe("Server/admin/static — hash history (UX-12a)", () => {
 
     expect(booted.bridge.state.section).toBe("roles");
     expect(booted.dom.window.location.hash).toBe("#roles");
+  });
+
+  it("replaces a deep link the principal may not open with the section it opened", async () => {
+    const booted = boot(MODERATOR_ME);
+    dom = booted.dom;
+    booted.dom.window.location.hash = "#tokens";
+    const entries = booted.dom.window.history.length;
+    await booted.bridge.enterApp();
+
+    expect(booted.bridge.state.section).toBe("dashboard");
+    expect(booted.dom.window.location.hash).toBe("#dashboard");
+    expect(booted.dom.window.history.length).toBe(entries);
   });
 });

@@ -332,15 +332,14 @@ function sectionFromHash(){
    hash, so the address bar names where you are and a copy of it returns there;
    the browser's back and forward buttons change the hash and fire hashchange,
    which navigates through the same permission gate a click does. An unknown
-   fragment, a fragment naming a section the principal may not open, or one
-   naming the current section changes nothing. */
+   fragment, or one naming a section the principal may not open, leaves the
+   page as it is and puts the current section's #id back in the address bar. */
 function syncHash(id){const frag='#'+id;if(location.hash!==frag)location.hash=frag}
 function hashSection(){
   if(!state.me)return;
   const id=sectionFromHash();
-  if(!id||id===state.section)return;
-  if(!sectionAllowed(id))return;
-  navigateTo(id);
+  if(id&&id!==state.section&&sectionAllowed(id))navigateTo(id);
+  else if(location.hash!=='#'+state.section)history.replaceState(null,'','#'+state.section);
 }
 window.addEventListener('hashchange',hashSection);
 
