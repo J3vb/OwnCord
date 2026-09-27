@@ -235,6 +235,123 @@ test("K6_SEND_PHASE=aligned puts every VU's sends on the epoch grid; typing keep
   assert.ok(spread.intervals.has(2000), "the default still sends on the connection's own phase");
 });
 
+test("voice churn is spread across the cohort by default, aligned as a named burst (PERF-02)", () => {
+  assert.throws(
+    () => harness({ K6_PROFILE: "operational", K6_VOICE_CHURN_PHASE: "storm" }),
+    /K6_VOICE_CHURN_PHASE/,
+  );
+
+  // Spread (default): VU n sits at (n-1)/(VOICE_VUS + OBS_VUS) through the
+  // period. With VOICE_VUS=4 plus the observer's slot the offsets are 0, 2000,
+  // 4000, 6000, 8000 ms, and VU 5 (a voice VU whenever the observer holds a
+  // lower id) gets its own slot rather than sharing VU 1's. Start partway
+  // through a period (t=0.5 s), so the first tick waits for this VU's own
+  // offset rather than the epoch boundary — the arithmetic the sign of JS `%`
+  // would otherwise get wrong.
+  for (const [vu, delayMs] of [
+    [1, 9500],
+    [2, 1500],
+    [3, 3500],
+    [5, 7500],
+  ]) {
+    const h = harness(
+      { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "4" },
+      vu,
+    );
+    h.at(0.5);
+    h.start();
+    assert.equal(
+      h.timeouts.filter((t) => t.ms === delayMs).length,
+      1,
+      `VU ${vu} churns ${delayMs} ms after t=0.5`,
+    );
+  }
+
+  // Aligned: every VU lands on the same epoch grid, the deliberate burst.
+  for (const vu of [1, 2, 3]) {
+    const h = harness(
+      {
+        K6_PROFILE: "operational",
+        K6_VOICE_CHANNEL_ID: "9",
+        K6_VOICE_VUS: "4",
+        K6_VOICE_CHURN_PHASE: "aligned",
+      },
+      vu,
+    );
+    h.at(0);
+    h.start();
+    assert.equal(h.timeouts.filter((t) => t.ms === 10000).length, 1);
+    assert.equal(h.timeouts.filter((t) => t.ms < 10000).length, 0, `VU ${vu} is not spread`);
+  }
+
+  // The measurement attributes a cross-VU frame to the SENDER's offset, not
+  // the epoch grid: a frame from VU 2 (offset 2000) seen 50 ms after that
+  // offset is a 50 ms delivery, not 2050 ms.
+  const spread = harness(
+    { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "4" },
+    1,
+  );
+  spread.at(2.05);
+  spread.start();
+  spread.receive({ type: "voice_state", seq: 1, payload: { username: "loadtest2" } });
+  assert.equal(spread.metrics.voice_state_delivery_ms.at(-1).value, 50);
+
+  const aligned = harness(
+    {
+      K6_PROFILE: "operational",
+      K6_VOICE_CHANNEL_ID: "9",
+      K6_VOICE_VUS: "4",
+      K6_VOICE_CHURN_PHASE: "aligned",
+    },
+    1,
+  );
+  aligned.at(2.05);
+  aligned.start();
+  aligned.receive({ type: "voice_state", seq: 1, payload: { username: "loadtest2" } });
+  assert.equal(aligned.metrics.voice_state_delivery_ms.at(-1).value, 2050);
+
+  // A username this run did not mint measures nothing rather than guessing.
+  const foreign = harness(
+    { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "4" },
+    1,
+  );
+  foreign.at(2.05);
+  foreign.start();
+  foreign.receive({ type: "voice_state", seq: 1, payload: { username: "someoneelse" } });
+  assert.equal(foreign.metrics.voice_state_delivery_ms.length, 0);
+
+  // Q10: the aligned burst is published unbudgeted. The voice-join budget
+  // gates spread churn (and capacity) and is dropped only under aligned; the
+  // count sanity gate stays either way.
+  const budgeted = harness(
+    { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "4" },
+    1,
+  );
+  assert.equal(
+    budgeted.evaluate('options.thresholds["voice_join_time"][0]'),
+    "p(95)<250",
+    "spread churn keeps the voice-join budget",
+  );
+  const burst = harness(
+    {
+      K6_PROFILE: "operational",
+      K6_VOICE_CHANNEL_ID: "9",
+      K6_VOICE_VUS: "4",
+      K6_VOICE_CHURN_PHASE: "aligned",
+    },
+    1,
+  );
+  assert.equal(burst.evaluate('options.thresholds["voice_join_time"]'), undefined);
+  assert.equal(burst.evaluate('options.thresholds["voice_tokens"][0]'), "count>0");
+  // Capacity does not churn, so an aligned input (the workflow passes it to
+  // every profile) must not drop its voice-join budget.
+  const capacity = harness(
+    { K6_PROFILE: "capacity", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_CHURN_PHASE: "aligned" },
+    1,
+  );
+  assert.equal(capacity.evaluate('options.thresholds["voice_join_time"][0]'), "p(95)<250");
+});
+
 test("operational acknowledgement and delivery samples carry the observer's phase", () => {
   const h = harness({ K6_PROFILE: "operational" });
   h.start();
@@ -263,6 +380,8 @@ test("operational acknowledgement and delivery samples carry the observer's phas
   for (const metric of ["ws_delivery_latency_ms", "ws_broadcast_latency_ms"]) {
     for (const phase of ["ramp", "sustain", "storm", "upload"]) {
       assert.equal(h.evaluate(`options.thresholds["${metric}{phase:${phase}}"][0]`), "p(95)>=0");
+      // p(99) too: the operational ack tail is the published concern.
+      assert.equal(h.evaluate(`options.thresholds["${metric}{phase:${phase}}"][1]`), "p(99)>=0");
     }
   }
   // The run-wide budget is untouched by the per-phase series.
