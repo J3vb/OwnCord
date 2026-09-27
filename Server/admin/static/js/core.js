@@ -208,7 +208,19 @@ function focusModalStart(inner){
   if(first instanceof HTMLElement)first.focus();
   else{inner.setAttribute('tabindex','-1');inner.focus()}
 }
+/* A dialog whose work cannot be abandoned — an update or restore already sent,
+   and the restart wait after it — holds this lock: Escape, the scrim and its
+   close buttons leave it open until the work settles (CLI-02). A new dialog
+   starts unlocked. */
+let modalLocked=false;
+function lockModal(on){
+  modalLocked=on;
+  const inner=document.getElementById('modalInner');
+  inner.setAttribute('aria-busy',String(on));
+  inner.querySelectorAll('[data-action="closeModal"],[data-action="closeModalAndRefresh"]').forEach(b=>{b.disabled=on});
+}
 function openModal(html){
+  lockModal(false);
   state.retentionProposal=null;
   const o=document.getElementById('modal');
   const inner=document.getElementById('modalInner');
@@ -224,6 +236,7 @@ function openModal(html){
   },0);
 }
 function closeModal(){
+  if(modalLocked)return;
   state.retentionProposal=null;
   const o=document.getElementById('modal');
   o.classList.remove('visible');o.setAttribute('aria-hidden','true');

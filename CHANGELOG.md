@@ -74,6 +74,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Accounts & admin
 
+- The admin panel's update and restore dialogs could be dismissed (Escape, a click outside, Close) while the update or restore was already running, leaving no sign of the restart in progress — they now stay open until the server is back, or until the request fails.
 - The admin audit log's Export CSV could hand a spreadsheet a formula — a cell such as a username starting with `=`, `+`, `-` or `@` now gets a leading `'` so it opens as text.
 
 ### Desktop app

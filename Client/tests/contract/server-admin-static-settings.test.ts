@@ -369,6 +369,32 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
       `/backups/${BACKUP}/restore`,
     ]);
     expect(document.getElementById("restartWait")?.textContent).toContain("Waiting for the server");
+
+    // CLI-02: once the restore is sent the dialog cannot be dismissed, by
+    // Escape, the scrim or a close call, until the server is back.
+    const modal = document.getElementById("modal") as HTMLElement;
+    booted.bridge.closeModal();
+    document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape" }));
+    modal.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    expect(modal.classList.contains("visible")).toBe(true);
+  });
+
+  it("lets a failed restore close again", async () => {
+    const booted = await boot(
+      [],
+      respondWith({
+        [`POST /backups/${BACKUP}/restore`]: { status: 409, json: { message: "busy" } },
+      }),
+    );
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.openRestoreModal(BACKUP, "2026-09-26T05:53:35Z");
+    (document.getElementById("restoreConfirm") as HTMLInputElement).value = BACKUP;
+    booted.bridge.checkRestoreConfirm(BACKUP);
+    await booted.bridge.confirmRestore(BACKUP);
+    expect(document.getElementById("restoreErr")?.textContent).toContain("busy");
+    booted.bridge.closeModal();
+    expect(document.getElementById("modal")?.classList.contains("visible")).toBe(false);
   });
 });
 
@@ -459,6 +485,51 @@ describe("Server/admin/static — Apply update dialog (AO-6, OP-11)", () => {
     expect(fetchCalls.filter((c) => c.method === "POST").map((c) => c.path)).toEqual([
       "/updates/apply",
     ]);
+  });
+
+  it("cannot be closed once the update is sent, and its close buttons are disabled (CLI-02)", async () => {
+    const fetchCalls: FetchCall[] = [];
+    let release: (() => void) | undefined;
+    const { bridge, document } = await openDialog(fetchCalls);
+    (document.getElementById("updateBackupFirst") as HTMLInputElement).checked = false;
+    bridge.syncUpdateConfirm();
+    const closers = [
+      ...document.querySelectorAll<HTMLButtonElement>('#modalInner [data-action="closeModal"]'),
+    ];
+    expect(closers.length).toBeGreaterThan(0);
+    // Hold the apply in flight to look at the dialog mid-request.
+    const win = dom!.window as unknown as { fetch: typeof fetch };
+    const realFetch = win.fetch;
+    win.fetch = (input, init) =>
+      String(input).endsWith("/updates/apply")
+        ? new Promise<void>((resolve) => (release = resolve)).then(() => realFetch(input, init))
+        : realFetch(input, init);
+    const pending = bridge.confirmApplyUpdate();
+    await new Promise((resolve) => dom!.window.setTimeout(resolve, 0));
+    const modal = document.getElementById("modal") as HTMLElement;
+    bridge.closeModal();
+    document.dispatchEvent(new dom!.window.KeyboardEvent("keydown", { key: "Escape" }));
+    expect(modal.classList.contains("visible")).toBe(true);
+    expect(closers.every((b) => b.disabled)).toBe(true);
+    expect(document.getElementById("modalInner")?.getAttribute("aria-busy")).toBe("true");
+
+    release?.();
+    await pending;
+    expect(document.getElementById("restartWait")).not.toBeNull();
+    bridge.closeModal();
+    expect(modal.classList.contains("visible")).toBe(true);
+  });
+
+  it("lets a failed update close again", async () => {
+    const { bridge, document } = await openDialog([], {
+      "POST /updates/apply": { status: 502, json: { message: "download failed" } },
+    });
+    (document.getElementById("updateBackupFirst") as HTMLInputElement).checked = false;
+    bridge.syncUpdateConfirm();
+    await bridge.confirmApplyUpdate();
+    expect(document.getElementById("updateErr")?.textContent).toContain("download failed");
+    bridge.closeModal();
+    expect(document.getElementById("modal")?.classList.contains("visible")).toBe(false);
   });
 
   it("links only an https release page", async () => {

@@ -141,6 +141,12 @@ for (const media of [false, true]) {
         // The dialog backs the database up first by default (OP-11).
         await admin.getByRole("button", { name: "Back up and update", exact: true }).click();
         expect((await applied).status()).toBe(200);
+        // ARCH-13: the busy dialog cannot be dismissed while the server
+        // restarts (CLI-02) — Escape leaves the restart wait on screen.
+        await expect(admin.locator("#restartWait")).toBeVisible();
+        await admin.keyboard.press("Escape");
+        await expect(admin.locator("#modal")).toHaveClass(/visible/);
+        await expect(admin.locator("#restartWait")).toBeVisible();
         // ARCH-13 (ii): the stop is bounded even with the Logs stream open —
         // the 5 s update countdown, the swap, then a drain the stream no
         // longer holds and the hub's 5 s notice. Before SRV-06 the stream
