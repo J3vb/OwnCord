@@ -11082,7 +11082,7 @@
         "revertProof": "n/a",
         "pr": 1800
       },
-      "fixedDate": "2026-09-26",
+      "fixedDate": "2026-09-25",
       "note": "Corrected by 6f120c02 (#1800, 2026-09-25): the RATCHET paragraph and every 'Worst today'/duplicate-pair note are gone, the settings block states the tree is clean at these budgets, and the ci.yml import-cycles step is renamed. Verified against HEAD: the stale strings no longer occur in Server/.golangci.yml."
     }
   ]
