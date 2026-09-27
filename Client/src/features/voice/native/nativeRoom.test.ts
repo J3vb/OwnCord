@@ -768,9 +768,7 @@ const screenOptions = {
   videoEncoding: { maxBitrate: 6_000_000, maxFramerate: 30 },
 };
 const share = async (room: ReturnType<typeof createNativeRoom>) => {
-  const [screen] = await room.localParticipant.createScreenTracks({
-    resolution: { width: 1920, height: 1080, frameRate: 30 },
-  });
+  const [screen] = await room.localParticipant.createScreenTracks();
   return screen!;
 };
 

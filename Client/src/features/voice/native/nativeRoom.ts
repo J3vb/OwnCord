@@ -45,7 +45,7 @@ import { nativeCounters } from "./counters";
 const DECRYPT_GRACE_MS = 3000;
 import { NativeVideoRenderer } from "./videoRenderer";
 import { CameraUplink } from "./cameraUplink";
-import { NativeScreenTrack, startError, type ScreenCaptureRequest } from "./screenTrack";
+import { NativeScreenTrack, startError } from "./screenTrack";
 import { pickScreenSource } from "./screenPicker";
 
 const log = createLogger("nativeRoom");
@@ -188,10 +188,10 @@ export class NativeRoom {
     },
     /** The native stand-in for `createLocalScreenTracks`: pick, then capture
      *  in the host. Resolves once the capture delivers its first frame. */
-    createScreenTracks: (options?: ScreenCaptureRequest) => this.createScreenTracks(options),
+    createScreenTracks: () => this.createScreenTracks(),
     publishTrack: (track: PublishableTrack, options: PublishOptions) =>
       (options.source ?? track.source) === "screen_share"
-        ? this.publishScreen(track, options)
+        ? this.publishScreen(track)
         : this.publishCamera(track, options),
     /** Takes the `mediaStreamTrack`, as the shared camera and screen-share
      *  paths pass it. */
@@ -374,7 +374,7 @@ export class NativeRoom {
       await desktop.nativeVoice.unpublishCamera(this.sessionId, camera.trackSid);
   }
 
-  private async createScreenTracks(_options?: ScreenCaptureRequest): Promise<NativeScreenTrack[]> {
+  private async createScreenTracks(): Promise<NativeScreenTrack[]> {
     // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId === null) throw new Error("native room is not connected");
     const session = this.sessionId;
@@ -384,8 +384,7 @@ export class NativeRoom {
     // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId !== session) throw new Error("native room disconnected during screen pick");
     // The picker resolved the capture pacing and size from the quality and fps
-    // chosen in the dialog (defaulted from the saved prefs), so it owns the
-    // capture rather than the shared path's saved-quality options.
+    // chosen in the dialog (defaulted from the saved prefs).
     const started = await desktop.nativeVoice
       .startScreen(session, pick.source, pick.capture)
       .catch((err: unknown) => {
@@ -420,22 +419,15 @@ export class NativeRoom {
       .catch((err) => log.warn("native stopScreen failed", { capture: track.capture, err }));
   }
 
-  private async publishScreen(
-    track: PublishableTrack,
-    options: PublishOptions,
-  ): Promise<NativeLocalPublication> {
+  private async publishScreen(track: PublishableTrack): Promise<NativeLocalPublication> {
     // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId === null) throw new Error("native room is not connected");
     if (!(track instanceof NativeScreenTrack))
       // i18n-exempt: internal unsupported-path guard, never rendered
       throw unsupported("publishing a browser screen track");
-    // The picker's per-share quality wins over the shared path's saved-quality
-    // encoding; without a pick (a direct createScreenTracks call) fall back to
-    // it, which still needs the shared path to supply both fields.
-    const encoding = track.publishEncoding ?? options.videoEncoding;
-    if (encoding?.maxFramerate === undefined)
-      // i18n-exempt: internal publish-config guard, never rendered
-      throw new Error("native screen publish needs videoEncoding.maxBitrate and maxFramerate");
+    // The picker's per-share quality, not the shared path's saved-quality
+    // publish options, sets the encoding.
+    const encoding = track.publishEncoding;
     const session = this.sessionId;
     const sid = await desktop.nativeVoice.publishScreen(session, track.capture, {
       width: track.width,

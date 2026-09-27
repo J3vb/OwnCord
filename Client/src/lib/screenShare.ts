@@ -376,11 +376,11 @@ export async function enableScreenshare(
   try {
     stopManualScreenTracks(state, room);
     // Linux captures in the native backend (no getDisplayMedia behind a
-    // WebRTC-less webview): its room's picker-and-capture stands in.
-    const captureOptions = getScreenShareCaptureOptions(quality, fps);
+    // WebRTC-less webview): its room's picker-and-capture stands in and sets
+    // the capture from the picker's per-share quality.
     const screenTracks = isLinuxDesktop()
-      ? await room.localParticipant.createScreenTracks(captureOptions)
-      : await createLocalScreenTracks(captureOptions);
+      ? await room.localParticipant.createScreenTracks()
+      : await createLocalScreenTracks(getScreenShareCaptureOptions(quality, fps));
     if ((state.generation ?? 0) !== generation) {
       // A disableScreenshare ran to completion while the OS picker was still
       // up — it already reset localScreenshare and sent voice_screenshare

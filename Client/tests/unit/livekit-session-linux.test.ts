@@ -233,6 +233,13 @@ const emit = (envelope: NativeVoiceEnvelope) => {
 const flush = async () => {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 };
+/** Confirm the share dialog, as the user does before anything is captured. */
+const pressGoLive = async () => {
+  const goLive = () =>
+    document.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]');
+  await vi.waitFor(() => expect(goLive()).not.toBeNull());
+  goLive()!.click();
+};
 
 describe("LiveKitSession on the Linux native backend", () => {
   let session: LiveKitSession;
@@ -469,7 +476,9 @@ describe("LiveKitSession on the Linux native backend", () => {
     session.setWsClient(ws as never);
     await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
     host.commands.length = 0;
-    await session.enableScreenshare();
+    const sharing = session.enableScreenshare();
+    await pressGoLive();
+    await sharing;
     // Wayland here: the portal picks, so no source list is shown.
     expect(host.commands).toEqual([
       ["screenSources", []],
@@ -506,7 +515,9 @@ describe("LiveKitSession on the Linux native backend", () => {
     desktop.nativeVoice.startScreen = () =>
       Promise.reject("screen capture was cancelled or refused");
     try {
-      await session.enableScreenshare();
+      const sharing = session.enableScreenshare();
+      await pressGoLive();
+      await sharing;
     } finally {
       desktop.nativeVoice.startScreen = real;
     }
