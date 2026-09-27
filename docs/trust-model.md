@@ -185,7 +185,7 @@ Desktop pinning details, each with its test:
   only first-contact defence on the desktop, whatever certificate the server
   has.
 - All three native tunnels (WebSocket, HTTP, LiveKit) use the same verifier:
-  `ws_proxy.rs:218`, `http_proxy.rs:405`, `livekit_proxy.rs:339`.
+  `ws_proxy.rs:155`, `http_proxy.rs:218`, `livekit_proxy.rs:339`.
 - The session token travels inside the first WebSocket frame, never in the
   URL: server `Server/ws/serve_auth.go:26-61`, client `Client/src/lib/ws.ts:546`
   (path only) and `:447-455` (auth frame). Test: `ws-lifecycle.test.ts`
