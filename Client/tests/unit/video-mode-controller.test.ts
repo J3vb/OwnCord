@@ -4,12 +4,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockVoiceStoreGetState, mockGetLocalCameraStream, mockGetLocalScreenshareStream } =
-  vi.hoisted(() => ({
-    mockVoiceStoreGetState: vi.fn(),
-    mockGetLocalCameraStream: vi.fn((): MediaStream | null => null),
-    mockGetLocalScreenshareStream: vi.fn((): MediaStream | null => null),
-  }));
+const {
+  mockVoiceStoreGetState,
+  mockGetLocalCameraStream,
+  mockGetLocalScreenshareStream,
+  mockHasLocalScreenshareAudio,
+} = vi.hoisted(() => ({
+  mockVoiceStoreGetState: vi.fn(),
+  mockGetLocalCameraStream: vi.fn((): MediaStream | null => null),
+  mockGetLocalScreenshareStream: vi.fn((): MediaStream | null => null),
+  mockHasLocalScreenshareAudio: vi.fn(() => false),
+}));
 
 vi.mock("@stores/voice.store", () => ({
   voiceStore: { getState: mockVoiceStoreGetState },
@@ -18,6 +23,7 @@ vi.mock("@stores/voice.store", () => ({
 vi.mock("@lib/livekitSession", () => ({
   getLocalCameraStream: mockGetLocalCameraStream,
   getLocalScreenshareStream: mockGetLocalScreenshareStream,
+  hasLocalScreenshareAudio: mockHasLocalScreenshareAudio,
   setScreenshareAudioVolume: vi.fn(),
 }));
 
@@ -320,6 +326,7 @@ describe("createVideoModeController", () => {
       isSelf: true,
       audioUserId: 1,
       isScreenshare: true,
+      hasAudio: false,
     });
   });
 
@@ -348,6 +355,7 @@ describe("createVideoModeController", () => {
       isSelf: true,
       audioUserId: 1,
       isScreenshare: true,
+      hasAudio: false,
     });
 
     // Second call: screenshare off — tile removed
@@ -417,6 +425,7 @@ describe("createVideoModeController", () => {
   it("checkVideoMode passes isSelf:true and isScreenshare:true for local screenshare tile", () => {
     const fakeStream = {} as MediaStream;
     mockGetLocalScreenshareStream.mockReturnValue(fakeStream);
+    mockHasLocalScreenshareAudio.mockReturnValueOnce(true);
     const users = new Map([[5, { userId: 5, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({
@@ -439,7 +448,12 @@ describe("createVideoModeController", () => {
       1_000_005,
       "me (Screen)",
       fakeStream,
-      expect.objectContaining({ isSelf: true, audioUserId: 5, isScreenshare: true }),
+      expect.objectContaining({
+        isSelf: true,
+        audioUserId: 5,
+        isScreenshare: true,
+        hasAudio: true,
+      }),
     );
   });
 

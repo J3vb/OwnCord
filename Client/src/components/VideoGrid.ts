@@ -32,6 +32,8 @@ export interface TileConfig {
   /** The person's display name, for control labels ("Otto stream volume").
    *  Falls back to the tile label. */
   readonly name?: string;
+  /** Your own screen share is sending audio too (the self-share cover). */
+  readonly hasAudio?: boolean;
 }
 
 /** What the grid reports back to its owner. */
@@ -50,10 +52,10 @@ export interface GridPerson {
 
 export interface VideoGridComponent extends MountableComponent {
   addStream(userId: number, username: string, stream: MediaStream, config?: TileConfig): void;
-  /** Update an already-open tile's label in place (e.g. a mid-call rename).
-   *  No-op if no tile is open for this id — callers don't need to know
-   *  whether the tile exists. */
-  setLabel(userId: number, username: string): void;
+  /** Update an already-open tile's label and the person's name in its
+   *  control labels in place (e.g. a mid-call rename). No-op if no tile is
+   *  open for this id — callers don't need to know whether the tile exists. */
+  setLabel(userId: number, username: string, name?: string): void;
   removeStream(userId: number): void;
   /** Remove every tile — used on a real voice leave so stale remote tiles
    *  from the previous session don't survive into the next join. */
@@ -161,12 +163,19 @@ function tileButton(
   return btn;
 }
 
+interface CellEntry {
+  el: HTMLDivElement;
+  config?: TileConfig;
+  trackCleanup?: () => void;
+  /** The person's name in the control labels and the tile menu. */
+  name: string;
+  /** Draw a volume set elsewhere (remote tiles only). */
+  applyVolume?: (volume: number, muted: boolean) => void;
+}
+
 export function createVideoGrid(): VideoGridComponent {
   let root: HTMLDivElement | null = null;
-  const cells = new Map<
-    number,
-    { el: HTMLDivElement; config?: TileConfig; trackCleanup?: () => void }
-  >();
+  const cells = new Map<number, CellEntry>();
   let focusedTileId: number | null = null;
   let people: readonly GridPerson[] = [];
   const personCells = new Map<number, HTMLDivElement>();
@@ -412,10 +421,10 @@ export function createVideoGrid(): VideoGridComponent {
 
   /** The stream (screen-share audio, 0-100 %) or voice (mic, 0-200 %) volume
    *  of a remote tile: mute, a slider named for whose it is, and its value. */
-  function buildVolumeControls(
-    config: TileConfig,
-    name: string,
-  ): { overlay: HTMLDivElement; apply: (volume: number, muted: boolean) => void } {
+  function buildVolumeControls(config: TileConfig): {
+    overlay: HTMLDivElement;
+    apply: (volume: number, muted: boolean) => void;
+  } {
     // Mic and screenshare audio state both survive tile rebuilds —
     // initialize from the same persisted values the sidebar volume menu
     // reads, instead of hardcoding "unmuted at 100%" (B3-5). Screenshare
@@ -439,9 +448,6 @@ export function createVideoGrid(): VideoGridComponent {
       max: config.isScreenshare ? "100" : "200",
       value: String(currentVolume),
       class: "tile-volume-slider",
-      "aria-label": config.isScreenshare
-        ? voiceText("tile.streamVolume", { name })
-        : voiceText("tile.voiceVolume", { name }),
       // Lets a tile rebuild or removal put focus back on the same control
       // (captureFocusedControl), not just the tile.
       "data-tile-control": "volume",
@@ -505,7 +511,7 @@ export function createVideoGrid(): VideoGridComponent {
     appendChildren(overlay, muteBtn, volumeSlider, output);
     return {
       overlay,
-      // The tile menu changed the same setting: show it here too.
+      // A tile menu changed the same setting: show it here too.
       apply(volume: number, isMuted: boolean): void {
         muted = isMuted;
         if (volume > 0) currentVolume = volume;
@@ -526,7 +532,11 @@ export function createVideoGrid(): VideoGridComponent {
     if (video !== null) video.hidden = stopped;
     cell.querySelector(".video-stopped")?.remove();
     if (!stopped) {
-      cell.querySelector<HTMLElement>("[data-tile-control='stop']")?.focus();
+      (
+        cell.querySelector<HTMLElement>(
+          "[data-tile-control='stop'], [data-tile-control='hide-preview']",
+        ) ?? cell.querySelector<HTMLElement>(".video-cell-select")
+      )?.focus();
       return;
     }
     const self = entry.config?.isSelf === true;
@@ -545,7 +555,7 @@ export function createVideoGrid(): VideoGridComponent {
     again.focus();
   }
 
-  function buildSelfCover(tileId: number, stream: MediaStream): HTMLDivElement {
+  function buildSelfCover(tileId: number, stream: MediaStream, hasAudio: boolean): HTMLDivElement {
     const track = stream.getVideoTracks()[0];
     const settings = track?.getSettings?.() ?? {};
     const surface = (settings as { displaySurface?: string }).displaySurface;
@@ -564,11 +574,7 @@ export function createVideoGrid(): VideoGridComponent {
         }),
       );
     }
-    parts.push(
-      stream.getAudioTracks?.().length > 0
-        ? voiceText("tile.withAudio")
-        : voiceText("tile.noAudio"),
-    );
+    parts.push(hasAudio ? voiceText("tile.withAudio") : voiceText("tile.noAudio"));
 
     const cover = createElement("div", { class: "video-self-cover" });
     const actions = createElement("div", { class: "video-self-actions" });
@@ -627,11 +633,7 @@ export function createVideoGrid(): VideoGridComponent {
           attachTrackLifecycle(userId, stream);
         }
       }
-      // Update username label in case it changed
-      const label = existing.el.querySelector(".video-username");
-      if (label !== null) {
-        label.textContent = username;
-      }
+      applyNames(existing, username, config?.name ?? username);
       // Sync stream type attribute in case it changed
       existing.el.dataset.streamType = config?.isScreenshare ? "screenshare" : "camera";
       return;
@@ -647,7 +649,6 @@ export function createVideoGrid(): VideoGridComponent {
       log.debug("Video autoplay rejected (new tile)", { userId, err });
     });
 
-    const name = config?.name ?? username;
     const streamType = config?.isScreenshare ? "screenshare" : "camera";
     const cell = createElement("div", {
       class: "video-cell",
@@ -660,13 +661,12 @@ export function createVideoGrid(): VideoGridComponent {
     const select = createElement("button", {
       type: "button",
       class: "video-cell-select",
-      "aria-label": voiceText("tile.watch", { name: username }),
       "data-tile-control": "select",
     });
     select.addEventListener("click", () => setFocusedTile(userId));
 
     const label = createElement("div", { class: "video-label" });
-    label.appendChild(createElement("div", { class: "video-username" }, username));
+    label.appendChild(createElement("div", { class: "video-username" }));
     if (config?.isScreenshare === true) {
       label.appendChild(createElement("span", { class: "video-live" }, voiceText("tile.live")));
     }
@@ -686,9 +686,11 @@ export function createVideoGrid(): VideoGridComponent {
       if (focusedTileId !== null && focusedTileId !== userId) setFocusedTile(userId);
     });
 
+    const entry: CellEntry = { el: cell, config, name: "" };
     // Remote tiles: volume, Stop watching and the tile menu.
     if (config !== undefined && !config.isSelf) {
-      const volume = buildVolumeControls(config, name);
+      const volume = buildVolumeControls(config);
+      entry.applyVolume = volume.apply;
       cell.appendChild(volume.overlay);
       nav.insertBefore(
         tileButton(voiceText("tile.stopWatching"), "eye-off", "stop", () =>
@@ -703,10 +705,11 @@ export function createVideoGrid(): VideoGridComponent {
           showTileMenu({
             x,
             y,
-            name,
+            name: entry.name,
             config,
             signal: disposable.signal,
-            onVolumeChange: volume.apply,
+            onVolumeChange: (isScreenshare, volume, muted) =>
+              applyVolume(config.audioUserId, isScreenshare, volume, muted),
             onStopWatching: () => setStopped(userId, true),
           }),
         );
@@ -724,9 +727,10 @@ export function createVideoGrid(): VideoGridComponent {
     // Your own screen share: say what is going out instead of showing a
     // hall of mirrors, with Stop sharing always at hand.
     if (config?.isSelf === true && config.isScreenshare) {
-      cell.appendChild(buildSelfCover(userId, stream));
+      cell.appendChild(buildSelfCover(userId, stream, config.hasAudio === true));
     }
-    cells.set(userId, { el: cell, config });
+    applyNames(entry, username, config?.name ?? username);
+    cells.set(userId, entry);
     attachTrackLifecycle(userId, stream);
     root.appendChild(cell);
     applySpeaking();
@@ -734,17 +738,47 @@ export function createVideoGrid(): VideoGridComponent {
     relayout();
   }
 
+  /** The tile's label, and the person's name on its controls and menu. */
+  function applyNames(entry: CellEntry, username: string, name: string): void {
+    entry.name = name;
+    const label = entry.el.querySelector(".video-username");
+    if (label !== null) label.textContent = username;
+    entry.el
+      .querySelector(".video-cell-select")
+      ?.setAttribute("aria-label", voiceText("tile.watch", { name: username }));
+    entry.el
+      .querySelector(".tile-volume-slider")
+      ?.setAttribute(
+        "aria-label",
+        entry.config?.isScreenshare === true
+          ? voiceText("tile.streamVolume", { name })
+          : voiceText("tile.voiceVolume", { name }),
+      );
+  }
+
+  /** A volume changed from a tile menu: draw it on every tile of that
+   *  person showing the same setting (stream or voice). */
+  function applyVolume(
+    audioUserId: number,
+    isScreenshare: boolean,
+    volume: number,
+    muted: boolean,
+  ): void {
+    for (const entry of cells.values()) {
+      if (entry.config?.audioUserId !== audioUserId) continue;
+      if (entry.config.isScreenshare !== isScreenshare) continue;
+      entry.applyVolume?.(volume, muted);
+    }
+  }
+
   /** Update an already-open tile's label in place. No-op if the tile isn't
    *  open — used to keep a remote tile's name in sync with a mid-call
    *  rename without re-creating the tile (addStream is only called once per
    *  tile, from the LiveKit TrackSubscribed callback). */
-  function setLabel(userId: number, username: string): void {
+  function setLabel(userId: number, username: string, name?: string): void {
     const entry = cells.get(userId);
     if (entry === undefined) return;
-    const label = entry.el.querySelector(".video-username");
-    if (label !== null) {
-      label.textContent = username;
-    }
+    applyNames(entry, username, name ?? username);
   }
 
   function removeStream(userId: number): void {

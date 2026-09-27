@@ -660,7 +660,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     // The already-open tile must pick up the new name without the tile
     // being torn down and re-created (no new addStream call for tile 200).
-    expect(videoGrid.setLabel).toHaveBeenCalledWith(200, "Robert");
+    expect(videoGrid.setLabel).toHaveBeenCalledWith(200, "Robert", "Robert");
   });
 
   it('keeps "(You)" on the self-view tile when the server echoes our own voice_state (OC-0375)', () => {
@@ -706,8 +706,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // "alice (You)". The relabel loop walks the whole roster, self included, so
     // it must produce the same self label — not the bare remote form, which
     // would leave your own tile indistinguishable from a participant's.
-    expect(videoGrid.setLabel).not.toHaveBeenCalledWith(1, "alice");
-    expect(videoGrid.setLabel).toHaveBeenCalledWith(1, "alice (You)");
+    expect(videoGrid.setLabel).not.toHaveBeenCalledWith(1, "alice", "alice");
+    expect(videoGrid.setLabel).toHaveBeenCalledWith(1, "alice (You)", "alice");
   });
 
   it("brackets a bare IPv6 host when building the auto-updater URL (OC-0332)", () => {

@@ -1,5 +1,5 @@
 // LiveKit Session — lifecycle orchestrator for voice chat via LiveKit
-import { Room } from "livekit-client";
+import { Room, Track } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import {
   voiceStore,
@@ -791,6 +791,13 @@ export class LiveKitSession {
     return this._remoteTracks.getLocalScreenshareStream();
   }
 
+  /** Your screen share is publishing its audio too. */
+  hasLocalScreenshareAudio(): boolean {
+    return (
+      this._room?.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio) !== undefined
+    );
+  }
+
   /** Get a remote participant's video MediaStream by userId and track type. Returns null if not available. */
   getRemoteVideoStream(userId: number, type: "camera" | "screenshare"): MediaStream | null {
     return this._remoteTracks.getRemoteVideoStream(userId, type);
@@ -872,6 +879,7 @@ export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
 export const reapplyAudioProcessing = session.reapplyAudioProcessing.bind(session);
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(session);
+export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(session);
 export const getRemoteVideoStream = session.getRemoteVideoStream.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);

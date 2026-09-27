@@ -28,8 +28,8 @@ export interface TileMenuOptions {
   readonly config: TileConfig;
   /** The grid's lifetime: the menu goes with it. */
   readonly signal: AbortSignal;
-  /** The tile's own slider shows the same setting; keep it in step. */
-  readonly onVolumeChange: (volume: number, muted: boolean) => void;
+  /** The tiles' own sliders show the same settings; keep them in step. */
+  readonly onVolumeChange: (isScreenshare: boolean, volume: number, muted: boolean) => void;
   readonly onStopWatching: () => void;
 }
 
@@ -101,7 +101,7 @@ export function showTileMenu(opts: TileMenuOptions): void {
           muteScreenshareAudio(id, muted);
           setScreenshareAudioVolume(id, v / 100);
           setText(muteItem, muted ? t("tile.unmuteStream") : t("tile.muteStream"));
-          opts.onVolumeChange(v, muted);
+          opts.onVolumeChange(true, v, muted);
         },
       ),
     );
@@ -117,7 +117,7 @@ export function showTileMenu(opts: TileMenuOptions): void {
         setScreenshareAudioVolume(id, 1);
       }
       muteScreenshareAudio(id, muted);
-      opts.onVolumeChange(volume, muted);
+      opts.onVolumeChange(true, volume, muted);
       closeMenu();
     });
     menu.append(muteItem, createElement("div", { class: "context-menu-sep" }));
@@ -132,8 +132,7 @@ export function showTileMenu(opts: TileMenuOptions): void {
       getUserVolume(id),
       (v) => {
         setUserVolume(id, v);
-        // A camera tile's own slider is the voice volume.
-        if (!config.isScreenshare) opts.onVolumeChange(v, v === 0);
+        opts.onVolumeChange(false, v, v === 0);
       },
     ),
   );

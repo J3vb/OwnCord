@@ -1201,8 +1201,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
     unsubscribers.push(() => clearOnRemoteVideo());
 
-    // Subscribe to voice store for camera/screenshare state changes, voice
-    // channel switches, and remote-tile identity changes (not speaking ticks)
     // The cover on your own screen-share preview stops the share.
     chatAreaResult.videoGrid.setCallbacks({
       onStopSharing: () => {
@@ -1213,18 +1211,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     let prevVideoSignature = "";
     let prevSpeaking = "";
     const prevTileLabels = new Map<number, string>();
+    // Subscribe to voice store for camera/screenshare state changes, voice
+    // channel switches, remote-tile identity changes and who is speaking.
     unsubscribers.push(
       voiceStore.subscribe((state) => {
         try {
           const channelId = state.currentChannelId;
-          // Seed the signature with the channel id so ANY voice-channel
-          // switch changes it, even one where the camera/screenshare flags
-          // happen to be identical on both sides (e.g. both channels empty).
-          // Without this, VideoModeController.checkVideoMode() — the only
-          // writer of its own lastChannelId — never runs for that switch,
-          // so lastChannelId is still the old channel the next time it runs
-          // (e.g. right after setOnRemoteVideo adds a fresh remote tile),
-          // and it clears the grid it was just given (OC-0207).
           // Speaking rings on the video tiles: only when who is speaking
           // changes, not on every store update.
           const talking = new Set<number>();
@@ -1239,6 +1231,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             videoGrid?.setSpeaking(talking);
           }
 
+          // Seed the signature with the channel id so ANY voice-channel
+          // switch changes it, even one where the camera/screenshare flags
+          // happen to be identical on both sides (e.g. both channels empty).
+          // Without this, VideoModeController.checkVideoMode() — the only
+          // writer of its own lastChannelId — never runs for that switch,
+          // so lastChannelId is still the old channel the next time it runs
+          // (e.g. right after setOnRemoteVideo adds a fresh remote tile),
+          // and it clears the grid it was just given (OC-0207).
           let sig =
             `${String(channelId)}|` +
             (state.localCamera ? "c" : "") +
@@ -1253,11 +1253,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
                 // changed (mid-call rename) — addStream only runs once per
                 // tile, so nothing else keeps its label in sync (OC-0227).
                 // setLabel() no-ops for a tile that isn't open yet.
+                const name = personName(uid) || undefined;
                 if (u.camera) {
                   const label = tileLabel(uid, false);
                   if (prevTileLabels.get(uid) !== label) {
                     prevTileLabels.set(uid, label);
-                    videoGrid?.setLabel(uid, label);
+                    videoGrid?.setLabel(uid, label, name);
                   }
                 }
                 if (u.screenshare) {
@@ -1265,7 +1266,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
                   const label = tileLabel(uid, true);
                   if (prevTileLabels.get(tileId) !== label) {
                     prevTileLabels.set(tileId, label);
-                    videoGrid?.setLabel(tileId, label);
+                    videoGrid?.setLabel(tileId, label, name);
                   }
                 }
               }

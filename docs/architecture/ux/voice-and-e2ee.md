@@ -130,8 +130,8 @@ volumes apart and offers Mute stream and **Stop watching**, which hides the
 stream locally behind a **Watch stream** card (the track stays subscribed;
 opt-in watching is open question Q3). Your own screen share is covered by what
 is going out (surface, resolution, fps, audio) with **Stop sharing** and
-**Hide preview**. In a DM call, focus view grows the call panel to the whole
-chat column; Collapse gives the chat back.
+**Hide preview**. In a DM call, focus view stays inside the call panel and the
+chat remains visible below it.
 
 **Mic-permission failure** (`restoreLocalVoiceState`): on denied/absent mic, set
 `listenOnly` and surface the specific reason ("Microphone permission denied" /

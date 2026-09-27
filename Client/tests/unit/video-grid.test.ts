@@ -1156,5 +1156,78 @@ describe("VideoGrid", () => {
       const show = self.querySelector<HTMLButtonElement>("[data-tile-control='watch']")!;
       expect(show.textContent).toBe("Show preview");
     });
+
+    it("says whether your screen share is sending audio", () => {
+      const self = { isSelf: true, audioUserId: 1, isScreenshare: true };
+      grid.addStream(1 + 1_000_000, "Your Screen", fakeStream(), { ...self, hasAudio: true });
+      expect(cell(1 + 1_000_000).querySelector(".video-self-detail")!.textContent).toBe(
+        "With audio",
+      );
+      grid.removeStream(1 + 1_000_000);
+      grid.addStream(1 + 1_000_000, "Your Screen", fakeStream(), self);
+      expect(cell(1 + 1_000_000).querySelector(".video-self-detail")!.textContent).toBe("No audio");
+    });
+
+    it("Show preview hands focus to Hide preview on your own screen share", () => {
+      document.body.appendChild(container);
+      grid.addStream(1 + 1_000_000, "Your Screen", fakeStream(), {
+        isSelf: true,
+        audioUserId: 1,
+        isScreenshare: true,
+      });
+      const self = cell(1 + 1_000_000);
+      self.querySelector<HTMLButtonElement>("[data-tile-control='hide-preview']")!.click();
+      self.querySelector<HTMLButtonElement>("[data-tile-control='watch']")!.click();
+
+      expect(document.activeElement).toBe(self.querySelector("[data-tile-control='hide-preview']"));
+      container.remove();
+    });
+
+    it("keeps the person's other tile in step with a voice volume set from a tile menu", async () => {
+      const otto = { audioUserId: 2, name: "Otto" };
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+      grid.addStream(2, "Otto", fakeStream(), camera(otto));
+      cell(SCREEN).dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+      await vi.dynamicImportSettled();
+
+      const menu = document.querySelector<HTMLElement>(".video-tile-menu")!;
+      const voice = menu.querySelector<HTMLInputElement>("[data-menu-volume='voice']")!;
+      voice.value = "150";
+      voice.dispatchEvent(new Event("input"));
+
+      expect(cell(2).querySelector("output")!.textContent).toBe("150%");
+      // The screen-share tile's own slider is the stream volume, not the voice.
+      expect(cell(SCREEN).querySelector("output")!.textContent).toBe("100%");
+      // Mute then unmute on the camera tile keeps the 150, not a stale 100.
+      const mute = cell(2).querySelector<HTMLButtonElement>(".tile-mute-btn")!;
+      mute.click();
+      mute.click();
+      expect(mockSetUserVolume).toHaveBeenLastCalledWith(2, 150);
+      menu.remove();
+    });
+
+    it("renames the tile's controls and menu with the person (setLabel)", async () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+      grid.setLabel(SCREEN, "Ottilie (Screen)", "Ottilie");
+
+      expect(cell(SCREEN).querySelector(".video-username")!.textContent).toBe("Ottilie (Screen)");
+      expect(select(SCREEN).getAttribute("aria-label")).toBe("Watch Ottilie (Screen)");
+      expect(cell(SCREEN).querySelector(".tile-volume-slider")!.getAttribute("aria-label")).toBe(
+        "Ottilie stream volume",
+      );
+
+      cell(SCREEN).dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+      await vi.dynamicImportSettled();
+      const menu = document.querySelector<HTMLElement>(".video-tile-menu")!;
+      expect(menu.getAttribute("aria-label")).toBe("Ottilie");
+      expect(menu.querySelector("[data-menu-volume='voice']")!.getAttribute("aria-label")).toBe(
+        "Ottilie voice volume",
+      );
+      menu.remove();
+    });
   });
 });
