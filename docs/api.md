@@ -2926,6 +2926,20 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
   "connected_users": 8,
   "voice_sessions": 2,
   "broadcast_drops": 0,
+  "topic_sheds_total": 0,
+  "ws_broadcast_ms": { "count": 1204, "p50": 1, "p95": 5, "p99": 20, "max": 210 },
+  "ws_dispatch_lag_ms": { "count": 1204, "p50": 0.5, "p95": 2, "p99": 10, "max": 90 },
+  "chat_send_ack_ms": { "count": 340, "p50": 2, "p95": 10, "p99": 50, "max": 60 },
+  "voice_join_ms": {
+    "precheck": { "count": 12, "p50": 1, "p95": 1.4, "p99": 1.4, "max": 1.4 },
+    "leave": { "count": 12, "p50": 0.5, "p95": 3.1, "p99": 3.1, "max": 3.1 },
+    "persist": { "count": 12, "p50": 2, "p95": 4.2, "p99": 4.2, "max": 4.2 },
+    "token": { "count": 12, "p50": 0.5, "p95": 0.8, "p99": 0.8, "max": 0.8 },
+    "complete": { "count": 12, "p50": 2, "p95": 4.9, "p99": 4.9, "max": 4.9 },
+    "total": { "count": 12, "p50": 5, "p95": 12.6, "p99": 12.6, "max": 12.6 }
+  },
+  "hub_broadcast_queue_depth": 0,
+  "hub_seqmu_max_hold_ms": 12,
   "livekit_healthy": true,
   "reconnect_tier_buffer": 120,
   "reconnect_tier_db": 4,
@@ -2953,7 +2967,10 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
 `voice_sessions` is the number of active voice connections. `broadcast_drops`
 is the cumulative count of events dropped because the **hub-wide broadcast
 queue** was full — sequenced events lost before delivery, worth alerting on
-if it ever grows. Per-client send-queue pressure is reported separately:
+if it ever grows. `topic_sheds_total` counts frames the **per-channel topic
+limiter** dropped before a sequence was assigned; like `broadcast_drops`, replay
+cannot recover them, so alert on any growth.
+Per-client send-queue pressure is reported separately:
 `backpressure_queue_disconnects` (clients disconnected to force a
 replay-recovering reconnect), `backpressure_high_fallbacks` (high-priority
 sends that fell back to the normal queue), and `backpressure_low_drops`
@@ -2973,6 +2990,25 @@ database). `ws_conn_rejects` counts upgrades refused by the
 volume (omitted when the platform can't report it). `livekit_healthy` is
 omitted when no LiveKit health check is wired; `event_persister` is omitted
 when event persistence is disabled.
+
+The distribution objects (`ws_broadcast_ms`, `ws_dispatch_lag_ms`,
+`chat_send_ack_ms`, `voice_join_ms`) and the two gauges (`hub_broadcast_queue_depth`,
+`hub_seqmu_max_hold_ms`) are the shipped, in-process metrics surface: they
+exist in **every** build, unlike the OpenTelemetry instruments below, which
+compile only with `-tags otel`. Each distribution reports `p50`, `p95`, `p99`
+(the upper bound of the fixed bucket the quantile falls into, capped at `max` —
+a coarse but comparable estimate; buckets are 0.5 ms through 5 s, anything
+larger is exact max), `max` (exact) and `count`. `ws_broadcast_ms` is enqueue→fanout-done;
+`ws_dispatch_lag_ms` is enqueue→dispatch-start, the direct signal for a
+contended dispatch loop; `chat_send_ack_ms` is a `chat_send` frame's arrival
+to its `chat_send_ok` being queued. `voice_join_ms` holds one such
+distribution per phase of a completed `voice_join` — `precheck` (rate limit,
+permission and channel gates), `leave` (leaving the previous channel on a
+switch), `persist` (the `voice_states` write and moderator-flag restore),
+`token` (minting and sending `voice_token`), `complete` (the voice topic
+subscription, `voice_state` fan-out, existing states and `voice_config`) and
+`total`; a refused or rolled-back join is not counted. A
+`hub_seqmu_max_hold_ms` above ~100 ms is worth investigating; the retention purge holds `seqMu` across a full scan.
 
 ### GET /metrics (Prometheus)
 
@@ -3189,8 +3225,8 @@ loaded certificate (TLS off, or ACME before its first handshake).
 The dashboard's attention panel (RI-07): server-side health signals and the
 deduplicated warnings raised from them. The server samples once a minute
 (the free space on the data volume, the SQLite writer pool's cumulative wait,
-reconnect resumes, hub broadcast drops plus send-queue overflow disconnects, the newest
-backup file, the LiveKit voice path's state and each maintenance job's last
+reconnect resumes, hub broadcast drops, per-channel topic sheds and
+send-queue overflow disconnects, the newest backup file, the LiveKit voice path's state and each maintenance job's last
 run); this route only reads that state. Thresholds and hysteresis are in
 [server-configuration.md](server-configuration.md#admin-attention-panel-attention).
 Nothing here is exported off the host.

@@ -172,7 +172,7 @@ test.describe("B9-18 connect and shell text", () => {
     await navigateToMainPageReady(page);
     const sidebar = page.locator("[data-testid='unified-sidebar']");
     await expect(sidebar.locator(".server-online")).toHaveText(/^\d+ online$/);
-    await expect(sidebar.locator("[data-testid='invite-btn']")).toHaveText("Invite");
+    await expect(sidebar.locator("[data-testid='invite-btn']")).toHaveAccessibleName("Invite");
     await expect(sidebar.locator(".sidebar-dm-section .category-name")).toHaveText(
       "DIRECT MESSAGES",
     );
@@ -193,13 +193,19 @@ test.describe("B9-18 connect and shell text", () => {
     await navigateToMainPageReady(page);
     const sidebar = page.locator("[data-testid='unified-sidebar']");
     await expect(sidebar.locator(".server-online")).toHaveText(/^⟦\d+ online .+⟧$/);
-    // The header wraps its buttons instead of squeezing out the server name.
+    // The header wraps its action row instead of squeezing out the server name.
     await expectWhole(sidebar.locator(".server-online"));
     await expect(sidebar.locator(".server-name")).toHaveText("Test Server");
     await expectWhole(sidebar.locator(".server-name"));
+    // The header actions are icon buttons: named by the catalog, and on screen.
     for (const [el, english] of [
       [sidebar.locator("[data-testid='invite-btn']"), "Invite"],
       [sidebar.locator("[data-testid='audit-log-btn']"), "Audit Log"],
+    ] as const) {
+      await expect(el).toHaveAccessibleName(expanded(english));
+      await expectWhole(el);
+    }
+    for (const [el, english] of [
       [sidebar.locator(".sidebar-dm-section .category-name"), "DIRECT MESSAGES"],
       [sidebar.locator(".sidebar-members-header .category-name"), "MEMBERS"],
     ] as const) {

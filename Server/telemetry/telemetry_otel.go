@@ -44,6 +44,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// SDKAvailable reports whether the real OpenTelemetry SDK is compiled in. The
+// otel build can honour telemetry.enabled, unlike the no-op default build.
+const SDKAvailable = true
+
 // otelProvider adapts the OTel SDK to the telemetry.Provider interface.
 type otelProvider struct {
 	cfg         config.TelemetryConfig
