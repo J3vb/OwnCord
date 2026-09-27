@@ -81,6 +81,23 @@ test.describe("Channel Switch — Messages", () => {
     ).not.toBeVisible();
   });
 
+  test("relaunch restores the last channel (UX-8)", async ({ page }) => {
+    await expect(page.locator(".message").first()).toBeVisible({ timeout: 10_000 });
+
+    // The first launch auto-selects the first text channel.
+    const secondChannel = page.locator(".channel-item").nth(1);
+    await expect(page.locator(".chat-header .ch-name")).toHaveText("general");
+
+    // Open channel 2 (the user is now actually viewing it), then relaunch.
+    await secondChannel.click();
+    await expect(page.locator(".chat-header .ch-name")).toHaveText("random");
+    await page.reload();
+    await navigateToMainPage(page);
+
+    // The launch restores the last channel instead of jumping to the first.
+    await expect(page.locator(".chat-header .ch-name")).toHaveText("random", { timeout: 10_000 });
+  });
+
   test("unread badge appears on channel with new message", async ({ page }) => {
     await expect(page.locator(".message").first()).toBeVisible({ timeout: 10_000 });
 

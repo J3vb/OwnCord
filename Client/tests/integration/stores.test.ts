@@ -221,8 +221,10 @@ describe("Store integration via dispatcher", () => {
       const channels = channelsStore.getState().channels;
       expect(channels.size).toBe(3);
       expect(channels.get(1)?.name).toBe("general");
-      // Auto-select first text channel clears its unread count
-      expect(channels.get(1)?.unreadCount).toBe(0);
+      // Auto-select picks the first text channel but keeps its badge: selecting
+      // is not viewing, and only mounting the channel clears it (UX-8).
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      expect(channels.get(1)?.unreadCount).toBe(3);
       expect(channels.get(3)?.type).toBe("voice");
 
       // Members

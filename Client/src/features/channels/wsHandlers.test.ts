@@ -17,6 +17,12 @@ import type { ReadyChannel } from "../../lib/types";
 
 vi.mock("../../lib/read-state", () => ({ markChannelRead: vi.fn() }));
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+let lastChannel: number | null = null;
+vi.mock("../../lib/last-channel", () => ({
+  loadLastChannel: () => lastChannel,
+  rememberLastChannel: vi.fn(),
+  setLastChannelHost: vi.fn(),
+}));
 import { markChannelRead } from "../../lib/read-state";
 import { showToast } from "../../lib/toast";
 
@@ -35,6 +41,7 @@ function ready(channels: ReadyChannel[], dmIds: number[] = []): Payload<"ready">
 
 beforeEach(() => {
   resetChannelsStore();
+  lastChannel = null;
   vi.clearAllMocks();
 });
 
@@ -54,6 +61,36 @@ describe("applyReadyActiveChannel", () => {
 
     expect(channelsStore.getState().activeChannelId).toBeNull();
     expect(seen).toBeNull();
+  });
+
+  it("restores the server's last channel instead of the first text channel (UX-8)", () => {
+    lastChannel = 5;
+
+    const seen = applyReadyActiveChannel(
+      ready([channel(1, "text", 0), channel(5, "text", 1), channel(9, "text", 2)]),
+    );
+
+    expect(channelsStore.getState().activeChannelId).toBe(5);
+    expect(seen).toBeNull();
+  });
+
+  it("falls back to the first text channel when the remembered one is gone (UX-8)", () => {
+    lastChannel = 999;
+
+    applyReadyActiveChannel(ready([channel(1, "text", 0), channel(2, "text", 1)]));
+
+    expect(channelsStore.getState().activeChannelId).toBe(1);
+  });
+
+  it("keeps channel 1's unread badge when the restored last channel is 5 (UX-8)", () => {
+    lastChannel = 5;
+    setChannels([{ ...channel(1, "text", 0), unread_count: 4 }, { ...channel(5, "text", 1) }]);
+
+    applyReadyActiveChannel(ready([{ ...channel(1, "text", 0) }, { ...channel(5, "text", 1) }]));
+
+    expect(channelsStore.getState().activeChannelId).toBe(5);
+    // Channel 1 was never mounted/viewed, so its badge survives the launch.
+    expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(4);
   });
 
   it("keeps an active DM that is still open, and marks it read", () => {

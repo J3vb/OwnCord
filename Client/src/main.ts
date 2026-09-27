@@ -14,6 +14,7 @@ import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { cleanupNotificationAudio } from "@lib/notifications";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
+import { setLastChannelHost } from "@lib/last-channel";
 import { authStore, clearAuth, onAuthCleared } from "@stores/auth.store";
 import { resetSafetyStore } from "./features/safety/store";
 import {
@@ -467,6 +468,11 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     authStore.setState((prev) => ({ ...prev, token }));
     lastConnectHost = host;
     lastConnectToken = token;
+    // UX-8: scope the last-channel store to this server before the dispatcher
+    // wires, so the first `ready` (which restores it) reads the right key.
+    // It has to be here, not MainPage: the first ready arrives before MainPage
+    // mounts, and it is what restores the last channel.
+    setLastChannelHost(host);
     ws.connect({ host, token });
     dispatcherCleanup = wireDispatcher(ws, api);
     owner.addCleanup(dispatcherCleanup);

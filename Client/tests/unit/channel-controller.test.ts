@@ -290,6 +290,7 @@ import {
 } from "@lib/pendingMessages";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
+import { loadLastChannel } from "@lib/last-channel";
 import { messagingText } from "../../src/i18n/messaging";
 import { setActiveTimeout } from "../../src/features/safety/store";
 import {
@@ -474,6 +475,40 @@ describe("createChannelController", () => {
     expect(mockInvalidateWindow).toHaveBeenCalledWith(99);
     // Each mount still asks for the tail exactly once.
     expect(opts.msgCtrl.loadMessages).toHaveBeenCalledTimes(3);
+  });
+
+  // UX-8: the ready-time auto-select no longer clears a badge (selecting is
+  // not viewing), so mounting the channel is what clears it.
+  describe("mount clears the unread badge (UX-8)", () => {
+    it("clears the mounted channel's unread and mention counts", () => {
+      setChannels([
+        {
+          id: 42,
+          name: "general",
+          type: "text",
+          category: null,
+          position: 0,
+          unread_count: 5,
+          mention_count: 2,
+        },
+      ]);
+      expect(channelsStore.getState().channels.get(42)?.unreadCount).toBe(5);
+
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      expect(channelsStore.getState().channels.get(42)?.unreadCount).toBe(0);
+      expect(channelsStore.getState().channels.get(42)?.mentionCount).toBe(0);
+    });
+
+    it("a DM mount does not overwrite the remembered server channel", () => {
+      localStorage.clear();
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(5, "random", "text");
+      ctrl.mountChannel(40, "alice", "dm");
+
+      expect(loadLastChannel()).toBe(5);
+    });
   });
 
   describe("per-channel composer drafts (UX-1)", () => {

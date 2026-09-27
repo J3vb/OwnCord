@@ -365,6 +365,20 @@ describe("channels store", () => {
       expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(0);
     });
 
+    // UX-8: the ready-time auto-select is not the user opening the channel, so
+    // it must not zero a badge the reader never looked at.
+    it("selects without clearing the badge when asked, keeping the NEW-divider snapshot", () => {
+      setChannels(readyChannels);
+      expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(3);
+
+      setActiveChannel(1, { clearUnread: false });
+
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(3);
+      // The snapshot is still taken, so MessageList can place the NEW divider.
+      expect(getUnreadOnOpen(1)).toBe(3);
+    });
+
     it("does not mutate channels map when clearing unread", () => {
       setChannels(readyChannels);
       const before = channelsStore.getState().channels;
