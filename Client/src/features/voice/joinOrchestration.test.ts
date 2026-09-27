@@ -15,12 +15,15 @@ vi.mock("../../lib/logger", () => ({
 
 import { JoinOrchestration, type JoinHost } from "./joinOrchestration";
 import { onRoom } from "./releaseRoom";
+import { voiceJoinSnapshot } from "../../lib/voiceJoinTrace";
 
 function fakeRoom(state = "connected"): Room {
   return {
     state,
     on: vi.fn(),
     off: vi.fn(),
+    connect: vi.fn(async () => {}),
+    startAudio: vi.fn(async () => {}),
     disconnect: vi.fn(async () => {}),
   } as unknown as Room;
 }
@@ -51,7 +54,9 @@ function setup(initial: SessionState = { type: "idle" }) {
     reapplyMuteGain: vi.fn(),
     startTokenRefreshTimer: vi.fn(),
     syncModuleRooms: vi.fn(),
-    leaveVoice: vi.fn(),
+    leaveVoice: vi.fn(() => {
+      state = { type: "idle" };
+    }),
     handleVoiceTokenRefresh: vi.fn(),
     connectAndSetup: vi.fn(async () => true as const),
   };
@@ -115,6 +120,35 @@ describe("connectAndSetup", () => {
     expect(room.disconnect).toHaveBeenCalled();
     expect(host.leaveVoice).not.toHaveBeenCalled();
     expect(getState()).toEqual({ type: "connecting", pendingJoin: null, joinGeneration: 99 });
+  });
+
+  it("SRE-M2: records a URL-resolution failure at stage resolve and its url kind", async () => {
+    const { host, join } = setup();
+    host.resolveLiveKitUrl.mockRejectedValueOnce(new Error("proxy refused"));
+
+    await expect(join.connectAndSetup("t", "/livekit", 5, "ws://127.0.0.1:7880")).resolves.toBe(
+      false,
+    );
+
+    expect(voiceJoinSnapshot().lastJoins[0]).toMatchObject({
+      channelId: 5,
+      succeeded: false,
+      stage: "resolve",
+    });
+    expect(host.leaveVoice).toHaveBeenCalledWith(true);
+  });
+
+  it("SRE-M2: records a failure after the room connected at stage activate", async () => {
+    const { host, join } = setup();
+    host.restoreLocalVoiceState.mockRejectedValueOnce(new Error("mic denied"));
+
+    await expect(join.connectAndSetup("t", "/livekit", 6)).resolves.toBe(false);
+
+    expect(voiceJoinSnapshot().lastJoins[0]).toMatchObject({
+      channelId: 6,
+      succeeded: false,
+      stage: "activate",
+    });
   });
 
   it("leaves no devicechange listener behind for a Room superseded before connect", async () => {

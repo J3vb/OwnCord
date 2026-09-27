@@ -22,6 +22,7 @@ import type {
 
 import { createRoomEventHandlers } from "@lib/roomEventHandlers";
 import { onRoom } from "../../src/features/voice/releaseRoom";
+import { voiceJoinSnapshot } from "@lib/voiceJoinTrace";
 import type { RoomEventDeps } from "@lib/roomEventHandlers";
 import { voiceStore } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
@@ -543,6 +544,47 @@ describe("handleEncryptionError", () => {
 
     expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
     expect(voiceStore.getState().encryptionDegraded).toBe(true);
+  });
+
+  it("SRE-M2: counts every receive-side decrypt failure, tolerated or not", () => {
+    const h = build();
+    const bob = { identity: "bob", isLocal: false } as Participant;
+    const before = voiceJoinSnapshot().decryptErrorCount;
+
+    h.handlers.handleEncryptionError(
+      new Error("InvalidKey: Decryption failed: operation-specific"),
+      bob,
+    );
+
+    expectConsole("warn", /receive-side decrypt failure/);
+    expect(voiceJoinSnapshot().decryptErrorCount).toBe(before + 1);
+  });
+
+  it("SRE-M2: counts a native decrypt failure from a remote participant", () => {
+    const h = build();
+    const bob = { identity: "bob", isLocal: false } as Participant;
+    const before = voiceJoinSnapshot().decryptErrorCount;
+
+    h.handlers.handleEncryptionError(new Error("native decrypt failure"), bob);
+
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+    expect(voiceJoinSnapshot().decryptErrorCount).toBe(before + 1);
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+  });
+
+  it("SRE-M2: does not count an error with no remote participant as a decrypt failure", () => {
+    const h = build();
+    const before = voiceJoinSnapshot().decryptErrorCount;
+
+    h.handlers.handleEncryptionError(new Error("worker crashed"));
+    h.handlers.handleEncryptionError(new Error("InvalidKey: local"), {
+      identity: "me",
+      isLocal: true,
+    } as Participant);
+
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+    expect(voiceJoinSnapshot().decryptErrorCount).toBe(before);
   });
 
   it("marks encryption degraded even when no participant is attributed", () => {

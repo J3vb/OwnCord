@@ -91,6 +91,7 @@ and only when it changes something a contributor or fork holder must do
 - On Linux desktop, unmuting after a connection drop that happened while you were muted left your mic silent until you rejoined — peers heard nothing although you showed as unmuted. Unmuting now works after such a reconnect.
 - **Enhanced Noise Suppression now actually runs.** Its audio-worklet path rejected the shipped RNNoise module over its minified export names and fell back to the deprecated ScriptProcessorNode on every call. The worklet now resolves the real function names, so the modern path loads.
 - Dragging the voice sensitivity slider restarted voice detection at every step — about 200 times per drag. It now applies once, when you let go.
+- **A voice join that fails now records where it failed.** The voice diagnostics in Settings > Logs (and the exported support bundle) used to show only that there was no room; they now carry a timeline per join attempt — the stage it reached, whether the LiveKit address was used directly or tunnelled, how many connect tries it made, and how long each phase took — plus the connection self-test's result and a count of receive-side decrypt failures. "Voice won't connect" reports can be read instead of guessed at.
 
 ### Accounts & admin
 

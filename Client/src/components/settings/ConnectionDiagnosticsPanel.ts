@@ -1,5 +1,6 @@
 import { appendChildren, clearChildren, createElement } from "@lib/dom";
 import { settingsText as t } from "../../i18n/settings";
+import { recordSelfTestStage, resetSelfTest } from "@lib/voiceJoinTrace";
 import {
   diagnosticLabel,
   getConnectionDiagnosticsSessionSignal,
@@ -63,6 +64,7 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
       attempt = current;
       clearChildren(results);
       rows.clear();
+      resetSelfTest();
       start.disabled = true;
       microphone.disabled = true;
       cancel.hidden = false;
@@ -82,6 +84,9 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
       void runConnectionDiagnostics(
         (result) => {
           if (!alive || attempt !== current || current.signal.aborted) return;
+          // SRE-M2: the self-test result the diagnostics bundle carries. Only
+          // the terminal status of each stage is kept.
+          if (result.status !== "running") recordSelfTestStage(result.stage, result.status);
           let row = rows.get(result.stage);
           if (!row) {
             row = createElement("div", {
