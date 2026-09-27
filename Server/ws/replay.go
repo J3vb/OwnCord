@@ -466,6 +466,7 @@ func (h *Hub) reconnectRegister(
 	if handleReconnectPreRegisterRaceHook != nil {
 		handleReconnectPreRegisterRaceHook()
 	}
+	h.applyQueueContentDrops()
 	// Re-check the watermark one last time, right before registerNow makes
 	// this connection reachable. RefreshChannelVisibility and
 	// revokeUnreadableChannels both iterate h.clients to fan out a targeted,

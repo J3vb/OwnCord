@@ -58,6 +58,13 @@ type Hub struct {
 	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
 	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
 
+	// queueContentDrops counts content-bearing frames the full broadcast
+	// queue dropped (SRV-03); queueContentDropsApplied is how many of them
+	// applyQueueContentDrops has settled into the resync watermark. Guarded
+	// by seqMu.
+	queueContentDrops        atomic.Uint64
+	queueContentDropsApplied uint64
+
 	// latency is the shipped in-process metrics surface (SRE-M1): broadcast
 	// and dispatch-lag histograms, the max seqMu hold, the chat-ack histogram
 	// and the topic-shed counter. The zero value is usable, so no initializer

@@ -1,38 +1,137 @@
 package ws
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
-// SRV-03: a CONTENT-bearing frame shed by the topic limiter is committed in
-// the database but reached no live client, and because it consumed no seq the
-// replay tiers cannot recover it either — a resuming client's last_seq sits at
-// or above it and never asks. The mitigation is to ratchet the resync watermark
-// on such a shed, so the next reconnect for every client at or behind it takes
-// the full-ready path, which rebuilds state from the database and thereby
-// delivers the shed message.
-func TestTopicShed_ContentFrameForcesFullResyncForOlderClients(t *testing.T) {
-	h := newEmitTestHub()
-	send := make(chan []byte, 4096)
-	h.clients[1] = NewTestClient(h, 1, send)
-	h.pubsub.Subscribe(h.clients[1], ChannelTopic(5))
-
-	// Drain the limit with content-bearing frames: nsfwChannelID != 0 marks the
-	// contentBearingKinds (chat_message and friends).
-	total := topicRateLimitPerSecond + 5
-	for range total {
-		h.deliverBroadcast(broadcastMsg{channelID: 5, nsfwChannelID: 5, msg: []byte(`{"type":"chat_message"}`)})
+// SRV-03: a committed chat_message whose frame is lost before a seq is
+// assigned — shed by the topic limiter, or dropped by a full broadcast queue —
+// reached no live client, and replay can never carry it because it consumed no
+// seq. Both triggers must force a client resuming from a seq at or behind the
+// loss onto the full-ready path, whose history refetch recovers the message
+// from the database. Driven end to end: committed rows, EmitEvents through the
+// running dispatch loop, and a real auth-frame resume over ServeWS.
+func TestContentFrameLoss_ResumingClientTakesFullReadyAndRecoversMessage(t *testing.T) {
+	type trigger struct {
+		name string
+		// lose commits and emits messages until one is lost before
+		// sequencing, returning the lost message's id.
+		lose func(t *testing.T, ctx context.Context, h *Hub, emit func() int64) int64
 	}
-	if h.TopicShedCount() != 5 {
-		t.Fatalf("TopicShedCount = %d, want 5", h.TopicShedCount())
+	triggers := []trigger{
+		{name: "topic limiter above 100 frames/s", lose: func(t *testing.T, ctx context.Context, h *Hub, emit func() int64) int64 {
+			go h.Run()
+			var last int64
+			for range topicRateLimitPerSecond + 5 {
+				last = emit()
+			}
+			waitDispatchDrained(t, ctx, h)
+			if got := h.TopicShedCount(); got != 5 {
+				t.Fatalf("TopicShedCount = %d, want 5", got)
+			}
+			return last
+		}},
+		{name: "full broadcast queue", lose: func(t *testing.T, ctx context.Context, h *Hub, emit func() int64) int64 {
+			for range cap(h.broadcast) {
+				h.BroadcastToAll([]byte(`{"type":"server_filler"}`))
+			}
+			lost := emit()
+			if got := h.BroadcastDropCount(); got != 1 {
+				t.Fatalf("BroadcastDropCount = %d, want 1", got)
+			}
+			go h.Run()
+			waitDispatchDrained(t, ctx, h)
+			return lost
+		}},
 	}
 
-	// A client whose last_seq is at or before the last delivered seq must be
-	// forced onto the full-ready path: the shed contents exist only in the DB.
-	lastDelivered := atomic.LoadUint64(&h.seq)
-	if !h.mustFullResync(lastDelivered) {
-		t.Fatalf("a client resuming from seq %d after a content shed must take the full-ready path", lastDelivered)
+	for _, tc := range triggers {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			database := newTeardownTestDB(t)
+			userID, err := database.CreateUser(ctx, "srv03-user", "hash", 4) // Member
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			chID, err := database.CreateChannel(ctx, "srv03-busy", "text", "", "", 0)
+			if err != nil {
+				t.Fatalf("CreateChannel: %v", err)
+			}
+			token, err := auth.GenerateToken()
+			if err != nil {
+				t.Fatalf("GenerateToken: %v", err)
+			}
+			if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+				t.Fatalf("CreateSession: %v", err)
+			}
+
+			h := newTestHub(t, database, auth.NewRateLimiter(), nil)
+			t.Cleanup(h.Stop)
+
+			emit := func() int64 {
+				msgID, err := database.CreateMessage(ctx, chID, userID, "srv03", nil)
+				if err != nil {
+					t.Fatalf("CreateMessage: %v", err)
+				}
+				payload := fmt.Appendf(nil, `{"type":"chat_message","payload":{"id":%d,"channel_id":%d,"content":"srv03"}}`, msgID, chID)
+				h.EmitEvents(ctx, []Event{channelEvt{evType: MsgTypeChatMessage, channelID: chID, payload: payload}})
+				return msgID
+			}
+			lostID := tc.lose(t, ctx, h, emit)
+
+			// The client received every frame that was sequenced, so its
+			// last_seq sits exactly at the loss.
+			lastSeq := atomic.LoadUint64(&h.seq)
+			var sawReady bool
+			for _, frame := range dialAndResume(t, h, token, lastSeq) {
+				var env struct {
+					Type string `json:"type"`
+				}
+				if json.Unmarshal(frame, &env) == nil && env.Type == MsgTypeReady {
+					sawReady = true
+				}
+			}
+			if !sawReady {
+				t.Fatalf("resume from last_seq %d after a lost content frame got no ready frame", lastSeq)
+			}
+			if buffer, db, full := h.ReconnectTierStats(); full != 1 || buffer != 0 || db != 0 {
+				t.Fatalf("ReconnectTierStats = (buffer %d, db %d, full %d), want the full tier only", buffer, db, full)
+			}
+
+			history, err := database.GetMessagesForAPI(ctx, chID, 0, 200, userID)
+			if err != nil {
+				t.Fatalf("GetMessagesForAPI: %v", err)
+			}
+			for _, m := range history {
+				if m.ID == lostID {
+					return
+				}
+			}
+			t.Fatalf("lost message %d missing from the history a full ready refetches", lostID)
+		})
+	}
+}
+
+// waitDispatchDrained waits for the dispatch loop to start and sequence every
+// frame queued so far.
+func waitDispatchDrained(t *testing.T, ctx context.Context, h *Hub) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !h.running.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("dispatch loop never started")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := h.awaitDispatch(ctx); err != nil {
+		t.Fatalf("awaitDispatch: %v", err)
 	}
 }
 

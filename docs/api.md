@@ -2969,10 +2969,11 @@ is the cumulative count of events dropped because the **hub-wide broadcast
 queue** was full — sequenced events lost before delivery, worth alerting on
 if it ever grows. `topic_sheds_total` counts frames the **per-channel topic
 limiter** dropped before a sequence was assigned; like `broadcast_drops`, replay
-cannot recover them, so alert on any growth. A shed **content** frame (a
-message body, or one that discloses it) additionally forces the next reconnect
-of a client at or behind the shed onto the full-ready path, which rebuilds
-state from the database and so recovers the message; a metadata shed does not.
+cannot recover them, so alert on any growth. A **content** frame (a message
+body, or one that discloses it) lost to either counter additionally forces the
+next reconnect of a client at or behind the loss onto the full-ready path,
+which rebuilds state from the database and so recovers the message; a metadata
+frame does not.
 Per-client send-queue pressure is reported separately:
 `backpressure_queue_disconnects` (clients disconnected to force a
 replay-recovering reconnect), `backpressure_high_fallbacks` (high-priority

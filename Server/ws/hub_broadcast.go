@@ -59,12 +59,17 @@ type broadcastMsg struct {
 // enqueue hands bm to the single hub dispatch loop, stamping it for the
 // enqueue→fanout latency metric. Non-blocking: if the broadcast channel is
 // full the message is dropped and counted, with kind naming the dropped frame.
+// A dropped content-bearing frame is also left for applyQueueContentDrops to
+// settle into the resync watermark under seqMu (SRV-03).
 func (h *Hub) enqueue(bm broadcastMsg, kind string) {
 	bm.enqueuedAt = time.Now()
 	select {
 	case h.broadcast <- bm:
 	default:
 		h.broadcastDrops.Add(1)
+		if bm.nsfwChannelID != 0 {
+			h.queueContentDrops.Add(1)
+		}
 		slog.Warn("hub: broadcast channel full, dropping "+kind,
 			"channel_id", bm.channelID, "msg_len", len(bm.msg))
 	}
@@ -404,6 +409,7 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		start := time.Now()
 		defer h.seqMu.Unlock()
 		defer h.observeSeqMuHold(start)
+		defer h.applyQueueContentDrops()
 
 		// Channel-scoped sends consult the topic limiter BEFORE a seq is
 		// allocated: a shed frame that consumed a seq would sit in the replay

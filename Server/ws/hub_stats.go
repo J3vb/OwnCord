@@ -143,6 +143,26 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 	return false
 }
 
+// applyQueueContentDrops is SRV-03's recovery for a content-bearing frame the
+// full broadcast queue dropped in enqueue. Unlike a topic shed, that frame's
+// place in the seq stream lies behind every frame still queued ahead of it, so
+// while such a drop is unsettled every call ratchets the watermark to the
+// current seq, and the drop only counts as settled once the queue is seen
+// empty — every frame queued before it has been sequenced by then. Caller
+// holds seqMu: deliverBroadcast after each frame, and reconnectRegister before
+// its watermark check, so a resume can never register between the drop and
+// its first bump.
+func (h *Hub) applyQueueContentDrops() {
+	n := h.queueContentDrops.Load()
+	if n == h.queueContentDropsApplied {
+		return
+	}
+	h.bumpVisibilityWatermark()
+	if len(h.broadcast) == 0 {
+		h.queueContentDropsApplied = n
+	}
+}
+
 // BroadcastQueueDepth is the number of frames currently waiting on the hub's
 // dispatch channel — 0 is healthy, approaching the channel's capacity means
 // the dispatch loop cannot keep up. Safe to call from any goroutine.
