@@ -117,7 +117,8 @@ connection's protocol Ping every 25s refreshes activity and closes a peer that
 misses a Pong),
 revoked-session sweep (30s, plus
 per-connection revalidation every 10 messages), stale-voice-state sweep (60s),
-panic containment on the run loop (3 panics/60s → stop), LiveKit client and
+panic containment on the run loop (3 panics/60s, or one Windows memory fault
+(SRE-08) → stop and exit), LiveKit client and
 optional managed subprocess, and the voice E2EE key-holder map
 ([voice-e2ee.md](voice-e2ee.md)). Collaborators are supplied up front through
 the validated `ws.HubOptions` (`Server/ws/hub_options.go`) — `NewHub` runs
