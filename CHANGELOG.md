@@ -33,6 +33,12 @@ The rules:
    need them. A PR number is fine where it genuinely helps someone dig.
 7. **Counts belong in a summary line, not per item.** "62 fixes" once at the
    top beats a number attached to every bullet.
+8. **Write the release section for end users, not contributors.** `release.yml`
+   copies the tag's section verbatim onto the GitHub release page, so it opens
+   with a one-paragraph intro and then **Highlights**, **Added**, **Changed**,
+   **Fixed** and **Known issues** in plain language — what a user gets, not a
+   wall of PR numbers. Internal, CI and test-only changes go in a short **Under
+   the hood** list at the end.
 
 Anything a user cannot observe — repository layout, CI gates, generated-code
 ownership, dependency automation — gets **at most a short block at the end**,
@@ -40,6 +46,14 @@ and only when it changes something a contributor or fork holder must do
 (a moved directory, a renamed module, a new required command).
 
 ## Unreleased
+
+### Under the hood
+
+- Release notes are now written for users. The tag's `CHANGELOG.md` section
+  opens with a one-paragraph intro, then Highlights / Added / Changed / Fixed /
+  Known issues, with internal changes in a short Under-the-hood list. The
+  release workflow copies it to the GitHub release page as-is, so a release no
+  longer first publishes a wall of internal text.
 
 ## v2.0.0-beta.1
 

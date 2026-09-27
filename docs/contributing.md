@@ -303,6 +303,18 @@ fails closed on any missing input.
    moved it to `## v2.0.0-beta.1` in this lane), so at tag time only confirm it
    and start a fresh `## Unreleased` for the work that follows.
 
+   **The section is the GitHub release page, copied verbatim** — `release.yml`
+   pastes it with no rewriting step — so write it for end users:
+   - a one-paragraph intro saying what this release gives them;
+   - then **Highlights**, **Added**, **Changed**, **Fixed** and **Known issues**
+     in plain language, no walls of PR numbers;
+   - internal, CI and test-only changes in a short **Under the hood** list at
+     the end.
+
+   The `CHANGELOG.md` "How to write an entry" rules still apply underneath; the
+   beta.1 release had to be rewritten after publishing because the section was
+   internal prose, and this step is what stops that happening again.
+
 4. **Flip the platform table and the alpha wording.** In `docs/quick-start.md`
    the "Server binary / Linux ARM64" row changes from "Not published yet" to the
    tag that publishes it. Flip the project-status wording (README badge and
