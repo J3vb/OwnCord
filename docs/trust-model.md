@@ -29,8 +29,8 @@ is right and this document has a bug — file it like any other.
   fingerprint and asks you to trust it. It does this for **every** kind of
   certificate — self-signed or from a public CA — because the desktop pins
   the fingerprint it sees rather than checking the certificate against the
-  public CA list (`Client/src-tauri/src/ws_proxy.rs:151-158`,
-  `Client/src-tauri/src/tofu.rs:72-111`). It cannot know whether that
+  public CA list (`Client/src-tauri/src/ws_proxy.rs:150-157`,
+  `Client/src-tauri/src/tofu.rs:71-110`). It cannot know whether that
   fingerprint is the server's or an attacker's on the path. Compare it with
   the fingerprint the operator gives you another way (chat elsewhere, a call)
   before clicking; every later connection is then checked against that pin.
@@ -157,35 +157,35 @@ certificate, and how the client decides to trust it:
 
 | Server `tls.mode` (`Server/config/config.go:332-344`, semantics `Server/auth/tls.go:116-140`) | Certificate                                                                                                                                                                                                                                                                                                                      | Desktop client                                                                                                                                                                                                             | Browser client (B8, does not exist yet)                                     |
 | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `self_signed` (default, `config.go:426`)                                                      | generated on first run                                                                                                                                                                                                                                                                                                           | **TOFU pinning.** First connect shows the fingerprint and asks; the pin is stored (`Client/src-tauri/src/ws_proxy.rs:455-501`, only writer) and every later connection must match (`Client/src-tauri/src/tofu.rs:132-166`) | Must use a publicly trusted or locally installed CA certificate; no pinning |
+| `self_signed` (default, `config.go:426`)                                                      | generated on first run                                                                                                                                                                                                                                                                                                           | **TOFU pinning.** First connect shows the fingerprint and asks; the pin is stored (`Client/src-tauri/src/ws_proxy.rs:454-500`, only writer) and every later connection must match (`Client/src-tauri/src/tofu.rs:131-165`) | Must use a publicly trusted or locally installed CA certificate; no pinning |
 | `acme`                                                                                        | Let's Encrypt via `autocert` (`Server/auth/tls.go:164-193`)                                                                                                                                                                                                                                                                      | Pinned the same way                                                                                                                                                                                                        | Trusted by the browser's CA store                                           |
 | `manual`                                                                                      | operator-supplied files                                                                                                                                                                                                                                                                                                          | Pinned the same way                                                                                                                                                                                                        | Trusted if the CA is                                                        |
 | `off`                                                                                         | none. **Served directly, every connection is plaintext HTTP** — passwords, tokens and messages are readable by anyone on the path (`Server/auth/tls.go:94-95`, `Server/internal/app/http.go:49-50`). Nothing in the server enforces a proxy; the operator must put a TLS-terminating reverse proxy in front and expose only that | Pins the proxy's certificate (behind a proxy); it cannot connect to a plaintext `off` server at all, so without a TLS-terminating proxy in front there is nothing to connect to                                            | Trusted if the proxy's CA is (behind a proxy); plaintext without one        |
 
 Desktop pinning details, each with its test:
 
-- The pin is the SHA-256 of the leaf certificate (`tofu.rs:25`); a mismatch
+- The pin is the SHA-256 of the leaf certificate (`tofu.rs:24`); a mismatch
   rejects the connection before the auth frame or any WebSocket payload is
-  sent (`tofu.rs:157-163`). The WebSocket upgrade request itself — path and
+  sent (`tofu.rs:156-162`). The WebSocket upgrade request itself — path and
   headers, which carry no credential, since the token travels in the first
   frame — does reach the peer before the verdict
-  (`Client/src-tauri/src/ws_proxy.rs:159-189`).
+  (`Client/src-tauri/src/ws_proxy.rs:158-188`).
   Tests: `decide_first_use_when_no_pin`, `decide_trusted_when_pin_matches`,
   `decide_mismatch_when_pin_differs`, `capture_verifier_records_leaf_not_intermediate`.
 - First use also rejects: the app shows the fingerprint, and only an explicit
-  accept writes a pin (`tofu.rs:6-10`, `:380-381` "deciding never writes a
+  accept writes a pin (`tofu.rs:6-10`, `:378-379` "deciding never writes a
   pin"). Tests: `valid_fingerprint_is_accepted` and the six rejection cases in
-  `ws_proxy.rs:516-579`.
+  `ws_proxy.rs:515-578`.
 - The first-use prompt is the same in every `tls.mode`: the desktop does
   not validate a public-CA certificate against the CA list on the OwnCord
-  connection — it pins what it sees (`ws_proxy.rs:151-158`,
-  `tofu.rs:72-111`). Web-PKI validation exists only in the updater's
-  `HostScopedVerifier` (`tofu.rs:191-215`) for the GitHub download, not for
+  connection — it pins what it sees (`ws_proxy.rs:150-157`,
+  `tofu.rs:71-110`). Web-PKI validation exists only in the updater's
+  `HostScopedVerifier` (`tofu.rs:190-214`) for the GitHub download, not for
   the server connection. Out-of-band fingerprint comparison is therefore the
   only first-contact defence on the desktop, whatever certificate the server
   has.
 - All three native tunnels (WebSocket, HTTP, LiveKit) use the same verifier:
-  `ws_proxy.rs:155`, `http_proxy.rs:218`, `livekit_proxy.rs:339`.
+  `ws_proxy.rs:154`, `http_proxy.rs:218`, `livekit_proxy.rs:339`.
 - The session token travels inside the first WebSocket frame, never in the
   URL: server `Server/ws/serve_auth.go:26-61`, client `Client/src/lib/ws.ts:546`
   (path only) and `:447-455` (auth frame). Test: `ws-lifecycle.test.ts`
@@ -340,7 +340,7 @@ SEC-03 row (B5-12, 2026-09-05); tracked as C-09 in
 | Server uploads             | plain files under `upload.storage_dir`                                                          | Same                                                                                                                                                                                                                                                                    |
 | Server backups             | plain database copies under `backup.dir`                                                        | Same — treat the backup directory as the database. Uploads are **not** included; back up `upload.storage_dir` alongside it                                                                                                                                              |
 | Server secrets             | password hashes, token hashes, encrypted TOTP secrets                                           | See "What the server does not keep in the clear" above                                                                                                                                                                                                                  |
-| Desktop session + identity | OS keychain via the `keyring` crate: Windows Credential Manager, macOS Keychain, Secret Service | Every write is read back and verified (`Client/src-tauri/src/secret_store.rs:94`). If the keychain fails the round trip, a sealed file (DPAPI on Windows, ChaCha20-Poly1305 elsewhere) takes over until it works again — [credential-storage.md](credential-storage.md) |
+| Desktop session + identity | OS keychain via the `keyring` crate: Windows Credential Manager, macOS Keychain, Secret Service | Every write is read back and verified (`Client/src-tauri/src/secret_store.rs:93`). If the keychain fails the round trip, a sealed file (DPAPI on Windows, ChaCha20-Poly1305 elsewhere) takes over until it works again — [credential-storage.md](credential-storage.md) |
 | Desktop certificate pins   | `certs.json` in the app data dir (`Client/src-tauri/src/constants.rs:2`)                        | Plain file; a user who can edit it can re-pin, which is the same user who can click "trust"                                                                                                                                                                             |
 | Desktop identity pins      | `identity_pins.json` (`Client/src/lib/identity.ts:11-12`)                                       | Plain file; same reasoning. The identity _private_ key is in the keychain, not here                                                                                                                                                                                     |
 

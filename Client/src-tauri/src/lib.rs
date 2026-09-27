@@ -10,6 +10,7 @@ mod external_content;
 #[cfg(not(windows))]
 mod fallback_crypto;
 mod http_proxy;
+mod json_store;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod livekit_proxy;
@@ -116,7 +117,6 @@ pub fn run() {
                 .max_file_size(10_000_000) // 10 MB rolling file (default 40 KB is too small)
                 .build(),
         )
-        .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
@@ -138,6 +138,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init());
 
     match builder
+        .manage(json_store::JsonStores::default())
         .manage(ws_proxy::WsState::new())
         .manage(livekit_proxy::LiveKitProxyState::new())
         .manage(http_proxy::HttpProxyState::new())

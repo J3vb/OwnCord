@@ -14,6 +14,7 @@ import { safetyText } from "../../i18n/safety";
 import { connectText } from "../../i18n/connect";
 import { livekitSession, log } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock } from "./dispatchContext";
+import type { ConnectionState } from "../../lib/ws";
 
 export function handleAuthOk(
   ws: DispatchWs,
@@ -62,22 +63,32 @@ export function handleAuthError(
   clearAuth(epochRefusal ? "protocol_epoch" : "user");
 }
 
-export function handleServerRestart(payload: Payload<"server_restart">): void {
+export function handleServerRestart(
+  clock: ReconnectClock,
+  payload: Payload<"server_restart">,
+): void {
   log.warn("Server restarting", {
     reason: payload.reason,
     delaySeconds: payload.delay_seconds,
   });
   // Every announced restart keeps the session (Q4): the token stays valid,
   // ws.ts reconnects on its own once the socket drops and resumes into the
-  // same channel, and MainPage's banner counts down. Only the hub's final
-  // teardown notice ("shutdown") ends the voice session — the server's voice
-  // state (and a managed LiveKit) goes with the process. An admin's earlier
-  // announcement leaves the call alone: the restart may still be aborted.
-  if (
-    payload.reason === "shutdown" &&
-    payload.delay_seconds > 0 &&
-    voiceStore.getState().currentChannelId !== null
-  ) {
+  // same channel, and MainPage's banner counts down. A zero delay
+  // (update_aborted) withdraws the announcement.
+  clock.restartAnnounced = payload.delay_seconds > 0;
+}
+
+/**
+ * The socket's state changed. When it drops while a restart is announced, the
+ * server is really going away and its voice state (and a managed LiveKit)
+ * goes with the process, so end the call. Keyed on the drop rather than the
+ * notice: the notice names the restart's intent, and an announced update can
+ * still be aborted before anything drops.
+ */
+export function handleRestartDrop(clock: ReconnectClock, state: ConnectionState): void {
+  if (!clock.restartAnnounced || (state !== "reconnecting" && state !== "disconnected")) return;
+  clock.restartAnnounced = false;
+  if (voiceStore.getState().currentChannelId !== null) {
     void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
     leaveVoiceChannel();
   }

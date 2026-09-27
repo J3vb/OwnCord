@@ -46,11 +46,13 @@ and only when it changes something a contributor or fork holder must do
 - A server update, backup restore or restart no longer signs everyone out — the desktop client counts down, reconnects on its own and returns to the channel it was in. Voice calls still end when the server actually stops.
 - A dead connection (a dropped network or a sleeping laptop) could stay open on the server for up to two minutes, so the user still showed online — the server now pings each connection every 25 seconds and closes one that stops answering within about 50 seconds.
 - **A half-open connection no longer stays "connected" forever.** When the network path drops silently — a firewall change, a lost Wi-Fi hop — the client used to keep showing Connected while sends vanished. It now treats a minute without any server frame as a dead link, shows Reconnecting and dials again.
+- **Saved servers, logins and trusted certificates survive a crash mid-save.** The desktop client rewrote its settings files in place, so a crash or power cut at the wrong moment could leave one torn, and the next start silently treated it as empty. Saves now replace the file atomically. A file that still cannot be read is copied aside as `<name>.corrupt-<time>` and logged; for the trusted-certificate and voice identity pins the client then refuses to connect or verify instead of trusting whatever it sees, until the damaged file is removed from the app data folder and the client restarted. A file the client cannot read or copy aside is left untouched rather than overwritten.
 - An admin with the Logs tab open no longer stalls a restart for 30 seconds and cuts the restart notice and the audit flush short — the log stream now ends as shutdown begins, and each shutdown step has its own budget: up to 30 seconds for the HTTP drain and 10 seconds for every other step.
 
 ### Messages
 
 - Message Requests showed the wrong time for anyone not on UTC — the request's time was read as the viewer's local time instead of the server's instant, so it was off by their UTC offset.
+- **Editing or deleting a message no longer claims success while offline.** Both used to show a "Message deleted" / "Message edited" toast the moment they were sent, so a moderator acting during a blip could think a message was gone when the frame had been dropped. Success is now confirmed by the server's echo; a dropped frame reports one error, and an edit's text is put back in an empty composer so it can be sent again. The delete button is disabled, with the reason shown, while the connection is down.
 
 ### Messages & files
 
@@ -67,6 +69,7 @@ and only when it changes something a contributor or fork holder must do
 - Linux desktop voice joins remote servers older than v2.0.0-beta.1. Those servers dropped the voice sign-in the Linux client sent, so the join failed; the client now sends it the way Windows and macOS do.
 - The server no longer hands clients LiveKit's internal address — it sends LiveKit's own address only when that address is loopback, so an older Linux client on the Docker host also gets voice through the `/livekit` tunnel.
 - On Linux desktop, a call kept showing "Secured" when another participant's audio could not be decrypted — that participant was just silent. The indicator now drops after a few seconds, as it already did on Windows and macOS.
+- Switching microphones while muted (or with push-to-talk released) no longer starts audio processing on the muted mic — it kept running until you unmuted. Enhanced Noise Suppression now also turns on at your first unmute after joining muted or with push-to-talk.
 
 ### Accounts & admin
 

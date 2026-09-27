@@ -97,6 +97,14 @@ on:
         description: "Concurrent voice participants (BPR-030 says 25)"
         required: false
         default: "25"
+      churn_phase:
+        description: "operational: voice churn shape — spread (default) or aligned (the deliberate burst)"
+        required: false
+        type: choice
+        default: spread
+        options:
+          - spread
+          - aligned
       ceiling_max:
         description: "ceiling-search: highest connection count probed (and users to seed)"
         required: false
@@ -552,6 +560,7 @@ jobs:
           # leg neither fails nor passes vacuously.
           K6_VOICE_CHANNEL_ID: ${{ env.VOICE_LEG == '1' && env.VOICE_ID || '' }}
           K6_VOICE_VUS: ${{ inputs.voice }}
+          K6_VOICE_CHURN_PHASE: ${{ inputs.churn_phase }}
           K6_PEAK_VUS: ${{ inputs.connections }}
           K6_RAMP: 60s
           K6_SUSTAIN: 180s

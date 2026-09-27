@@ -101,11 +101,16 @@ export class AudioPipeline {
 
   // --- RNNoise processor (LiveKit TrackProcessor API) ---
 
-  /** Attach RNNoise processor to the local mic track. Safe to call if already attached. */
+  /**
+   * Attach RNNoise processor to the local mic track. Safe to call if already
+   * attached. A no-op while the track is muted (its capture is stopped); the
+   * unmute path in MediaControl.applyMicMuteState attaches it instead.
+   */
   async applyNoiseSuppressor(): Promise<void> {
     if (this.room === null) return;
     const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
     if (micPub?.track === undefined) return;
+    if (micPub.track.isMuted) return;
     if (micPub.track.getProcessor() !== undefined) return;
     const processor = createRNNoiseProcessor();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LocalTrack.setProcessor uses wide generic, but AudioProcessorOptions is guaranteed at runtime with webAudioMix
@@ -138,6 +143,11 @@ export class AudioPipeline {
     if (this.room === null) return;
     const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
     if (micPub?.track === undefined) return;
+    // OC-0474: the pipeline only exists when unmuted. Muting stops the capture
+    // track, so building here (a device switch, a permission retry, a
+    // reconnect while muted) would run a context and VAD over an ended track
+    // until the next unmute, which rebuilds it on the fresh track anyway.
+    if (micPub.track.isMuted) return;
 
     try {
       // Source from the NS processor's output when one is attached, not the

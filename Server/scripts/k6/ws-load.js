@@ -34,8 +34,9 @@
 //   operational — the 100-connection sustain PLUS, concurrently: the observer
 //     VU polling /api/v1/metrics every 5 s (per-phase deltas), the reconnect
 //     storm (every socket closes at K6_RAMP + K6_STORM_AT on the scenario
-//     clock, reconnects with last_seq + active_channel_id and resumes), the voice churn (voice VUs leave+rejoin on epoch-aligned
-//     K6_VOICE_CHURN_MS boundaries), and the upload-admission scenario. No
+//     clock, reconnects with last_seq + active_channel_id and resumes), the voice churn (voice VUs leave+rejoin on a
+//     K6_VOICE_CHURN_MS grid, spread across the cohort by default or aligned
+//     on one instant under K6_VOICE_CHURN_PHASE=aligned), and the upload-admission scenario. No
 //     voice-load.sh SFU cohort — the churn exercises the control plane, not
 //     the media path.
 //   restart — 100 connections at the capacity rate; the workflow (or the
@@ -107,6 +108,10 @@
 //                         reconnects — one wave, anchored on the scenario
 //                         clock (default: 120)
 //   K6_VOICE_CHURN_MS   - operational: voice leave+rejoin period (default: 10000)
+//   K6_VOICE_CHURN_PHASE- operational: spread (default) staggers each voice
+//                         VU's leave+rejoin through the period; aligned puts
+//                         every voice VU on the same instant, the deliberate
+//                         burst OC-0480 records
 //   K6_UPLOAD_BYTES     - operational: per-upload payload size (default: 262144)
 //   K6_CEILING_MAX      - ceiling-search: highest connection count probed (default: 500)
 //   K6_CEILING_STEP     - ceiling-search: connection increment per step (default: 100)
@@ -285,6 +290,46 @@ const VOICE_VUS = VOICE_CHANNEL_ID ? parseInt(__ENV.K6_VOICE_VUS || "25") : 0;
 // collided in B6-9); none is one.
 const STORM_AT = parseInt(__ENV.K6_STORM_AT || "120"); // seconds
 const CHURN_MS = parseInt(__ENV.K6_VOICE_CHURN_MS || "10000");
+// PERF-02: how the voice cohort's leave+rejoin churn is scheduled.
+//   spread (default) — each voice VU lands on its own offset within the
+//     CHURN_MS period, so joins arrive as ordinary churn and the voice-join
+//     budget measures a single join. A real population does not leave and
+//     rejoin in unison.
+//   aligned — every voice VU leaves and rejoins on the same epoch-aligned
+//     CHURN_MS boundary: the deliberate 25-way burst OC-0480 records, kept
+//     as a named mode rather than the default the operational profile ran.
+// The default changed from aligned to spread (PERF-02): the published
+// voice-join figures came from the aligned shape, which serialises 25 joins
+// into one queue and so overstated the cost a budget is meant to bound.
+const CHURN_PHASE = __ENV.K6_VOICE_CHURN_PHASE || "spread";
+if (!["spread", "aligned"].includes(CHURN_PHASE)) {
+  throw new Error(`K6_VOICE_CHURN_PHASE must be spread or aligned, got ${CHURN_PHASE}`);
+}
+
+// This VU's offset within the CHURN_MS period for its leave+rejoin tick.
+// aligned: every VU at 0, the shared grid (the deliberate burst). spread:
+// VU n sits at (n-1)/(VOICE_VUS + OBS_VUS) through the period — the voice
+// cohort's ids span that many slots, whichever id the observer took — so the
+// cohort's joins arrive staggered like an ordinary population's churn and the
+// voice-join budget measures one join rather than 25 queued behind each other.
+function churnOffsetMs(vuId) {
+  if (CHURN_PHASE === "aligned" || VOICE_VUS <= 0) return 0;
+  const slots = VOICE_VUS + OBS_VUS;
+  return Math.round(((vuId - 1) % slots) * (CHURN_MS / slots));
+}
+
+// A voice_state frame names its sender by username (`loadtest<vuId>`), which
+// is the only way a receiver can tell which VU's churn boundary it belongs
+// to. Returns null for any name that is not this run's prefix + an int, so a
+// differently-seeded run simply measures nothing rather than misattributing.
+function voiceVuIdFromUsername(uname) {
+  if (typeof uname !== "string" || !uname.startsWith(USERNAME_PREFIX)) return null;
+  const rest = uname.slice(USERNAME_PREFIX.length);
+  if (!/^\d+$/.test(rest)) return null;
+  const id = Number(rest);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 const UPLOAD_BYTES = parseInt(__ENV.K6_UPLOAD_BYTES || "262144");
 // Ceiling-search knobs. The search probes CEILING_START connections, then
 // steps by K6_CEILING_STEP, ramping each step in over CEILING_RAMP_S and
@@ -578,8 +623,15 @@ export const options = {
     ...(VOICE_VUS > 0
       ? {
           // Tightened from measured p95 3 ms / p99 4 ms: this is an HMAC JWT
-          // and a session lookup, not a network round trip to an SFU.
-          voice_join_time: ["p(95)<250", "p(99)<500"],
+          // and a session lookup, not a network round trip to an SFU. Under
+          // the aligned churn this budget does NOT gate (PERF-02 / owner
+          // decision Q10): the burst is published unbudgeted, because the
+          // 25-way simultaneous rejoin it produces is a harness shape, not a
+          // single-join cost. The budget itself is never loosened — spread
+          // churn keeps it.
+          ...(IS_OPERATIONAL && CHURN_PHASE === "aligned"
+            ? {}
+            : { voice_join_time: ["p(95)<250", "p(99)<500"] }),
           voice_tokens: ["count>0"],
           // The churn's cross-VU voice_state delivery only happens when the
           // voice leg does — an operational run without K6_VOICE_CHANNEL_ID
@@ -814,9 +866,12 @@ function passThroughThresholds() {
     // The one Gauge among the observer's metrics; a Gauge aggregates as value.
     out[`obs_upload_storage_used_mb{phase:${p}}`] = ["value>=0"];
     // The per-phase acknowledgement/delivery series (operationalTags). The
-    // run-wide budgets above stay the gate; these only materialize.
-    out[`ws_broadcast_latency_ms{phase:${p}}`] = ["p(95)>=0"];
-    out[`ws_delivery_latency_ms{phase:${p}}`] = ["p(95)>=0"];
+    // run-wide budgets above stay the gate; these only materialize. p(99) as
+    // well as p(95): the operational ack tail is the published concern
+    // (capacity.md), and a sub-metric only reaches the summary when a
+    // threshold names the stat.
+    out[`ws_broadcast_latency_ms{phase:${p}}`] = ["p(95)>=0", "p(99)>=0"];
+    out[`ws_delivery_latency_ms{phase:${p}}`] = ["p(95)>=0", "p(99)>=0"];
   }
   // Tier and backpressure come in two shapes: the run total per tier/kind,
   // and the per-phase delta (a sub-metric key takes several comma-separated
@@ -1194,8 +1249,8 @@ export default function () {
             socket.send(envelope("channel_focus", { channel_id: VU_CHANNEL_ID }));
             if (joinsVoice && !IS_OPERATIONAL) {
               // Capacity joins once on ready, as B6-9. Under operational the
-              // churn timer owns every join, so all joins land on the shared
-              // K6_VOICE_CHURN_MS grid that voice_state_delivery_ms reads.
+              // churn timer owns every join, so all joins land on the per-VU
+              // churn grid (churnOffsetMs) that voice_state_delivery_ms reads.
               voiceJoinSent = Date.now();
               socket.send(envelope("voice_join", { channel_id: VOICE_CHANNEL_ID }));
             }
@@ -1241,15 +1296,19 @@ export default function () {
             // ignores the frame, as B6-9 did.
             if (IS_OPERATIONAL && typeof data.seq === "number") {
               const uname = data.payload && data.payload.username;
-              // Every join is a churn-tick join, anchored to the shared
-              // K6_VOICE_CHURN_MS grid. A voice_state arriving for ANOTHER
-              // user at time R was broadcast by that user's epoch-aligned
-              // join at boundary = R - (R % CHURN_MS), so R - boundary is the
-              // delivery time; the <CHURN_MS/2 gate only accepts frames that
-              // attribute to the right boundary unambiguously.
-              if (uname && uname !== username) {
+              // Every join is a churn-tick join. The sender's tick sits on
+              // its own grid: at offset churnOffsetMs(vuId) within every
+              // CHURN_MS period (0 for every VU under aligned, so the grid is
+              // the epoch grid). A voice_state from ANOTHER user at receipt
+              // time R was broadcast by that user's most recent tick, at
+              // O + floor((R - O) / CHURN_MS) * CHURN_MS, so R minus that is
+              // the delivery time. The < CHURN_MS/2 gate only accepts frames
+              // that attribute to the right tick unambiguously.
+              const senderVu = voiceVuIdFromUsername(uname);
+              if (senderVu !== null && uname !== username) {
                 const r = Date.now();
-                const boundary = Math.floor(r / CHURN_MS) * CHURN_MS;
+                const offset = churnOffsetMs(senderVu);
+                const boundary = offset + Math.floor((r - offset) / CHURN_MS) * CHURN_MS;
                 const delta = r - boundary;
                 if (delta < CHURN_MS / 2) {
                   voiceStates.add(1);
@@ -1353,14 +1412,26 @@ export default function () {
       }
     }
 
-    // B6-10 voice churn: every K6_VOICE_CHURN_MS boundary the VU leaves and
-    // rejoins, so the voice control plane (voice_join -> voice_token,
-    // voice_state broadcasts, voice_leave) is exercised continuously instead
-    // of 25 VUs joining once and sitting. Joins are anchored to the shared
-    // wall-clock grid (Date.now() % CHURN_MS == 0) because
-    // voice_state_delivery_ms reads that grid. (protocol.md:1241-1275; the
-    // 5/s per-user limit is far away at one join per 10 s.)
+    // B6-10 voice churn: every K6_VOICE_CHURN_MS the VU leaves and rejoins,
+    // so the voice control plane (voice_join -> voice_token, voice_state
+    // broadcasts, voice_leave) is exercised continuously instead of 25 VUs
+    // joining once and sitting. K6_VOICE_CHURN_PHASE decides where in the
+    // period this VU's tick sits: spread (default) staggers the cohort,
+    // aligned puts every VU on the shared epoch grid so the join burst
+    // OC-0480 records can be published as its own mode. voice_state_delivery_ms
+    // reads the same per-VU grid. (protocol.md:1241-1275; the 5/s per-user
+    // limit is far away at one join per 10 s.)
     if (IS_OPERATIONAL && joinsVoice) {
+      const offset = churnOffsetMs(vuId);
+      // Floored modulo: JS `%` keeps the dividend's sign, so
+      // (offset - now) % CHURN_MS goes negative whenever now is partway
+      // through a period; the positive form is what "time to the next tick
+      // at this offset" needs. A zero result is a boundary exactly now, so
+      // wait a full period rather than firing twice on it.
+      const nextDelay = () => {
+        const d = (((offset - Date.now()) % CHURN_MS) + CHURN_MS) % CHURN_MS;
+        return d === 0 ? CHURN_MS : d;
+      };
       const churnTick = function () {
         if (authed) {
           if (vuInVoice) {
@@ -1371,9 +1442,9 @@ export default function () {
           socket.send(envelope("voice_join", { channel_id: VOICE_CHANNEL_ID }));
           vuInVoice = true;
         }
-        socket.setTimeout(churnTick, CHURN_MS - (Date.now() % CHURN_MS));
+        socket.setTimeout(churnTick, nextDelay());
       };
-      socket.setTimeout(churnTick, CHURN_MS - (Date.now() % CHURN_MS));
+      socket.setTimeout(churnTick, nextDelay());
     }
 
     // Send messages periodically (respecting rate limits). Gated on the

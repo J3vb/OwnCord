@@ -14,6 +14,7 @@ const {
   mockGetChannelMessages,
   mockSetReplyTo,
   mockStartEdit,
+  mockIsIdle,
   mockScrollToMessage,
   mockSetDisabled,
 } = vi.hoisted(() => ({
@@ -34,6 +35,7 @@ const {
   ),
   mockSetReplyTo: vi.fn(),
   mockStartEdit: vi.fn(),
+  mockIsIdle: vi.fn(() => true),
   mockScrollToMessage: vi.fn(() => true),
   mockSetDisabled: vi.fn(),
 }));
@@ -83,6 +85,7 @@ vi.mock("@components/MessageInput", () => ({
       startEdit: mockStartEdit,
       clearReply: vi.fn(),
       cancelEdit: vi.fn(),
+      isIdle: mockIsIdle,
       setDisabled: mockSetDisabled,
     };
   }),
@@ -275,6 +278,7 @@ import {
 } from "@lib/pendingMessages";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
+import { messagingText } from "../../src/i18n/messaging";
 import { setActiveTimeout } from "../../src/features/safety/store";
 import {
   channelsStore,
@@ -306,6 +310,7 @@ function makeOpts(overrides: Partial<ChannelControllerOptions> = {}): ChannelCon
       onStateChange: vi.fn(() => vi.fn()),
       // The composer subscribes to chat_send_ok / error to drive slow mode.
       on: vi.fn(() => vi.fn()),
+      onSendFailure: vi.fn(() => vi.fn()),
     } as unknown as ChannelControllerOptions["ws"],
     api: {
       uploadFile: vi.fn().mockResolvedValue({ id: 1, url: "/f/1", filename: "f.txt" }),
@@ -343,6 +348,7 @@ describe("createChannelController", () => {
     dmStoreSubscribers.length = 0;
     membersStoreSubscribers.length = 0;
     mockDmComposerBlockReason.mockReturnValue(null);
+    mockIsIdle.mockReturnValue(true);
     // The controller gates sends on the store-backed connection status
     // (docs/architecture/ux §3), not on ws.getState().
     setConnectionStatus("connected");
@@ -1189,7 +1195,9 @@ describe("createChannelController", () => {
         type: "chat_edit",
         payload: { message_id: 5, content: "new content" },
       });
-      expect(opts.showToast).toHaveBeenCalledWith("Message edited", "success");
+      // CLI-08: no optimistic success toast — an edit is confirmed by its
+      // chat_edited echo, and toasted only when it fails.
+      expect(opts.showToast).not.toHaveBeenCalledWith(expect.any(String), "success");
     });
 
     it("onEditMessage sends edit when message not found in store", () => {
@@ -2390,6 +2398,322 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
 
       expect(mockNsfwGateDestroy).toHaveBeenCalled();
+    });
+  });
+
+  // CLI-08: chat_edit / chat_delete are fire-and-forget. They used to toast
+  // "success" on send, so a frame dropped by a closed or half-open socket left
+  // a moderator convinced the message was gone. Track each frame's envelope id
+  // (like reactions), resolve it on the echo, and report one error if the
+  // socket refuses it — restoring an edit's text so it can be retried.
+  describe("edit/delete delivery tracking (CLI-08)", () => {
+    /** The onSendFailure listener the controller registered. */
+    function sendFailureListener(
+      opts: ChannelControllerOptions,
+    ): (id: string, code: string) => void {
+      const calls = (opts.ws.onSendFailure as ReturnType<typeof vi.fn>).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      return calls[0]![0] as (id: string, code: string) => void;
+    }
+
+    function errorListener(
+      opts: ChannelControllerOptions,
+    ): (payload: { code: string; message: string }, id?: string) => void {
+      const calls = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls;
+      const entry = calls.find((c) => c[0] === "error");
+      expect(entry).toBeDefined();
+      return entry![1] as (payload: { code: string; message: string }, id?: string) => void;
+    }
+
+    function echoListener(
+      opts: ChannelControllerOptions,
+      event: string,
+    ): (payload: { message_id: number; channel_id: number }) => void {
+      const calls = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls;
+      const entry = calls.find((c) => c[0] === event);
+      expect(entry).toBeDefined();
+      return entry![1] as (payload: { message_id: number; channel_id: number }) => void;
+    }
+
+    function optsWithIds(): { opts: ChannelControllerOptions; ids: () => string[] } {
+      const opts = makeOpts();
+      const issued: string[] = [];
+      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation((frame: { type: string }) => {
+        const id = `cid-${issued.length + 1}-${frame.type}`;
+        issued.push(id);
+        return id;
+      });
+      return { opts, ids: () => issued };
+    }
+
+    it("does not toast success when a delete is sent and acknowledged", () => {
+      const opts = makeOpts();
+      (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
+        "confirmed",
+      );
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5);
+
+      expect(opts.ws.send).toHaveBeenCalledWith({
+        type: "chat_delete",
+        payload: { message_id: 5 },
+      });
+      expect(opts.showToast).not.toHaveBeenCalledWith(expect.any(String), "success");
+      ctrl.destroyChannel();
+    });
+
+    it("shows one error and sends nothing when deleting while disconnected", () => {
+      setConnectionStatus("disconnected");
+      const opts = makeOpts();
+      (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
+        "confirmed",
+      );
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      vi.clearAllMocks();
+
+      capturedMessageListOpts!.onDeleteClick(5);
+
+      const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([frame]) => (frame as { type: string }).type === "chat_delete",
+      );
+      expect(sends).toHaveLength(0);
+      expect(opts.showToast).toHaveBeenCalledTimes(1);
+      expect(opts.showToast).toHaveBeenCalledWith(expect.stringContaining("delete"), "error");
+      expect(opts.showToast).not.toHaveBeenCalledWith(expect.any(String), "success");
+      ctrl.destroyChannel();
+    });
+
+    it("does not toast success when an edit is sent", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const { opts } = optsWithIds();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts!.onEditMessage(5, "new content");
+
+      const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([frame]) => (frame as { type: string }).type === "chat_edit",
+      );
+      expect(sends).toHaveLength(1);
+      expect(opts.showToast).not.toHaveBeenCalledWith(expect.any(String), "success");
+      ctrl.destroyChannel();
+    });
+
+    it("shows one error, sends nothing, and restores the text when editing offline", async () => {
+      setConnectionStatus("reconnecting");
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      vi.clearAllMocks();
+
+      capturedMessageInputOpts!.onEditMessage(5, "new content");
+
+      const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([frame]) => (frame as { type: string }).type === "chat_edit",
+      );
+      expect(sends).toHaveLength(0);
+      await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "new content"));
+      await vi.waitFor(() => expect(opts.showToast).toHaveBeenCalledTimes(1));
+      expect(opts.showToast).toHaveBeenCalledWith(
+        messagingText("toast.editFailedRestored"),
+        "error",
+      );
+      ctrl.destroyChannel();
+    });
+
+    it("shows one error and restores the text when an edit fails to send", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const { opts, ids } = optsWithIds();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const onSendFailure = sendFailureListener(opts);
+
+      capturedMessageInputOpts!.onEditMessage(5, "new content");
+      const editId = ids().find((id) => id.endsWith("chat_edit"))!;
+      vi.clearAllMocks();
+
+      onSendFailure(editId, "NETWORK");
+
+      await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "new content"));
+      await vi.waitFor(() => expect(opts.showToast).toHaveBeenCalledTimes(1));
+      expect(opts.showToast).toHaveBeenCalledWith(
+        messagingText("toast.editFailedRestored"),
+        "error",
+      );
+      ctrl.destroyChannel();
+    });
+
+    it("restores the text but leaves the single error to the dispatcher on a server refusal", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const { opts, ids } = optsWithIds();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const onError = errorListener(opts);
+
+      capturedMessageInputOpts!.onEditMessage(5, "too long");
+      const editId = ids().find((id) => id.endsWith("chat_edit"))!;
+      vi.clearAllMocks();
+
+      onError({ code: "BAD_REQUEST", message: "Message too long" }, editId);
+
+      // The dispatcher's error chain already shows the one error toast; the
+      // controller only restores, so the user never sees two.
+      expect(opts.showToast).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "too long"));
+      ctrl.destroyChannel();
+    });
+
+    it("shows one error when a delete frame fails to send", () => {
+      const { opts, ids } = optsWithIds();
+      (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
+        "confirmed",
+      );
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const onSendFailure = sendFailureListener(opts);
+
+      capturedMessageListOpts!.onDeleteClick(5);
+      const deleteId = ids().find((id) => id.endsWith("chat_delete"))!;
+      vi.clearAllMocks();
+
+      onSendFailure(deleteId, "OFFLINE");
+
+      expect(opts.showToast).toHaveBeenCalledTimes(1);
+      expect(opts.showToast).toHaveBeenCalledWith(expect.stringContaining("delete"), "error");
+      ctrl.destroyChannel();
+    });
+
+    it("reports one edit error and restores the text when the socket drops mid-frame", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const { opts } = optsWithIds();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const onState = (opts.ws.onStateChange as ReturnType<typeof vi.fn>).mock.calls[0]![0] as (
+        state: string,
+      ) => void;
+
+      capturedMessageInputOpts!.onEditMessage(5, "new content");
+      vi.clearAllMocks();
+
+      // A half-open socket accepts the frame into its buffer, then the link
+      // drops: the frame can never be echoed.
+      onState("reconnecting");
+
+      await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "new content"));
+      await vi.waitFor(() => expect(opts.showToast).toHaveBeenCalledTimes(1));
+      expect(opts.showToast).toHaveBeenCalledWith(
+        messagingText("toast.editFailedRestored"),
+        "error",
+      );
+      ctrl.destroyChannel();
+    });
+
+    it("restores the newest of several edits lost when the socket drops", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const { opts } = optsWithIds();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const onState = (opts.ws.onStateChange as ReturnType<typeof vi.fn>).mock.calls[0]![0] as (
+        state: string,
+      ) => void;
+
+      capturedMessageInputOpts!.onEditMessage(5, "fix typo");
+      capturedMessageInputOpts!.onEditMessage(5, "fix typo properly");
+      vi.clearAllMocks();
+
+      onState("reconnecting");
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockStartEdit).toHaveBeenCalledTimes(1);
+      expect(mockStartEdit).toHaveBeenCalledWith(5, "fix typo properly");
+      expect(opts.showToast).toHaveBeenCalledTimes(1);
+      expect(opts.showToast).toHaveBeenCalledWith(
+        messagingText("toast.editFailedRestored"),
+        "error",
+      );
+      ctrl.destroyChannel();
+    });
+
+    it("drops an unechoed edit and delete silently after the expiry, so a later drop shows no error", async () => {
+      vi.useFakeTimers();
+      try {
+        mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+        const { opts } = optsWithIds();
+        (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
+          "confirmed",
+        );
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        capturedMessageInputOpts!.onEditMessage(5, "new content");
+        capturedMessageListOpts!.onDeleteClick(6);
+
+        // The user moves on; the server unsubscribes channel 42's topic
+        // before the echoes are delivered, so none ever arrives.
+        ctrl.mountChannel(43, "random");
+        vi.advanceTimersByTime(90_000);
+        vi.clearAllMocks();
+
+        ctrl.mountChannel(42, "general");
+        const onState = (opts.ws.onStateChange as ReturnType<typeof vi.fn>).mock.calls[0]![0] as (
+          state: string,
+        ) => void;
+        onState("reconnecting");
+        await vi.runAllTimersAsync();
+
+        expect(opts.showToast).not.toHaveBeenCalled();
+        expect(mockStartEdit).not.toHaveBeenCalled();
+        ctrl.destroyChannel();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps a draft the user started when a failed edit comes back late", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const { opts } = optsWithIds();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const onState = (opts.ws.onStateChange as ReturnType<typeof vi.fn>).mock.calls[0]![0] as (
+        state: string,
+      ) => void;
+
+      capturedMessageInputOpts!.onEditMessage(5, "new content");
+      vi.clearAllMocks();
+      mockIsIdle.mockReturnValue(false);
+
+      onState("reconnecting");
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(opts.showToast).toHaveBeenCalledTimes(1);
+      expect(opts.showToast).toHaveBeenCalledWith(messagingText("toast.editFailed"), "error");
+      expect(mockStartEdit).not.toHaveBeenCalled();
+      ctrl.destroyChannel();
+    });
+
+    it("does not toast success and resolves the entry when the edit echo arrives", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const { opts, ids } = optsWithIds();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const onSendFailure = sendFailureListener(opts);
+      const onEdited = echoListener(opts, "chat_edited");
+
+      capturedMessageInputOpts!.onEditMessage(5, "new content");
+      const editId = ids().find((id) => id.endsWith("chat_edit"))!;
+
+      // The frame is echoed back: the tracker must drop it so a later error
+      // carrying a reused id cannot be misattributed to this edit.
+      onEdited({ message_id: 5, channel_id: 42 });
+      vi.clearAllMocks();
+      onSendFailure(editId, "NETWORK");
+
+      expect(opts.showToast).not.toHaveBeenCalled();
+      expect(mockStartEdit).not.toHaveBeenCalled();
+      ctrl.destroyChannel();
     });
   });
 });

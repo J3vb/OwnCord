@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // The composite-close contract, as three properties. Before B3-3's rewrite
@@ -117,8 +118,10 @@ type fakeDispatchHub struct {
 	done    chan struct{}
 }
 
-func (h *fakeDispatchHub) GracefulStopContext(context.Context) { close(h.stopped) }
-func (h *fakeDispatchHub) Done() <-chan struct{}               { return h.done }
+func (h *fakeDispatchHub) GracefulStopContext(context.Context, ws.RestartReason) {
+	close(h.stopped)
+}
+func (h *fakeDispatchHub) Done() <-chan struct{} { return h.done }
 
 // TestStopHub_WaitsForTheDispatchLoopToExit pins the join the hub close step
 // adds after GracefulStopContext. That call only signals the loop; without
@@ -127,7 +130,7 @@ func (h *fakeDispatchHub) Done() <-chan struct{}               { return h.done }
 func TestStopHub_WaitsForTheDispatchLoopToExit(t *testing.T) {
 	hub := &fakeDispatchHub{stopped: make(chan struct{}), done: make(chan struct{})}
 	returned := make(chan error, 1)
-	go func() { returned <- stopHub(context.Background(), hub) }()
+	go func() { returned <- stopHub(context.Background(), hub, ws.RestartReasonShutdown) }()
 
 	<-hub.stopped
 	select {
@@ -155,7 +158,7 @@ func TestStopHub_BoundedByTheShutdownBudget(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := stopHub(ctx, hub)
+	err := stopHub(ctx, hub, ws.RestartReasonShutdown)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("stopHub() = %v, want it to report the expired budget", err)
 	}

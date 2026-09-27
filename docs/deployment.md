@@ -1514,8 +1514,9 @@ The server handles `Ctrl+C` (SIGINT) and `SIGTERM`:
    drains in-flight HTTP handlers; a file upload or download still in
    progress gets up to 20 seconds to finish and is then cut, so the drain
    stays inside the 30-second budget
-2. Stops the hub on a budget of its own: sends the restart notice,
-   stops the LiveKit process and closes every WebSocket connection
+2. Stops the hub on a budget of its own: sends the restart notice, waits
+   out the notice window, closes every WebSocket connection and only then
+   stops the LiveKit process, so clients leave voice while it is still up
 3. Unregisters the signal handler, so a second `Ctrl+C` during steps 1–2 does
    not cut the drain short
 4. Joins the maintenance loop, flushes the audit queue and drains event

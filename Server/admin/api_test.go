@@ -17,6 +17,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // newTestModService builds a real ModerationService over the test database so
@@ -1449,11 +1450,11 @@ type memberUpdateCall struct {
 }
 
 type restartCall struct {
-	reason       string
+	reason       ws.RestartReason
 	delaySeconds int
 }
 
-func (m *mockHub) BroadcastServerRestart(reason string, delaySeconds int) {
+func (m *mockHub) BroadcastServerRestart(reason ws.RestartReason, delaySeconds int) {
 	m.restartCalls = append(m.restartCalls, restartCall{reason, delaySeconds})
 }
 

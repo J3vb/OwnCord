@@ -15,6 +15,8 @@ import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { messagingText } from "../../i18n/messaging";
+import { shellText } from "../../i18n/shell";
+import { uiStore } from "@stores/ui.store";
 
 /** Cached value of the developerMode preference. Invalidated on pref change. */
 let developerModeEnabled = loadPref<boolean>("developerMode", false);
@@ -365,8 +367,17 @@ export function renderMessage(
         "aria-label": messagingText("action.delete"),
       });
       deleteBtn.appendChild(createIcon("trash-2", 16));
-      deleteBtn.title = messagingText("action.delete");
-      deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
+      const connectionStatus = uiStore.getState().connectionStatus;
+      if (connectionStatus === "connected") {
+        deleteBtn.title = messagingText("action.delete");
+        deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
+      } else {
+        deleteBtn.disabled = true;
+        deleteBtn.setAttribute("aria-disabled", "true");
+        deleteBtn.title = shellText(
+          connectionStatus === "reconnecting" ? "channel.reconnecting" : "channel.notConnected",
+        );
+      }
       actionsBar.appendChild(deleteBtn);
     }
 

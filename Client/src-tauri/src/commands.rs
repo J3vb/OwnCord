@@ -1,5 +1,4 @@
 use serde_json::Value;
-use tauri_plugin_store::StoreExt;
 
 use crate::constants::{CERTS_STORE, IDENTITY_PINS_STORE, SETTINGS_STORE};
 
@@ -33,8 +32,7 @@ fn is_settings_key_allowed(key: &str) -> bool {
 
 #[tauri::command]
 pub fn get_settings(app: tauri::AppHandle) -> Result<Value, String> {
-    let store = app
-        .store(SETTINGS_STORE)
+    let store = crate::json_store::open(&app, SETTINGS_STORE)
         .map_err(|e| format!("failed to open settings store: {e}"))?;
 
     let keys = store.keys();
@@ -60,7 +58,7 @@ pub fn save_settings(app: tauri::AppHandle, key: String, value: Value) -> Result
         return Err(format!("unknown settings key: {key}"));
     }
 
-    let store = app.store(SETTINGS_STORE).map_err(|e| {
+    let store = crate::json_store::open(&app, SETTINGS_STORE).map_err(|e| {
         log_cmd_err(
             "save_settings",
             format!("failed to open settings store: {e}"),
@@ -84,8 +82,7 @@ pub fn get_cert_fingerprint(app: tauri::AppHandle, host: String) -> Result<Optio
         return Err("host must not be empty".into());
     }
 
-    let store = app
-        .store(CERTS_STORE)
+    let store = crate::json_store::open(&app, CERTS_STORE)
         .map_err(|e| format!("failed to open certs store: {e}"))?;
 
     let value = store.get(&host).and_then(|v| {
@@ -156,8 +153,7 @@ pub fn store_identity_pin(
         return Err("pin contains invalid characters".into());
     }
 
-    let store = app
-        .store(IDENTITY_PINS_STORE)
+    let store = crate::json_store::open(&app, IDENTITY_PINS_STORE)
         .map_err(|e| format!("failed to open identity pins store: {e}"))?;
 
     let store_key = identity_pin_key(&host, &user_id);
@@ -193,8 +189,7 @@ pub fn get_identity_pin(
         return Err("user_id must not be empty".into());
     }
 
-    let store = app
-        .store(IDENTITY_PINS_STORE)
+    let store = crate::json_store::open(&app, IDENTITY_PINS_STORE)
         .map_err(|e| format!("failed to open identity pins store: {e}"))?;
 
     let value = store.get(identity_pin_key(&host, &user_id)).and_then(|v| {

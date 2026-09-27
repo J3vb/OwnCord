@@ -2323,6 +2323,45 @@ describe("LiveKitSession", () => {
       mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
     });
 
+    // A gated join publishes no mic and attaches no RNNoise processor, and a
+    // device switch while gated no longer attaches one either (OC-0474), so
+    // the first unmute is the only place left to give the track its processor.
+    it.each([
+      [true, "applies"],
+      [false, "does not apply"],
+    ])(
+      "with enhancedNoiseSuppression=%s, the first unmute after a muted join %s the noise suppressor",
+      async (enhancedNS) => {
+        mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+          key === "enhancedNoiseSuppression" ? enhancedNS : defaultVal,
+        );
+        const noiseSpy = vi
+          .spyOn((session as any)._audioPipeline, "applyNoiseSuppressor")
+          .mockResolvedValue(undefined);
+        mockVoiceState.localMuted = true;
+        try {
+          await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
+          expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+          expect(noiseSpy).not.toHaveBeenCalled();
+
+          mockVoiceState.localMuted = false;
+          session.setMuted(false);
+          await vi.advanceTimersByTimeAsync(0);
+
+          expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+          if (enhancedNS) {
+            expect(noiseSpy).toHaveBeenCalledTimes(1);
+          } else {
+            expect(noiseSpy).not.toHaveBeenCalled();
+          }
+        } finally {
+          mockVoiceState.localMuted = false;
+          noiseSpy.mockRestore();
+          mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+        }
+      },
+    );
+
     it("mode reconnect with mic error logs warn but does NOT call error callback", async () => {
       const errorCb = vi.fn();
       session.setOnError(errorCb);

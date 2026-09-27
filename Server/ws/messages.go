@@ -315,8 +315,8 @@ type channelDeletePayload struct {
 }
 
 type serverRestartPayload struct {
-	Reason       string `json:"reason"`
-	DelaySeconds int    `json:"delay_seconds"`
+	Reason       RestartReason `json:"reason"`
+	DelaySeconds int           `json:"delay_seconds"`
 }
 
 // callSignalPayload carries an ephemeral DM call signal (call_incoming /
@@ -926,7 +926,7 @@ func buildCallSignal(msgType string, channelID, fromUserID int64, username strin
 }
 
 // buildServerRestartMsg constructs a server_restart broadcast.
-func buildServerRestartMsg(reason string, delaySeconds int) []byte {
+func buildServerRestartMsg(reason RestartReason, delaySeconds int) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeServerRestart,
 		Payload: serverRestartPayload{

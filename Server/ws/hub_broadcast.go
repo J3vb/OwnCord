@@ -123,9 +123,9 @@ func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients [
 }
 
 // BroadcastServerRestart sends a server_restart message to all connected clients.
-// reason describes why the server is restarting (e.g., "update").
-// delaySeconds tells clients how long until the server actually shuts down.
-func (h *Hub) BroadcastServerRestart(reason string, delaySeconds int) {
+// reason says why the server is restarting; delaySeconds tells clients how
+// long until the socket drops, and 0 cancels an earlier announcement.
+func (h *Hub) BroadcastServerRestart(reason RestartReason, delaySeconds int) {
 	h.BroadcastToAll(buildServerRestartMsg(reason, delaySeconds))
 }
 

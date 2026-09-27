@@ -10,6 +10,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/updater"
+	"github.com/J3vb/OwnCord/Server/ws"
 	"golang.org/x/mod/semver"
 )
 
@@ -162,7 +163,7 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 // by applyStagedUpdate's deferred guard).
 func applyAndRestart(ctx context.Context, database *db.DB, actor int64, version string, hub HubBroadcaster, exePath, oldPath, newPath, stagedHash string) {
 	if hub != nil {
-		hub.BroadcastServerRestart("update", 5)
+		hub.BroadcastServerRestart(ws.RestartReasonUpdate, 5)
 	}
 	time.Sleep(applyRestartDelay)
 	if applyStagedUpdate(hub, exePath, oldPath, newPath, stagedHash) {
@@ -215,7 +216,7 @@ func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash
 	committed := false
 	defer func() {
 		if !committed && hub != nil {
-			hub.BroadcastServerRestart("update_aborted", 0)
+			hub.BroadcastServerRestart(ws.RestartReasonUpdateAborted, 0)
 		}
 	}()
 

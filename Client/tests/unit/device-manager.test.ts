@@ -320,6 +320,27 @@ describe("DeviceManager", () => {
       expect(pipeline.applyNoiseSuppressor).toHaveBeenCalled();
     });
 
+    it("OC-0474: leaves RNNoise alone on a device switch while the mic is gated", async () => {
+      // A muted track keeps any attached processor across the switch and
+      // re-inits it on unmute; attaching one now only builds a live RNNoise
+      // context on the ended track for the whole muted period.
+      mockVoiceState.localMuted = true;
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "enhancedNoiseSuppression") return true;
+        return defaultVal;
+      });
+      const pipeline = {
+        setupAudioPipeline: vi.fn(),
+        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
+        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
+      } as any;
+      dm.setRoom(mockRoom);
+      dm.setAudioPipeline(pipeline);
+      await dm.switchInputDevice("device-1");
+      expect(pipeline.applyNoiseSuppressor).not.toHaveBeenCalled();
+      expect(pipeline.removeNoiseSuppressor).not.toHaveBeenCalled();
+    });
+
     it("removes noise suppression when not enabled", async () => {
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
         if (key === "enhancedNoiseSuppression") return false;
