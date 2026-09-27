@@ -58,6 +58,7 @@ export default defineConfig({
         "long-session.spec.ts",
         "b9-content-consent.spec.ts",
         "b9-journeys.spec.ts",
+        "diagnostics-log.spec.ts",
       ],
     },
     {

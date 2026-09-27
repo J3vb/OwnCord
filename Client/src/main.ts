@@ -114,6 +114,12 @@ document.addEventListener("click", (e) => {
 // Install global error handlers first
 installGlobalErrorHandlers();
 
+// Start log persistence immediately after: an early startup failure (a missing
+// #app element, a failing lazy chunk) must still reach the on-disk log, not
+// just the in-memory ring. The listener is installed before the first render
+// and back-fills the bootstrap window (CLI-03).
+void initLogPersistence();
+
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
 
@@ -1183,8 +1189,5 @@ function handleMessageDeepLink(channelId: number, messageId: number): void {
   jumpToMessage(channelId, messageId);
 }
 void desktop.deepLinks.init(handleInviteDeepLink, handleMessageDeepLink);
-
-// Initialize log persistence to disk (fire-and-forget)
-void initLogPersistence();
 
 log.info("OwnCord client initialized");

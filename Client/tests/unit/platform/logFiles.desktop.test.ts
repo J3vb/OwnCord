@@ -209,3 +209,75 @@ describe("LogFiles.readAll", () => {
     await expect(mod.logFiles.readAll()).rejects.toThrow("permission denied");
   });
 });
+
+// The support bundle's native (Rust) log half (CLI-03).
+describe("LogFiles.readNative", () => {
+  test("reads the active and rotated Rust logs, newest first, and nothing else", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    readDir.mockResolvedValue([
+      { name: "owncord-client_2026-09-19_10-00-00.log", isDirectory: false },
+      { name: "owncord-client.log", isDirectory: false },
+      { name: "notes.txt", isDirectory: false },
+      { name: "owncord-client-backup.txt", isDirectory: false },
+      { name: "subdir", isDirectory: true },
+    ]);
+    readTextFile.mockImplementation((path: string) => Promise.resolve(`contents of ${path}\n`));
+
+    await expect(mod.logFiles.readNative()).resolves.toEqual([
+      { name: "owncord-client.log", text: "contents of /logs/owncord-client.log\n" },
+      {
+        name: "owncord-client_2026-09-19_10-00-00.log",
+        text: "contents of /logs/owncord-client_2026-09-19_10-00-00.log\n",
+      },
+    ]);
+  });
+
+  test("caps each file to its last 2 MB so the store-only zip stays small", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    readDir.mockResolvedValue([{ name: "owncord-client.log", isDirectory: false }]);
+    const big = "a".repeat((2 << 20) + 10) + "TAIL";
+    readTextFile.mockResolvedValue(big);
+
+    const [file] = await mod.logFiles.readNative();
+
+    expect(file!.text.length).toBe(2 << 20);
+    expect(file!.text.endsWith("TAIL")).toBe(true);
+    expect(file!.text.startsWith("a")).toBe(true);
+  });
+
+  test("is empty when the app log directory does not exist yet", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    readDir.mockRejectedValue(new Error("No such file or directory (os error 2)"));
+
+    await expect(mod.logFiles.readNative()).resolves.toEqual([]);
+  });
+
+  test("keeps the files it read when a rotated file vanishes mid-read", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    readDir.mockResolvedValue([
+      { name: "owncord-client.log", isDirectory: false },
+      { name: "owncord-client_2026-09-19_10-00-00.log", isDirectory: false },
+    ]);
+    readTextFile.mockImplementation((path: string) =>
+      path.endsWith("owncord-client.log")
+        ? Promise.resolve("active\n")
+        : Promise.reject(new Error("No such file or directory (os error 2)")),
+    );
+
+    await expect(mod.logFiles.readNative()).resolves.toEqual([
+      { name: "owncord-client.log", text: "active\n" },
+    ]);
+  });
+
+  test("is empty, not a rejection, when a read fails for another reason", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    readDir.mockRejectedValue(new Error("permission denied"));
+
+    await expect(mod.logFiles.readNative()).resolves.toEqual([]);
+  });
+});

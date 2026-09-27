@@ -46,13 +46,14 @@ and written on the user's machine, and makes no server call. The zip is
 store-only and written in TypeScript (`Client/src/lib/supportBundle.ts`,
 loaded lazily from the button); there is no Rust command behind it.
 
-| File                     | Contents                                                                                                                                                                                               |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `README.txt`             | what the bundle holds and the verbatim-logs warning below                                                                                                                                              |
-| `app.json`               | client version and export time                                                                                                                                                                         |
-| `settings.json`          | an **allowlist** of `owncord:settings:` keys (display, accessibility, notification, voice) and the listed fields of each saved server profile (name, host, username, sign-in options, last connection) |
-| `voice-diagnostics.json` | the voice session state the Logs tab shows                                                                                                                                                             |
-| `logs/*.jsonl`           | the rotated client log files (at most five days)                                                                                                                                                       |
+| File                       | Contents                                                                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `README.txt`               | what the bundle holds and the verbatim-logs warning below                                                                                                                                              |
+| `app.json`                 | client version, export time, OS (`navigator.platform`) and webview (`navigator.userAgent`); `serverVersion` is always null, since the export makes no server call                                      |
+| `settings.json`            | an **allowlist** of `owncord:settings:` keys (display, accessibility, notification, voice) and the listed fields of each saved server profile (name, host, username, sign-in options, last connection) |
+| `voice-diagnostics.json`   | the voice session state the Logs tab shows                                                                                                                                                             |
+| `logs/*.jsonl`             | the rotated client log files (at most five days)                                                                                                                                                       |
+| `logs/owncord-client*.log` | the native host log (the Rust `owncord-client.log` plus rotated `owncord-client_<date>.log`), newest first, each tail-capped at 2 MB                                                                   |
 
 A settings key that is not on the allowlist never enters the bundle, whatever
 it holds; device ids and the custom status text are left out on purpose. The

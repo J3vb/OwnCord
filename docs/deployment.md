@@ -1382,7 +1382,12 @@ directory, which is the route in when the window never came up: the log then
 says `frontend not ready` 30 seconds after start, and a crash is logged as a
 `[panic]` line with a backtrace.
 
-Ask for the exported bundle first; it carries the log plus the diagnostic
+The desktop client keeps **two** logs, the webview's own rotating JSONL log and
+the native log above, and the exported bundle carries both;
+[Desktop client support bundle](architecture/diagnostics.md#desktop-client-support-bundle)
+lists every file it holds.
+
+Ask for the exported bundle first; it carries both logs plus the diagnostic
 sections the client can collect on its own.
 
 ## Verifying a Download
