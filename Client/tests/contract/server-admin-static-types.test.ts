@@ -7,7 +7,7 @@
 // non-strict checkJs program and a shrink-only baseline, enforced by
 // `npm run check:admin-types`. This drives the ratchet's own logic so a broken
 // comparator cannot silently pass every PR, and pins the property the check
-// exists for: 0 TS2304 (undefined global).
+// exists for: 0 TS2304/TS2552 (undefined global).
 import { describe, expect, it } from "vitest";
 import {
   compare,
@@ -79,12 +79,14 @@ describe("the type-check ratchet", () => {
     ).toBe("2339:Property 'value' does not exist on type 'A | {}'.");
   });
 
-  it("fails an undefined name (TS2304) even when the baseline lists it", () => {
-    const id = "2304:Cannot find name 'toast'.";
-    const { added } = compare(
-      scanOf({ file: "admin/static/js/a.js", code: 2304, message: "Cannot find name 'toast'." }),
-      { files: { "admin/static/js/a.js": { [id]: 1 } } },
-    );
+  it.each([
+    [2304, "Cannot find name 'toast'."],
+    [2552, "Cannot find name 'tost'. Did you mean 'toast'?"],
+  ])("fails an undefined name (TS%i) even when the baseline lists it", (code, message) => {
+    const id = `${code}:${message}`;
+    const { added } = compare(scanOf({ file: "admin/static/js/a.js", code, message }), {
+      files: { "admin/static/js/a.js": { [id]: 1 } },
+    });
     expect(added).toEqual([{ file: "admin/static/js/a.js", identity: id, actual: 1, baseline: 0 }]);
   });
 
@@ -102,19 +104,22 @@ describe("the type-check ratchet", () => {
   });
 
   it("seeds the whole scan only when there is no baseline file", () => {
-    const one = scanOf({
+    const value = {
       file: "admin/static/js/a.js",
       code: 2339,
       message: "Property 'value' does not exist on type 'HTMLElement'.",
-    });
-    expect(shrink(one, baseline).files).toEqual({
+    };
+    const files = { ...value, message: "Property 'files' does not exist on type 'HTMLElement'." };
+    const scan = scanOf(value, value, value, files);
+    expect(shrink(scan, baseline).files).toEqual({
       "admin/static/js/a.js": {
-        "2339:Property 'value' does not exist on type 'HTMLElement'.": 1,
+        "2339:Property 'value' does not exist on type 'HTMLElement'.": 2,
       },
     });
-    expect(shrink(one, null).files).toEqual({
+    expect(shrink(scan, null).files).toEqual({
       "admin/static/js/a.js": {
-        "2339:Property 'value' does not exist on type 'HTMLElement'.": 1,
+        "2339:Property 'files' does not exist on type 'HTMLElement'.": 1,
+        "2339:Property 'value' does not exist on type 'HTMLElement'.": 3,
       },
     });
   });

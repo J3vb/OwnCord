@@ -24,9 +24,9 @@
 //
 // Limits, stated so a green run is not read as more than it is: this proves
 // nothing about runtime behaviour, the two TS2362/TS2363 arithmetic errors are
-// noise from untyped DOM reads, and 0 TS2304 (cannot find name) is the signal
-// worth keeping — it stays at zero, so a typo'd global is caught. compare()
-// fails every TS2304 whatever the baseline says.
+// noise from untyped DOM reads, and 0 TS2304/TS2552 (cannot find name) is the
+// signal worth keeping — it stays at zero, so a typo'd global is caught.
+// compare() fails every TS2304 and TS2552 whatever the baseline says.
 //
 // Reseeding: a TypeScript or lib.dom bump can still reword a message, which
 // shows up as a stale entry plus an added one with the same count. Only then,
@@ -49,7 +49,7 @@ const DOC = [
   "This list only shrinks: scripts/check-admin-types.mjs fails a new identity or a higher count,",
   "and fails a listed identity the source no longer produces until",
   "`node scripts/check-admin-types.mjs --update` removes it. Keys are file + code + normalised message, never",
-  "a line, so an edit above an error does not churn the file. TS2304 (undefined name) is pinned at zero.",
+  "a line, so an edit above an error does not churn the file. TS2304/TS2552 (undefined name) are pinned at zero.",
 ].join(" ");
 
 /**
@@ -116,7 +116,7 @@ export function loadBaseline() {
 /**
  * Compare a scan with the baseline. `added` are identities above their baseline
  * count (every instance, since which occurrence is new cannot be known), and
- * every TS2304 whatever its baseline; `stale` are baseline identities above the
+ * every TS2304/TS2552 whatever its baseline; `stale` are baseline identities above the
  * scanned count.
  */
 export function compare(scan, baseline) {
@@ -126,7 +126,7 @@ export function compare(scan, baseline) {
   const stale = [];
   for (const [file, byIdentity] of Object.entries(actual)) {
     for (const [id, n] of Object.entries(byIdentity)) {
-      const cap = id.startsWith("2304:") ? 0 : (allowed[file]?.[id] ?? 0);
+      const cap = /^(2304|2552):/.test(id) ? 0 : (allowed[file]?.[id] ?? 0);
       if (n > cap) added.push({ file, identity: id, actual: n, baseline: cap });
     }
   }

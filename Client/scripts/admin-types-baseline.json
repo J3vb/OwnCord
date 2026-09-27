@@ -1,5 +1,5 @@
 {
-  "_doc": "Admin-panel checkJs errors, keyed file -> \"<code>:<normalised message>\" -> count. This list only shrinks: scripts/check-admin-types.mjs fails a new identity or a higher count, and fails a listed identity the source no longer produces until `node scripts/check-admin-types.mjs --update` removes it. Keys are file + code + normalised message, never a line, so an edit above an error does not churn the file. TS2304 (undefined name) is pinned at zero.",
+  "_doc": "Admin-panel checkJs errors, keyed file -> \"<code>:<normalised message>\" -> count. This list only shrinks: scripts/check-admin-types.mjs fails a new identity or a higher count, and fails a listed identity the source no longer produces until `node scripts/check-admin-types.mjs --update` removes it. Keys are file + code + normalised message, never a line, so an edit above an error does not churn the file. TS2304/TS2552 (undefined name) are pinned at zero.",
   "files": {
     "admin/static/js/boot.js": {
       "2339:Property 'focus' does not exist on type 'Element'.": 1,
