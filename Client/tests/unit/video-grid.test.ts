@@ -1204,6 +1204,24 @@ describe("VideoGrid", () => {
       }
     });
 
+    it("removing a tile closes its menu and drops its menu listeners", async () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+      const removed = cell(SCREEN);
+      removed.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      await vi.dynamicImportSettled();
+      expect(document.querySelector(".video-tile-menu")).not.toBeNull();
+
+      grid.removeStream(SCREEN);
+      expect(document.querySelector(".video-tile-menu")).toBeNull();
+
+      removed.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      removed
+        .querySelector(".video-cell-select")!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true }));
+      await vi.dynamicImportSettled();
+      expect(document.querySelector(".video-tile-menu")).toBeNull();
+    });
+
     it("keeps the tile menu inside the window", async () => {
       const width = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(200);
       const height = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(220);

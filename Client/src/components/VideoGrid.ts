@@ -176,6 +176,8 @@ interface CellEntry {
   el: HTMLDivElement;
   config?: TileConfig;
   trackCleanup?: () => void;
+  /** Owns the tile's menu listeners and its open menu; goes with the tile. */
+  listeners: Disposable;
   /** The person's name in the control labels and the tile menu. */
   name: string;
   /** Draw a volume set elsewhere (remote tiles only). */
@@ -192,8 +194,6 @@ export function createVideoGrid(): VideoGridComponent {
   let resizeRafId = 0;
   let callbacks: VideoGridCallbacks = {};
   let speaking: ReadonlySet<number> = new Set();
-  /** Owns listeners that outlive one tile (the tile context menu). */
-  const disposable = new Disposable();
 
   /** Apply JS-calculated tile sizes to all grid-mode cells. */
   function applyGridSizes(): void {
@@ -694,7 +694,7 @@ export function createVideoGrid(): VideoGridComponent {
       if (focusedTileId !== null && focusedTileId !== userId) setFocusedTile(userId);
     });
 
-    const entry: CellEntry = { el: cell, config, name: "" };
+    const entry: CellEntry = { el: cell, config, listeners: new Disposable(), name: "" };
     // Remote tiles: volume, Stop watching and the tile menu.
     if (config !== undefined && !config.isSelf) {
       const volume = buildVolumeControls(config);
@@ -715,7 +715,7 @@ export function createVideoGrid(): VideoGridComponent {
             y,
             name: entry.name,
             config,
-            signal: disposable.signal,
+            signal: entry.listeners.signal,
             onVolumeChange: (isScreenshare, volume, muted) =>
               applyVolume(config.audioUserId, isScreenshare, volume, muted),
             onStopWatching: () => setStopped(userId, true),
@@ -727,9 +727,9 @@ export function createVideoGrid(): VideoGridComponent {
           e.preventDefault();
           openMenu(e.clientX, e.clientY);
         },
-        { signal: disposable.signal },
+        { signal: entry.listeners.signal },
       );
-      openMenuOnKeyboard(cell, openMenu, disposable.signal);
+      openMenuOnKeyboard(cell, openMenu, entry.listeners.signal);
     }
 
     // Your own screen share: say what is going out instead of showing a
@@ -801,6 +801,7 @@ export function createVideoGrid(): VideoGridComponent {
       entry.trackCleanup();
       entry.trackCleanup = undefined;
     }
+    entry.listeners.destroy();
 
     const video = entry.el.querySelector("video");
     if (video !== null) video.srcObject = null;
@@ -886,6 +887,7 @@ export function createVideoGrid(): VideoGridComponent {
         entry.trackCleanup();
         entry.trackCleanup = undefined;
       }
+      entry.listeners.destroy();
       const video = entry.el.querySelector("video");
       if (video !== null) video.srcObject = null;
     }
@@ -893,7 +895,6 @@ export function createVideoGrid(): VideoGridComponent {
     focusedTileId = null;
     people = [];
     personCells.clear();
-    disposable.destroy();
 
     if (root !== null) {
       root.remove();
