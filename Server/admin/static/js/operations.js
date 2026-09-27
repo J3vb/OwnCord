@@ -76,8 +76,9 @@ async function downloadSupportBundle(){
    and is never drawn or counted as healthy.
    The dashboard answers "is anything wrong?" first: one headline, a card per
    active warning, and every signal in a disclosure that starts open only when
-   a warning is active or a signal is a warning or critical; unknown alone shows as a grey "not measured"
-   chip. The disclosures never touch the #section hash. */
+   a warning is active or a signal is a warning or critical; unknown alone
+   shows as a grey "not measured" chip. The disclosures never touch the
+   #section hash. */
 const ATTN_STATUS={ok:['badge-green','Healthy'],warning:['badge-yellow','Warning'],critical:['badge-red','Critical'],unknown:['badge-muted','Unknown']};
 function attnBadge(s){const b=ATTN_STATUS[s]||ATTN_STATUS.unknown;return'<span class="badge '+b[0]+'">'+b[1]+'</span>'}
 const ATTN_TIME=new Intl.DateTimeFormat(undefined,{hour:'numeric',minute:'2-digit'});
