@@ -6,9 +6,13 @@
 // desktop portal's dialog is the picker (and the consent) — so the dialog
 // shows only the quality step and hands "portal" to the host.
 //
-// The dialog itself is `components/ScreenSharePicker.ts`; this module adapts
-// its result to the host capture and the shared publish settings, so the
-// per-share quality the user picked drives both.
+// The dialog itself lives in the UI layer (`components/ScreenSharePicker.ts`).
+// This module is a lower layer and must not import a component (ARCH-06), so
+// the UI registers the dialog through `screenPickerSlot.ts` — the same
+// injection shape as `lib/read-state.ts`'s `setMarkReadSender` — and this
+// module adapts the dialog's result to the host capture and the shared publish
+// settings, so the per-share quality the user picked drives both. With no
+// picker registered (a headless run) a share resolves to null, i.e. cancelled.
 import { desktop } from "../../../platform/desktop";
 import {
   getEffectiveScreenShareFps,
@@ -18,7 +22,7 @@ import {
   getStreamQuality,
 } from "@lib/screenShare";
 import type { NativeVoiceScreenCapture } from "../../../platform/contracts/nativeVoice";
-import { showScreenSharePicker } from "../../../components/ScreenSharePicker";
+import { getScreenSourcePicker } from "./screenPickerSlot";
 import { captureOptions } from "./screenTrack";
 
 /** A confirmed share: the host source to capture, plus what it should be
@@ -35,8 +39,10 @@ export interface ScreenSharePick {
 /** Resolve the source to share and its settings, or null when the user closed
  *  the picker. */
 export async function pickScreenSource(): Promise<ScreenSharePick | null> {
+  const showPicker = getScreenSourcePicker();
+  if (showPicker === null) return null;
   const listed = await desktop.nativeVoice.screenSources();
-  const pick = await showScreenSharePicker({
+  const pick = await showPicker({
     sources: listed.sources,
     portal: listed.portal,
     defaultQuality: getStreamQuality(),
