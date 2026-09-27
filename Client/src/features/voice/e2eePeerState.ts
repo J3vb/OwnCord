@@ -149,6 +149,7 @@ export class E2EEPeerState {
     const publishedIdentity =
       membersStore.getState().members.get(userId)?.identityPublicKey ?? null;
     const host = this.deps.getServerHost();
+    const sessionGeneration = this._sessionGeneration;
 
     // Resolve the persisted pin FIRST — before any legacy shortcut. A server
     // must not be able to strip a pinned peer's published key (or swap it) to
@@ -233,7 +234,7 @@ export class E2EEPeerState {
       // Fail closed: peer has an identity key but no valid signature (MITM).
       // Buffered like the missing-key block so a re-pin replays and
       // re-verifies it rather than clearing the badge (OC-0212).
-      this._blockedAnnounces.set(userId, { publicKeyBase64, signatureBase64 });
+      if (isCurrent()) this._blockedAnnounces.set(userId, { publicKeyBase64, signatureBase64 });
       this.setPeerVerificationIfCurrent(isCurrent, {
         userId,
         status: "mismatch",
@@ -273,7 +274,9 @@ export class E2EEPeerState {
       (!pinWriteFailed || isCurrent()) &&
       this._keyChangedPeers.get(userId) !== publishedIdentity
     ) {
-      this._keyChangedPeers.set(userId, publishedIdentity);
+      if (this._sessionGeneration === sessionGeneration) {
+        this._keyChangedPeers.set(userId, publishedIdentity);
+      }
       const member = membersStore.getState().members.get(userId);
       showToast(
         voiceText("identity.keyChanged", {

@@ -165,6 +165,41 @@ describe("verifyPeerAnnounce (F3 TOFU)", () => {
     expect(setPeerVerification).not.toHaveBeenCalled();
   });
 
+  it("notifies but records nothing for the next call when the session ends during the re-pin", async () => {
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: "old-id" });
+    members.set(PEER, { identityPublicKey: "new-id", username: "alice" });
+    const { peers, bumpSession } = setup();
+    const isCurrent = peers.peerAttemptIsCurrent(PEER);
+    vi.mocked(storeIdentityPin).mockImplementationOnce(async () => {
+      bumpSession();
+      peers.keyChangedPeers.clear();
+      return "stored";
+    });
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", isCurrent);
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(peers.keyChangedPeers.size).toBe(0);
+
+    // Next call: the announce matches the new pin, so the peer is plainly verified.
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: "new-id" });
+    await expect(
+      peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", peers.peerAttemptIsCurrent(PEER)),
+    ).resolves.toBe(true);
+    expect(lastVerification()).toMatchObject({ status: "verified" });
+  });
+
+  it("does not buffer a bad-signature announce whose check outlived the session", async () => {
+    members.set(PEER, { identityPublicKey: "id" });
+    const { peers, bumpSession } = setup();
+    const isCurrent = peers.peerAttemptIsCurrent(PEER);
+    vi.mocked(verifyEphemeralKeySignature).mockImplementationOnce(async () => {
+      bumpSession();
+      return false;
+    });
+    await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", isCurrent)).resolves.toBe(false);
+    expect(peers.blockedAnnounces.size).toBe(0);
+    expect(setPeerVerification).not.toHaveBeenCalled();
+  });
+
   it("rejects a changed identity key whose announce does not verify, keeping the old pin", async () => {
     vi.mocked(getIdentityPin).mockResolvedValueOnce({ status: "pinned", pin: "old-id" });
     vi.mocked(verifyEphemeralKeySignature).mockResolvedValueOnce(false);
