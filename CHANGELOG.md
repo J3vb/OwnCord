@@ -64,6 +64,10 @@ and only when it changes something a contributor or fork holder must do
 
 - The admin audit log's Export CSV could hand a spreadsheet a formula — a cell such as a username starting with `=`, `+`, `-` or `@` now gets a leading `'` so it opens as text.
 
+### Desktop app
+
+- **The desktop client's own log now survives long enough to explain a problem.** It used to delete itself each time it reached ten megabytes; the two previous files are now kept beside it. A crash is written to the log with a backtrace, a window that never finishes loading leaves a `frontend not ready` line after 30 seconds, and the tray icon gains **Open Log Folder** so the log is reachable even when the window is blank.
+
 ## v2.0.0-beta.1
 
 User-visible: the first public beta. You can now recover your own account

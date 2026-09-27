@@ -1374,7 +1374,13 @@ The raw client log lives per user:
 
 - **Windows:** `%LOCALAPPDATA%\com.owncord.client\logs\owncord-client.log`
 - **Linux:** the app log directory, `~/.local/share/com.owncord.client/logs/owncord-client.log`
-  on a default setup (a ten-megabyte rolling file).
+  on a default setup.
+
+It rolls over at ten megabytes and keeps the two previous files beside it as
+`owncord-client_<date>.log`. The tray icon's **Open Log Folder** opens that
+directory, which is the route in when the window never came up: the log then
+says `frontend not ready` 30 seconds after start, and a crash is logged as a
+`[panic]` line with a backtrace.
 
 Ask for the exported bundle first; it carries the log plus the diagnostic
 sections the client can collect on its own.
