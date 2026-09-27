@@ -236,11 +236,11 @@ Screens that pass at 200 %: the connect page (B9-18), the shell's message
 surface, history and composer (B9-3, 18, 19, 21, 22), the search overlay, the
 report dialog (B9-10), and every settings tab the connect page's Settings gear
 (`button.settings-gear`) opens — Appearance, Notifications, Text & Images,
-Accessibility, Voice & Audio, Keybinds, Advanced and Logs (B9-20, 23). The Logs
-tab's controls row and each log message wrap (`LogsTab.ts`), so its filter and
-level selects, its Copy All, Clear Logs and Refresh buttons, and any log line
-holding an unbroken URL, token or hash no longer push `.settings-content` into a
-sideways scroll at 640 CSS px.
+Accessibility, Voice & Audio, Keybinds, Advanced and Diagnostics & logs (B9-20,
+23). The Diagnostics & logs tab's log controls row and each log message wrap
+(`LogsTab.ts`), so its filter and level selects, its Copy All, Clear Logs and
+Refresh buttons, and any log line holding an unbroken URL, token or hash no
+longer push `.settings-content` into a sideways scroll at 640 CSS px.
 
 Navigation at 200 %: below 800 CSS px `responsive.css` collapses
 `.unified-sidebar` to zero width, so the header's menu button opens it as the

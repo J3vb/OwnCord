@@ -35,8 +35,18 @@ const { mockExportSupportBundle } = vi.hoisted(() => ({
 }));
 vi.mock("@lib/supportBundle", () => ({ exportSupportBundle: mockExportSupportBundle }));
 
+import { getSessionDebugInfo } from "@lib/livekitSession";
 import { createLogsTab } from "../../src/components/settings/LogsTab";
 import type { TabName } from "../../src/components/SettingsOverlay";
+
+/** The <details> whose summary starts with `label`. */
+function disclosure(el: HTMLElement, label: string): HTMLDetailsElement {
+  const found = [...el.querySelectorAll("details")].find((d) =>
+    d.querySelector("summary")!.textContent!.startsWith(label),
+  );
+  expect(found, `a disclosure named ${label}`).toBeDefined();
+  return found!;
+}
 
 function makeMockEntry(level: "debug" | "info" | "warn" | "error", msg: string) {
   return {
@@ -77,14 +87,12 @@ describe("LogsTab", () => {
     expect(el.className).toBe("settings-pane active");
   });
 
-  it("renders a Voice Diagnostics header", () => {
+  it("keeps the voice engine state in its own closed disclosure", () => {
     const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
     const el = handle.build();
-    const h3 = [...el.querySelectorAll("h3")].find(
-      (heading) => heading.textContent === "Voice Diagnostics",
-    );
-    expect(h3).toBeDefined();
-    expect(h3!.textContent).toBe("Voice Diagnostics");
+    const voice = disclosure(el, "Voice engine state");
+    expect(voice.open).toBe(false);
+    expect(voice.querySelector(".diag-state")).not.toBeNull();
   });
 
   it("renders log entries from getLogBuffer", () => {
@@ -232,6 +240,20 @@ describe("LogsTab", () => {
     await vi.waitFor(() => {
       expect(diagCopy.textContent).toBe("Failed to copy");
     });
+  });
+
+  it("Copy Diagnostics copies the voice state as of the click, not as of the build", async () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
+    vi.mocked(getSessionDebugInfo).mockReturnValue({ hasRoom: true } as never);
+    Array.from(el.querySelectorAll("button"))
+      .find((b) => b.textContent === "Copy Diagnostics")!
+      .click();
+
+    expect(JSON.parse(writeText.mock.calls[0]![0] as string)).toEqual({ hasRoom: true });
   });
 
   it("filter level persists via owncord:settings prefix", () => {
@@ -440,7 +462,7 @@ describe("LogsTab", () => {
     mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "initial")]);
     const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
     const el = handle.build();
-    expect(el.textContent).toContain("1 entries");
+    expect(el.textContent).toContain("1 entry ·");
 
     mockGetLogBuffer.mockReturnValue([
       makeMockEntry("info", "initial"),
@@ -453,7 +475,7 @@ describe("LogsTab", () => {
     refreshBtn.click();
 
     expect(el.textContent).toContain("2 entries");
-    expect(el.textContent).not.toContain("1 entries");
+    expect(el.textContent).not.toContain("1 entry ·");
   });
 
   it("Refresh Diagnostics button re-renders diagnostics panel", () => {
@@ -464,15 +486,16 @@ describe("LogsTab", () => {
     const diagRefresh = Array.from(el.querySelectorAll("button")).find(
       (b) => b.textContent === "Refresh Diagnostics",
     )!;
-    // Should not throw
+    vi.mocked(getSessionDebugInfo).mockReturnValue({ hasRoom: true } as never);
     diagRefresh.click();
 
-    const diagPanel = el.querySelector("[style*='monospace']");
+    const diagPanel = el.querySelector(".diag-state");
     expect(diagPanel).not.toBeNull();
+    expect(JSON.parse(diagPanel!.textContent!)).toEqual({ hasRoom: true });
   });
 
   // B7-15c: the support bundle is exported locally and the UI says plainly
-  // that log lines go out verbatim.
+  // that log lines go out unredacted.
   describe("support bundle", () => {
     function build() {
       const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
@@ -480,10 +503,12 @@ describe("LogsTab", () => {
       return el;
     }
 
-    it("states that nothing is uploaded and that logs are exported verbatim", () => {
+    it("states that nothing is uploaded and that logs are not redacted", () => {
       const el = build();
-      expect(el.textContent).toContain("Nothing is uploaded");
-      expect(el.textContent).toContain("Log lines are exported verbatim, without redaction");
+      expect(el.textContent).toContain(
+        "Saves a zip of your logs, diagnostics and settings on this computer. Nothing is uploaded.",
+      );
+      expect(el.textContent).toContain("Log lines are not redacted, so read them before sharing.");
       el.remove();
     });
 
@@ -513,6 +538,87 @@ describe("LogsTab", () => {
       btn.click();
       await vi.waitFor(() => expect(status.textContent).toBe("Export failed: disk full"));
       el.remove();
+    });
+  });
+
+  describe("Diagnostics & logs layout", () => {
+    const buttonNamed = (el: HTMLElement, text: string) =>
+      [...el.querySelectorAll("button")].find((b) => b.textContent === text)!;
+
+    it("keeps the client logs in a closed disclosure whose summary counts entries, warnings and errors", () => {
+      mockGetLogBuffer.mockReturnValue([
+        makeMockEntry("info", "a"),
+        makeMockEntry("warn", "b"),
+        makeMockEntry("error", "c"),
+        makeMockEntry("error", "d"),
+      ]);
+      const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
+      const logs = disclosure(el, "Client logs");
+      expect(logs.open).toBe(false);
+      expect(logs.querySelector("summary")!.textContent).toContain(
+        "4 entries · 1 warning · 2 errors",
+      );
+      expect(logs.querySelectorAll(".log-entry")).toHaveLength(4);
+    });
+
+    it("scrolls to the newest entry when the client logs are opened", () => {
+      mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "a"), makeMockEntry("info", "b")]);
+      const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
+      const logs = disclosure(el, "Client logs");
+      const viewer = logs.querySelector<HTMLElement>(".log-viewer")!;
+      Object.defineProperty(viewer, "scrollHeight", { value: 480 });
+      Object.defineProperty(viewer, "scrollTop", { value: 0, writable: true });
+
+      logs.open = true;
+      logs.dispatchEvent(new Event("toggle"));
+
+      expect(viewer.scrollTop).toBe(480);
+    });
+
+    it("updates the summary counts as live entries arrive", () => {
+      let listener: () => void = () => {};
+      mockAddLogListener.mockImplementation((...args: unknown[]) => {
+        listener = args[0] as () => void;
+        return () => {};
+      });
+      mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "a")]);
+      const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
+      const summary = disclosure(el, "Client logs").querySelector("summary")!;
+      expect(summary.textContent).toContain("1 entry · 0 warnings · 0 errors");
+      mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "a"), makeMockEntry("warn", "b")]);
+      listener();
+      expect(summary.textContent).toContain("2 entries · 1 warning · 0 errors");
+    });
+
+    it("gives the Get help card one primary action: export the support bundle", () => {
+      const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
+      const card = el.querySelector<HTMLElement>("[data-testid='get-help']")!;
+      expect(card.querySelector("h3")!.textContent).toBe("Get help");
+      const exportBtn = card.querySelector("[data-testid='export-support-bundle']")!;
+      expect(exportBtn.classList.contains("secondary")).toBe(false);
+      expect(buttonNamed(card, "Copy Diagnostics").classList.contains("secondary")).toBe(true);
+    });
+
+    it("makes every log and voice-state tool a secondary button", () => {
+      const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
+      for (const text of ["Copy All", "Clear Logs", "Refresh", "Refresh Diagnostics"]) {
+        expect(buttonNamed(el, text).classList.contains("secondary"), text).toBe(true);
+      }
+    });
+
+    it("colours log levels with tokens through classes, never literal hex inline styles", () => {
+      mockGetLogBuffer.mockReturnValue([
+        { ...makeMockEntry("debug", "d"), data: { k: 1 } },
+        makeMockEntry("error", "e"),
+      ]);
+      const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
+      const [debug, error] = [...el.querySelectorAll<HTMLElement>(".log-entry")];
+      expect(debug!.classList.contains("log-debug")).toBe(true);
+      expect(error!.classList.contains("log-error")).toBe(true);
+      const hexStyles = [...el.querySelectorAll<HTMLElement>("[style]")].filter((n) =>
+        /#[0-9a-f]{3,6}\b/i.test(n.getAttribute("style")!),
+      );
+      expect(hexStyles).toEqual([]);
     });
   });
 });

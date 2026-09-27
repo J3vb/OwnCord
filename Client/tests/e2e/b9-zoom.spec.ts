@@ -559,6 +559,10 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     ): Promise<void> {
       await openSettingsTab(page, tab);
       await panel.locator(".settings-pane.active").waitFor();
+      // Audit what a disclosure hides too (the client logs, the voice state).
+      await panel
+        .locator(".settings-pane.active details")
+        .evaluateAll((all) => all.forEach((d) => ((d as HTMLDetailsElement).open = true)));
       await expectScreenReflows(
         page,
         {
@@ -574,19 +578,21 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       page,
     }, testInfo) => {
       const panel = await openConnectSettings(page);
-      const tabs = (await settingsTabs(page).allInnerTexts()).filter((t) => t.trim() !== "Logs");
+      const tabs = (await settingsTabs(page).allInnerTexts()).filter(
+        (t) => t.trim() !== "Diagnostics & logs",
+      );
       expect(tabs.length, "settings tabs rendered").toBeGreaterThan(0);
       for (const tab of tabs) await expectSettingsTabReflows(page, panel, tab, testInfo);
     });
 
-    test("the Logs tab opened from the connect page gear fits at 200 % zoom", async ({
+    test("the Diagnostics & logs tab opened from the connect page gear fits at 200 % zoom", async ({
       page,
     }, testInfo) => {
       const panel = await openConnectSettings(page);
       await expectSettingsTabReflows(page, panel, "Logs", testInfo);
     });
 
-    test("an unbroken log message in the Logs tab wraps at 200 % zoom", async ({
+    test("an unbroken log message in the Diagnostics & logs tab wraps at 200 % zoom", async ({
       page,
     }, testInfo) => {
       const panel = await openConnectSettings(page);
