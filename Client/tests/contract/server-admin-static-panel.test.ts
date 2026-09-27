@@ -28,6 +28,7 @@ window.__test = {
   myPosition: myPosition,
   renderUsers: renderUsers,
   renderAudit: renderAudit,
+  renderDashboard: renderDashboard,
   renderTokens: renderTokens,
   openRoleModal: openRoleModal,
   renderRetention: renderRetention,
@@ -66,6 +67,7 @@ interface Bridge {
   myPosition: () => number;
   renderUsers: () => Promise<string>;
   renderAudit: () => Promise<string>;
+  renderDashboard: () => Promise<string>;
   renderTokens: () => Promise<string>;
   openRoleModal: (id: number | null) => void;
   renderRetention: () => Promise<string>;
@@ -593,6 +595,25 @@ describe("Server/admin/static — panel behaviour", () => {
     // Selecting "All Actions" must therefore be a real value change.
     expect(html).toContain('<option value="all" >All Actions</option>');
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toContain("limit=51");
+  });
+
+  // Every client connection writes user_login and ws_connect, so the
+  // dashboard's five-row Recent activity would read as sign-ins only.
+  it("hides sign-ins and connections from the dashboard's Recent activity", async () => {
+    const calls: FetchCall[] = [];
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/audit-log?")) return { json: [] };
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+
+    await booted.bridge.renderDashboard();
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=5&offset=0&hide_signins=1",
+    );
   });
 
   // AO-7. Search and the action filter used to run over the fetched page of

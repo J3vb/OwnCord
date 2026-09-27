@@ -187,7 +187,7 @@ async function renderDashboard(){
   }
   // Recent audit — VIEW_AUDIT_LOG only.
   if(can(PERM.VIEW_AUDIT_LOG))try{
-    const entries=await api('GET','/audit-log?limit=5&offset=0');
+    const entries=await api('GET','/audit-log?limit=5&offset=0&hide_signins=1');
     if(entries&&entries.length){
       html+='<div class="section-card"><div class="section-card-header"><h3>Recent activity</h3><button class="btn btn-ghost" data-action="navigateTo" data-args="'+actArgs('audit')+'">View all</button></div><div class="section-card-body">';
       entries.forEach(a=>{html+='<div class="act-line" data-audit-action="'+esc(a.action)+'" title="'+esc(a.action+(a.detail?' — '+a.detail:''))+'">'+auditMark(a.action)+'<span class="act-what">'+auditSentence(a)+'</span><span class="act-when">'+fmtLocal(a.created_at,auditDay(a.created_at)==='Today'?AUDIT_TIME:undefined)+'</span></div>'});
@@ -252,7 +252,7 @@ async function renderAudit(){
 
   let html='<div class="page-title">Audit log</div><div class="page-desc">Every administrative action, newest first. Search and the filters cover the whole log; sign-ins and connections stay hidden until you turn on Sign-ins.</div>';
   html+='<div class="filter-bar audit-filters">';
-  html+='<input type="search" class="filter-search" aria-label="Search audit log" placeholder="Search actor, action, target or detail…" maxlength="100" value="'+esc(state.auditSearch)+'" data-input-action="setAuditSearch">';
+  html+='<input type="search" class="filter-search" aria-label="Search audit log" placeholder="Search action codes, names and details…" maxlength="100" value="'+esc(state.auditSearch)+'" data-input-action="setAuditSearch">';
   html+='<select class="filter-select" id="auditAction" aria-label="Filter by action" data-change-action="setAuditActionFilter">'+auditOptionsHtml()+'</select>';
   html+='<button class="chip-toggle" id="auditSignins" aria-pressed="'+state.auditShowSignins+'" data-action="toggleAuditSignins" title="Show sign-in and connection events">'+(state.auditShowSignins?I.check:'')+'Sign-ins</button>';
   html+='<button class="btn btn-ghost" data-action="copyAuditLog" title="Copy the entries on this page">'+OPS_ICON.copy+'Copy page</button>';
