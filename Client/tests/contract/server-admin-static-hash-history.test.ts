@@ -96,11 +96,13 @@ describe("Server/admin/static — hash history (UX-12a)", () => {
   it("writes the section's id to the hash when a section is opened", async () => {
     const booted = boot();
     dom = booted.dom;
+    const entries = booted.dom.window.history.length;
 
     booted.bridge.navigateTo("audit");
 
     expect(booted.bridge.state.section).toBe("audit");
     expect(booted.dom.window.location.hash).toBe("#audit");
+    expect(booted.dom.window.history.length).toBe(entries + 1);
   });
 
   it("navigates to the section a hashchange names (the back/forward buttons)", async () => {
