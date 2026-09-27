@@ -118,7 +118,7 @@ with at least twice it as headroom, so a busier runner does not turn a published
 promise into a flake. That headroom is a property of the steady shape:
 the operational profile runs a storm, a 25-way voice churn and upload pressure
 alongside the same fan-out, and there the acknowledgement p99 has been measured
-_over_ its budget (ramp p99 299 ms and tls-off upload p99 301 ms against 300).
+_at or over_ its budget (ramp p99 299 ms and tls-off upload p99 301 ms against 300).
 The budgets do not move for that — a busy-runner tail is a finding, not a
 number to loosen (see the operational section). `auth_time` is the one steady
 row with the least room on purpose: its floor is bcrypt at cost 12, roughly a
@@ -380,7 +380,7 @@ trend measures a `voice_state` broadcast reaching a _different_ connection.
   shape a published voice-join figure is taken from.
 - **`aligned`** — every voice VU leaves and rejoins on the same instant. This
   serialises the cohort's joins into one queue: it is the deliberate burst
-  OC-0454 measures, published as that and never used for the voice-join row.
+  OC-0480 records, published as that and never used for the voice-join row.
   The voice-join budget does not gate an `aligned` run (the burst is published
   unbudgeted); the count sanity gate still does. The 130–437 ms p95 previously
   published in this section came from this shape; it is a harness artifact, not

@@ -111,7 +111,7 @@
 //   K6_VOICE_CHURN_PHASE- operational: spread (default) staggers each voice
 //                         VU's leave+rejoin through the period; aligned puts
 //                         every voice VU on the same instant, the deliberate
-//                         burst OC-0454 measures
+//                         burst OC-0480 records
 //   K6_UPLOAD_BYTES     - operational: per-upload payload size (default: 262144)
 //   K6_CEILING_MAX      - ceiling-search: highest connection count probed (default: 500)
 //   K6_CEILING_STEP     - ceiling-search: connection increment per step (default: 100)
@@ -296,7 +296,7 @@ const CHURN_MS = parseInt(__ENV.K6_VOICE_CHURN_MS || "10000");
 //     budget measures a single join. A real population does not leave and
 //     rejoin in unison.
 //   aligned — every voice VU leaves and rejoins on the same epoch-aligned
-//     CHURN_MS boundary: the deliberate 25-way burst OC-0454 measures, kept
+//     CHURN_MS boundary: the deliberate 25-way burst OC-0480 records, kept
 //     as a named mode rather than the default the operational profile ran.
 // The default changed from aligned to spread (PERF-02): the published
 // voice-join figures came from the aligned shape, which serialises 25 joins
@@ -627,7 +627,9 @@ export const options = {
           // 25-way simultaneous rejoin it produces is a harness shape, not a
           // single-join cost. The budget itself is never loosened — spread
           // churn keeps it.
-          ...(CHURN_PHASE === "aligned" ? {} : { voice_join_time: ["p(95)<250", "p(99)<500"] }),
+          ...(IS_OPERATIONAL && CHURN_PHASE === "aligned"
+            ? {}
+            : { voice_join_time: ["p(95)<250", "p(99)<500"] }),
           voice_tokens: ["count>0"],
           // The churn's cross-VU voice_state delivery only happens when the
           // voice leg does — an operational run without K6_VOICE_CHANNEL_ID
@@ -1414,7 +1416,7 @@ export default function () {
     // joining once and sitting. K6_VOICE_CHURN_PHASE decides where in the
     // period this VU's tick sits: spread (default) staggers the cohort,
     // aligned puts every VU on the shared epoch grid so the join burst
-    // OC-0454 measures can be published as its own mode. voice_state_delivery_ms
+    // OC-0480 records can be published as its own mode. voice_state_delivery_ms
     // reads the same per-VU grid. (protocol.md:1241-1275; the 5/s per-user
     // limit is far away at one join per 10 s.)
     if (IS_OPERATIONAL && joinsVoice) {

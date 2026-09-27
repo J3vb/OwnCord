@@ -11112,7 +11112,7 @@
         "test": "node --test Server/scripts/k6/ws-load.test.mjs",
         "revertProof": "pass (restoring ws-load.js from dev fails 2 of 11 offline checks -- the PERF-02 spread/aligned churn test and the per-phase p99 test; the fixed script passes all 11 under Node 26)"
       },
-      "note": "PERF-02 (absorbs ED-04). K6_VOICE_CHURN_PHASE selects the shape: spread (default) staggers each VU at (vuId-1)/VOICE_VUS through the period, aligned keeps the shared grid as the deliberate burst OC-0454 measures. voice_state_delivery_ms attributes a cross-VU frame to the sender's own offset. The budget itself is unchanged."
+      "note": "PERF-02 (absorbs ED-04). K6_VOICE_CHURN_PHASE selects the shape: spread (default) staggers each VU at (vuId-1)/VOICE_VUS through the period, aligned keeps the shared grid as the deliberate burst this entry records. voice_state_delivery_ms attributes a cross-VU frame to the sender's own offset. The budget itself is unchanged."
     }
   ]
 }

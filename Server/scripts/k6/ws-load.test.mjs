@@ -340,6 +340,13 @@ test("voice churn is spread across the cohort by default, aligned as a named bur
   );
   assert.equal(burst.evaluate('options.thresholds["voice_join_time"]'), undefined);
   assert.equal(burst.evaluate('options.thresholds["voice_tokens"][0]'), "count>0");
+  // Capacity does not churn, so an aligned input (the workflow passes it to
+  // every profile) must not drop its voice-join budget.
+  const capacity = harness(
+    { K6_PROFILE: "capacity", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_CHURN_PHASE: "aligned" },
+    1,
+  );
+  assert.equal(capacity.evaluate('options.thresholds["voice_join_time"][0]'), "p(95)<250");
 });
 
 test("operational acknowledgement and delivery samples carry the observer's phase", () => {
