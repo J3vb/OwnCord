@@ -133,6 +133,68 @@ describe("Server/admin/static — dialog dirty guard (UX-10)", () => {
     expect(asked.length).toBe(1);
   });
 
+  const DISMISS_ROUTES: [string, (dom: JSDOM) => void][] = [
+    [
+      "Escape",
+      (d) =>
+        d.window.document.dispatchEvent(
+          new d.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        ),
+    ],
+    ["a click on the scrim", (d) => d.window.document.getElementById("modal")!.click()],
+    [
+      "the Cancel button",
+      (d) =>
+        (
+          d.window.document.querySelector('#modalInner [data-action="closeModal"]') as HTMLElement
+        ).click(),
+    ],
+  ];
+
+  it.each(DISMISS_ROUTES)(
+    "asks on %s and keeps a dirty dialog open when declined",
+    async (_, route) => {
+      const booted = await boot();
+      dom = booted.dom;
+      const asked = stubConfirm(dom, false);
+      booted.bridge.openModal(
+        '<div class="modal-body"><button data-action="closeModal">Cancel</button></div>',
+      );
+      booted.bridge.markModalDirty();
+
+      route(dom);
+
+      expect(asked.length).toBe(1);
+      expect(booted.modalVisible()).toBe(true);
+    },
+  );
+
+  it("asks before a close-and-refresh button discards, and refreshes only once confirmed", async () => {
+    const booted = await boot();
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    const content = doc.getElementById("content")!;
+    content.innerHTML = "<p id='before'></p>";
+    bridge.openModal(
+      '<div class="modal-body"><button data-action="closeModalAndRefresh">Done</button></div>',
+    );
+    bridge.markModalDirty();
+    const button = () =>
+      doc.querySelector('#modalInner [data-action="closeModalAndRefresh"]') as HTMLElement;
+
+    const declined = stubConfirm(dom, false);
+    button().click();
+    expect(declined.length).toBe(1);
+    expect(booted.modalVisible()).toBe(true);
+    expect(doc.getElementById("before")).not.toBeNull();
+
+    const confirmed = stubConfirm(dom, true);
+    button().click();
+    expect(confirmed.length).toBe(1);
+    expect(booted.modalVisible()).toBe(false);
+    expect(doc.getElementById("before")).toBeNull();
+  });
+
   it("closes a dirty dialog once the discard is confirmed, and forgets the dirt", async () => {
     const booted = await boot();
     dom = booted.dom;
