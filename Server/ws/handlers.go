@@ -97,8 +97,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		return
 	}
 	if result.Error != nil {
-		var ce ClientError
-		if errors.As(result.Error, &ce) {
+		if ce, ok := errors.AsType[ClientError](result.Error); ok {
 			c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
 		} else {
 			slog.Error("ws handler internal error",

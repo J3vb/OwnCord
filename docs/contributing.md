@@ -12,7 +12,7 @@ How to set up the development environment and contribute to OwnCord.
 | Linux x64       | ✅     | ✅           |
 | Linux ARM64     | ✅     | ✅ (CI only) |
 
-- **Go 1.26+** (server)
+- **Go 1.27+** (server)
 - **Node.js 26.x / npm 11.x** (client) — `Client/.nvmrc` is the source of truth;
   `engine-strict` makes a different major a hard failure at `npm ci`, not a
   warning, and `node scripts/check-node-policy.mjs` fails the Repository

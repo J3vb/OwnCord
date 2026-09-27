@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -181,8 +182,7 @@ func (a *App) Close(ctx context.Context) error {
 	overall, cancelOverall := context.WithTimeout(context.WithoutCancel(ctx), teardown)
 	defer cancelOverall()
 	var first error
-	for i := len(a.closers) - 1; i >= 0; i-- {
-		step := a.closers[i]
+	for _, step := range slices.Backward(a.closers) {
 		if a.onCloseStep != nil {
 			a.onCloseStep(step.stage)
 		}

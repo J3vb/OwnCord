@@ -15,13 +15,13 @@ import (
 // drive the same calls through a real *db.DB, but per-package coverage only
 // counts a package's own tests, so the wrappers need their own here too.
 
-var testPublicIDCounter int64
+var testPublicIDCounter atomic.Int64
 
 // testPublicID mints a unique-enough public_id for a test fixture; the
 // column's real generator is crypto/rand at the service layer (P2-9) — this
 // is just uniqueness for a test database, not a security property.
 func testPublicID() string {
-	return fmt.Sprintf("test-public-%d", atomic.AddInt64(&testPublicIDCounter, 1))
+	return fmt.Sprintf("test-public-%d", testPublicIDCounter.Add(1))
 }
 
 // fileReport is FileReport with an auto-minted public_id and no evidence,

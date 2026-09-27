@@ -38,7 +38,7 @@ This table is the single source of truth for the plugin toolchain;
 | Go       | 1.25.x       | TinyGo 0.40.1 rejects Go 1.26+. Install alongside the system Go: `go install golang.org/dl/go1.25.3@latest && go1.25.3 download` |
 | wasm-opt | Binaryen 129 | Required by TinyGo for the `wasi` target; download from Binaryen GitHub releases                                                 |
 
-Note the Go row: this repository's own module is pinned to Go 1.26
+Note the Go row: this repository's own module is pinned to Go 1.27
 (`Server/go.mod`), so building a plugin needs a _second_, older Go SDK
 side-installed. That conflict is why there is no CI job for this — see
 Provenance.

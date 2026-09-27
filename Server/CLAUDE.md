@@ -1,6 +1,6 @@
 # OwnCord Server (Go)
 
-Go 1.26, module `github.com/J3vb/OwnCord/Server`. Key deps: chi (HTTP),
+Go 1.27, module `github.com/J3vb/OwnCord/Server`. Key deps: chi (HTTP),
 go.yaml.in/yaml/v3 (config), sqlc-generated SQLite layer, LiveKit server SDK,
 coraza WAF, prometheus.
 

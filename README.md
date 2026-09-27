@@ -1,7 +1,7 @@
 [![CI](https://github.com/J3vb/OwnCord/actions/workflows/ci.yml/badge.svg)](https://github.com/J3vb/OwnCord/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/J3vb/OwnCord?include_prereleases&label=release)](https://github.com/J3vb/OwnCord/releases/latest)
 ![Status](https://img.shields.io/badge/status-beta-orange)
-![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/go-1.27%2B-00ADD8?logo=go&logoColor=white)
 ![Tauri](https://img.shields.io/badge/tauri-v2-24C8DB?logo=tauri&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20x64%20%7C%20Linux%20x64%20%7C%20Linux%20ARM64-informational)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
@@ -147,7 +147,7 @@ Two main components:
 
 ### Prerequisites
 
-- Go 1.26+
+- Go 1.27+
 - Node.js 26.x and npm 11.x (see `Client/.nvmrc` — a different major fails
   `npm ci`)
 - Rust stable (client builds)

@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -245,7 +246,15 @@ func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 		host = net.JoinHostPort(cfg.Domain, strconv.Itoa(cfg.HTTPSPort))
 	}
 	redirect := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		target := "https://" + host + r.URL.RequestURI()
+		// Compose through url.URL rather than string concatenation: the request
+		// URI becomes Path/RawQuery on a URL whose Scheme and Host are fixed
+		// here, so a crafted path can never move the redirect to another host.
+		target := (&url.URL{
+			Scheme:   "https",
+			Host:     host,
+			Path:     r.URL.Path,
+			RawQuery: r.URL.RawQuery,
+		}).String()
 		http.Redirect(w, r, target, http.StatusMovedPermanently)
 	})
 

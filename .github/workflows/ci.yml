@@ -240,7 +240,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         if: env.RUN_SERVER != 'false'
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache-dependency-path: Server/go.sum
 
       # scripts/coverage-floor.sh parses the floor file with node (the coverage
@@ -470,7 +470,7 @@ jobs:
         if: env.RUN_SERVER != 'false'
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.11.3
+          version: v2.13.2
           working-directory: Server/
           verify: false
 
@@ -1124,7 +1124,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache-dependency-path: Server/go.sum
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -1368,7 +1368,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache-dependency-path: Server/go.sum
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -1411,7 +1411,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache-dependency-path: Server/go.sum
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:

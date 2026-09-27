@@ -68,16 +68,16 @@ func TestUpdateProfile_SetsAndClearsDisplayNameAndAbout(t *testing.T) {
 // under a particular timing.
 type raceDetectingStore struct {
 	Store
-	active  int32
-	overlap int32
+	active  atomic.Int32
+	overlap atomic.Int32
 }
 
 func (r *raceDetectingStore) GetUserByID(ctx context.Context, id int64) (*db.User, error) {
-	if atomic.AddInt32(&r.active, 1) > 1 {
-		atomic.AddInt32(&r.overlap, 1)
+	if r.active.Add(1) > 1 {
+		r.overlap.Add(1)
 	}
 	time.Sleep(5 * time.Millisecond) // widen the window a real race would need
-	defer atomic.AddInt32(&r.active, -1)
+	defer r.active.Add(-1)
 	return r.Store.GetUserByID(ctx, id)
 }
 
@@ -112,7 +112,7 @@ func TestUpdateProfile_ConcurrentUpdatesSerializePerUser(t *testing.T) {
 	}()
 	wg.Wait()
 
-	if got := atomic.LoadInt32(&rs.overlap); got != 0 {
+	if got := rs.overlap.Load(); got != 0 {
 		t.Errorf("UpdateProfile's read-merge-write overlapped %d times, want 0 (must be serialized per user)", got)
 	}
 

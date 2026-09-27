@@ -92,7 +92,7 @@ func sanitizeUploadFilename(name string) string {
 // content (scripts, markup) if served inline under the OwnCord origin.
 func isUnsafeInlineMIME(mimeType string) bool {
 	// Normalize: take the base type before any parameters (e.g. "text/html; charset=utf-8").
-	base := strings.SplitN(mimeType, ";", 2)[0]
+	base, _, _ := strings.Cut(mimeType, ";")
 	base = strings.TrimSpace(strings.ToLower(base))
 	switch base {
 	case "text/html", "application/xhtml+xml",
