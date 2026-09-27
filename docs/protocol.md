@@ -307,6 +307,9 @@ alive even when its app-level ping timer is throttled. A Pong counts as
 activity for the stale sweep below; a peer that misses a Pong is disconnected,
 so a silent peer is closed within 50 seconds. A client can treat a gap of more
 than 2.5 × 25 seconds without any frame from the server as a dead connection.
+The server sends a message larger than 16 KiB as a fragmented message (RFC
+6455 continuation frames), so a Pong or Ping never waits behind one large frame
+on a slow link.
 
 ### Server Stale Client Sweep
 
@@ -320,6 +323,16 @@ half-open socket and reconnects. It does this only once a heartbeat ping has
 gone unanswered for at least 15 seconds. That rule keeps a minimised window,
 whose throttled heartbeat timer may not have sent a ping yet, from
 reconnecting for no reason.
+
+### Desktop Transport Liveness
+
+The desktop client's Rust WebSocket proxy (`Client/src-tauri/src/ws_proxy.rs`)
+also sends a WebSocket protocol Ping every 25 seconds, which the server's read
+loop answers with a Pong. If no frame of any kind arrives for 62.5 seconds
+(2.5 ping intervals), the proxy closes the socket and the client reconnects.
+This catches a half-open connection that a firewall or NAT dropped silently,
+and does not depend on the webview's JSON ping timer, which the OS may throttle
+while the window is minimised. The JSON ping above is unchanged.
 
 ---
 
