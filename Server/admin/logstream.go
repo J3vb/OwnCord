@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -122,6 +123,8 @@ type RingBuffer struct {
 	pos         int        // next write position
 	count       int        // entries stored (up to len(entries))
 	subscribers map[*chan LogEntry]struct{}
+	streamsEnd  chan struct{} // closed by EndStreams
+	endOnce     sync.Once
 }
 
 // NewRingBuffer creates a ring buffer with the given capacity (must be > 0).
@@ -129,7 +132,17 @@ func NewRingBuffer(capacity int) *RingBuffer {
 	return &RingBuffer{
 		entries:     make([]LogEntry, capacity),
 		subscribers: make(map[*chan LogEntry]struct{}),
+		streamsEnd:  make(chan struct{}),
 	}
+}
+
+// EndStreams ends every open log stream, and any opened after it, for good.
+// The server registers it with http.Server.RegisterOnShutdown: a stream never
+// returns on its own, and Shutdown waits for every active handler, so an open
+// admin Logs tab would otherwise hold the drain for its whole budget (SRV-06).
+// Safe to call more than once.
+func (rb *RingBuffer) EndStreams() {
+	rb.endOnce.Do(func() { close(rb.streamsEnd) })
 }
 
 // Write appends an entry, overwriting the oldest if full, and fans out
@@ -546,6 +559,8 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 				_, _ = fmt.Fprint(w, ": keepalive\n\n")
 				flusher.Flush()
 			case <-ctx.Done():
+				return
+			case <-ringBuf.streamsEnd:
 				return
 			}
 		}
