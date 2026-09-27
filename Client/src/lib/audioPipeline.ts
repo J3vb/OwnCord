@@ -101,7 +101,11 @@ export class AudioPipeline {
 
   // --- RNNoise processor (LiveKit TrackProcessor API) ---
 
-  /** Attach RNNoise processor to the local mic track. Safe to call if already attached. */
+  /**
+   * Attach RNNoise processor to the local mic track. Safe to call if already
+   * attached. A no-op while the track is muted (its capture is stopped); the
+   * unmute path in MediaControl.applyMicMuteState attaches it instead.
+   */
   async applyNoiseSuppressor(): Promise<void> {
     if (this.room === null) return;
     const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
