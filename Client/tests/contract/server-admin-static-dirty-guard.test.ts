@@ -25,9 +25,7 @@ window.__test = {
   dismissModal: dismissModal,
   markModalDirty: markModalDirty,
   renderChannelPermsModal: renderChannelPermsModal,
-  saveChannelPerms: saveChannelPerms,
-  renderBackups: renderBackups,
-  markBackupPolicyChanged: markBackupPolicyChanged
+  saveChannelPerms: saveChannelPerms
 };
 </script>`;
 if (!ADMIN_HTML_SOURCE.includes("</body>")) {
@@ -48,8 +46,6 @@ interface Bridge {
   markModalDirty: () => void;
   renderChannelPermsModal: () => void;
   saveChannelPerms: () => Promise<void>;
-  renderBackups: () => Promise<string>;
-  markBackupPolicyChanged: () => void;
 }
 
 async function boot(
@@ -319,19 +315,6 @@ describe("Server/admin/static — beforeunload guard (UX-10)", () => {
     dom = booted.dom;
     booted.bridge.openModal("<div class='modal-header'><h3>Dirty</h3></div>");
     booted.bridge.markModalDirty();
-    expect(unload(dom).defaultPrevented).toBe(true);
-  });
-
-  it("warns while the Backups schedule has unsaved changes", async () => {
-    const booted = await boot();
-    dom = booted.dom;
-    booted.bridge.state._settings = { backup_schedule: "off", backup_retention: "30" };
-    const content = dom.window.document.getElementById("content")!;
-    content.innerHTML = await booted.bridge.renderBackups();
-    // Editing the schedule marks the backup policy dirty, like Settings.
-    const select = dom.window.document.getElementById("s-backup_schedule") as HTMLSelectElement;
-    select.value = "weekly";
-    booted.bridge.markBackupPolicyChanged();
     expect(unload(dom).defaultPrevented).toBe(true);
   });
 });

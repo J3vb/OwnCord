@@ -42,7 +42,7 @@ const I={
 const PAGE_SIZE=50;
 const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   me:null,partialToken:'',
-  usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupPolicyChanged:false,backupRunning:false,updateApplying:false,
+  usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
   modalDirty:false,
   supportPreview:null,supportBusy:false,badges:{pending:0,warnings:0,update:false},
   cachedStats:null,cachedUpdate:null,channelCache:{},roleList:[],pluginRuntime:'unknown',pluginBusy:false,
@@ -279,7 +279,7 @@ document.getElementById('modal').addEventListener('change',e=>{if(modalEditMarks
    form — asks the browser to confirm first. beforeunload is the only event
    that can, and the browser owns the prompt text. */
 window.addEventListener('beforeunload',e=>{
-  if(state.settingsChanged||state.backupPolicyChanged||state.modalDirty){e.preventDefault();e.returnValue=''}
+  if(state.settingsChanged||state.modalDirty){e.preventDefault();e.returnValue=''}
 });
 /* Keep Tab inside the dialog while it is open. */
 document.getElementById('modal').addEventListener('keydown',e=>{
@@ -455,7 +455,7 @@ function closeNav(restoreFocus=true){
 window.addEventListener('resize',()=>{if(window.innerWidth>900)closeNav(false)});
 /* Sign-out and session expiry: close the popups and forget the last
    principal's badge counts. */
-function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending:0,warnings:0,update:false};state.settingsChanged=false;state.backupPolicyChanged=false;state.modalDirty=false}
+function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending:0,warnings:0,update:false};state.settingsChanged=false;state.modalDirty=false}
 
 /* ═══ Nav badges ═══ */
 /* Pending registrations (Members), active attention warnings (Dashboard) and
@@ -489,7 +489,6 @@ function navigateTo(id){
   try{
     if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}}
     if(state.section==='settings'&&id!=='settings')state.settingsChanged=false;
-    if(state.section==='backups'&&id!=='backups')state.backupPolicyChanged=false;
     state.section=id;renderNav();renderContent();closeNav();
   }catch(err){
     console.error('[Admin] Tab navigation failed for "'+id+'":', err);
