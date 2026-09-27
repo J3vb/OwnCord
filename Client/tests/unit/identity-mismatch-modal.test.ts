@@ -115,10 +115,10 @@ describe("IdentityMismatchModal", () => {
     expect(title?.textContent).toBe("Identity Warning");
   });
 
-  it("displays the cert title 'Identity Key Changed'", () => {
+  it("displays the cert title 'Identity Not Verified'", () => {
     mountModal();
     const title = container.querySelector(".cert-title");
-    expect(title?.textContent).toBe("Identity Key Changed");
+    expect(title?.textContent).toBe("Identity Not Verified");
   });
 
   it("carries dialog semantics labelled by the h3 title", () => {

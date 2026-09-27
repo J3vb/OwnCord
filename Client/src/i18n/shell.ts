@@ -112,9 +112,9 @@ export const shellText = defineCatalog("shell", {
   "identity.unverifiedWithFingerprint":
     "Identity not verified — this participant published no key. Session fingerprint (changes every call — not an identity): {fingerprint}",
   "identity.title": "Identity Warning",
-  "identity.heading": "Identity Key Changed",
+  "identity.heading": "Identity Not Verified",
   "identity.description":
-    "This participant's end-to-end encryption identity key no longer matches the one pinned on first contact. This usually means they reinstalled or switched device, but it could also indicate that the server swapped their key. Verify the new key out-of-band before trusting it.",
+    "This participant is blocked from end-to-end encryption: the server stopped delivering their identity key, or their announce was not signed by it. This can be a glitch, but it could also indicate that the server tampered with their key. Verify the key out-of-band before trusting it.",
   "identity.participant": "Participant",
   "identity.newKey": "New key",
   "identity.accept": "Trust New Key",

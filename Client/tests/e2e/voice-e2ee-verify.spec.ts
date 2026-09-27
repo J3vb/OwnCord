@@ -304,7 +304,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     // The modal shows the participant and the NEW key's fingerprint so the
     // user can verify it out-of-band before trusting.
     await expect(page.locator("h3", { hasText: "Identity Warning" })).toBeVisible();
-    await expect(page.locator(".cert-title")).toHaveText("Identity Key Changed");
+    await expect(page.locator(".cert-title")).toHaveText("Identity Not Verified");
     await expect(page.locator(".cert-details")).toContainText("moderator1");
     await expect(page.locator(".cert-details .cert-fingerprint")).toBeVisible();
 

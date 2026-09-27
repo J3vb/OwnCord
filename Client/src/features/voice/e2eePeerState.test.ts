@@ -135,6 +135,36 @@ describe("verifyPeerAnnounce (F3 TOFU)", () => {
     expect(showToast).toHaveBeenCalledTimes(1);
   });
 
+  it("notifies again when an already-changed peer's key changes a second time", async () => {
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: "old-id" });
+    members.set(PEER, { identityPublicKey: "new-id", username: "alice" });
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current);
+    expect(showToast).toHaveBeenCalledTimes(1);
+
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: "new-id" });
+    members.set(PEER, { identityPublicKey: "third-id", username: "alice" });
+    await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current)).resolves.toBe(true);
+    expect(storeIdentityPin).toHaveBeenLastCalledWith("chat.example", String(PEER), "third-id");
+    expect(showToast).toHaveBeenCalledTimes(2);
+    expect(lastVerification()).toMatchObject({ status: "changed" });
+  });
+
+  it("still notifies when the peer's membership moves on while the changed key is re-pinned", async () => {
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: "old-id" });
+    members.set(PEER, { identityPublicKey: "new-id", username: "alice" });
+    const { peers } = setup();
+    const isCurrent = peers.peerAttemptIsCurrent(PEER);
+    vi.mocked(storeIdentityPin).mockImplementationOnce(async () => {
+      peers.peerGenerations.set(PEER, 1);
+      return "stored";
+    });
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", isCurrent);
+    expect(storeIdentityPin).toHaveBeenCalledWith("chat.example", String(PEER), "new-id");
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(setPeerVerification).not.toHaveBeenCalled();
+  });
+
   it("rejects a changed identity key whose announce does not verify, keeping the old pin", async () => {
     vi.mocked(getIdentityPin).mockResolvedValueOnce({ status: "pinned", pin: "old-id" });
     vi.mocked(verifyEphemeralKeySignature).mockResolvedValueOnce(false);
@@ -142,6 +172,10 @@ describe("verifyPeerAnnounce (F3 TOFU)", () => {
     const { peers } = setup();
     await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current)).resolves.toBe(false);
     expect(lastVerification()).toMatchObject({ status: "mismatch", sessionFingerprint: null });
+    expect(peers.blockedAnnounces.get(PEER)).toEqual({
+      publicKeyBase64: EPHEMERAL,
+      signatureBase64: "sig",
+    });
     expect(storeIdentityPin).not.toHaveBeenCalled();
     expect(showToast).not.toHaveBeenCalled();
   });

@@ -59,9 +59,11 @@ export class E2EEPeerState {
   private _blockedAnnounces: Map<number, { publicKeyBase64: string; signatureBase64?: string }> =
     new Map();
   /** Peers whose identity key changed and was accepted automatically this
-   *  session, so their badge keeps showing the change after later announces
-   *  verify cleanly against the new pin. Cleared in clearState(). */
-  private _keyChangedPeers: Set<number> = new Set();
+   *  session, mapped to the latest key a notice was shown for, so their badge
+   *  keeps showing the change after later announces verify cleanly against the
+   *  new pin and every further change raises its own notice. Cleared in
+   *  clearState(). */
+  private _keyChangedPeers: Map<number, string> = new Map();
 
   constructor(private readonly deps: E2EEPeerStateDeps) {}
 
@@ -85,7 +87,7 @@ export class E2EEPeerState {
   get blockedAnnounces(): Map<number, { publicKeyBase64: string; signatureBase64?: string }> {
     return this._blockedAnnounces;
   }
-  get keyChangedPeers(): Set<number> {
+  get keyChangedPeers(): Map<number, string> {
     return this._keyChangedPeers;
   }
 
@@ -229,6 +231,9 @@ export class E2EEPeerState {
       : false;
     if (!ok) {
       // Fail closed: peer has an identity key but no valid signature (MITM).
+      // Buffered like the missing-key block so a re-pin replays and
+      // re-verifies it rather than clearing the badge (OC-0212).
+      this._blockedAnnounces.set(userId, { publicKeyBase64, signatureBase64 });
       this.setPeerVerificationIfCurrent(isCurrent, {
         userId,
         status: "mismatch",
@@ -263,8 +268,12 @@ export class E2EEPeerState {
         log.info("E2EE: pinned peer identity key on first sight", { userId });
       }
     }
-    if (keyChanged && isCurrent() && !this._keyChangedPeers.has(userId)) {
-      this._keyChangedPeers.add(userId);
+    if (
+      keyChanged &&
+      (!pinWriteFailed || isCurrent()) &&
+      this._keyChangedPeers.get(userId) !== publishedIdentity
+    ) {
+      this._keyChangedPeers.set(userId, publishedIdentity);
       const member = membersStore.getState().members.get(userId);
       showToast(
         voiceText("identity.keyChanged", {
