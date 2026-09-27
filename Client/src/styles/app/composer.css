@@ -69,7 +69,7 @@
   opacity: 0.6;
 }
 /* Upload progress on the chip: a native bar along the bottom edge, left
-   indeterminate (browsers animate it) until the transport reports a first
+   indeterminate (a sweeping stripe) until the transport reports a first
    byte, then determinate. Its value/max announce the percentage. */
 .attachment-preview-item > progress {
   position: absolute;
@@ -89,9 +89,32 @@
   background: var(--accent);
   transition: width 0.15s linear;
 }
+.attachment-preview-item > progress:indeterminate,
+.attachment-preview-item > progress:indeterminate::-webkit-progress-bar {
+  background: linear-gradient(
+      90deg,
+      var(--bg-overlay) 30%,
+      var(--accent) 50%,
+      var(--bg-overlay) 70%
+    )
+    0 0 / 300% 100%;
+  animation: uploadIndeterminate 1.2s linear infinite;
+}
+@keyframes uploadIndeterminate {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .attachment-preview-item > progress::-webkit-progress-value {
     transition: none;
+  }
+  .attachment-preview-item > progress:indeterminate,
+  .attachment-preview-item > progress:indeterminate::-webkit-progress-bar {
+    animation: none;
   }
 }
 @keyframes iconSpin {
