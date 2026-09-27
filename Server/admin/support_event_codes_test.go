@@ -384,6 +384,45 @@ func TestSupportEventCode_PrefixMatch(t *testing.T) {
 	}
 }
 
+// TestSupportEventCode_KeepsEveryPreSRE03Code pins the codes the table had
+// before SRE-03's M half: the regenerated table must keep resolving each of
+// these messages to its original code, Info-level ones included (the canary
+// only scans Warn/Error).
+func TestSupportEventCode_KeepsEveryPreSRE03Code(t *testing.T) {
+	for message, want := range map[string]string{
+		"database backup created":                              "backup_created",
+		"backup failed integrity check — removing":             "backup_verification_failed",
+		"restore refused: backup failed integrity check":       "restore_verification_failed",
+		"pre-restore backup failed — aborting restore":         "restore_safety_backup_failed",
+		"audit log write failed":                               "audit_write_failed",
+		"admin: token resolution failed":                       "authentication_storage_failed",
+		"session sweep: batch session lookup failed":           "session_storage_failed",
+		"ws service internal error":                            "message_service_failed",
+		"ws handler internal error":                            "socket_handler_failed",
+		"ws writePump error":                                   "socket_write_failed",
+		"hub: closing stale connection (no activity)":          "socket_stale_closed",
+		"hub: broadcast channel full, dropping message":        "broadcast_dropped",
+		"hub: broadcast channel full, dropping global message": "broadcast_dropped",
+		"hub: panic recovered":                                 "hub_panic_recovered",
+		"livekit: process exited unexpectedly":                 "livekit_process_exited",
+		"livekit: too many rapid failures, giving up":          "livekit_restart_exhausted",
+		"livekit: auto-download failed — voice stays offline until livekit-server is available": "livekit_download_failed",
+		"LeaveVoiceChannelIfMatch exhausted retries — ghost state may persist":                  "voice_cleanup_exhausted",
+		"sweepStaleVoiceStates: removed ghost voice state":                                      "voice_ghost_removed",
+		"voice permission reconciliation deferred":                                              "voice_permission_reconcile_deferred",
+		"event pruner: PruneEventsOlderThan failed":                                             "event_prune_failed",
+		"backup maintenance failed":                                                             "backup_maintenance_failed",
+		"retention sweep failed":                                                                "retention_failed",
+		"report content retention failed":                                                       "report_retention_failed",
+		"moderation action retention failed":                                                    "moderation_retention_failed",
+		"maintenance loop: circuit breaker open, skipping tick":                                 "maintenance_circuit_open",
+	} {
+		if got := supportEventCode(message); got != want {
+			t.Errorf("supportEventCode(%q) = %q, want %q", message, got, want)
+		}
+	}
+}
+
 // TestSupportEventCode_UnknownFallsBackToLogEvent pins the safe default: an
 // unrecognized message (or one whose constant part was stripped) is reported as
 // the generic code, never the raw text.

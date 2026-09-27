@@ -491,4 +491,5 @@ var supportEventCodes = map[string]string{
 	"upload refused: server storage below its reserved headroom":                                   "upload_refused_low_disk",
 	"upload failed: server storage error":                                                          "upload_storage_error",
 	"upload rejected":                                                                              "upload_rejected",
+	"database backup created":                                                                      "backup_created",
 }
