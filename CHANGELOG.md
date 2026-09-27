@@ -94,7 +94,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Accounts & admin
 
-- **`GET /api/v1/metrics` now reports broadcast latency, dispatch-queue depth, the worst seqMu hold and per-channel message sheds** — figures that previously existed only in an OpenTelemetry build nobody ships, so an operator could not tell a slow server from a slow network. All are in every build and in the support bundle's `health.json`.
+- **`GET /api/v1/metrics` now reports broadcast latency, per-phase voice join time, dispatch-queue depth, the worst seqMu hold and per-channel message sheds** — figures that previously existed only in an OpenTelemetry build nobody ships, so an operator could not tell a slow server from a slow network. All are in every build, and all but the voice join phases are also in the support bundle's `health.json`.
 - A channel frame dropped by the per-channel rate limiter is now counted (`topic_sheds_total`) and raised in the admin Attention panel, so a busy channel's lost frames are visible instead of silent.
 - An operator who sets `telemetry.enabled` on a build without the OpenTelemetry SDK (the shipped release and Docker builds) now gets a startup warning instead of a silently inert setting.
 - The admin panel's nav badges (pending registrations, active warnings, an available update) loaded only at sign-in, so a warning raised later went unseen until a re-login — they now refresh whenever you come back to the tab.

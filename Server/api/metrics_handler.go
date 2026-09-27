@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/metrics"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // EventPersisterMetrics is the nested event-persistence block of ServerMetrics.
@@ -47,6 +48,8 @@ type ServerMetrics struct {
 	BroadcastMs   *metrics.Summary `json:"ws_broadcast_ms,omitempty"`
 	DispatchLagMs *metrics.Summary `json:"ws_dispatch_lag_ms,omitempty"`
 	ChatAckMs     *metrics.Summary `json:"chat_send_ack_ms,omitempty"`
+	// VoiceJoinMs is each phase of a completed voice join (voice_join_ms).
+	VoiceJoinMs *ws.VoiceJoinPhases `json:"voice_join_ms,omitempty"`
 
 	// BroadcastQueueDepth is the hub dispatch channel's current depth; the
 	// max-seqMu-hold gauge is the worst single critical-section hold.
@@ -113,13 +116,14 @@ type MetricsSources struct {
 	ConnectedUsers func() int
 	VoiceSessions  func() int
 	BroadcastDrops func() uint64
-	// TopicSheds, BroadcastMs, DispatchLagMs, ChatAckMs, BroadcastQueueDepth
-	// and SeqMuMaxHoldMs are the shipped in-process metrics (SRE-M1). Nil
+	// TopicSheds, BroadcastMs, DispatchLagMs, ChatAckMs, VoiceJoinMs,
+	// BroadcastQueueDepth and SeqMuMaxHoldMs are the shipped in-process metrics (SRE-M1). Nil
 	// fields are skipped, so tests and partial wirings stay cheap.
 	TopicSheds          func() uint64
 	BroadcastMs         func() metrics.Summary
 	DispatchLagMs       func() metrics.Summary
 	ChatAckMs           func() metrics.Summary
+	VoiceJoinMs         func() ws.VoiceJoinPhases
 	BroadcastQueueDepth func() int
 	SeqMuMaxHoldMs      func() float64
 	LiveKitHealth       func(context.Context) (bool, error)
@@ -177,6 +181,10 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 		if src.ChatAckMs != nil {
 			s := src.ChatAckMs()
 			metrics.ChatAckMs = &s
+		}
+		if src.VoiceJoinMs != nil {
+			v := src.VoiceJoinMs()
+			metrics.VoiceJoinMs = &v
 		}
 		if src.BroadcastQueueDepth != nil {
 			metrics.BroadcastQueueDepth = src.BroadcastQueueDepth()

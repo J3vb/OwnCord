@@ -1,9 +1,7 @@
 package admin
 
 import (
-	"bytes"
 	"runtime"
-	"runtime/pprof"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/metrics"
@@ -73,30 +71,5 @@ func supportHealth(hub HubBroadcaster, at time.Time) map[string]any {
 		out["livekit_restarts"] = status.Restarts
 		out["livekit_gave_up"] = status.GaveUp
 	}
-	// SRE-M1: the aggregated goroutine summary only — function names and
-	// counts, no argument values — never a full goroutine dump, which would
-	// carry whatever values sit in locals and arguments.
-	out["goroutine_summary"] = goroutineSummary()
 	return out
-}
-
-// goroutineSummary is pprof's debug=1 goroutine profile: one line per stack,
-// deduplicated and counted, no argument values. Bounded so a pathological
-// number of distinct stacks cannot blow the bundle's size limit.
-func goroutineSummary() string {
-	profile := pprof.Lookup("goroutine")
-	if profile == nil {
-		return ""
-	}
-	var buf bytes.Buffer
-	// debug=1 is the aggregated form; an error only means the profile could
-	// not be written, and an empty summary is a safe omission.
-	if err := profile.WriteTo(&buf, 1); err != nil {
-		return ""
-	}
-	const maxSummaryBytes = 64 * 1024
-	if buf.Len() > maxSummaryBytes {
-		buf.Truncate(maxSummaryBytes)
-	}
-	return buf.String()
 }

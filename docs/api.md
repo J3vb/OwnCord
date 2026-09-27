@@ -2930,6 +2930,14 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
   "ws_broadcast_ms": { "count": 1204, "p50": 1, "p95": 5, "p99": 20, "max": 210 },
   "ws_dispatch_lag_ms": { "count": 1204, "p50": 0.5, "p95": 2, "p99": 10, "max": 90 },
   "chat_send_ack_ms": { "count": 340, "p50": 2, "p95": 8, "p99": 25, "max": 60 },
+  "voice_join_ms": {
+    "precheck": { "count": 12, "p50": 1, "p95": 2, "p99": 2, "max": 1.4 },
+    "leave": { "count": 12, "p50": 0.5, "p95": 5, "p99": 5, "max": 3.1 },
+    "persist": { "count": 12, "p50": 2, "p95": 5, "p99": 5, "max": 4.2 },
+    "token": { "count": 12, "p50": 0.5, "p95": 1, "p99": 1, "max": 0.8 },
+    "complete": { "count": 12, "p50": 2, "p95": 5, "p99": 5, "max": 4.9 },
+    "total": { "count": 12, "p50": 5, "p95": 20, "p99": 20, "max": 12.6 }
+  },
   "hub_broadcast_queue_depth": 0,
   "hub_seqmu_max_hold_ms": 12,
   "livekit_healthy": true,
@@ -2983,8 +2991,8 @@ volume (omitted when the platform can't report it). `livekit_healthy` is
 omitted when no LiveKit health check is wired; `event_persister` is omitted
 when event persistence is disabled.
 
-The three distribution objects (`ws_broadcast_ms`, `ws_dispatch_lag_ms`,
-`chat_send_ack_ms`) and the two gauges (`hub_broadcast_queue_depth`,
+The distribution objects (`ws_broadcast_ms`, `ws_dispatch_lag_ms`,
+`chat_send_ack_ms`, `voice_join_ms`) and the two gauges (`hub_broadcast_queue_depth`,
 `hub_seqmu_max_hold_ms`) are the shipped, in-process metrics surface: they
 exist in **every** build, unlike the OpenTelemetry instruments below, which
 compile only with `-tags otel`. Each distribution reports `p50`, `p95`, `p99`
@@ -2993,7 +3001,13 @@ comparable estimate; buckets are 0.5 ms through 5 s, anything larger is exact
 max), `max` (exact) and `count`. `ws_broadcast_ms` is enqueue→fanout-done;
 `ws_dispatch_lag_ms` is enqueue→dispatch-start, the direct signal for a
 contended dispatch loop; `chat_send_ack_ms` is a `chat_send` frame's arrival
-to its `chat_send_ok` being queued. A `hub_seqmu_max_hold_ms` above ~100 ms is
+to its `chat_send_ok` being queued. `voice_join_ms` holds one such
+distribution per phase of a completed `voice_join` — `precheck` (rate limit,
+permission and channel gates), `leave` (leaving the previous channel on a
+switch), `persist` (the `voice_states` write), `token` (minting and sending
+`voice_token`), `complete` (the `voice_state` fan-out, existing states and
+`voice_config`) and `total`; a refused or rolled-back join is not counted. A
+`hub_seqmu_max_hold_ms` above ~100 ms is
 worth investigating; the retention purge holds `seqMu` across a full scan.
 
 ### GET /metrics (Prometheus)

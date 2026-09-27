@@ -11,6 +11,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/metrics"
+	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -26,8 +27,11 @@ func buildMetricsRouter(allowedCIDRs []string) http.Handler {
 			BroadcastMs: func() metrics.Summary {
 				return metrics.Summary{Count: 10, P50: 2, P95: 5, P99: 10, Max: 20}
 			},
-			DispatchLagMs:       func() metrics.Summary { return metrics.Summary{Count: 4, P95: 50, Max: 90} },
-			ChatAckMs:           func() metrics.Summary { return metrics.Summary{Count: 8, P95: 12, Max: 30} },
+			DispatchLagMs: func() metrics.Summary { return metrics.Summary{Count: 4, P95: 50, Max: 90} },
+			ChatAckMs:     func() metrics.Summary { return metrics.Summary{Count: 8, P95: 12, Max: 30} },
+			VoiceJoinMs: func() ws.VoiceJoinPhases {
+				return ws.VoiceJoinPhases{Token: metrics.Summary{Count: 2, P95: 20}, Total: metrics.Summary{Count: 2, P95: 50}}
+			},
 			BroadcastQueueDepth: func() int { return 7 },
 			SeqMuMaxHoldMs:      func() float64 { return 210 },
 			LiveKitHealth:       func(_ context.Context) (bool, error) { return true, nil },
@@ -62,7 +66,7 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 		"uptime", "uptime_seconds", "goroutines",
 		"heap_alloc_mb", "heap_sys_mb", "num_gc",
 		"connected_users", "voice_sessions", "broadcast_drops", "topic_sheds_total",
-		"ws_broadcast_ms", "ws_dispatch_lag_ms", "chat_send_ack_ms",
+		"ws_broadcast_ms", "ws_dispatch_lag_ms", "chat_send_ack_ms", "voice_join_ms",
 		"hub_broadcast_queue_depth", "hub_seqmu_max_hold_ms", "livekit_healthy",
 		"reconnect_tier_buffer", "reconnect_tier_db", "reconnect_tier_full",
 		"backpressure_queue_disconnects", "backpressure_high_fallbacks", "backpressure_low_drops",
@@ -102,6 +106,18 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 	}
 	if ack, ok := resp["chat_send_ack_ms"].(map[string]any); !ok || int(ack["p95"].(float64)) != 12 {
 		t.Errorf("chat_send_ack_ms = %v, want p95 12", resp["chat_send_ack_ms"])
+	}
+	vj, ok := resp["voice_join_ms"].(map[string]any)
+	if !ok {
+		t.Fatalf("voice_join_ms = %v, want object", resp["voice_join_ms"])
+	}
+	for _, phase := range []string{"precheck", "leave", "persist", "token", "complete", "total"} {
+		if _, ok := vj[phase].(map[string]any); !ok {
+			t.Errorf("voice_join_ms.%s = %v, want object", phase, vj[phase])
+		}
+	}
+	if total := vj["total"].(map[string]any); int(total["p95"].(float64)) != 50 || int(total["count"].(float64)) != 2 {
+		t.Errorf("voice_join_ms.total p95/count = %v/%v, want 50/2", total["p95"], total["count"])
 	}
 	if resp["livekit_healthy"] != true {
 		t.Errorf("livekit_healthy = %v, want true", resp["livekit_healthy"])

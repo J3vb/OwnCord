@@ -37,6 +37,41 @@ type hubLatencyMetrics struct {
 	// seq was assigned (SRV-03). Distinct from broadcastDrops, which is the
 	// hub-wide queue, and from low-priority drops, which lose nothing.
 	topicSheds atomic.Uint64
+	// voiceJoin is voice_join_ms: each phase of a completed voice join.
+	voiceJoin voiceJoinMetrics
+}
+
+// voiceJoinMetrics times the phases of handleVoiceJoin for joins that reach
+// the joiner; a refused or rolled-back join records nothing, so every phase
+// shares one count.
+type voiceJoinMetrics struct {
+	precheck, leave, persist, token, complete, total metrics.Histogram
+}
+
+// observe records one completed join from the timestamps taken as each phase
+// ended.
+func (m *voiceJoinMetrics) observe(start, precheckDone, leaveDone, persistDone, tokenDone, completeDone time.Time) {
+	ms := func(from, to time.Time) float64 { return float64(to.Sub(from)) / float64(time.Millisecond) }
+	m.precheck.Observe(ms(start, precheckDone))
+	m.leave.Observe(ms(precheckDone, leaveDone))
+	m.persist.Observe(ms(leaveDone, persistDone))
+	m.token.Observe(ms(persistDone, tokenDone))
+	m.complete.Observe(ms(tokenDone, completeDone))
+	m.total.Observe(ms(start, completeDone))
+}
+
+// VoiceJoinPhases is the voice_join_ms snapshot: precheck (rate limit,
+// permission and channel gates), leave (leaving the previous channel on a
+// switch), persist (the voice_states write and moderator-flag restore), token
+// (minting and sending voice_token), complete (subscription, voice_state
+// fan-out, existing states and voice_config) and total.
+type VoiceJoinPhases struct {
+	Precheck metrics.Summary `json:"precheck"`
+	Leave    metrics.Summary `json:"leave"`
+	Persist  metrics.Summary `json:"persist"`
+	Token    metrics.Summary `json:"token"`
+	Complete metrics.Summary `json:"complete"`
+	Total    metrics.Summary `json:"total"`
 }
 
 // observeSeqMuHold records how long the current seqMu critical section was
@@ -110,6 +145,19 @@ func (h *Hub) TopicShedCount() uint64 { return h.latency.topicSheds.Load() }
 func (h *Hub) BroadcastMs() metrics.Summary   { return h.latency.broadcast.Snapshot() }
 func (h *Hub) DispatchLagMs() metrics.Summary { return h.latency.dispatchLag.Snapshot() }
 func (h *Hub) ChatAckMs() metrics.Summary     { return h.latency.chatAck.Snapshot() }
+
+// VoiceJoinMs returns the per-phase voice join distributions.
+func (h *Hub) VoiceJoinMs() VoiceJoinPhases {
+	v := &h.latency.voiceJoin
+	return VoiceJoinPhases{
+		Precheck: v.precheck.Snapshot(),
+		Leave:    v.leave.Snapshot(),
+		Persist:  v.persist.Snapshot(),
+		Token:    v.token.Snapshot(),
+		Complete: v.complete.Snapshot(),
+		Total:    v.total.Snapshot(),
+	}
+}
 
 // IsUserConnected returns true if a client with the given userID is already
 // registered in the hub. Safe to call from any goroutine.

@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -71,24 +70,6 @@ func TestSupportHealth_LatencyFields(t *testing.T) {
 		if _, ok := out[key].(metrics.Summary); !ok {
 			t.Errorf("%s = %T, want metrics.Summary", key, out[key])
 		}
-	}
-}
-
-// The bundle carries the aggregated goroutine summary (function names and
-// counts), never a full dump with argument values (SRE-M1 / SRE-03).
-func TestSupportHealth_GoroutineSummaryIsAggregated(t *testing.T) {
-	out := supportHealth(nil, time.Now())
-	summary, ok := out["goroutine_summary"].(string)
-	if !ok {
-		t.Fatalf("goroutine_summary = %T, want string", out["goroutine_summary"])
-	}
-	// This test's own goroutine is running, so the profile must be non-empty
-	// and start with the aggregated header pprof writes for debug=1.
-	if summary == "" {
-		t.Fatal("goroutine_summary is empty; the profile could not be read")
-	}
-	if !strings.Contains(summary, "goroutine profile:") {
-		t.Errorf("goroutine_summary does not look like an aggregated profile: %.80q", summary)
 	}
 }
 

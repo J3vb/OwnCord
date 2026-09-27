@@ -554,6 +554,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 			BroadcastMs:         hub.BroadcastMs,
 			DispatchLagMs:       hub.DispatchLagMs,
 			ChatAckMs:           hub.ChatAckMs,
+			VoiceJoinMs:         hub.VoiceJoinMs,
 			BroadcastQueueDepth: hub.BroadcastQueueDepth,
 			SeqMuMaxHoldMs:      hub.SeqMuMaxHoldMs,
 			LiveKitHealth:       hub.LiveKitHealthCheck,

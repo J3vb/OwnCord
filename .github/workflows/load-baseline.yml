@@ -712,19 +712,13 @@ jobs:
       #
       # Read the counter from metrics-after.json (SRE-M1), not the server log:
       # the JSON figure is the same number the Attention panel alerts on, so
-      # the gate can no longer drift from what an operator sees. The log-grep
-      # fallback covers only an older server whose metrics lack the field.
+      # the gate can no longer drift from what an operator sees. A missing or
+      # unreadable snapshot fails the gate rather than passing it.
       - name: Assert the ceiling search never hit the topic limiter
         if: always() && inputs.profile == 'ceiling-search' && matrix.leg == 'constrained'
         run: |
-          shed=""
-          if [ -f "$WORK/metrics-after.json" ] && jq -e 'has("topic_sheds_total")' "$WORK/metrics-after.json" >/dev/null 2>&1; then
-            shed=$(jq -r '.topic_sheds_total' "$WORK/metrics-after.json")
-          elif [ -f "$WORK/server.log" ]; then
-            echo "::warning::metrics-after.json has no topic_sheds_total (pre-SRE-M1 server?); falling back to the server log"
-            shed=$(grep -c 'topic rate limit exceeded' "$WORK/server.log" || true)
-          else
-            echo "::error::neither metrics-after.json with topic_sheds_total nor server.log is available to check for topic-limiter shedding"
+          if ! shed=$(jq -er '.topic_sheds_total' "$WORK/metrics-after.json" 2>/dev/null); then
+            echo "::error::metrics-after.json is missing or has no topic_sheds_total, so topic-limiter shedding cannot be checked"
             exit 1
           fi
           if [ "$shed" != "0" ]; then

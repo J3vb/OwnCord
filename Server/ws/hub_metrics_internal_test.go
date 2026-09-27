@@ -3,6 +3,8 @@ package ws
 import (
 	"testing"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/metrics"
 )
 
 // A channel frame shed by the topic limiter must be counted, and counted
@@ -69,5 +71,30 @@ func TestBroadcastQueueDepth_TracksEnqueuedFrames(t *testing.T) {
 	}
 	if got := h.BroadcastQueueDepth(); got != 5 {
 		t.Fatalf("queue depth = %d, want 5", got)
+	}
+}
+
+// A completed voice join records every phase once, and a refused join records
+// none, so each phase's count is the number of joins that reached the joiner
+// (SRE-M1's voice_join_ms, the server half of RT-4).
+func TestVoiceJoinMs_RecordsEachPhaseOfACompletedJoin(t *testing.T) {
+	h, _, c, chID := newVoiceTraceHub(t, "joinms")
+
+	joinVoiceForTrace(t, h, c, chID)
+	// A re-join of the same channel is refused (ALREADY_JOINED) and must not
+	// be counted.
+	h.handleMessage(c, voiceFrame(t, "voice_join", "again", map[string]any{"channel_id": chID}))
+
+	got := h.VoiceJoinMs()
+	for name, s := range map[string]metrics.Summary{
+		"precheck": got.Precheck, "leave": got.Leave, "persist": got.Persist,
+		"token": got.Token, "complete": got.Complete, "total": got.Total,
+	} {
+		if s.Count != 1 {
+			t.Errorf("voice_join_ms.%s count = %d, want 1", name, s.Count)
+		}
+	}
+	if got.Total.Max < got.Persist.Max {
+		t.Errorf("voice_join_ms.total max %v < persist max %v; total must span every phase", got.Total.Max, got.Persist.Max)
 	}
 }
