@@ -66,10 +66,16 @@ stateDiagram-v2
 **Per-channel drafts (UX-1).** Switching away from a channel stashes its unsent
 state — text, reply target and staged upload ids — in `ChannelController`'s
 `draftByChannel`, and restores it when the user returns; a send that consumes
-the draft leaves nothing behind. Gating the composer (offline, slow mode, no
-permission) uses `aria-disabled` + `readOnly` rather than the `disabled`
-attribute, so a mid-sentence caret is never dropped to `<body>`; Send is
-refused with the reason instead.
+the draft leaves nothing behind. An in-progress edit is dropped, not stashed
+(restored outside edit mode it would send as a duplicate), a reply whose
+target was deleted meanwhile is dropped, and a staged upload older than
+`DRAFT_ATTACHMENT_TTL_MS` (50 min, under the server's ~1 h unlinked-attachment
+sweep) is dropped with an "attach it again" notice. Gating the composer
+(offline, slow mode, no permission) uses `aria-disabled` + `readOnly` rather
+than the `disabled` attribute, so a mid-sentence caret is never dropped to
+`<body>`; paste-to-upload and ArrowUp-to-edit are ignored while gated, and a
+refused Send shows the reason on the composer's refusal line (linked by
+`aria-describedby`, kept current as the slow-mode countdown ticks).
 
 > **✓ Implemented (2026-07).** The server sends an authoritative per-channel
 > `can_send` in the ready payload (`ws/serve.go` `channelCanSend`, mirroring
