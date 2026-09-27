@@ -1218,8 +1218,8 @@ The ZIP holds six fixed files: `build.json` (application/Go version, OS and
 architecture), `configuration.json` (an explicit scalar allowlist from the
 running startup configuration), `database.json` (applied migration names,
 table names and row counts), `health.json` (a database, memory and hub
-snapshot), `events.json` (up to 200 recent log records, mapped to fixed
-event codes; Warn/Error records are kept in preference to lower levels, so a
+snapshot), `events.json` (up to 200 recent log records, each mapped to a fixed
+event code; Warn/Error records are kept in preference to lower levels, so a
 routine INFO burst cannot push a failure out of the bundle) and
 `manifest.json` (sizes, hashes and the omission report).
 What it deliberately does not hold: no message content, no attachments or

@@ -117,6 +117,7 @@ and only when it changes something a contributor or fork holder must do
 - **Behind a reverse proxy, the log and audit trail now name the real client instead of the proxy.** With `trusted_proxies` configured — the recommended deployment — the access log, the WebSocket connect log and the `ws_connect` audit row recorded the proxy's address. They now record the client's, the same address the rate limiter and lockouts already used.
 - **The admin panel no longer discards unsaved edits silently.** Closing a dialog with Escape, a click outside or a Cancel/Close button used to drop whatever you had typed or toggled, and reloading the page dropped an edited Settings form. Both now ask first: a dialog with edits asks before closing, and the browser's own leave-site prompt appears while the Settings form or a dialog holds unsaved changes.
 - **A support bundle keeps the warnings that matter.** Its log timeline held the last 200 records at any level, so an ordinary run of info messages could push a failure out of the bundle before you exported it. Warnings and errors are now kept in preference to lower levels.
+- **Failures in a support bundle now name themselves.** Almost every warning or error in the bundle's log summary was reported as a generic `log_event`, so a reader could see that something failed but not what. Every warn/error message now maps to a fixed event code, and a test fails the build when a new failure log is added without one. No message text or request value is exported — the code comes from the fixed message only.
 
 ### Desktop app
 
