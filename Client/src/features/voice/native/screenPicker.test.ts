@@ -1,15 +1,37 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { NativeVoiceScreenSources } from "../../../platform/contracts/nativeVoice";
 
-const host = vi.hoisted((): { sources: NativeVoiceScreenSources } => ({
-  sources: { portal: false, sources: [] },
-}));
+interface FakePickOptions {
+  readonly sources: readonly unknown[];
+  readonly portal: boolean;
+}
+type FakePick = {
+  source: string;
+  quality: "low" | "medium" | "high" | "source";
+  fps: number;
+  audio: boolean;
+} | null;
+
+const host = vi.hoisted(
+  (): {
+    sources: NativeVoiceScreenSources;
+    pick: (opts: FakePickOptions) => FakePick;
+  } => ({
+    sources: { portal: false, sources: [] },
+    pick: () => null,
+  }),
+);
 vi.mock("../../../platform/desktop", () => ({
   desktop: { nativeVoice: { screenSources: () => Promise.resolve(host.sources) } },
 }));
+// The picker component itself is covered by its own test; here we pin the
+// adapter's mapping from the dialog's choice to the host capture settings.
+vi.mock("../../../components/ScreenSharePicker", () => ({
+  showScreenSharePicker: (opts: { sources: unknown[]; portal: boolean }) =>
+    Promise.resolve(host.pick(opts)),
+}));
 
 import { pickScreenSource } from "./screenPicker";
-import { captureOptions } from "./screenTrack";
 
 const x11: NativeVoiceScreenSources = {
   portal: false,
@@ -24,82 +46,52 @@ const x11: NativeVoiceScreenSources = {
   ],
 };
 
-const picker = () => document.querySelector<HTMLElement>('[data-testid="native-screen-picker"]');
-/** Let the source enumeration resolve and the modal mount. */
-const mounted = async () => {
-  await vi.waitFor(() => expect(picker()).not.toBeNull());
-  return picker()!;
-};
-
 describe("pickScreenSource", () => {
   beforeEach(() => {
     host.sources = x11;
+    host.pick = () => null;
   });
   afterEach(() => {
     document.body.replaceChildren();
   });
 
-  it("leaves the pick to the desktop portal on Wayland without showing anything", async () => {
+  it("maps the dialog's choice onto the host capture and the saved quality", async () => {
+    host.pick = () => ({
+      source: "window:81",
+      quality: "high",
+      fps: 30,
+      audio: true,
+    });
+    await expect(pickScreenSource()).resolves.toEqual({
+      source: "window:81",
+      capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
+      maxBitrate: 6_000_000,
+      maxFramerate: 30,
+    });
+  });
+
+  it("lets the dialog's per-share quality override the saved prefs", async () => {
+    host.pick = () => ({ source: "screen:277", quality: "low", fps: 30, audio: false });
+    await expect(pickScreenSource()).resolves.toEqual({
+      source: "screen:277",
+      capture: { fps: 5, maxWidth: 1280, maxHeight: 720 },
+      maxBitrate: 1_500_000,
+      maxFramerate: 5,
+    });
+  });
+
+  it("shows only the audio/quality step on Wayland and hands the portal the pick", async () => {
     host.sources = { portal: true, sources: [] };
-    await expect(pickScreenSource()).resolves.toBe("portal");
-    expect(picker()).toBeNull();
+    host.pick = (opts) => {
+      expect(opts.portal).toBe(true);
+      expect(opts.sources).toEqual([]);
+      return { source: "portal", quality: "medium", fps: 60, audio: true };
+    };
+    await expect(pickScreenSource()).resolves.toMatchObject({ source: "portal" });
   });
 
-  it("shows each screen and window with what would be shared, and resolves the pick", async () => {
-    const picking = pickScreenSource();
-    const modal = await mounted();
-    const cards = [...modal.querySelectorAll<HTMLButtonElement>(".native-screen-source")];
-    expect(cards.map((c) => c.getAttribute("aria-label"))).toEqual([
-      "Share Screen: screen",
-      "Share Window: Terminal",
-    ]);
-    expect(cards[0]!.querySelector("img")!.getAttribute("src")).toBe(
-      "data:image/png;base64,iVBORw==",
-    );
-    expect(cards[1]!.textContent).toContain("No preview");
-    cards[1]!.click();
-    await expect(picking).resolves.toBe("window:81");
-    expect(picker()).toBeNull();
-  });
-
-  it("resolves null when cancelled or dismissed with Escape", async () => {
-    const cancelled = pickScreenSource();
-    const modal = await mounted();
-    [...modal.querySelectorAll("button")].find((b) => b.textContent === "Cancel")!.click();
-    await expect(cancelled).resolves.toBeNull();
-
-    const escaped = pickScreenSource();
-    await mounted();
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    await expect(escaped).resolves.toBeNull();
-    expect(picker()).toBeNull();
-  });
-
-  it("says so when there is nothing to share", async () => {
-    host.sources = { portal: false, sources: [] };
-    const picking = pickScreenSource();
-    const modal = await mounted();
-    expect(modal.textContent).toContain("No screens or windows can be shared");
-    [...modal.querySelectorAll("button")].find((b) => b.textContent === "Cancel")!.click();
-    await expect(picking).resolves.toBeNull();
-  });
-});
-
-describe("captureOptions", () => {
-  it("maps the web presets onto the host capture, as createLocalScreenTracks reads them", () => {
-    expect(captureOptions({ resolution: { width: 1280, height: 720, frameRate: 5 } })).toEqual({
-      fps: 5,
-      maxWidth: 1280,
-      maxHeight: 720,
-    });
-    // "source" at 60/120 fps: a zero size is uncapped.
-    expect(captureOptions({ resolution: { width: 0, height: 0, frameRate: 60 } })).toEqual({
-      fps: 60,
-      maxWidth: 0,
-      maxHeight: 0,
-    });
-    // No resolution: the library's 1080p30 default.
-    expect(captureOptions({})).toEqual({ fps: 30, maxWidth: 1920, maxHeight: 1080 });
-    expect(captureOptions(undefined)).toEqual({ fps: 30, maxWidth: 1920, maxHeight: 1080 });
+  it("resolves null when the dialog is dismissed", async () => {
+    host.pick = () => null;
+    await expect(pickScreenSource()).resolves.toBeNull();
   });
 });

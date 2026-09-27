@@ -16,6 +16,7 @@ import {
   type LocalTrack,
   type VideoCaptureOptions,
   type ScreenShareCaptureOptions,
+  type AudioCaptureOptions,
 } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
@@ -46,19 +47,26 @@ export const CAMERA_PUBLISH_BITRATES: Record<StreamQuality, number> = {
   source: 8_000_000,
 };
 
+/** Screen-share audio: capture it, but exclude OwnCord's own playback from the
+ *  captured stream. Without `restrictOwnAudio` a screen share on Windows
+ *  captures system loopback — the call itself — and echoes every other caller
+ *  back into the stream the viewers hear. Chromium-only (WebView2 included);
+ *  other browsers ignore the constraint and keep their current behaviour. */
+const SCREENSHARE_AUDIO: AudioCaptureOptions = { restrictOwnAudio: true };
+
 export const SCREENSHARE_PRESETS: Record<StreamQuality, ScreenShareCaptureOptions> = {
-  low: { audio: true, resolution: ScreenSharePresets.h720fps5.resolution },
+  low: { audio: SCREENSHARE_AUDIO, resolution: ScreenSharePresets.h720fps5.resolution },
   medium: {
-    audio: true,
+    audio: SCREENSHARE_AUDIO,
     resolution: ScreenSharePresets.h1080fps15.resolution,
     contentHint: "detail",
   },
   high: {
-    audio: true,
+    audio: SCREENSHARE_AUDIO,
     resolution: ScreenSharePresets.h1080fps30.resolution,
     contentHint: "detail",
   },
-  source: { audio: true, contentHint: "detail" }, // no resolution cap — use native source resolution
+  source: { audio: SCREENSHARE_AUDIO, contentHint: "detail" }, // no resolution cap — use native source resolution
 };
 
 export const SCREENSHARE_PUBLISH_BITRATES: Record<StreamQuality, number> = {

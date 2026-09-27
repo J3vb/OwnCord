@@ -37,7 +37,13 @@ const host = vi.hoisted(() => ({
     frames: "ws://127.0.0.1:9/tok",
   }),
   publishCamera: (): Promise<string> => Promise.resolve("TR_cam"),
-  pick: (): Promise<string | null> => Promise.resolve("screen:7"),
+  pick: (): Promise<unknown> =>
+    Promise.resolve({
+      source: "screen:7",
+      capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
+      maxBitrate: 6_000_000,
+      maxFramerate: 30,
+    }),
   startScreen: (): Promise<unknown> => Promise.resolve({ capture: 4, width: 1280, height: 720 }),
   unsubscribed: 0,
   renderers: [] as FakeMedia[],
@@ -174,7 +180,13 @@ beforeEach(() => {
     frames: "ws://127.0.0.1:9/tok",
   });
   host.publishCamera = () => Promise.resolve("TR_cam");
-  host.pick = () => Promise.resolve("screen:7");
+  host.pick = () =>
+    Promise.resolve({
+      source: "screen:7",
+      capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
+      maxBitrate: 6_000_000,
+      maxFramerate: 30,
+    });
   host.startScreen = () => Promise.resolve({ capture: 4, width: 1280, height: 720 });
   nativeCounters.screenTracks = 0;
   host.renderers.length = 0;
@@ -805,7 +817,13 @@ describe("NativeRoom screen share", () => {
     host.pick = () => Promise.resolve(null);
     await expect(share(room)).rejects.toMatchObject({ name: "NotAllowedError" });
     expect(host.calls.filter(([n]) => n === "startScreen")).toHaveLength(0);
-    host.pick = () => Promise.resolve("portal");
+    host.pick = () =>
+      Promise.resolve({
+        source: "portal",
+        capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
+        maxBitrate: 6_000_000,
+        maxFramerate: 30,
+      });
     host.startScreen = () => Promise.reject("screen capture was cancelled or refused");
     await expect(share(room)).rejects.toMatchObject({ name: "NotAllowedError" });
     host.startScreen = () => Promise.reject("that screen or window is no longer available");
