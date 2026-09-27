@@ -83,13 +83,14 @@ Each item links to the guidance that owns it.
   native voice engine sends its room credential as an HTTP header, and servers
   from the `1.2.0-alpha.*` series drop that header and refuse the join. Update
   the server — [Linux desktop voice](deployment.md#linux-desktop-voice).
-- **On Linux, a 2.0.0-beta.1 or older client that reaches a Docker Compose
-  server on the same machine as `localhost` cannot join voice.** The server
-  hands the client LiveKit's container-internal address (`ws://livekit:7880`),
-  which does not resolve outside the container network, and those clients use it
-  as-is for a `localhost` server. Connect using the host's LAN address or
-  hostname instead, so voice goes through the server's `/livekit` tunnel, or run
-  the client on another machine. Fixed in the next client release —
+- **On Linux, a 2.0.0-beta.1 or older client that reaches a 2.0.0-beta.1 or
+  older Docker Compose server on the same machine as `localhost` cannot join
+  voice.** Those servers hand the client LiveKit's container-internal address
+  (`ws://livekit:7880`), which does not resolve outside the container network,
+  and those clients use it as-is for a `localhost` server. Update the server or
+  the client — the next release of either fixes it — or connect using the
+  host's LAN address or hostname instead, so voice goes through the server's
+  `/livekit` tunnel —
   [Linux desktop voice](deployment.md#linux-desktop-voice).
 
 ## FAQ

@@ -79,8 +79,8 @@ baselines and scorecards.
 
 | Status    |   Count |
 | --------- | ------: |
-| Fixed     |     466 |
-| Open      |       6 |
+| Fixed     |     467 |
+| Open      |       5 |
 | Declined  |       6 |
 | Duplicate |       1 |
 | **Total** | **479** |

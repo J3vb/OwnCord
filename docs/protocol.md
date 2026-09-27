@@ -302,6 +302,15 @@ The server responds immediately:
 
 Every 30 seconds, the server checks all clients. Any client with no activity for 90 seconds is forcibly disconnected. Normal chat activity also keeps the connection alive.
 
+### Client Silence Deadline
+
+The client treats any inbound frame (a `pong`, chat, presence) as proof that
+the socket still delivers. After 60 seconds with no inbound frame, it drops a
+half-open socket and reconnects. It does this only once a heartbeat ping has
+gone unanswered for at least 15 seconds. That rule keeps a minimised window,
+whose throttled heartbeat timer may not have sent a ping yet, from
+reconnecting for no reason.
+
 ### Desktop Transport Liveness
 
 The desktop client's Rust WebSocket proxy (`Client/src-tauri/src/ws_proxy.rs`)
@@ -1253,6 +1262,10 @@ it is written before item 3 in the same program order as items 1 and 4.
   }
 }
 ```
+
+`direct_url` is the server's own `voice.livekit_url`, sent only when its host
+is loopback (`localhost`, `127.0.0.1`, `::1`) and omitted otherwise; a client
+without it connects through the `url` proxy path.
 
 `is_key_holder` tells the joiner whether they are the channel's E2EE key
 holder (see [Voice End-to-End Encryption](#voice-end-to-end-encryption)).

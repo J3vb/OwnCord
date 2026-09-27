@@ -9,6 +9,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"time"
 
 	"github.com/livekit/protocol/auth"
@@ -240,4 +242,21 @@ func wsToHTTP(wsURL string) string {
 	default:
 		return wsURL
 	}
+}
+
+// loopbackURLOrEmpty returns rawURL when its host is localhost or a loopback
+// IP, and "" otherwise.
+func loopbackURLOrEmpty(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return rawURL
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return rawURL
+	}
+	return ""
 }
