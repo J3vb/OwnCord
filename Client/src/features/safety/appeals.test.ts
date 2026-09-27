@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@stores/ui.store", () => ({ openSettings: vi.fn() }));
 
 import { expectConsole } from "../../../tests/helpers/console";
+import { pinZone } from "../../../tests/helpers/tz-pin";
 import { ApiClientError, type MyAppeal, type OwnModerationAction } from "../../lib/api";
 import { appealBody, fitsAppealLimit } from "./Appeals";
 import { renderSafetyTab } from "./SafetyTab";
@@ -10,6 +11,8 @@ import { applyAppealStatus, refreshOwnModeration, resetSafetyStore, safetyStore 
 import { handleAppealStatus } from "./wsHandlers";
 
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+let restoreTZ: () => void;
 
 function row(over: Partial<OwnModerationAction> & { id: number }): OwnModerationAction {
   return {
@@ -78,12 +81,14 @@ const primaryOf = (pane: HTMLElement) =>
 const errorOf = (pane: HTMLElement) => q(pane, "#safety-appeal-error");
 
 beforeEach(() => {
+  restoreTZ = pinZone("UTC");
   resetSafetyStore();
   vi.clearAllMocks();
 });
 afterEach(() => {
   resetSafetyStore();
   document.body.replaceChildren();
+  restoreTZ();
 });
 
 describe("appeals store", () => {

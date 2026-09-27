@@ -886,6 +886,18 @@ jobs:
       - name: Run unit tests with coverage
         run: npx vitest run --coverage --reporter=default
 
+      # BUG-11: the suite above only ever ran in CI's UTC zone, so an assertion
+      # that hard-codes a rendered local time passed there and failed for every
+      # contributor east or west of it (the fifth instance of this class). A
+      # half-hour offset — the one offset no whole-hour zone shares — moves both
+      # the date and the hour, so a date-only or time-only assertion is caught
+      # too. No coverage: the floor script just measured the UTC run, and this
+      # leg is a timezone proof, not a second coverage measurement.
+      - name: Run unit tests at a half-hour offset (America/St_Johns)
+        env:
+          TZ: America/St_Johns
+        run: npx vitest run --reporter=default
+
       - name: Check client coverage floor
         if: always()
         run: bash scripts/coverage-floor.sh

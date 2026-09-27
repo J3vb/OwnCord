@@ -43,6 +43,30 @@ export function restoreTZ(original: string | undefined): void {
 }
 
 /**
+ * Pin the whole file to `zone` and return a restore for `afterEach`.
+ *
+ * Call from `beforeEach`:
+ *
+ *   let restore: () => void;
+ *   beforeEach(() => { restore = pinZone("UTC"); });
+ *   afterEach(() => { restore(); });
+ *
+ * For suites that assert an exact rendered local time. Pinning UTC there is
+ * what makes them pass off-UTC (BUG-11): the fixture is a real UTC instant,
+ * so the rendered string is only stable when Date renders in UTC. The
+ * `unit-tz` CI leg runs the whole suite at a half-hour offset precisely so a
+ * new unpinned assertion is caught.
+ *
+ * @param zone IANA zone to pin, e.g. "UTC".
+ * @returns A restore function; call it from `afterEach`.
+ */
+export function pinZone(zone: string): () => void {
+  const original = process.env.TZ;
+  process.env.TZ = zone;
+  return () => restoreTZ(original);
+}
+
+/**
  * Pin `zone`, run `verify()`, restore.
  *
  * @param zone   IANA zone to pin, e.g. "Asia/Tokyo".
