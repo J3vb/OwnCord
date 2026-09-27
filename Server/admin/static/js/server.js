@@ -127,10 +127,13 @@ async function renderRetention(){
   const plural=(n,w)=>n.toLocaleString()+' '+w+(n===1?'':'s');
   const excepted=rows.filter(r=>Object.prototype.hasOwnProperty.call(overrides,r.id));
   const following=rows.length-excepted.length;
+  const own=plural(excepted.length,'channel')+(excepted.length===1?' has its own rule':' have their own rules');
+  const shown=channels?'Show all '+plural(rows.length,'channel'):'Show listed channels';
   const sweep=!preview||!preview.length||totalDue===0
     ?'Nothing will be deleted on the next sweep.'
     :'The next sweep permanently deletes <strong>'+totalDue.toLocaleString()+'</strong> '+(totalDue===1?'message':'messages')+' across '+plural(preview.length,'channel')+'. This cannot be undone.';
-  const follow=!rows.length?'':excepted.length?plural(following,'channel')+' follow this; '+plural(excepted.length,'channel')+(excepted.length===1?' has its own rule. ':' have their own rules. '):(rows.length===1?'The one channel follows this. ':'All '+rows.length+' channels follow this. ');
+  const follow=!channels?(excepted.length?own+'; every other channel follows this.':'Every channel follows this.')
+    :!rows.length?'':excepted.length?plural(following,'channel')+(following===1?' follows':' follow')+' this; '+own+'.':(rows.length===1?'The one channel follows this.':'All '+rows.length+' channels follow this.');
 
   let html='<div class="page-title">Message retention</div><div class="page-desc">How long messages are kept before they are deleted permanently. Pinned messages and direct messages are never deleted.</div>';
 
@@ -148,7 +151,7 @@ async function renderRetention(){
   /* Only channels with their own window are listed; the full list waits
      behind a disclosure. */
   html+='<section class="section-card" aria-labelledby="ret-exc-h"><div class="section-card-header"><h3 id="ret-exc-h">Channel exceptions</h3></div>';
-  if(!excepted.length)html+='<div class="empty-line">'+I.channels+'<span>No channel has its own rule.'+(rows.length?' To keep a channel\'s messages for a different time, open Show all '+plural(rows.length,'channel')+' below.':'')+'</span></div>';
+  if(!excepted.length)html+='<div class="empty-line">'+I.channels+'<span>No channel has its own rule.'+(rows.length?' To keep a channel\'s messages for a different time, open '+shown+' below.':'')+'</span></div>';
   excepted.forEach(r=>{
     html+='<div class="ret-row" data-channel="'+esc(r.id)+'">'+I.channels+'<strong>'+esc(r.name)+'</strong><span class="muted">'+esc(retentionLabel(overrides[r.id]))+'</span>'
       +'<div class="act-group"><button class="btn btn-ghost" data-action="openChannelRetention" data-args="'+actArgs(r.id,r.name)+'">Edit</button><button class="btn btn-ghost" data-action="clearChannelRetention" data-args="'+actArgs(r.id)+'">Use server policy</button></div></div>';
@@ -162,7 +165,7 @@ async function renderRetention(){
         +'<span class="muted">'+esc(retentionLabel(has?overrides[r.id]:serverDays))+'</span>'
         +'<button class="btn btn-ghost" data-action="openChannelRetention" data-args="'+actArgs(r.id,r.name)+'">'+(has?'Edit exception':'Set exception')+'</button></div>';
     });
-    html+=disclosure('Show all '+plural(rows.length,'channel'),all,false,'ret-all');
+    html+=disclosure(shown,all,false,'ret-all');
   }
   html+='</section>';
   return html;
