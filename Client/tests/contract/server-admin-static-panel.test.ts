@@ -1190,7 +1190,7 @@ describe("Server/admin/static — panel behaviour", () => {
     // Signed out, a return to the tab loads nothing.
     (doc.querySelector('#userMenu [data-action="doLogout"]') as HTMLButtonElement).click();
     calls.length = 0;
-    jsdom.window.dispatchEvent(new jsdom.window.Event("focus"));
+    doc.dispatchEvent(new jsdom.window.Event("visibilitychange"));
     await tick();
     expect(calls).toEqual([]);
   });

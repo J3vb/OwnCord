@@ -443,16 +443,9 @@ function refreshBadges(everySource){
   if(can(PERM.ADMINISTRATOR)&&(everySource||state.section!=='dashboard'))api('GET','/attention').catch(quiet);
   if(isOwner()&&(everySource||(state.section!=='dashboard'&&state.section!=='updates')))api('GET','/updates').catch(quiet);
 }
-/* Tab switches fire both events; one refresh per return is enough. */
-let badgesRefreshedAt=0;
-function refreshBadgesOnReturn(){
-  if(document.visibilityState!=='visible'||!state.me)return;
-  if(Date.now()-badgesRefreshedAt<5000)return;
-  badgesRefreshedAt=Date.now();
-  refreshBadges(true);
-}
-document.addEventListener('visibilitychange',refreshBadgesOnReturn);
-window.addEventListener('focus',refreshBadgesOnReturn);
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&state.me)refreshBadges(true);
+});
 
 function navigateTo(id){
   if(!sectionAllowed(id)){showToast('You do not have permission to open that section','error');return}
