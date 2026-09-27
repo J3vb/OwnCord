@@ -208,6 +208,8 @@ export const shellText = defineCatalog("shell", {
   "sidebar.open": "Open navigation",
   "sidebar.close": "Close navigation",
 
+  "toast.dismiss": "Dismiss notification",
+
   "quickSwitch.label": "Switch server",
   "quickSwitch.title": "Switch Server",
   "quickSwitch.subtitle": "You’ll disconnect from the current server.",
