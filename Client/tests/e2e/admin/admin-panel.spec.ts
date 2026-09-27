@@ -71,7 +71,7 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page, adminS
     // A fresh server may not have evaluated yet; either way the headline is
     // one sentence, and a report with signals lists them under All health checks.
     await expect(page.locator("#attentionPanel #attnTitle")).toHaveText(
-      /^(Waiting for the first health check|Everything is running normally|No active warnings|\d+ problems? needs? your attention)$/,
+      /^(Waiting for the first health check|Everything is running normally|\d+ problems? needs? your attention)$/,
     );
     const checks = page.locator("#healthChecks");
     if ((await checks.count()) > 0) {

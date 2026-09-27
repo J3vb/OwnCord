@@ -177,14 +177,24 @@ describe("Server/admin/static — attention panel (RI-07)", () => {
 
   it("says so when nothing is active, and when the server has not evaluated yet", async () => {
     const paths: string[] = [];
-    let report: unknown = { ...REPORT, warnings: [] };
+    // Unknown signals alone do not need attention: the headline stays
+    // normal, they show as a "not measured" chip, not as healthy, and the
+    // checks stay shut.
+    let report: unknown = {
+      ...REPORT,
+      warnings: [],
+      signals: REPORT.signals.map((g) => (g.status === "unknown" ? g : { ...g, status: "ok" })),
+    };
     const booted = await boot(paths, (p) => (p === "/attention" ? { json: report } : { json: {} }));
     dom = booted.dom;
     booted.bridge.state.me = { permissions: ADMINISTRATOR };
     let panel = render(dom, await booted.bridge.renderDashboard());
-    expect(panel.querySelector(".attn-none")?.textContent).toBe("No active warnings");
+    expect(panel.querySelector(".attn-none")?.textContent).toBe("Everything is running normally");
+    const counts = panel.querySelector(".health-hero-counts")?.textContent;
+    expect(counts).toContain("3 healthy");
+    expect(counts).toContain("2 not measured");
+    expect(panel.querySelector("#healthChecks")?.hasAttribute("open")).toBe(false);
 
-    // Only when every signal is healthy does it say so, with the checks shut.
     report = {
       ...REPORT,
       warnings: [],

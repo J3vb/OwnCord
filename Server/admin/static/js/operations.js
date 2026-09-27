@@ -76,7 +76,8 @@ async function downloadSupportBundle(){
    and is never drawn or counted as healthy.
    The dashboard answers "is anything wrong?" first: one headline, a card per
    active warning, and every signal in a disclosure that starts open only when
-   one is not healthy. The disclosures never touch the #section hash. */
+   one is a warning or critical; unknown alone shows as a grey "not measured"
+   chip. The disclosures never touch the #section hash. */
 const ATTN_STATUS={ok:['badge-green','Healthy'],warning:['badge-yellow','Warning'],critical:['badge-red','Critical'],unknown:['badge-muted','Unknown']};
 function attnBadge(s){const b=ATTN_STATUS[s]||ATTN_STATUS.unknown;return'<span class="badge '+b[0]+'">'+b[1]+'</span>'}
 const ATTN_TIME=new Intl.DateTimeFormat(undefined,{hour:'numeric',minute:'2-digit'});
@@ -133,7 +134,7 @@ function renderChecks(signals,counts){
       +disclosure(statusIcon(attnWorst(jc))+'<span class="lbl">'+plural(jobs.length,'maintenance job','maintenance jobs')+'</span><span class="val">'+jobState+'</span>',list+'</ul>',jc.critical+jc.warning>0,'check-jobs');
   }
   body+='</div>';
-  return'<details class="section-card checks disclose" id="healthChecks"'+(attnWorst(counts)==='ok'?'':' open')+'><summary class="section-card-header">'+I.chevronRight+'<h3>All health checks</h3><span class="checks-sum">'+sum.join(' · ')+'</span></summary>'+body+'</details>';
+  return'<details class="section-card checks disclose" id="healthChecks"'+(counts.critical+counts.warning?' open':'')+'><summary class="section-card-header">'+I.chevronRight+'<h3>All health checks</h3><span class="checks-sum">'+sum.join(' · ')+'</span></summary>'+body+'</details>';
 }
 /* The headline, the active and recently recovered warnings (#attentionPanel),
    and the all-checks disclosure, returned apart so the dashboard can put the
@@ -145,7 +146,7 @@ function renderAttention(rep){
   let tone,title,cls;
   if(!rep||!rep.evaluated_at){tone='unknown';cls='attn-pending';title='Waiting for the first health check'}
   else if(active.length){tone=active.some(w=>w.severity==='critical')?'critical':'warning';cls='attn-problems';title=active.length===1?'1 problem needs your attention':active.length+' problems need your attention'}
-  else{tone=attnWorst(counts)==='ok'?'ok':'unknown';cls='attn-none';title=tone==='ok'?'Everything is running normally':'No active warnings'}
+  else{tone='ok';cls='attn-none';title='Everything is running normally'}
   const sub=rep&&rep.evaluated_at?'Checked '+fmtLocal(rep.evaluated_at,ATTN_TIME)+' · the server checks every minute':'The server checks its health once a minute after it starts.';
   const chips=[['critical','critical','critical'],['warning','warning','warnings'],['ok','healthy','healthy'],['unknown','not measured','not measured']]
     .filter(k=>counts[k[0]]).map(k=>'<span class="count-chip">'+statusIcon(k[0])+plural(counts[k[0]],k[1],k[2])+'</span>').join('');
