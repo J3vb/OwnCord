@@ -616,7 +616,7 @@ func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 	if c == nil {
 		return false
 	}
-	h.handleVoiceLeave(ctx, c)
+	h.handleVoiceLeave(ctx, c, voiceLeaveReasonModerator)
 	return true
 }
 
@@ -633,7 +633,7 @@ func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelI
 	if c == nil {
 		return false
 	}
-	return h.handleVoiceLeaveIfStillIn(ctx, c, channelID)
+	return h.handleVoiceLeaveIfStillIn(ctx, c, channelID, voiceLeaveReasonModerator)
 }
 
 // SetPendingVoiceModFlags stashes a moderator-imposed mute/deafen on

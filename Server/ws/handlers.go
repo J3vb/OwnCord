@@ -22,7 +22,7 @@ func (h *Hub) HandleMessageForTest(c *Client, raw []byte) {
 // disconnect-triggered cleanup without an explicit voice_leave message.
 // Exported for ws_test package use only.
 func (h *Hub) HandleVoiceLeaveForTest(c *Client) {
-	h.handleVoiceLeave(context.Background(), c)
+	h.handleVoiceLeave(context.Background(), c, voiceLeaveReasonDisconnect)
 }
 
 // handleMessage parses the envelope and dispatches to the appropriate handler.
@@ -108,7 +108,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		// LeaveVoice alongside its error when CONNECT_VOICE was revoked, so the
 		// user is removed from the SFU rather than merely denied a new token.
 		if result.LeaveVoice {
-			h.handleVoiceLeave(c.ctx, c)
+			h.handleVoiceLeave(c.ctx, c, result.LeaveVoiceReason)
 		}
 		return
 	}
@@ -236,10 +236,16 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, result Result) {
 	// un-throttled on disconnect/switch). handleVoiceJoin re-reads channel_id
 	// from the already-validated envelope payload.
 	if result.LeaveVoice {
-		h.handleVoiceLeave(c.ctx, c)
+		h.handleVoiceLeave(c.ctx, c, result.LeaveVoiceReason)
 	}
 	if result.JoinVoice {
-		h.handleVoiceJoin(c.ctx, c, env.Payload)
+		// req_id is client-controlled; cap it to the same 64 chars
+		// handleMessageDecode uses before it reaches a log line (SRE-M2).
+		reqID := env.ID
+		if len(reqID) > 64 {
+			reqID = reqID[:64]
+		}
+		h.handleVoiceJoin(c.ctx, c, env.Payload, reqID)
 	}
 }
 

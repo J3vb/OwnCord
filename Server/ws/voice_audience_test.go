@@ -90,7 +90,7 @@ func TestFinishVoiceLeave_EvictedUserAlwaysInAudience(t *testing.T) {
 	// "" as "nothing to remove") — this bare hub has no DB, matching the
 	// bare-hub fail-closed (empty) READ audience the sibling test above
 	// exercises for broadcastVoiceEvent.
-	h.finishVoiceLeave(context.Background(), evicted, 5, "")
+	h.finishVoiceLeave(context.Background(), evicted, 5, "", voiceLeaveReasonModerator)
 
 	select {
 	case bm := <-h.broadcast:
