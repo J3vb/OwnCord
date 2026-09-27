@@ -597,6 +597,80 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toContain("limit=51");
   });
 
+  // Each label is written for the target the server records with it: a
+  // self-target, a target without an id and a numbered object must all leave
+  // a complete sentence.
+  it("reads every recorded target shape as a complete sentence", async () => {
+    const rowsIn: [string, string, number, number?][] = [
+      ["session_revoke_all", "user", 1],
+      ["setting_change", "setting", 0],
+      ["registration_mode_change", "setting", 0],
+      ["retention_policy_change", "setting", 0],
+      ["role_reorder", "role", 0],
+      ["role_create", "role", 5],
+      ["message_delete", "message", 55],
+      ["session_revoke", "session", 12],
+      ["invite_create", "invite", 3],
+      ["emoji_delete", "emoji", 5],
+      ["api_token_create", "api_token", 3],
+      ["api_token_revoke", "api_token", 0],
+      ["appeal_assign", "appeal", 3],
+      ["appeal_submit", "moderation_action", 4],
+      ["permission_preview", "channel", 3],
+      ["account_deleted", "user", 0],
+      ["plugin_install", "plugin", 0],
+      ["voice_mod_kick", "user", 9],
+      ["backup_create", "server", 0],
+    ];
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/audit-log?"))
+        return {
+          json: rowsIn.map(([action, target_type, target_id], i) => ({
+            id: rowsIn.length - i,
+            action,
+            actor_id: 1,
+            actor_name: "owner",
+            target_type,
+            target_id,
+            detail: "",
+            created_at: "2020-01-02 10:00:00",
+          })),
+        };
+      return { json: {} };
+    };
+    const booted = await boot([], respond);
+    dom = booted.dom;
+    const doc = booted.dom.window.document;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+    booted.bridge.state.section = "audit";
+    doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
+
+    expect(
+      [...doc.querySelectorAll("#auditTbody tr.audit-row .audit-what")].map((r) => r.textContent),
+    ).toEqual([
+      "owner signed out all their sessions",
+      "owner changed a server setting",
+      "owner changed who can join",
+      "owner changed the message retention policy",
+      "owner reordered the roles",
+      "owner created role #5",
+      "owner deleted a message #55",
+      "owner signed out a session #12",
+      "owner created an invite #3",
+      "owner removed an emoji #5",
+      "owner created an API token #3",
+      "owner revoked an API token",
+      "owner took an appeal #3",
+      "owner appealed a moderation action #4",
+      "owner previewed permissions for channel #3",
+      "owner deleted an account",
+      "owner installed a plugin",
+      "owner disconnected user #9",
+      "owner took a backup",
+    ]);
+  });
+
   // Every client connection writes user_login and ws_connect, so the
   // dashboard's five-row Recent activity would read as sign-ins only.
   it("hides sign-ins and connections from the dashboard's Recent activity", async () => {
