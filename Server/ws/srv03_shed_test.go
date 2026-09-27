@@ -23,22 +23,22 @@ func TestContentFrameLoss_ResumingClientTakesFullReadyAndRecoversMessage(t *test
 		name string
 		// lose commits and emits messages until one is lost before
 		// sequencing, returning the lost message's id.
-		lose func(t *testing.T, ctx context.Context, h *Hub, emit func() int64) int64
+		lose func(t *testing.T, h *Hub, emit func() int64) int64
 	}
 	triggers := []trigger{
-		{name: "topic limiter above 100 frames/s", lose: func(t *testing.T, ctx context.Context, h *Hub, emit func() int64) int64 {
+		{name: "topic limiter above 100 frames/s", lose: func(t *testing.T, h *Hub, emit func() int64) int64 {
 			go h.Run()
 			var last int64
 			for range topicRateLimitPerSecond + 5 {
 				last = emit()
 			}
-			waitDispatchDrained(t, ctx, h)
+			waitDispatchDrained(t, h)
 			if got := h.TopicShedCount(); got != 5 {
 				t.Fatalf("TopicShedCount = %d, want 5", got)
 			}
 			return last
 		}},
-		{name: "full broadcast queue", lose: func(t *testing.T, ctx context.Context, h *Hub, emit func() int64) int64 {
+		{name: "full broadcast queue", lose: func(t *testing.T, h *Hub, emit func() int64) int64 {
 			for range cap(h.broadcast) {
 				h.BroadcastToAll([]byte(`{"type":"server_filler"}`))
 			}
@@ -47,7 +47,7 @@ func TestContentFrameLoss_ResumingClientTakesFullReadyAndRecoversMessage(t *test
 				t.Fatalf("BroadcastDropCount = %d, want 1", got)
 			}
 			go h.Run()
-			waitDispatchDrained(t, ctx, h)
+			waitDispatchDrained(t, h)
 			return lost
 		}},
 	}
@@ -84,7 +84,7 @@ func TestContentFrameLoss_ResumingClientTakesFullReadyAndRecoversMessage(t *test
 				h.EmitEvents(ctx, []Event{channelEvt{evType: MsgTypeChatMessage, channelID: chID, payload: payload}})
 				return msgID
 			}
-			lostID := tc.lose(t, ctx, h, emit)
+			lostID := tc.lose(t, h, emit)
 
 			// The client received every frame that was sequenced, so its
 			// last_seq sits exactly at the loss.
@@ -121,7 +121,7 @@ func TestContentFrameLoss_ResumingClientTakesFullReadyAndRecoversMessage(t *test
 
 // waitDispatchDrained waits for the dispatch loop to start and sequence every
 // frame queued so far.
-func waitDispatchDrained(t *testing.T, ctx context.Context, h *Hub) {
+func waitDispatchDrained(t *testing.T, h *Hub) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for !h.running.Load() {
@@ -130,7 +130,7 @@ func waitDispatchDrained(t *testing.T, ctx context.Context, h *Hub) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if err := h.awaitDispatch(ctx); err != nil {
+	if err := h.awaitDispatch(t.Context()); err != nil {
 		t.Fatalf("awaitDispatch: %v", err)
 	}
 }
