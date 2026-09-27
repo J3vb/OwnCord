@@ -492,7 +492,8 @@ cert management), three things matter:
    LiveKit. An HTTP reverse proxy never carries this traffic.
 3. **Tell OwnCord about the proxy.** Set `server.trusted_proxies` to the
    proxy's own address(es) (e.g. `["10.0.0.2/32"]`) so client IPs come from
-   `X-Forwarded-For` for rate limiting and the admin IP allowlist. List only
+   `X-Forwarded-For` for rate limiting, the admin IP allowlist, the access
+   and WebSocket logs, and the `ws_connect` audit row. List only
    the proxy hops, never client networks. A proxy on the same host is
    `["127.0.0.1/32", "::1/128"]`: without it the allowlist sees the proxy's
    loopback address on every request, and the server warns about this shape
