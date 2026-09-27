@@ -101,7 +101,7 @@ const VERDICTS = {
 // ---------- rules ----------
 const RULES = `
 Repo: OwnCord, checked out at your current working directory (the repo root - do not assume any absolute
-path; run every command from there and use repo-relative paths). Go 1.26 server in Server/, Tauri v2 client in Client/
+path; run every command from there and use repo-relative paths). Go 1.27 server in Server/, Tauri v2 client in Client/
 (Rust in src-tauri/src/, TypeScript in src/lib/ and src/stores/).
 
 You are hunting REAL BUGS: wrong behavior, not style. In scope:

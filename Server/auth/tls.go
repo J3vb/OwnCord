@@ -253,6 +253,7 @@ func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 			Scheme:   "https",
 			Host:     host,
 			Path:     r.URL.Path,
+			RawPath:  r.URL.RawPath,
 			RawQuery: r.URL.RawQuery,
 		}).String()
 		http.Redirect(w, r, target, http.StatusMovedPermanently)

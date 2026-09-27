@@ -59,9 +59,10 @@ updates:
         update-types: ["version-update:semver-minor"]
 
   # Server container base images (Server/Dockerfile). The builder's
-  # `golang:1.27-bookworm` tracks the toolchain in Server/go.mod and every
-  # `actions/setup-go` in CI, so a minor bump here is a signal to move all three
-  # together — not a standalone merge.
+  # `golang:1.27-bookworm` tracks the toolchain in Server/go.mod, every
+  # `actions/setup-go` in CI and the golangci-lint pin (a linter built with an
+  # older Go refuses the module), so a minor bump here is a signal to move all
+  # four together — not a standalone merge.
   - package-ecosystem: docker
     directory: /Server
     target-branch: dev

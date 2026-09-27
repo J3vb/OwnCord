@@ -380,6 +380,29 @@ func TestLoadOrGenerateACME_HTTPRedirectNonDefaultPort(t *testing.T) {
 	}
 }
 
+func TestLoadOrGenerateACME_HTTPRedirectKeepsEscapedPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.TLSConfig{
+		Mode:         "acme",
+		Domain:       "chat.example.com",
+		AcmeCacheDir: filepath.Join(tmpDir, "acme_certs"),
+	}
+
+	result, err := auth.LoadOrGenerate(cfg)
+	if err != nil {
+		t.Fatalf("LoadOrGenerate(acme) error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://chat.example.com/x/a%2Fb%3Bc?q=1", nil)
+	rec := httptest.NewRecorder()
+	result.HTTPHandler.ServeHTTP(rec, req)
+
+	loc := rec.Header().Get("Location")
+	if want := "https://chat.example.com/x/a%2Fb%3Bc?q=1"; loc != want {
+		t.Errorf("redirect Location = %q, want %q", loc, want)
+	}
+}
+
 // ─── B6-6: reachability failures must not be silent ─────────────────────────
 
 // TestLoadACME_IPErrorNamesTheRealLimit — the error used to read "Let's
