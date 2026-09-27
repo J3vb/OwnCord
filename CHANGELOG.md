@@ -76,6 +76,10 @@ and only when it changes something a contributor or fork holder must do
   only hid the preview while the upload kept running, and Send stayed blocked
   until it finished or failed. The upload is now stopped, Send is available at
   once, and no error is shown for it.
+- **A file upload now shows its progress instead of an indefinite spinner.**
+  The chip on each attachment fills as the bytes move, so a large file on a
+  slow connection no longer looks stuck. Until the transfer reports its first
+  byte the bar is indeterminate, as before.
 
 ### Voice
 

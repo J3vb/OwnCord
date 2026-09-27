@@ -422,7 +422,11 @@ describe("MessageInput", () => {
     Object.defineProperty(fileInput, "files", { value: [testFile], writable: true });
     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
     await vi.waitFor(() => {
-      expect(onUploadFile).toHaveBeenCalledWith(testFile, expect.any(AbortSignal));
+      expect(onUploadFile).toHaveBeenCalledWith(
+        testFile,
+        expect.any(AbortSignal),
+        expect.any(Function),
+      );
     });
     // Wait for the upload to fully settle so the send is not blocked by the
     // uploads-in-flight guard instead of the empty-content one.
@@ -487,7 +491,11 @@ describe("MessageInput", () => {
     Object.defineProperty(fileInput, "files", { value: [testFile], writable: true });
     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
     await vi.waitFor(() => {
-      expect(onUploadFile).toHaveBeenCalledWith(testFile, expect.any(AbortSignal));
+      expect(onUploadFile).toHaveBeenCalledWith(
+        testFile,
+        expect.any(AbortSignal),
+        expect.any(Function),
+      );
     });
     const previewBar = container.querySelector(".attachment-preview-bar");
     await vi.waitFor(() => {
@@ -886,7 +894,11 @@ describe("MessageInput", () => {
 
     // Wait for the async upload to complete
     await vi.waitFor(() => {
-      expect(onUploadFile).toHaveBeenCalledWith(testFile, expect.any(AbortSignal));
+      expect(onUploadFile).toHaveBeenCalledWith(
+        testFile,
+        expect.any(AbortSignal),
+        expect.any(Function),
+      );
     });
 
     // Preview bar should be visible
@@ -1242,7 +1254,11 @@ describe("MessageInput", () => {
     // Wait for the upload to resolve — the entry's id is now the server id,
     // not the tempId the remove button was created with.
     await vi.waitFor(() => {
-      expect(onUploadFile).toHaveBeenCalledWith(testFile, expect.any(AbortSignal));
+      expect(onUploadFile).toHaveBeenCalledWith(
+        testFile,
+        expect.any(AbortSignal),
+        expect.any(Function),
+      );
     });
     const previewBar = container.querySelector(".attachment-preview-bar");
     await vi.waitFor(() => {
@@ -1644,7 +1660,11 @@ describe("MessageInput", () => {
     textarea.dispatchEvent(pasteEvent);
 
     await vi.waitFor(() => {
-      expect(onUploadFile).toHaveBeenCalledWith(file, expect.any(AbortSignal));
+      expect(onUploadFile).toHaveBeenCalledWith(
+        file,
+        expect.any(AbortSignal),
+        expect.any(Function),
+      );
     });
 
     comp.destroy?.();

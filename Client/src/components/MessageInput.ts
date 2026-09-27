@@ -39,6 +39,7 @@ export interface MessageInputOptions {
   readonly onUploadFile?: (
     file: File,
     signal?: AbortSignal,
+    onProgress?: (fraction: number) => void,
   ) => Promise<{ id: string; url: string; filename: string }>;
   readonly onTyping: () => void;
   readonly onEditMessage: (messageId: number, content: string) => void;
@@ -745,10 +746,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       appendFileLabel(item, file.name);
     }
 
-    // Loading spinner overlay
-    const spinner = createElement("div", { class: "attachment-preview-spinner" });
-    spinner.appendChild(createIcon("loader", 16));
-    item.appendChild(spinner);
+    // A native progress bar on the chip: indeterminate (no value) while the
+    // transport reports nothing, determinate from its first tick.
+    const progressBar = createElement("progress", { "aria-label": file.name });
+    item.appendChild(progressBar);
 
     appendRemoveButton(item, file.name);
     attachmentPreviewBar.appendChild(item);
@@ -763,7 +764,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     // Upload in background
     try {
-      const result = await options.onUploadFile(file, uploadOwner.signal);
+      // A late tick after the preview is removed writes a detached node only.
+      const result = await options.onUploadFile(
+        file,
+        uploadOwner.signal,
+        (fraction) => (progressBar.value = fraction),
+      );
       // Replace temp ID with real server ID, unless the preview was removed
       if (!uploadOwner.signal.aborted) {
         pending.id = result.id;
@@ -771,7 +777,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         pending.owner = undefined;
         pending.uploadedAt = Date.now();
         item.classList.remove("uploading");
-        spinner.remove();
+        progressBar.remove();
       }
     } catch (err) {
       // A user-cancelled upload (removed preview) is not a failure: the

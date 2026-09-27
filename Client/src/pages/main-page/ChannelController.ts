@@ -860,9 +860,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => {
         performSend(content, replyTo, attachments);
       },
-      onUploadFile: async (file: File, uploadSignal?: AbortSignal) => {
+      onUploadFile: async (
+        file: File,
+        uploadSignal?: AbortSignal,
+        onProgress?: (fraction: number) => void,
+      ) => {
         try {
-          const result = await api.uploadFile(file, uploadSignal);
+          const result = await api.uploadFile(file, uploadSignal, onProgress);
           return { id: result.id, url: result.url, filename: result.filename };
         } catch (err) {
           // A user-cancelled upload is not a failure — the composer already
