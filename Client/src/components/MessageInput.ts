@@ -721,15 +721,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     pendingUploadCount++;
     try {
       const result = await options.onUploadFile(file, uploadOwner.signal);
-      // Replace temp ID with real server ID (immutable update)
-      const attIdx = pendingAttachments.findIndex((a) => a.id === tempId);
-      if (attIdx !== -1) {
-        pendingAttachments[attIdx] = {
-          ...pendingAttachments[attIdx]!,
-          id: result.id,
-          filename: result.filename,
-          owner: undefined,
-        };
+      // Replace temp ID with real server ID
+      if (pendingAttachments.includes(pending)) {
+        pending.id = result.id;
+        pending.filename = result.filename;
+        pending.owner = undefined;
         item.classList.remove("uploading");
         spinner.remove();
       }

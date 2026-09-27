@@ -819,6 +819,43 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("removing a finished upload keeps Send blocked on a later in-flight one", async () => {
+    const onUploadFile = vi
+      .fn<
+        (file: File, signal?: AbortSignal) => Promise<{ id: string; url: string; filename: string }>
+      >()
+      .mockResolvedValueOnce({ id: "srv-a", url: "/a", filename: "a.pdf" })
+      .mockImplementationOnce(() => new Promise(() => {}));
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const attach = (name: string): void => {
+      Object.defineProperty(fileInput, "files", {
+        value: [new File(["data"], name, { type: "application/pdf" })],
+        configurable: true,
+      });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+
+    attach("a.pdf");
+    await vi.waitFor(() =>
+      expect(container.querySelector(".attachment-preview-item.uploading")).toBeNull(),
+    );
+    (container.querySelector("[data-testid='attachment-remove']") as HTMLButtonElement).click();
+
+    attach("b.pdf");
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(2));
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "hello";
+    (container.querySelector(".send-btn") as HTMLButtonElement).click();
+    expect(opts.onSend).not.toHaveBeenCalled();
+    expect(container.querySelector(".attachment-preview-item")).not.toBeNull();
+
+    comp.destroy?.();
+  });
+
   it("shows no error when an upload is aborted by the user", async () => {
     const onUploadFile = vi.fn(
       (_file: File, signal?: AbortSignal) =>
