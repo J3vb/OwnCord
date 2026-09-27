@@ -37,6 +37,9 @@ const (
 	// voiceLeaveReasonRevoked is the CONNECT_VOICE revocation sweep
 	// (sweepStaleVoiceEvictRevoked, hub_sweep.go).
 	voiceLeaveReasonRevoked = "revoked"
+	// voiceLeaveReasonReconciled is RT-3's polling reconciler removing a
+	// membership whose SFU participant no longer exists (voice_reconcile.go).
+	voiceLeaveReasonReconciled = "reconciled"
 )
 
 // clearVoiceAndUnsubscribe clears c's voice state and drops its voice-topic
