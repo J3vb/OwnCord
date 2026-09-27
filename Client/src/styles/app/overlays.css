@@ -150,10 +150,16 @@
   opacity: 0;
   transition: opacity 0.3s;
   pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .toast.show {
   opacity: 1;
   animation: toastSlideUp 0.3s ease;
+  /* Only a shown toast may be hovered or focused (that pauses its dismissal),
+     so it alone re-enables pointer events the container turns off. */
+  pointer-events: auto;
 }
 .toast-info {
   border-left: 4px solid var(--accent);
@@ -166,6 +172,36 @@
 }
 .toast-warning {
   border-left: 4px solid var(--yellow);
+}
+.toast-count {
+  flex-shrink: 0;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-align: center;
+}
+.toast-close {
+  flex-shrink: 0;
+  margin-left: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-size-lg);
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: var(--radius-sm);
+}
+.toast-close:hover {
+  color: var(--text-normal);
+}
+.toast-close:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 /* ── Reconnecting Banner ── */
