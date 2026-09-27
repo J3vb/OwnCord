@@ -36,6 +36,13 @@ const I={
   activity:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
   chevronDown:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
   smile:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>',
+  /* Status icons (Lucide circle-check, triangle-alert, circle-x, circle-dashed),
+     always drawn next to a word: statusIcon() below. */
+  circleCheck:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>',
+  triangleAlert:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+  circleX:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>',
+  circleDashed:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.1 2.18a10 10 0 0 1 3.8 0"/><path d="M13.9 21.82a10 10 0 0 1-3.8 0"/><path d="M17.61 3.72a10 10 0 0 1 2.69 2.7"/><path d="M2.18 13.9a10 10 0 0 1 0-3.8"/><path d="M20.28 17.61a10 10 0 0 1-2.7 2.69"/><path d="M21.82 10.1a10 10 0 0 1 0 3.8"/><path d="M3.72 6.39a10 10 0 0 1 2.7-2.69"/><path d="M6.39 20.28a10 10 0 0 1-2.69-2.7"/></svg>',
+  chevronRight:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
 };
 
 /* ═══ State ═══ */
@@ -109,6 +116,11 @@ function utcDate(s){const v=String(s);return new Date(/[Zz]|[+-]\d\d:?\d\d$/.tes
 function fmtLocal(s,fmt){if(!s)return'';const d=utcDate(s);if(isNaN(d.getTime()))return esc(String(s));return'<span title="'+esc(d.toISOString())+'">'+esc(fmt?fmt.format(d):d.toLocaleString())+'</span>'}
 function actionBadge(a){if(!a)return'badge-muted';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'badge-red';if(a.includes('create'))return'badge-green';if(a.includes('update'))return'badge-yellow';return'badge-accent'}
 function actionColor(a){if(!a)return'var(--accent)';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'var(--text-danger)';if(a.includes('create'))return'var(--text-positive)';if(a.includes('update'))return'var(--text-warning)';return'var(--accent)'}
+/* A status is never colour alone: the icon is aria-hidden and sits next to a
+   word, visible or .sr-only. Unknown keeps its own grey icon and is never
+   drawn as healthy. */
+const STATUS_ICON={ok:['st-ok','circleCheck'],warning:['st-warn','triangleAlert'],critical:['st-crit','circleX'],unknown:['st-pending','circleDashed']};
+function statusIcon(s){const v=STATUS_ICON[s]||STATUS_ICON.unknown;return'<span class="st-ic '+v[0]+'" aria-hidden="true">'+I[v[1]]+'</span>'}
 /* Roles are createable now, so the four seeded ids are a fallback, not the set.
    Anything role-shaped prefers the live list (state.roleList, filled by the
    Roles section and by openEditUser) and only then the seeded map — otherwise a

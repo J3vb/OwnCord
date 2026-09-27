@@ -2,6 +2,13 @@ import type { Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test, expect } from "./fixtures";
+import {
+  Q1,
+  findUnnamedControls,
+  focusIndicator,
+  keyboardReachable,
+  textContrast,
+} from "../support/b9-accessibility";
 
 // One atomic user journey with a fresh process/database on EVERY attempt.
 // Retries must replay setup, not silently replace the wizard with login.
@@ -56,8 +63,38 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page, adminS
     // Token persisted in localStorage by the wizard → straight into the app.
     await expect(page.locator("#adminShell")).toBeVisible({ timeout: 10_000 });
 
-    const usersCard = page.locator(".stat-card", { hasText: "Total Users" });
+    const usersCard = page.locator(".stat-card", { hasText: "Members" });
     await expect(usersCard.locator(".stat-card-value")).toHaveText("1");
+  });
+
+  await test.step("dashboard opens with one health headline from the live attention state", async () => {
+    // A fresh server may not have evaluated yet; either way the headline is
+    // one sentence, and a report with signals lists them under All health checks.
+    await expect(page.locator("#attentionPanel #attnTitle")).toHaveText(
+      /^(Waiting for the first health check|Everything is running normally|\d+ problems? needs? your attention)$/,
+    );
+    const checks = page.locator("#healthChecks");
+    const hasChecks = (await checks.count()) > 0;
+    if (hasChecks) {
+      if (!(await checks.evaluate((el) => el.hasAttribute("open")))) {
+        await checks.locator(":scope > summary").click();
+      }
+      await expect(checks.locator("[data-signal]").first()).toBeVisible();
+    }
+    // The disclosures are local state: they never write the #section hash.
+    expect(new URL(page.url()).hash).toBe("");
+
+    // The shared accessibility checks, over this page.
+    expect(await findUnnamedControls(page.locator("#content"))).toEqual([]);
+    for (const text of hasChecks ? [".health-hero-sub", ".count-chip"] : [".health-hero-sub"]) {
+      const { ratio } = await textContrast(page.locator(text).first());
+      expect(ratio, text).toBeGreaterThanOrEqual(Q1.text);
+    }
+    if (hasChecks) {
+      const summary = checks.locator(":scope > summary");
+      expect(await keyboardReachable(page, summary)).toBe(true);
+      expect((await focusIndicator(page)).problems).toEqual([]);
+    }
   });
 
   await test.step("channel create shows up in the channel table", async () => {

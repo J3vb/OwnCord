@@ -94,12 +94,8 @@ input,select,textarea{font-family:inherit;border:none}
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:24px}
 .stat-card{background:var(--bg-card);border-radius:var(--radius-md);padding:18px 20px;border:1px solid var(--border);transition:border-color .2s}
 .stat-card:hover{border-color:var(--border-strong)}
-.stat-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .stat-card-label{font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase}
-.stat-card-icon{width:32px;height:32px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.stat-card-icon svg{width:16px;height:16px}
 .stat-card-value{font-size:28px;font-weight:700;color:var(--header-primary);font-family:var(--font-mono);line-height:1.1}
-.stat-card-sub{font-size:12px;color:var(--text-muted);margin-top:4px;font-family:var(--font-mono)}
 
 .section-card{background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border);margin-bottom:20px;overflow:hidden}
 .section-card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
@@ -306,6 +302,67 @@ input,select,textarea{font-family:inherit;border:none}
 .activity-text{font-size:13px;color:var(--text-muted);line-height:1.4}
 .activity-text strong{color:var(--text-normal)}
 .activity-time{font-size:11px;color:var(--text-muted);margin-top:2px}
+
+/* Status icons (core.js statusIcon): always beside a word, never colour
+   alone. The tints below are the existing badge tints of the same tokens. */
+.st-ic{display:inline-flex;width:18px;height:18px;flex-shrink:0}.st-ic svg{width:100%;height:100%}
+.st-ok{color:var(--text-positive)}.st-warn{color:var(--text-warning)}.st-crit{color:var(--text-danger)}.st-pending{color:var(--text-muted)}
+.muted{color:var(--text-muted)}
+.card-note{font-size:13px;color:var(--text-muted);line-height:1.45;margin-bottom:8px}
+/* Native disclosures: the leading chevron turns when open (reduced motion
+   zeroes the transition). */
+details.disclose>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px}
+details.disclose>summary::-webkit-details-marker{display:none}
+details.disclose>summary>svg:first-child{width:14px;height:14px;flex-shrink:0;color:var(--text-muted);transition:transform .15s}
+details.disclose[open]>summary>svg:first-child{transform:rotate(90deg)}
+details.disclose>summary.section-card-header{justify-content:flex-start}
+details.disclose:not([open])>summary.section-card-header{border-bottom:none}
+.checks-sum{font-size:13px;color:var(--text-muted);margin-left:auto;text-align:right}
+
+/* Dashboard (UX clarity): one health headline, a card per active warning,
+   every check behind a disclosure. */
+.health-hero{display:flex;align-items:center;flex-wrap:wrap;gap:12px 16px;padding:18px 20px;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--bg-card);margin-bottom:12px}
+.health-hero.ok{border-color:rgba(92,195,137,.35)}.health-hero.warn{border-color:rgba(242,184,75,.45)}.health-hero.crit{border-color:rgba(255,143,146,.5)}
+.health-hero-icon{width:44px;height:44px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0;background:rgba(163,169,178,.15)}
+.health-hero.ok .health-hero-icon{background:rgba(92,195,137,.15)}.health-hero.warn .health-hero-icon{background:rgba(242,184,75,.15)}.health-hero.crit .health-hero-icon{background:rgba(255,143,146,.15)}
+.health-hero-icon .st-ic{width:24px;height:24px}
+.health-hero-text{flex:1 1 240px;min-width:0}
+.health-hero-title{font-size:18px;font-weight:700;color:var(--header-primary)}
+.health-hero-sub{font-size:13px;color:var(--text-muted);margin-top:2px}
+.health-hero-counts{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.count-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:4px 10px;border-radius:var(--radius-pill);background:var(--bg-hover);color:var(--text-normal)}
+.count-chip .st-ic{width:14px;height:14px}
+.attn-card{display:flex;gap:12px;padding:16px 20px;border-radius:var(--radius-md);background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--yellow);margin-bottom:12px}
+.attn-card.crit{border-left-color:var(--red)}.attn-card.ok{border-left-color:var(--green)}
+.attn-body{flex:1;min-width:0}
+.attn-card h4{font-size:14px;color:var(--header-primary);margin-bottom:4px;overflow-wrap:anywhere}
+.attn-next{font-size:13px;line-height:1.5;margin-top:6px}.attn-next b{color:var(--header-primary)}
+.attn-meta{font-size:12px;color:var(--text-muted);margin-top:8px;display:flex;gap:4px 12px;flex-wrap:wrap;align-items:center}
+.attn-tech{font-size:12px;color:var(--text-muted);margin-top:6px;font-family:var(--font-mono);overflow-wrap:anywhere}
+.attn-recovered{margin-bottom:12px}
+.attn-recovered>summary{font-size:13px;color:var(--text-muted);padding:4px 0 8px}
+#attentionPanel{margin-bottom:20px}
+.update-strip{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:10px 16px;border-radius:var(--radius-md);background:var(--bg-card);border:1px solid var(--border);margin-bottom:20px;font-size:13px}
+.update-strip>svg{width:18px;height:18px;color:var(--accent-text);flex-shrink:0}
+.update-strip>span{flex:1 1 200px;min-width:0}
+.update-strip .btn{margin-left:auto}
+.stat-grid.compact{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.stat-grid.compact .stat-card{padding:12px 16px}
+.stat-grid.compact .stat-card-label{display:block;margin-bottom:6px}
+.stat-grid.compact .stat-card-value{font-size:22px}
+.check-group{padding:4px 20px 16px}
+.check-group-title{font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase;padding:12px 0 6px}
+.check-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}
+.check-tile{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:var(--radius-md);background:var(--bg-primary);border:1px solid var(--border);min-width:0}
+.check-tile>div{min-width:0}
+.check-tile .lbl,.check-jobs .lbl{font-size:13px;font-weight:600;color:var(--text-normal)}
+.check-tile .val{font-size:12px;color:var(--text-muted);margin-top:2px;overflow-wrap:anywhere}
+.check-jobs>summary{padding:10px 12px;border-radius:var(--radius-md);background:var(--bg-primary);border:1px solid var(--border);flex-wrap:wrap}
+.check-jobs>summary .val{font-size:12px;color:var(--text-muted);margin-left:auto}
+.job-list{list-style:none;columns:2 260px;column-gap:24px;margin-top:8px;padding:0 4px}
+.job-list li{display:flex;gap:8px;align-items:center;font-size:13px;padding:4px 0;break-inside:avoid}
+.job-list .st-ic{width:14px;height:14px}
+.job-list .val{color:var(--text-muted)}
 
 /* Members (AO-4): tabs, the list, one Manage button plus an overflow menu per
    row. The menu is position:fixed (members.js places it) so the table's scroll
