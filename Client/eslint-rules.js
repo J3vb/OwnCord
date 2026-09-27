@@ -8,6 +8,8 @@
 //
 // Plain JS, ESM, no build step — eslint.config.js imports this directly.
 
+import path from "node:path";
+
 /** True when `node` calls `<methodName>(...)` through any of the receivers the
  *  reconnect code uses: `this.<methodName>()` (the class form in
  *  livekitSession.ts), a bare `<methodName>()` local closure, or
@@ -331,21 +333,24 @@ const noIdentityScopeFallback = {
 // (safety, message-requests, moderation) that this rule used to miss — their
 // module path is not `stores/`, and several mutators (apply*, note*, begin*,
 // fail*, refresh*) were outside the verb list, so a page-local ws.on could
-// write them clean. Both are widened here. Store *instances* stay safe: a
-// `safetyStore.getState()` read is a member callee, never a bare call to a
-// recorded import, so recording the instance name flags no read.
+// write them clean. Both are widened here. Store *instances* stay safe: only
+// imports whose names match the mutator verbs are recorded, so `safetyStore`
+// is never recorded and a `safetyStore.getState()` read is never flagged.
 // ─────────────────────────────────────────────────────────────────────────
 
 const STORE_MUTATOR_PREFIX =
   /^(set|add|remove|update|increment|clear|toggle|open|close|join|leave|mark|confirm|bulk|rollback|reset|prepend|reattach|invalidate|load|apply|note|begin|fail|refresh)[A-Z_]/;
 
-function isStoreModuleSource(source) {
+function isStoreModuleSource(source, filename) {
   if (typeof source !== "string") return false;
-  // The `stores/` layer: "@stores/..." alias or relative "../stores/...".
-  if (/(?:^|\/)@?stores\//.test(source)) return true;
-  // A feature-local domain store: "features/<name>/store" (relative) — and
-  // the bare "./store" a module inside that feature directory uses.
-  return /(?:^|\/)features\/[^/]+\/store$/.test(source) || source === "./store";
+  if (source.startsWith("@stores/")) return true;
+  if (!source.startsWith(".")) return false;
+  // Resolve a relative specifier against the importing file, so every
+  // spelling of the same module ("./store", "../<name>/store",
+  // "../../stores/x") lands on one path: the `stores/` layer or a
+  // feature-local `src/features/<name>/store.ts`.
+  const resolved = path.resolve(path.dirname(filename), source).split(path.sep).join("/");
+  return /\/src\/stores\//.test(resolved) || /\/src\/features\/[^/]+\/store$/.test(resolved);
 }
 
 function isWsOnCall(node) {
@@ -368,7 +373,7 @@ const noStoreWriteInWsOn = {
     type: "problem",
     docs: {
       description:
-        "Disallow calling an imported store-mutator (set*/add*/update*/... from a stores/ module) from " +
+        "Disallow calling an imported store-mutator (set*/add*/update*/... from a stores/ or features/*/store module) from " +
         "inside a ws.on(...) callback outside dispatcher.ts. dispatcher.ts is the single place server " +
         "events are allowed to write into domain stores; a page-local ws.on(...) handler may read store " +
         "state and drive its own local UI, but must not mutate a domain store itself.",
@@ -387,7 +392,7 @@ const noStoreWriteInWsOn = {
 
     return {
       ImportDeclaration(node) {
-        if (!isStoreModuleSource(node.source.value)) return;
+        if (!isStoreModuleSource(node.source.value, context.filename)) return;
         for (const spec of node.specifiers) {
           if (spec.type === "ImportSpecifier" && STORE_MUTATOR_PREFIX.test(spec.local.name)) {
             storeMutatorImports.add(spec.local.name);

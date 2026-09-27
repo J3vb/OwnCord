@@ -9,7 +9,7 @@ import { deriveAccentTokens, parseColor, type Rgb } from "./color-contrast";
 
 /** Built-in theme palettes. Moved here from `@components/settings/helpers` so
  *  `lib/` and `features/` modules can apply a theme without importing the
- *  component layer; the settings tabs re-export it from `helpers.ts`. */
+ *  component layer. */
 export const THEMES = {
   dark: {
     "--bg-primary": "#313338",

@@ -299,12 +299,23 @@ describe("eslint-rules", () => {
         });`,
         // A feature-local store instance is READ, not called — `safetyStore`
         // is imported from a features/*/store module but only its .getState()
-        // is reached, so recording every named import must not flag a member
-        // call (OC-0478).
-        `import { safetyStore } from "../features/safety/store";
-        ws.on("mod_action", () => {
-          safetyStore.getState();
-        });`,
+        // is reached, and a store instance is never recorded as a mutator
+        // (OC-0478).
+        {
+          filename: "src/pages/Probe.ts",
+          code: `import { safetyStore } from "../features/safety/store";
+          ws.on("mod_action", () => {
+            safetyStore.getState();
+          });`,
+        },
+        // A bare "./store" outside features/ is not a domain store: from lib/
+        // it resolves to src/lib/store, so a mutator-named import is not
+        // recorded.
+        {
+          filename: "src/lib/Probe.ts",
+          code: `import { applyFrame } from "./store";
+          ws.on("dm_request", (p) => applyFrame(p, true));`,
+        },
       ],
       invalid: [
         {
@@ -331,11 +342,27 @@ describe("eslint-rules", () => {
         // applyAppealStatus. A page-local ws.on that writes any of them is
         // the same second-writer violation and must be flagged.
         {
+          filename: "src/pages/Probe.ts",
           code: `import { applyFrame } from "../features/message-requests/store";
           ws.on("dm_request", (p) => applyFrame(p, true));`,
           errors: [{ messageId: "storeWriteOutsideDispatcher" }],
         },
+        // The same store reached from a sibling feature ("../<name>/store")
+        // and from inside its own feature ("./store").
         {
+          filename: "src/features/navigation/Probe.ts",
+          code: `import { applyFrame } from "../message-requests/store";
+          ws.on("dm_request", (p) => applyFrame(p, true));`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        {
+          filename: "src/features/message-requests/Probe.ts",
+          code: `import { applyFrame } from "./store";
+          ws.on("dm_request", (p) => applyFrame(p, true));`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        {
+          filename: "src/main.ts",
           code: `import { applySnapshot, beginSnapshot } from "./features/message-requests/store";
           ws.on("ready", () => { beginSnapshot(); applySnapshot([], token); });`,
           errors: [
@@ -344,11 +371,13 @@ describe("eslint-rules", () => {
           ],
         },
         {
+          filename: "src/pages/Probe.ts",
           code: `import { noteQueueChange } from "../features/moderation/store";
           ws.on("mod_queue", () => noteQueueChange());`,
           errors: [{ messageId: "storeWriteOutsideDispatcher" }],
         },
         {
+          filename: "src/pages/Probe.ts",
           code: `import { addNotice, setActiveTimeout } from "../features/safety/store";
           ws.on("mod_action", (p) => { addNotice(1, "x", "y"); setActiveTimeout(null); });`,
           errors: [

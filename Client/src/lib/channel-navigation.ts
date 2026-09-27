@@ -5,14 +5,7 @@
  */
 
 import { setActiveChannel, clearUnread, channelsStore } from "@stores/channels.store";
-import { clearDmUnread, dmStore, dmDisplayName } from "@stores/dm.store";
-// lib -> pages import: addDmToChannelsStore is the only place that
-// synthesizes a DM's channelsStore mirror row. dispatcher.ts already crosses
-// this same boundary for exactly this reason (see its DM_CHANNEL_CLOSE
-// handler) — a DM that `ready` reported in dmStore but that the user has not
-// yet opened this session has no mirror row until one of these two call
-// sites creates it.
-import { addDmToChannelsStore } from "@stores/dm.store";
+import { addDmToChannelsStore, clearDmUnread, dmStore, dmDisplayName } from "@stores/dm.store";
 
 /**
  * Activate `channelId`, clearing its unread and mention badges.
