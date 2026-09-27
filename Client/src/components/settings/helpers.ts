@@ -4,16 +4,13 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref } from "@lib/preferences";
-import { THEMES, applyTheme, type ThemeName } from "@lib/themes";
 
-// Preference persistence lives in `@lib/preferences` and the theme palette in
-// `@lib/themes` so `lib/` and `features/` modules can use them without
-// importing the component layer (ARCH-06). Re-exported here so the settings
-// tabs keep a single import site — and, critically, so both layers share one
-// implementation (they used to be copy-pasted and had drifted).
+// Preference persistence lives in `@lib/preferences` so `lib/` and `features/`
+// modules can use it without importing the component layer (ARCH-06).
+// Re-exported here so the settings tabs keep a single import site — and,
+// critically, so both layers share one implementation (they used to be
+// copy-pasted and had drifted).
 export { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref };
-export { THEMES, applyTheme };
-export type { ThemeName };
 
 // ---------------------------------------------------------------------------
 // Accessible toggle creation
