@@ -54,6 +54,11 @@ compares its output against these files. It runs under `go test ./...`, so
 `npm run check:server` and the `Server Build & Test` CI check already cover
 it — there is nothing extra to run.
 
+The client replays the same files through its dispatcher in
+`Client/tests/contract/protocol-fixtures.test.ts`, so a regenerated fixture
+must also pass `npm run test:contract` from `Client/` (`npm run check:client`
+covers it).
+
 Regenerate with:
 
 ```bash
