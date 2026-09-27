@@ -244,9 +244,13 @@ refuses anything else with `protocol_epoch_unsupported`.
 - **Within an epoch, changes are additive.** New optional fields; new message
   types the other side may ignore. Unknown server→client types are ignored by
   the client; unknown client→server types get an `error` frame. The frozen
-  transcripts under `protocol/fixtures/epoch-1/` replay against the server for
-  as long as epoch 1 is accepted — a failing fixture means "bump the epoch",
-  not "fix the fixture".
+  transcripts under `protocol/fixtures/epoch-1/` replay against the server
+  (`Server/ws/protocol_epoch1_contract_test.go`) for as long as epoch 1 is
+  accepted — a failing fixture means "bump the epoch", not "fix the fixture".
+  The client half replays each server→client frame through the real dispatcher
+  and asserts its store effect (`Client/tests/contract/protocol-fixtures.test.ts`,
+  ARCH-02), so a rename or retype on the wire fails a client test and not only
+  the server's.
 - **A breaking change is a new epoch.** Bump `protocol_epoch`, regenerate, and
   set `minClientEpoch` (`Server/ws/messages.go`) to the new value: the server
   accepts exactly one epoch by policy. Epoch 1 additionally accepts an absent
