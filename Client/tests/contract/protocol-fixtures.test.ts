@@ -244,13 +244,16 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
   });
 
   /** Feed one frame, envelope id included, with its placeholders substituted.
-   *  `envelopeId` pins the envelope id the way `overrides` pin payload keys. */
-  function send(
+   *  `envelopeId` pins the envelope id the way `overrides` pin payload keys.
+   *  Voice handlers lazily import the mocked livekitSession without awaiting
+   *  it; two such imports in one tick bypass the mock and load the real
+   *  module, so each frame's imports settle before the next frame is fed. */
+  async function send(
     frame: WireFrame["frame"],
     overrides: Record<string, unknown>,
     counter: { n: number },
     envelopeId?: string,
-  ): void {
+  ): Promise<void> {
     const envelope = substitute(
       { id: frame.id },
       envelopeId === undefined ? {} : { id: envelopeId },
@@ -261,42 +264,43 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
       substitute(frame.payload, overrides, counter) as never,
       envelope.id,
     );
+    await vi.dynamicImportSettled();
   }
 
   /** Feed ONE server->client frame through the wired dispatcher. */
-  function dispatch(
+  async function dispatch(
     journey: string,
     type: string,
     overrides: Record<string, unknown> = {},
     envelopeId?: string,
-  ): void {
-    send(s2cFrame(journey, type), overrides, { n: 0 }, envelopeId);
+  ): Promise<void> {
+    await send(s2cFrame(journey, type), overrides, { n: 0 }, envelopeId);
   }
 
   /** Feed a whole connection's s2c frames in order (smoke / multi-frame). */
-  function replayConnection(journey: string, conn: string): void {
+  async function replayConnection(journey: string, conn: string): Promise<void> {
     const counter = { n: 0 };
-    for (const f of s2c(journey, conn)) send(f.frame, {}, counter);
+    for (const f of s2c(journey, conn)) await send(f.frame, {}, counter);
   }
 
-  it("auth-failure: auth_error lands in uiStore and clears auth", () => {
-    dispatch("auth-failure", "auth_error");
+  it("auth-failure: auth_error lands in uiStore and clears auth", async () => {
+    await dispatch("auth-failure", "auth_error");
     expectConsole("error", "Auth failed");
     expect(uiStore.getState().transientError).toBe("invalid token");
     expect(authStore.getState().isAuthenticated).toBe(false);
     expect(authStore.getState().logoutReason).toBe("user");
   });
 
-  it("fresh-connect: auth_ok authenticates from the fixture's user", () => {
-    dispatch("fresh-connect", "auth_ok");
+  it("fresh-connect: auth_ok authenticates from the fixture's user", async () => {
+    await dispatch("fresh-connect", "auth_ok");
     expect(authStore.getState().isAuthenticated).toBe(true);
     expect(authStore.getState().user?.username).toBe("alice");
     expect(authStore.getState().serverName).toBe("OwnCord Server");
     expect(authStore.getState().motd).toBe("Welcome!");
   });
 
-  it("fresh-connect: ready fills channels, roles and members", () => {
-    dispatch("fresh-connect", "ready");
+  it("fresh-connect: ready fills channels, roles and members", async () => {
+    await dispatch("fresh-connect", "ready");
     expect([...channelsStore.getState().channels.values()].map((c) => c.name).sort()).toEqual([
       "Voice",
       "general",
@@ -307,13 +311,13 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     expect(alice?.displayName).toBe("Alice Fixture");
   });
 
-  it("fresh-connect: member_join adds the joining user by name", () => {
-    dispatch("fresh-connect", "member_join");
+  it("fresh-connect: member_join adds the joining user by name", async () => {
+    await dispatch("fresh-connect", "member_join");
     const alice = [...membersStore.getState().members.values()].find((m) => m.username === "alice");
     expect(alice?.status).toBe("online");
   });
 
-  it("fresh-connect: presence fills the custom status", () => {
+  it("fresh-connect: presence fills the custom status", async () => {
     // presence only patches a member that already exists, and the fixture does
     // not keep ids stable, so seed the member the frame patches.
     const USER_ID = 8001;
@@ -329,18 +333,18 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
         identity_public_key: null,
       },
     ]);
-    dispatch("fresh-connect", "presence", { user_id: USER_ID });
+    await dispatch("fresh-connect", "presence", { user_id: USER_ID });
     expect(membersStore.getState().members.get(USER_ID)?.customStatus).toBe(
       "fixture custom status",
     );
   });
 
-  it("chat-send-fanout: the broadcast is appended with its fixture content", () => {
-    dispatch("chat-send-fanout", "chat_message");
+  it("chat-send-fanout: the broadcast is appended with its fixture content", async () => {
+    await dispatch("chat-send-fanout", "chat_message");
     expect(getChannelMessages(1).some((m) => m.content === "hello epoch one")).toBe(true);
   });
 
-  it("chat-send-fanout: chat_send_ok confirms the pending send it acknowledges", () => {
+  it("chat-send-fanout: chat_send_ok confirms the pending send it acknowledges", async () => {
     const CORRELATION_ID = "send-1";
     const MESSAGE_ID = 5002;
     addOptimisticMessage({
@@ -351,7 +355,7 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
       replyTo: null,
       timestamp: "2026-09-05 11:00:00",
     });
-    dispatch("chat-send-fanout", "chat_send_ok", { message_id: MESSAGE_ID }, CORRELATION_ID);
+    await dispatch("chat-send-fanout", "chat_send_ok", { message_id: MESSAGE_ID }, CORRELATION_ID);
     const row = getChannelMessages(1).find((m) => m.content === "hello epoch one");
     expect(row).toMatchObject({
       id: MESSAGE_ID,
@@ -360,7 +364,7 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     });
   });
 
-  it("chat-edit-delete: edit rewrites content, delete tombstones the row", () => {
+  it("chat-edit-delete: edit rewrites content, delete tombstones the row", async () => {
     // The message is created server-side (setup), so the fixture carries no
     // chat_message for it — seed the row at the id the frames name.
     const MESSAGE_ID = 5000;
@@ -383,13 +387,13 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
       ],
       false,
     );
-    dispatch("chat-edit-delete", "chat_edited", { message_id: MESSAGE_ID });
+    await dispatch("chat-edit-delete", "chat_edited", { message_id: MESSAGE_ID });
     expect(getChannelMessages(1).find((m) => m.id === MESSAGE_ID)?.content).toBe("edited text");
-    dispatch("chat-edit-delete", "chat_deleted", { message_id: MESSAGE_ID });
+    await dispatch("chat-edit-delete", "chat_deleted", { message_id: MESSAGE_ID });
     expect(getChannelMessages(1).find((m) => m.id === MESSAGE_ID)?.deleted).toBe(true);
   });
 
-  it("reaction-add-remove: add then remove returns the reaction list to empty", () => {
+  it("reaction-add-remove: add then remove returns the reaction list to empty", async () => {
     const MESSAGE_ID = 5001;
     setMessages(
       1,
@@ -415,23 +419,23 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     // two frames' generated user ids from colliding onto the same value.
     const counter = { n: 0 };
     for (const frame of s2cFrames("reaction-add-remove", "reaction_update")) {
-      send(frame, { message_id: MESSAGE_ID }, counter);
+      await send(frame, { message_id: MESSAGE_ID }, counter);
     }
     expect(getChannelMessages(1).find((m) => m.id === MESSAGE_ID)?.reactions).toEqual([]);
   });
 
-  it("typing: the indicator is keyed on the fixture's channel id", () => {
-    dispatch("typing", "typing");
+  it("typing: the indicator is keyed on the fixture's channel id", async () => {
+    await dispatch("typing", "typing");
     expect(membersStore.getState().typingUsers.get(1)?.size).toBe(1);
   });
 
-  it("dm-send: the DM broadcast is appended to its DM channel", () => {
-    dispatch("dm-send", "chat_message");
+  it("dm-send: the DM broadcast is appended to its DM channel", async () => {
+    await dispatch("dm-send", "chat_message");
     expect(getChannelMessages(3).some((m) => m.content === "hello over dm")).toBe(true);
   });
 
-  it("dm-request: the pending request lands in the message-requests store", () => {
-    dispatch("dm-request", "dm_request");
+  it("dm-request: the pending request lands in the message-requests store", async () => {
+    await dispatch("dm-request", "dm_request");
     const state = messageRequestsStore.getState();
     expect(state.pending).toHaveLength(1);
     expect(state.pending[0]!.channelId).toBe(3);
@@ -439,18 +443,18 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     expect(state.pending[0]!.createdAt).toBe("2026-09-05 12:00:00");
   });
 
-  it("dm-request-ignored: b's view is genuine silence (no request, no message)", () => {
-    replayConnection("dm-request-ignored", "b");
+  it("dm-request-ignored: b's view is genuine silence (no request, no message)", async () => {
+    await replayConnection("dm-request-ignored", "b");
     expect(messageRequestsStore.getState().pending).toHaveLength(0);
     expect(getChannelMessages(3)).toHaveLength(0);
   });
 
-  it("resume-replay: replayed chat_message is applied", () => {
-    dispatch("resume-replay", "chat_message");
+  it("resume-replay: replayed chat_message is applied", async () => {
+    await dispatch("resume-replay", "chat_message");
     expect(getChannelMessages(1).some((m) => m.content === "sent while away")).toBe(true);
   });
 
-  it("resume-replay: the back-online presence restores the member's status", () => {
+  it("resume-replay: the back-online presence restores the member's status", async () => {
     const USER_ID = 8002;
     setMembers([
       {
@@ -471,19 +475,19 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
       (f) => (f.payload as { status?: string }).status === "online",
     );
     expect(online, "resume-replay: back-online presence frame").toBeDefined();
-    send(online!, { user_id: USER_ID }, { n: 0 });
+    await send(online!, { user_id: USER_ID }, { n: 0 });
     const bob = membersStore.getState().members.get(USER_ID);
     expect(bob?.status).toBe("online");
     expect(bob?.customStatus).toBe("fixture custom status");
   });
 
-  it("voice-join-e2ee-leave: voice_state adds the named user to the roster", () => {
-    dispatch("voice-join-e2ee-leave", "voice_state");
+  it("voice-join-e2ee-leave: voice_state adds the named user to the roster", async () => {
+    await dispatch("voice-join-e2ee-leave", "voice_state");
     expect(getChannelVoiceUsers(2).some((u) => u.username === "alice")).toBe(true);
   });
 
-  it("voice-join-e2ee-leave: voice_config is keyed on the fixture's channel id", () => {
-    dispatch("voice-join-e2ee-leave", "voice_config");
+  it("voice-join-e2ee-leave: voice_config is keyed on the fixture's channel id", async () => {
+    await dispatch("voice-join-e2ee-leave", "voice_config");
     expect(voiceStore.getState().voiceConfigs.get(2)).toMatchObject({
       quality: "medium",
       bitrate: 64000,
@@ -492,7 +496,7 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     });
   });
 
-  it("voice-join-e2ee-leave: voice_leave removes the named user from the roster", () => {
+  it("voice-join-e2ee-leave: voice_leave removes the named user from the roster", async () => {
     const USER_ID = 8100;
     setVoiceStates([
       {
@@ -506,18 +510,21 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
         server_deafened: false,
       },
     ]);
-    dispatch("voice-join-e2ee-leave", "voice_leave", { user_id: USER_ID });
+    await dispatch("voice-join-e2ee-leave", "voice_leave", { user_id: USER_ID });
     expect(getChannelVoiceUsers(2).some((u) => u.userId === USER_ID)).toBe(false);
   });
 
-  it("every fixture connection replays end to end without a handler throw", () => {
+  it("every fixture connection replays end to end without a handler throw", async () => {
     for (const [journey, tr] of FIXTURES) {
       for (const conn of Object.keys(tr.connections)) {
         cleanup?.();
         resetStores();
         ws = createMockWsClient();
         cleanup = wireDispatcher(ws as unknown as WsClient);
-        expect(() => replayConnection(journey, conn), `${journey}/${conn}`).not.toThrow();
+        await expect(
+          replayConnection(journey, conn),
+          `${journey}/${conn}`,
+        ).resolves.toBeUndefined();
         // auth-failure is the one journey whose handler deliberately logs an
         // error; claim it so the console guard does not fail the run.
         if (journey === "auth-failure") expectConsole("error", "Auth failed");
