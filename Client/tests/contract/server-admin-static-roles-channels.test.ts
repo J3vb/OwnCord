@@ -26,7 +26,8 @@ window.__test = {
   confirmDeleteChannel: confirmDeleteChannel,
   openDeleteRole: openDeleteRole,
   confirmDeleteRole: confirmDeleteRole,
-  renderChannelPermsModal: renderChannelPermsModal
+  renderChannelPermsModal: renderChannelPermsModal,
+  renderChannels: renderChannels
 };
 </script>`;
 if (!ADMIN_HTML_SOURCE.includes("</body>")) {
@@ -51,6 +52,7 @@ interface Bridge {
   openDeleteRole: (id: number) => void;
   confirmDeleteRole: (id: number) => Promise<void>;
   renderChannelPermsModal: () => void;
+  renderChannels: () => Promise<string>;
 }
 
 const ADMINISTRATOR = 0x40000000;
@@ -364,5 +366,51 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
 
     // The Access edit made before switching tabs is still there to save.
     expect((doc.getElementById("permRole4") as HTMLInputElement).checked).toBe(false);
+  });
+  // UX clarity: channels read like the client sidebar, grouped under their
+  // category with the type as a named icon; Archived shows only on a channel
+  // that is, and the lock says what it opens.
+  it("groups channels by category with type icons and an archived-only badge", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, (p) =>
+      p === "/channels"
+        ? [
+            { id: 1, name: "rules", type: "announcement", category: "Info" },
+            { id: 2, name: "lobby", type: "text", category: "" },
+            { id: 3, name: "hangout", type: "voice", category: "Voice", archived: true },
+            { id: 4, name: "faq", type: "text", category: "Info", topic: "Read me" },
+          ]
+        : {},
+    );
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    const host = doc.createElement("div");
+    host.innerHTML = await bridge.renderChannels();
+
+    const rows = [...host.querySelectorAll(".ch-tbl tbody tr")].map((r) =>
+      r.classList.contains("ch-cat")
+        ? `[${r.textContent}]`
+        : r.querySelector("strong")?.textContent,
+    );
+    expect(rows).toEqual([
+      "[No category]",
+      "lobby",
+      "[Info]",
+      "rules",
+      "faq",
+      "[Voice]",
+      "hangout",
+    ]);
+
+    const row = (id: number) => host.querySelector(`tr[data-channel="${id}"]`)!;
+    expect(row(3).querySelector(".ch-type .sr-only")?.textContent).toBe("Voice channel");
+    expect(row(1).querySelector(".ch-type .sr-only")?.textContent).toBe("Announcement channel");
+    expect(row(3).querySelector(".badge")?.textContent).toBe("Archived");
+    expect(row(2).querySelector(".badge")).toBeNull();
+    expect(row(4).querySelector(".ch-topic")?.textContent).toBe("Read me");
+    expect(
+      row(2).querySelector('[data-action="openChannelPermsModal"]')?.getAttribute("aria-label"),
+    ).toBe("Who can see #lobby");
+    expect(host.querySelector("thead")?.textContent).not.toContain("Archived");
   });
 });

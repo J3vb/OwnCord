@@ -107,7 +107,12 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page, adminS
     await page.locator("#chName").fill("e2e-lounge");
     await page.locator(".modal-footer .btn-accent", { hasText: "Create" }).click();
 
-    await expect(page.locator(".tbl tbody tr", { hasText: "e2e-lounge" })).toBeVisible();
+    const created = page.locator(".tbl tbody tr", { hasText: "e2e-lounge" });
+    await expect(created).toBeVisible();
+    // The type is a named icon, and Archived shows only on an archived channel.
+    await expect(created.locator(".ch-type .sr-only")).toHaveText("Text channel");
+    await expect(created.locator(".badge", { hasText: "Archived" })).toHaveCount(0);
+    await expect(created.getByRole("button", { name: "Who can see #e2e-lounge" })).toBeVisible();
   });
 
   await test.step("channel edit renames it in place", async () => {
