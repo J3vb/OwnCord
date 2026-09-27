@@ -115,8 +115,11 @@ type Hub struct {
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
 	// goroutines (startSweep): a tick that arrives while the previous sweep
 	// is still running is skipped rather than stacked.
-	sessionSweepInFlight atomic.Bool
-	voiceSweepInFlight   atomic.Bool
+	sessionSweepInFlight   atomic.Bool
+	voiceSweepInFlight     atomic.Bool
+	voiceReconcileInFlight atomic.Bool
+
+	voiceReconcile voiceReconcileState // RT-3 (voice_reconcile.go)
 
 	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
 	reconnectTierBuf  atomic.Uint64
@@ -303,6 +306,8 @@ func (h *Hub) Run() {
 					h.startSweep(&h.sessionSweepInFlight, h.sweepRevokedSessions)
 				case <-voiceSweepTicker.C:
 					h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
+					// RT-3 has its own guard: a slow ListParticipants never suppresses the ghost sweep.
+					h.startSweep(&h.voiceReconcileInFlight, h.reconcileVoiceMembership)
 				}
 			}
 		}()
