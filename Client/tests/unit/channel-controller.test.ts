@@ -290,6 +290,7 @@ import {
 } from "@lib/pendingMessages";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
+import { loadLastChannel } from "@lib/last-channel";
 import { messagingText } from "../../src/i18n/messaging";
 import { setActiveTimeout } from "../../src/features/safety/store";
 import {
@@ -498,6 +499,15 @@ describe("createChannelController", () => {
 
       expect(channelsStore.getState().channels.get(42)?.unreadCount).toBe(0);
       expect(channelsStore.getState().channels.get(42)?.mentionCount).toBe(0);
+    });
+
+    it("a DM mount does not overwrite the remembered server channel", () => {
+      localStorage.clear();
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(5, "random", "text");
+      ctrl.mountChannel(40, "alice", "dm");
+
+      expect(loadLastChannel()).toBe(5);
     });
   });
 

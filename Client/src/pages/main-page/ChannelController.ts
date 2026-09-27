@@ -363,7 +363,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // channel" is recorded and where the unread badge is cleared (the ready-
     // time auto-select only selected it). clearUnread is local only; the
     // channel_focus below advances the server's read state.
-    rememberLastChannel(channelId);
+    if (channelType !== "dm") rememberLastChannel(channelId);
     clearUnread(channelId);
 
     ws.send({
