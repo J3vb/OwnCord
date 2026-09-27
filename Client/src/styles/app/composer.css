@@ -156,7 +156,8 @@
 .msg-textarea::placeholder {
   color: var(--text-muted);
 }
-.msg-textarea:disabled {
+.msg-textarea:disabled,
+.msg-textarea[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.7;
 }

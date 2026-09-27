@@ -13,7 +13,7 @@ import type { ChannelType } from "@lib/types";
 import { createMessageList } from "@components/MessageList";
 import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
-import type { MessageInputComponent } from "@components/MessageInput";
+import type { ComposerDraft, MessageInputComponent } from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 import {
@@ -145,6 +145,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   let nsfwConsentUiGen = 0;
   // Store/ws subscriptions that keep the composer's disabled state in sync.
   let composerGatingUnsubs: (() => void)[] = [];
+
+  // UX-1: unsent composer state per channel, so switching away and back keeps
+  // the text, the reply target and the staged upload ids. Controller-scoped
+  // (not per-mount) because the whole point is to outlive a channel switch.
+  // Entries are dropped once a send consumes them or the user clears them.
+  const draftByChannel = new Map<number, ComposerDraft>();
 
   // Optimistic send: keep the raw payload per correlation id so a failed send
   // can be retried (including its attachments). Controller-scoped rather than
@@ -286,6 +292,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       typingIndicator = null;
     }
     if (messageInput !== null) {
+      // UX-1: stash the unsent state before the composer is torn down. Empty
+      // drafts are not stored, so switching away from a channel with nothing
+      // typed leaves no entry behind.
+      if (currentChannelId !== null) {
+        const draft = messageInput.getDraft();
+        if (draft.content !== "" || draft.replyTo !== null || draft.attachments.length > 0) {
+          draftByChannel.set(currentChannelId, draft);
+        } else {
+          draftByChannel.delete(currentChannelId);
+        }
+      }
       messageInput.destroy?.();
       messageInput = null;
     }
@@ -884,6 +901,23 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       },
     });
     messageInput.mount(slots.inputSlot);
+
+    // UX-1: restore this channel's stashed draft, if any — its text, reply
+    // target and staged upload ids — so a switch away and back is lossless.
+    // A reply whose target is gone (deleted while away) is dropped, not
+    // restored onto a message the server would refuse the reply to.
+    const stashedDraft = draftByChannel.get(channelId);
+    if (stashedDraft !== undefined) {
+      const replyTo =
+        stashedDraft.replyTo !== null &&
+        !getChannelMessages(channelId).some(
+          (m) => m.id === stashedDraft.replyTo!.messageId && !m.deleted,
+        )
+          ? null
+          : stashedDraft.replyTo;
+      messageInput.restoreDraft({ ...stashedDraft, replyTo });
+      draftByChannel.delete(channelId);
+    }
 
     // Composer gating: express permission + connection as affordance. The
     // composer disables (with a reason) when the socket is down or the user
