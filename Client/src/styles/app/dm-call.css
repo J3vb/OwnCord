@@ -325,15 +325,12 @@
 
 /* The voice widget's call name, as a link back to the DM. */
 .vw-channel-link {
-  min-width: 0;
   padding: 0;
   background: none;
   color: var(--text-muted);
   font-size: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .vw-channel-link:hover {

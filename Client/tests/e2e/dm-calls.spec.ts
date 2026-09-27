@@ -560,7 +560,18 @@ test.describe("DM calls — call panel", () => {
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("thirduser");
     await expect(panel(page)).toBeHidden();
 
-    await voiceWidget(page).locator("[data-testid='vw-channel-link']").click();
+    // The link must keep its text width in the crowded 260 px widget header,
+    // like a plain channel name — not shrink to nothing.
+    const link = voiceWidget(page).locator("[data-testid='vw-channel-link']");
+    await expect(link).toHaveText("otheruser");
+    const width = await link.evaluate((el) => el.getBoundingClientRect().width);
+    const textWidth = await link.evaluate((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return range.getBoundingClientRect().width;
+    });
+    expect(width).toBeGreaterThanOrEqual(textWidth);
+    await link.click({ timeout: 1_500 });
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("otheruser");
     await expect(panel(page)).toBeVisible();
   });
