@@ -1511,7 +1511,9 @@ open a circuit breaker that skips one tick and then retries:
 The server handles `Ctrl+C` (SIGINT) and `SIGTERM`:
 
 1. Shuts down the ACME listener, ends any open admin Logs stream, then
-   drains in-flight HTTP handlers
+   drains in-flight HTTP handlers; a file upload or download still in
+   progress gets up to 20 seconds to finish and is then cut, so the drain
+   stays inside the 30-second budget
 2. Stops the hub on a budget of its own: sends the restart notice,
    stops the LiveKit process and closes every WebSocket connection
 3. Unregisters the signal handler, so a second `Ctrl+C` during steps 1–2 does
