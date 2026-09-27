@@ -39,7 +39,13 @@ import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
-import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/channels.store";
+import {
+  channelsStore,
+  clearUnread,
+  setActiveChannel,
+  setNsfwAcknowledged,
+} from "@stores/channels.store";
+import { rememberLastChannel } from "@lib/last-channel";
 import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../features/safety/store";
 import { reportEntryText } from "../../i18n/reportEntry";
@@ -352,6 +358,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     }
 
     log.info("Switching channel", { channelId, channelName });
+
+    // UX-8: the channel is actually on screen now, so this is where "last
+    // channel" is recorded and where the unread badge is cleared (the ready-
+    // time auto-select only selected it). clearUnread is local only; the
+    // channel_focus below advances the server's read state.
+    rememberLastChannel(channelId);
+    clearUnread(channelId);
 
     ws.send({
       type: "channel_focus",

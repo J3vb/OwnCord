@@ -25,6 +25,7 @@ import { updateDmParticipant } from "../../stores/dm.store";
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
 import { uiStore } from "../../stores/ui.store";
 import { isTextLikeChannel } from "../../lib/types";
+import { loadLastChannel } from "../../lib/last-channel";
 import { markChannelRead } from "../../lib/read-state";
 import { showToast } from "../../lib/toast";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
@@ -61,9 +62,21 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): number | nul
   // one would close it.
   const viewOpen = uiStore.getState().activeView !== null;
   if (currentActive === null && !viewOpen && payload.channels.length > 0) {
-    const firstText = payload.channels.find((ch) => isTextLikeChannel(ch));
-    if (firstText !== undefined) {
-      setActiveChannel(firstText.id);
+    // UX-8: restore where the user left off rather than always jumping to the
+    // first text channel. The stored id is a hint — ignore it when the channel
+    // is gone or no longer visible. Selecting is not viewing, so neither this
+    // nor the fallback clears the badge (clearUnread: false); the channel
+    // clears only when actually mounted.
+    const remembered = loadLastChannel();
+    const rememberedVisible =
+      remembered !== null && payload.channels.some((ch) => ch.id === remembered);
+    if (rememberedVisible) {
+      setActiveChannel(remembered, { clearUnread: false });
+    } else {
+      const firstText = payload.channels.find((ch) => isTextLikeChannel(ch));
+      if (firstText !== undefined) {
+        setActiveChannel(firstText.id, { clearUnread: false });
+      }
     }
   } else if (currentActive !== null) {
     const stillPresent =
