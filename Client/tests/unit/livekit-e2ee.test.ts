@@ -83,8 +83,14 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
+vi.mock("@lib/voiceJoinTrace", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/voiceJoinTrace")>()),
+  markJoinMilestone: vi.fn(),
+}));
+
 // Now import
 import { E2EEManager } from "../../src/lib/livekitE2EE";
+import { markJoinMilestone } from "@lib/voiceJoinTrace";
 import {
   setPeerVerification,
   clearPeerVerification,
@@ -139,6 +145,41 @@ describe("E2EEManager", () => {
     const announces = sendsOfType(ws, "voice_e2ee_announce");
     expect(announces).toHaveLength(1);
     expect((announces[0] as any).payload.signature).toBe("mock-signature");
+  });
+
+  it("SRE-M2: marks the key holder's E2EE join milestones in order", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+
+    await mgr.setupKeyExchange(true, 1);
+
+    expect(vi.mocked(markJoinMilestone).mock.calls.map(([m]) => m)).toEqual([
+      "e2ee room key generated",
+      "e2ee announce sent",
+    ]);
+  });
+
+  it("SRE-M2: marks the non-key-holder's E2EE join milestones in order", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+    mgr.clearState();
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+    ws.send.mockClear();
+    vi.mocked(markJoinMilestone).mockClear();
+
+    const setupPromise = mgr.setupKeyExchange(false, 1);
+    await vi.waitFor(() => {
+      expect(sendsOfType(ws, "voice_e2ee_announce").length).toBeGreaterThan(0);
+    });
+    await mgr.handleOffer(PEER_ID, "enc", "iv");
+    await expect(setupPromise).resolves.toBe(true);
+
+    expect(vi.mocked(markJoinMilestone).mock.calls.map(([m]) => m)).toEqual([
+      "e2ee announce sent",
+      "e2ee key holder offer received",
+      "e2ee room key applied",
+    ]);
   });
 
   it("queues an announce before the keypair exists and drains it on setup, sending an offer", async () => {

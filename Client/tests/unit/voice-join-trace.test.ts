@@ -165,6 +165,7 @@ describe("voice join attempt", () => {
     finishJoinAttempt(id);
 
     expect(newestJoin()?.timings).toMatchObject({ localTrackMs: 30, remoteTrackMs: 100 });
+    expect(newestJoin()?.timings.e2eeMs).toBeNull();
   });
 
   it("still marks a track the SDK delivers just after the attempt finished", () => {

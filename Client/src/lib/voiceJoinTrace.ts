@@ -268,7 +268,6 @@ export function finishJoinAttempt(id: number): void {
   if (a === null || a.id !== id) return;
   const now = Date.now();
   if (a.phaseStarts.activate !== null) a.timings.activateMs = now - a.phaseStarts.activate;
-  if (a.timings.e2eeMs === null) a.timings.e2eeMs = now - a.startedAt;
   a.stage = "live";
   const attempt = snapshotAttempt(a, true);
   active = null;
