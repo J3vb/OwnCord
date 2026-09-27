@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,35 +46,10 @@ func TestServeWS_TrustedProxy_LogsAndAuditsClientIP(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	var logs bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	// The test client connects through a trusted proxy hop: its RemoteAddr is
-	// the proxy (10.0.0.9) and the real client rides in X-Forwarded-For.
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.RemoteAddr = "10.0.0.9:54321"
-		r.Header.Set("X-Forwarded-For", "203.0.113.7")
-		handler(w, r)
-	}))
-	defer srv.Close()
-
+	logs := captureSRE11Log(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	conn, dialResp, dialErr := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.CloseNow() }()
-	raw, _ := json.Marshal(map[string]any{"type": "auth", "payload": map[string]any{"token": token}})
-	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
+	conn := dialThroughTrustedProxy(ctx, t, hub, token)
 
 	// Read the auth_ok so the handshake has fully completed.
 	deadline := time.Now().Add(5 * time.Second)
@@ -119,4 +95,102 @@ func TestServeWS_TrustedProxy_LogsAndAuditsClientIP(t *testing.T) {
 	if strings.Contains(detail, "10.0.0.9") {
 		t.Errorf("ws_connect audit row recorded the proxy's address: %q", detail)
 	}
+}
+
+// TestServeWS_TrustedProxy_FailedAuthLogsClientIP covers the failure branch:
+// a rejected token behind a trusted proxy must log the client, not the proxy.
+func TestServeWS_TrustedProxy_FailedAuthLogsClientIP(t *testing.T) {
+	database := openServeTestDB(t)
+	hub := newTestHubWith(t, ws.HubOptions{
+		DB:             database,
+		Limiter:        auth.NewRateLimiter(),
+		TrustedProxies: []string{"10.0.0.0/8"},
+	})
+	go hub.Run()
+	defer hub.Stop()
+
+	logs := captureSRE11Log(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn := dialThroughTrustedProxy(ctx, t, hub, "not-a-valid-token")
+
+	// The server closes the socket after the failure log; drain until then.
+	for {
+		readCtx, readCancel := context.WithTimeout(ctx, time.Second)
+		_, _, readErr := conn.Read(readCtx)
+		readCancel()
+		if readErr != nil {
+			break
+		}
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && !strings.Contains(logs.String(), "ws auth failed") {
+		time.Sleep(20 * time.Millisecond)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "ws auth failed") {
+		t.Fatalf("no ws auth failed log line: %q", out)
+	}
+	if !strings.Contains(out, "remote=203.0.113.7") {
+		t.Errorf("failed-auth log did not record the client IP: %q", out)
+	}
+	if strings.Contains(out, "10.0.0.9") {
+		t.Errorf("failed-auth log recorded the proxy's address instead of the client's: %q", out)
+	}
+}
+
+// dialThroughTrustedProxy connects to hub as if through a trusted proxy hop —
+// RemoteAddr is the proxy (10.0.0.9), the real client rides in
+// X-Forwarded-For — and sends an auth frame carrying token.
+func dialThroughTrustedProxy(ctx context.Context, t *testing.T, hub *ws.Hub, token string) *websocket.Conn {
+	t.Helper()
+	handler := ws.ServeWS(hub, []string{"*"}, 0)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.RemoteAddr = "10.0.0.9:54321"
+		r.Header.Set("X-Forwarded-For", "203.0.113.7")
+		handler(w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	conn, dialResp, dialErr := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if dialResp != nil && dialResp.Body != nil {
+		_ = dialResp.Body.Close()
+	}
+	if dialErr != nil {
+		t.Fatalf("websocket.Dial: %v", dialErr)
+	}
+	t.Cleanup(func() { _ = conn.CloseNow() })
+	raw, _ := json.Marshal(map[string]any{"type": "auth", "payload": map[string]any{"token": token}})
+	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	return conn
+}
+
+// sre11LogBuffer is a slog sink safe to read while handler goroutines write.
+type sre11LogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *sre11LogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *sre11LogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func captureSRE11Log(t *testing.T) *sre11LogBuffer {
+	t.Helper()
+	logs := &sre11LogBuffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return logs
 }

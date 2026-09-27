@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -130,7 +131,7 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 	// Resolve the trusted-proxy CIDRs once at construction (W3-3a), never per
 	// request. opts.RunningCfg is nil in the legacy/test construction path
 	// (no SetupOptions passed to NewAdminAPI), which yields an empty list —
-	// setupClientIP then always falls back to raw RemoteAddr, preserving
+	// clientip.Resolve then always falls back to raw RemoteAddr, preserving
 	// prior behaviour exactly.
 	var trustedProxies []string
 	if opts.RunningCfg != nil {
@@ -218,7 +219,7 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 	// different source ports/hops from the same real client are correctly
 	// grouped under a single rate-limit bucket, and so distinct clients
 	// behind the same trusted proxy are NOT collapsed into one.
-	host := setupClientIP(r, proxyNets)
+	host := clientip.Resolve(r, proxyNets)
 	setupKey := "setup:" + host
 	if !limiter.Allow(setupKey, 5, time.Minute) {
 		writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many setup attempts, try again later")

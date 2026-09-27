@@ -119,19 +119,19 @@ func handshakeWrite(ctx context.Context, conn *websocket.Conn, msg []byte) error
 }
 
 func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, uint64, error) {
+	// SRE-11: resolve the real client address through trusted_proxies, so the
+	// handshake logs and the ws_connect audit row name the client and not the
+	// reverse proxy in the recommended deployment.
+	clientAddr := clientip.Resolve(r, h.trustedProxyNets)
 	user, tokenHash, hint, err := h.authenticateConn(r.Context(), conn)
 	if err != nil {
-		slog.Warn("ws auth failed", "err", err, "remote", r.RemoteAddr)
+		slog.Warn("ws auth failed", "err", err, "remote", clientAddr)
 		_ = conn.Close(websocket.StatusPolicyViolation, "authentication failed")
 		return nil, 0, err
 	}
 	lastSeq := hint.LastSeq
 
 	c := newClient(h, conn, user, tokenHash, lastSeq, r.Context())
-	// SRE-11: resolve the real client address through trusted_proxies, so the
-	// handshake log and the ws_connect audit row name the client and not the
-	// reverse proxy in the recommended deployment.
-	clientAddr := clientip.Resolve(r, h.trustedProxyNets)
 	c.remoteAddr = clientAddr
 	// Untrusted until handleReconnect checks it against the allowed set.
 	c.authChannelID = hint.ChannelID
