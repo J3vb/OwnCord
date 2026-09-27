@@ -17,7 +17,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Runtime};
-use tauri_plugin_store::StoreExt;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::Message;
@@ -463,7 +462,7 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         return Err("fingerprint must be SHA-256 colon-hex format (e.g. aa:bb:cc:...)".into());
     }
 
-    let store = app.store(CERTS_STORE).map_err(|e| {
+    let store = crate::json_store::open(&app, CERTS_STORE).map_err(|e| {
         log::warn!("[ws_proxy] accept_cert_fingerprint: failed to open certs store: {e}");
         format!("failed to open certs store: {e}")
     })?;
