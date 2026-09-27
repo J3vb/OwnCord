@@ -182,16 +182,18 @@ describe("createChatArea", () => {
     expect((slot as HTMLElement).style.display).toBe("none");
   });
 
-  it("appends slots in order: header, messages, typing, input, videoGrid", () => {
+  it("appends slots in order: header, call panel, messages, typing, input, videoGrid", () => {
     const result = createChatArea(makeOptions());
     const children = Array.from(result.chatArea.children);
 
-    expect(children.length).toBe(5);
+    expect(children.length).toBe(6);
     expect(children[0]!.getAttribute("data-testid")).toBe("chat-header");
-    expect(children[1]!.getAttribute("data-testid")).toBe("messages-slot");
-    expect(children[2]!.getAttribute("data-testid")).toBe("typing-slot");
-    expect(children[3]!.getAttribute("data-testid")).toBe("input-slot");
-    expect(children[4]!.getAttribute("data-testid")).toBe("video-grid-slot");
+    expect(children[1]).toBe(result.callPanelSlot);
+    expect(children[1]!.getAttribute("data-testid")).toBe("call-panel-slot");
+    expect(children[2]!.getAttribute("data-testid")).toBe("messages-slot");
+    expect(children[3]!.getAttribute("data-testid")).toBe("typing-slot");
+    expect(children[4]!.getAttribute("data-testid")).toBe("input-slot");
+    expect(children[5]!.getAttribute("data-testid")).toBe("video-grid-slot");
   });
 
   // --- Slots in return value ---

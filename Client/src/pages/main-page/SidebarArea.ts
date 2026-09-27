@@ -16,7 +16,7 @@ import type { ToastContainer } from "@components/Toast";
 import { createLogger } from "@lib/logger";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
-import type { DmSidebar } from "@components/DmSidebar";
+import type { DmConversation, DmSidebar } from "@components/DmSidebar";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createUserBar } from "@components/UserBar";
@@ -47,6 +47,7 @@ import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { dmStore, closeDmLocally } from "@stores/dm.store";
+import { voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
 import { canModerateMembers, canViewAuditLog } from "@lib/permissions";
@@ -100,6 +101,15 @@ export interface SidebarAreaResult {
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
+
+/** The DM rows, each marked when someone is in that DM's call. */
+function dmConversations(activeChannelId: number | null): DmConversation[] {
+  const voiceUsers = voiceStore.getState().voiceUsers;
+  return buildDmConversations(activeChannelId).map((c) => ({
+    ...c,
+    inCall: (voiceUsers.get(c.channelId)?.size ?? 0) > 0,
+  }));
+}
 
 export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const { ws, api, limiters, presenceSender, getRoot, getToast } = opts;
@@ -616,7 +626,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   function buildDmSidebar(): DmSidebar {
     const serverName = authStore.getState().serverName ?? shellText("common.serverFallback");
     const activeChannelId = channelsStore.getState().activeChannelId;
-    const conversations = buildDmConversations(activeChannelId);
+    const conversations = dmConversations(activeChannelId);
 
     return createDmSidebar({
       conversations,
@@ -757,7 +767,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
        */
       function refreshDmSidebar(): void {
         if (activeSidebarContent === null) return;
-        const conversations = buildDmConversations(channelsStore.getState().activeChannelId);
+        const conversations = dmConversations(channelsStore.getState().activeChannelId);
         (activeSidebarContent as DmSidebar).update(conversations);
       }
 
@@ -774,6 +784,22 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         },
       );
       channelModeUnsubs.push(unsubDmStore);
+
+      // The live-call glyph follows who is in each DM's voice channel.
+      channelModeUnsubs.push(
+        voiceStore.subscribeSelector(
+          // Occupied channels only: a speaking tick replaces voiceUsers too,
+          // and must not re-render the list.
+          (s) =>
+            [...s.voiceUsers]
+              .filter(([, users]) => users.size > 0)
+              .map(([id]) => id)
+              .join(","),
+          () => {
+            refreshDmSidebar();
+          },
+        ),
+      );
 
       // Re-render DM sidebar when the active conversation changes. Keyed on the
       // active channel rather than activeDmUserId, which a group DM leaves null.
@@ -805,7 +831,13 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // ---------------------------------------------------------------------------
 
   const voiceWidgetSlot = createElement("div", {});
-  const voiceWidget = createVoiceWidget(createVoiceWidgetCallbacks(ws, limiters));
+  const voiceWidget = createVoiceWidget({
+    ...createVoiceWidgetCallbacks(ws, limiters),
+    onOpenCall: (channelId) => {
+      const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+      if (dm !== undefined) selectDmConversation(dm, dmDeps);
+    },
+  });
   voiceWidget.mount(voiceWidgetSlot);
   children.push(voiceWidget);
   sidebarWrapper.appendChild(voiceWidgetSlot);

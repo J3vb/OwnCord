@@ -217,10 +217,13 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       destroy: vi.fn(),
     };
     const chatArea = document.createElement("div");
+    const callPanelSlot = document.createElement("div");
+    chatArea.appendChild(callPanelSlot);
     capturedChatAreaRef.current = { chatArea, slots, dmProfileSlot, videoGrid };
     return {
       chatArea,
       slots,
+      callPanelSlot,
       videoGrid,
       chatHeaderName: document.createElement("span"),
       chatHeaderRefs: {
@@ -262,6 +265,7 @@ import {
 import { desktop } from "../../src/platform/desktop";
 import { saveUserStatus } from "../../src/lib/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
+import { startRingChime } from "../../src/lib/notifications";
 
 function resetStores(): void {
   channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
@@ -816,6 +820,128 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).not.toBe("none");
   });
 
+  function openOneToOneDm(id: number): void {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(id, dmChannel(id, "dm-bob"));
+      return { ...prev, channels: ch, activeChannelId: id };
+    });
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: id,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
+          name: "",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+  }
+
+  it("answers a ring for the open DM in the call panel and hides the banner, handing it back when you look elsewhere", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    // The panel is a lazy chunk.
+    await vi.dynamicImportSettled();
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "bob" });
+
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("incoming");
+    expect(banner.style.display).toBe("none");
+
+    // Another channel on screen: the banner is the only way to answer.
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 7 }));
+    channelsStore.flush();
+    expect(banner.style.display).not.toBe("none");
+
+    // Settings over the DM hides the panel, so the banner answers there too.
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+    channelsStore.flush();
+    expect(banner.style.display).toBe("none");
+    uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
+    uiStore.flush();
+    expect(banner.style.display).not.toBe("none");
+  });
+
+  it("tells the caller when the callee declines, and Ring again rings once more", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    // The panel is a lazy chunk.
+    await vi.dynamicImportSettled();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("outgoing");
+
+    ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
+    expect(panel.dataset.state).toBe("unanswered");
+
+    vi.mocked(ws.send).mockClear();
+    (panel.querySelector('[data-testid="dcp-ring-again"]') as HTMLElement).click();
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
+    expect(panel.dataset.state).toBe("outgoing");
+
+    // The call timer is the page's to stop.
+    page.destroy?.();
+  });
+
+  it("redialing from inside a live call rings but leaves no outgoing ring behind", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    const vu = (userId: number, username: string) => ({
+      userId,
+      username,
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    const roster = (ids: Array<[number, string]>) =>
+      new Map([[50, new Map(ids.map(([id, name]) => [id, vu(id, name)]))]]);
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceUsers: roster([
+        [1, "alice"],
+        [10, "bob"],
+      ]),
+    }));
+    voiceStore.flush();
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    // The panel is a lazy chunk.
+    await vi.dynamicImportSettled();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("connected");
+
+    // Bob hangs up before any other voice change: the panel must not start
+    // "Calling bob…" about someone who was just in the call.
+    voiceStore.setState((prev) => ({ ...prev, voiceUsers: roster([[1, "alice"]]) }));
+    voiceStore.flush();
+    expect(panel.dataset.state).toBe("connected");
+
+    page.destroy?.();
+  });
+
   it("shows the caller's nickname on the incoming-call banner, not the raw username (OC-0303)", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
@@ -965,6 +1091,45 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     ws.emit("voice_leave", { channel_id: 50, user_id: 10 });
 
     expect(banner.style.display).not.toBe("none");
+  });
+
+  it("silently ends an incoming ring once this client is in the ringing channel by any path", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    expect(banner.style.display).not.toBe("none");
+
+    // Joined without Accept (the header's call button, the Join strip, the
+    // sidebar): being in the room answers the ring.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50 }));
+    voiceStore.flush();
+
+    expect(banner.style.display).toBe("none");
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "call_decline" }));
+  });
+
+  it("does not ring for the channel this client is already in", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50 }));
+    voiceStore.flush();
+
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    vi.mocked(startRingChime).mockClear();
+
+    // Someone else in the call redials the DM: the server rings everyone
+    // else in it, this client included.
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    expect(banner.style.display).toBe("none");
+    expect(startRingChime).not.toHaveBeenCalled();
   });
 
   it("clears settingsOpen on destroy so the next page (e.g. ConnectPage after logout) doesn't inherit a stale open overlay", () => {

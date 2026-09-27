@@ -41,6 +41,7 @@ import {
   setWsClient,
   setServerHost as setLiveKitServerHost,
   setOnError as setVoiceOnError,
+  enableCamera,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
@@ -74,8 +75,9 @@ import { createUpdateNotifier } from "@components/UpdateNotifier";
 import type { DmProfileData, DmProfileSidebarComponent } from "@components/DmProfileSidebar";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
 import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
-import { createRingController } from "@lib/call-ring";
-import type { RingController } from "@lib/call-ring";
+import { createRingController, createOutgoingCall } from "@lib/call-ring";
+import type { RingController, OutgoingCall } from "@lib/call-ring";
+import type { DmCallPanelComponent } from "@components/DmCallPanel";
 import { startRingChime, stopRingChime } from "@lib/notifications";
 import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
@@ -280,6 +282,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // DM calls: the banner draws a ring, the controller owns its lifetime.
   let callBanner: IncomingCallBannerComponent | null = null;
   let ringCtrl: RingController | null = null;
+  // The caller's side of a ring, and the in-DM panel that draws both sides.
+  let outgoingCall: OutgoingCall | null = null;
+  let callPanel: DmCallPanelComponent | null = null;
+  /** "Join with video": turn the camera on once this call is connected. */
+  let cameraOnJoin: number | null = null;
 
   // The narrow-width sidebar drawer (WCAG 1.4.10). Null above 800px in
   // practice, but always created so the breakpoint is decided by CSS, not JS.
@@ -416,8 +423,58 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       return;
     }
     createSidebarVoiceCallbacks(ws).onVoiceJoin(active.id);
-    ws.send({ type: "call_ring", payload: { channel_id: active.id } });
-    showToast(account("toast.calling"), "info");
+    ringCallees(active.id);
+  }
+
+  /** Send a ring and start (or restart) the caller's 30s window. The panel
+   *  is the caller's feedback: it shows "Calling…" from here on, unless the
+   *  call is already answered (a redial from inside a live call). */
+  function ringCallees(channelId: number): void {
+    ws.send({ type: "call_ring", payload: { channel_id: channelId } });
+    const roster = voiceStore.getState().voiceUsers.get(channelId);
+    const self = getCurrentUserId();
+    if (roster !== undefined && [...roster.keys()].some((id) => id !== self)) return;
+    const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+    outgoingCall?.start(channelId, dm?.participants.map((p) => p.id) ?? []);
+  }
+
+  /**
+   * Draw the incoming ring on exactly one surface. While the ringing DM is on
+   * screen the call panel is the answer surface and the banner stays hidden,
+   * so there are never two Accept buttons; everywhere else the banner is the
+   * only way to answer.
+   */
+  function syncRingSurfaces(): void {
+    const ring = ringCtrl?.current() ?? null;
+    // setIncoming re-derives the panel from the live stores first, so the
+    // check below never reads a panel one channel switch behind.
+    callPanel?.setIncoming(ring);
+    const ui = uiStore.getState();
+    const panelAnswers =
+      ring !== null &&
+      callPanel?.showsRingFor(ring.channelId) === true &&
+      ui.activeView === null &&
+      !ui.settingsOpen;
+    callBanner?.setRing(panelAnswers ? null : ring);
+  }
+
+  /** Accept the ring from either surface. */
+  function acceptRing(withVideo: boolean): void {
+    // ringCtrl.accept() unconditionally consumes the ring (stopRinging)
+    // before onVoiceJoin ever runs, and onVoiceJoin itself silently refuses
+    // to join while the socket is down (VoiceCallbacks.ts's socketLive()
+    // guard) — so accepting while reconnecting would otherwise discard the
+    // ring for good with no join and no retry. Guarded here, the only caller
+    // of accept(), so the ring survives for the user to accept again once
+    // reconnected.
+    if (uiStore.getState().connectionStatus !== "connected") {
+      showToast(account("voice.canAnswerWhileReconnecting"), "error");
+      return;
+    }
+    const ring = ringCtrl?.current() ?? null;
+    if (ring === null) return;
+    cameraOnJoin = withVideo ? ring.channelId : null;
+    ringCtrl?.accept();
   }
 
   /** Close the DM profile sidebar if open. */
@@ -850,7 +907,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // so a ring stays visible while the user is looking at another channel —
     // which is exactly when a call most needs to be answerable.
     ringCtrl = createRingController({
-      onRingStateChange: (state) => callBanner?.setRing(state),
+      onRingStateChange: () => syncRingSurfaces(),
       onChime: (playing) => (playing ? startRingChime() : stopRingChime()),
       onAccept: (channelId) => {
         createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId);
@@ -860,28 +917,100 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
     });
     callBanner = createIncomingCallBanner({
-      onAccept: () => {
-        // ringCtrl.accept() unconditionally consumes the ring
-        // (stopRinging) before onVoiceJoin ever runs, and onVoiceJoin itself
-        // silently refuses to join while the socket is down (VoiceCallbacks
-        // .ts's socketLive() guard) — so accepting while reconnecting would
-        // otherwise discard the ring for good with no join and no retry.
-        // Guarded here, the banner's only caller of accept(), so the ring
-        // survives for the user to accept again once reconnected.
-        if (uiStore.getState().connectionStatus !== "connected") {
-          showToast(account("voice.canAnswerWhileReconnecting"), "error");
-          return;
-        }
-        ringCtrl?.accept();
-      },
+      onAccept: () => acceptRing(false),
       onDecline: () => ringCtrl?.decline(),
     });
     callBanner.mount(root);
     children.push(callBanner);
 
+    outgoingCall = createOutgoingCall({
+      onChange: (state) => callPanel?.setOutgoing(state),
+    });
+    // Loaded on demand like the sidebar drawer: the panel is only drawn in a
+    // DM with a call, so its code stays out of the eager MainPage chunk
+    // (bundle budget). Until it lands, the banner answers every ring.
+    void import("@components/DmCallPanel").then(({ createDmCallPanel }) => {
+      if (tornDown) return;
+      const panel = createDmCallPanel({
+        onMuteToggle: () => voiceKeybindActions.onMuteToggle(),
+        onDeafenToggle: () => voiceKeybindActions.onDeafenToggle(),
+        onCameraToggle: () => voiceKeybindActions.onCameraToggle(),
+        onScreenshareToggle: () => voiceKeybindActions.onScreenshareToggle(),
+        onLeave: () => voiceKeybindActions.onDisconnect(),
+        onAccept: (withVideo) => acceptRing(withVideo),
+        onDecline: () => ringCtrl?.decline(),
+        onJoin: (channelId) => {
+          if (uiStore.getState().connectionStatus !== "connected") {
+            showToast(shellText("channel.notConnected"), "error");
+            return;
+          }
+          createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId);
+        },
+        onRingAgain: (channelId) => {
+          if (uiStore.getState().connectionStatus !== "connected") {
+            showToast(shellText("channel.notConnected"), "error");
+            return;
+          }
+          ringCallees(channelId);
+        },
+      });
+      panel.mount(chatAreaResult.callPanelSlot);
+      children.push(panel);
+      callPanel = panel;
+      panel.setOutgoing(outgoingCall?.current() ?? null);
+      syncRingSurfaces();
+    });
+
+    // The ring's surface depends on what is on screen.
+    unsubscribers.push(
+      channelsStore.subscribeSelector(
+        (s) => s.activeChannelId,
+        () => syncRingSurfaces(),
+      ),
+      uiStore.subscribeSelector(
+        (s) => s.activeView === null && !s.settingsOpen,
+        () => syncRingSurfaces(),
+      ),
+    );
+
+    // The outgoing ring is over once anyone else is in the room, or once
+    // the caller is not; an incoming ring is answered by being in its room,
+    // however you got there; and "Join with video" turns the camera on as
+    // soon as the accepted call is connected.
+    unsubscribers.push(
+      voiceStore.subscribe((state) => {
+        const ring = ringCtrl?.current() ?? null;
+        if (ring !== null && state.currentChannelId === ring.channelId) {
+          ringCtrl?.cancel(ring.channelId);
+        }
+        const out = outgoingCall?.current() ?? null;
+        if (out !== null) {
+          const roster = state.voiceUsers.get(out.channelId);
+          const self = getCurrentUserId();
+          const answered = roster !== undefined && [...roster.keys()].some((id) => id !== self);
+          if (state.currentChannelId !== out.channelId || answered) outgoingCall?.clear();
+        }
+        if (cameraOnJoin !== null) {
+          if (state.currentChannelId !== cameraOnJoin) {
+            cameraOnJoin = null;
+          } else if (state.voiceStatus === "connected") {
+            cameraOnJoin = null;
+            if (!state.localCamera) {
+              enableCamera().catch((err: unknown) => {
+                log.error("Camera on join failed", { error: String(err) });
+              });
+            }
+          }
+        }
+      }),
+    );
+
     unsubscribers.push(
       ws.on("call_incoming", (payload) => {
         try {
+          // Being in the room already answers the ring (a redial from
+          // someone in the call re-rings everyone else in the DM).
+          if (voiceStore.getState().currentChannelId === payload.channel_id) return;
           // A call in the DM you are already sitting in still rings: the
           // channel being open does not mean the app has focus, and Discord
           // rings there too.
@@ -906,6 +1035,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         // server holds no call state to target with (see handlers_call.go).
         // In a group DM that includes fellow callees who are also ringing;
         // only the actual ringer declining should silence this client's ring.
+        // The caller hears about it too: in a 1:1 a decline ends the ring,
+        // in a group it takes that callee off the list.
+        outgoingCall?.declined(payload.channel_id, payload.from_user);
         const ringing = ringCtrl?.current();
         if (ringing === null || ringing === undefined) return;
         if (payload.from_user === ringing.fromUserId) {
@@ -938,6 +1070,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       ringCtrl?.destroy();
       ringCtrl = null;
       callBanner = null;
+      callPanel = null;
+      outgoingCall?.destroy();
+      outgoingCall = null;
+      cameraOnJoin = null;
     });
 
     // Message loading controller

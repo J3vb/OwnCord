@@ -147,8 +147,8 @@ detail each; this is the index.
 
 `call_incoming` / `call_declined` are deliberately _not_ routed through the
 dispatcher: `MainPage.ts` subscribes to them directly (page-scoped listeners)
-and drives the ring state machine in `lib/call-ring.ts` +
-`components/IncomingCallBanner.ts`.
+and drives the ring state machine in `lib/call-ring.ts` and its answer surfaces
+([voice-and-e2ee.md §9](voice-and-e2ee.md)).
 
 > **✓ Implemented (2026-07).** Error codes are no longer silently dropped for
 > sends: the server echoes the request id on error replies, so `SLOW_MODE`,

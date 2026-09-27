@@ -69,6 +69,8 @@ export const voiceText = defineCatalog("voice", {
   "call.accept": "Accept",
   "call.decline": "Decline",
   "call.isCalling": "{name} is calling",
+  "call.goToCall": "Go to the call",
+  "call.inProgress": "Call in progress",
 
   "picker.title": "Share your screen",
   "picker.none": "No screens or windows can be shared in this desktop session.",
