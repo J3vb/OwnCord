@@ -72,6 +72,7 @@ func (a *App) stages() []stage {
 		{"data-dir", a.startDataDir},
 		{"tls", a.startTLS},
 		{"database", a.startDatabase},
+		{"boot-marker", a.startBootMarker},
 		{"migrate", a.startMigrate},
 		{"erasure-markers", a.startErasureMarkers},
 		{"push-vapid-key", a.startPushVAPIDKey},
@@ -156,6 +157,9 @@ func (a *App) start() error {
 	// copy through every start-up refusal; the schema-ahead check in
 	// db.MigrateFS stops that copy from then booting on a newer schema.
 	removeOldBinaryFn(a.log)
+	if a.bootMarker != nil {
+		a.bootMarker.reported()
+	}
 	return nil
 }
 
@@ -292,6 +296,7 @@ func (a *App) startHub() error {
 	}
 	a.runtime = rt
 	a.hub = a.runtime.Hub
+	a.recordBootStatus(rt.Services)
 	// The emergency restart path must stop LiveKit even when an earlier
 	// shutdown step wedges before the hub's closer can run.
 	a.deps.Restart.setCompanionStop(a.hub.StopLiveKit)

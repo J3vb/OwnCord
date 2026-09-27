@@ -99,6 +99,22 @@ type AttentionSources struct {
 	VoiceHealth func(context.Context) VoiceHealth
 }
 
+// BootStatus is what the previous run left in the boot marker (SRE-08):
+// whether the marker was readable, whether the last shutdown was clean, when
+// the previous run started and when it last recovered a panic.
+type BootStatus struct {
+	// Recorded is whether a boot marker was found and read. False on a first
+	// start, which is reported unknown, never a false warning.
+	Recorded bool
+	// Unclean is whether the previous run ended without clearing its marker —
+	// a kill, a crash, or a hardware exit.
+	Unclean bool
+	// StartedAt is when the previous run started, and LastPanicAt the last
+	// panic it recovered (zero if none).
+	StartedAt   time.Time
+	LastPanicAt time.Time
+}
+
 // AttentionSignal is one measurement and its current status.
 type AttentionSignal struct {
 	ID         string    `json:"id"`
@@ -154,6 +170,9 @@ type AttentionService struct {
 	delivery    attentionRate
 	voice       attentionLevel
 	jobs        []*attentionJob
+	// boot is the previous run's marker, set once at start-up and constant
+	// for this process (SRE-08).
+	boot BootStatus
 }
 
 type attentionJob struct {
@@ -216,6 +235,17 @@ func (s *AttentionService) job(label string) *attentionJob {
 		}
 	}
 	return nil
+}
+
+// RecordBootStatus records the previous run's marker for the attention panel
+// (SRE-08). It is set once at start-up, before Run samples.
+func (s *AttentionService) RecordBootStatus(b BootStatus) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.boot = b
 }
 
 // Run evaluates now and then every interval until ctx ends.
@@ -314,6 +344,7 @@ func (s *AttentionService) Evaluate(ctx context.Context, now time.Time) {
 	})
 	s.evalBackup(r, now)
 	s.evalVoice(r, now)
+	s.evalBootStatus(now)
 	s.evalJobs(now)
 	for id, w := range s.warnings {
 		if w.RecoveredAt != nil && now.Sub(*w.RecoveredAt) > attentionRecoveredKeep {

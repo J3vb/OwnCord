@@ -21,7 +21,7 @@ In mount order (`Server/api/router.go`):
 1. **boundRequestID** -- drops an oversized (>128 bytes) or non-printable client-supplied `X-Request-Id` before chi adopts it.
 2. **RequestID** (chi) -- assigns the request ID used in logs.
 3. **setRequestIDHeader** -- echoes the request ID into the `X-Request-Id` response header.
-4. **Recoverer** -- catches panics, logs them through `slog` with a stack capture, returns 500.
+4. **Recoverer** -- catches panics, logs them through `slog` with a stack capture, returns 500. On Windows a nil-dereference or invalid-address fault exits the process for a supervisor restart instead (SRE-08, [server-boundaries.md](architecture/server-boundaries.md)).
 5. **Request Logger** -- structured logging of method, path, status, duration.
 6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
 7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
@@ -3243,7 +3243,13 @@ Nothing here is exported off the host.
   both `0`).
   It is never reported as healthy and neither raises nor clears a warning.
 - `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `voice`,
-  `backup`, and `job:<name>` for each maintenance step.
+  `last_exit`, `backup`, and `job:<name>` for each maintenance step.
+- `last_exit` reports how the previous run ended (SRE-08): `ok` after a clean
+  shutdown, `warning` when the run before this one left its boot marker armed
+  (a `kill -9`, a crash, or a hardware-fault exit), with the previous run's
+  start time as `value` and the last panic it recovered, if any, in `detail`;
+  `unknown` on a first start, when there was no marker to read. A planned
+  (clean) restart clears the marker, so it recovers this warning.
 - `voice` reports LiveKit. An OwnCord-managed companion reports its
   supervisor's local state — `running`, plus a `not running` warning when it is
   down and a `gave up` critical when the backoff stopped restarting it; a

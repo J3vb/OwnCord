@@ -828,6 +828,15 @@ func recoverer(next http.Handler) http.Handler {
 					attrs = append(attrs, "trace_id", traceID)
 				}
 				slog.Error("http handler panic recovered", attrs...)
+				// SRE-08: on Windows a nil deref or invalid address may have
+				// left the heap corrupt (golang/go#81238), so it exits for a
+				// supervisor restart rather than writing a 500 and continuing
+				// on damaged memory. Every other panic stays recovered.
+				if stackutil.Recovered(rec) {
+					slog.Error("http handler: hardware fault, exiting for supervisor restart",
+						"method", r.Method, "path", truncateForLog(r.URL.Path, maxLoggedPathLen))
+					stackutil.Fatal()
+				}
 				w.WriteHeader(http.StatusInternalServerError)
 			}
 		}()
