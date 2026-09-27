@@ -13,7 +13,8 @@
 //! closed: opening them errors until the file is repaired or removed and the
 //! client restarted, because an empty pin store would trust any certificate or
 //! identity key on first sight. The other stores start empty, and their next
-//! save replaces the bad file.
+//! save replaces the bad file. A store that cannot be read at all, or whose
+//! copy could not be saved, fails to open whatever its kind.
 //!
 //! The on-disk format is the plugin's (a pretty-printed JSON object), so files
 //! written by earlier versions load unchanged.
@@ -90,21 +91,42 @@ pub fn open<R: Runtime>(app: &AppHandle<R>, name: &'static str) -> Result<Arc<Js
     entry
 }
 
-/// Load the store at `path`. A missing file is an empty store.
+/// Load the store at `path`. A missing file is an empty store. A file that
+/// cannot be read, or does not parse and could not be copied aside, never
+/// opens: its next save would destroy the only copy.
 fn load(path: &Path, fail_closed: bool) -> Result<JsonStore, String> {
-    let map = match read_map(path) {
-        Ok(map) => map.unwrap_or_default(),
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => b"{}".to_vec(),
+        Err(e) => {
+            let msg = format!(
+                "{} cannot be read ({e}); restart OwnCord once it is accessible.",
+                path.display()
+            );
+            log::error!("[json_store] {msg}");
+            return Err(msg);
+        }
+    };
+    let map = match parse_map(&bytes) {
+        Ok(map) => map,
         Err(why) => {
-            let saved = preserve_corrupt(path)
-                .map(|copy| format!("a copy is saved as {}", copy.display()))
-                .unwrap_or_else(|e| format!("no copy could be saved: {e}"));
+            let copy = preserve_corrupt(path);
+            let saved = match &copy {
+                Ok(copy) => format!("a copy is saved as {}", copy.display()),
+                Err(e) => format!("no copy could be saved: {e}"),
+            };
             log::error!(
                 "[json_store] {} is unreadable ({why}); {saved}",
                 path.display()
             );
-            if fail_closed {
+            if fail_closed || copy.is_err() {
+                let reset = if fail_closed {
+                    "these trust pins"
+                } else {
+                    "it"
+                };
                 return Err(format!(
-                    "{} is unreadable ({why}); {saved}. Remove the file to reset these trust pins.",
+                    "{} is unreadable ({why}); {saved}. Remove the file and restart OwnCord to reset {reset}.",
                     path.display()
                 ));
             }
@@ -117,15 +139,9 @@ fn load(path: &Path, fail_closed: bool) -> Result<JsonStore, String> {
     })
 }
 
-/// Read and parse a store file; `Ok(None)` when it does not exist.
-fn read_map(path: &Path) -> Result<Option<Map<String, Value>>, String> {
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e.to_string()),
-    };
-    match serde_json::from_slice(&bytes) {
-        Ok(Value::Object(map)) => Ok(Some(map)),
+fn parse_map(bytes: &[u8]) -> Result<Map<String, Value>, String> {
+    match serde_json::from_slice(bytes) {
+        Ok(Value::Object(map)) => Ok(map),
         Ok(_) => Err("not a JSON object".into()),
         Err(e) => Err(e.to_string()),
     }
@@ -286,6 +302,26 @@ mod tests {
             .expect("a torn pin store must not open");
         assert!(err.contains(".corrupt-"), "the error names the copy: {err}");
         assert_eq!(corrupt_copies(&dir.0).len(), 1);
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            TORN,
+            "the original stays in place"
+        );
+    }
+
+    // A 250-byte file name leaves no room under the 255-byte limit for the
+    // `.corrupt-<secs>` suffix, so the copy fails while the read succeeds.
+    #[test]
+    fn a_torn_settings_file_that_cannot_be_copied_does_not_open() {
+        let dir = TempDir::new("torn-no-copy");
+        let path = dir.0.join(format!("{}.json", "s".repeat(245)));
+        fs::write(&path, TORN).unwrap();
+
+        let err = load(&path, false)
+            .err()
+            .expect("a store whose only copy is the torn file must not open");
+        assert!(err.contains("no copy could be saved"), "{err}");
+        assert!(corrupt_copies(&dir.0).is_empty());
         assert_eq!(
             fs::read(&path).unwrap(),
             TORN,
