@@ -11023,7 +11023,7 @@
       "why": "The RI-04 restore cutoff (message_retry_floor_ms) makes the server refuse a keyed send whose id is older than the floor and has no receipt (ErrMessageDeliveryBeforeRestore). The server's message tells the user to review the pending message before sending it again. On the client, pendingMessageExpired treats the floor only as an upper bound for ids dated in the future, so a draft from before the restore still counts as retryable. retrySend passes draft.clientMessageId back into performSend as existingClientMessageId, so every retry sends the same pre-floor id and gets the same BAD_REQUEST. handleMessagingError keeps only payload.code, so the server's explanation is dropped. The persisted RECOVERED draft is shown again on every launch until its 24h expiry, with a Retry button that cannot succeed. The only way out is to delete the draft and type the message again.",
       "repro": "User A sends a text in the last seconds before the owner restores a backup from the admin panel. The ack is lost at the close, so the row becomes UNCONFIRMED and is kept in the encrypted pending queue. The server restarts with floor = restore time + 5 min + 1 ms. A reconnects, and ready carries message_retry_floor_ms. A clicks Retry: chat_send goes out with the original id, and FindMessageDelivery finds no receipt and createdAt < floor, so the server returns an error frame with code BAD_REQUEST and the row is marked failed again. Every further Retry, and every app restart for up to 24h, repeats this.",
       "evidence": "Server/db/message_delivery.go:57 and :102: CreatedAtMS below the floor with no receipt returns ErrMessageDeliveryBeforeRestore. Server/service/message_delivery.go:74-75 maps it to ErrBadRequest with \"review the pending message before sending it again\". Client/src/lib/pendingMessages.ts:41-52: an id counts as expired only when older than 24h or createdAt > max(now+5min, floor), so ids below the floor stay valid. Client/src/pages/main-page/ChannelController.ts:468-493: retrySend reuses draft.clientMessageId. ChannelController.ts:356-360: performSend keeps existingClientMessageId. Client/src/features/messaging/wsHandlers.ts:362-380: markSendFailed(id, payload.code) drops the message text. No client test covers the floor.",
-      "suggestedFix": "Do not refuse a pre-floor id on the client: Retry resends the same client_message_id with its unchanged timestamp and lets the server decide. If the restored database holds the receipt, the server deduplicates (chat_send_ok with deduplicated) and the row reconciles. Otherwise it returns the before-restore BAD_REQUEST: handleMessagingError, using pendingMessageBeforeRestore in lib/pendingMessages.ts, labels the row BEFORE_RESTORE (\"The server was restored — check the conversation before sending this again.\"), keeping its text for copy or discard, and ChannelController shows the same text as a toast. Never mint a replacement id (docs/protocol.md). Vitest cases cover both the deduplicated and the refused retry.",
+      "suggestedFix": "Do not refuse a pre-floor id on the client: Retry resends the same client_message_id with its unchanged timestamp and lets the server decide. If the restored database holds the receipt, the server deduplicates (chat_send_ok with deduplicated) and the row reconciles. Otherwise it returns the before-restore BAD_REQUEST: handleMessagingError, using pendingMessageBeforeRestore in lib/pendingMessages.ts, labels the row BEFORE_RESTORE (\"The server was restored \u2014 check the conversation before sending this again.\"), keeping its text for copy or discard, and ChannelController shows the same text as a toast. Never mint a replacement id (docs/protocol.md). Vitest cases cover both the deduplicated and the refused retry.",
       "confidence": "high",
       "status": "open",
       "found": "2026-09-25",
@@ -11146,7 +11146,7 @@
     },
     {
       "id": "OC-0482",
-      "title": "Linux native voice: unmuting after a full LiveKit reconnect made while muted leaves the mic silent — NativeSession.mic kept the pre-restart publication whose track the SDK detached",
+      "title": "Linux native voice: unmuting after a full LiveKit reconnect made while muted leaves the mic silent \u2014 NativeSession.mic kept the pre-restart publication whose track the SDK detached",
       "file": "Client/src-tauri/src/native_voice/session.rs",
       "line": 529,
       "severity": "medium",
@@ -11166,6 +11166,30 @@
         "revertProof": "n/a"
       },
       "note": "Hunt finding F1. Its sibling F2 (native adapter never degrades Secured on a remote decrypt failure) is OC-0473, fixed by #1858. Not driven live: the validation host cannot build the native voice stack."
+    },
+    {
+      "id": "OC-0483",
+      "title": "The member profile popup's \"Call\" action never renders because no caller passes onCall",
+      "file": "Client/src/components/MemberList.ts",
+      "line": 315,
+      "severity": "low",
+      "why": "Affected property: the member list's profile popup offers a \"Call\" action. UserProfilePopup.ts:311-322 renders the Call button only when `options.onCall !== undefined`, and MemberList.ts's openProfile passed `onMessage` (line 315) and `onReport` (line 318) but never `onCall`, so the button never rendered for any member. The component comment says Call was omitted \"before DM calls exist\"; DM calls exist now (the DM chat header's call button, dm-calls.spec.ts), so the affordance users expect beside Message simply never appeared. tests/e2e/user-profile.spec.ts:266 was a `test.fixme` asserting the missing control.",
+      "repro": "In the client, open a member's profile from the member list: the popup shows Message and Report but no Call button, though `createUserProfilePopup` renders one whenever onCall is passed (tests/unit/user-profile-popup.test.ts:72,91 proves the component renders it). No production caller passed onCall: `grep -rn \"onCall:\" Client/src --include=*.ts` outside the component returned nothing.",
+      "evidence": "Client/src/components/UserProfilePopup.ts:53,311-322 (onCall option and its guarded button); Client/src/components/MemberList.ts:284-320 (openProfile wires onMessage and onReport only); Client/tests/e2e/user-profile.spec.ts:266 (`test.fixme(\"offers a Call action for another member\")`).",
+      "suggestedFix": "Wire onCall through MemberList -> SidebarMemberSection -> SidebarArea, where it opens (or reuses) the 1:1 DM and starts a call in it via the same startCall the DM header uses.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-09-27",
+      "hunt": "post-beta-roadmap-2026-09-27",
+      "lens": "client-ts",
+      "finder": "planning-panel",
+      "fixed": "2026-09-27",
+      "fix": {
+        "commit": "PENDING",
+        "test": "Client/tests/unit/member-list.test.ts, Client/tests/unit/sidebar-area.test.ts, Client/tests/e2e/user-profile.spec.ts",
+        "revertProof": "self-reported"
+      },
+      "note": "Phase B lane B6 item BUG-05. The un-fixme'd e2e asserts the Call action opens the DM and rings its voice channel; two unit tests cover the MemberList onCall wiring (incl. no button for yourself) and the SidebarArea open-or-create flow."
     }
   ]
 }

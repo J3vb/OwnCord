@@ -36,6 +36,9 @@ export interface SidebarMemberSectionOptions {
   readonly getToast: () => ToastContainer | null;
   /** Start a DM with a user (profile popup's Message button). */
   readonly onMessageUser?: (userId: number) => void;
+  /** Call a user: open/create the 1:1 DM and start a call in it (profile
+   *  popup's Call button, BUG-05). */
+  readonly onCallUser?: (userId: number) => void;
 }
 
 export interface SidebarMemberSectionResult {
@@ -66,7 +69,7 @@ function isBanInForce(user: AdminUser): boolean {
 export function createSidebarMemberSection(
   opts: SidebarMemberSectionOptions,
 ): SidebarMemberSectionResult {
-  const { api, getToast, onMessageUser } = opts;
+  const { api, getToast, onMessageUser, onCallUser } = opts;
   const unsubs: Array<() => void> = [];
 
   // --- Container ---
@@ -280,6 +283,7 @@ export function createSidebarMemberSection(
   const memberList = createMemberList({
     currentUserRole: authStore.getState().user?.role ?? "member",
     ...(onMessageUser !== undefined ? { onMessageUser } : {}),
+    ...(onCallUser !== undefined ? { onCallUser } : {}),
     onReportUser: (userId, name) => {
       // The dialog lives as long as this section (resizeOwner is its lifetime).
       import("../../features/reports/openers").then(
