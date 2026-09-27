@@ -210,7 +210,7 @@ func (h *Hub) reconnectPrecheck(
 	// messages, so replay cannot bring a client that missed one back into a
 	// coherent state — force the full-ready path instead.
 	if h.mustFullResync(lastSeq) {
-		slog.Info("ws replay skipped (visibility changed since last_seq), sending full ready",
+		slog.Info("ws replay skipped (resync watermark at or past last_seq), sending full ready",
 			"user_id", c.userID, "last_seq", lastSeq)
 		h.reconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
@@ -466,7 +466,9 @@ func (h *Hub) reconnectRegister(
 	if handleReconnectPreRegisterRaceHook != nil {
 		handleReconnectPreRegisterRaceHook()
 	}
-	h.applyQueueContentDrops()
+	if h.queueContentDrops.Load() != h.queueContentDropsApplied {
+		h.bumpVisibilityWatermark()
+	}
 	// Re-check the watermark one last time, right before registerNow makes
 	// this connection reachable. RefreshChannelVisibility and
 	// revokeUnreadableChannels both iterate h.clients to fan out a targeted,
@@ -480,7 +482,7 @@ func (h *Hub) reconnectRegister(
 	if h.mustFullResync(lastSeq) {
 		h.observeSeqMuHold(start)
 		h.seqMu.Unlock()
-		slog.Warn("ws handleReconnect: visibility changed during handshake, forcing full ready",
+		slog.Warn("ws handleReconnect: resync watermark moved during handshake, forcing full ready",
 			"user_id", c.userID, "last_seq", lastSeq)
 		h.reconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))

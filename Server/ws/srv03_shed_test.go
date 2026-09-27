@@ -156,3 +156,25 @@ func TestTopicShed_MetadataFrameDoesNotForceResync(t *testing.T) {
 		t.Fatalf("a metadata shed must not force a full resync for seq %d", lastDelivered)
 	}
 }
+
+// A resume that registers while the dispatch loop holds the last frame queued
+// ahead of a dropped content frame — dequeued, so the queue reads empty, but
+// not yet sequenced — must not settle the drop: that frame is sequenced next,
+// and a client that receives it sits exactly at the loss point.
+func TestQueueContentDrop_ResumeMidDispatchDoesNotSettleDrop(t *testing.T) {
+	h := newEmitTestHub()
+	for range 2 {
+		h.deliverBroadcast(broadcastMsg{msg: []byte(`{"type":"server_filler"}`)})
+	}
+	h.queueContentDrops.Add(1)
+
+	c := NewTestClient(h, 2, make(chan []byte, 8))
+	if _, ok := h.ReconnectRegisterForTest(c, atomic.LoadUint64(&h.seq), nil); ok {
+		t.Fatal("a resume at the loss point with a content drop pending must take the full-ready path")
+	}
+
+	h.deliverBroadcast(broadcastMsg{msg: []byte(`{"type":"server_filler"}`)})
+	if last := atomic.LoadUint64(&h.seq); !h.mustFullResync(last) {
+		t.Fatalf("a client that received seq %d, the frame just ahead of the dropped one, must take the full-ready path", last)
+	}
+}

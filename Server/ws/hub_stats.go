@@ -148,10 +148,10 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 // place in the seq stream lies behind every frame still queued ahead of it, so
 // while such a drop is unsettled every call ratchets the watermark to the
 // current seq, and the drop only counts as settled once the queue is seen
-// empty — every frame queued before it has been sequenced by then. Caller
-// holds seqMu: deliverBroadcast after each frame, and reconnectRegister before
-// its watermark check, so a resume can never register between the drop and
-// its first bump.
+// empty — every frame queued before it has been sequenced by then. That proof
+// holds only on the dispatch goroutine, so deliverBroadcast is the sole caller,
+// under seqMu after each frame; reconnectRegister bumps for an unsettled drop
+// but never settles it.
 func (h *Hub) applyQueueContentDrops() {
 	n := h.queueContentDrops.Load()
 	if n == h.queueContentDropsApplied {
