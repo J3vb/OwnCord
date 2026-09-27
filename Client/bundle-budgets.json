@@ -17,9 +17,9 @@
       "note": "Measured 132,225 B at dev 4c45d26a (B7-7). B9-26 re-baseline 2026-09-25: measured 133,372 B; the ratchet rule gives min(135,000, 134,500) = 134,500 B."
     },
     "livekitSession": {
-      "budget": 24000,
+      "budget": 24500,
       "lazy": true,
-      "note": "Measured 21,652 B after the B7-9 split (livekitSession and livekitE2EE facades plus src/features/voice/). Ratchet rule (B7-9): measured + 10 %, rounded up to the next 1,000 B — 21,652 x 1.10 = 23,817 -> 24,000. Replaces decision 10's 800,000 B post-decomposition placeholder. B9-26 re-baseline 2026-09-25: measured 23,008 B; the ratchet rule gives min(24,000, 24,500) = 24,000 B, unchanged."
+      "note": "Measured 21,652 B after the B7-9 split (livekitSession and livekitE2EE facades plus src/features/voice/). Ratchet rule (B7-9): measured + 10 %, rounded up to the next 1,000 B — 21,652 x 1.10 = 23,817 -> 24,000. Replaces decision 10's 800,000 B post-decomposition placeholder. B9-26 re-baseline 2026-09-25: measured 23,008 B; the ratchet rule gives min(24,000, 24,500) = 24,000 B, unchanged. Raised 24,000 -> 24,500 B (SRE-M2 client half, B3 voice join timeline): dev 1ccb61c9 measured 23,172 B, and the join timeline module (voiceJoinTrace.ts) with its stage, milestone and decrypt-error hooks brings livekitSession to 24,321 B (+1,149 B); one 500 B step, not a re-baseline, pending firstmate review."
     }
   },
   "forbidEmbeddedWasm": {
