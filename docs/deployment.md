@@ -1058,6 +1058,12 @@ One key controls verbosity: `logging.level` (`debug`/`info`/`warn`/`error`,
 default `info`). `OWNCORD_LOGGING_LEVEL` overrides it without editing
 `config.yaml`.
 
+A LiveKit that OwnCord supervises logs through the same pipeline, as
+`livekit: ` lines with `component=livekit`. An external LiveKit, including
+the Docker `livekit` service, logs only to its own stdout: read it with
+`docker compose logs livekit` (or wherever that process's supervisor puts
+stdout). Its output is not in the admin live log or the support bundle.
+
 A log line is `time level msg key=value ...`, and every request-scoped
 record carries a `req_id` so a line can be tied back to the HTTP request
 that produced it.

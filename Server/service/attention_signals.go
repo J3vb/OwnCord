@@ -246,7 +246,7 @@ func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 	sig := AttentionSignal{ID: "voice", Label: "Voice (LiveKit)", ObservedAt: now}
 	title := "Voice is unavailable"
-	action := "Check Server Logs for livekit: lines (LiveKit output is now logged). If OwnCord manages the LiveKit process and it gave up, fix its config or binary and restart the server; otherwise confirm the external LiveKit is reachable at voice.livekit_url."
+	action := "Check Server Logs for livekit: lines (the managed LiveKit's output is logged there). If it gave up, fix its config or binary and restart the server."
 	if r.voice == nil {
 		sig.Status, sig.Detail = AttentionStatusUnknown, "voice health is not measured on this server"
 		s.settle(sig, title, action)
@@ -255,7 +255,8 @@ func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 	v := *r.voice
 	if !v.Managed {
 		// External LiveKit: a probe answer warns when unreachable; no probe
-		// (unconfigured) is unknown.
+		// (unconfigured) is unknown. Its output never reaches Server Logs.
+		action = "Confirm the external LiveKit is reachable at voice.livekit_url. Its output is not in Server Logs or the support bundle: read it where it runs, e.g. docker compose logs livekit."
 		if v.Reachable == nil {
 			sig.Status, sig.Detail = AttentionStatusUnknown, "LiveKit is not configured"
 			s.settle(sig, title, action)

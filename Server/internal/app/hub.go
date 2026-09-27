@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/api"
@@ -137,7 +136,8 @@ func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *ws.LiveKitProcess, bool
 	// admin-CIDR gate anyway told operators to fix a setting that was not the
 	// problem. The gate stays on the route itself; a hand-managed
 	// `livekit.yaml` that does configure a webhook is the operator's to reason
-	// about, documented in docs/deployment.md.
+	// about (see server.livekit_webhook_allowed_cidrs in
+	// docs/server-configuration.md).
 	return lk, nil, true
 }
 
@@ -168,8 +168,8 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 		VoiceHealth: func(ctx context.Context) service.VoiceHealth {
 			// OwnCord-managed companion: report the supervisor's own state,
 			// which probes nothing. Elsewhere (or voice unconfigured) the
-			// hub's LiveKit client is external; probe its health with a
-			// bounded context, or report unconfigured when there is none.
+			// hub's LiveKit client is external; probe its health (the probe
+			// bounds itself), or report unconfigured when there is none.
 			if hub.LiveKitManaged() {
 				status := hub.LiveKitProcessStatus()
 				return service.VoiceHealth{
@@ -182,16 +182,8 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 			if hub.URL() == "" {
 				return service.VoiceHealth{}
 			}
-			probeCtx, cancel := context.WithTimeout(ctx, liveKitAttentionProbeTimeout)
-			defer cancel()
-			reachable, _ := hub.LiveKitHealthCheck(probeCtx)
+			reachable, _ := hub.LiveKitHealthCheck(ctx)
 			return service.VoiceHealth{Reachable: &reachable}
 		},
 	})
 }
-
-// liveKitAttentionProbeTimeout bounds the external LiveKit health probe the
-// attention sampler runs once a minute, so a hung external server cannot
-// stall the sample. The probe already carries its own 3s HTTP timeout; this is
-// the outer bound for the whole call.
-const liveKitAttentionProbeTimeout = 3 * time.Second

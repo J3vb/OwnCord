@@ -257,6 +257,12 @@ func TestLiveKitLogWriter_RoutesLinesThroughSlog(t *testing.T) {
 	if _, err := w.Write([]byte("R ice failed\n2024-01-01 WARN port busy\n\n")); err != nil {
 		t.Fatal(err)
 	}
+	// Only the level field counts: an "error" field on a WARN line keeps
+	// it WARN, and "trace" in an INFO line's text does not make it DEBUG.
+	if _, err := w.Write([]byte("2024-01-01T00:00:00Z\tWARN\tlivekit\trtc/transport.go:123\tcould not handle ICE candidate\t{\"error\": \"x\"}\n" +
+		"2024-01-01T00:00:00Z\tINFO\tlivekit\tstacktrace tracer ready\n")); err != nil {
+		t.Fatal(err)
+	}
 	out := buf.String()
 	for _, want := range []string{
 		"component=livekit",
@@ -266,6 +272,8 @@ func TestLiveKitLogWriter_RoutesLinesThroughSlog(t *testing.T) {
 		"ice failed",
 		"level=WARN",
 		"port busy",
+		"level=WARN msg=\"livekit: 2024-01-01T00:00:00Z\\tWARN\\tlivekit\\trtc/transport.go:123\\tcould not handle ICE candidate",
+		"level=INFO msg=\"livekit: 2024-01-01T00:00:00Z\\tINFO\\tlivekit\\tstacktrace tracer ready\"",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("slog output missing %q:\n%s", want, out)

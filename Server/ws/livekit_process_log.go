@@ -78,18 +78,24 @@ func (w *liveKitLogWriter) emit(line string) {
 	slog.Log(context.Background(), liveKitLineLevel(line), liveKitLogPrefix+line, "component", "livekit")
 }
 
-// liveKitLineLevel maps the level word LiveKit prints (zap's capitalised
-// "INFO", "WARN", "ERROR" or "DEBUG") to a slog level, defaulting to info.
+// liveKitLineLevel maps the level field LiveKit prints after its timestamp
+// (zap's capitalised "DEBUG", "INFO", "WARN", "ERROR", "DPANIC", "PANIC" or
+// "FATAL") to a slog level. Only that standalone field counts, so a message
+// or an "error" field on a WARN line cannot change the level; a line without
+// one is info.
 func liveKitLineLevel(line string) slog.Level {
-	upper := strings.ToUpper(line)
-	switch {
-	case strings.Contains(upper, "ERROR"), strings.Contains(upper, "FATAL"), strings.Contains(upper, "PANIC"):
-		return slog.LevelError
-	case strings.Contains(upper, "WARN"):
-		return slog.LevelWarn
-	case strings.Contains(upper, "DEBUG"), strings.Contains(upper, "TRACE"):
-		return slog.LevelDebug
-	default:
-		return slog.LevelInfo
+	fields := strings.Fields(line)
+	for _, f := range fields[:min(2, len(fields))] {
+		switch f {
+		case "DEBUG":
+			return slog.LevelDebug
+		case "INFO":
+			return slog.LevelInfo
+		case "WARN":
+			return slog.LevelWarn
+		case "ERROR", "DPANIC", "PANIC", "FATAL":
+			return slog.LevelError
+		}
 	}
+	return slog.LevelInfo
 }
