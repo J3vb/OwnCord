@@ -186,6 +186,34 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   let sendChainBusy = false;
   let sendChainGen = 0;
   const sendTimers = new Map<string, { timer: number; release?: () => void }>();
+
+  // CLI-08: chat_edit and chat_delete are fire-and-forget — no ack carries
+  // their envelope id back, so before this they were toasted "success" on
+  // send and silently dropped by a closed or half-open socket. Track each
+  // frame by the id ws.send returns (the same correlation scheme reactions
+  // use), resolve it on the server echo, and report a failure instead of a
+  // false success. Controller-scoped like draftByCorrelation so a frame in
+  // flight across a channel switch keeps its entry; restoration only lands
+  // when that channel is the one mounted.
+  interface TrackedEdit {
+    readonly channelId: number;
+    readonly messageId: number;
+    readonly content: string;
+  }
+  const pendingEdits = new Map<string, TrackedEdit>();
+  const pendingDeletes = new Map<string, { channelId: number; messageId: number }>();
+
+  /** Put a failed edit's text back in the composer, but only while its own
+   *  channel is the mounted one — the row it belongs to may be gone by now,
+   *  and startEdit against another channel's composer would target the wrong
+   *  message id. Deferred a microtask because the synchronous disconnected
+   *  path runs inside MessageInput.handleSend, whose own cancelEdit() (right
+   *  after onEditMessage returns) would otherwise wipe the restored text. */
+  function restoreEdit(channelId: number, messageId: number, content: string): void {
+    queueMicrotask(() => {
+      if (currentChannelId === channelId) messageInput?.startEdit(messageId, content);
+    });
+  }
   function clearSendTimer(id: string): void {
     const owned = sendTimers.get(id);
     if (!owned) return;
@@ -705,15 +733,22 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       },
       onDeleteClick: (msgId: number) => {
         const result = pendingDeleteManager.tryDelete(msgId);
-        if (result === "confirmed") {
-          ws.send({
-            type: "chat_delete",
-            payload: { message_id: msgId },
-          });
-          showToast(messagingText("toast.deleted"), "success");
-        } else {
+        if (result !== "confirmed") {
           showToast(messagingText("toast.deleteConfirm"), "info");
+          return;
         }
+        // CLI-08: a destructive menu action is gated on the connection. A
+        // closed or half-open socket would drop the frame and leave the
+        // moderator thinking the message was deleted.
+        if (uiStore.getState().connectionStatus !== "connected") {
+          showToast(messagingText("toast.deleteFailed"), "error");
+          return;
+        }
+        const id = ws.send({
+          type: "chat_delete",
+          payload: { message_id: msgId },
+        });
+        pendingDeletes.set(id, { channelId, messageId: msgId });
       },
       onReactionClick: (msgId: number, emoji: string) => {
         reactionCtrl.handleReaction(msgId, emoji);
@@ -798,11 +833,19 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         if (original !== undefined && original.content === trimmed) {
           return;
         }
-        ws.send({
+        // CLI-08: same connection gate as delete. A dropped edit frame must
+        // not toast success — the row would keep its old text, and the user
+        // would never know to try again.
+        if (uiStore.getState().connectionStatus !== "connected") {
+          restoreEdit(channelId, messageId, trimmed);
+          showToast(messagingText("toast.editFailed"), "error");
+          return;
+        }
+        const id = ws.send({
           type: "chat_edit",
           payload: { message_id: messageId, content: trimmed },
         });
-        showToast(messagingText("toast.edited"), "success");
+        pendingEdits.set(id, { channelId, messageId, content: trimmed });
       },
     });
     messageInput.mount(slots.inputSlot);
@@ -936,10 +979,77 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }
       }),
     );
+    // CLI-08: the server's edit/delete echoes carry no envelope id, so a
+    // tracked frame is resolved by its channel + message (the same
+    // content-match reactions use). Only the server echo proves delivery.
+    composerGatingUnsubs.push(
+      ws.on("chat_edited", (payload) => {
+        for (const [id, edit] of pendingEdits) {
+          if (edit.channelId === payload.channel_id && edit.messageId === payload.message_id) {
+            pendingEdits.delete(id);
+          }
+        }
+      }),
+    );
+    composerGatingUnsubs.push(
+      ws.on("chat_deleted", (payload) => {
+        for (const [id, del] of pendingDeletes) {
+          if (del.channelId === payload.channel_id && del.messageId === payload.message_id) {
+            pendingDeletes.delete(id);
+          }
+        }
+      }),
+    );
+    // A local transport failure never echoes, so the frame is gone: report
+    // one error (the dispatcher's generic handler ignores an id that matches
+    // no pending send/reaction) and put a failed edit's text back. A half-open
+    // socket does not reject the send (the frame buffers), so the reconnect
+    // transition below is what catches that case.
+    composerGatingUnsubs.push(
+      ws.onSendFailure((id) => {
+        const edit = pendingEdits.get(id);
+        if (edit !== undefined) {
+          pendingEdits.delete(id);
+          restoreEdit(edit.channelId, edit.messageId, edit.content);
+          showToast(messagingText("toast.editFailed"), "error");
+          return;
+        }
+        if (pendingDeletes.delete(id)) {
+          showToast(messagingText("toast.deleteFailed"), "error");
+        }
+      }),
+    );
+    // Leaving "connected" means an in-flight frame can never be echoed: the
+    // dispatcher only sweeps optimistic sends/reactions, so resolve the
+    // tracked edit/delete frames here too — one error, and an edit's text
+    // back — instead of leaving a false success and a leaked entry.
+    composerGatingUnsubs.push(
+      ws.onStateChange((state) => {
+        if (state === "connected") return;
+        const hadEdit = pendingEdits.size > 0;
+        for (const edit of pendingEdits.values()) {
+          restoreEdit(edit.channelId, edit.messageId, edit.content);
+        }
+        pendingEdits.clear();
+        const hadDelete = pendingDeletes.size > 0;
+        pendingDeletes.clear();
+        if (hadEdit) showToast(messagingText("toast.editFailed"), "error");
+        if (hadDelete) showToast(messagingText("toast.deleteFailed"), "error");
+      }),
+    );
     // A refused send restarts the full window: the server's limiter is the
-    // authority on when the next one is allowed.
+    // authority on when the next one is allowed. A refused edit restores the
+    // text but leaves the one error to the dispatcher's own chain.
     composerGatingUnsubs.push(
       ws.on("error", (payload, correlationId) => {
+        if (correlationId !== undefined) {
+          const edit = pendingEdits.get(correlationId);
+          if (edit !== undefined) {
+            pendingEdits.delete(correlationId);
+            restoreEdit(edit.channelId, edit.messageId, edit.content);
+          }
+          pendingDeletes.delete(correlationId);
+        }
         if (payload.code !== "SLOW_MODE") return;
         if (!sentToMountedChannel(correlationId)) return;
         const ch = channelsStore.getState().channels.get(channelId);
