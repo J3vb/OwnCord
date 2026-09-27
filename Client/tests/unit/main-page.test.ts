@@ -134,6 +134,7 @@ const {
         setFocusedTile: ReturnType<typeof vi.fn>;
         getFocusedTileId: ReturnType<typeof vi.fn>;
         setLabel: ReturnType<typeof vi.fn>;
+        setPeople: ReturnType<typeof vi.fn>;
       };
     },
   },
@@ -213,12 +214,20 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       setFocusedTile: vi.fn(),
       getFocusedTileId: vi.fn(() => null),
       setLabel: vi.fn(),
+      setPeople: vi.fn(),
       mount: vi.fn(),
       destroy: vi.fn(),
     };
     const chatArea = document.createElement("div");
     const callPanelSlot = document.createElement("div");
-    chatArea.appendChild(callPanelSlot);
+    // The real chat column's order: the call panel, then the chat slots.
+    chatArea.append(
+      callPanelSlot,
+      slots.messagesSlot,
+      slots.typingSlot,
+      slots.inputSlot,
+      slots.videoGridSlot,
+    );
     capturedChatAreaRef.current = { chatArea, slots, dmProfileSlot, videoGrid };
     return {
       chatArea,
@@ -872,6 +881,124 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
     uiStore.flush();
     expect(banner.style.display).not.toBe("none");
+  });
+
+  it("shows the DM's own call video in its panel, keeping the chat in view", async () => {
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceUsers: new Map([
+        [
+          50,
+          new Map([
+            [
+              1,
+              {
+                userId: 1,
+                username: "alice",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: false,
+              },
+            ],
+            [
+              10,
+              {
+                userId: 10,
+                username: "bob",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: true,
+              },
+            ],
+          ]),
+        ],
+      ]),
+      localCamera: true,
+    }));
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    voiceStore.flush();
+
+    const slots = capturedChatAreaRef.current!.slots;
+    const panelVideo = document.querySelector('[data-testid="dcp-video"]');
+    expect(panelVideo).not.toBeNull();
+    expect(panelVideo!.contains(slots.videoGridSlot)).toBe(true);
+    // Your own camera no longer takes over the DM's chat.
+    expect(slots.messagesSlot.style.display).toBe("");
+    expect(slots.inputSlot.style.display).toBe("");
+
+    // Opening another channel hands the grid back to the chat column.
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 7 }));
+    channelsStore.flush();
+    expect(panelVideo!.contains(slots.videoGridSlot)).toBe(false);
+
+    page.destroy?.();
+  });
+
+  it("keeps the DM call panel's video up across repeated video changes, never switching it off in between", async () => {
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    const vu = (userId: number, username: string, extra = {}) => ({
+      userId,
+      username,
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+      ...extra,
+    });
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceUsers: new Map([
+        [
+          50,
+          new Map([
+            [1, vu(1, "alice")],
+            [10, vu(10, "bob", { screenshare: true })],
+          ]),
+        ],
+      ]),
+    }));
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    voiceStore.flush();
+
+    const mute = document.querySelector('[data-testid="dcp-mute"]');
+    expect(mute).not.toBeNull();
+    const setPeople = capturedChatAreaRef.current!.videoGrid.setPeople;
+    setPeople.mockClear();
+
+    for (const extra of [{ screenshare: true, camera: true }, { screenshare: true }]) {
+      voiceStore.setState((prev) => ({
+        ...prev,
+        voiceUsers: new Map([
+          [
+            50,
+            new Map([
+              [1, vu(1, "alice")],
+              [10, vu(10, "bob", extra)],
+            ]),
+          ],
+        ]),
+      }));
+      voiceStore.flush();
+    }
+
+    expect(setPeople).not.toHaveBeenCalledWith([]);
+    expect(document.querySelector('[data-testid="dcp-mute"]')).toBe(mute);
+
+    page.destroy?.();
   });
 
   it("tells the caller when the callee declines, and Ring again rings once more", async () => {

@@ -36,13 +36,20 @@ const I={
   activity:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
   chevronDown:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
   smile:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>',
+  /* Status icons (Lucide circle-check, triangle-alert, circle-x, circle-dashed),
+     always drawn next to a word: statusIcon() below. */
+  circleCheck:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>',
+  triangleAlert:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+  circleX:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>',
+  circleDashed:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.1 2.18a10 10 0 0 1 3.8 0"/><path d="M13.9 21.82a10 10 0 0 1-3.8 0"/><path d="M17.61 3.72a10 10 0 0 1 2.69 2.7"/><path d="M2.18 13.9a10 10 0 0 1 0-3.8"/><path d="M20.28 17.61a10 10 0 0 1-2.7 2.69"/><path d="M21.82 10.1a10 10 0 0 1 0 3.8"/><path d="M3.72 6.39a10 10 0 0 1 2.7-2.69"/><path d="M6.39 20.28a10 10 0 0 1-2.69-2.7"/></svg>',
+  chevronRight:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
 };
 
 /* ═══ State ═══ */
 const PAGE_SIZE=50;
 const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   me:null,partialToken:'',
-  usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
+  usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditShowSignins:false,auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
   modalDirty:false,
   supportPreview:null,supportBusy:false,badges:{pending:0,warnings:0,update:false},
   cachedStats:null,cachedUpdate:null,channelCache:{},roleList:[],pluginRuntime:'unknown',pluginBusy:false,
@@ -109,6 +116,66 @@ function utcDate(s){const v=String(s);return new Date(/[Zz]|[+-]\d\d:?\d\d$/.tes
 function fmtLocal(s,fmt){if(!s)return'';const d=utcDate(s);if(isNaN(d.getTime()))return esc(String(s));return'<span title="'+esc(d.toISOString())+'">'+esc(fmt?fmt.format(d):d.toLocaleString())+'</span>'}
 function actionBadge(a){if(!a)return'badge-muted';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'badge-red';if(a.includes('create'))return'badge-green';if(a.includes('update'))return'badge-yellow';return'badge-accent'}
 function actionColor(a){if(!a)return'var(--accent)';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'var(--text-danger)';if(a.includes('create'))return'var(--text-positive)';if(a.includes('update'))return'var(--text-warning)';return'var(--accent)'}
+/* Audit actions in plain words: the verb phrase that follows the actor's
+   name. A phrase that acts on the entry's target ends in {t}, which
+   auditTarget always fills; any other phrase names its own object, and a
+   numbered target only adds its number. The raw code stays in
+   each row's tooltip, in the action filter's values and in Copy page and
+   Export CSV; an action missing here reads as its code with spaces. */
+const ACTION_LABEL={
+  user_login:'signed in',user_logout:'signed out',ws_connect:'connected',login_blocked_banned:'tried to sign in while banned',
+  user_register:'joined the server',profile_update:'updated their profile',password_change:'changed their password',
+  identity_key_update:'changed their encryption key',totp_enabled:'turned on two-factor sign-in',totp_disabled:'turned off two-factor sign-in',
+  totp_verified:'confirmed two-factor sign-in',recovery_codes_regenerated:'made new recovery codes',recovery_kit_issued:'created a recovery kit',
+  recovery_kit_locked:'locked a recovery kit',recovery_kit_used:'recovered their account with a recovery kit',
+  recovery_assist_issued:'issued account recovery for {t}',recovery_assist_used:'recovered their account with help from an owner',
+  account_deleted:'deleted an account',account_erasure_replayed:'replayed an account erasure',
+  session_revoke:'signed out a session',session_revoke_all:'signed out all their sessions',force_logout:'signed out {t}',
+  user_ban:'banned {t}',user_unban:'unbanned {t}',user_kick:'kicked {t}',user_timeout:'timed out {t}',user_untimeout:'ended the timeout of {t}',user_warn:'warned {t}',
+  user_warning_acknowledged:'withdrew the warning of {t}',mod_action:'took a moderation action on {t}',
+  voice_mod_mute:'changed the server mute of {t}',voice_mod_deafen:'changed the server deafen of {t}',voice_mod_move:'moved {t}',voice_mod_kick:'disconnected {t}',
+  message_delete:'deleted a message',message_purge:'purged messages in {t}',message_pin:'pinned a message',
+  appeal_submit:'appealed a moderation action',appeal_withdraw:'withdrew an appeal',appeal_assign:'took an appeal',appeal_decide:'decided an appeal',
+  registration_approve:'approved the registration of {t}',registration_deny:'denied the registration of {t}',invite_create:'created an invite',invite_revoke:'revoked an invite',
+  channel_create:'created {t}',channel_update:'edited {t}',channel_delete:'deleted {t}',channel_perms_update:'changed role access to {t}',channel_perms_clear:'reset role access to {t}',
+  channel_user_perms_update:'changed member access to {t}',channel_user_perms_clear:'reset member access to {t}',channel_retention_change:'changed message retention for {t}',
+  role_create:'created {t}',role_update:'edited {t}',role_delete:'deleted {t}',role_reorder:'reordered the roles',role_change:'changed the role of {t}',
+  permission_explain:'checked the permissions of {t}',permission_preview:'previewed permissions for {t}',emoji_create:'added an emoji',emoji_delete:'removed an emoji',
+  setting_change:'changed a server setting',settings_change:'changed the server settings',registration_mode_change:'changed who can join',
+  retention_policy_change:'changed the message retention policy',config_write:'wrote config.yaml',server_setup:'set up the server',
+  backup_create:'took a backup',backup_delete:'deleted a backup',backup_restore:'restored a backup',
+  update_apply:'applied a server update',update_applied:'finished a server update',update_failed:'failed to apply a server update',
+  api_token_create:'created an API token',api_token_revoke:'revoked an API token',support_bundle_create:'created a support bundle',
+  plugin_install:'installed a plugin',plugin_uninstall:'uninstalled a plugin',
+};
+/* What an entry acted on, in words, never empty: an erased account keeps
+   only its token, and a channel the Channels page has loaded reads by name. */
+function auditTarget(e){
+  const t=e.target_type||'',id=e.target_id;
+  if(t==='user'){if(id&&id===e.actor_id)return'themselves';if(!id)return e.subject_token?'an erased account':'a member'}
+  const ch=t==='channel'&&state.channelCache[id];
+  if(ch&&ch.name)return'#'+ch.name;
+  if(!t)return'something';
+  const noun=t.replace(/_/g,' ');
+  return id?noun+' #'+id:t==='server'?'the server':'a '+noun;
+}
+/* One entry as a sentence: actor, action, target. HTML-escaped. */
+function auditSentence(e){
+  const actor=e.actor_name||(e.actor_token?'An erased account':e.actor_id?'user #'+e.actor_id:'The server');
+  const numbered=!!e.target_id&&!(e.target_type==='user'&&e.target_id===e.actor_id);
+  const label=ACTION_LABEL[e.action]||String(e.action||'').replace(/_/g,' ')+(numbered?' {t}':'');
+  const takesTarget=label.endsWith(' {t}');
+  const obj=takesTarget?auditTarget(e):numbered?'#'+e.target_id:'';
+  return'<strong>'+esc(actor)+'</strong> <span class="audit-verb">'+esc(takesTarget?label.slice(0,-4):label)+'</span>'+(obj?' <strong>'+esc(obj)+'</strong>':'');
+}
+/* Sign-in and connection rows, hidden by default behind the audit log's
+   Sign-ins filter. */
+const SIGNIN_ACTIONS=['user_login','ws_connect'];
+/* A status is never colour alone: the icon is aria-hidden and sits next to a
+   word, visible or .sr-only. Unknown keeps its own grey icon and is never
+   drawn as healthy. */
+const STATUS_ICON={ok:['st-ok','circleCheck'],warning:['st-warn','triangleAlert'],critical:['st-crit','circleX'],unknown:['st-pending','circleDashed']};
+function statusIcon(s){const v=STATUS_ICON[s]||STATUS_ICON.unknown;return'<span class="st-ic '+v[0]+'" aria-hidden="true">'+I[v[1]]+'</span>'}
 /* Roles are createable now, so the four seeded ids are a fallback, not the set.
    Anything role-shaped prefers the live list (state.roleList, filled by the
    Roles section and by openEditUser) and only then the seeded map — otherwise a
@@ -328,6 +395,21 @@ function sectionFromHash(){
   const id=(location.hash||'').replace(/^#/,'');
   return NAV.some(n=>n.id===id)?id:'';
 }
+/* UX-12(a): the URL tracks the page. Opening a section writes its #id to the
+   hash, so the address bar names where you are and a copy of it returns there;
+   the browser's back and forward buttons change the hash and fire hashchange,
+   which navigates through the same permission gate a click does. An unknown
+   fragment, or one naming a section the principal may not open, leaves the
+   page as it is and puts the current section's #id back in the address bar. */
+function syncHash(id){const frag='#'+id;if(location.hash!==frag)location.hash=frag}
+function hashSection(){
+  if(!state.me)return;
+  const id=sectionFromHash();
+  if(id&&id!==state.section&&sectionAllowed(id))navigateTo(id);
+  else replaceHash();
+}
+function replaceHash(){if(location.hash!=='#'+state.section)history.replaceState(null,'','#'+state.section)}
+window.addEventListener('hashchange',hashSection);
 
 async function enterApp(){
   state.me=await api('GET','/me');
@@ -335,6 +417,10 @@ async function enterApp(){
   if(deepLink)state.section=deepLink;
   if(!sectionAllowed(state.section))state.section='dashboard';
   showApp();renderTopbar();renderNav();renderContent();refreshBadges();
+  /* Reflect the section actually opened without adding a history entry: a
+     stale or forbidden fragment is replaced by the real one, so the address
+     bar never names a page that is not on screen. */
+  replaceHash();
 }
 
 /* ═══ Nav ═══ */
@@ -488,12 +574,20 @@ document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='visible'&&state.me)refreshBadges(true);
 });
 
+/* Leaving the page — a nav click, a link, or the browser's back and forward
+   buttons — closes an open dialog through dismissModal() and asks before
+   discarding an edited Settings form. Declining stays put. */
+function leaveSection(){
+  if(document.getElementById('modal').classList.contains('visible')&&!dismissModal())return false;
+  return !state.settingsChanged||confirm('Discard your unsaved changes?');
+}
 function navigateTo(id){
   if(!sectionAllowed(id)){showToast('You do not have permission to open that section','error');return}
+  if(!leaveSection()){if(location.hash!=='#'+state.section)history.pushState(null,'','#'+state.section);return}
   try{
     if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}}
-    if(state.section==='settings'&&id!=='settings')state.settingsChanged=false;
-    state.section=id;renderNav();renderContent();closeNav();
+    state.settingsChanged=false;
+    state.section=id;renderNav();renderContent();closeNav();syncHash(id);
   }catch(err){
     console.error('[Admin] Tab navigation failed for "'+id+'":', err);
     var c=document.getElementById('content');
