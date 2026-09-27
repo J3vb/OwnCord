@@ -120,6 +120,31 @@ func TestVoiceReconcile_RemovesOrphanParticipant(t *testing.T) {
 	h.check()
 }
 
+// TestVoiceReconcile_JoinDuringTickIsNotOrphan: a join that commits after the
+// tick's AllStates snapshot and reaches the SFU before the room is listed is
+// absent from the snapshot, but it is a live membership, not an orphan.
+func TestVoiceReconcile_JoinDuringTickIsNotOrphan(t *testing.T) {
+	h := newVMHarness(t, 2)
+	alice, bob := h.members[0], h.members[1]
+	chID := h.chanOf("rt3-join-race")
+	h.connect(alice)
+	h.connect(bob)
+	if !h.join(alice, chID) {
+		t.Fatal("setup join did not complete")
+	}
+
+	joined := false
+	h.sfu.beforeNextList(func() { joined = h.join(bob, chID) })
+	h.reconcile()
+	if !joined {
+		t.Fatal("bob's mid-tick join did not complete")
+	}
+	if !h.sfu.has(RoomName(chID), participantIdentity(bob.userID, rowOfToken(t, h, bob))) {
+		t.Fatal("reconciler removed a participant whose join committed after the snapshot")
+	}
+	h.check()
+}
+
 // TestVoiceReconcile_HealthyMembershipUntouched: a completed membership whose
 // SFU participant is present survives every tick.
 func TestVoiceReconcile_HealthyMembershipUntouched(t *testing.T) {

@@ -61,6 +61,15 @@ type fakeSFU struct {
 	participants map[string]map[string]struct{} // room -> identity set
 	unhandled    []string                       // RPC methods the fake does not implement
 	listFails    bool                           // when set, ListParticipants answers an error
+	onList       func()                         // when set, runs once at the next ListParticipants, before it answers
+}
+
+// beforeNextList runs fn once, inside the next ListParticipants, before the
+// fake reads the room — to interleave a join with a reconcile tick.
+func (f *fakeSFU) beforeNextList(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onList = fn
 }
 
 // setListFailure makes ListParticipants answer an error until cleared, to
@@ -149,7 +158,12 @@ func (f *fakeSFU) handle(w http.ResponseWriter, r *http.Request) {
 		_ = proto.Unmarshal(body, &req)
 		f.mu.Lock()
 		fails := f.listFails
+		hook := f.onList
+		f.onList = nil
 		f.mu.Unlock()
+		if hook != nil {
+			hook()
+		}
 		if fails {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
