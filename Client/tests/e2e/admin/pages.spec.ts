@@ -50,6 +50,11 @@ test("Members: a pending applicant is approved through the Pending tab", async (
   // A decision removes the application from the queue; the page re-renders on
   // the tab it was left on.
   await expect(page.locator(".members-empty")).toContainText("No registrations are waiting");
+
+  // The member list holds active accounts only, so the applicant appearing
+  // there proves the decision admitted them rather than denying them.
+  await page.getByRole("tab", { name: "All" }).click();
+  await expect(page.locator(".members-tbl tbody tr", { hasText: "applicant" })).toBeVisible();
 });
 
 test("Roles: a created role appears on the rank ladder", async ({ page, seededAdminServer }) => {
