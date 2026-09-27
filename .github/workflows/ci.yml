@@ -506,6 +506,15 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      # D6 of the check-reliability pain-points report: the nightly mutation
+      # job's union check drifted because it only ran nightly, so 41 source
+      # files sat in no shard and the whole baseline aborted. It is pure Node
+      # (the shard lists plus a glob over the configured surface), takes
+      # seconds, and belongs on the PR that adds the file rather than in a
+      # nightly report nobody reads until it fails.
+      - name: Mutation shards cover the configured surface
+        run: node scripts/check-mutation-shards.mjs
+
       # Scoped to shipped dependencies. The remaining high findings are all one
       # advisory, brace-expansion <=5.0.7, reaching us only through dev tooling
       # (eslint, @vitest/coverage-v8, stryker). Those are already on their

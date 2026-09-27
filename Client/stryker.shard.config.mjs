@@ -31,7 +31,10 @@ export const shards = {
     "src/features/voice/native/devices.ts",
     "src/features/voice/native/videoRenderer.ts",
     "src/features/voice/native/cameraUplink.ts",
-  ], // 2901 mutants
+    "src/features/voice/native/screenPicker.ts",
+    "src/features/voice/native/screenTrack.ts",
+    "src/features/voice/releaseRoom.ts",
+  ], // 2901 mutants (before the D6 additions)
   "audio-media": [
     "src/lib/audioPipeline.ts",
     "src/lib/audioElements.ts",
@@ -77,26 +80,29 @@ export const shards = {
     "src/lib/call-ring.ts",
     "src/lib/channel-mutes.ts",
     "src/lib/channel-navigation.ts",
+    "src/lib/color-contrast.ts",
     "src/lib/constants.ts",
     "src/lib/context-menu.ts",
     "src/lib/deep-link.ts",
     "src/lib/disposable.ts",
     "src/lib/dom.ts",
+    "src/lib/formatting.ts",
     "src/lib/gifProvider.ts",
     "src/lib/icons.ts",
+    "src/lib/last-channel.ts",
     "src/lib/logger.ts",
     "src/lib/logPersistence.ts",
     "src/lib/mentions.ts",
     "src/lib/message-navigation.ts",
     "src/lib/modalFactory.ts",
     "src/lib/notifications.ts",
-    "src/lib/nsfw-gate.ts",
     "src/lib/os-motion.ts",
     "src/lib/preferences.ts",
     "src/lib/presence.ts",
     "src/lib/profiles.ts",
     "src/lib/protocolTypes.ts",
     "src/lib/read-state.ts",
+    "src/lib/reconcile.ts",
     "src/lib/safe-render.ts",
     "src/lib/store.ts",
     "src/lib/supportBundle.ts",
@@ -104,8 +110,9 @@ export const shards = {
     "src/lib/toast.ts",
     "src/lib/updater.ts",
     "src/lib/userStatus.ts",
+    "src/lib/voiceJoinTrace.ts",
     "src/lib/window-state.ts",
-  ], // 2511 mutants
+  ], // 2511 mutants (before the D6 additions)
   stores: [
     "src/stores/auth.store.ts",
     "src/stores/blocks.store.ts",
@@ -123,6 +130,47 @@ export const shards = {
     "src/features/messaging/messageEdits.ts",
     "src/features/messaging/reactionState.ts",
   ], // 1918 mutants
+  // D6 of the check-reliability pain-points report: the safety, moderation,
+  // message-request, content-consent, navigation and reports feature modules
+  // were never assigned to a shard, so the nightly union check failed and the
+  // mutation baseline never ran. A sixth shard keeps them out of the already
+  // large shards above (the longest measured shard was ~50 min of the 90-min
+  // ceiling), and every list stays explicit so the union check remains exact.
+  "safety-moderation": [
+    "src/features/content-consent/concealed.ts",
+    "src/features/content-consent/external.ts",
+    "src/features/content-consent/externalDialog.ts",
+    "src/features/content-consent/nsfw.ts",
+    "src/features/message-requests/Inbox.ts",
+    "src/features/message-requests/api.ts",
+    "src/features/message-requests/decisions.ts",
+    "src/features/message-requests/store.ts",
+    "src/features/message-requests/sync.ts",
+    "src/features/message-requests/view.ts",
+    "src/features/message-requests/wsHandlers.ts",
+    "src/features/moderation/ActionForms.ts",
+    "src/features/moderation/AppealDetail.ts",
+    "src/features/moderation/AppealQueue.ts",
+    "src/features/moderation/Evidence.ts",
+    "src/features/moderation/History.ts",
+    "src/features/moderation/Queue.ts",
+    "src/features/moderation/Workflow.ts",
+    "src/features/moderation/api.ts",
+    "src/features/moderation/store.ts",
+    "src/features/moderation/view.ts",
+    "src/features/moderation/wsHandlers.ts",
+    "src/features/navigation/contentView.ts",
+    "src/features/navigation/destinations.ts",
+    "src/features/reports/myReports.ts",
+    "src/features/reports/openers.ts",
+    "src/features/reports/reportDialog.ts",
+    "src/features/reports/safetyPane.ts",
+    "src/features/safety/Appeals.ts",
+    "src/features/safety/Notices.ts",
+    "src/features/safety/SafetyTab.ts",
+    "src/features/safety/store.ts",
+    "src/features/safety/wsHandlers.ts",
+  ], // size hint only
 };
 
 const shard = process.env.STRYKER_SHARD;

@@ -143,6 +143,9 @@ const CHECK_CLIENT = [
   step("npm", ["run", "check:admin-types"], "Client"),
   step("npm", ["run", "lint"], "Client"),
   step("npm", ["run", "knip"], "Client"),
+  // D6: the CI job that runs this on every PR (client-check) mirrors ci.yml, so
+  // the nightly mutation union check cannot drift unnoticed.
+  step("node", ["scripts/check-mutation-shards.mjs"], "Client"),
   step("npm", ["run", "test:coverage"], "Client"),
   // B7-7 bundle budgets: scratch --manifest build (dist-budget/, never the
   // shipped dist/) then the gate. Node zlib, not the gzip CLI, so it runs
