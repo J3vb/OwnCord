@@ -15,6 +15,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // setupStatusResponse is the JSON shape returned by GET /api/setup/status.
@@ -330,7 +331,7 @@ func setupRestartAfterResponse(hub HubBroadcaster, opts SetupOptions) {
 		return
 	}
 	if hub != nil {
-		hub.BroadcastServerRestart("setup", restartBroadcastDelaySeconds)
+		hub.BroadcastServerRestart(ws.RestartReasonSetup, restartBroadcastDelaySeconds)
 	}
 	restartFn := opts.Restart
 	if restartFn == nil {

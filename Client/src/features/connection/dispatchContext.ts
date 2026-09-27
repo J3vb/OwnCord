@@ -45,6 +45,8 @@ export interface ReconnectClock {
   hasReceivedReadyBefore: boolean;
   lastReconnectHandshakeAt: number | null;
   serverClockSkewMs: number;
+  /** A server_restart announced a drop that no cancel has withdrawn yet. */
+  restartAnnounced: boolean;
 }
 
 /** The socket surface a handler may use: send and disconnect, never subscribe. */
@@ -86,6 +88,7 @@ export function createReconnectClock(): ReconnectClock {
     // worst a duplicate notification, while a false replay classification
     // silently drops one.
     serverClockSkewMs: 0,
+    restartAnnounced: false,
   };
 }
 

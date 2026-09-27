@@ -160,11 +160,14 @@ for (const media of [false, true]) {
             { timeout: 60_000 },
           )
           .toBe(`v${release.version}`);
-        // ARCH-13 (i): the hub's own teardown notice reached the client, and
-        // (v): the drain ran on a live budget, so no audit row was dropped.
-        expect(notices).toContainEqual(
-          expect.objectContaining({ reason: "shutdown", delay_seconds: 5 }),
-        );
+        // ARCH-13 (i): the hub's own teardown notice reached the client after
+        // the admin's announcement, and names the update rather than a stop
+        // (CLI-02); (v): the drain ran on a live budget, so no audit row was
+        // dropped.
+        expect(notices).toEqual([
+          { reason: "update", delay_seconds: 5 },
+          { reason: "update", delay_seconds: 5 },
+        ]);
         expect(server.log()).not.toContain("audit log dropped");
         expect(server.log()).not.toContain("flush lost audit entries");
         const pids = await release.pids();

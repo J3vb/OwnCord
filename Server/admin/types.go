@@ -2,6 +2,7 @@ package admin
 
 import (
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── Context keys ─────────────────────────────────────────────────────────────
@@ -28,7 +29,7 @@ const (
 
 // HubBroadcaster is the subset of ws.Hub needed by the admin package.
 type HubBroadcaster interface {
-	BroadcastServerRestart(reason string, delaySeconds int)
+	BroadcastServerRestart(reason ws.RestartReason, delaySeconds int)
 	BroadcastChannelCreate(ch *db.Channel)
 	BroadcastChannelUpdate(ch *db.Channel)
 	BroadcastChannelDelete(channelID int64)

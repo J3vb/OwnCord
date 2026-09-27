@@ -21,6 +21,7 @@ import {
   handleAuthError,
   handleAuthOk,
   handleConnectionError,
+  handleRestartDrop,
   handleServerRestart,
 } from "../features/connection/wsHandlers";
 import {
@@ -287,7 +288,8 @@ export function wireDispatcher(
 
   // ── Server Events ─────────────────────────────────────
 
-  unsubs.push(ws.on(S.SERVER_RESTART, handleServerRestart));
+  unsubs.push(ws.on(S.SERVER_RESTART, (payload) => handleServerRestart(clock, payload)));
+  unsubs.push(ws.onStateChange((state) => handleRestartDrop(clock, state)));
 
   // Local transport failures (proxy not open, outbound channel full/closed):
   // fail the matching optimistic row exactly like a server error reply would.

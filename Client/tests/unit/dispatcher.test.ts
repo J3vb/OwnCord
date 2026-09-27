@@ -3400,6 +3400,8 @@ describe("WS Dispatcher", () => {
     expectConsole("warn", /\[dispatcher\] Server restarting/);
     mock.dispatch("server_restart", { reason: "update_aborted", delay_seconds: 0 });
     expectConsole("warn", /\[dispatcher\] Server restarting/);
+    // A later, unrelated drop is not the withdrawn restart.
+    mock.dispatchState("reconnecting");
 
     await vi.runAllTimersAsync();
     expect(mockLeaveVoice).not.toHaveBeenCalled();
@@ -3408,7 +3410,7 @@ describe("WS Dispatcher", () => {
     expect(voice.voiceStatus).toBe("connected");
   });
 
-  it("keeps the session through a shutdown notice but ends the call (Q4)", async () => {
+  it("keeps the session through an announced restart and ends the call when the socket drops (Q4)", async () => {
     vi.mocked(mockLeaveVoice).mockClear();
     authStore.setState((prev) => ({
       ...prev,
@@ -3421,10 +3423,17 @@ describe("WS Dispatcher", () => {
       voiceStatus: "connected",
     }));
 
-    mock.dispatch("server_restart", { reason: "shutdown", delay_seconds: 5 });
+    // The hub's teardown notice names the restart's intent, not "shutdown".
+    mock.dispatch("server_restart", { reason: "update", delay_seconds: 5 });
     expectConsole("warn", /\[dispatcher\] Server restarting/);
+    await vi.runAllTimersAsync();
+    // The notice alone leaves the call: the restart can still be aborted.
+    expect(mockLeaveVoice).not.toHaveBeenCalled();
+    expect(voiceStore.getState().currentChannelId).toBe(42);
 
-    // Still signed in: ws.ts reconnects and resumes once the socket drops.
+    mock.dispatchState("reconnecting");
+
+    // Still signed in: ws.ts reconnects and resumes on its own.
     expect(authStore.getState().isAuthenticated).toBe(true);
     expect(authStore.getState().logoutReason).toBeUndefined();
 
@@ -3436,6 +3445,21 @@ describe("WS Dispatcher", () => {
     const voice = voiceStore.getState();
     expect(voice.currentChannelId).toBeNull();
     expect(voice.voiceStatus).toBe("idle");
+  });
+
+  it("keeps the call through an ordinary socket drop with no restart announced", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 42,
+      voiceStatus: "connected",
+    }));
+
+    mock.dispatchState("reconnecting");
+    await vi.runAllTimersAsync();
+
+    expect(mockLeaveVoice).not.toHaveBeenCalled();
+    expect(voiceStore.getState().currentChannelId).toBe(42);
   });
 
   it("wires error BANNED to clear auth and show error", () => {

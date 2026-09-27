@@ -20,11 +20,13 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/updater"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 const (
@@ -127,6 +129,24 @@ func (rc *RestartCoordinator) Requested() (reason string, ok bool) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 	return rc.reason, rc.requested
+}
+
+// noticeReason is what the hub's restart notice tells clients: the intent of
+// a requested restart, or a plain shutdown when the stop came from outside
+// the server (a signal, a supervisor). The admin handoff's reasons lead with
+// that intent ("update", "setup_wizard", "backup_restore_close_failed"), so
+// the prefix is the mapping.
+func (rc *RestartCoordinator) noticeReason() ws.RestartReason {
+	reason, ok := rc.Requested()
+	if !ok {
+		return ws.RestartReasonShutdown
+	}
+	for _, intent := range []ws.RestartReason{ws.RestartReasonUpdate, ws.RestartReasonSetup, ws.RestartReasonBackupRestore} {
+		if strings.HasPrefix(reason, string(intent)) {
+			return intent
+		}
+	}
+	return ws.RestartReasonShutdown
 }
 
 // Disarm stops the backstop timer. main() calls it the moment Run returns:
