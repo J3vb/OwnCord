@@ -59,16 +59,18 @@ sequenceDiagram
     CS->>CH: setActiveChannel(id)  %% selecting; badge cleared on mount, not here
     CH-->>CC: activeChannelId change
     CC->>CC: mountChannel(id, type) — MessageList + Typing + Composer
-    CC->>CH: clearUnread(id) + rememberLastChannel(id)
+    CC->>CH: clearUnread(id) + rememberLastChannel(id)  %% not recorded for a DM
     CC->>SRV: channel_focus{channel_id}  %% server read-state
 ```
 
 > **✓ UX-8 (2026-09).** A launch restores the last channel viewed for that
 > server (`lib/last-channel.ts`, host-scoped like `channel-mutes.ts`) instead of
 > always jumping to the first text channel, and the ready-time auto-select no
-> longer zeroes a badge the user never looked at: `setActiveChannel(id, {
-clearUnread: false })` selects, and `mountChannel` — the channel actually on
-> screen — records the last channel and clears its badge.
+> longer zeroes a badge the user never looked at: the restore selects with
+> `clearUnread: false`, and `mountChannel` — the channel actually on screen —
+> clears its badge and records it as the last channel. A DM mount clears its
+> badge but is not recorded, because the restore only matches server channels
+> from `ready` (DMs arrive in `dm_channels`).
 
 **Target rules:**
 
