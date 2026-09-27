@@ -23,15 +23,32 @@ import (
 // loggerReceiver reports whether a `.Warn`/`.Error` call's receiver is a
 // structured logger rather than an unrelated Error method (http.Error, an
 // error wrapper, an errgroup). It mirrors the derivation of
-// support_event_codes.go.
+// support_event_codes.go. A chained receiver (slog.With(...), slog.Default(),
+// h.log.With(...)) resolves through the call to the logger it derives from.
 func loggerReceiver(e ast.Expr) bool {
 	switch v := e.(type) {
 	case *ast.Ident:
 		return v.Name == "slog" || strings.Contains(strings.ToLower(v.Name), "log")
 	case *ast.SelectorExpr:
 		return strings.Contains(strings.ToLower(v.Sel.Name), "log")
+	case *ast.CallExpr:
+		if f, ok := v.Fun.(*ast.SelectorExpr); ok {
+			return loggerReceiver(f.X) || loggerReceiver(f.Sel)
+		}
+		return loggerReceiver(v.Fun)
 	}
 	return false
+}
+
+// typeName returns the named type an expression spells (T or *T), or "".
+func typeName(e ast.Expr) string {
+	switch v := e.(type) {
+	case *ast.Ident:
+		return v.Name
+	case *ast.StarExpr:
+		return typeName(v.X)
+	}
+	return ""
 }
 
 // constPrefix folds the leading constant part of a string expression — string
@@ -104,14 +121,16 @@ type uncodedMessage struct {
 // log_event:
 //   - a constant message needs an exact supportEventCodes entry;
 //   - a struct-field message (step.failLog) needs an entry for every constant
-//     the field is set to in the package, and at least one such constant;
+//     the field is set to in the package — by keyed or positional composite
+//     literal or by assignment — and at least one such constant; a field ever
+//     set from a non-constant is reported;
 //   - any other message needs a constant prefix that a supportEventPrefixCodes
 //     entry matches — one with no constant prefix is always reported.
 func uncodedLogMessages(fset *token.FileSet, pkgs map[string][]*ast.File) []uncodedMessage {
 	var out []uncodedMessage
 	for _, files := range pkgs {
 		consts := map[string]string{}
-		fields := map[string][]string{}
+		structs := map[string][]string{}
 		for _, f := range files {
 			ast.Inspect(f, func(n ast.Node) bool {
 				switch v := n.(type) {
@@ -129,10 +148,68 @@ func uncodedLogMessages(fset *token.FileSet, pkgs map[string][]*ast.File) []unco
 							}
 						}
 					}
-				case *ast.KeyValueExpr:
-					if key, ok := v.Key.(*ast.Ident); ok {
-						if s, full := constPrefix(v.Value, consts); full {
-							fields[key.Name] = append(fields[key.Name], s)
+				case *ast.TypeSpec:
+					if st, ok := v.Type.(*ast.StructType); ok {
+						var names []string
+						for _, field := range st.Fields.List {
+							if len(field.Names) == 0 {
+								names = append(names, "")
+							}
+							for _, name := range field.Names {
+								names = append(names, name.Name)
+							}
+						}
+						structs[v.Name.Name] = names
+					}
+				}
+				return true
+			})
+		}
+		fields := map[string][]string{}
+		unresolved := map[string]bool{}
+		record := func(field string, value ast.Expr) {
+			if s, full := constPrefix(value, consts); full {
+				fields[field] = append(fields[field], s)
+			} else {
+				unresolved[field] = true
+			}
+		}
+		elided := map[*ast.CompositeLit]string{}
+		for _, f := range files {
+			ast.Inspect(f, func(n ast.Node) bool {
+				switch v := n.(type) {
+				case *ast.CompositeLit:
+					typ := elided[v]
+					if v.Type != nil {
+						typ = typeName(v.Type)
+					}
+					var elem string
+					switch t := v.Type.(type) {
+					case *ast.ArrayType:
+						elem = typeName(t.Elt)
+					case *ast.MapType:
+						elem = typeName(t.Value)
+					}
+					for i, e := range v.Elts {
+						kv, keyed := e.(*ast.KeyValueExpr)
+						if keyed {
+							e = kv.Value
+							if key, ok := kv.Key.(*ast.Ident); ok {
+								record(key.Name, kv.Value)
+							}
+						} else if names := structs[typ]; i < len(names) && names[i] != "" {
+							record(names[i], e)
+						}
+						if cl, ok := e.(*ast.CompositeLit); ok && cl.Type == nil && elem != "" {
+							elided[cl] = elem
+						}
+					}
+				case *ast.AssignStmt:
+					if len(v.Lhs) == len(v.Rhs) {
+						for i, lhs := range v.Lhs {
+							if sel, ok := lhs.(*ast.SelectorExpr); ok {
+								record(sel.Sel.Name, v.Rhs[i])
+							}
 						}
 					}
 				}
@@ -158,7 +235,7 @@ func uncodedLogMessages(fset *token.FileSet, pkgs map[string][]*ast.File) []unco
 					}
 				case isField:
 					values := fields[sel.Sel.Name]
-					if len(values) == 0 {
+					if len(values) == 0 || unresolved[sel.Sel.Name] {
 						out = append(out, uncodedMessage{pos, types.ExprString(msg)})
 					}
 					for _, v := range values {
@@ -228,21 +305,40 @@ func TestUncodedLogMessages_ReportsEveryUncodedForm(t *testing.T) {
 
 import "log/slog"
 
-type step struct{ failLog string }
+type step struct {
+	job     string
+	failLog string
+}
+
+type toggle struct{ updateLog string }
+
+type reason struct{ warnLog string }
+
+type hub struct{ log *slog.Logger }
 
 const companionPrefix = "livekit: "
 
-func f(kind, line string, s step) {
+func f(kind, line string, s step, t toggle, r reason, h hub) {
 	slog.Warn("upload rejected")
 	slog.Warn("a brand new failure")
 	slog.Warn("hub: broadcast channel full, dropping " + kind)
 	slog.Warn("a new prefix " + kind)
 	slog.Warn(kind + " rejected")
 	slog.Error(s.failLog)
+	slog.Error(t.updateLog)
+	slog.Warn(r.warnLog)
 	slog.Log(nil, slog.LevelWarn, companionPrefix+line)
 	slog.Log(nil, slog.LevelInfo, line)
+	slog.With("k", kind).Warn("a chained failure")
+	slog.Default().Error("a default-logger failure")
+	h.log.With("k", kind).Warn("upload rejected")
 	_ = step{failLog: "storage recount failed"}
 	_ = step{failLog: "a new step failure"}
+	_ = []step{{"Job", "a positional failure"}}
+	_ = toggle{updateLog: "ws handleVoiceMuteV2 UpdateVoiceMute"}
+	_ = toggle{updateLog: "x " + kind}
+	r.warnLog = "upload rejected"
+	r.warnLog = kind
 }
 `
 	fset := token.NewFileSet()
@@ -255,7 +351,10 @@ func f(kind, line string, s step) {
 		got = append(got, u.msg)
 	}
 	slices.Sort(got)
-	want := []string{`"a new prefix " + kind`, "a brand new failure", "a new step failure", `kind + " rejected"`}
+	want := []string{
+		`"a new prefix " + kind`, "a brand new failure", "a new step failure", `kind + " rejected"`,
+		"a positional failure", "t.updateLog", "r.warnLog", "a chained failure", "a default-logger failure",
+	}
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
 		t.Fatalf("uncoded messages = %q, want %q", got, want)
