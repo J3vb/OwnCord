@@ -138,6 +138,11 @@ export class AudioPipeline {
     if (this.room === null) return;
     const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
     if (micPub?.track === undefined) return;
+    // OC-0474: the pipeline only exists when unmuted. Muting stops the capture
+    // track, so building here (a device switch, a permission retry, a
+    // reconnect while muted) would run a context and VAD over an ended track
+    // until the next unmute, which rebuilds it on the fresh track anyway.
+    if (micPub.track.isMuted) return;
 
     try {
       // Source from the NS processor's output when one is attached, not the

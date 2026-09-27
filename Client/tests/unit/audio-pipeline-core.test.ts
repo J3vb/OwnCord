@@ -320,6 +320,19 @@ describe("AudioPipeline", () => {
       expect(mockGainNode.connect).toHaveBeenCalledWith(mockDestNode);
     });
 
+    it("OC-0474: builds nothing while the mic track is muted", () => {
+      // Muting stops the capture track (stopMicTrackOnMute); a pipeline built
+      // now would run an AudioContext and VAD over the ended track and move
+      // the muted sender onto a live track until the next unmute rebuilds it.
+      mockRoom.localParticipant.getTrackPublication().track.isMuted = true;
+      pipeline.setRoom(mockRoom);
+      pipeline.setupAudioPipeline();
+
+      expect(pipeline.isActive).toBe(false);
+      expect(AudioContext).not.toHaveBeenCalled();
+      expect(mockSender.replaceTrack).not.toHaveBeenCalledWith({ id: "adjusted-track" });
+    });
+
     it("replaces WebRTC sender track with pipeline output", () => {
       pipeline.setRoom(mockRoom);
       pipeline.setupAudioPipeline();
