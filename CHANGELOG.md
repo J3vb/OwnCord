@@ -63,6 +63,10 @@ and only when it changes something a contributor or fork holder must do
   download stopped without an error. The server now keeps a transfer alive
   while it is making progress and gives up on one that has stalled; any
   single transfer is still closed after 10 minutes.
+- **Removing an attachment that is still uploading now cancels it.** The ×
+  only hid the preview while the upload kept running, and Send stayed blocked
+  until it finished or failed. The upload is now stopped, Send is available at
+  once, and no error is shown for it.
 
 ### Voice
 

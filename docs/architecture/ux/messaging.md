@@ -54,14 +54,14 @@ stateDiagram-v2
     SlowMode --> Enabled: cooldown elapsed
 ```
 
-| Composer state                                 | Presentation                                                                                                                | Reason shown                                         |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `enabled`                                      | Editable textarea, attach + pickers active                                                                                  | —                                                    |
-| `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar                                                                                         | "Only moderators can post in announcement channels." |
-| `no-permission`                                | Disabled bar                                                                                                                | "You don't have permission to send messages here."   |
-| `offline`                                      | Disabled — "Reconnecting…" while retrying, "Not connected" when disconnected                                                | connection status (README §3)                        |
-| `slow-mode`                                    | Disabled with a live countdown                                                                                              | "Slow mode: wait Ns."                                |
-| `uploading`                                    | Send disabled until uploads settle (already the `pendingUploadCount` guard in `handleSend()`, `components/MessageInput.ts`) | per-attachment spinner                               |
+| Composer state                                 | Presentation                                                                                                                               | Reason shown                                         |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
+| `enabled`                                      | Editable textarea, attach + pickers active                                                                                                 | —                                                    |
+| `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar                                                                                                        | "Only moderators can post in announcement channels." |
+| `no-permission`                                | Disabled bar                                                                                                                               | "You don't have permission to send messages here."   |
+| `offline`                                      | Disabled — "Reconnecting…" while retrying, "Not connected" when disconnected                                                               | connection status (README §3)                        |
+| `slow-mode`                                    | Disabled with a live countdown                                                                                                             | "Slow mode: wait Ns."                                |
+| `uploading`                                    | Send disabled until uploads settle or are removed (already the `pendingUploadCount` guard in `handleSend()`, `components/MessageInput.ts`) | per-attachment spinner                               |
 
 > **✓ Implemented (2026-07).** The server sends an authoritative per-channel
 > `can_send` in the ready payload (`ws/serve.go` `channelCanSend`, mirroring
@@ -187,13 +187,13 @@ Usernames are inserted as text nodes — never markup.
 The composer supports file attach with client-side validation and per-item
 upload state (already thorough — `MessageInput.ts`).
 
-| State      | Presentation                                                                                                                                                                 |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| selected   | Thumbnail/chip per file                                                                                                                                                      |
-| validating | Reject oversize/disallowed type inline via `showUploadError` (the `MAX_FILE_SIZE`/`ALLOWED_TYPES` validation in `handlePasteFile()`, `components/MessageInput.ts`)           |
-| uploading  | Per-item spinner; **send disabled** until all settle (the per-item uploading preview in `handlePasteFile()` + the `handleSend()` upload guard, `components/MessageInput.ts`) |
-| uploaded   | Chip ready; ids attached to the `chat_send` payload                                                                                                                          |
-| failed     | Inline error on the chip with remove/retry                                                                                                                                   |
+| State      | Presentation                                                                                                                                                                                                                                                                             |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| selected   | Thumbnail/chip per file                                                                                                                                                                                                                                                                  |
+| validating | Reject oversize/disallowed type inline via `showUploadError` (the `MAX_FILE_SIZE`/`ALLOWED_TYPES` validation in `handlePasteFile()`, `components/MessageInput.ts`)                                                                                                                       |
+| uploading  | Per-item indeterminate spinner; **send disabled** until all settle (the per-item uploading preview in `handlePasteFile()` + the `handleSend()` upload guard, `components/MessageInput.ts`). Removing the chip (×) aborts its `POST /uploads` and frees Send at once, with no error shown |
+| uploaded   | Chip ready; ids attached to the `chat_send` payload                                                                                                                                                                                                                                      |
+| failed     | Inline error on the chip with remove/retry                                                                                                                                                                                                                                               |
 
 Upload goes through `POST /uploads` (multipart). **✓ Implemented (2026-07):**
 `uploadFile` now honors the global 401 handler like every other call — a 401
