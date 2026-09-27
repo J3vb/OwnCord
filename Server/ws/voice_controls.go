@@ -239,13 +239,13 @@ func enableVideoSlot(
 		// nil) for a channel that no longer exists (e.g. deleted while the
 		// user was still in its voice room), so that outcome must refuse
 		// exactly like the error case above, not skip the cap check.
-		slog.Error(logPrefix+" GetChannel", "err", chErr, "channel_id", voiceChID)
+		slog.Error("ws enableVideoSlot GetChannel", "handler", logPrefix, "err", chErr, "channel_id", voiceChID)
 		return &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check video limit"}}
 	}
 	if ch.VoiceMaxVideo > 0 {
 		ok, limitErr := tryReserve(ctx, userID, voiceChID, ch.VoiceMaxVideo)
 		if limitErr != nil {
-			slog.Error(logPrefix+" EnableIfUnderLimit", "err", limitErr, "channel_id", voiceChID)
+			slog.Error("ws enableVideoSlot EnableIfUnderLimit", "handler", logPrefix, "err", limitErr, "channel_id", voiceChID)
 			return &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check video limit"}}
 		}
 		if !ok {
@@ -257,7 +257,7 @@ func enableVideoSlot(
 		return nil
 	}
 	if err := unconditionalSet(ctx, userID, true); err != nil {
-		slog.Error("ws "+logPrefix+" "+kind+" unconditional enable", "err", err, "user_id", userID)
+		slog.Error("ws enableVideoSlot unconditional enable", "handler", logPrefix, "kind", kind, "err", err, "user_id", userID)
 		return &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update " + kind + " state"}}
 	}
 	return nil

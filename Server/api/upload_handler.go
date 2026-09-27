@@ -141,16 +141,16 @@ func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
 		return
 	}
 	if errors.Is(saveErr, service.ErrLowDisk) {
-		slog.Warn(what+" refused: server storage below its reserved headroom", "error", saveErr)
+		slog.Warn("upload refused: server storage below its reserved headroom", "upload", what, "error", saveErr)
 		writeErr(w, http.StatusInsufficientStorage, "STORAGE_LOW_DISK", "upload rejected: the server is low on disk space")
 		return
 	}
 	if errors.Is(saveErr, storage.ErrIO) {
-		slog.Error(what+" failed: server storage error", "error", saveErr)
+		slog.Error("upload failed: server storage error", "upload", what, "error", saveErr)
 		writeErr(w, http.StatusInsufficientStorage, "STORAGE_ERROR", "upload failed: server storage error")
 		return
 	}
-	slog.Warn(what+" rejected", "error", saveErr)
+	slog.Warn("upload rejected", "upload", what, "error", saveErr)
 	writeErr(w, http.StatusBadRequest, "BAD_REQUEST", safeStorageErrorMessage(saveErr))
 }
 

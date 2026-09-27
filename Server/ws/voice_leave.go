@@ -149,8 +149,8 @@ func (h *Hub) removeLiveKitParticipantAsync(ctx context.Context, channelID, user
 		default:
 		}
 		if err := h.livekit.RemoveParticipant(lkCtx, channelID, userID, joinToken); err != nil {
-			slog.Warn(caller+" RemoveParticipant failed (may already be gone)",
-				"err", err, "user_id", userID, "channel_id", channelID)
+			slog.Warn("RemoveParticipant failed (may already be gone)",
+				"caller", caller, "err", err, "user_id", userID, "channel_id", channelID)
 		}
 	}()
 }

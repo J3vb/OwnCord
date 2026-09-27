@@ -137,6 +137,18 @@ func supportEvents(rb *RingBuffer) []supportEvent {
 	return out
 }
 
+// supportEventPrefixCodes maps the constant prefix of a Warn/Error message
+// built with a variable suffix to its code. supportEventCode tries an exact
+// match first, then the longest matching prefix here, so these dynamic messages
+// are coded without depending on their runtime suffix.
+var supportEventPrefixCodes = map[string]string{
+	"DeleteOtherSessions after ":             "deleteothersessions_after",
+	"DeleteOtherSessions retry after ":       "deleteothersessions_retry_after",
+	"auto-generated ":                        "key_auto_generated",
+	"hub: broadcast channel full, dropping ": "broadcast_dropped",
+	"livekit: ":                              "livekit_companion_log",
+}
+
 func supportEventCode(message string) string {
 	if code, ok := supportEventCodes[message]; ok {
 		return code
