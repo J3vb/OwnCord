@@ -242,9 +242,9 @@ describe("RoomLifecycle on the Linux native backend", () => {
     expect(nativeRoom.applyScreenshareVolumes).toHaveBeenCalledTimes(1);
     expect(vi.mocked(WebRoom).mock.calls.length).toBe(webRoomsBefore);
     expect(workers).toHaveLength(0);
-    // The same eight handlers the web room gets (RoomEvent is stubbed empty
+    // The same eleven handlers the web room gets (RoomEvent is stubbed empty
     // here, so count the registrations rather than name them).
-    expect(nativeRoom.on).toHaveBeenCalledTimes(8);
+    expect(nativeRoom.on).toHaveBeenCalledTimes(11);
     expect(attach).toHaveBeenCalledWith(nativeRoom);
     vi.doUnmock("./native/platform");
     vi.doUnmock("./native/nativeRoom");

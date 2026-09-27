@@ -17,6 +17,10 @@
  * Built on `createModal`, so it carries the shared dialog contract (role,
  * modal, focus trap, Escape, focus restore). All copy lives in the `voice`
  * catalog.
+ *
+ * Registered from the UI side (`MainPage` -> `screenPickerSlot.ts`) and loaded
+ * on demand; the native picker adapter is a lower layer and may not import
+ * this component directly (ARCH-06).
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";

@@ -116,8 +116,11 @@ type Hub struct {
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
 	// goroutines (startSweep): a tick that arrives while the previous sweep
 	// is still running is skipped rather than stacked.
-	sessionSweepInFlight atomic.Bool
-	voiceSweepInFlight   atomic.Bool
+	sessionSweepInFlight   atomic.Bool
+	voiceSweepInFlight     atomic.Bool
+	voiceReconcileInFlight atomic.Bool
+
+	voiceReconcile voiceReconcileState // RT-3 (voice_reconcile.go)
 
 	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
 	reconnectTierBuf  atomic.Uint64
@@ -259,14 +262,9 @@ func (h *Hub) Run() {
 					hardware := stackutil.Recovered(r)
 					breaker := panicCount >= 3
 					if hardware || breaker {
-						// The hub's state after a hardware fault, or after
-						// three panics in a minute, is unknown, and a stopped
-						// dispatch loop is invisible from the outside:
-						// registerNow keeps admitting clients that can never
-						// receive a broadcast. Exit and let the process
-						// supervisor restart us (fatalFn is os.Exit(1) in
-						// production; tests substitute a no-op and rely on
-						// the Stop below).
+						// State is unknown, and a dead loop is invisible from
+						// outside, so exit for a supervisor restart (see
+						// fatalFn; tests substitute a no-op and rely on Stop).
 						slog.Error("hub: stopping and exiting for supervisor restart",
 							"hardware_fault", hardware, "panic_count", panicCount)
 						h.Stop()
@@ -303,6 +301,8 @@ func (h *Hub) Run() {
 					h.startSweep(&h.sessionSweepInFlight, h.sweepRevokedSessions)
 				case <-voiceSweepTicker.C:
 					h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
+					// RT-3 has its own guard: a slow ListParticipants never suppresses the ghost sweep.
+					h.startSweep(&h.voiceReconcileInFlight, h.reconcileVoiceMembership)
 				}
 			}
 		}()
