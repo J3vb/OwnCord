@@ -367,7 +367,7 @@ jobs:
 
       - name: Go vulnerability check
         if: env.RUN_SERVER != 'false'
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 && govulncheck ./...
 
       # Generated sqlc output must never drift from db/queries/. One leg of
       # the matrix is enough; make is not guaranteed on the Windows runner.
