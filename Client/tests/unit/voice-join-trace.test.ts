@@ -180,6 +180,18 @@ describe("voice join attempt", () => {
     expect(newestJoin()?.timings.remoteTrackMs).toBe(120);
   });
 
+  it("leaves a track mark long after the attempt finished off the join", () => {
+    const id = beginJoinAttempt(9);
+    at(20);
+    finishJoinAttempt(id);
+    // A first PTT press or a peer joining minutes later is not part of the join.
+    at(300_000);
+    markLocalTrackPublished();
+    markFirstRemoteTrackSubscribed();
+
+    expect(newestJoin()?.timings).toMatchObject({ localTrackMs: null, remoteTrackMs: null });
+  });
+
   it("drops an abandoned attempt without recording it", () => {
     const id = beginJoinAttempt(4);
     const before = voiceJoinSnapshot().lastJoins.length;

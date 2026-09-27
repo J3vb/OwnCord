@@ -84,11 +84,16 @@ interface SelfTest {
 
 /** Most recent attempts kept for the diagnostics bundle. */
 const MAX_LAST_JOINS = 5;
+/** How long after a join is recorded a late track mark still belongs to it.
+ *  Past this, a publish or subscription (a PTT press, a peer joining later, a
+ *  reconnect) is not part of the join. */
+const LATE_MARK_GRACE_MS = 5_000;
 
 let active: ActiveAttempt | null = null;
 /** The most recently recorded attempt, still referenced by the ring, so a
  *  track mark the SDK delivers just after connect returns lands on it. */
 let mostRecent: InternalAttempt | null = null;
+let mostRecentAt = 0;
 let nextId = 1;
 const lastJoins: InternalAttempt[] = [];
 let decryptErrorCount = 0;
@@ -134,6 +139,15 @@ function pushAttempt(attempt: InternalAttempt): void {
   lastJoins.unshift(attempt);
   if (lastJoins.length > MAX_LAST_JOINS) lastJoins.length = MAX_LAST_JOINS;
   mostRecent = attempt;
+  mostRecentAt = Date.now();
+}
+
+/** The just-finished successful join a late track mark lands on, if the mark
+ *  is still inside the grace window. */
+function lateMarkTarget(): InternalAttempt | null {
+  const r = mostRecent;
+  if (r === null || !r.succeeded || Date.now() - mostRecentAt > LATE_MARK_GRACE_MS) return null;
+  return r;
 }
 
 /** Classify a resolved LiveKit URL for the timeline. A loopback result equal to
@@ -223,7 +237,8 @@ export function markJoinMilestone(milestone: string): void {
 
 /** Join-relative ms at the first local track publication. First mark wins.
  *  Falls back to the most recently recorded attempt when the SDK delivers the
- *  publication just after connect returned (the attempt is already recorded). */
+ *  publication just after connect returned (the attempt is already recorded),
+ *  within LATE_MARK_GRACE_MS of it. */
 export function markLocalTrackPublished(): void {
   const a = active;
   if (a !== null) {
@@ -233,8 +248,8 @@ export function markLocalTrackPublished(): void {
     }
     return;
   }
-  const r = mostRecent;
-  if (r !== null && r.succeeded && r.timings.localTrackMs === null) {
+  const r = lateMarkTarget();
+  if (r !== null && r.timings.localTrackMs === null) {
     r.timings.localTrackMs = Date.now() - r.startedAt;
     log.info("voice join milestone: local track published", { ms: r.timings.localTrackMs });
   }
@@ -253,8 +268,8 @@ export function markFirstRemoteTrackSubscribed(): void {
     }
     return;
   }
-  const r = mostRecent;
-  if (r !== null && r.succeeded && r.timings.remoteTrackMs === null) {
+  const r = lateMarkTarget();
+  if (r !== null && r.timings.remoteTrackMs === null) {
     r.timings.remoteTrackMs = Date.now() - r.startedAt;
     log.info("voice join milestone: first remote track subscribed", {
       ms: r.timings.remoteTrackMs,
