@@ -723,6 +723,41 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
+    it("refuses to retry a recovered draft whose id predates the restore floor (OC-0476)", async () => {
+      const owner = { host: "chat.example", userId: 1 };
+      const user = { id: 1, username: "tester", avatar: null };
+      const floor = Date.now() + 5 * 60 * 1000 + 1000;
+      activatePendingMessages(owner, user, true, floor);
+      // A pre-floor id was persisted before the restore; save it directly so
+      // the recovered path exposes it (a live send would mint a post-floor id).
+      const beforeFloorId = `${Date.now()}:${crypto.randomUUID()}`;
+      await savePendingText(owner, {
+        clientMessageId: beforeFloorId,
+        channelId: 42,
+        content: "queued before the restore",
+        createdAt: Number(beforeFloorId.split(":", 1)[0]!),
+      });
+
+      const opts = makeOpts();
+      Object.assign(opts.api, { getConfig: () => ({ host: owner.host, token: "token" }) });
+      let next = 0;
+      vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      vi.clearAllMocks();
+
+      capturedMessageListOpts.onRetry(`recovered:${beforeFloorId}`);
+
+      // Retry is refused: no resend, and the user is told why.
+      expect(
+        vi.mocked(opts.ws.send).mock.calls.filter(([frame]) => frame.type === "chat_send"),
+      ).toHaveLength(0);
+      expect(opts.showToast).toHaveBeenCalledWith(expect.stringContaining("restored"), "error");
+      // The row's text is kept (not discarded) for copy/discard.
+      expect(mockRemoveOptimistic).not.toHaveBeenCalled();
+      ctrl.destroyChannel();
+    });
+
     it("cannot retry a saved logical identity after a server capability downgrade", async () => {
       const owner = { host: "chat.example", userId: 1 };
       const user = { id: 1, username: "tester", avatar: null };

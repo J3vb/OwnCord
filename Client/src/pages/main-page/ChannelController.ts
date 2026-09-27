@@ -50,6 +50,7 @@ import { formatUntil, safetyText } from "../../i18n/safety";
 import { markChannelRead } from "@lib/read-state";
 import {
   newClientMessageId,
+  pendingMessageBeforeRestore,
   pendingMessageExpired,
   pendingMessageRetryFloor,
   recoveredPendingText,
@@ -561,6 +562,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         pendingMessageExpired(draft.clientMessageId, Date.now(), pendingMessageRetryFloor(owner))
       ) {
         showToast(messagingText("toast.retryExpired"), "error");
+        return;
+      }
+      // OC-0476: an id that predates the server's restore floor can never be
+      // accepted — the server already refuses it as BAD_REQUEST. Refuse the
+      // resend here with the server's reason and keep the row's text for copy
+      // or discard, instead of a Retry that is a dead end.
+      if (
+        draft.clientMessageId &&
+        pendingMessageBeforeRestore(draft.clientMessageId, pendingMessageRetryFloor(owner))
+      ) {
+        showToast(messagingText("send.beforeRestore"), "error");
         return;
       }
       if (draft.clientMessageId && !supportsMessageDeduplication(owner)) {

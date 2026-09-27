@@ -51,6 +51,19 @@ export function pendingMessageExpired(
   );
 }
 
+/**
+ * Whether a keyed id predates the server's restore floor. The server refuses
+ * such a send with BAD_REQUEST ("review the pending message before sending it
+ * again") because a backup restore may have committed a message under this id
+ * that the client never saw. The draft is still recovered and its text kept
+ * for copy/discard; this only makes Retry refuse rather than resend a doomed
+ * id, matching docs/protocol.md's "retain expired text" contract (OC-0476).
+ */
+export function pendingMessageBeforeRestore(clientMessageId: string, floor = 0): boolean {
+  if (floor <= 0 || !ID_PATTERN.test(clientMessageId)) return false;
+  return Number(clientMessageId.split(":", 1)[0]) < floor;
+}
+
 /** Serialization never evicts a newer unsent draft to make room for another. */
 function decode(value: string | null, now: number, floor: number): PendingTextMessage[] {
   if (value === null) return [];
