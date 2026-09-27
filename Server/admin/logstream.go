@@ -118,10 +118,12 @@ type LogEntry struct {
 // ws.EventRingBuffer: overwriting the oldest entry is a single slot store,
 // not a fresh capacity-sized allocation + copy per write.
 type RingBuffer struct {
-	mu          syncutil.Mutex
-	entries     []LogEntry // fixed backing array, len == capacity
-	pos         int        // next write position
-	count       int        // entries stored (up to len(entries))
+	mu  syncutil.Mutex
+	all logRing
+	// warn holds the last supportEventsMax WARN-and-above entries, so an
+	// INFO/DEBUG burst longer than all cannot evict a failure from the
+	// support bundle (SRE-03).
+	warn        logRing
 	subscribers map[*chan LogEntry]struct{}
 	streamsEnd  chan struct{} // closed by EndStreams
 	endOnce     sync.Once
@@ -130,7 +132,8 @@ type RingBuffer struct {
 // NewRingBuffer creates a ring buffer with the given capacity (must be > 0).
 func NewRingBuffer(capacity int) *RingBuffer {
 	return &RingBuffer{
-		entries:     make([]LogEntry, capacity),
+		all:         logRing{entries: make([]LogEntry, capacity)},
+		warn:        logRing{entries: make([]LogEntry, supportEventsMax)},
 		subscribers: make(map[*chan LogEntry]struct{}),
 		streamsEnd:  make(chan struct{}),
 	}
@@ -151,10 +154,9 @@ func (rb *RingBuffer) Write(entry LogEntry) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 
-	rb.entries[rb.pos] = entry
-	rb.pos = (rb.pos + 1) % len(rb.entries)
-	if rb.count < len(rb.entries) {
-		rb.count++
+	rb.all.push(entry)
+	if isWarnLevel(entry.Level) {
+		rb.warn.push(entry)
 	}
 
 	for chp := range rb.subscribers {
@@ -177,16 +179,32 @@ func (rb *RingBuffer) Snapshot() []LogEntry {
 // rb.mu (SnapshotAndSubscribe needs the copy and the subscription to happen
 // under the same critical section).
 func (rb *RingBuffer) snapshotLocked() []LogEntry {
-	out := make([]LogEntry, rb.count)
-	if rb.count < len(rb.entries) {
-		// Not yet wrapped: entries [0, count) are already in order.
-		copy(out, rb.entries[:rb.count])
-		return out
+	return rb.all.snapshot()
+}
+
+// supportSnapshot returns every entry, oldest first, preceded by any of the
+// last supportEventsMax WARN-and-above entries the general ring has already
+// evicted. The warn ring's newest entries are the WARN+ entries still in the
+// general ring, so only its older surplus is prepended.
+func (rb *RingBuffer) supportSnapshot() []LogEntry {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	all, warn := rb.all.snapshot(), rb.warn.snapshot()
+	retained := 0
+	for _, entry := range all {
+		if isWarnLevel(entry.Level) {
+			retained++
+		}
 	}
-	// Wrapped: oldest entry sits at pos.
-	n := copy(out, rb.entries[rb.pos:])
-	copy(out[n:], rb.entries[:rb.pos])
-	return out
+	if evicted := len(warn) - retained; evicted > 0 {
+		return append(warn[:evicted:evicted], all...)
+	}
+	return all
+}
+
+// isWarnLevel reports whether a LogEntry level is WARN or above.
+func isWarnLevel(level string) bool {
+	return level == "WARN" || level == "ERROR"
 }
 
 // Subscribe creates a buffered channel for a new SSE client.
