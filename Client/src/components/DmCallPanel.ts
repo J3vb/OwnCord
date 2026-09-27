@@ -133,6 +133,8 @@ export interface DmCallPanelComponent extends MountableComponent {
   readonly setOutgoing: (state: OutgoingCallState | null) => void;
   /** Whether the panel is showing the ring for this channel right now. */
   readonly showsRingFor: (channelId: number) => boolean;
+  /** A stream is in focus view: the panel takes the whole chat column. */
+  readonly setVideoFocus: (focused: boolean) => void;
   /** True while this panel shows the call in this voice channel. */
   readonly ownsCall: (channelId: number) => boolean;
   /** Where the call's video grid goes, or null while it cannot show one. */
@@ -237,6 +239,8 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   let structureKey = "";
   /** Any camera or screen share is on in the call (VideoModeController). */
   let videoActive = false;
+  /** A stream is in the grid's focus view (VideoGrid.onFocusChange). */
+  let videoFocus = false;
   /** The avatar tiles handed to the grid on the last rebuild. */
   let people: GridPerson[] = [];
   let peopleGiven = false;
@@ -724,7 +728,16 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   }
 
   /** In-place updates that never rebuild: rings, badges, controls, status. */
+  /** Focus view fills the chat column; collapsing gives the chat back. */
+  function syncFocusView(): void {
+    root.classList.toggle(
+      "dm-call-panel--focus",
+      videoFocus && videoActive && videoElement() !== null,
+    );
+  }
+
   function refresh(): void {
+    syncFocusView();
     if (view.kind === "none") return;
     const voice = voiceStore.getState();
     const me = currentUserId();
@@ -914,6 +927,10 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       if (active === videoActive) return;
       videoActive = active;
       update();
+    },
+    setVideoFocus(focused: boolean): void {
+      videoFocus = focused;
+      syncFocusView();
     },
   };
 }

@@ -339,6 +339,17 @@
   aspect-ratio: 1;
 }
 
+/* A stream in focus view fills the chat column; Collapse gives it back. */
+.dm-call-panel--focus {
+  flex: 1 1 auto;
+  height: auto;
+}
+.chat-area:has(.dm-call-panel--focus) > .messages-slot,
+.chat-area:has(.dm-call-panel--focus) > .typing-slot,
+.chat-area:has(.dm-call-panel--focus) > .input-slot {
+  display: none;
+}
+
 /* The DM list's live-call glyph. */
 .dm-in-call {
   display: inline-flex;

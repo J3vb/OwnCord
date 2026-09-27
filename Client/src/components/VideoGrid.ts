@@ -3,8 +3,11 @@
  * Replaces the chat area when cameras are active.
  */
 
-import { createElement, appendChildren } from "@lib/dom";
+import { createElement, appendChildren, setText } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
+import { openMenuOnKeyboard } from "@lib/context-menu";
 import { createIcon } from "@lib/icons";
+import type { IconName } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import {
   getScreenshareAudioMuted,
@@ -26,6 +29,17 @@ export interface TileConfig {
   readonly audioUserId: number;
   /** True if this tile represents a screenshare (vs camera) */
   readonly isScreenshare: boolean;
+  /** The person's display name, for control labels ("Otto stream volume").
+   *  Falls back to the tile label. */
+  readonly name?: string;
+}
+
+/** What the grid reports back to its owner. */
+export interface VideoGridCallbacks {
+  /** The focused tile changed (null: back to the grid layout). */
+  readonly onFocusChange?: (tileId: number | null) => void;
+  /** Stop sharing, from the cover on your own screen-share preview. */
+  readonly onStopSharing?: () => void;
 }
 
 /** Someone in the call the host wants drawn as an avatar tile while they have
@@ -52,6 +66,9 @@ export interface VideoGridComponent extends MountableComponent {
   /** The people to draw as avatar tiles, after the streams. A person's tile
    *  steps aside while their camera tile is up. Not counted by hasStreams. */
   setPeople(people: readonly GridPerson[]): void;
+  /** Ring the camera tiles of the users speaking now. */
+  setSpeaking(userIds: ReadonlySet<number>): void;
+  setCallbacks(callbacks: VideoGridCallbacks): void;
 }
 
 /** Create a fresh volume icon element. */
@@ -124,6 +141,28 @@ export function computeGridLayout(
   return best;
 }
 
+/** A labelled icon button on a tile, above the tile's own select button. */
+function tileButton(
+  text: string,
+  icon: IconName,
+  control: string,
+  onClick: () => void,
+): HTMLButtonElement {
+  const btn = createElement("button", {
+    type: "button",
+    class: "video-tile-btn",
+    "aria-label": text,
+    title: text,
+    "data-tile-control": control,
+  });
+  btn.appendChild(createIcon(icon, 18));
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    onClick();
+  });
+  return btn;
+}
+
 export function createVideoGrid(): VideoGridComponent {
   let root: HTMLDivElement | null = null;
   const cells = new Map<
@@ -135,6 +174,10 @@ export function createVideoGrid(): VideoGridComponent {
   const personCells = new Map<number, HTMLDivElement>();
   let resizeObserver: ResizeObserver | null = null;
   let resizeRafId = 0;
+  let callbacks: VideoGridCallbacks = {};
+  let speaking: ReadonlySet<number> = new Set();
+  /** Owns listeners that outlive one tile (the tile context menu). */
+  const disposable = new Disposable();
 
   /** Apply JS-calculated tile sizes to all grid-mode cells. */
   function applyGridSizes(): void {
@@ -286,8 +329,21 @@ export function createVideoGrid(): VideoGridComponent {
     (target ?? root).focus();
   }
 
+  /** The focused tile needs no "watch" button, and only it offers Back to
+   *  grid. */
+  function syncTileNav(): void {
+    for (const [id, entry] of cells) {
+      const isMain = id === focusedTileId;
+      const select = entry.el.querySelector<HTMLElement>(".video-cell-select");
+      if (select !== null) select.hidden = isMain;
+      const back = entry.el.querySelector<HTMLElement>("[data-tile-control='grid']");
+      if (back !== null) back.hidden = !isMain;
+    }
+  }
+
   function rebuildFocusLayout(): void {
     if (root === null) return;
+    syncTileNav();
 
     const savedFocus = captureFocusedControl();
 
@@ -350,10 +406,201 @@ export function createVideoGrid(): VideoGridComponent {
   function setFocusedTile(tileId: number | null): void {
     focusedTileId = tileId;
     rebuildFocusLayout();
+    callbacks.onFocusChange?.(tileId);
   }
 
   function getFocusedTileIdFn(): number | null {
     return focusedTileId;
+  }
+
+  /** The stream (screen-share audio, 0-100 %) or voice (mic, 0-200 %) volume
+   *  of a remote tile: mute, a slider named for whose it is, and its value. */
+  function buildVolumeControls(
+    config: TileConfig,
+    name: string,
+  ): { overlay: HTMLDivElement; apply: (volume: number, muted: boolean) => void } {
+    // Mic and screenshare audio state both survive tile rebuilds —
+    // initialize from the same persisted values the sidebar volume menu
+    // reads, instead of hardcoding "unmuted at 100%" (B3-5). Screenshare
+    // sliders are 0-100 (HTMLAudioElement.volume caps at 1.0); mic sliders
+    // keep 0-200 (LiveKit setVolume supports boost up to 2.0).
+    const savedVolume = config.isScreenshare
+      ? Math.round(getScreenshareAudioVolume(config.audioUserId) * 100)
+      : getUserVolume(config.audioUserId);
+    let currentVolume = savedVolume;
+    let muted = config.isScreenshare
+      ? getScreenshareAudioMuted(config.audioUserId)
+      : savedVolume === 0;
+    /** What the slider shows: the stored level on open (even if muted), 0
+     *  once muted from here, the level again on unmute. */
+    let shown = currentVolume;
+
+    const overlay = createElement("div", { class: "video-tile-overlay" });
+    const volumeSlider = createElement("input", {
+      type: "range",
+      min: "0",
+      max: config.isScreenshare ? "100" : "200",
+      value: String(currentVolume),
+      class: "tile-volume-slider",
+      "aria-label": config.isScreenshare
+        ? voiceText("tile.streamVolume", { name })
+        : voiceText("tile.voiceVolume", { name }),
+      // Lets a tile rebuild or removal put focus back on the same control
+      // (captureFocusedControl), not just the tile.
+      "data-tile-control": "volume",
+    });
+    const output = createElement("output", { class: "tile-volume-value" });
+    const muteBtn = createElement("button", {
+      type: "button",
+      class: "tile-mute-btn",
+      "data-tile-control": "mute",
+    });
+
+    /** Draw the state; the slider shows 0 while muted. */
+    function render(): void {
+      volumeSlider.value = String(shown);
+      const text = voiceText("tile.percent", { percent: shown });
+      volumeSlider.setAttribute("aria-valuetext", text);
+      setText(output, text);
+      setButtonIcon(muteBtn, muted ? volumeXIcon() : volumeIcon());
+      muteBtn.setAttribute(
+        "aria-label",
+        muted ? voiceText("widget.control.unmute") : voiceText("widget.control.mute"),
+      );
+      overlay.classList.toggle("muted", muted);
+    }
+
+    function commit(): void {
+      if (config.isScreenshare) {
+        // BUG-102: Set actual volume, not just mute toggle. Slider 100 maps
+        // to element volume 1.0 (the attach-time default).
+        muteScreenshareAudio(config.audioUserId, muted);
+        if (!muted) setScreenshareAudioVolume(config.audioUserId, currentVolume / 100);
+      } else {
+        setUserVolume(config.audioUserId, muted ? 0 : currentVolume);
+      }
+    }
+
+    volumeSlider.addEventListener("input", () => {
+      const value = Number(volumeSlider.value);
+      muted = value === 0;
+      shown = value;
+      if (!muted) currentVolume = value;
+      if (config.isScreenshare) {
+        muteScreenshareAudio(config.audioUserId, muted);
+        setScreenshareAudioVolume(config.audioUserId, value / 100);
+      } else {
+        setUserVolume(config.audioUserId, value);
+      }
+      render();
+    });
+
+    muteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      muted = !muted;
+      if (!muted && currentVolume === 0) currentVolume = 100;
+      shown = muted ? 0 : currentVolume;
+      commit();
+      render();
+    });
+
+    render();
+    appendChildren(overlay, muteBtn, volumeSlider, output);
+    return {
+      overlay,
+      // The tile menu changed the same setting: show it here too.
+      apply(volume: number, isMuted: boolean): void {
+        muted = isMuted;
+        if (volume > 0) currentVolume = volume;
+        shown = muted ? 0 : currentVolume;
+        render();
+      },
+    };
+  }
+
+  /** Stop watching (or hide your own preview) locally, or bring it back. The
+   *  stream stays subscribed: opt-in watching is a separate decision (Q3). */
+  function setStopped(tileId: number, stopped: boolean): void {
+    const entry = cells.get(tileId);
+    if (entry === undefined) return;
+    const cell = entry.el;
+    cell.classList.toggle("video-cell--stopped", stopped);
+    const video = cell.querySelector("video");
+    if (video !== null) video.hidden = stopped;
+    cell.querySelector(".video-stopped")?.remove();
+    if (!stopped) {
+      cell.querySelector<HTMLElement>("[data-tile-control='stop']")?.focus();
+      return;
+    }
+    const self = entry.config?.isSelf === true;
+    const cover = createElement("div", { class: "video-stopped" });
+    const again = createElement(
+      "button",
+      { type: "button", class: "video-watch-btn", "data-tile-control": "watch" },
+      self ? voiceText("tile.showPreview") : voiceText("tile.watchStream"),
+    );
+    again.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setStopped(tileId, false);
+    });
+    cover.appendChild(again);
+    cell.appendChild(cover);
+    again.focus();
+  }
+
+  function buildSelfCover(tileId: number, stream: MediaStream): HTMLDivElement {
+    const track = stream.getVideoTracks()[0];
+    const settings = track?.getSettings?.() ?? {};
+    const surface = (settings as { displaySurface?: string }).displaySurface;
+    const title =
+      surface === "window"
+        ? voiceText("tile.sharingWindow")
+        : surface === "browser"
+          ? voiceText("tile.sharingTab")
+          : voiceText("tile.sharingScreen");
+    const parts: string[] = [];
+    if (settings.height !== undefined && settings.frameRate !== undefined) {
+      parts.push(
+        voiceText("tile.shareQuality", {
+          height: settings.height,
+          fps: Math.round(settings.frameRate),
+        }),
+      );
+    }
+    parts.push(
+      stream.getAudioTracks?.().length > 0
+        ? voiceText("tile.withAudio")
+        : voiceText("tile.noAudio"),
+    );
+
+    const cover = createElement("div", { class: "video-self-cover" });
+    const actions = createElement("div", { class: "video-self-actions" });
+    const stop = createElement(
+      "button",
+      { type: "button", class: "btn-danger", "data-tile-control": "stop-sharing" },
+      voiceText("tile.stopSharing"),
+    );
+    stop.addEventListener("click", (e) => {
+      e.stopPropagation();
+      callbacks.onStopSharing?.();
+    });
+    const hide = createElement(
+      "button",
+      { type: "button", class: "btn-ghost", "data-tile-control": "hide-preview" },
+      voiceText("tile.hidePreview"),
+    );
+    hide.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setStopped(tileId, true);
+    });
+    appendChildren(actions, stop, hide);
+    appendChildren(
+      cover,
+      createElement("div", { class: "video-self-title" }, title),
+      createElement("div", { class: "video-self-detail" }, parts.join(" · ")),
+      actions,
+    );
+    return cover;
   }
 
   function addStream(
@@ -403,121 +650,90 @@ export function createVideoGrid(): VideoGridComponent {
       log.debug("Video autoplay rejected (new tile)", { userId, err });
     });
 
-    const label = createElement("div", { class: "video-username" }, username);
-
+    const name = config?.name ?? username;
     const streamType = config?.isScreenshare ? "screenshare" : "camera";
     const cell = createElement("div", {
       class: "video-cell",
       "data-user-id": String(userId),
       "data-stream-type": streamType,
     });
-    appendChildren(cell, video, label);
 
-    cell.addEventListener("click", (e) => {
-      // Don't switch focus if clicking the mute button
-      if ((e.target as Element).closest(".tile-mute-btn")) return;
-      if (focusedTileId !== null && focusedTileId !== userId) {
-        focusedTileId = userId;
-        rebuildFocusLayout();
-      }
+    // The whole tile is one real button (click, Enter, Space) that opens it
+    // in focus view; the tile's own controls sit above it, never inside it.
+    const select = createElement("button", {
+      type: "button",
+      class: "video-cell-select",
+      "aria-label": voiceText("tile.watch", { name: username }),
+      "data-tile-control": "select",
     });
+    select.addEventListener("click", () => setFocusedTile(userId));
 
-    // Add audio control overlay for remote tiles
-    if (config !== undefined && !config.isSelf) {
-      // Mic and screenshare audio state both survive tile rebuilds —
-      // initialize from the same persisted values the sidebar volume menu
-      // reads, instead of hardcoding "unmuted at 100%" (B3-5). Screenshare
-      // sliders are 0-100 (HTMLAudioElement.volume caps at 1.0); mic sliders
-      // keep 0-200 (LiveKit setVolume supports boost up to 2.0).
-      const savedVolume = config.isScreenshare
-        ? Math.round(getScreenshareAudioVolume(config.audioUserId) * 100)
-        : getUserVolume(config.audioUserId);
-      let currentVolume = savedVolume;
-      let muted = config.isScreenshare
-        ? getScreenshareAudioMuted(config.audioUserId)
-        : savedVolume === 0;
-
-      const overlay = createElement("div", { class: "video-tile-overlay" });
-
-      // Volume slider
-      const volumeSlider = createElement("input", {
-        type: "range",
-        min: "0",
-        max: config.isScreenshare ? "100" : "200",
-        value: String(currentVolume),
-        class: "tile-volume-slider",
-        "aria-label": voiceText("widget.volume"),
-        // Lets a tile rebuild or removal put focus back on the same control
-        // (captureFocusedControl), not just the tile.
-        "data-tile-control": "volume",
-      });
-
-      volumeSlider.addEventListener("input", () => {
-        currentVolume = Number(volumeSlider.value);
-        const wasMuted = muted;
-        muted = currentVolume === 0;
-        if (config.isScreenshare) {
-          // BUG-102: Set actual volume, not just mute toggle. Slider 100 maps
-          // to element volume 1.0 (the attach-time default).
-          muteScreenshareAudio(config.audioUserId, muted);
-          setScreenshareAudioVolume(config.audioUserId, currentVolume / 100);
-        } else {
-          setUserVolume(config.audioUserId, currentVolume);
-        }
-        setButtonIcon(muteBtn, muted ? volumeXIcon() : volumeIcon());
-        muteBtn.setAttribute(
-          "aria-label",
-          muted ? voiceText("widget.control.unmute") : voiceText("widget.control.mute"),
-        );
-        if (muted !== wasMuted) {
-          overlay.classList.toggle("muted", muted);
-        }
-      });
-
-      // Mute button
-      const muteBtn = createElement("button", {
-        class: "tile-mute-btn",
-        "aria-label": muted ? voiceText("widget.control.unmute") : voiceText("widget.control.mute"),
-        "data-tile-control": "mute",
-      });
-      muteBtn.appendChild(muted ? volumeXIcon() : volumeIcon());
-      if (muted) overlay.classList.add("muted");
-
-      muteBtn.addEventListener("click", () => {
-        muted = !muted;
-        if (muted) {
-          if (config.isScreenshare) {
-            muteScreenshareAudio(config.audioUserId, true);
-          } else {
-            setUserVolume(config.audioUserId, 0);
-          }
-          volumeSlider.value = "0";
-        } else {
-          if (currentVolume === 0) currentVolume = 100;
-          if (config.isScreenshare) {
-            muteScreenshareAudio(config.audioUserId, false);
-            setScreenshareAudioVolume(config.audioUserId, currentVolume / 100);
-          } else {
-            setUserVolume(config.audioUserId, currentVolume);
-          }
-          volumeSlider.value = String(currentVolume);
-        }
-        setButtonIcon(muteBtn, muted ? volumeXIcon() : volumeIcon());
-        muteBtn.setAttribute(
-          "aria-label",
-          muted ? voiceText("widget.control.unmute") : voiceText("widget.control.mute"),
-        );
-        overlay.classList.toggle("muted", muted);
-      });
-
-      overlay.appendChild(volumeSlider);
-      overlay.appendChild(muteBtn);
-      cell.appendChild(overlay);
+    const label = createElement("div", { class: "video-label" });
+    label.appendChild(createElement("div", { class: "video-username" }, username));
+    if (config?.isScreenshare === true) {
+      label.appendChild(createElement("span", { class: "video-live" }, voiceText("tile.live")));
     }
 
+    const nav = createElement("div", { class: "video-tile-nav" });
+    const back = tileButton(voiceText("tile.backToGrid"), "layout-grid", "grid", () =>
+      setFocusedTile(null),
+    );
+    back.hidden = true;
+    nav.appendChild(back);
+
+    appendChildren(cell, video, select, label, nav);
+    // A click anywhere on a filmstrip thumb (not on one of its controls)
+    // swaps it into focus, as the tile button does.
+    cell.addEventListener("click", (e) => {
+      if ((e.target as Element).closest("button, input") !== null) return;
+      if (focusedTileId !== null && focusedTileId !== userId) setFocusedTile(userId);
+    });
+
+    // Remote tiles: volume, Stop watching and the tile menu.
+    if (config !== undefined && !config.isSelf) {
+      const volume = buildVolumeControls(config, name);
+      cell.appendChild(volume.overlay);
+      nav.insertBefore(
+        tileButton(voiceText("tile.stopWatching"), "eye-off", "stop", () =>
+          setStopped(userId, true),
+        ),
+        back,
+      );
+      // Loaded on first use: the menu opens only on a right-click or
+      // Shift+F10, so it stays out of the eager bundle.
+      const openMenu = (x: number, y: number): void =>
+        void import("./video-grid/tile-menu").then(({ showTileMenu }) =>
+          showTileMenu({
+            x,
+            y,
+            name,
+            config,
+            signal: disposable.signal,
+            onVolumeChange: volume.apply,
+            onStopWatching: () => setStopped(userId, true),
+          }),
+        );
+      cell.addEventListener(
+        "contextmenu",
+        (e) => {
+          e.preventDefault();
+          openMenu(e.clientX, e.clientY);
+        },
+        { signal: disposable.signal },
+      );
+      openMenuOnKeyboard(cell, openMenu, disposable.signal);
+    }
+
+    // Your own screen share: say what is going out instead of showing a
+    // hall of mirrors, with Stop sharing always at hand.
+    if (config?.isSelf === true && config.isScreenshare) {
+      cell.appendChild(buildSelfCover(userId, stream));
+    }
     cells.set(userId, { el: cell, config });
     attachTrackLifecycle(userId, stream);
     root.appendChild(cell);
+    applySpeaking();
+    syncTileNav();
     relayout();
   }
 
@@ -587,6 +803,19 @@ export function createVideoGrid(): VideoGridComponent {
     relayout();
   }
 
+  function applySpeaking(): void {
+    for (const [id, entry] of cells) {
+      const cfg = entry.config;
+      const on = cfg?.isScreenshare !== true && speaking.has(cfg?.audioUserId ?? id);
+      entry.el.classList.toggle("video-cell--speaking", on);
+    }
+  }
+
+  function setSpeaking(userIds: ReadonlySet<number>): void {
+    speaking = userIds;
+    applySpeaking();
+  }
+
   function mount(container: Element): void {
     root = createElement("div", {
       class: "video-grid",
@@ -625,6 +854,7 @@ export function createVideoGrid(): VideoGridComponent {
     focusedTileId = null;
     people = [];
     personCells.clear();
+    disposable.destroy();
 
     if (root !== null) {
       root.remove();
@@ -643,5 +873,9 @@ export function createVideoGrid(): VideoGridComponent {
     setFocusedTile,
     getFocusedTileId: getFocusedTileIdFn,
     setPeople,
+    setSpeaking,
+    setCallbacks(next: VideoGridCallbacks): void {
+      callbacks = next;
+    },
   };
 }

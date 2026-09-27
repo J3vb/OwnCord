@@ -118,6 +118,21 @@ the accepted cost.
 | screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                              |
 | speaking       | Green ring on the speaking user's tile/avatar (from LiveKit's ActiveSpeakers)                                                                                                                                                                    |
 
+**Video tiles** (`components/VideoGrid.ts`, in guild voice and DM calls alike):
+each tile is a button (click, Enter, Space) that opens it in focus view, with a
+filmstrip for the rest and **Back to grid** to leave. Screen shares carry a
+**LIVE** badge, and the speaking ring (`--text-positive`) is on camera tiles.
+A remote tile's volume slider is named for whose it is ("Otto stream volume"
+for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %) and
+shows its value. The tile menu (right-click, the Menu key, Shift+F10;
+`components/video-grid/tile-menu.ts`, loaded on first use) keeps the two
+volumes apart and offers Mute stream and **Stop watching**, which hides the
+stream locally behind a **Watch stream** card (the track stays subscribed;
+opt-in watching is open question Q3). Your own screen share is covered by what
+is going out (surface, resolution, fps, audio) with **Stop sharing** and
+**Hide preview**. In a DM call, focus view grows the call panel to the whole
+chat column; Collapse gives the chat back.
+
 **Mic-permission failure** (`restoreLocalVoiceState`): on denied/absent mic, set
 `listenOnly` and surface the specific reason ("Microphone permission denied" /
 "No microphone found") as a toast with a retry — already wired to

@@ -109,6 +109,16 @@ export interface MainPageOptions {
 // MainPage
 // ---------------------------------------------------------------------------
 
+/** The person's name as every identity surface shows it, or undefined. */
+function personName(userId: number): string | undefined {
+  const voice = voiceStore.getState();
+  const channelId = voice.currentChannelId;
+  const channelUsers = channelId !== null ? voice.voiceUsers.get(channelId) : undefined;
+  const voiceUser = channelUsers?.get(userId);
+  const member = membersStore.getState().members.get(userId);
+  return (member !== undefined ? memberDisplayName(member) : "") || voiceUser?.username;
+}
+
 /**
  * Build the profile panel's data from the live stores for a 1:1 DM channel.
  * Null for a group (no single "recipient" -- see the caller) or a channel
@@ -1153,13 +1163,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // leaves your own tile indistinguishable from a participant's (OC-0375).
     // These two branches must keep matching VideoModeController's addStream
     // labels — that is what the OC-0375 test pins.
+
     function tileLabel(userId: number, isScreenshare: boolean): string {
-      const voice = voiceStore.getState();
-      const channelId = voice.currentChannelId;
-      const channelUsers = channelId !== null ? voice.voiceUsers.get(channelId) : undefined;
-      const voiceUser = channelUsers?.get(userId);
-      const member = membersStore.getState().members.get(userId);
-      const name = (member !== undefined ? memberDisplayName(member) : "") || voiceUser?.username;
+      const name = personName(userId);
       const isSelf = userId === getCurrentUserId();
       if (name === undefined || name === "") {
         if (isSelf) return isScreenshare ? shellText("tile.yourScreen") : shellText("tile.you");
@@ -1179,10 +1185,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       if (channelId === null) return;
       const tileId = isScreenshare ? userId + SCREENSHARE_TILE_ID_OFFSET : userId;
       const username = tileLabel(userId, isScreenshare);
+      const name = personName(userId);
       videoGrid.addStream(tileId, username, stream, {
         isSelf: false,
         audioUserId: userId,
         isScreenshare,
+        ...(name === undefined || name === "" ? {} : { name }),
       });
       videoModeCtrl?.checkVideoMode();
     });
@@ -1195,7 +1203,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // Subscribe to voice store for camera/screenshare state changes, voice
     // channel switches, and remote-tile identity changes (not speaking ticks)
+    // The grid's own actions: its focus view sizes the DM call panel, and the
+    // cover on your own screen-share preview stops the share.
+    chatAreaResult.videoGrid.setCallbacks({
+      onFocusChange: (tileId) => callPanel?.setVideoFocus(tileId !== null),
+      onStopSharing: () => {
+        if (voiceStore.getState().localScreenshare) voiceKeybindActions.onScreenshareToggle();
+      },
+    });
+
     let prevVideoSignature = "";
+    let prevSpeaking = "";
     const prevTileLabels = new Map<number, string>();
     unsubscribers.push(
       voiceStore.subscribe((state) => {
@@ -1209,6 +1227,20 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           // so lastChannelId is still the old channel the next time it runs
           // (e.g. right after setOnRemoteVideo adds a fresh remote tile),
           // and it clears the grid it was just given (OC-0207).
+          // Speaking rings on the video tiles: only when who is speaking
+          // changes, not on every store update.
+          const talking = new Set<number>();
+          for (const u of channelId !== null
+            ? (state.voiceUsers.get(channelId)?.values() ?? [])
+            : []) {
+            if (u.speaking && !u.muted) talking.add(u.userId);
+          }
+          const speakingKey = [...talking].join(",");
+          if (speakingKey !== prevSpeaking) {
+            prevSpeaking = speakingKey;
+            videoGrid?.setSpeaking(talking);
+          }
+
           let sig =
             `${String(channelId)}|` +
             (state.localCamera ? "c" : "") +
