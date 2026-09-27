@@ -16,12 +16,8 @@ export interface Scan {
 /** Per-file identity counts, the baseline's shape. */
 export type Baseline = { _doc?: string; files: Record<string, Record<string, number>> };
 
-export const CONFIG_PATH: string;
-export const BASELINE_PATH: string;
-export function scanTree(): Scan;
 export function identity(d: TypeDiagnostic): string;
 export function counts(diagnostics: TypeDiagnostic[]): Record<string, Record<string, number>>;
-export function loadBaseline(): Baseline | null;
 export function compare(
   scan: Scan,
   baseline: Baseline | null,

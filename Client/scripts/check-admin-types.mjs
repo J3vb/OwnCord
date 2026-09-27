@@ -4,7 +4,6 @@
 // From Client/:
 //   node scripts/check-admin-types.mjs            # fail on any new or stale error
 //   node scripts/check-admin-types.mjs --update   # shrink the baseline after a fix
-//   node scripts/check-admin-types.mjs --report   # per-file error table (markdown)
 //
 // The admin panel (Server/admin/static/js, 223 KB of classic scripts with no
 // build step) has no type check of its own: it is Server-owned, so tsc never
@@ -14,8 +13,11 @@
 // works over, not a claim the panel is type-clean.
 //
 // The baseline (scripts/admin-types-baseline.json) is keyed by
-// file + diagnostic code + message, never by line, so an edit above an error
-// does not churn it. It only shrinks: a new identity or a higher count fails,
+// file + diagnostic code + normalised message, never by line, so an edit above
+// an error does not churn it. The message keeps its first line only (TypeScript's
+// elaboration chain varies by version) and a printed object type collapses to
+// '{…}', so adding an action to a big literal such as ACTIONS does not rename
+// the errors that mention it. It only shrinks: a new identity or a higher count fails,
 // and an entry the source no longer produces also fails until `--update`
 // removes it, so a fixed error cannot leave stale credit behind. That is the
 // same ratchet scripts/check-ui-strings.mjs enforces over UI text.
@@ -23,7 +25,14 @@
 // Limits, stated so a green run is not read as more than it is: this proves
 // nothing about runtime behaviour, the two TS2362/TS2363 arithmetic errors are
 // noise from untyped DOM reads, and 0 TS2304 (cannot find name) is the signal
-// worth keeping — it stays at zero, so a typo'd global is caught.
+// worth keeping — it stays at zero, so a typo'd global is caught. compare()
+// fails every TS2304 whatever the baseline says.
+//
+// Reseeding: a TypeScript or lib.dom bump can still reword a message, which
+// shows up as a stale entry plus an added one with the same count. Only then,
+// rebuild the baseline from scratch and check the diff renames keys without
+// growing any count:
+//   rm scripts/admin-types-baseline.json && node scripts/check-admin-types.mjs --update
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -36,10 +45,10 @@ export const BASELINE_PATH = join(CLIENT, "scripts", "admin-types-baseline.json"
 
 /** Written by `--update` so the file explains its own ratchet to a reader. */
 const DOC = [
-  'Admin-panel checkJs errors, keyed file -> "<code>:<message>" -> count.',
+  'Admin-panel checkJs errors, keyed file -> "<code>:<normalised message>" -> count.',
   "This list only shrinks: scripts/check-admin-types.mjs fails a new identity or a higher count,",
   "and fails a listed identity the source no longer produces until",
-  "`node scripts/check-admin-types.mjs --update` removes it. Keys are file + code + message, never",
+  "`node scripts/check-admin-types.mjs --update` removes it. Keys are file + code + normalised message, never",
   "a line, so an edit above an error does not churn the file. TS2304 (undefined name) is pinned at zero.",
 ].join(" ");
 
@@ -79,9 +88,13 @@ export function scanTree() {
   return { diagnostics, configErrors };
 }
 
-/** Identity key for one diagnostic: stable across line moves and reformatting. */
+/**
+ * Identity key for one diagnostic: stable across line moves, reformatting and
+ * edits to a printed object type.
+ */
 export function identity(d) {
-  return `${d.code}:${d.message}`;
+  const message = d.message.split("\n")[0].replace(/'\{[^']*\}'/g, "'{…}'");
+  return `${d.code}:${message}`;
 }
 
 /** Per-file identity counts, the shape both compare() and shrink() use. */
@@ -101,8 +114,9 @@ export function loadBaseline() {
 
 /**
  * Compare a scan with the baseline. `added` are identities above their baseline
- * count (every instance, since which occurrence is new cannot be known);
- * `stale` are baseline identities above the scanned count.
+ * count (every instance, since which occurrence is new cannot be known), and
+ * every TS2304 whatever its baseline; `stale` are baseline identities above the
+ * scanned count.
  */
 export function compare(scan, baseline) {
   const actual = counts(scan.diagnostics);
@@ -111,8 +125,8 @@ export function compare(scan, baseline) {
   const stale = [];
   for (const [file, byIdentity] of Object.entries(actual)) {
     for (const [id, n] of Object.entries(byIdentity)) {
-      if (n > (allowed[file]?.[id] ?? 0))
-        added.push({ file, identity: id, actual: n, baseline: allowed[file]?.[id] ?? 0 });
+      const cap = id.startsWith("2304:") ? 0 : (allowed[file]?.[id] ?? 0);
+      if (n > cap) added.push({ file, identity: id, actual: n, baseline: cap });
     }
   }
   for (const [file, byIdentity] of Object.entries(allowed)) {
@@ -146,33 +160,11 @@ export function shrink(scan, baseline) {
   return { _doc: DOC, files };
 }
 
-function report(scan) {
-  const rows = Object.entries(counts(scan.diagnostics))
-    .map(([file, byIdentity]) => ({
-      file,
-      total: Object.values(byIdentity).reduce((a, b) => a + b, 0),
-      identities: Object.keys(byIdentity).length,
-    }))
-    .sort((a, b) => b.total - a.total);
-  const lines = [
-    "| File | Errors | Distinct |",
-    "| --- | ---: | ---: |",
-    ...rows.map((r) => `| \`${r.file}\` | ${r.total} | ${r.identities} |`),
-  ];
-  const total = rows.reduce((a, r) => a + r.total, 0);
-  lines.push("", `${total} errors across ${rows.length} files.`);
-  return lines.join("\n");
-}
-
 function main(argv) {
   const scan = scanTree();
   if (scan.configErrors.length > 0) {
     console.error(scan.configErrors.join("\n"));
     return 1;
-  }
-  if (argv.includes("--report")) {
-    console.log(report(scan));
-    return 0;
   }
   const baseline = loadBaseline();
   if (argv.includes("--update")) {
