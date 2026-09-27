@@ -89,7 +89,8 @@ func (m *bootMarker) recordPanic(at time.Time) {
 	_ = err // the marker is best-effort: a failure must not panic the recovery path
 }
 
-// reported notes that the previous run's exit reached the attention panel.
+// reported notes that every start stage came up, so the attention panel is
+// serving the previous run's exit.
 func (m *bootMarker) reported() {
 	m.mu.Lock()
 	m.unreported = nil
@@ -142,7 +143,9 @@ func bootMarkerPath(dataDir string) string {
 	return filepath.Join(dataDir, bootMarkerRelPath)
 }
 
-// startBootMarker is the boot-marker stage (SRE-08): it reads the previous
+// startBootMarker is the boot-marker stage (SRE-08). It runs after the
+// database stage, so only the process holding the data directory's
+// single-process lock touches the marker. It reads the previous
 // run's marker, records this run as in progress and installs the
 // process-global panic recorder, so a kill, crash or hardware exit leaves
 // evidence the next start reports. Its close rewrites the marker as a clean
@@ -190,7 +193,4 @@ func (a *App) recordBootStatus(svc *service.Services) {
 		return
 	}
 	svc.Attention.RecordBootStatus(a.prevBoot)
-	if a.bootMarker != nil {
-		a.bootMarker.reported()
-	}
 }

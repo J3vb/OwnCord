@@ -534,9 +534,9 @@ on every return — a failed start, a serve error and a clean shutdown alike.
 | --- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | (in `Run`) `bgCtx`     | `background-context` — cancels bgCtx; registered first, so it runs **last**                                                                                                                    |
 | 2   | `data-dir`             | —                                                                                                                                                                                              |
-| 3   | `boot-marker`          | `boot-marker` — clears the process panic recorder and rewrites `data/boot.json` as a clean shutdown (SRE-08)                                                                                   |
-| 4   | `tls`                  | —                                                                                                                                                                                              |
-| 5   | `database`             | `database` — `database.Close()`, registered before the migration runs                                                                                                                          |
+| 3   | `tls`                  | —                                                                                                                                                                                              |
+| 4   | `database`             | `database` — `database.Close()`, registered before the migration runs                                                                                                                          |
+| 5   | `boot-marker`          | `boot-marker` — clears the process panic recorder and rewrites `data/boot.json` as a clean shutdown (SRE-08)                                                                                   |
 | 6   | `migrate`              | —                                                                                                                                                                                              |
 | 7   | `erasure-markers`      | `erasure-markers` — `markers.Close()`, releases the deletion-marker file                                                                                                                       |
 | 8   | `push-vapid-key`       | —                                                                                                                                                                                              |
@@ -553,19 +553,20 @@ on every return — a failed start, a serve error and a clean shutdown alike.
 
 Close order is therefore `http`, `hub-notice`, `listener`, `signals`, `maintenance`, `audit-writer`,
 `event-persistence`, `router`, `hub`, `plugins`, `telemetry`,
-`erasure-markers`, `database`, `boot-marker`, `background-context`. All four facts hold, and
+`erasure-markers`, `boot-marker`, `database`, `background-context`. All four facts hold, and
 now hold **because of the ordering rule** rather than because of where a
 `defer` happened to sit: `push-vapid-key` is deliberately absent — it registers
 no closer. `boot-marker` clears the marker as it runs, so any exit that reaches
 `App.Close` — a clean shutdown, a planned restart, or a reported start failure
 — reads back as clean on the next start. The one exception is a start that
-inherited an unclean exit and failed before the `hub` stage put it on the
-attention panel: its close writes the previous run's unclean record back, so
-the next start still reports it. An exit that never runs `Close` (a
-`kill -9`, an OOM kill, or a hardware-fault exit through `stackutil.Fatal`, which
-calls `os.Exit` from the hub breaker or the router's recovery site) leaves the
-marker armed, which is exactly the unclean exit the attention panel reports
-(SRE-08).
+inherited an unclean exit and failed at any stage, so the attention panel was
+never served: its close writes the previous run's unclean record back, so the
+next start still reports it. The stage runs after `database`, so a second
+process refused the single-process lock never touches the running server's
+marker. An exit that never runs `Close` (a `kill -9`, an OOM kill, or a
+hardware-fault exit — the hub breaker through its own `fatalFn`, and the HTTP
+recoverer and `ws` `DispatchV2` through `stackutil.Fatal`) leaves the marker
+armed, which is exactly the unclean exit the attention panel reports (SRE-08).
 
 - the audit writer and event persistence both start after the database opens,
   so both stop before `database.Close`;

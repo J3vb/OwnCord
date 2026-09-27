@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -38,6 +39,7 @@ func TestApp_BootMarkerStage_ReportsPreviousExitAndClearsOnCleanClose(t *testing
 		DiskFree: func() (uint64, error) { return 1 << 30, nil },
 	})
 	a.recordBootStatus(&service.Services{Attention: svc})
+	a.bootMarker.reported() // every start stage came up
 	svc.Evaluate(context.Background(), time.Now())
 	raised := false
 	for _, w := range svc.Report().Warnings {
@@ -95,10 +97,37 @@ func TestApp_BootMarkerStage_FailedStartCarriesUncleanExitForward(t *testing.T) 
 	}
 	svc := service.NewAttentionService(service.AttentionThresholds{}, service.AttentionSources{})
 	b.recordBootStatus(&service.Services{Attention: svc})
+	b.bootMarker.reported() // every start stage came up
 	if err := b.Close(context.Background()); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 	if st := readBootMarker(markerPath); !st.Recorded || st.Unclean {
 		t.Fatalf("after a reported start and a clean close the marker reads %+v, want clean", st)
+	}
+}
+
+// SRE-08: the hub stage puts the previous exit on the attention panel, but a
+// start that then fails at a later stage never serves that panel, so its close
+// must still carry the unclean exit forward.
+func TestAppRun_LateStageFailureCarriesUncleanExitForward(t *testing.T) {
+	a := bootTestApp(t, "0", "http")
+	if err := os.MkdirAll(a.cfg.Server.DataDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	markerPath := bootMarkerPath(a.cfg.Server.DataDir)
+	killedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if _, err := openBootMarker(markerPath, killedAt); err != nil {
+		t.Fatalf("arming the killed run's marker: %v", err)
+	}
+
+	if err := a.Run(context.Background()); err == nil {
+		t.Fatal("Run() = nil, want the injected http failure")
+	}
+	if a.hub == nil {
+		t.Fatal("the hub stage never ran, so this does not test a failure after the report")
+	}
+	st := readBootMarker(markerPath)
+	if !st.Unclean || !st.StartedAt.Equal(killedAt) {
+		t.Fatalf("after a late start failure the marker reads %+v, want the killed run started %v", st, killedAt)
 	}
 }

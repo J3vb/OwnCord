@@ -70,9 +70,9 @@ type stage struct {
 func (a *App) stages() []stage {
 	return []stage{
 		{"data-dir", a.startDataDir},
-		{"boot-marker", a.startBootMarker},
 		{"tls", a.startTLS},
 		{"database", a.startDatabase},
+		{"boot-marker", a.startBootMarker},
 		{"migrate", a.startMigrate},
 		{"erasure-markers", a.startErasureMarkers},
 		{"push-vapid-key", a.startPushVAPIDKey},
@@ -157,6 +157,9 @@ func (a *App) start() error {
 	// copy through every start-up refusal; the schema-ahead check in
 	// db.MigrateFS stops that copy from then booting on a newer schema.
 	removeOldBinaryFn(a.log)
+	if a.bootMarker != nil {
+		a.bootMarker.reported()
+	}
 	return nil
 }
 
