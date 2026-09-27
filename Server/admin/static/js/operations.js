@@ -187,10 +187,10 @@ async function renderDashboard(){
   }
   // Recent audit — VIEW_AUDIT_LOG only.
   if(can(PERM.VIEW_AUDIT_LOG))try{
-    const entries=await api('GET','/audit-log?limit=5&offset=0');
+    const entries=await api('GET','/audit-log?limit=5&offset=0&hide_signins=1');
     if(entries&&entries.length){
-      html+='<div class="section-card"><div class="section-card-header"><h3>Recent Activity</h3><button class="btn btn-ghost" data-action="navigateTo" data-args="'+actArgs('audit')+'">View All</button></div><div class="section-card-body">';
-      entries.forEach(a=>{html+='<div class="activity-item"><div class="activity-icon" style="background:'+actionColor(a.action)+'22;color:'+actionColor(a.action)+'">'+I.audit+'</div><div><div class="activity-text"><strong>'+esc(a.actor_name||a.actor_id)+'</strong> '+esc(a.action)+' <strong>'+esc(a.target_type)+(a.target_id?' #'+a.target_id:'')+'</strong></div><div class="activity-time">'+fmtLocal(a.created_at)+(a.detail?' — '+esc(a.detail):'')+'</div></div></div>'});
+      html+='<div class="section-card"><div class="section-card-header"><h3>Recent activity</h3><button class="btn btn-ghost" data-action="navigateTo" data-args="'+actArgs('audit')+'">View all</button></div><div class="section-card-body">';
+      entries.forEach(a=>{html+='<div class="act-line" data-audit-action="'+esc(a.action)+'" title="'+esc(a.action+(a.detail?' — '+a.detail:''))+'">'+auditMark(a.action)+'<span class="act-what">'+auditSentence(a)+'</span><span class="act-when">'+fmtLocal(a.created_at,auditDay(a.created_at)==='Today'?AUDIT_TIME:undefined)+'</span></div>'});
       html+='</div></div>';
     }
   }catch(e){}
@@ -205,9 +205,13 @@ async function renderDashboard(){
    action options are every action in the whole log, which the first page's
    X-Audit-Actions header names. */
 let auditSeq=0,auditSearchTimer=null,auditActions=[];
+/* Sign-in and connection rows stay hidden (on the server, so paging and
+   search still cover the whole log) until the Sign-ins chip is on, or the
+   action filter asks for one of them by name. */
 function auditQuery(search,action){
   const q=search.trim();
-  return(q?'&q='+encodeURIComponent(q):'')+(action!=='all'?'&action='+encodeURIComponent(action):'');
+  const hide=!state.auditShowSignins&&!SIGNIN_ACTIONS.includes(action);
+  return(q?'&q='+encodeURIComponent(q):'')+(action!=='all'?'&action='+encodeURIComponent(action):'')+(hide?'&hide_signins=1':'');
 }
 /* state.auditSearch and state.auditActionFilter mirror the controls; page is
    committed to state.auditPage only once its rows arrive. */
@@ -227,6 +231,9 @@ async function loadAuditPage(page){
   return true;
 }
 
+/* A filter option names the action itself, not the sentence verb, so two
+   actions that share a verb ("created") stay apart: "Channel create". */
+function auditActionName(a){const s=String(a).replace(/_/g,' ');return s.charAt(0).toUpperCase()+s.slice(1)}
 function auditOptionsHtml(){
   // The filter is global, so a filtered action that the fetched rows do not
   // contain would leave no option `selected`: the control would read "All
@@ -236,17 +243,18 @@ function auditOptionsHtml(){
   // impossible to diverge.
   const actionTypes=[...new Set(auditActions.concat(state.auditActionFilter!=='all'?[state.auditActionFilter]:[]))].sort();
   let html='<option value="all" '+(state.auditActionFilter==='all'?'selected':'')+'>All Actions</option>';
-  actionTypes.forEach(t=>{html+='<option value="'+esc(t)+'" '+(state.auditActionFilter===t?'selected':'')+'>'+esc(t)+'</option>'});
+  actionTypes.forEach(t=>{html+='<option value="'+esc(t)+'" '+(state.auditActionFilter===t?'selected':'')+'>'+esc(auditActionName(t))+'</option>'});
   return html;
 }
 
 async function renderAudit(){
   try{await loadAuditPage(state.auditPage)}catch(e){return'<div class="page-title">Audit log</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p><button class="btn btn-accent" data-action="renderContent">Retry</button>'}
 
-  let html='<div class="page-title">Audit log</div><div class="page-desc">Every administrative action, newest first. Search and the action filter cover the whole log.</div>';
+  let html='<div class="page-title">Audit log</div><div class="page-desc">Every administrative action, newest first. Search and the filters cover the whole log; sign-ins and connections stay hidden until you turn on Sign-ins.</div>';
   html+='<div class="filter-bar audit-filters">';
-  html+='<input type="search" class="filter-search" aria-label="Search audit log" placeholder="Search actor, action, target or detail…" maxlength="100" value="'+esc(state.auditSearch)+'" data-input-action="setAuditSearch">';
+  html+='<input type="search" class="filter-search" aria-label="Search audit log" placeholder="Search action codes, names and details…" maxlength="100" value="'+esc(state.auditSearch)+'" data-input-action="setAuditSearch">';
   html+='<select class="filter-select" id="auditAction" aria-label="Filter by action" data-change-action="setAuditActionFilter">'+auditOptionsHtml()+'</select>';
+  html+='<button class="chip-toggle" id="auditSignins" aria-pressed="'+state.auditShowSignins+'" data-action="toggleAuditSignins" title="Show sign-in and connection events">'+(state.auditShowSignins?I.check:'')+'Sign-ins</button>';
   html+='<button class="btn btn-ghost" data-action="copyAuditLog" title="Copy the entries on this page">'+OPS_ICON.copy+'Copy page</button>';
   html+='<button class="btn btn-ghost" data-action="exportAuditCSV" title="Export the entries on this page as CSV">'+I.download+'Export CSV</button>';
   html+='</div>';
@@ -255,9 +263,16 @@ async function renderAudit(){
 
 function auditResultsHtml(){
   const rows=state.auditCache,filtered=!!(state.auditSearch.trim()||state.auditActionFilter!=='all');
-  let html='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl audit-tbl"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead><tbody id="auditTbody">';
-  if(!rows.length)html+='<tr><td colspan="5" class="tbl-empty">'+(filtered?'No entries match this search':'No audit entries yet')+'</td></tr>';
-  else rows.forEach(e=>{html+=renderAuditRow(e)});
+  let html='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl audit-tbl"><thead><tr><th>Time</th><th>What happened</th><th>Detail</th></tr></thead><tbody id="auditTbody">';
+  if(!rows.length)html+='<tr><td colspan="3" class="tbl-empty">'+(filtered?'No entries match this search':'No audit entries yet')+(state.auditShowSignins?'':' <span class="muted">(sign-ins hidden)</span>')+'</td></tr>';
+  else{
+    let day='';
+    rows.forEach(e=>{
+      const d=auditDay(e.created_at);
+      if(d!==day){day=d;html+='<tr class="audit-day"><th colspan="3" scope="colgroup">'+esc(d)+'</th></tr>'}
+      html+=renderAuditRow(e);
+    });
+  }
   html+='</tbody></table></div></div>';
   // The count is a status message, so a screen reader hears how many entries
   // a search found without leaving the search box.
@@ -268,11 +283,21 @@ function auditResultsHtml(){
   return html+'</div></div>';
 }
 
+/* Rows are grouped under their local day; each row shows the time alone. */
+const AUDIT_TIME=new Intl.DateTimeFormat(undefined,{hour:'numeric',minute:'2-digit'});
+const AUDIT_DAY=new Intl.DateTimeFormat(undefined,{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+function auditDay(s){
+  const d=utcDate(s);if(!s||isNaN(d.getTime()))return'Unknown date';
+  const day=x=>new Date(x.getFullYear(),x.getMonth(),x.getDate()).getTime();
+  const diff=Math.round((day(new Date())-day(d))/86400000);
+  return diff===0?'Today':diff===1?'Yesterday':AUDIT_DAY.format(d);
+}
+/* The coloured mark keeps actionBadge's classes (delete/ban red, create
+   green, update yellow); the words carry the meaning. */
+function auditMark(a){return'<span class="audit-mark '+actionBadge(a)+'" aria-hidden="true"></span>'}
 function renderAuditRow(e){
-  return'<tr><td class="audit-time">'+fmtLocal(e.created_at)+'</td>'
-    +'<td><strong>'+esc(e.actor_name||e.actor_id)+'</strong></td>'
-    +'<td><span class="badge '+actionBadge(e.action)+'">'+esc(e.action)+'</span></td>'
-    +'<td class="audit-target">'+esc(e.target_type)+(e.target_id?' #'+e.target_id:'')+'</td>'
+  return'<tr class="audit-row" data-audit-action="'+esc(e.action)+'" title="'+esc(e.action)+'"><td class="audit-time">'+fmtLocal(e.created_at,AUDIT_TIME)+'</td>'
+    +'<td class="audit-what"><div>'+auditMark(e.action)+'<span>'+auditSentence(e)+'</span></div></td>'
     +'<td class="audit-detail">'+esc(e.detail)+'</td></tr>';
 }
 
@@ -652,5 +677,11 @@ Object.assign(ACTIONS,{clearLogs,confirmRevokeToken,copyAllLogs,copyAuditLog,cop
     auditSearchTimer=setTimeout(()=>reloadAudit(1),300);
   },
   setAuditActionFilter(){clearTimeout(auditSearchTimer);state.auditActionFilter=this.value;reloadAudit(1)},
+  toggleAuditSignins(){
+    clearTimeout(auditSearchTimer);state.auditShowSignins=!state.auditShowSignins;
+    const chip=document.getElementById('auditSignins');
+    if(chip){chip.setAttribute('aria-pressed',String(state.auditShowSignins));chip.innerHTML=(state.auditShowSignins?I.check:'')+'Sign-ins'}
+    reloadAudit(1);
+  },
   setLogSearch(){state.logSearch=this.value;renderLogLines()},
   pluginFileChosen(){document.getElementById('pluginInstallBtn').disabled=!this.files.length}});

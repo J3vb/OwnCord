@@ -492,7 +492,24 @@ details.disclose:not([open])>summary.section-card-header{border-bottom:none}
 
 /* Audit log */
 .audit-tbl .audit-time{font-size:12px;color:var(--text-muted);white-space:nowrap}
-.audit-tbl .audit-target{white-space:nowrap}
+.audit-tbl .audit-what{min-width:220px}.audit-tbl .audit-what>div{display:flex;align-items:baseline;gap:8px}
+.audit-tbl .audit-what strong,.act-line strong{color:var(--header-primary)}
+.audit-tbl tr.audit-day th{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);background:var(--bg-primary);padding:8px 16px;border-bottom:1px solid var(--border)}
+.audit-tbl tr.audit-day:hover th{background:var(--bg-primary)}
+/* The action's colour as a small mark beside the sentence, never alone. */
+.audit-mark{display:inline-block;width:8px;height:8px;padding:0;border-radius:50%;flex-shrink:0;align-self:center}
+.audit-mark.badge-red{background:var(--text-danger)}.audit-mark.badge-green{background:var(--text-positive)}
+.audit-mark.badge-yellow{background:var(--text-warning)}.audit-mark.badge-accent{background:var(--accent-text)}.audit-mark.badge-muted{background:var(--text-muted)}
+/* A filter chip: a toggle button whose pressed state shows as a filled chip
+   with a check, not colour alone. */
+.chip-toggle{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:6px 14px;border-radius:var(--radius-pill);background:transparent;color:var(--text-muted);border:1px solid var(--border-control);font-size:13px;font-weight:600}
+.chip-toggle:hover{color:var(--text-normal);border-color:var(--border-strong)}
+.chip-toggle[aria-pressed="true"]{background:var(--accent-glow);color:var(--accent-text);border-color:var(--accent-text)}
+.chip-toggle svg{width:14px;height:14px}
+.act-line{display:flex;align-items:baseline;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+.act-line:last-child{border-bottom:none}
+.act-what{flex:1;min-width:0;overflow-wrap:anywhere}
+.act-when{font-size:12px;color:var(--text-muted);white-space:nowrap}
 .audit-tbl .audit-detail{font-size:12px;color:var(--text-muted);min-width:220px;overflow-wrap:anywhere}
 @media(max-width:600px){.audit-filters{align-items:stretch}}
 .tbl .tbl-empty{text-align:center;color:var(--text-muted);padding:24px}
