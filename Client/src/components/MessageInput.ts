@@ -229,6 +229,14 @@ function markGifUnavailable(gifBtn: HTMLButtonElement, reason: string): void {
   gifBtn.setAttribute("aria-label", messagingText("gif.ariaWithReason", { reason }));
 }
 
+/** File-icon + filename label for a non-image attachment chip. */
+function appendFileLabel(item: HTMLDivElement, filename: string): void {
+  const icon = createElement("div", { class: "attachment-preview-file" });
+  icon.appendChild(createIcon("file-text", 16));
+  const nameEl = createElement("span", { class: "attachment-preview-name" }, filename);
+  appendChildren(item, icon, nameEl);
+}
+
 export function createMessageInput(options: MessageInputOptions): MessageInputComponent {
   const disposable = new Disposable();
   const signal = disposable.signal;
@@ -539,11 +547,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Send is refused in handleSend() with the reason; the buttons stay
     // `disabled` (they are not focus targets the user is typing into).
     textarea.readOnly = disabled;
-    if (disabled) {
-      textarea.setAttribute("aria-disabled", "true");
-    } else {
-      textarea.removeAttribute("aria-disabled");
-    }
+    textarea.setAttribute("aria-disabled", String(disabled));
     textarea.placeholder = disabled
       ? disabledReason!
       : messagingText("composer.placeholder", { channel: options.channelName });
@@ -564,9 +568,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   function setDisabled(reason: string | null): void {
-    if (uploadErrorEl !== null && uploadErrorEl.textContent === disabledReason) {
+    if (uploadErrorEl?.textContent === disabledReason) {
       if (reason === null) clearUploadError();
-      else setText(uploadErrorEl, reason);
+      else showUploadError(reason);
     }
     disabledReason = reason;
     applyDisabledState();
@@ -659,6 +663,25 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     });
   }
 
+  /** The chip's × button; removing the chip cancels its upload, if any. */
+  function appendRemoveButton(item: HTMLDivElement, filename: string): void {
+    const removeBtn = createElement("button", {
+      class: "attachment-preview-remove",
+      "data-testid": "attachment-remove",
+      "aria-label": messagingText("attach.remove", { filename }),
+    });
+    removeBtn.appendChild(createIcon("x", 14));
+    removeBtn.addEventListener(
+      "click",
+      (e) => {
+        e.stopPropagation();
+        removePreviewItem(item);
+      },
+      { signal },
+    );
+    item.appendChild(removeBtn);
+  }
+
   async function handlePasteFile(file: File): Promise<void> {
     if (options.onUploadFile === undefined || attachmentPreviewBar === null) return;
     if (disabledReason !== null) return;
@@ -719,10 +742,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           img.replaceWith(nameEl);
         });
     } else {
-      const icon = createElement("div", { class: "attachment-preview-file" });
-      icon.appendChild(createIcon("file-text", 16));
-      const nameEl = createElement("span", { class: "attachment-preview-name" }, file.name);
-      appendChildren(item, icon, nameEl);
+      appendFileLabel(item, file.name);
     }
 
     // Loading spinner overlay
@@ -730,30 +750,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     spinner.appendChild(createIcon("loader", 16));
     item.appendChild(spinner);
 
-    const removeBtn = createElement("button", {
-      class: "attachment-preview-remove",
-      "data-testid": "attachment-remove",
-      "aria-label": messagingText("attach.remove", { filename: file.name }),
-    });
-    removeBtn.appendChild(createIcon("x", 14));
-    removeBtn.addEventListener(
-      "click",
-      (e) => {
-        e.stopPropagation();
-        removePreviewItem(item);
-      },
-      { signal },
-    );
-    item.appendChild(removeBtn);
-
+    appendRemoveButton(item, file.name);
     attachmentPreviewBar.appendChild(item);
     const uploadOwner = new Disposable();
-    const pending = {
+    const pending: (typeof pendingAttachments)[number] = {
       id: tempId,
       filename: file.name,
       previewEl: item,
-      owner: uploadOwner as Disposable | undefined,
-      uploadedAt: undefined as number | undefined,
+      owner: uploadOwner,
     };
     pendingAttachments.push(pending);
 
@@ -1228,9 +1232,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     };
   }
 
-  /** Restore a captured draft into this composer: text, reply bar and an
-   *  already-uploaded chip per attachment. Idempotent per attachment id, so a
-   *  double restore cannot duplicate a chip. */
+  /** Restore a captured draft into this (fresh) composer: text, reply bar and
+   *  a ready chip (no spinner) per still-live upload, so its id sends without
+   *  re-uploading. */
   function restoreDraft(draft: ComposerDraft): void {
     if (textarea !== null) {
       textarea.value = draft.content;
@@ -1239,45 +1243,18 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (draft.replyTo !== null) setReplyTo(draft.replyTo.messageId, draft.replyTo.username);
     const now = Date.now();
     const live = draft.attachments.filter((a) => now - a.uploadedAt < DRAFT_ATTACHMENT_TTL_MS);
-    for (const att of live) addSettledAttachment(att);
+    for (const att of live) {
+      if (attachmentPreviewBar === null) break;
+      const item = createElement("div", { class: "attachment-preview-item" });
+      appendFileLabel(item, att.filename);
+      appendRemoveButton(item, att.filename);
+      attachmentPreviewBar.classList.add("visible");
+      attachmentPreviewBar.appendChild(item);
+      pendingAttachments.push({ ...att, previewEl: item });
+    }
     if (live.length < draft.attachments.length) {
       showUploadError(messagingText("error.draftAttachmentExpired"));
     }
-  }
-
-  /** Render an already-uploaded attachment as a ready chip (no spinner), so a
-   *  restored draft can send its ids without re-uploading. */
-  function addSettledAttachment(att: ComposerDraft["attachments"][number]): void {
-    if (attachmentPreviewBar === null) return;
-    if (pendingAttachments.some((a) => a.id === att.id)) return;
-    const item = createElement("div", { class: "attachment-preview-item" });
-    const icon = createElement("div", { class: "attachment-preview-file" });
-    icon.appendChild(createIcon("file-text", 16));
-    const nameEl = createElement("span", { class: "attachment-preview-name" }, att.filename);
-    appendChildren(item, icon, nameEl);
-    const removeBtn = createElement("button", {
-      class: "attachment-preview-remove",
-      "data-testid": "attachment-remove",
-      "aria-label": messagingText("attach.remove", { filename: att.filename }),
-    });
-    removeBtn.appendChild(createIcon("x", 14));
-    removeBtn.addEventListener(
-      "click",
-      (e) => {
-        e.stopPropagation();
-        removePreviewItem(item);
-      },
-      { signal },
-    );
-    item.appendChild(removeBtn);
-    attachmentPreviewBar.classList.add("visible");
-    attachmentPreviewBar.appendChild(item);
-    pendingAttachments.push({
-      id: att.id,
-      filename: att.filename,
-      previewEl: item,
-      uploadedAt: att.uploadedAt,
-    });
   }
 
   return {
