@@ -20,13 +20,17 @@ import { findUnnamedControls } from "./support/b9-accessibility";
 // their journeys here.
 // ---------------------------------------------------------------------------
 
+// In the tab's grouped order (Motion, Readability, Chat). The playwright
+// config emulates prefers-reduced-motion: reduce, so the OS row says so.
 const ENGLISH = [
   ["Reduce Motion", "Disable animations and transitions"],
+  ["Sync with OS", "Follow your system setting. It is asking for less motion right now."],
   ["High Contrast", "Increase contrast for better readability"],
-  ["Role Colors", "Show colored usernames based on role in chat"],
-  ["Sync with OS", "Automatically enable reduced motion based on your OS accessibility settings"],
   ["Large Font", "Use larger text throughout the app for better readability"],
+  ["Role Colors", "Show colored usernames based on role in chat"],
 ] as const;
+/** The text-size readout row, which has no switch. */
+const READOUT = ["Text size", "Set in Appearance"] as const;
 
 async function expandCatalogText(page: Page): Promise<boolean> {
   return page.evaluate(async (url) => {
@@ -61,7 +65,10 @@ test.describe("B9-3 Accessibility tab text", () => {
 
   test("reads the catalog's English copy and names each switch with it", async ({ page }) => {
     await openAccessibility(page, false);
-    const rows = pane(page).locator(".setting-row");
+    const readout = pane(page).locator(".setting-readout");
+    await expect(readout.locator(".setting-label")).toHaveText(READOUT[0]);
+    await expect(readout.locator(".setting-desc")).toHaveText(READOUT[1]);
+    const rows = pane(page).locator(".setting-row:not(.setting-readout)");
     await expect(rows).toHaveCount(ENGLISH.length);
     for (const [i, [label, desc]] of ENGLISH.entries()) {
       const row = rows.nth(i);
@@ -76,9 +83,19 @@ test.describe("B9-3 Accessibility tab text", () => {
   }, testInfo) => {
     await openAccessibility(page, true);
     const root = pane(page);
-    const rows = root.locator(".setting-row");
+    const rows = root.locator(".setting-row:not(.setting-readout)");
     await expect(rows).toHaveCount(ENGLISH.length);
     expect(await findUnnamedControls(root)).toEqual([]);
+
+    const readout = root.locator(".setting-readout");
+    await readout.scrollIntoViewIfNeeded();
+    for (const [el, english] of [
+      [readout.locator(".setting-label"), READOUT[0]],
+      [readout.locator(".setting-desc"), READOUT[1]],
+    ] as const) {
+      await expect(el).toHaveText(new RegExp(`^⟦${english} .+⟧$`));
+      expect(await el.evaluate((n) => n.scrollWidth <= n.clientWidth + 1)).toBe(true);
+    }
 
     for (const [i, [label, desc]] of ENGLISH.entries()) {
       const row = rows.nth(i);

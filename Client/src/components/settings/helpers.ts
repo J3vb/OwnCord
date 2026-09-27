@@ -71,7 +71,8 @@ export function appendToggleRows(
   section: HTMLElement,
   items: ReadonlyArray<ToggleItem>,
   signal: AbortSignal,
-): void {
+): HTMLDivElement[] {
+  const rows: HTMLDivElement[] = [];
   for (const item of items) {
     const row = createElement("div", { class: "setting-row" });
     const info = createElement("div", {});
@@ -89,7 +90,9 @@ export function appendToggleRows(
     });
     appendChildren(row, info, toggle);
     section.appendChild(row);
+    rows.push(row);
   }
+  return rows;
 }
 
 // ---------------------------------------------------------------------------

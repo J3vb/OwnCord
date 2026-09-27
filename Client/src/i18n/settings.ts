@@ -37,8 +37,15 @@ export const settingsText = defineCatalog("settings", {
   "accessibility.roleColors.label": "Role Colors",
   "accessibility.roleColors.desc": "Show colored usernames based on role in chat",
   "accessibility.syncOsMotion.label": "Sync with OS",
-  "accessibility.syncOsMotion.desc":
-    "Automatically enable reduced motion based on your OS accessibility settings",
+  "accessibility.syncOsMotion.asking":
+    "Follow your system setting. It is asking for less motion right now.",
+  "accessibility.syncOsMotion.notAsking":
+    "Follow your system setting. It is not asking for less motion right now.",
+  "accessibility.group.motion": "Motion",
+  "accessibility.group.readability": "Readability",
+  "accessibility.group.chat": "Chat",
+  "accessibility.textSize.label": "Text size",
+  "accessibility.textSize.desc": "Set in Appearance",
   "accessibility.largeFont.label": "Large Font",
   "accessibility.largeFont.desc": "Use larger text throughout the app for better readability",
 
@@ -54,8 +61,11 @@ export const settingsText = defineCatalog("settings", {
   "notifications.desktop.label": "Desktop Notifications",
   "notifications.desktop.desc": "Show desktop notifications for messages",
   "notifications.permission.label": "System Notification Permission",
-  "notifications.permission.granted":
-    "Your system allows OwnCord to show notifications. The toggles below choose which ones.",
+  "notifications.permission.allowed": "Allowed",
+  "notifications.permission.blocked": "Blocked",
+  "notifications.permission.unknownState": "Unknown",
+  "notifications.permission.unavailableState": "Unavailable",
+  "notifications.blockedReason": "Blocked by your system. Allow notifications above.",
   "notifications.permission.denied":
     "Your system has blocked notifications from OwnCord, so the toggles below cannot deliver them. Allow notifications to change this.",
   "notifications.permission.allow": "Allow notifications",

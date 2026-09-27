@@ -4,6 +4,7 @@
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
 import { appendToggleRows } from "./helpers";
+import { setStatusIcon, statusIcon, type StatusKind } from "./status";
 import { listMutedChannels, unmuteChannel } from "@lib/channel-mutes";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -18,7 +19,13 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   // a browser API. A denied permission makes "Desktop Notifications" a switch
   // that cannot do anything, so the panel says so and offers the one action
   // that can change it.
-  section.appendChild(buildPermissionRow(signal));
+  const permissionRow = buildPermissionRow(signal, (blocked) => {
+    // A denied permission makes this switch unable to deliver anything: dim
+    // it and say why, but leave it operable (the choice still applies later).
+    desktopRow.classList.toggle("blocked", blocked);
+    blockedReason.hidden = !blocked;
+  });
+  section.appendChild(permissionRow);
 
   const toggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
     {
@@ -47,7 +54,14 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     },
   ];
 
-  appendToggleRows(section, toggles, signal);
+  const [desktopRow] = appendToggleRows(section, toggles, signal) as [HTMLDivElement];
+  const blockedReason = createElement(
+    "div",
+    { class: "setting-desc setting-blocked-reason" },
+    t("notifications.blockedReason"),
+  );
+  blockedReason.hidden = true;
+  desktopRow.querySelector(".setting-desc")!.after(blockedReason);
 
   section.appendChild(buildMutedChannelsSection(signal));
   return section;
@@ -66,7 +80,10 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
  * "granted") gets wording that says so instead of a granted claim, and no
  * Allow action, since asking it changes nothing.
  */
-function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
+function buildPermissionRow(
+  signal: AbortSignal,
+  onBlocked: (blocked: boolean) => void,
+): HTMLDivElement {
   const row = createElement("div", {
     class: "setting-row",
     "data-testid": "notification-permission-row",
@@ -78,7 +95,16 @@ function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
     t("notifications.permission.label"),
   );
   const desc = createElement("div", { class: "setting-desc" });
-  const actionWrap = createElement("div", {});
+  // The state as an icon and one word; the line below only says how to fix it.
+  const status = createElement("span", {
+    class: "status-pill",
+    "data-testid": "notification-permission-status",
+  });
+  const statusIconEl = statusIcon("pending");
+  const statusWord = createElement("span", {});
+  status.append(statusIconEl, statusWord);
+  status.hidden = true;
+  const actionWrap = createElement("div", { class: "setting-actions" });
   appendChildren(info, label, desc);
 
   const allow = createElement(
@@ -87,21 +113,35 @@ function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
     t("notifications.permission.allow"),
   );
   allow.hidden = true;
-  actionWrap.appendChild(allow);
+  appendChildren(actionWrap, status, allow);
   appendChildren(row, info, actionWrap);
 
-  function setState(text: string): void {
+  function setState(kind: StatusKind, word: string, text: string): void {
+    status.hidden = false;
+    setStatusIcon(statusIconEl, kind);
+    setText(statusWord, word);
     setText(desc, text);
+    desc.hidden = text === "";
+    onBlocked(kind === "crit");
   }
 
   function showGranted(): void {
-    setState(t("notifications.permission.granted"));
+    setState("ok", t("notifications.permission.allowed"), "");
     allow.hidden = true;
   }
 
   function showDenied(): void {
-    setState(t("notifications.permission.denied"));
+    setState("crit", t("notifications.permission.blocked"), t("notifications.permission.denied"));
     allow.hidden = false;
+  }
+
+  function showUnavailable(): void {
+    setState(
+      "pending",
+      t("notifications.permission.unavailableState"),
+      t("notifications.permission.unavailable"),
+    );
+    allow.hidden = true;
   }
 
   allow.addEventListener(
@@ -117,8 +157,7 @@ function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
         .catch(() => {
           // No native notifier to ask. Say the limitation instead of leaving a
           // button that can never succeed.
-          setState(t("notifications.permission.unavailable"));
-          allow.hidden = true;
+          showUnavailable();
         })
         .finally(() => {
           allow.disabled = false;
@@ -130,7 +169,11 @@ function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
   void desktop.notifier.permissionGranted().then(
     (granted) => {
       if (!desktop.notifier.readsOsPermission) {
-        setState(t("notifications.permission.unknown"));
+        setState(
+          "pending",
+          t("notifications.permission.unknownState"),
+          t("notifications.permission.unknown"),
+        );
         allow.hidden = true;
       } else if (granted) showGranted();
       else showDenied();
@@ -138,8 +181,7 @@ function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
     () => {
       // The notifier itself is absent (non-Tauri host): a real limitation,
       // not a denial, and no Allow action can fix it.
-      setState(t("notifications.permission.unavailable"));
-      allow.hidden = true;
+      showUnavailable();
     },
   );
 
