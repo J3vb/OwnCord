@@ -1,0 +1,9 @@
+# Truncating writes are banned: a crash midway destroys the old content. Store
+# files go through json_store::write_atomic (temp file, fsync, rename), whose
+# own temp-file create is the one allowed exception (CLI-05).
+disallowed-methods = [
+  { path = "std::fs::write", reason = "truncates first; write store files with json_store::write_atomic" },
+  { path = "std::fs::File::create", reason = "truncates first; write store files with json_store::write_atomic" },
+  { path = "std::fs::OpenOptions::truncate", reason = "truncates first; write store files with json_store::write_atomic" },
+  { path = "tokio::fs::write", reason = "truncates first; write store files with json_store::write_atomic" },
+]

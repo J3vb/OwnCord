@@ -307,6 +307,9 @@ alive even when its app-level ping timer is throttled. A Pong counts as
 activity for the stale sweep below; a peer that misses a Pong is disconnected,
 so a silent peer is closed within 50 seconds. A client can treat a gap of more
 than 2.5 × 25 seconds without any frame from the server as a dead connection.
+The server sends a message larger than 16 KiB as a fragmented message (RFC
+6455 continuation frames), so a Pong or Ping never waits behind one large frame
+on a slow link.
 
 ### Server Stale Client Sweep
 

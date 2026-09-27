@@ -161,6 +161,7 @@ pub fn unprotect(key: &[u8; KEY_LEN], blob: &[u8], aad: &[u8]) -> Result<Vec<u8>
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tests plant key files directly
 mod tests {
     use super::*;
 
