@@ -22,8 +22,7 @@ func isMemoryFault(rec any) bool {
 	if !ok {
 		return false
 	}
-	var rerr runtime.Error
-	if !errors.As(err, &rerr) {
+	if _, ok := errors.AsType[runtime.Error](err); !ok {
 		return false
 	}
 	return strings.Contains(err.Error(), memoryFaultMessage)

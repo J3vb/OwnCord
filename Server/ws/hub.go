@@ -253,12 +253,8 @@ func (h *Hub) Run() {
 						// supervisor restart us (fatalFn is os.Exit(1) in
 						// production; tests substitute a no-op and rely on
 						// the Stop below).
-						reason := "too many panics in 60s"
-						if hardware {
-							reason = "hardware fault"
-						}
 						slog.Error("hub: stopping and exiting for supervisor restart",
-							"reason", reason, "panic_count", panicCount)
+							"hardware_fault", hardware, "panic_count", panicCount)
 						h.Stop()
 						h.dispatchExited.Store(true)
 						if h.fatalFn != nil {
