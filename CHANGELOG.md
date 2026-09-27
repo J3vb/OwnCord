@@ -114,6 +114,7 @@ and only when it changes something a contributor or fork holder must do
 
 - **The desktop client's own log now survives long enough to explain a problem.** It used to delete itself each time it reached ten megabytes; the two previous files are now kept beside it. A crash is written to the log with a backtrace, a window that never finishes loading leaves a `frontend not ready` line after 30 seconds, and the tray icon gains **Open Log Folder** so the log is reachable even when the window is blank.
 - **The exported support bundle now carries the desktop app's own log too.** It held only the webview's log, so an update or a Linux voice problem arrived without the file that explains it. The bundle also records your OS and webview; it still makes no server call.
+- The sidebar's Invite, Audit Log and Moderation buttons wrapped unevenly onto two rows under the server name — they are now one quiet row of icon buttons beside it, each with a tooltip.
 - Settings no longer paints every action in the accent colour: routine actions (clear a cache, reset consent, clear a push-to-talk key) are now quieter secondary buttons, and **Clear All Cache & Restart** is marked as destructive in red. The empty **Debug** heading under Advanced no longer shows in release builds.
 
 ### Under the hood

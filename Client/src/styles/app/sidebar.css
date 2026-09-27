@@ -9,20 +9,21 @@
 }
 .unified-sidebar-header {
   min-height: 44px;
-  padding: 8px 14px;
+  padding: 8px 12px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 10px;
+  gap: 6px 8px;
   border-bottom: 1px solid var(--border-glow, var(--border));
   flex-shrink: 0;
 }
-/* The server name owns the first row, so Invite, Audit Log and Moderation
-   wrap onto a row under it instead of truncating the name (B9 Q13, F8). The
-   name column is the icon's next sibling; 38px is the icon plus the gap. */
+/* The name column takes its full width and never shrinks, so when the name
+   and the header actions do not fit on one row the actions wrap under it
+   instead of truncating the name (B9 Q13, F8). The column is the icon's next
+   sibling; 36px is the icon plus the gap. */
 .unified-sidebar-header > .server-icon-sm + * {
-  flex: 1 1 calc(100% - 38px);
-  min-width: 0;
+  flex: 1 0 auto;
+  max-width: calc(100% - 36px);
 }
 .unified-sidebar-header .server-info {
   display: flex;
@@ -79,22 +80,35 @@
 .sidebar-content-inner .channel-sidebar-header {
   display: none;
 }
-.sidebar-invite-btn {
-  margin-left: 38px;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--accent-primary, var(--accent));
-  color: var(--on-accent);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    background var(--transition-fast),
-    opacity var(--transition-fast);
+/* Invite, Audit Log and Moderation: one row of quiet icon buttons on the
+   header's trailing edge, beside the name or, when both do not fit, on a row
+   of their own under it. The row never splits. */
+.sidebar-header-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 2px;
+  margin-left: auto;
   flex-shrink: 0;
 }
-.sidebar-invite-btn:hover {
-  opacity: 0.85;
+.sidebar-header-action {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+}
+.sidebar-header-action:hover {
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+.sidebar-header-action[aria-current="page"] {
+  background: var(--bg-active);
+  color: var(--text-normal);
 }
 
 /* ── Channel Sidebar ── */
