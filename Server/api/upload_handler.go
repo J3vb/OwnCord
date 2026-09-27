@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -173,33 +172,6 @@ func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store Fil
 	).Post("/api/v1/uploads", handleUpload(uploads, store, limiter))
 	// File serving requires authentication for channel-level access control.
 	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
-}
-
-// uploadSlots counts each user's in-flight uploads against
-// maxConcurrentUploadsPerUser.
-type uploadSlots struct {
-	mu sync.Mutex
-	n  map[int64]int
-}
-
-func (s *uploadSlots) acquire(userID int64) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.n[userID] >= maxConcurrentUploadsPerUser {
-		return false
-	}
-	s.n[userID]++
-	return true
-}
-
-func (s *uploadSlots) release(userID int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.n[userID] <= 1 {
-		delete(s.n, userID)
-		return
-	}
-	s.n[userID]--
 }
 
 func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {

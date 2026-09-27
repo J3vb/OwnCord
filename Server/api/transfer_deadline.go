@@ -179,3 +179,37 @@ func (p progressWriter) Write(b []byte) (int, error) {
 // Unwrap keeps http.NewResponseController able to reach the underlying
 // connection through this wrapper.
 func (p progressWriter) Unwrap() http.ResponseWriter { return p.ResponseWriter }
+
+// uploadSlots counts each user's in-flight uploads against
+// maxConcurrentUploadsPerUser. It bounds one member's reserved headroom to
+// that many times the per-file cap, which the 30 s whole-request timeout used
+// to bound implicitly. It lives here, next to the transfer-deadline machinery
+// it guards, to keep upload_handler.go under the file-size invariant.
+type uploadSlots struct {
+	mu syncutil.Mutex
+	n  map[int64]int
+}
+
+// acquire takes a slot for userID, reporting false when the per-user cap is
+// already reached. Callers must release the slot on every path.
+func (s *uploadSlots) acquire(userID int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.n[userID] >= maxConcurrentUploadsPerUser {
+		return false
+	}
+	s.n[userID]++
+	return true
+}
+
+// release returns userID's slot, dropping the map entry at zero so the map
+// does not grow one entry per uploader for the process lifetime.
+func (s *uploadSlots) release(userID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.n[userID] <= 1 {
+		delete(s.n, userID)
+		return
+	}
+	s.n[userID]--
+}
