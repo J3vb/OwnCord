@@ -117,30 +117,30 @@ function fmtLocal(s,fmt){if(!s)return'';const d=utcDate(s);if(isNaN(d.getTime())
 function actionBadge(a){if(!a)return'badge-muted';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'badge-red';if(a.includes('create'))return'badge-green';if(a.includes('update'))return'badge-yellow';return'badge-accent'}
 function actionColor(a){if(!a)return'var(--accent)';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'var(--text-danger)';if(a.includes('create'))return'var(--text-positive)';if(a.includes('update'))return'var(--text-warning)';return'var(--accent)'}
 /* Audit actions in plain words: the verb phrase that follows the actor's
-   name, written for the target the server records with it. A user, channel
-   or role target follows as its own noun; any other target only adds its
-   number, so the phrase names the object. The raw code stays in each row's
-   tooltip, in the action filter's values and in Copy page and Export CSV; an
-   action missing here reads as its code with spaces. */
+   name. A phrase that acts on the entry's target ends in {t}, which
+   auditTarget always fills; any other phrase names its own object, and a
+   numbered target only adds its number. The raw code stays in
+   each row's tooltip, in the action filter's values and in Copy page and
+   Export CSV; an action missing here reads as its code with spaces. */
 const ACTION_LABEL={
   user_login:'signed in',user_logout:'signed out',ws_connect:'connected',login_blocked_banned:'tried to sign in while banned',
   user_register:'joined the server',profile_update:'updated their profile',password_change:'changed their password',
   identity_key_update:'changed their encryption key',totp_enabled:'turned on two-factor sign-in',totp_disabled:'turned off two-factor sign-in',
   totp_verified:'confirmed two-factor sign-in',recovery_codes_regenerated:'made new recovery codes',recovery_kit_issued:'created a recovery kit',
   recovery_kit_locked:'locked a recovery kit',recovery_kit_used:'recovered their account with a recovery kit',
-  recovery_assist_issued:'issued account recovery for',recovery_assist_used:'recovered their account with help from an owner',
+  recovery_assist_issued:'issued account recovery for {t}',recovery_assist_used:'recovered their account with help from an owner',
   account_deleted:'deleted an account',account_erasure_replayed:'replayed an account erasure',
-  session_revoke:'signed out a session',session_revoke_all:'signed out all their sessions',force_logout:'signed out',
-  user_ban:'banned',user_unban:'unbanned',user_kick:'kicked',user_timeout:'timed out',user_untimeout:'ended the timeout of',user_warn:'warned',
-  user_warning_acknowledged:'withdrew the warning of',mod_action:'took a moderation action on',
-  voice_mod_mute:'changed the server mute of',voice_mod_deafen:'changed the server deafen of',voice_mod_move:'moved',voice_mod_kick:'disconnected',
-  message_delete:'deleted a message',message_purge:'purged messages in',message_pin:'pinned a message',
+  session_revoke:'signed out a session',session_revoke_all:'signed out all their sessions',force_logout:'signed out {t}',
+  user_ban:'banned {t}',user_unban:'unbanned {t}',user_kick:'kicked {t}',user_timeout:'timed out {t}',user_untimeout:'ended the timeout of {t}',user_warn:'warned {t}',
+  user_warning_acknowledged:'withdrew the warning of {t}',mod_action:'took a moderation action on {t}',
+  voice_mod_mute:'changed the server mute of {t}',voice_mod_deafen:'changed the server deafen of {t}',voice_mod_move:'moved {t}',voice_mod_kick:'disconnected {t}',
+  message_delete:'deleted a message',message_purge:'purged messages in {t}',message_pin:'pinned a message',
   appeal_submit:'appealed a moderation action',appeal_withdraw:'withdrew an appeal',appeal_assign:'took an appeal',appeal_decide:'decided an appeal',
-  registration_approve:'approved the registration of',registration_deny:'denied the registration of',invite_create:'created an invite',invite_revoke:'revoked an invite',
-  channel_create:'created',channel_update:'edited',channel_delete:'deleted',channel_perms_update:'changed role access to',channel_perms_clear:'reset role access to',
-  channel_user_perms_update:'changed member access to',channel_user_perms_clear:'reset member access to',channel_retention_change:'changed message retention for',
-  role_create:'created',role_update:'edited',role_delete:'deleted',role_reorder:'reordered the roles',role_change:'changed the role of',
-  permission_explain:'checked the permissions of',permission_preview:'previewed permissions for',emoji_create:'added an emoji',emoji_delete:'removed an emoji',
+  registration_approve:'approved the registration of {t}',registration_deny:'denied the registration of {t}',invite_create:'created an invite',invite_revoke:'revoked an invite',
+  channel_create:'created {t}',channel_update:'edited {t}',channel_delete:'deleted {t}',channel_perms_update:'changed role access to {t}',channel_perms_clear:'reset role access to {t}',
+  channel_user_perms_update:'changed member access to {t}',channel_user_perms_clear:'reset member access to {t}',channel_retention_change:'changed message retention for {t}',
+  role_create:'created {t}',role_update:'edited {t}',role_delete:'deleted {t}',role_reorder:'reordered the roles',role_change:'changed the role of {t}',
+  permission_explain:'checked the permissions of {t}',permission_preview:'previewed permissions for {t}',emoji_create:'added an emoji',emoji_delete:'removed an emoji',
   setting_change:'changed a server setting',settings_change:'changed the server settings',registration_mode_change:'changed who can join',
   retention_policy_change:'changed the message retention policy',config_write:'wrote config.yaml',server_setup:'set up the server',
   backup_create:'took a backup',backup_delete:'deleted a backup',backup_restore:'restored a backup',
@@ -148,21 +148,25 @@ const ACTION_LABEL={
   api_token_create:'created an API token',api_token_revoke:'revoked an API token',support_bundle_create:'created a support bundle',
   plugin_install:'installed a plugin',plugin_uninstall:'uninstalled a plugin',
 };
-function actionLabel(a){return ACTION_LABEL[a]||String(a||'').replace(/_/g,' ')}
-/* Who or what an entry acted on, in words; empty when the sentence already
-   says it (no numbered target, or the actor acting on their own account). A
-   channel the Channels page has loaded reads by name. */
+/* What an entry acted on, in words, never empty: an erased account keeps
+   only its token, and a channel the Channels page has loaded reads by name. */
 function auditTarget(e){
   const t=e.target_type||'',id=e.target_id;
-  if(!id||(t==='user'&&id===e.actor_id))return'';
+  if(t==='user'){if(id&&id===e.actor_id)return'themselves';if(!id)return e.subject_token?'an erased account':'a member'}
   const ch=t==='channel'&&state.channelCache[id];
   if(ch&&ch.name)return'#'+ch.name;
-  return(t==='user'||t==='channel'||t==='role'?t+' ':'')+'#'+id;
+  if(!t)return'something';
+  const noun=t.replace(/_/g,' ');
+  return id?noun+' #'+id:t==='server'?'the server':'a '+noun;
 }
 /* One entry as a sentence: actor, action, target. HTML-escaped. */
 function auditSentence(e){
-  const target=auditTarget(e);
-  return'<strong>'+esc(e.actor_name||e.actor_id)+'</strong> <span class="audit-verb">'+esc(actionLabel(e.action))+'</span>'+(target?' <strong>'+esc(target)+'</strong>':'');
+  const actor=e.actor_name||(e.actor_token?'An erased account':e.actor_id?'user #'+e.actor_id:'The server');
+  const numbered=!!e.target_id&&!(e.target_type==='user'&&e.target_id===e.actor_id);
+  const label=ACTION_LABEL[e.action]||String(e.action||'').replace(/_/g,' ')+(numbered?' {t}':'');
+  const takesTarget=label.endsWith(' {t}');
+  const obj=takesTarget?auditTarget(e):numbered?'#'+e.target_id:'';
+  return'<strong>'+esc(actor)+'</strong> <span class="audit-verb">'+esc(takesTarget?label.slice(0,-4):label)+'</span>'+(obj?' <strong>'+esc(obj)+'</strong>':'');
 }
 /* Sign-in and connection rows, hidden by default behind the audit log's
    Sign-ins filter. */

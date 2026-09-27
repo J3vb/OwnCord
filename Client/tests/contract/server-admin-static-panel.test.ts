@@ -29,6 +29,8 @@ window.__test = {
   renderUsers: renderUsers,
   renderAudit: renderAudit,
   renderDashboard: renderDashboard,
+  auditSentence: auditSentence,
+  actionLabels: ACTION_LABEL,
   renderTokens: renderTokens,
   openRoleModal: openRoleModal,
   renderRetention: renderRetention,
@@ -68,6 +70,8 @@ interface Bridge {
   renderUsers: () => Promise<string>;
   renderAudit: () => Promise<string>;
   renderDashboard: () => Promise<string>;
+  auditSentence: (e: any) => string;
+  actionLabels: Record<string, string>;
   renderTokens: () => Promise<string>;
   openRoleModal: (id: number | null) => void;
   renderRetention: () => Promise<string>;
@@ -601,7 +605,7 @@ describe("Server/admin/static — panel behaviour", () => {
   // self-target, a target without an id and a numbered object must all leave
   // a complete sentence.
   it("reads every recorded target shape as a complete sentence", async () => {
-    const rowsIn: [string, string, number, number?][] = [
+    const rowsIn: [string, string, number, string?][] = [
       ["session_revoke_all", "user", 1],
       ["setting_change", "setting", 0],
       ["registration_mode_change", "setting", 0],
@@ -621,18 +625,20 @@ describe("Server/admin/static — panel behaviour", () => {
       ["plugin_install", "plugin", 0],
       ["voice_mod_kick", "user", 9],
       ["backup_create", "server", 0],
+      ["user_ban", "user", 0, "tok"],
     ];
     const respond: Responder = (p) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?"))
         return {
-          json: rowsIn.map(([action, target_type, target_id], i) => ({
+          json: rowsIn.map(([action, target_type, target_id, subject_token], i) => ({
             id: rowsIn.length - i,
             action,
             actor_id: 1,
             actor_name: "owner",
             target_type,
             target_id,
+            subject_token,
             detail: "",
             created_at: "2020-01-02 10:00:00",
           })),
@@ -668,7 +674,60 @@ describe("Server/admin/static — panel behaviour", () => {
       "owner installed a plugin",
       "owner disconnected user #9",
       "owner took a backup",
+      "owner banned an erased account",
     ]);
+  });
+
+  // No row may end on a dangling word, whatever target the server records:
+  // an id of 0, an erased account, the actor themselves, a setting or the
+  // server. Nor may an actor without a user row read as a bare number.
+  it("completes every action's sentence for every target and actor shape", async () => {
+    const booted = await boot([], (p) =>
+      p === "/setup/status" ? { json: { needs_setup: false } } : { json: {} },
+    );
+    dom = booted.dom;
+    const { bridge } = booted;
+    const div = booted.dom.window.document.createElement("div");
+    const text = (e: object) => {
+      div.innerHTML = bridge.auditSentence(e);
+      return div.textContent!;
+    };
+    const shapes = [
+      { target_type: "user", target_id: 0 },
+      { target_type: "user", target_id: 0, subject_token: "tok" },
+      { target_type: "user", target_id: 1 },
+      { target_type: "channel", target_id: 0 },
+      { target_type: "role", target_id: 0 },
+      { target_type: "setting", target_id: 0 },
+      { target_type: "server", target_id: 0 },
+      { target_type: "", target_id: 0 },
+    ];
+    const codes = Object.keys(bridge.actionLabels);
+    expect(codes.length).toBeGreaterThan(50);
+    for (const action of codes) {
+      const label = bridge.actionLabels[action]!;
+      for (const shape of shapes) {
+        const sentence = text({ action, actor_id: 1, actor_name: "owner", ...shape });
+        expect(sentence, action).not.toMatch(/[{}]|\b(of|to|for|on|with|from|at|by)$/);
+        if (label.endsWith(" {t}"))
+          expect(sentence, action).not.toBe(`owner ${label.slice(0, -4)}`);
+      }
+    }
+
+    const backup = { action: "backup_create", target_type: "server", target_id: 0 };
+    expect(text({ ...backup, actor_id: 0, actor_name: "" })).toBe("The server took a backup");
+    expect(
+      text({
+        action: "identity_key_update",
+        actor_id: 0,
+        actor_name: "",
+        actor_token: "tok",
+        target_type: "user",
+        target_id: 0,
+        subject_token: "tok",
+      }),
+    ).toBe("An erased account changed their encryption key");
+    expect(text({ ...backup, actor_id: 9, actor_name: "" })).toBe("user #9 took a backup");
   });
 
   // Every client connection writes user_login and ws_connect, so the
