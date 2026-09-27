@@ -195,6 +195,18 @@ describe("Server/admin/static — attention panel (RI-07)", () => {
     expect(counts).toContain("2 not measured");
     expect(panel.querySelector("#healthChecks")?.hasAttribute("open")).toBe(false);
 
+    // A warning stays active when its signal turns unknown, so the checks
+    // still open.
+    report = {
+      ...REPORT,
+      signals: REPORT.signals.map((g) => (g.status === "ok" ? g : { ...g, status: "unknown" })),
+    };
+    panel = render(dom, await booted.bridge.renderDashboard());
+    expect(panel.querySelector(".attn-problems")?.textContent).toBe(
+      "1 problem needs your attention",
+    );
+    expect(panel.querySelector("#healthChecks")?.hasAttribute("open")).toBe(true);
+
     report = {
       ...REPORT,
       warnings: [],

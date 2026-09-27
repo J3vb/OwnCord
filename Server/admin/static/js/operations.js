@@ -76,7 +76,7 @@ async function downloadSupportBundle(){
    and is never drawn or counted as healthy.
    The dashboard answers "is anything wrong?" first: one headline, a card per
    active warning, and every signal in a disclosure that starts open only when
-   one is a warning or critical; unknown alone shows as a grey "not measured"
+   a warning is active or a signal is a warning or critical; unknown alone shows as a grey "not measured"
    chip. The disclosures never touch the #section hash. */
 const ATTN_STATUS={ok:['badge-green','Healthy'],warning:['badge-yellow','Warning'],critical:['badge-red','Critical'],unknown:['badge-muted','Unknown']};
 function attnBadge(s){const b=ATTN_STATUS[s]||ATTN_STATUS.unknown;return'<span class="badge '+b[0]+'">'+b[1]+'</span>'}
@@ -108,7 +108,7 @@ function attnSignalText(g){
   const more=g.status!=='ok'&&g.value&&g.detail?g.detail:'';
   return{val,more,title:[g.value,g.threshold,g.detail].filter(Boolean).join(' · ')};
 }
-function renderChecks(signals,counts){
+function renderChecks(signals,counts,active){
   const jobs=signals.filter(g=>String(g.id).startsWith('job:')),services=signals.filter(g=>!String(g.id).startsWith('job:'));
   const sum=[plural(signals.length,'check','checks')];
   if(counts.critical)sum.push(counts.critical+' critical');
@@ -134,7 +134,7 @@ function renderChecks(signals,counts){
       +disclosure(statusIcon(attnWorst(jc))+'<span class="lbl">'+plural(jobs.length,'maintenance job','maintenance jobs')+'</span><span class="val">'+jobState+'</span>',list+'</ul>',jc.critical+jc.warning>0,'check-jobs');
   }
   body+='</div>';
-  return'<details class="section-card checks disclose" id="healthChecks"'+(counts.critical+counts.warning?' open':'')+'><summary class="section-card-header">'+I.chevronRight+'<h3>All health checks</h3><span class="checks-sum">'+sum.join(' · ')+'</span></summary>'+body+'</details>';
+  return'<details class="section-card checks disclose" id="healthChecks"'+(counts.critical+counts.warning||active.length?' open':'')+'><summary class="section-card-header">'+I.chevronRight+'<h3>All health checks</h3><span class="checks-sum">'+sum.join(' · ')+'</span></summary>'+body+'</details>';
 }
 /* The headline, the active and recently recovered warnings (#attentionPanel),
    and the all-checks disclosure, returned apart so the dashboard can put the
@@ -156,7 +156,7 @@ function renderAttention(rep){
   active.forEach(w=>{head+=attnWarningCard(w)});
   if(recovered.length)head+=disclosure('Recently recovered ('+recovered.length+')',recovered.map(attnWarningCard).join(''),false,'attn-recovered');
   head+='</section>';
-  return{head,checks:signals.length?renderChecks(signals,counts):''};
+  return{head,checks:signals.length?renderChecks(signals,counts,active):''};
 }
 
 /* ═══ Dashboard ═══ */
