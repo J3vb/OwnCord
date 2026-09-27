@@ -1,5 +1,5 @@
 {
-  "nextId": 482,
+  "nextId": 483,
   "findings": [
     {
       "id": "OC-0001",
@@ -11137,6 +11137,29 @@
       "lens": "perf",
       "finder": "a8-ci-qa",
       "note": "Observed once, on a busy shared CI runner; to be re-measured in RE-05. No budget changes."
+    },
+    {
+      "id": "OC-0482",
+      "title": "Linux native voice: unmuting after a full LiveKit reconnect made while muted leaves the mic silent — NativeSession.mic kept the pre-restart publication whose track the SDK detached",
+      "file": "Client/src-tauri/src/native_voice/session.rs",
+      "line": 529,
+      "severity": "medium",
+      "why": "On an engine restart (full reconnect, not a resume) livekit 0.9.1's handle_restarted unpublishes every local track, which detaches it from the old LocalTrackPublication (set_track(None)), and republishes the same track under a new publication. NativeSession stored the microphone's publication, so after the restart its mute()/unmute() skipped the track (they act only if track() is Some) and only notified the SFU for a sid it no longer had. The republish copies the track's muted state, so a mic muted before the restart stayed disabled: the user's UI and the server's voice_state showed them unmuted while every peer heard silence, until they left and rejoined. The camera and screen slots already follow LocalTrackRepublished; the mic did not.",
+      "repro": "Linux desktop, native voice: join a voice channel and mute. Force a full reconnect (drop the network long enough for resume to fail, suspend and resume, or restart the LiveKit node). Unmute: the OS mic indicator comes on, but peers hear nothing and LiveKit keeps the new mic publication announced as muted.",
+      "evidence": "session.rs stored `mic: Option<LocalTrackPublication>` and called publication.mute()/unmute() in set_microphone; livekit 0.9.1 room/mod.rs handle_restarted (unpublish then publish of the same track, LocalTrackRepublished), participant/local_participant.rs unpublish_track (publication.set_track(None)), publication/local.rs mute/unmute (track toggled only if present), publication/mod.rs set_track (re-binds the track's mute callbacks to the new publication).",
+      "suggestedFix": "Store the LocalAudioTrack (the same Arc across the republish) and mute/unmute through it; unpublish by track.sid() in close().",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-09-27",
+      "hunt": "bug-09-targeted-2026-09-27",
+      "lens": "voice-media",
+      "finder": "a9-hunt",
+      "fix": {
+        "commit": "b384d35d",
+        "test": "none (native session needs a LiveKit engine restart; CI builds and tests the crate)",
+        "revertProof": "n/a"
+      },
+      "note": "Hunt finding F1. Its sibling F2 (native adapter never degrades Secured on a remote decrypt failure) is OC-0473, fixed by #1858. Not driven live: the validation host cannot build the native voice stack."
     }
   ]
 }

@@ -79,11 +79,11 @@ baselines and scorecards.
 
 | Status    |   Count |
 | --------- | ------: |
-| Fixed     |     470 |
+| Fixed     |     471 |
 | Open      |       3 |
 | Declined  |       7 |
 | Duplicate |       1 |
-| **Total** | **481** |
+| **Total** | **482** |
 
 As of 2026-09-27 the three open findings are `OC-0476`, `OC-0478` and
 `OC-0481` (all low, none B9-tagged); `OC-0473` is fixed by #1858 and `OC-0474` by #1865; `OC-0454` is declined by owner decision
