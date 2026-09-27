@@ -17,7 +17,7 @@ describe("rnnoise-worklet", () => {
         _inputRing: Float32Array;
         _outBuffer: Float32Array;
         _heapF32: Float32Array | null;
-        _instance: { exports: { rnnoise_process_frame: ReturnType<typeof vi.fn> } } | null;
+        _process: ReturnType<typeof vi.fn> | null;
       })
     | null;
 
@@ -60,11 +60,7 @@ describe("rnnoise-worklet", () => {
 
     expect(processorCtor).not.toBeNull();
     const processor = new processorCtor!();
-    processor._instance = {
-      exports: {
-        rnnoise_process_frame: vi.fn(),
-      },
-    };
+    processor._process = vi.fn();
     processor._heapF32 = new Float32Array(960);
     processor._state = 1;
     processor._inputPtr = 0;
@@ -77,7 +73,31 @@ describe("rnnoise-worklet", () => {
 
     processor._processFrame();
 
+    expect(processor._process).toHaveBeenCalledTimes(1);
     expect(processor._outReadPos).toBe(4);
     expect(processor._outSampleOffset).toBe(0);
+  });
+
+  it("initializes the shipped minified RNNoise WASM through the name section", async () => {
+    // @ts-expect-error — worklet script has no module exports
+    await import("../../public/rnnoise-worklet.js");
+    const { readFileSync } = await import("node:fs");
+    const wasmBytes = readFileSync("public/rnnoise.wasm");
+
+    expect(processorCtor).not.toBeNull();
+    const processor = new processorCtor!() as unknown as {
+      _initWasm(bytes: ArrayBuffer): Promise<void>;
+      _ready: boolean;
+      _process: unknown;
+    };
+    const port = (processor as unknown as { port: { postMessage: ReturnType<typeof vi.fn> } }).port;
+
+    await processor._initWasm(wasmBytes.buffer.slice(0) as ArrayBuffer);
+
+    // The shipped artifact exports minified Emscripten names (c..k); a ready
+    // processor proves the resolver recovered rnnoise_* / malloc / free.
+    expect(port.postMessage).toHaveBeenCalledWith({ type: "ready" });
+    expect(processor._ready).toBe(true);
+    expect(typeof processor._process).toBe("function");
   });
 });

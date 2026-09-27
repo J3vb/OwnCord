@@ -6,16 +6,168 @@
 // =============================================================================
 
 const FRAME_SIZE = 480;
-const WASM_MEMORY_INITIAL_PAGES = 256;
 const OUTPUT_RING_CAPACITY = 50;
 const RN_NOISE_INT16_SCALE = 32768;
+
+// The C API the worklet calls. A build that exports these names directly
+// resolves by identity; the shipped @jitsi/rnnoise-wasm build minifies every
+// export to a one-letter name (`d`..`k`), so resolveExportNames below recovers
+// the mapping from the WASM name section (authoritative) or the Emscripten
+// wrapper's known table (fallback). Either way the worklet gets real function
+// references instead of failing the old literal export-name check.
+const REQUIRED_EXPORTS = [
+  "rnnoise_create",
+  "rnnoise_destroy",
+  "rnnoise_process_frame",
+  "malloc",
+  "free",
+];
+
+// Exports in @jitsi/rnnoise-wasm/dist/rnnoise.js's `Module["asm"]` table, e.g.
+// `_rnnoise_create = Module["asm"]["f"]`. Used only when the WASM has no name
+// section, which the shipped artifact in fact carries.
+const EMSCRIPTEN_MINIFIED_EXPORT_MAP = {
+  __wasm_call_ctors: "d",
+  rnnoise_init: "e",
+  rnnoise_create: "f",
+  malloc: "g",
+  rnnoise_destroy: "h",
+  free: "i",
+  rnnoise_process_frame: "j",
+};
+
+/**
+ * Reads the WASM name section (custom section "name", subsection 1) and returns
+ * a map of export name → canonical function name, e.g. `{ f: "rnnoise_create" }`.
+ * Returns an empty map when the section is absent or malformed.
+ * @param {Uint8Array} bytes - Raw WASM module bytes
+ * @returns {Map<string, string>}
+ */
+function parseNamedExports(bytes) {
+  const result = new Map();
+  try {
+    const cursor = { pos: 8 }; // magic (4) + version (4)
+    const readVarUint = () => {
+      let value = 0;
+      let shift = 0;
+      let byte;
+      do {
+        byte = bytes[cursor.pos++];
+        value |= (byte & 0x7f) << shift;
+        shift += 7;
+      } while (byte & 0x80);
+      return value >>> 0;
+    };
+    const readName = () => {
+      const length = readVarUint();
+      const name = new TextDecoder().decode(bytes.subarray(cursor.pos, cursor.pos + length));
+      cursor.pos += length;
+      return name;
+    };
+
+    const funcNames = new Map(); // function index -> canonical name
+    const funcExport = new Map(); // function index -> export name
+
+    while (cursor.pos < bytes.length) {
+      const sectionId = bytes[cursor.pos++];
+      const sectionSize = readVarUint();
+      const sectionEnd = cursor.pos + sectionSize;
+      if (sectionId === 7) {
+        const count = readVarUint();
+        for (let i = 0; i < count; i++) {
+          const exportName = readName();
+          const kind = bytes[cursor.pos++];
+          const index = readVarUint();
+          if (kind === 0) funcExport.set(index, exportName);
+        }
+      } else if (sectionId === 0) {
+        const customName = readName();
+        if (customName === "name") {
+          while (cursor.pos < sectionEnd) {
+            const subsectionId = bytes[cursor.pos++];
+            const subsectionSize = readVarUint();
+            const subsectionEnd = cursor.pos + subsectionSize;
+            if (subsectionId === 1) {
+              const count = readVarUint();
+              for (let i = 0; i < count; i++) {
+                const index = readVarUint();
+                funcNames.set(index, readName());
+              }
+            }
+            cursor.pos = subsectionEnd;
+          }
+        }
+      }
+      cursor.pos = sectionEnd;
+    }
+
+    for (const [index, canonical] of funcNames) {
+      const exportName = funcExport.get(index);
+      if (exportName !== undefined) result.set(exportName, canonical);
+    }
+  } catch {
+    // A truncated or hand-crafted module simply yields no mapping; the
+    // identity and minified-table fallbacks below still apply.
+  }
+  return result;
+}
+
+/**
+ * Resolves each required canonical export name to the name the module actually
+ * exports. Order: identity (already canonical), the name-section mapping, then
+ * the known Emscripten minified table.
+ * @param {Uint8Array} bytes - Raw WASM module bytes
+ * @param {Array<{name: string, kind: string}>} moduleExports - WebAssembly.Module.exports()
+ * @returns {Record<string, string>}
+ */
+function resolveExportNames(bytes, moduleExports) {
+  const present = new Set(moduleExports.map((entry) => entry.name));
+  const named = parseNamedExports(bytes);
+  const resolved = {};
+  const candidates = [...REQUIRED_EXPORTS, "__wasm_call_ctors"];
+
+  for (const canonical of candidates) {
+    if (present.has(canonical)) {
+      resolved[canonical] = canonical;
+      continue;
+    }
+    for (const [exportName, name] of named) {
+      if (name === canonical && present.has(exportName)) {
+        resolved[canonical] = exportName;
+        break;
+      }
+    }
+    if (resolved[canonical] === undefined) {
+      const minified = EMSCRIPTEN_MINIFIED_EXPORT_MAP[canonical];
+      if (minified !== undefined && present.has(minified)) resolved[canonical] = minified;
+    }
+  }
+
+  for (const entry of moduleExports) {
+    if (entry.kind === "memory") {
+      resolved.memory = entry.name;
+      break;
+    }
+  }
+  return resolved;
+}
 
 class RNNoiseProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
 
-    /** @type {WebAssembly.Instance | null} */
-    this._instance = null;
+    /** @type {boolean} */
+    this._initialized = false;
+    /** @type {(() => number) | null} */
+    this._create = null;
+    /** @type {((state: number) => void) | null} */
+    this._destroy = null;
+    /** @type {((state: number, out: number, inp: number) => number) | null} */
+    this._process = null;
+    /** @type {((bytes: number) => number) | null} */
+    this._malloc = null;
+    /** @type {((ptr: number) => void) | null} */
+    this._free = null;
     /** @type {number} */
     this._state = 0;
     /** @type {number} */
@@ -68,60 +220,74 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
   async _initWasm(wasmBytes) {
     let allocated = false;
     try {
-      // Basic validation: check for expected exports
       const module = await WebAssembly.compile(wasmBytes);
-      const expectedExports = [
-        "rnnoise_create",
-        "rnnoise_destroy",
-        "rnnoise_process_frame",
-        "malloc",
-        "free",
-      ];
-      const availableExports = WebAssembly.Module.exports(module).map((exp) => exp.name);
+      const moduleExports = WebAssembly.Module.exports(module);
+      const names = resolveExportNames(new Uint8Array(wasmBytes), moduleExports);
 
-      const hasRequiredExports = expectedExports.every((exp) => availableExports.includes(exp));
-      if (!hasRequiredExports) {
-        throw new Error("WASM module missing required RNNoise exports");
+      const missing = REQUIRED_EXPORTS.filter((name) => names[name] === undefined);
+      if (missing.length > 0) {
+        throw new Error(`WASM module missing required RNNoise exports: ${missing.join(", ")}`);
+      }
+      if (names.memory === undefined) {
+        throw new Error("WASM module missing its memory export");
       }
 
-      const memory = new WebAssembly.Memory({ initial: WASM_MEMORY_INITIAL_PAGES });
+      // The module exports its own memory and imports only the two Emscripten
+      // runtime helpers (resize-heap and memcpy) — it is not a WASI module, so
+      // the old wasi_snapshot_preview1 stubs never matched. Both helpers run
+      // only after instantiation, so they can read the memory captured below.
+      let memory = null;
       const importObject = {
-        env: {
-          memory,
-          emscripten_notify_memory_growth: () => {
-            this._heapF32 = new Float32Array(memory.buffer);
+        a: {
+          a: (requestedSize) => {
+            const extraPages = Math.ceil((requestedSize - memory.buffer.byteLength) / 65536);
+            if (extraPages <= 0) return true;
+            try {
+              memory.grow(extraPages);
+              this._heapF32 = new Float32Array(memory.buffer);
+              return true;
+            } catch {
+              return false;
+            }
           },
-        },
-        wasi_snapshot_preview1: {
-          proc_exit: () => {},
-          fd_close: () => 0,
-          fd_write: () => 0,
-          fd_seek: () => 0,
+          b: (dest, src, num) => {
+            new Uint8Array(memory.buffer).copyWithin(dest, src, src + num);
+          },
         },
       };
 
-      // Try instantiating with the raw WASM bytes
       const { instance } = await WebAssembly.instantiate(wasmBytes, importObject);
-      this._instance = instance;
-      this._heapF32 = new Float32Array(memory.buffer);
-
-      // Call RNNoise C API
       const exports = instance.exports;
-      this._state = exports.rnnoise_create();
-      this._inputPtr = exports.malloc(FRAME_SIZE * 4);
-      this._outputPtr = exports.malloc(FRAME_SIZE * 4);
+      memory = exports[names.memory];
+      this._heapF32 = new Float32Array(memory.buffer);
+      this._create = exports[names.rnnoise_create];
+      this._destroy = exports[names.rnnoise_destroy];
+      this._process = exports[names.rnnoise_process_frame];
+      this._malloc = exports[names.malloc];
+      this._free = exports[names.free];
+      this._initialized = true;
+
+      // Emscripten runs __wasm_call_ctors before any exported C function; the
+      // RNNoise globals malloc reads during rnnoise_create are only initialized
+      // here. The Emscripten wrapper does this on instantiation.
+      if (names.__wasm_call_ctors !== undefined) {
+        exports[names.__wasm_call_ctors]();
+      }
+
+      this._state = this._create();
+      this._inputPtr = this._malloc(FRAME_SIZE * 4);
+      this._outputPtr = this._malloc(FRAME_SIZE * 4);
       allocated = true;
 
       this._ready = true;
       this.port.postMessage({ type: "ready" });
     } catch (err) {
       // Cleanup allocated memory on failure
-      if (allocated && this._instance) {
+      if (allocated) {
         try {
-          const exports = this._instance.exports;
-          if (this._inputPtr) exports.free(this._inputPtr);
-          if (this._outputPtr) exports.free(this._outputPtr);
-          if (this._state) exports.rnnoise_destroy(this._state);
+          if (this._inputPtr && this._free) this._free(this._inputPtr);
+          if (this._outputPtr && this._free) this._free(this._outputPtr);
+          if (this._state && this._destroy) this._destroy(this._state);
         } catch (cleanupErr) {
           // Log cleanup errors but don't override original error
           console.warn("Failed to cleanup WASM memory:", cleanupErr);
@@ -141,8 +307,7 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
    * @private
    */
   _processFrame() {
-    if (!this._instance || !this._heapF32) return;
-    const exports = this._instance.exports;
+    if (!this._process || !this._heapF32) return;
 
     const inOff = this._inputPtr / 4;
     const outOff = this._outputPtr / 4;
@@ -157,7 +322,7 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
       this._heapF32[inOff + i] = this._inputRing[i] * RN_NOISE_INT16_SCALE;
     }
 
-    exports.rnnoise_process_frame(this._state, this._outputPtr, this._inputPtr);
+    this._process(this._state, this._outputPtr, this._inputPtr);
 
     // Write to contiguous buffer
     const writeStart = this._outWritePos * FRAME_SIZE;
@@ -180,12 +345,11 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
    * @private
    */
   _cleanup() {
-    if (this._instance && this._state) {
+    if (this._initialized && this._state && this._destroy && this._free) {
       try {
-        const exports = this._instance.exports;
-        exports.rnnoise_destroy(this._state);
-        exports.free(this._inputPtr);
-        exports.free(this._outputPtr);
+        this._destroy(this._state);
+        this._free(this._inputPtr);
+        this._free(this._outputPtr);
       } catch (err) {
         console.warn("RNNoise cleanup failed:", err);
         // Continue cleanup even if individual steps fail
