@@ -422,7 +422,7 @@ describe("MessageInput", () => {
     Object.defineProperty(fileInput, "files", { value: [testFile], writable: true });
     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
     await vi.waitFor(() => {
-      expect(onUploadFile).toHaveBeenCalledWith(testFile);
+      expect(onUploadFile).toHaveBeenCalledWith(testFile, expect.any(AbortSignal));
     });
     // Wait for the upload to fully settle so the send is not blocked by the
     // uploads-in-flight guard instead of the empty-content one.
@@ -487,7 +487,7 @@ describe("MessageInput", () => {
     Object.defineProperty(fileInput, "files", { value: [testFile], writable: true });
     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
     await vi.waitFor(() => {
-      expect(onUploadFile).toHaveBeenCalledWith(testFile);
+      expect(onUploadFile).toHaveBeenCalledWith(testFile, expect.any(AbortSignal));
     });
     const previewBar = container.querySelector(".attachment-preview-bar");
     await vi.waitFor(() => {
@@ -649,7 +649,7 @@ describe("MessageInput", () => {
 
     // Wait for the async upload to complete
     await vi.waitFor(() => {
-      expect(onUploadFile).toHaveBeenCalledWith(testFile);
+      expect(onUploadFile).toHaveBeenCalledWith(testFile, expect.any(AbortSignal));
     });
 
     // Preview bar should be visible
@@ -776,6 +776,114 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  // SRV-05 (client): removing an in-flight attachment must abort its upload
+  // and free Send immediately, instead of leaving a doomed request running
+  // and the composer blocked on it.
+  it("aborts an in-flight upload when its preview is removed", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const onUploadFile = vi.fn(
+      (_file: File, signal?: AbortSignal) =>
+        new Promise<{ id: string; url: string; filename: string }>((_resolve, reject) => {
+          capturedSignal = signal;
+          signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        }),
+    );
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const file = new File(["data"], "big.pdf", { type: "application/pdf" });
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledOnce());
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal!.aborted).toBe(false);
+
+    (container.querySelector("[data-testid='attachment-remove']") as HTMLButtonElement).click();
+
+    // The request is cancelled and its preview is gone.
+    expect(capturedSignal!.aborted).toBe(true);
+    expect(container.querySelector(".attachment-preview-item")).toBeNull();
+
+    // Send must be free immediately: an empty-edit send is refused for being
+    // empty, not for uploads still pending.
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "hello";
+    (container.querySelector(".send-btn") as HTMLButtonElement).click();
+    expect(opts.onSend).toHaveBeenCalledWith("hello", null, []);
+
+    comp.destroy?.();
+  });
+
+  it("removing a finished upload keeps Send blocked on a later in-flight one", async () => {
+    const onUploadFile = vi
+      .fn<
+        (file: File, signal?: AbortSignal) => Promise<{ id: string; url: string; filename: string }>
+      >()
+      .mockResolvedValueOnce({ id: "srv-a", url: "/a", filename: "a.pdf" })
+      .mockImplementationOnce(() => new Promise(() => {}));
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const attach = (name: string): void => {
+      Object.defineProperty(fileInput, "files", {
+        value: [new File(["data"], name, { type: "application/pdf" })],
+        configurable: true,
+      });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+
+    attach("a.pdf");
+    await vi.waitFor(() =>
+      expect(container.querySelector(".attachment-preview-item.uploading")).toBeNull(),
+    );
+    (container.querySelector("[data-testid='attachment-remove']") as HTMLButtonElement).click();
+
+    attach("b.pdf");
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(2));
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "hello";
+    (container.querySelector(".send-btn") as HTMLButtonElement).click();
+    expect(opts.onSend).not.toHaveBeenCalled();
+    expect(container.querySelector(".attachment-preview-item")).not.toBeNull();
+
+    comp.destroy?.();
+  });
+
+  it("shows no error when an upload is aborted by the user", async () => {
+    const onUploadFile = vi.fn(
+      (_file: File, signal?: AbortSignal) =>
+        new Promise<{ id: string; url: string; filename: string }>((_resolve, reject) => {
+          signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        }),
+    );
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const file = new File(["data"], "big.pdf", { type: "application/pdf" });
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledOnce());
+    (container.querySelector("[data-testid='attachment-remove']") as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 10));
+
+    // A deliberate cancel is not a failure: no refusal line.
+    expect(container.querySelector(".attachment-upload-error")).toBeNull();
+
+    comp.destroy?.();
+  });
+
   it("shows upload error when onUploadFile rejects", async () => {
     const onUploadFile = vi.fn(async () => {
       throw new Error("Server exploded");
@@ -897,7 +1005,7 @@ describe("MessageInput", () => {
     // Wait for the upload to resolve — the entry's id is now the server id,
     // not the tempId the remove button was created with.
     await vi.waitFor(() => {
-      expect(onUploadFile).toHaveBeenCalledWith(testFile);
+      expect(onUploadFile).toHaveBeenCalledWith(testFile, expect.any(AbortSignal));
     });
     const previewBar = container.querySelector(".attachment-preview-bar");
     await vi.waitFor(() => {
@@ -1299,7 +1407,7 @@ describe("MessageInput", () => {
     textarea.dispatchEvent(pasteEvent);
 
     await vi.waitFor(() => {
-      expect(onUploadFile).toHaveBeenCalledWith(file);
+      expect(onUploadFile).toHaveBeenCalledWith(file, expect.any(AbortSignal));
     });
 
     comp.destroy?.();

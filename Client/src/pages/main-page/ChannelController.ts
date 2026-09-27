@@ -837,11 +837,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => {
         performSend(content, replyTo, attachments);
       },
-      onUploadFile: async (file: File) => {
+      onUploadFile: async (file: File, uploadSignal?: AbortSignal) => {
         try {
-          const result = await api.uploadFile(file);
+          const result = await api.uploadFile(file, uploadSignal);
           return { id: result.id, url: result.url, filename: result.filename };
         } catch (err) {
+          // A user-cancelled upload is not a failure — the composer already
+          // removed its preview and does not want an error for it.
+          if (uploadSignal?.aborted) throw err;
           log.error("File upload failed", { error: String(err) });
           showToast(messagingText("toast.uploadFailed"), "error");
           throw err;

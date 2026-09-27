@@ -36,7 +36,10 @@ export interface MessageInputOptions {
     replyTo: number | null,
     attachments: readonly string[],
   ) => void;
-  readonly onUploadFile?: (file: File) => Promise<{ id: string; url: string; filename: string }>;
+  readonly onUploadFile?: (
+    file: File,
+    signal?: AbortSignal,
+  ) => Promise<{ id: string; url: string; filename: string }>;
   readonly onTyping: () => void;
   readonly onEditMessage: (messageId: number, content: string) => void;
   /** Initial disabled reason (e.g. read-only / no-permission / offline). */
@@ -233,11 +236,18 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** Index of the ":" the open emoji popup is completing; -1 when closed. */
   let emojiStart = -1;
 
-  /** Pending attachment IDs to send with the next message. */
-  const pendingAttachments: { id: string; filename: string; readonly previewEl: HTMLDivElement }[] =
-    [];
-  /** Count of file uploads currently in flight. */
-  let pendingUploadCount = 0;
+  /** Pending attachment IDs to send with the next message. `owner` is set
+   *  exactly while the upload is in flight, so it alone is what blocks Send:
+   *  destroying it cancels that upload when the user removes the preview, and
+   *  it is detached once the upload succeeds. A `Disposable` rather than a raw
+   *  AbortController keeps the upload token in the lifecycle primitives,
+   *  matching MessageList's per-row owner. */
+  const pendingAttachments: {
+    id: string;
+    filename: string;
+    readonly previewEl: HTMLDivElement;
+    owner?: Disposable;
+  }[] = [];
   /** References to picker close functions, set by mount() for destroy() to call. */
   let cleanupPickers: (() => void) | null = null;
   /** Timer IDs for cleanup on destroy. */
@@ -537,7 +547,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
 
     // Block send while uploads are still in flight
-    if (pendingUploadCount > 0) {
+    if (pendingAttachments.some((a) => a.owner)) {
       showUploadError(messagingText("error.uploadsPending"));
       return;
     }
@@ -573,6 +583,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const idx = pendingAttachments.findIndex((a) => a.previewEl === el);
     const att = idx !== -1 ? pendingAttachments[idx] : undefined;
     if (att !== undefined) {
+      // SRV-05: removing an in-flight attachment cancels its upload and frees
+      // Send immediately, instead of leaving a doomed request running and the
+      // composer blocked on it until the request settles.
+      att.owner?.destroy();
       const img = att.previewEl.querySelector("img");
       if (img !== null && img.src.startsWith("blob:")) {
         URL.revokeObjectURL(img.src);
@@ -684,30 +698,34 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     item.appendChild(removeBtn);
 
     attachmentPreviewBar.appendChild(item);
-    pendingAttachments.push({ id: tempId, filename: file.name, previewEl: item });
+    const uploadOwner = new Disposable();
+    const pending = {
+      id: tempId,
+      filename: file.name,
+      previewEl: item,
+      owner: uploadOwner as Disposable | undefined,
+    };
+    pendingAttachments.push(pending);
 
     // Upload in background
-    pendingUploadCount++;
     try {
-      const result = await options.onUploadFile(file);
-      // Replace temp ID with real server ID (immutable update)
-      const attIdx = pendingAttachments.findIndex((a) => a.id === tempId);
-      if (attIdx !== -1) {
-        pendingAttachments[attIdx] = {
-          ...pendingAttachments[attIdx]!,
-          id: result.id,
-          filename: result.filename,
-        };
+      const result = await options.onUploadFile(file, uploadOwner.signal);
+      // Replace temp ID with real server ID, unless the preview was removed
+      if (!uploadOwner.signal.aborted) {
+        pending.id = result.id;
+        pending.filename = result.filename;
+        pending.owner = undefined;
         item.classList.remove("uploading");
         spinner.remove();
       }
     } catch (err) {
+      // A user-cancelled upload (removed preview) is not a failure: the
+      // preview is already gone and there is nothing to report.
+      if (uploadOwner.signal.aborted) return;
       // Upload failed — remove preview and show error
       removePreviewItem(item);
       const errMsg = err instanceof Error ? err.message : messagingText("error.uploadFailed");
       showUploadError(messagingText("error.uploadFailedDetail", { detail: errMsg }));
-    } finally {
-      pendingUploadCount--;
     }
   }
 
@@ -1114,6 +1132,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Clear all pending timers
     for (const t of activeTimers) clearTimeout(t);
     activeTimers.clear();
+    // SRV-05: a channel switch or unmount must not leave an upload running
+    // against a composer that no longer exists.
+    for (const att of pendingAttachments) att.owner?.destroy();
     disposable.destroy();
     // Image previews now use data: URLs (via readFileAsDataUrl) which don't
     // require revocation — just clear the array and let GC reclaim them.
