@@ -127,8 +127,29 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page, adminS
     await expect(page.locator("#adminShell")).toBeVisible({ timeout: 10_000 });
 
     await navigate(page, "Audit Log");
-    await expect(page.locator(".badge", { hasText: "channel_create" }).first()).toBeVisible();
-    await expect(page.locator(".badge", { hasText: "channel_update" }).first()).toBeVisible();
+    // Each row reads as a sentence; the raw action code stays in its tooltip.
+    const created = page.locator('tr.audit-row[data-audit-action="channel_create"]').first();
+    await expect(created).toBeVisible();
+    await expect(created.locator(".audit-what")).toContainText("created");
+    await expect(created).toHaveAttribute("title", "channel_create");
+    await expect(
+      page.locator('tr.audit-row[data-audit-action="channel_update"]').first(),
+    ).toContainText("edited");
+
+    // Sign-in and connection rows are hidden until the Sign-ins chip is on.
+    const signins = page.locator("#auditSignins");
+    await expect(signins).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator('tr.audit-row[data-audit-action="ws_connect"]')).toHaveCount(0);
+    await expect(page.locator('tr.audit-row[data-audit-action="user_login"]')).toHaveCount(0);
+    await signins.click();
+    await expect(signins).toHaveAttribute("aria-pressed", "true");
+    await expect(created).toBeVisible();
+
+    expect(await findUnnamedControls(page.locator("#content"))).toEqual([]);
+    expect(await keyboardReachable(page, signins)).toBe(true);
+    expect((await focusIndicator(page)).problems).toEqual([]);
+    const { ratio } = await textContrast(created.locator(".audit-time"));
+    expect(ratio).toBeGreaterThanOrEqual(Q1.text);
   });
 
   await test.step("support preview requires confirmation and downloads the exact reviewed archive", async () => {
@@ -162,7 +183,9 @@ test("admin setup, channel CRUD, audit and login journey", async ({ page, adminS
       expect(createHash("sha256").update(bytes).digest("hex")).toBe(preview.sha256);
       await expect(page.locator("#support-preview")).toHaveCount(0);
       await navigate(page, "Audit Log");
-      await expect(page.locator(".badge", { hasText: "support_bundle_create" })).toBeVisible();
+      await expect(
+        page.locator('tr.audit-row[data-audit-action="support_bundle_create"]'),
+      ).toContainText("created a support bundle");
     } finally {
       page.off("download", onDownload);
     }

@@ -636,7 +636,7 @@ describe("Server/admin/static — panel behaviour", () => {
     booted.bridge.state.section = "audit";
     booted.bridge.state.auditPage = 2;
     doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
-    expect(doc.querySelectorAll("#auditTbody tr")).toHaveLength(50);
+    expect(doc.querySelectorAll("#auditTbody tr.audit-row")).toHaveLength(50);
 
     const search = doc.querySelector<HTMLInputElement>(".filter-search")!;
     expect(search.maxLength).toBe(100);
@@ -649,8 +649,8 @@ describe("Server/admin/static — panel behaviour", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 350));
 
     const fetched = calls.find((c) => c.path.startsWith("/audit-log?"))?.path;
-    expect(fetched).toBe("/audit-log?limit=51&offset=0&q=needle%20%26%20co");
-    const rows = doc.querySelectorAll("#auditTbody tr");
+    expect(fetched).toBe("/audit-log?limit=51&offset=0&q=needle%20%26%20co&hide_signins=1");
+    const rows = doc.querySelectorAll("#auditTbody tr.audit-row");
     expect(rows).toHaveLength(1);
     expect(rows[0]!.textContent).toContain("removed #needle & co");
     expect(doc.querySelector(".pagination-info")!.textContent).toBe("Page 1 · 1 matching entry");
@@ -672,7 +672,109 @@ describe("Server/admin/static — panel behaviour", () => {
     select.dispatchEvent(new window.Event("change", { bubbles: true }));
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=0&q=needle%20%26%20co&action=channel_delete",
+      "/audit-log?limit=51&offset=0&q=needle%20%26%20co&action=channel_delete&hide_signins=1",
+    );
+  });
+
+  // UX clarity: each row reads as a sentence with the raw code kept in its
+  // tooltip, rows sit under day headings, and sign-in and connection rows are
+  // hidden on the server until the Sign-ins chip is pressed or the action
+  // filter names one of them.
+  it("reads audit rows as sentences and hides sign-ins until asked", async () => {
+    const calls: FetchCall[] = [];
+    const now = new Date().toISOString();
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/audit-log?")) {
+        return {
+          json: [
+            {
+              id: 3,
+              action: "channel_delete",
+              actor_id: 1,
+              actor_name: "owner",
+              target_type: "channel",
+              target_id: 7,
+              detail: "",
+              created_at: now,
+            },
+            {
+              id: 2,
+              action: "profile_update",
+              actor_id: 1,
+              actor_name: "owner",
+              target_type: "user",
+              target_id: 1,
+              detail: "",
+              created_at: "2020-01-02 10:00:00",
+            },
+            {
+              id: 1,
+              action: "made_up_thing",
+              actor_id: 2,
+              actor_name: "bob",
+              target_type: "server",
+              target_id: 0,
+              detail: "",
+              created_at: "2020-01-02 09:00:00",
+            },
+          ],
+          headers: { "X-Audit-Actions": '["channel_delete","user_login"]' },
+        };
+      }
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { window } = booted.dom;
+    const doc = window.document;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+    booted.bridge.state.section = "audit";
+    doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=51&offset=0&hide_signins=1",
+    );
+
+    const rows = [...doc.querySelectorAll("#auditTbody tr.audit-row")];
+    expect(rows.map((r) => r.querySelector(".audit-what")!.textContent)).toEqual([
+      "owner deleted channel #7",
+      "owner updated their profile",
+      "bob made up thing",
+    ]);
+    expect(rows.map((r) => r.getAttribute("title"))).toEqual([
+      "channel_delete",
+      "profile_update",
+      "made_up_thing",
+    ]);
+    const days = [...doc.querySelectorAll("#auditTbody tr.audit-day")].map((r) => r.textContent);
+    expect(days).toHaveLength(2);
+    expect(days[0]).toBe("Today");
+
+    const chip = doc.querySelector<HTMLButtonElement>("#auditSignins")!;
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+    calls.length = 0;
+    chip.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=51&offset=0",
+    );
+
+    // Filtering on a sign-in action shows it even with the chip off.
+    chip.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    calls.length = 0;
+    const select = doc.querySelector<HTMLSelectElement>("#auditAction")!;
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "All Actions",
+      "Channel delete",
+      "User login",
+    ]);
+    select.value = "user_login";
+    select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=51&offset=0&action=user_login",
     );
   });
 
@@ -714,7 +816,7 @@ describe("Server/admin/static — panel behaviour", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toContain("offset=50");
     expect(booted.bridge.state.auditPage).toBe(2);
-    expect(doc.querySelectorAll("#auditTbody tr")).toHaveLength(50);
+    expect(doc.querySelectorAll("#auditTbody tr.audit-row")).toHaveLength(50);
   });
 
   // A failed search used to leave the old query's rows on screen; and a page
@@ -755,7 +857,7 @@ describe("Server/admin/static — panel behaviour", () => {
     doc.querySelector<HTMLButtonElement>('[data-action="turnAuditPage"][data-args="[1]"]')!.click();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=50&q=foo",
+      "/audit-log?limit=51&offset=50&q=foo&hide_signins=1",
     );
 
     fail = true;
@@ -772,7 +874,7 @@ describe("Server/admin/static — panel behaviour", () => {
     doc.querySelector<HTMLButtonElement>('#auditResults [data-action="reloadAudit"]')!.click();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=0&q=foo&action=channel_delete",
+      "/audit-log?limit=51&offset=0&q=foo&action=channel_delete&hide_signins=1",
     );
   });
 
