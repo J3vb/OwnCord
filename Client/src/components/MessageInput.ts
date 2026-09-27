@@ -48,6 +48,8 @@ export type MessageInputComponent = MountableComponent & {
   clearReply(): void;
   startEdit(messageId: number, content: string): void;
   cancelEdit(): void;
+  /** True when the composer holds no text, reply, edit or attachment. */
+  isIdle(): boolean;
   /**
    * Disable the composer with a visible reason (permission / connection), or
    * pass null to re-enable. Permission is expressed as affordance: a send that
@@ -743,6 +745,15 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
   }
 
+  function isIdle(): boolean {
+    return (
+      (textarea?.value ?? "") === "" &&
+      state.replyTo === null &&
+      state.editing === null &&
+      pendingAttachments.length === 0
+    );
+  }
+
   function mount(container: Element): void {
     root = createElement("div", { class: "message-input-wrap", "data-testid": "message-input" });
 
@@ -1129,6 +1140,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     clearReply,
     startEdit,
     cancelEdit,
+    isIdle,
     setDisabled,
     openFilePicker,
   };

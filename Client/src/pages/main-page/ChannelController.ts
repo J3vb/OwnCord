@@ -211,7 +211,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
    *  after onEditMessage returns) would otherwise wipe the restored text. */
   function restoreEdit(channelId: number, messageId: number, content: string): void {
     queueMicrotask(() => {
-      if (currentChannelId === channelId) messageInput?.startEdit(messageId, content);
+      if (currentChannelId === channelId && messageInput?.isIdle() === true) {
+        messageInput.startEdit(messageId, content);
+      }
     });
   }
   function clearSendTimer(id: string): void {
