@@ -16,6 +16,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/updater"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 func TestRestartCoordinator_RequestIdempotent(t *testing.T) {
@@ -343,5 +344,29 @@ func TestRun_RestartRequest_DrainsCleanly(t *testing.T) {
 		t.Errorf("port still held after drain: %v", err)
 	} else {
 		_ = relisten.Close()
+	}
+}
+
+// TestRestartCoordinator_NoticeReason pins what the hub's restart notice tells
+// clients (CLI-02): the intent of a requested restart, taken from the admin
+// handoff's reason, and a plain shutdown for a stop from outside the server.
+func TestRestartCoordinator_NoticeReason(t *testing.T) {
+	if got := NewRestartCoordinator(time.Hour, nil).noticeReason(); got != ws.RestartReasonShutdown {
+		t.Errorf("no restart requested: notice reason = %q, want %q", got, ws.RestartReasonShutdown)
+	}
+	for requested, want := range map[string]ws.RestartReason{
+		"update":                        ws.RestartReasonUpdate,
+		"setup_wizard":                  ws.RestartReasonSetup,
+		"backup_restore":                ws.RestartReasonBackupRestore,
+		"backup_restore_close_failed":   ws.RestartReasonBackupRestore,
+		"backup_restore_cutoff_failed":  ws.RestartReasonBackupRestore,
+		"something the handoff invents": ws.RestartReasonShutdown,
+	} {
+		rc := NewRestartCoordinator(time.Hour, nil)
+		rc.Request(requested)
+		if got := rc.noticeReason(); got != want {
+			t.Errorf("Request(%q): notice reason = %q, want %q", requested, got, want)
+		}
+		rc.Disarm()
 	}
 }

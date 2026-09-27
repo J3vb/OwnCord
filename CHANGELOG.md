@@ -47,6 +47,55 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Login & connection
+
+- A server update, backup restore or restart no longer signs everyone out — the desktop client counts down, reconnects on its own and returns to the channel it was in. Voice calls still end when the server actually stops.
+- A dead connection (a dropped network or a sleeping laptop) could stay open on the server for up to two minutes, so the user still showed online — the server now pings each connection every 25 seconds and closes one that stops answering within about 50 seconds.
+- **A half-open connection no longer stays "connected" forever.** When the network path drops silently — a firewall change, a lost Wi-Fi hop — the client used to keep showing Connected while sends vanished. It now treats a minute without any server frame as a dead link, shows Reconnecting and dials again.
+- **Saved servers, logins and trusted certificates survive a crash mid-save.** The desktop client rewrote its settings files in place, so a crash or power cut at the wrong moment could leave one torn, and the next start silently treated it as empty. Saves now replace the file atomically. A file that still cannot be read is copied aside as `<name>.corrupt-<time>` and logged; for the trusted-certificate and voice identity pins the client then refuses to connect or verify instead of trusting whatever it sees, until the damaged file is removed from the app data folder and the client restarted. A file the client cannot read or copy aside is left untouched rather than overwritten.
+- An admin with the Logs tab open no longer stalls a restart for 30 seconds and cuts the restart notice and the audit flush short — the log stream now ends as shutdown begins, and each shutdown step has its own budget: up to 30 seconds for the HTTP drain and 10 seconds for every other step.
+
+### Messages
+
+- **Half-written messages are no longer lost when you switch channels.** Each channel keeps its own draft — the text, the reply you had selected and any files you had staged — and restores it when you come back. And when the connection drops or slow mode gates the composer, the textarea is locked rather than disabled, so your caret stays exactly where you left it, and pressing Send says why it is blocked. An unfinished edit is not kept, and a file staged more than about 50 minutes ago must be attached again.
+- **Error toasts no longer vanish before you can read them.** Errors used to disappear after five seconds and could not be closed; they now stay until you dismiss them, with a close button. Any toast pauses its countdown while you hover or focus it, and repeated identical toasts show as one with a count instead of stacking.
+- Message Requests showed the wrong time for anyone not on UTC — the request's time was read as the viewer's local time instead of the server's instant, so it was off by their UTC offset.
+- **Editing or deleting a message no longer claims success while offline.** Both used to show a "Message deleted" / "Message edited" toast the moment they were sent, so a moderator acting during a blip could think a message was gone when the frame had been dropped. Success is now confirmed by the server's echo; a dropped frame reports one error, and an edit's text is put back in an empty composer so it can be sent again. The delete button is disabled, with the reason shown, while the connection is down.
+
+### Messages & files
+
+- **Large attachments no longer fail on a slow connection.** Uploads and
+  downloads used to be cut after 30 seconds no matter how steadily they were
+  moving, so a 25 MB file on a 1 Mbit/s uplink was lost mid-transfer and a
+  download stopped without an error. The server now keeps a transfer alive
+  while it is making progress and gives up on one that has stalled; any
+  single transfer is still closed after 10 minutes.
+- **Removing an attachment that is still uploading now cancels it.** The ×
+  only hid the preview while the upload kept running, and Send stayed blocked
+  until it finished or failed. The upload is now stopped, Send is available at
+  once, and no error is shown for it.
+
+### Voice
+
+- Linux desktop voice works against a server on the same Docker host again — the client tried LiveKit's Docker-internal hostname, which does not resolve outside the container network, and now uses the same rule as the other platforms: only a loopback `ws:`/`http:` address is used directly, anything else goes through the `/livekit` tunnel.
+- Linux desktop voice joins remote servers older than v2.0.0-beta.1. Those servers dropped the voice sign-in the Linux client sent, so the join failed; the client now sends it the way Windows and macOS do.
+- The server no longer hands clients LiveKit's internal address — it sends LiveKit's own address only when that address is loopback, so an older Linux client on the Docker host also gets voice through the `/livekit` tunnel.
+- On Linux desktop, a call kept showing "Secured" when another participant's audio could not be decrypted — that participant was just silent. The indicator now drops after a few seconds, as it already did on Windows and macOS.
+- Switching microphones while muted (or with push-to-talk released) no longer starts audio processing on the muted mic — it kept running until you unmuted. Enhanced Noise Suppression now also turns on at your first unmute after joining muted or with push-to-talk.
+- Joining or reconnecting to voice with a chosen microphone no longer opens the system default first — for a moment you were transmitting from the wrong mic. The chosen one is now the only one opened.
+- On Linux desktop, unmuting after a connection drop that happened while you were muted left your mic silent until you rejoined — peers heard nothing although you showed as unmuted. Unmuting now works after such a reconnect.
+
+### Accounts & admin
+
+- The admin panel's nav badges (pending registrations, active warnings, an available update) loaded only at sign-in, so a warning raised later went unseen until a re-login — they now refresh whenever you come back to the tab.
+- The admin panel's update and restore dialogs could be dismissed (Escape, a click outside, Close) while the update or restore was already running, leaving no sign of the restart in progress — they now stay open until the server is back, or until the request fails.
+- The admin audit log's Export CSV could hand a spreadsheet a formula — a cell such as a username starting with `=`, `+`, `-` or `@` now gets a leading `'` so it opens as text.
+
+### Desktop app
+
+- **The desktop client's own log now survives long enough to explain a problem.** It used to delete itself each time it reached ten megabytes; the two previous files are now kept beside it. A crash is written to the log with a backtrace, a window that never finishes loading leaves a `frontend not ready` line after 30 seconds, and the tray icon gains **Open Log Folder** so the log is reachable even when the window is blank.
+- **The exported support bundle now carries the desktop app's own log too.** It held only the webview's log, so an update or a Linux voice problem arrived without the file that explains it. The bundle also records your OS and webview; it still makes no server call.
+
 ### Under the hood
 
 - Release notes are now written for users. The tag's `CHANGELOG.md` section

@@ -440,9 +440,10 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, c *Client, channelID int6
 			}
 			return false
 		}
-		// Send both proxy path and direct URL. The client uses direct_url
-		// when on localhost (avoids self-signed TLS issues with WebView
-		// fetch) and falls back to the /livekit proxy for remote clients.
+		// Send the proxy path and, when loopback, the direct URL (see
+		// buildVoiceToken). The client uses direct_url when on localhost
+		// (avoids self-signed TLS issues with WebView fetch) and falls back
+		// to the /livekit proxy otherwise.
 		// NOTE: E2EE keys are no longer server-generated. Clients exchange
 		// keys via ECDH (voice_e2ee_announce / voice_e2ee_offer messages).
 		// C-2: Include is_key_holder so the client knows whether to initiate

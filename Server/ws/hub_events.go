@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync/atomic"
 
+	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/plugin"
 )
 
@@ -375,7 +376,10 @@ func wrapWithSeq(msg []byte, seq uint64) []byte {
 	// Fast path: inject seq after the opening brace.
 	// e.g., {"type":"chat_message",...} → {"seq":123,"type":"chat_message",...}
 	// Guard: msg must be a non-empty JSON object (starts with '{' and has content).
-	if len(msg) < 2 || msg[0] != '{' {
+	// Frames above config.MaxMessageBytes pass through unsequenced, like a
+	// non-object frame: every server-built envelope is far smaller, and the
+	// bound keeps the capacity arithmetic below provably overflow-free.
+	if len(msg) < 2 || len(msg) > config.MaxMessageBytes || msg[0] != '{' {
 		return msg
 	}
 	// `{"seq":` + up-to-20-digit uint64 + `,` = at most 28 extra bytes; the

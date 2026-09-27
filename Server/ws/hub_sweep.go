@@ -12,9 +12,11 @@ import (
 )
 
 // staleClientTimeout is the maximum duration a client can go without sending
-// any message before being considered stale and disconnected. The client sends
-// a ping every 30s, so 90s (3x) gives plenty of margin.
-const staleClientTimeout = 90 * time.Second
+// any message or answering a protocol Ping before being considered stale and
+// disconnected. pingPump refreshes activity on every Pong (25s) and closes a
+// peer that misses one itself, so this sweep is the backstop; the app-level
+// ping (every 30s) keeps old peers covered too.
+var staleClientTimeout = 90 * time.Second
 
 // onStaleTick runs the cheap in-memory maintenance driven by the stale ticker.
 func (h *Hub) onStaleTick() {

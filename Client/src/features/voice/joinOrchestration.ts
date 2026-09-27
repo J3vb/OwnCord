@@ -378,24 +378,16 @@ export class JoinOrchestration {
         localRoom.startAudio().catch(() => {
           log.debug("Optimistic startAudio failed — waiting for user gesture");
         });
-        await this.restoreLocalVoiceState("join");
-
-        // Checkpoint 3: after restoreLocalVoiceState (mic acquisition can be slow).
-        // Cast to SessionState to escape TS control-flow narrowing that incorrectly
-        // assumes _state is still "connecting" (it was set to "connected" above, but
-        // TS cannot see through the setState() opaque method call).
-        if (!this.isStateConnected(channelId, localRoom)) {
-          log.info("connectAndSetup: superseded after restoreLocalVoiceState — aborting", {
-            channelId,
-          });
-          this.disconnectSupersededLocalRoom(localRoom);
-          return "superseded";
-        }
-
+        // RT-6: point capture at the saved input BEFORE the mic is first
+        // enabled. With no mic track yet this only records the capture
+        // constraint (native: the backend's capture device), so the join opens
+        // the saved mic once instead of publishing on the default and then
+        // switching. Non-exact, so a saved mic that is gone degrades to the
+        // default rather than failing the publish into listen-only.
         const savedInput = loadPref<string>("audioInputDevice", "");
         if (savedInput) {
           try {
-            await localRoom.switchActiveDevice("audioinput", savedInput);
+            await localRoom.switchActiveDevice("audioinput", savedInput, false);
           } catch (err) {
             log.warn("Saved input device unavailable, using default", err);
           }
@@ -404,6 +396,20 @@ export class JoinOrchestration {
         // Checkpoint 4: after audioinput switchActiveDevice.
         if (!this.isStateConnected(channelId, localRoom)) {
           log.info("connectAndSetup: superseded after audioinput switch — aborting", {
+            channelId,
+          });
+          this.disconnectSupersededLocalRoom(localRoom);
+          return "superseded";
+        }
+
+        await this.restoreLocalVoiceState("join");
+
+        // Checkpoint 3: after restoreLocalVoiceState (mic acquisition can be slow).
+        // Cast to SessionState to escape TS control-flow narrowing that incorrectly
+        // assumes _state is still "connecting" (it was set to "connected" above, but
+        // TS cannot see through the setState() opaque method call).
+        if (!this.isStateConnected(channelId, localRoom)) {
+          log.info("connectAndSetup: superseded after restoreLocalVoiceState — aborting", {
             channelId,
           });
           this.disconnectSupersededLocalRoom(localRoom);

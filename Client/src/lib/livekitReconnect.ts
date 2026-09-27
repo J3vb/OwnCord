@@ -196,6 +196,25 @@ export async function attemptAutoReconnect(
       setVoiceStatus("connected");
       logIceConnectionInfo(newRoom);
       newRoom.startAudio().catch((err) => log.debug("Failed to start audio after reconnect", err));
+      // RT-6: the saved input goes in before the mic is re-captured, as on
+      // the join path (joinOrchestration), so the reconnect opens it once.
+      const savedInput = loadPref<string>("audioInputDevice", "");
+      if (savedInput) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- sequential by design: the device switch must land before the next superseded check
+          await newRoom.switchActiveDevice("audioinput", savedInput, false);
+        } catch (err) {
+          log.warn("Reconnect: saved input device unavailable, using default", err);
+        }
+      }
+      if (!deps.isStateConnected(channelId, newRoom)) {
+        log.info("Auto-reconnect: superseded after audioinput switch — aborting tail", {
+          channelId,
+        });
+        deps.disconnectSupersededLocalRoom(newRoom);
+        return;
+      }
+
       // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: must restore voice state after connect
       await deps.restoreLocalVoiceState("reconnect");
 
@@ -215,25 +234,8 @@ export async function attemptAutoReconnect(
         return;
       }
 
-      // BUG-099: Reapply saved audio devices after reconnect (matches initial join path).
-      const savedInput = loadPref<string>("audioInputDevice", "");
-      if (savedInput) {
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- sequential by design: the device switch must land before the next superseded check
-          await newRoom.switchActiveDevice("audioinput", savedInput);
-        } catch (err) {
-          log.warn("Reconnect: saved input device unavailable, using default", err);
-        }
-      }
-
-      if (!deps.isStateConnected(channelId, newRoom)) {
-        log.info("Auto-reconnect: superseded after audioinput switch — aborting tail", {
-          channelId,
-        });
-        deps.disconnectSupersededLocalRoom(newRoom);
-        return;
-      }
-
+      // BUG-099: Reapply the saved output device after reconnect (matches initial join path;
+      // the saved input went in above, before the mic was re-captured).
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput) {
         try {

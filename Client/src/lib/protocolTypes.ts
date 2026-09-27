@@ -108,3 +108,17 @@ export const MessageType = {
 } as const;
 
 export type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];
+
+// ---------------------------------------------------------------------------
+// server_restart.reason — the closed set of values
+// ---------------------------------------------------------------------------
+
+export const ServerRestartReason = {
+  UPDATE: "update", // an admin applied a server update
+  UPDATE_ABORTED: "update_aborted", // with delay_seconds 0: cancels an announced update restart
+  BACKUP_RESTORE: "backup_restore", // an admin restored a backup
+  SETUP: "setup", // the setup wizard finished
+  SHUTDOWN: "shutdown", // a stop or restart from outside the server (signal, supervisor)
+} as const;
+
+export type ServerRestartReasonValue = (typeof ServerRestartReason)[keyof typeof ServerRestartReason];

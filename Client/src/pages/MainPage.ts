@@ -553,10 +553,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     unsubscribers.push(
       ws.on("server_restart", (payload) => {
         try {
-          // A "shutdown" broadcast kicks back to the login screen (handled in
-          // the dispatcher) — no point starting a countdown on a page that is
-          // about to unmount.
-          if (banner !== null && payload.reason !== "shutdown") {
+          // Every reason counts down: the session survives the restart
+          // and ws.ts reconnects once the socket drops.
+          if (banner !== null) {
             if (payload.delay_seconds <= 0) {
               // A zero/negative delay is a cancel, not a countdown (e.g.
               // "update_aborted" correcting an earlier restart announcement

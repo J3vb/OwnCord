@@ -54,14 +54,28 @@ stateDiagram-v2
     SlowMode --> Enabled: cooldown elapsed
 ```
 
-| Composer state                                 | Presentation                                                                                                                | Reason shown                                         |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `enabled`                                      | Editable textarea, attach + pickers active                                                                                  | —                                                    |
-| `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar                                                                                         | "Only moderators can post in announcement channels." |
-| `no-permission`                                | Disabled bar                                                                                                                | "You don't have permission to send messages here."   |
-| `offline`                                      | Disabled — "Reconnecting…" while retrying, "Not connected" when disconnected                                                | connection status (README §3)                        |
-| `slow-mode`                                    | Disabled with a live countdown                                                                                              | "Slow mode: wait Ns."                                |
-| `uploading`                                    | Send disabled until uploads settle (already the `pendingUploadCount` guard in `handleSend()`, `components/MessageInput.ts`) | per-attachment spinner                               |
+| Composer state                                 | Presentation                                                                                                                                 | Reason shown                                         |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `enabled`                                      | Editable textarea, attach + pickers active                                                                                                   | —                                                    |
+| `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar                                                                                                          | "Only moderators can post in announcement channels." |
+| `no-permission`                                | Disabled bar                                                                                                                                 | "You don't have permission to send messages here."   |
+| `offline`                                      | Gated — "Reconnecting…" while retrying, "Not connected" when disconnected; the textarea uses `aria-disabled` + `readOnly` so the caret stays | connection status (README §3)                        |
+| `slow-mode`                                    | Disabled with a live countdown                                                                                                               | "Slow mode: wait Ns."                                |
+| `uploading`                                    | Send disabled until uploads settle or are removed (an in-flight upload's owner blocks `handleSend()`, `components/MessageInput.ts`)          | per-attachment spinner                               |
+
+**Per-channel drafts (UX-1).** Switching away from a channel stashes its unsent
+state — text, reply target and staged upload ids — in `ChannelController`'s
+`draftByChannel`, and restores it when the user returns; a send that consumes
+the draft leaves nothing behind. An in-progress edit is dropped, not stashed
+(restored outside edit mode it would send as a duplicate), a reply whose
+target was deleted meanwhile is dropped, and a staged upload older than
+`DRAFT_ATTACHMENT_TTL_MS` (50 min, under the server's ~1 h unlinked-attachment
+sweep) is dropped with an "attach it again" notice. Gating the composer
+(offline, slow mode, no permission) uses `aria-disabled` + `readOnly` rather
+than the `disabled` attribute, so a mid-sentence caret is never dropped to
+`<body>`; paste-to-upload and ArrowUp-to-edit are ignored while gated, and a
+refused Send shows the reason on the composer's refusal line (linked by
+`aria-describedby`, kept current as the slow-mode countdown ticks).
 
 > **✓ Implemented (2026-07).** The server sends an authoritative per-channel
 > `can_send` in the ready payload (`ws/serve.go` `channelCanSend`, mirroring
@@ -134,11 +148,17 @@ existing pending/sent row for that id and replace-in-place rather than append.
 
 ## 4. Edit / delete
 
-| Action                   | Target UX                                                                                                                                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Edit (own message)       | Inline edit in the composer (`startEdit`, `MessageInput.ts`); optimistic content swap; `chat_edited` reconciles + stamps "edited"; failure rolls back with a toast                         |
-| Delete (own / moderator) | **Two-click confirm** on the row (`createPendingDeleteManager()`, `pages/main-page/MessageController.ts`); optimistic tombstone; `chat_deleted` confirms; failure restores the row + toast |
-| Delete (no permission)   | The delete affordance is not offered on others' messages unless the user has MANAGE_MESSAGES                                                                                               |
+| Action                   | Target UX                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Edit (own message)       | Inline edit in the composer (`startEdit`, `MessageInput.ts`); the frame's envelope id is tracked (CLI-08) and resolved by the `chat_edited` echo; a refused or dropped frame shows exactly one error and puts the text back in the composer when it is empty, so no "edited" toast is claimed before delivery                                         |
+| Delete (own / moderator) | **Two-click confirm** on the row (`createPendingDeleteManager()`, `pages/main-page/MessageController.ts`); the frame's envelope id is tracked (CLI-08) and resolved by the `chat_deleted` echo; a refused or dropped frame shows one error instead of a false success, and the button is disabled with the connection reason while the socket is down |
+| Delete (no permission)   | The delete affordance is not offered on others' messages unless the user has MANAGE_MESSAGES                                                                                                                                                                                                                                                          |
+
+A frame counts as dropped when the socket leaves `connected` before its echo
+arrives; if several edits fail together, only the newest is put back. A tracked
+entry still unechoed after 90 s on a socket that stayed connected is dropped
+silently (`TRACKED_ACTION_EXPIRY_MS`, `ChannelController.ts`): the frame reached
+the server, and the echo can miss this client when it left the channel first.
 
 Deleted messages are soft-deleted (kept as a tombstone in the array, `deleted:true`)
 so surrounding context and reply references stay intact.
@@ -181,13 +201,13 @@ Usernames are inserted as text nodes — never markup.
 The composer supports file attach with client-side validation and per-item
 upload state (already thorough — `MessageInput.ts`).
 
-| State      | Presentation                                                                                                                                                                 |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| selected   | Thumbnail/chip per file                                                                                                                                                      |
-| validating | Reject oversize/disallowed type inline via `showUploadError` (the `MAX_FILE_SIZE`/`ALLOWED_TYPES` validation in `handlePasteFile()`, `components/MessageInput.ts`)           |
-| uploading  | Per-item spinner; **send disabled** until all settle (the per-item uploading preview in `handlePasteFile()` + the `handleSend()` upload guard, `components/MessageInput.ts`) |
-| uploaded   | Chip ready; ids attached to the `chat_send` payload                                                                                                                          |
-| failed     | Inline error on the chip with remove/retry                                                                                                                                   |
+| State      | Presentation                                                                                                                                                                                                                                                                             |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| selected   | Thumbnail/chip per file                                                                                                                                                                                                                                                                  |
+| validating | Reject oversize/disallowed type inline via `showUploadError` (the `MAX_FILE_SIZE`/`ALLOWED_TYPES` validation in `handlePasteFile()`, `components/MessageInput.ts`)                                                                                                                       |
+| uploading  | Per-item indeterminate spinner; **send disabled** until all settle (the per-item uploading preview in `handlePasteFile()` + the `handleSend()` upload guard, `components/MessageInput.ts`). Removing the chip (×) aborts its `POST /uploads` and frees Send at once, with no error shown |
+| uploaded   | Chip ready; ids attached to the `chat_send` payload                                                                                                                                                                                                                                      |
+| failed     | Inline error on the chip with remove/retry                                                                                                                                                                                                                                               |
 
 Upload goes through `POST /uploads` (multipart). **✓ Implemented (2026-07):**
 `uploadFile` now honors the global 401 handler like every other call — a 401

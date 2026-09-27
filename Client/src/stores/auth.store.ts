@@ -13,19 +13,16 @@ import { createLogger } from "@lib/logger";
 
 const log = createLogger("auth.store");
 
-/** Why the session ended. "user" covers every locally-initiated or
- *  invalid-token path (logout, 401, auth_error, ban); "server_shutdown" is a
- *  server-initiated kick whose token is still valid — the logout wiring keeps
- *  the saved credential in that case so auto-login works when the server
- *  comes back. */
 /**
- * Why the session ended. "protocol_epoch": the server refused this client's
+ * Why the session ended. "user" covers every locally-initiated or
+ * invalid-token path (logout, 401, auth_error, ban). A server restart is not
+ * one: it keeps the session. "protocol_epoch": the server refused this client's
  * wire epoch — the token is still valid, so main.ts keeps the stored
  * credential and the update it offers relaunches into auto-login.
  * "server_switch": the user quick-switched to another server — main.ts keeps
  * the departed server's credential so switching back resumes it (B7-13).
  */
-export type LogoutReason = "user" | "server_shutdown" | "protocol_epoch" | "server_switch";
+export type LogoutReason = "user" | "protocol_epoch" | "server_switch";
 
 export interface AuthState {
   readonly token: string | null;

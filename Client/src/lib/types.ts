@@ -5,6 +5,7 @@
 // =============================================================================
 
 import { connectText } from "../i18n/connect";
+import type { ServerRestartReasonValue } from "./protocolTypes";
 
 // -----------------------------------------------------------------------------
 // Common / Shared Types
@@ -739,7 +740,7 @@ export interface DmRequestPayload extends DmRequestListItem {
 }
 
 export interface ServerRestartPayload {
-  readonly reason: string;
+  readonly reason: ServerRestartReasonValue;
   readonly delay_seconds: number;
 }
 

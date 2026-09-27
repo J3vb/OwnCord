@@ -108,6 +108,8 @@ test.describe("B9-8 external-content consent", () => {
     expect(await brokerUrls(page)).toEqual([]);
 
     await page.keyboard.press("Enter");
+    // The dialog loads lazily; Tab before it takes focus would be lost.
+    await expect(dialog(page).getByRole("button", { name: "Cancel" })).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(dialog(page).getByRole("button", { name: "Ask each time" })).toBeFocused();
     await page.keyboard.press("Enter");

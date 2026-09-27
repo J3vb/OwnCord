@@ -485,3 +485,50 @@ test.describe("Reaction tooltip", () => {
     expect(reactionFetches).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// UX-1 — per-channel drafts survive a switch
+// ---------------------------------------------------------------------------
+
+test.describe("Composer — per-channel drafts (UX-1)", () => {
+  test.beforeEach(async ({ page }) => {
+    await bootComposer(page);
+  });
+
+  test("switching away and back restores the text and reply target", async ({ page }) => {
+    await textarea(page).fill("draft for general");
+
+    // Switch to #random, whose composer starts empty.
+    await page.locator("[data-testid='channel-2']").click();
+    await expect(textarea(page)).toHaveValue("");
+
+    // Back to #general: the draft is restored.
+    await page.locator("[data-testid='channel-1']").click();
+    await expect(textarea(page)).toHaveValue("draft for general");
+
+    // A second round trip still restores it, and each channel keeps its own.
+    await textarea(page).fill("second draft");
+    await page.locator("[data-testid='channel-2']").click();
+    await expect(textarea(page)).toHaveValue("");
+    await page.locator("[data-testid='channel-1']").click();
+    await expect(textarea(page)).toHaveValue("second draft");
+  });
+
+  test("the caret survives a reconnect that gates the composer", async ({ page }) => {
+    await textarea(page).fill("mid-sentence");
+    await textarea(page).click();
+
+    // A dropped socket gates the composer with a reason…
+    await page.evaluate(() =>
+      (window as unknown as { __tauriEmitEvent: (e: string, p: string) => void }).__tauriEmitEvent(
+        "ws-state",
+        "closed",
+      ),
+    );
+    await expect(textarea(page)).toBeDisabled();
+    // …but the textarea keeps its text and its place (aria-disabled, not
+    // disabled, so focus never falls to <body>).
+    await expect(textarea(page)).toHaveValue("mid-sentence");
+    await expect(textarea(page)).toHaveAttribute("aria-disabled", "true");
+  });
+});

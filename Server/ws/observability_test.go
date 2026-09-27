@@ -88,7 +88,7 @@ func TestDone_ClosesOnlyOnceDispatchHasExited(t *testing.T) {
 		clientEvents: make(chan clientEvent, 1),
 		broadcast:    make(chan broadcastMsg, 1),
 	}
-	h.GracefulStopContext(context.Background())
+	h.GracefulStopContext(context.Background(), RestartReasonShutdown)
 	select {
 	case <-h.Done():
 		t.Fatal("Done closed before Run ever ran")

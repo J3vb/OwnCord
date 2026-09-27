@@ -9,7 +9,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import {
   appVersion,
   artifactLogin,
@@ -71,10 +71,11 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
         return await step();
       } catch (error) {
         if (attempt > 2 || !BASELINE_SESSION_LOST.test(String(error))) throw error;
-        await info.attach(`baseline-${label}-lost-${attempt}`, {
-          body: `${String(error)}\n\n${app?.log() ?? ""}`,
-          contentType: "text/plain",
-        });
+        // Reporters drop inline text bodies, so a `body:` attachment never
+        // reaches CI. Write by path, the rule journey.spec.ts already follows.
+        const path = info.outputPath(`baseline-${label}-lost-${attempt}.log`);
+        await writeFile(path, `${String(error)}\n\n${app?.log() ?? ""}`);
+        await info.attach(`baseline-${label}-lost-${attempt}`, { path, contentType: "text/plain" });
       }
     }
   };
@@ -149,7 +150,11 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
       });
     throw error;
   } finally {
-    if (app) await info.attach("artifact-driver", { body: app.log(), contentType: "text/plain" });
+    if (app) {
+      const log = info.outputPath("artifact-driver.log");
+      await writeFile(log, app.log());
+      await info.attach("artifact-driver", { path: log, contentType: "text/plain" });
+    }
     await app?.close().catch(() => {});
     await killInstalled(binary);
     await gateway.close();

@@ -6,7 +6,11 @@
  * contract rather than an `AppUpdater` member, so a platform with a real
  * relaunch (a browser's `location.reload()`) and no updater does not have to
  * stub an updater to offer one.
+ *
+ * `reportReady` tells the native host the first page has rendered; the Rust
+ * side logs a warning when it never arrives (a blank window).
  */
 export interface AppProcess {
   relaunch(): Promise<void>;
+  reportReady(): Promise<void>;
 }

@@ -197,8 +197,8 @@ describe("auth store", () => {
 
     it("records an explicit logout reason and resets it on the next setAuth", () => {
       setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
-      clearAuth("server_shutdown");
-      expect(authStore.getState().logoutReason).toBe("server_shutdown");
+      clearAuth("server_switch");
+      expect(authStore.getState().logoutReason).toBe("server_switch");
 
       setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
       expect(authStore.getState().logoutReason).toBeUndefined();

@@ -1,4 +1,4 @@
-import { test, expect, login } from "./fixtures";
+import { test, expect } from "./fixtures";
 
 test("two users receive exactly one message across transport loss and server restart", async ({
   alice,
@@ -24,12 +24,22 @@ test("two users receive exactly one message across transport loss and server res
   await expect(alice.locator(".msg-text", { hasText: text })).toHaveCount(1);
 
   await server.stop();
-  // A deliberate shutdown signs users out; a transport interruption above
-  // resumes automatically. Assert each supported lifecycle explicitly.
-  await expect(bob.locator("#host")).toBeVisible();
+  // A server stop (systemd/Docker restart) keeps the session (Q4): each client
+  // stays on the main page, never the login form, and resumes on its own
+  // once the server is back — just like the transport interruption above.
+  await expect(bob.locator(".reconnecting-banner")).toBeVisible();
+  await expect(bob.getByTestId("app-layout")).toBeVisible();
+  await expect(bob.locator("#host")).toHaveCount(0);
   await server.restart();
-  await login(alice, server, "alice");
-  await login(bob, server, "bob");
+  for (const page of [alice, bob]) {
+    await expect(page.locator(".reconnecting-banner")).not.toHaveClass(/visible/, {
+      timeout: 60_000,
+    });
+    await expect(page.locator("#password")).toHaveCount(0);
+    await expect(
+      page.locator(".channel-item.active:not(.voice)").filter({ hasText: "general" }),
+    ).toBeVisible();
+  }
   await expect(received).toHaveCount(1);
   const channels = await server.api("/api/v1/channels/", undefined, server.owner!.token);
   const general = channels.find(

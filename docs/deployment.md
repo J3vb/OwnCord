@@ -202,6 +202,25 @@ stopped.
 
 LiveKit runs as its own container (`livekit/livekit-server:v1.13.5`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset and `voice.auto_download_livekit` false. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.
 
+### Linux desktop voice
+
+Two limits apply to Linux desktop clients:
+
+- **The server must be 2.0.0-beta.1 or later.** The Linux client's native voice
+  sends its room credential as an `Authorization` header; the server forwards it
+  through `/livekit` from 2.0.0-beta.1 on, and a `1.2.0-alpha.*` server drops it
+  and refuses the join. Update the server.
+- **A 2.0.0-beta.1 or older client on the Docker host cannot join as
+  `localhost` against a 2.0.0-beta.1 or older server.** Those servers hand the
+  client LiveKit's own address, `ws://livekit:7880`, as its `direct_url`; a
+  client that reaches the server as `localhost`, `127.0.0.1` or `::1` uses it
+  as-is, and that name does not resolve outside the container network. Update
+  the server: it now sends a `direct_url` only when it is loopback, so the
+  client routes voice through the server's `/livekit` tunnel. Updating the
+  client also fixes it, since the next client release tunnels any non-loopback
+  `direct_url`. Until then, connect using the host's LAN address or hostname
+  instead, or run the client on another machine.
+
 ---
 
 ## First Run Behavior
@@ -256,10 +275,12 @@ in its header comments. The important choices it encodes:
   applying server updates from the admin panel** — it also repairs the
   update handoff when updating from older OwnCord releases, whose spawned
   replacement gets reaped by the cgroup cleanup.
-- `TimeoutStopSec=60` — the server drains gracefully on SIGTERM with a 30s
-  budget and a worst case of ≈55s, so systemd waits 60s before SIGKILLing a
-  wedged teardown; the server's own 90s restart backstop covers non-systemd
-  supervisors.
+- `TimeoutStopSec=60` — the server drains gracefully on SIGTERM, each
+  shutdown step on its own budget — up to 30s for the HTTP drain and 10s
+  for each other step — so one step that overruns cannot starve the next,
+  and the whole teardown is capped at 50s; a normal stop takes about 5–10s,
+  so systemd's 60s is only reached by a wedged teardown, which it SIGKILLs;
+  the server's own 90s restart backstop covers non-systemd supervisors.
 - `ReadWritePaths=/opt/owncord` under `ProtectSystem=strict` — the install
   directory must stay writable or the admin panel's self-update (which
   renames the new binary into place) breaks. `ProtectSystem=strict` mounts
@@ -1353,9 +1374,20 @@ The raw client log lives per user:
 
 - **Windows:** `%LOCALAPPDATA%\com.owncord.client\logs\owncord-client.log`
 - **Linux:** the app log directory, `~/.local/share/com.owncord.client/logs/owncord-client.log`
-  on a default setup (a ten-megabyte rolling file).
+  on a default setup.
 
-Ask for the exported bundle first; it carries the log plus the diagnostic
+It rolls over at ten megabytes and keeps the two previous files beside it as
+`owncord-client_<date>.log`. The tray icon's **Open Log Folder** opens that
+directory, which is the route in when the window never came up: the log then
+says `frontend not ready` 30 seconds after start, and a crash is logged as a
+`[panic]` line with a backtrace.
+
+The desktop client keeps **two** logs, the webview's own rotating JSONL log and
+the native log above, and the exported bundle carries both;
+[Desktop client support bundle](architecture/diagnostics.md#desktop-client-support-bundle)
+lists every file it holds.
+
+Ask for the exported bundle first; it carries both logs plus the diagnostic
 sections the client can collect on its own.
 
 ## Verifying a Download
@@ -1489,9 +1521,13 @@ open a circuit breaker that skips one tick and then retries:
 
 The server handles `Ctrl+C` (SIGINT) and `SIGTERM`:
 
-1. Shuts down the ACME listener, then drains in-flight HTTP handlers
-2. Stops the hub on the same 30-second budget: sends the restart notice,
-   stops the LiveKit process and closes every WebSocket connection
+1. Shuts down the ACME listener, ends any open admin Logs stream, then
+   drains in-flight HTTP handlers; a file upload or download still in
+   progress gets up to 20 seconds to finish and is then cut, so the drain
+   stays inside the 30-second budget
+2. Stops the hub on a budget of its own: sends the restart notice, waits
+   out the notice window, closes every WebSocket connection and only then
+   stops the LiveKit process, so clients leave voice while it is still up
 3. Unregisters the signal handler, so a second `Ctrl+C` during steps 1–2 does
    not cut the drain short
 4. Joins the maintenance loop, flushes the audit queue and drains event
@@ -1507,6 +1543,13 @@ does not wait on hijacked WebSocket connections, so connected clients do not
 delay the drain — they get the restart notice immediately afterwards. The order
 is the reverse of the start sequence in `Server/internal/app/lifecycle.go`, not
 a hand-written teardown.
+
+A managed livekit-server never outlives the server, even when the server dies
+without running this sequence: on Linux the kernel kills it with its parent
+(`Pdeathsig`), and on Windows it runs in a job object that is killed when the
+server exits. On Windows, closing the server's console window stops the server
+and LiveKit together; after a self-restart in `spawn` mode, the replacement
+opens a new console window of its own.
 
 ## See Also
 

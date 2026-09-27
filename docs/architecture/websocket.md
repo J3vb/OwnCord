@@ -112,7 +112,9 @@ hub-coupled voice routines (`handleVoiceJoin`/`handleVoiceLeave`, also called
 un-throttled on disconnect and channel switch) are triggered from the applier via
 `Result.JoinVoice` / `Result.LeaveVoice` rather than re-expressed as pure events.
 
-The `Hub` also owns: stale-client sweep (30s ticker, 90s idle threshold),
+The `Hub` also owns: stale-client sweep (30s ticker, 90s idle threshold; each
+connection's protocol Ping every 25s refreshes activity and closes a peer that
+misses a Pong),
 revoked-session sweep (30s, plus
 per-connection revalidation every 10 messages), stale-voice-state sweep (60s),
 panic containment on the run loop (3 panics/60s → stop), LiveKit client and

@@ -113,11 +113,18 @@ column is where the B6 PRD started, kept so the tightening is auditable.
 | Voice join, OwnCord half (`voice_join` → `voice_token`) | < 250 ms | < 500 ms | < 2 s / < 4 s    | k6 `voice_join_time`             |
 | Graceful drain to exit 0                                | < 20 s   | —        | unchanged        | `Server/cmd/smoke` `drainBudget` |
 
-Each tightened budget keeps at least twice the measured p99 as headroom, so a
-busier runner does not turn a published promise into a flake. `auth_time` is
-the one with the least room on purpose: its floor is bcrypt at cost 12, roughly
-a quarter-second of one core, and that is a deliberate security cost rather
-than something to tune away.
+For the **steady** profile these budgets were tightened from a measured p99
+with at least twice it as headroom, so a busier runner does not turn a published
+promise into a flake. That headroom is a property of the steady shape:
+the operational profile runs a storm, a 25-way voice churn and upload pressure
+alongside the same fan-out, and there the acknowledgement p99 has been measured
+_at or over_ its budget (ramp p99 299 ms, and tls-off upload p99 301 ms against
+300, filed as OC-0481).
+The budgets do not move for that — a busy-runner tail is a finding, not a
+number to loosen (see the operational section). `auth_time` is the one steady
+row with the least room on purpose: its floor is bcrypt at cost 12, roughly a
+quarter-second of one core, and that is a deliberate security cost rather than
+something to tune away.
 
 Two of the PRD's rows are corrected rather than satisfied, because as written
 they ask for measurements that cannot exist:
@@ -362,12 +369,26 @@ measurement. Report held population and generator saturation alongside it.
 ### Voice control churn
 
 The voice connections stop joining once and sitting: every `K6_VOICE_CHURN_MS`
-(default 10 000) each leaves and rejoins. The voice-join budget above is
-therefore applied under churn rather than under a single join, and a new
-`voice_state_delivery_ms` measures a `voice_state` broadcast reaching a
-_different_ connection.
+(default 10 000) each leaves and rejoins, so the voice-join budget above is
+applied under churn rather than under a single join. A `voice_state_delivery_ms`
+trend measures a `voice_state` broadcast reaching a _different_ connection.
 
-- **Budget**: the voice-join row above. `voice_state_delivery_ms` has none.
+`K6_VOICE_CHURN_PHASE` selects the churn's shape (PERF-02):
+
+- **`spread` (default)** — each voice VU's leave+rejoin sits at its own offset
+  through the period, so the cohort's joins arrive like an ordinary
+  population's churn and the voice-join row measures one join. This is the
+  shape a published voice-join figure is taken from.
+- **`aligned`** — every voice VU leaves and rejoins on the same instant. This
+  serialises the cohort's joins into one queue: it is the deliberate burst
+  OC-0480 records, published as that and never used for the voice-join row.
+  The voice-join budget does not gate an `aligned` run (the burst is published
+  unbudgeted); the count sanity gate still does. The 130–437 ms p95 previously
+  published in this section came from this shape; it is a harness artifact, not
+  a single-join cost.
+
+- **Budget**: the voice-join row above, taken under `spread` (and by the
+  capacity profile, which does not churn). `voice_state_delivery_ms` has none.
 - **Still not a WebRTC measurement.** k6 speaks OwnCord's control plane only;
   the media path remains `lk load-test`'s, as the profile's caveats say.
 
@@ -406,22 +427,29 @@ TLS delta rather than a configuration delta.
 ### Graceful shutdown under load
 
 The **workflow**, not k6, sends the stop: it waits until the connections are up
-and sending, `docker stop --time=90`s the container (a grace past the 30 s
-budget, so an overrun is measured rather than SIGKILLed), records the server's
-exit code and the drain wall clock, then starts the same container again — same
-cgroup, same flags, same data directory, so the second boot is the same server
-and not a lookalike.
+and sending, `docker stop --time=90`s the container (a grace past both the 30 s
+drill gate and the server's 50 s teardown cap, so an overrun is measured rather
+than SIGKILLed), records the server's exit code and the drain wall clock, then
+starts the same container again — same cgroup, same flags, same data directory,
+so the second boot is the same server and not a lookalike.
 
 - **Measures** the restart frame reaching every connection and the lead from
   frame arrival to the socket actually closing; the resume time after the second
   boot; the sends attempted during the drain; and the sends lost.
-- **Gated on** exit code 0, a drain inside the 30 s stop timeout, `sends_lost:
+- **Gated on** exit code 0, a drain inside 30 s, `sends_lost:
 count==0`, and no replay gap across the restart. A message that was sent,
   never acknowledged and absent from the channel history after the second boot
   is a **lost message** — a defect recorded in the findings ledger and
   published as "lost N of M" until it is fixed, not a number to round. The
   history is the only place to look: the post-restart resume is a full re-sync
   (next point), so no replay will ever carry a drain-window send.
+- **The 30 s drain gate is deliberately stricter than the server's cap.** The
+  server bounds its whole teardown at 50 s (`teardownBudget` in
+  `Server/internal/app/lifecycle.go`), of which the HTTP drain alone may take
+  30 s (`httpDrainBudget`) to let a slow upload or export finish. The drill has
+  no slow transfers in flight, so a normal restart must still finish well
+  inside 30 s; a drain between 30 s and 50 s fails the drill even though the
+  server would not have cut it short.
 - **Delivery and acknowledgement keep their `phase:pre-restart` and
   `phase:post-restart` tags**, with a separate `phase:recovery` for the stop,
   drain, outage and reconnects. The explicit windows below separate recovery
@@ -682,6 +710,14 @@ advance runs inside the message transaction. That halved writer waits and
 took ~7% off the aligned-burst p95 (318 → 297 ms locally). Spread sends are
 unchanged at 18 ms. These local figures are not reference-runner figures.
 
+**OC-0454 is declined by owner decision D-09 (Q14, 2026-09-26) as an accepted
+low, and this document does not budget the aligned burst.** The shape is a
+property of per-frame fan-out cost — one TLS record and one write syscall per
+frame per recipient — not a correctness defect, and a real population rarely
+presses Enter in unison. Reopen on a user-visible burst scenario where the
+acknowledgement tail costs someone; the fix then is a connection wrapper that
+coalesces queued frames into one flush.
+
 **Measurement-only rows — no budget is published for any of them, and this
 document does not invent one.**
 
@@ -758,9 +794,11 @@ Per phase, send → acknowledgement p95 / p99: ramp 35 / 151 ms, sustain
 51 / 176 ms, upload 110 / 301 ms, storm window 102 / 271 ms. The second run
 (35856019988) measured 96 / 267 ms and 98 / 266 ms on this leg and missed the
 voice-join p95 (335 ms against 250) — a row the interleaved `dev` runs missed
-too (437 ms on `self_signed` in 35856022553); voice join p95 moved between 130
-and 437 ms across the four runs of that hour and is not distinguishable from
-runner noise at one run per mode. The `dev` runs measured 373 / 452 and
+too (437 ms on `self_signed` in 35856022553). Those runs were taken under the
+old aligned churn, so that voice-join row measured a 25-way simultaneous rejoin
+rather than one join (PERF-02 / OC-0480): it is a harness shape, not a
+single-join cost. The default is now `spread`; a `spread` operational run is
+what republishes this table. The `dev` runs measured 373 / 452 and
 276 / 352 ms for acknowledgement on this leg.
 
 Per-phase database waits on this leg, for comparison with the table above:
@@ -837,7 +875,7 @@ The stop was sent 90 s into the run — 60 s of ramp plus 30 s at full fan-out.
 
 No message was lost: every one of the 250 drain-window sends was acknowledged
 before the socket closed, and all 100 connections came back and re-synced with
-no gap. The drain finished in a fifth of the 30 s budget under 100 connections
+no gap. The drain finished in a fifth of the 30 s drill gate under 100 connections
 and in-flight writes.
 
 The budget rows, and the two sides of the stop:

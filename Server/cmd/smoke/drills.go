@@ -474,7 +474,7 @@ func (d *drill) bootAt(dir, logName string, extraEnv ...string) error {
 	if err := os.MkdirAll(filepath.Join(dir, "data"), 0o700); err != nil {
 		return err
 	}
-	s, err := start(d.bin, dir, name, append([]string{noLiveKitDownload}, extraEnv...)...)
+	s, err := start(d.bin, dir, name, append([]string{noLiveKitDownload, spawnRestart}, extraEnv...)...)
 	if err != nil {
 		return err
 	}
@@ -507,7 +507,7 @@ func (d *drill) failures(problems []failure) error {
 // the harness at whatever comes next.
 //
 // D9: the replacement is not this harness's child. updater.SpawnDetached starts
-// it detached — its own session on Unix, a detached process on Windows — and
+// it detached — its own session on Unix, its own new console on Windows — and
 // there is no PID file to find it by, so `drain` and `waitErr` are both
 // unavailable for it. What IS shared is the log file (the replacement inherits
 // the parent's stdout/stderr) and the install directory (it inherits its cwd),
@@ -1955,7 +1955,7 @@ func (d *drill) stepCBrokenConfig() ([]failure, error) {
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(broken), 0o600); err != nil {
 		return nil, err
 	}
-	s, err := start(d.bin, dir, "C-broken.log", noLiveKitDownload)
+	s, err := start(d.bin, dir, "C-broken.log", noLiveKitDownload, spawnRestart)
 	if err != nil {
 		return nil, err
 	}

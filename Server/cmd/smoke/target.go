@@ -58,6 +58,15 @@ const defaultBaseURL = "https://127.0.0.1:8443"
 // so the file under test is untouched.
 const noLiveKitDownload = "OWNCORD_VOICE_AUTO_DOWNLOAD_LIVEKIT=false"
 
+// spawnRestart pins the standalone server's self-restart (backup restore,
+// update, setup) to spawning its own replacement, which is what an owner who
+// starts the binary by hand gets and what the drills wait for. Auto-detection
+// reads INVOCATION_ID as "systemd will relaunch me", and a GitHub-hosted
+// runner's agent is itself a systemd service, so every job inherits that
+// variable: left to detect, the server exits for a supervisor that never
+// comes. The container leg stays supervised; its engine does relaunch it.
+const spawnRestart = "OWNCORD_SERVER_RESTART_MODE=spawn"
+
 // setupTokenLine matches the first-run setup token the server prints in its
 // start-up output. A release older than the token prints none, and ignores
 // the request field.
@@ -143,7 +152,7 @@ func (t *standaloneTarget) start(version string) error {
 		return fmt.Errorf("start %s: the %s server has not been drained", version, t.version)
 	}
 	t.boots++
-	s, err := start(bin, t.dir, fmt.Sprintf("boot%d-%s.log", t.boots, version), noLiveKitDownload)
+	s, err := start(bin, t.dir, fmt.Sprintf("boot%d-%s.log", t.boots, version), noLiveKitDownload, spawnRestart)
 	if err != nil {
 		return err
 	}

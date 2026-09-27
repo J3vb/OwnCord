@@ -1391,6 +1391,46 @@ describe("LiveKitSession", () => {
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
     });
 
+    it("RT-6: applies the saved input device before the reconnect re-captures the mic", async () => {
+      mockVoiceState.localMuted = false;
+      mockVoiceState.localDeafened = false;
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "audioInputDevice") return "usb-mic";
+        return defaultVal;
+      });
+      const order: string[] = [];
+      mockRoom.switchActiveDevice.mockImplementation(async (kind: string) => {
+        order.push(kind);
+        return true;
+      });
+      mockRoom.localParticipant.setMicrophoneEnabled.mockImplementation(async (on: boolean) => {
+        order.push(`mic:${on}`);
+      });
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 7,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        7,
+        "ws://localhost:7880",
+        new AbortController().signal,
+      );
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "usb-mic", false);
+      expect(order.indexOf("audioinput")).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf("audioinput")).toBeLessThan(order.indexOf("mic:true"));
+      expect(order.filter((o) => o === "audioinput")).toHaveLength(1);
+    });
+
     it("re-applies deafened remote subscriptions on reconnect", async () => {
       mockVoiceState.localMuted = true;
       mockVoiceState.localDeafened = true;
@@ -2323,6 +2363,45 @@ describe("LiveKitSession", () => {
       mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
     });
 
+    // A gated join publishes no mic and attaches no RNNoise processor, and a
+    // device switch while gated no longer attaches one either (OC-0474), so
+    // the first unmute is the only place left to give the track its processor.
+    it.each([
+      [true, "applies"],
+      [false, "does not apply"],
+    ])(
+      "with enhancedNoiseSuppression=%s, the first unmute after a muted join %s the noise suppressor",
+      async (enhancedNS) => {
+        mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+          key === "enhancedNoiseSuppression" ? enhancedNS : defaultVal,
+        );
+        const noiseSpy = vi
+          .spyOn((session as any)._audioPipeline, "applyNoiseSuppressor")
+          .mockResolvedValue(undefined);
+        mockVoiceState.localMuted = true;
+        try {
+          await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
+          expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+          expect(noiseSpy).not.toHaveBeenCalled();
+
+          mockVoiceState.localMuted = false;
+          session.setMuted(false);
+          await vi.advanceTimersByTimeAsync(0);
+
+          expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+          if (enhancedNS) {
+            expect(noiseSpy).toHaveBeenCalledTimes(1);
+          } else {
+            expect(noiseSpy).not.toHaveBeenCalled();
+          }
+        } finally {
+          mockVoiceState.localMuted = false;
+          noiseSpy.mockRestore();
+          mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+        }
+      },
+    );
+
     it("mode reconnect with mic error logs warn but does NOT call error callback", async () => {
       const errorCb = vi.fn();
       session.setOnError(errorCb);
@@ -2866,6 +2945,33 @@ describe("LiveKitSession", () => {
       );
 
       expect(result).toBe(true);
+    });
+
+    it("RT-6: applies the saved input device before the mic is first captured", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      mockRoom.connect.mockResolvedValue(undefined);
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "audioInputDevice") return "usb-mic";
+        return defaultVal;
+      });
+      const order: string[] = [];
+      mockRoom.switchActiveDevice.mockImplementation(async (kind: string) => {
+        order.push(kind);
+        return true;
+      });
+      mockRoom.localParticipant.setMicrophoneEnabled.mockImplementation(async (on: boolean) => {
+        order.push(`mic:${on}`);
+      });
+
+      await (session as any).connectAndSetup("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      // Non-exact: a saved mic that was unplugged degrades to the default
+      // instead of failing the publish into listen-only.
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "usb-mic", false);
+      expect(order.indexOf("audioinput")).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf("audioinput")).toBeLessThan(order.indexOf("mic:true"));
+      expect(order.filter((o) => o === "audioinput")).toHaveLength(1);
     });
 
     it("calls leaveVoice(false) when room is non-null at entry", async () => {

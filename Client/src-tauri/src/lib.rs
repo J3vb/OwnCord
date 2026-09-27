@@ -4,12 +4,14 @@ mod commands;
 mod config_gates;
 mod constants;
 mod credentials;
+mod diagnostics;
 #[cfg(windows)]
 mod dpapi;
 mod external_content;
 #[cfg(not(windows))]
 mod fallback_crypto;
 mod http_proxy;
+mod json_store;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod livekit_proxy;
@@ -75,6 +77,8 @@ fn should_restore_on_second_launch(installer_launching: bool) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // First, so a panic anywhere after the log plugin starts reaches the log.
+    diagnostics::install_panic_hook();
     let builder = tauri::Builder::default();
 
     // The single-instance plugin MUST be registered first: a second launch is
@@ -114,9 +118,11 @@ pub fn run() {
                 ))
                 .level(log_level_from_env())
                 .max_file_size(10_000_000) // 10 MB rolling file (default 40 KB is too small)
+                // Keep the two previous files (owncord-client_<date>.log): the
+                // default KeepOne deletes the whole log at each rollover.
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(2))
                 .build(),
         )
-        .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
@@ -138,12 +144,15 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init());
 
     match builder
+        .manage(json_store::JsonStores::default())
+        .manage(diagnostics::FrontendReady::new())
         .manage(ws_proxy::WsState::new())
         .manage(livekit_proxy::LiveKitProxyState::new())
         .manage(http_proxy::HttpProxyState::new())
         .manage(external_content::ExternalContentState::new())
         .manage(native_voice_state())
         .invoke_handler(tauri::generate_handler![
+            diagnostics::frontend_ready,
             commands::get_settings,
             commands::save_settings,
             commands::get_cert_fingerprint,
@@ -228,6 +237,7 @@ pub fn run() {
             // Record the credential backend first: if this build has no
             // persistent store, every later credential symptom follows from it.
             secret_store::log_compiled_backend();
+            diagnostics::spawn_frontend_watchdog(app.handle());
             tray::create_tray(app.handle())?;
             // WebKitGTK denies mic/camera access by default — grant it so
             // voice/video works on Linux (no-op elsewhere; see linux_media).

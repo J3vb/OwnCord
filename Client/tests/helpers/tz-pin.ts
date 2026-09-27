@@ -1,7 +1,8 @@
 /**
  * Probe and restore for `process.env.TZ` pins, for the regression blocks that
  * can only be written in a specific zone (OC-0315's east-of-UTC replay gate,
- * the DST day boundaries in renderers).
+ * the DST day boundaries in renderers, BUG-11's Berlin inbox row), plus
+ * `pinZone` for whole-file pins that neither probe nor throw.
  *
  * `process.env.TZ = ...` only reaches Date's local-time engine on a process
  * main thread. In a worker-thread pool the assignment succeeds and Date
@@ -40,6 +41,31 @@ export function restoreTZ(original: string | undefined): void {
   if (original === undefined) {
     delete process.env.TZ;
   }
+}
+
+/**
+ * Pin the whole file to `zone` and return a restore for `afterEach`.
+ *
+ * Call from `beforeEach`:
+ *
+ *   let restore: () => void;
+ *   beforeEach(() => { restore = pinZone("UTC"); });
+ *   afterEach(() => { restore(); });
+ *
+ * For suites that assert an exact rendered local time. Pinning UTC there is
+ * what makes them pass off-UTC (BUG-11): the fixture is a real UTC instant,
+ * so the rendered string is only stable when Date renders in UTC. The
+ * `client-tests` CI job's "Run unit tests at a half-hour offset
+ * (America/St_Johns)" step runs the whole suite there precisely so a new
+ * unpinned assertion is caught.
+ *
+ * @param zone IANA zone to pin, e.g. "UTC".
+ * @returns A restore function; call it from `afterEach`.
+ */
+export function pinZone(zone: string): () => void {
+  const original = process.env.TZ;
+  process.env.TZ = zone;
+  return () => restoreTZ(original);
 }
 
 /**

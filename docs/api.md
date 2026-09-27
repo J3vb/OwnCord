@@ -1961,7 +1961,7 @@ Revoke an invite by its code string.
 Upload a file as multipart form data.
 
 **Auth:** Required
-**Rate limit:** 10 requests/minute
+**Rate limit:** 10 requests/minute, and at most 10 uploads in flight per user (`429 RATE_LIMITED` beyond that)
 **Body size limit:** 100 MiB
 **Content-Type:** `multipart/form-data`
 
@@ -3997,6 +3997,8 @@ ring buffer (capacity 2000) is replayed as backfill, then new entries stream
 live, with a keepalive every 15 s. The ticket is consumed on connect; the
 `ADMINISTRATOR` bit is re-checked throughout the stream, and revoking the
 underlying session or API token (or banning the user) mid-stream cuts it.
+The server ends every open stream as its shutdown begins, so an open stream
+does not hold up a restart; reconnect with a fresh ticket once it is back.
 
 **Auth:** single-use ticket (from `POST /admin/api/logs/ticket`)
 

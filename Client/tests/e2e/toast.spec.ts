@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures";
 import {
+  emitWsMessage,
   mockTauriFullSession,
   mockTauriFullSessionWithMessagesAndEcho,
   mockTauriFullSessionWithFailingMessages,
@@ -59,6 +60,39 @@ test.describe("Toast Notifications", () => {
     await expect(toastContainer).toHaveAttribute("role", "status");
     await expect(toastContainer).toHaveAttribute("aria-live", "polite");
     await expect(toastContainer).toHaveAttribute("aria-atomic", "false");
+  });
+
+  test("an error toast persists until dismissed", async ({ page }) => {
+    // Errors persist (UX-5): drive a real error toast from a server WS
+    // `error` frame and check it outlives the old 5s auto-dismiss.
+    await mockTauriFullSession(page);
+    await page.goto("/");
+    await navigateToMainPage(page);
+
+    // A generic error frame with no pending send reaches the dispatcher's
+    // catch-all, which toasts it as an error.
+    await emitWsMessage(page, {
+      type: "error",
+      payload: { code: "RATE_LIMITED", message: "too many requests" },
+    });
+
+    const errorToast = page.locator("[data-testid='toast']", { hasText: "Too many requests" });
+    await expect(errorToast).toBeVisible({ timeout: 5_000 });
+
+    // It waits to be dismissed, so it must sit clear of the composer.
+    const toastBox = await errorToast.boundingBox();
+    const composerBox = await page.locator("[data-testid='message-input']").boundingBox();
+    expect(toastBox).not.toBeNull();
+    expect(composerBox).not.toBeNull();
+    expect(toastBox!.y + toastBox!.height).toBeLessThan(composerBox!.y);
+
+    // Well past the old 5s auto-dismiss, the error is still there…
+    await page.waitForTimeout(6000);
+    await expect(errorToast).toBeVisible();
+
+    // …and its close button removes it.
+    await errorToast.locator(".toast-close").click();
+    await expect(errorToast).toHaveCount(0, { timeout: 5_000 });
   });
 
   test("distinct app toasts stack in the one container", async ({ page }) => {

@@ -170,6 +170,10 @@ const PROFILE_FIELDS = [
 export interface SupportBundleSources {
   readonly appVersion: string;
   readonly logs: readonly { readonly name: string; readonly text: string }[];
+  /** The Rust log files (`owncord-client*.log`), newest first, tail-capped. */
+  readonly nativeLogs: readonly { readonly name: string; readonly text: string }[];
+  /** The OS and webview identity the bundle records in `app.json`. */
+  readonly environment: { readonly platform: string; readonly userAgent: string };
   /** Saved profiles as stored; only `PROFILE_FIELDS` are read. */
   readonly profiles: unknown;
   readonly storage: Pick<Storage, "getItem">;
@@ -217,7 +221,14 @@ export function buildSupportBundle(src: SupportBundleSources): Uint8Array {
       { name: "README.txt", data: encoder.encode(settingsText("logs.bundleReadme")) },
       {
         name: "app.json",
-        data: json({ version: src.appVersion, exportedAt: src.now.toISOString() }),
+        data: json({
+          version: src.appVersion,
+          exportedAt: src.now.toISOString(),
+          os: src.environment.platform,
+          userAgent: src.environment.userAgent,
+          serverVersion: null,
+          serverVersionNote: "not collected (bundle makes no server call, decision 7)",
+        }),
       },
       {
         name: "settings.json",
@@ -228,6 +239,10 @@ export function buildSupportBundle(src: SupportBundleSources): Uint8Array {
       },
       { name: "voice-diagnostics.json", data: json(src.voiceDiagnostics) },
       ...src.logs.map((file) => ({ name: `logs/${file.name}`, data: encoder.encode(file.text) })),
+      ...src.nativeLogs.map((file) => ({
+        name: `logs/${file.name}`,
+        data: encoder.encode(file.text),
+      })),
     ],
     src.now,
   );
@@ -245,14 +260,20 @@ export async function exportSupportBundle(
   const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, "-");
   const path = await desktop.fileSaver.pickSaveLocation(`owncord-support-${stamp}.zip`);
   if (path === null) return false;
-  const [appVersion, logs, snapshot] = await Promise.all([
+  const [appVersion, logs, nativeLogs, snapshot] = await Promise.all([
     desktop.appMetadata.getVersion(),
     desktop.logFiles.readAll(),
+    desktop.logFiles.readNative(),
     desktop.settings.load(),
   ]);
   const bundle = buildSupportBundle({
     appVersion,
     logs,
+    nativeLogs,
+    environment: {
+      platform: navigator.platform,
+      userAgent: navigator.userAgent,
+    },
     profiles: snapshot?.profiles,
     storage: localStorage,
     voiceDiagnostics,

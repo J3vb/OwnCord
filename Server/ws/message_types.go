@@ -86,3 +86,14 @@ const (
 	MsgTypePluginBroadcast     = "plugin_broadcast"    // plugin channel broadcast, gated by the sender's SEND_MESSAGES
 	MsgTypeNSFWAck             = "nsfw_ack"            // second-device signal after acknowledge/revoke; unsequenced, not replayed (B5-7)
 )
+
+// RestartReason is the closed set of values for server_restart.reason.
+type RestartReason string
+
+const (
+	RestartReasonUpdate        RestartReason = "update"         // an admin applied a server update
+	RestartReasonUpdateAborted RestartReason = "update_aborted" // with delay_seconds 0: cancels an announced update restart
+	RestartReasonBackupRestore RestartReason = "backup_restore" // an admin restored a backup
+	RestartReasonSetup         RestartReason = "setup"          // the setup wizard finished
+	RestartReasonShutdown      RestartReason = "shutdown"       // a stop or restart from outside the server (signal, supervisor)
+)

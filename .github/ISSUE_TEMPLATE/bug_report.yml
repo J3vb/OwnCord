@@ -21,6 +21,12 @@ body:
         Questions, ideas and feedback belong in
         [Discussions](https://github.com/J3vb/OwnCord/discussions), not here.
 
+        **Never paste `config.yaml`, `.env`, or any token, key or password.**
+        This repository is public, and a pasted secret is exposed to everyone
+        the moment it is posted. The support bundles below leave passwords,
+        tokens and keys out; attach one of those instead of copying
+        configuration, after reviewing it as described below.
+
   - type: textarea
     id: what-happened
     attributes:
@@ -161,9 +167,18 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: Logs, screenshots, or anything else
+      label: Support bundle, logs, screenshots, or anything else
       description: >-
-        Server console output or Settings → Logs from the client. Redact tokens,
-        invite codes and anything else you would not post publicly.
+        Attach a support bundle if you can — it is usually the fastest way to a
+        fix. Desktop client: Settings → Logs → Export. Server operator: admin
+        panel → Diagnostics → Create support bundle preview, review it, then
+        Confirm download. Both are local files that upload nothing, but review
+        them before sharing: the client bundle copies log lines verbatim and
+        lists your saved server names, addresses and usernames, so check or
+        remove those before attaching it, or share it privately with a
+        maintainer instead. You can also paste plain server console output or
+        client logs. Redact tokens, invite codes and anything else you would
+        not post publicly, and never paste `config.yaml` or `.env` — see the
+        warning at the top.
     validations:
       required: false

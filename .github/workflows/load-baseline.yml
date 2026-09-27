@@ -52,9 +52,12 @@
 #     exercises the control plane, not the media path.
 #   restart — 100 connections at the capacity rate while the WORKFLOW, not k6,
 #     stops the server between equal steady windows (T+135s) and restarts the
-#     same container. The drain contract under load is 30 s
-#     (internal/app/lifecycle.go shutdownBudget), not the 20 s an idle server
-#     proves, so the step fails on a non-zero exit or a drain over 30 s.
+#     same container. The drill gates the whole stop at 30 s, not the 20 s an
+#     idle server proves, and fails on a non-zero exit or a drain over 30 s.
+#     That is deliberately stricter than the server's 50 s hard cap
+#     (internal/app/lifecycle.go teardownBudget; httpDrainBudget alone may take
+#     30 s for a slow transfer): a restart with no slow transfers in flight
+#     must still finish well inside it.
 #   ceiling-search — one ramping-vus scenario stepping connections from 100 to
 #     `inputs.ceiling_max`, a 30 s ramp then a 60 s hold per step, to find the
 #     step where a capacity budget first breaks. Constrained-only: a ceiling
@@ -94,6 +97,14 @@ on:
         description: "Concurrent voice participants (BPR-030 says 25)"
         required: false
         default: "25"
+      churn_phase:
+        description: "operational: voice churn shape — spread (default) or aligned (the deliberate burst)"
+        required: false
+        type: choice
+        default: spread
+        options:
+          - spread
+          - aligned
       ceiling_max:
         description: "ceiling-search: highest connection count probed (and users to seed)"
         required: false
@@ -549,6 +560,7 @@ jobs:
           # leg neither fails nor passes vacuously.
           K6_VOICE_CHANNEL_ID: ${{ env.VOICE_LEG == '1' && env.VOICE_ID || '' }}
           K6_VOICE_VUS: ${{ inputs.voice }}
+          K6_VOICE_CHURN_PHASE: ${{ inputs.churn_phase }}
           K6_PEAK_VUS: ${{ inputs.connections }}
           K6_RAMP: 60s
           K6_SUSTAIN: 180s
@@ -598,9 +610,9 @@ jobs:
             (
               sleep "$RESTART_AT"
               start=$(date +%s%N)
-              # Grace well past the 30 s shutdownBudget, so an over-budget
-              # drain is measured by the assertion below rather than cut
-              # short by docker's SIGKILL (rc 137, drain_ms pinned at 30 s).
+              # Grace well past the 30 s drill gate and the server's 50 s
+              # teardownBudget, so an over-budget drain is measured by the
+              # assertion below rather than cut short by docker's SIGKILL.
               docker stop --time=90 owncord-sut
               rc=$(docker wait owncord-sut)
               drain_ms=$((($(date +%s%N) - start) / 1000000))
@@ -655,10 +667,10 @@ jobs:
               exit 1
             fi
             if [ "$drill_drain_ms" -gt 30000 ]; then
-              echo "::error::the drain took ${drill_drain_ms} ms, over the 30 s shutdownBudget. Publish the measured number and open a findings-ledger entry; do NOT re-run this on a bigger box."
+              echo "::error::the drain took ${drill_drain_ms} ms, over the drill's 30 s gate (deliberately stricter than the server's 50 s teardownBudget cap). Publish the measured number and open a findings-ledger entry; do NOT re-run this on a bigger box."
               exit 1
             fi
-            echo "drain $drill_drain_ms ms, exit $drill_rc — inside the 30 s budget"
+            echo "drain $drill_drain_ms ms, exit $drill_rc — inside the 30 s drill gate"
           fi
 
           if [ "$voice_rc" -ne 0 ]; then

@@ -6,7 +6,6 @@
 // session, and the class there now delegates here.
 import { invoke } from "@tauri-apps/api/core";
 import { createLogger } from "@lib/logger";
-import { isLinuxDesktop } from "../../features/voice/native/platform";
 import type { NativeProxies } from "../contracts/nativeProxies";
 
 // --- HTTP ------------------------------------------------------------------
@@ -125,8 +124,8 @@ function isLoopbackDirectUrl(url: string): boolean {
 
 /** Resolve a LiveKit connection URL. Routes through the local Rust TLS
  *  proxy for remote servers (to handle self-signed certs), or returns
- *  the direct URL for a local server whose LiveKit is also on loopback
- *  (or any local server's, on Linux where voice is native). */
+ *  the direct URL for a local server whose LiveKit is also on a loopback
+ *  host. */
 async function resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise<string> {
   if (serverHost !== null) {
     // Extract hostname, handling IPv6 bracket notation (e.g. "[::1]:7880")
@@ -141,12 +140,11 @@ async function resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise
       host = serverHost.split(":")[0] ?? "";
     }
     const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
-    // Only a loopback direct URL the CSP's connect-src admits is used as-is.
-    // Anything else (LiveKit Cloud, a TLS LiveKit on another host) goes
-    // through the tunnel like a remote server's, so the webview never needs
-    // an https:/wss: connect source. Linux voice is native (Rust), outside
-    // the webview's CSP, so it keeps any local server's direct URL.
-    if (isLocal && directUrl && (isLinuxDesktop() || isLoopbackDirectUrl(directUrl))) {
+    // Only a loopback ws:/http: direct URL is used as-is, on every platform.
+    // Anything else (LiveKit Cloud, a TLS LiveKit on another host, or a
+    // docker-compose service name like ws://livekit:7880 that does not
+    // resolve on the host) goes through the tunnel like a remote server's.
+    if (isLocal && directUrl && isLoopbackDirectUrl(directUrl)) {
       livekitLog.debug("LiveKit URL resolved via direct (local)", { url: directUrl });
       return directUrl;
     }

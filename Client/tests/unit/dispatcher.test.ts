@@ -30,7 +30,7 @@ import {
   listCustomEmoji,
   resolveEmoji,
 } from "../../src/stores/emoji.store";
-import { uiStore, setUpdateRequiredHost } from "../../src/stores/ui.store";
+import { uiStore, setTransientError, setUpdateRequiredHost } from "../../src/stores/ui.store";
 import { PROTOCOL_EPOCH } from "../../src/lib/protocolTypes";
 import { safetyText } from "../../src/i18n/safety";
 import {
@@ -3371,72 +3371,95 @@ describe("WS Dispatcher", () => {
     });
   });
 
-  it("wires server_restart to transient error", () => {
-    mock.dispatch("server_restart", {
-      reason: "update",
-      delay_seconds: 10,
-    });
-    expectConsole("warn", /\[dispatcher\] Server restarting/);
-
-    const error = uiStore.getState().transientError;
-    expect(error).toContain("Server is restarting");
-    expect(error).toContain("update");
-  });
-
-  it("wires server_restart with null reason to maintenance", () => {
-    mock.dispatch("server_restart", {
-      reason: null,
-      delay_seconds: 5,
-    });
-    expectConsole("warn", /\[dispatcher\] Server restarting/);
-
-    const error = uiStore.getState().transientError;
-    expect(error).toContain("maintenance");
-  });
-
-  it("wires server_restart shutdown to sign-out and call-state reset", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      isAuthenticated: true,
-      user: { id: 1, username: "call-user", avatar: null, role: "member" },
-    }));
-    // Simulate a live call with webcam and screenshare on.
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 42,
-      voiceStatus: "connected",
-      localCamera: true,
-      localScreenshare: true,
-    }));
-
-    mock.dispatch("server_restart", { reason: "shutdown", delay_seconds: 5 });
-    expectConsole("warn", /\[dispatcher\] Server restarting/);
-
-    // Kicked back to login: auth cleared, reason preserved so the logout
-    // wiring keeps the saved credential.
-    expect(authStore.getState().isAuthenticated).toBe(false);
-    expect(authStore.getState().logoutReason).toBe("server_shutdown");
-    expect(uiStore.getState().transientError).toContain("shut down");
-
-    // Call settings reset to their normal state.
-    const voice = voiceStore.getState();
-    expect(voice.currentChannelId).toBeNull();
-    expect(voice.voiceStatus).toBe("idle");
-    expect(voice.localCamera).toBe(false);
-    expect(voice.localScreenshare).toBe(false);
-  });
-
-  it("keeps the session for non-shutdown server_restart reasons", () => {
+  it("keeps the session and sets no transient error for any server_restart reason", () => {
+    setTransientError(null);
     authStore.setState((prev) => ({
       ...prev,
       isAuthenticated: true,
       user: { id: 1, username: "stay-user", avatar: null, role: "member" },
     }));
 
+    for (const reason of ["update", "backup_restore", "setup", "shutdown", null]) {
+      mock.dispatch("server_restart", { reason, delay_seconds: 5 });
+      expectConsole("warn", /\[dispatcher\] Server restarting/);
+      expect(authStore.getState().isAuthenticated).toBe(true);
+      expect(authStore.getState().logoutReason).toBeUndefined();
+      expect(uiStore.getState().transientError).toBeNull();
+    }
+  });
+
+  it("leaves the call intact through an update notice that is then aborted", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 42,
+      voiceStatus: "connected",
+    }));
+
     mock.dispatch("server_restart", { reason: "update", delay_seconds: 5 });
     expectConsole("warn", /\[dispatcher\] Server restarting/);
+    mock.dispatch("server_restart", { reason: "update_aborted", delay_seconds: 0 });
+    expectConsole("warn", /\[dispatcher\] Server restarting/);
+    // A later, unrelated drop is not the withdrawn restart.
+    mock.dispatchState("reconnecting");
 
+    await vi.runAllTimersAsync();
+    expect(mockLeaveVoice).not.toHaveBeenCalled();
+    const voice = voiceStore.getState();
+    expect(voice.currentChannelId).toBe(42);
+    expect(voice.voiceStatus).toBe("connected");
+  });
+
+  it("keeps the session through an announced restart and ends the call when the socket drops (Q4)", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      isAuthenticated: true,
+      user: { id: 1, username: "call-user", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 42,
+      voiceStatus: "connected",
+    }));
+
+    // The hub's teardown notice names the restart's intent, not "shutdown".
+    mock.dispatch("server_restart", { reason: "update", delay_seconds: 5 });
+    expectConsole("warn", /\[dispatcher\] Server restarting/);
+    await vi.runAllTimersAsync();
+    // The notice alone leaves the call: the restart can still be aborted.
+    expect(mockLeaveVoice).not.toHaveBeenCalled();
+    expect(voiceStore.getState().currentChannelId).toBe(42);
+
+    mock.dispatchState("reconnecting");
+
+    // Still signed in: ws.ts reconnects and resumes on its own.
     expect(authStore.getState().isAuthenticated).toBe(true);
+    expect(authStore.getState().logoutReason).toBeUndefined();
+
+    // The call does not survive the server process: the LiveKit session
+    // closes (leaveVoice also turns camera and screenshare off) and the
+    // voice channel is left.
+    await vi.runAllTimersAsync();
+    expect(mockLeaveVoice).toHaveBeenCalledWith(false);
+    const voice = voiceStore.getState();
+    expect(voice.currentChannelId).toBeNull();
+    expect(voice.voiceStatus).toBe("idle");
+  });
+
+  it("keeps the call through an ordinary socket drop with no restart announced", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 42,
+      voiceStatus: "connected",
+    }));
+
+    mock.dispatchState("reconnecting");
+    await vi.runAllTimersAsync();
+
+    expect(mockLeaveVoice).not.toHaveBeenCalled();
+    expect(voiceStore.getState().currentChannelId).toBe(42);
   });
 
   it("wires error BANNED to clear auth and show error", () => {

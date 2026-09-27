@@ -19,6 +19,8 @@ import type { Message } from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
+import { setConnectionStatus } from "../../src/stores/ui.store";
+import { shellText } from "../../src/i18n/shell";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import {
   clearReactionUsersCache,
@@ -73,6 +75,7 @@ function resetStores(): void {
     motd: null,
     isAuthenticated: false,
   }));
+  setConnectionStatus("connected");
 }
 
 /** Seed the member list so @tokens resolve — unresolvable tokens stay plain text. */
@@ -1227,6 +1230,25 @@ describe("renderers", () => {
       const deleteBtn = container.querySelector("[data-testid='msg-delete-1']") as HTMLElement;
       deleteBtn.click();
       expect(opts.onDeleteClick).toHaveBeenCalledWith(1);
+
+      ac.abort();
+    });
+
+    it("disables delete with the connection reason while the socket is down", () => {
+      setConnectionStatus("reconnecting");
+      const opts = makeOpts();
+      const msg = makeMessage();
+      const ac = new AbortController();
+      container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+
+      const deleteBtn = container.querySelector(
+        "[data-testid='msg-delete-1']",
+      ) as HTMLButtonElement;
+      expect(deleteBtn.disabled).toBe(true);
+      expect(deleteBtn.getAttribute("aria-disabled")).toBe("true");
+      expect(deleteBtn.title).toBe(shellText("channel.reconnecting"));
+      deleteBtn.dispatchEvent(new MouseEvent("click"));
+      expect(opts.onDeleteClick).not.toHaveBeenCalled();
 
       ac.abort();
     });

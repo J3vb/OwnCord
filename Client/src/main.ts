@@ -114,6 +114,12 @@ document.addEventListener("click", (e) => {
 // Install global error handlers first
 installGlobalErrorHandlers();
 
+// Start log persistence immediately after: an early startup failure (a missing
+// #app element, a failing lazy chunk) must still reach the on-disk log, not
+// just the in-memory ring. The listener is installed before the first render
+// and back-fills the bootstrap window (CLI-03).
+void initLogPersistence();
+
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
 
@@ -987,9 +993,8 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       // for "an explicit logout just happened, don't auto-login" (set by the
       // isAuthenticated subscriber further down), and every connect-page
       // mount — quick-switch included — must clear it here or it survives in
-      // sessionStorage and goes on to suppress an unrelated, later
-      // clearAuth("server_shutdown") auto-login that deliberately does NOT
-      // re-set it (OC-0028).
+      // sessionStorage and goes on to suppress a later, unrelated
+      // auto-login (OC-0028).
       const skipAutoLogin = sessionStorage.getItem("owncord:skip-auto-login") !== null;
       sessionStorage.removeItem("owncord:skip-auto-login");
 
@@ -1054,9 +1059,8 @@ authStore.subscribeSelector(
   (isAuthenticated) => {
     // The router only reaches "main" from the connected overlay's own
     // onReady, 800ms after `ready` arrives — so a session that ends between
-    // auth_ok and ready (a ban, an auth_error on an intervening reconnect,
-    // a server_restart shutdown) flips isAuthenticated false while the
-    // router is still "connect". The synchronous session cleanup has already
+    // auth_ok and ready (a ban, an auth_error on an intervening reconnect)
+    // flips isAuthenticated false while the router is still "connect". The synchronous session cleanup has already
     // destroyed its overlay; lastConnectHost retains the transport ownership
     // needed to finish teardown here. Otherwise the overlay (position:fixed, opaque,
     // z-index 200, appended straight to #app in wirePostAuth's auth_ok
@@ -1086,13 +1090,12 @@ authStore.subscribeSelector(
       ws.disconnect();
       lastConnectToken = "";
       lastConnectHost = "";
-      // Clear stored credential on logout — but keep it when the server
-      // kicked us by shutting down: the token is still valid, and deleting
-      // the credential would break auto-login every time the server restarts.
+      // Clear stored credential on logout. (A server restart never gets
+      // here: it keeps the session and reconnects.)
       const host = api.getConfig().host;
       const reason = authStore.getState().logoutReason;
-      if (host && reason !== "server_shutdown") {
-        // A protocol-epoch refusal keeps the credential too: the token is
+      if (host) {
+        // A protocol-epoch refusal keeps the credential: the token is
         // still valid, and the update the connect page offers relaunches
         // straight into auto-login with it (sessionStorage — and so the
         // skip flag below — does not survive that relaunch).
@@ -1100,9 +1103,7 @@ authStore.subscribeSelector(
         // (B7-13), and the departed session is left for that return.
         if (reason !== "protocol_epoch" && reason !== "server_switch") void deleteCredential(host);
         // Whenever this session must not turn around and auto-login with the
-        // credential (removed, or just refused), say so. A server_shutdown
-        // keeps the credential precisely so auto-login still works on
-        // restart, so it deliberately does not set this.
+        // credential (removed, or just refused), say so.
         sessionStorage.setItem("owncord:skip-auto-login", "1");
       }
       navigate("connect");
@@ -1124,8 +1125,11 @@ window.addEventListener("beforeunload", () => {
 });
 
 // Initial render (fire-and-forget — the initial page is "connect", whose
-// render branch is synchronous)
-void renderPage(activePage);
+// render branch is synchronous), then tell the native host's startup watchdog
+// the window came up.
+void renderPage(activePage).then(() =>
+  desktop.appProcess.reportReady().catch((err) => log.warn("Failed to report frontend ready", err)),
+);
 
 // Initialize window state persistence (fire-and-forget)
 void initWindowState();
@@ -1185,8 +1189,5 @@ function handleMessageDeepLink(channelId: number, messageId: number): void {
   jumpToMessage(channelId, messageId);
 }
 void desktop.deepLinks.init(handleInviteDeepLink, handleMessageDeepLink);
-
-// Initialize log persistence to disk (fire-and-forget)
-void initLogPersistence();
 
 log.info("OwnCord client initialized");

@@ -86,6 +86,11 @@ func startLiveKitTestProcess(t *testing.T, mode string) (*LiveKitProcess, liveKi
 	}
 	t.Cleanup(p.Stop)
 	waitForLiveKitTestFile(t, filepath.Join(dir, "listeners.json"))
+	return p, readLiveKitTestListeners(t, dir)
+}
+
+func readLiveKitTestListeners(t *testing.T, dir string) liveKitTestListeners {
+	t.Helper()
 	data, err := os.ReadFile(filepath.Join(dir, "listeners.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +99,7 @@ func startLiveKitTestProcess(t *testing.T, mode string) (*LiveKitProcess, liveKi
 	if err := json.Unmarshal(data, &listeners); err != nil {
 		t.Fatal(err)
 	}
-	return p, listeners
+	return listeners
 }
 
 func waitForLiveKitTestFile(t *testing.T, path string) {

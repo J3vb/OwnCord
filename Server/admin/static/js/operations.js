@@ -248,9 +248,16 @@ function copyAuditLog(){
   navigator.clipboard.writeText(lines.join('\n')).then(()=>showToast('Copied '+lines.length+' entries','info')).catch(()=>showToast('Copy failed','error'));
 }
 
+/* Quotes one CSV cell. A leading =, +, -, @, tab or CR is prefixed with '
+   so spreadsheet apps read the cell as text, not a formula. */
+function csvQ(v){
+  let s=String(v||'');
+  if(/^[=+\-@\t\r]/.test(s))s="'"+s;
+  return '"'+s.replace(/"/g,'""')+'"';
+}
+
 function exportAuditCSV(){
   const rows=state.auditCache;
-  const csvQ=v=>'"'+String(v||'').replace(/"/g,'""')+'"';
   let csv='Time,Actor,Action,Target,Detail\n';
   rows.forEach(e=>{csv+=csvQ(e.created_at)+','+csvQ(e.actor_name||e.actor_id)+','+csvQ(e.action)+','+csvQ((e.target_type||'')+(e.target_id?' #'+e.target_id:''))+','+csvQ(e.detail)+'\n'});
   const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);

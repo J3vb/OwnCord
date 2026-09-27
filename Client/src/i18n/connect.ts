@@ -132,9 +132,6 @@ export const connectText = defineCatalog("connect", {
   "connected.ready": "Ready!",
 
   "session.expired": "Your session expired — sign in again.",
-  "session.serverShutdown": "The server was shut down — you have been signed out.",
-  "session.serverRestarting": "Server is restarting: {reason}",
-  "session.restartReasonDefault": "maintenance",
   "session.banned": "You have been banned.",
   "error.serverFallback": "Server error",
   "error.rateLimited": "Too many requests. Try again later.",
