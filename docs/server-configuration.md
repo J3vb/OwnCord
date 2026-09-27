@@ -186,7 +186,7 @@ Controls the tiered event log used for WebSocket reconnection replay. When enabl
 
 ### Telemetry / OpenTelemetry (`telemetry`)
 
-Controls the OpenTelemetry SDK. Requires building with `-tags otel` (see [Contributing](contributing.md)). When disabled, the server uses no-op tracer/meter providers; the legacy JSON `/api/v1/metrics` endpoint exists regardless of this setting (it is admin-IP-restricted, like all metrics surfaces).
+Controls the OpenTelemetry SDK. Requires building with `-tags otel` (see [Contributing](contributing.md)); on a build without it (the release binaries and Docker image) `telemetry.enabled` has no effect and the server logs a warning at startup. When disabled, the server uses no-op tracer/meter providers; the legacy JSON `/api/v1/metrics` endpoint exists regardless of this setting (it is admin-IP-restricted, like all metrics surfaces).
 
 | Key                       | Type   | Default            | Description                                                                                             |
 | ------------------------- | ------ | ------------------ | ------------------------------------------------------------------------------------------------------- |

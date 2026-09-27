@@ -3004,11 +3004,11 @@ contended dispatch loop; `chat_send_ack_ms` is a `chat_send` frame's arrival
 to its `chat_send_ok` being queued. `voice_join_ms` holds one such
 distribution per phase of a completed `voice_join` — `precheck` (rate limit,
 permission and channel gates), `leave` (leaving the previous channel on a
-switch), `persist` (the `voice_states` write), `token` (minting and sending
-`voice_token`), `complete` (the `voice_state` fan-out, existing states and
-`voice_config`) and `total`; a refused or rolled-back join is not counted. A
-`hub_seqmu_max_hold_ms` above ~100 ms is
-worth investigating; the retention purge holds `seqMu` across a full scan.
+switch), `persist` (the `voice_states` write and moderator-flag restore),
+`token` (minting and sending `voice_token`), `complete` (the voice topic
+subscription, `voice_state` fan-out, existing states and `voice_config`) and
+`total`; a refused or rolled-back join is not counted. A
+`hub_seqmu_max_hold_ms` above ~100 ms is worth investigating; the retention purge holds `seqMu` across a full scan.
 
 ### GET /metrics (Prometheus)
 
@@ -3225,8 +3225,8 @@ loaded certificate (TLS off, or ACME before its first handshake).
 The dashboard's attention panel (RI-07): server-side health signals and the
 deduplicated warnings raised from them. The server samples once a minute
 (the free space on the data volume, the SQLite writer pool's cumulative wait,
-reconnect resumes, hub broadcast drops plus send-queue overflow disconnects, the newest
-backup file, the LiveKit voice path's state and each maintenance job's last
+reconnect resumes, hub broadcast drops, per-channel topic sheds and
+send-queue overflow disconnects, the newest backup file, the LiveKit voice path's state and each maintenance job's last
 run); this route only reads that state. Thresholds and hysteresis are in
 [server-configuration.md](server-configuration.md#admin-attention-panel-attention).
 Nothing here is exported off the host.

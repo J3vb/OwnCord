@@ -348,9 +348,10 @@ planned total and mean per-channel message rates, a conservative per-channel
 one-second send bound, and **each channel's observed send-attempt count/rate**
 (count divided by the 60 s hold, excluding ramp sends). This is generator-side
 traffic evidence, not a server admission counter. Delayed processing can still
-bunch frames at the server: the workflow's existing server-log gate must find
-zero `topic rate limit exceeded` lines before any step is called a hardware
-measurement. Report held population and generator saturation alongside it.
+bunch frames at the server: the workflow's post-run gate must read
+`topic_sheds_total == 0` from the server's `/api/v1/metrics` snapshot before
+any step is called a hardware measurement. Report held population and
+generator saturation alongside it.
 
 - **Publishes** the last step at which every budget above still held, plus the
   per-step table. The steps are informational and nothing is gated on them. The
@@ -1021,9 +1022,11 @@ it.** The search no longer walks into the limiter:
   mean, at most 46 scheduled sends in one second). The total remains 250
   messages/s at step 500. The summary publishes the planned rate and observed
   send-attempt rate for every channel and hold. Sender and focus use the same id.
-- **Shedding is now a hard failure, not a footnote.** A post-run step greps
-  the server log for `topic rate limit exceeded` on the ceiling leg and fails
-  the run if it finds any, with the same posture as the run's own
+- **Shedding is now a hard failure, not a footnote.** A post-run step reads
+  `topic_sheds_total` from the server's `/api/v1/metrics` snapshot on the
+  ceiling leg (it originally grepped the server log for
+  `topic rate limit exceeded`) and fails the run if it is non-zero or missing,
+  with the same posture as the run's own
   `obs_ws_conn_rejects == 0`: the search is shaped to stay under the limiter,
   so a shed frame means the shaping is wrong and the steps above the first shed
   are **inconclusive rather than a ceiling**. `CEILING_CHANNELS` is printed in
