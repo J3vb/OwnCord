@@ -262,6 +262,8 @@ function waitForRestart(statusId){
     const elapsed=Date.now()-started;
     if(up&&(sawDown||elapsed>20000)){location.reload();return}
     if(elapsed>120000){
+      /* Nothing left to wait for: let the dialog close again. */
+      lockModal(false);
       const el=document.getElementById(statusId);
       if(el)el.innerHTML='The server has not come back after two minutes. Check it on the host, then <button class="link-btn" data-action="reloadPage">reload this page</button>.';
       return;
@@ -344,6 +346,7 @@ function checkRestoreConfirm(name){
 async function confirmRestore(name){
   if((document.getElementById('restoreConfirm')?.value||'').trim()!==name)return;
   const b=document.getElementById('restoreConfirmBtn');if(b)b.disabled=true;
+  lockModal(true);
   try{
     await api('POST','/backups/'+encodeURIComponent(name)+'/restore');
     setModalHTML(restartingHTML('Restoring backup','The database was restored from '+name+' and the server is restarting.'));
@@ -352,6 +355,7 @@ async function confirmRestore(name){
     /* Some failures still restart the server (its database is already
        closed); the message says so, and then waiting is the right thing. */
     if(/restarting/i.test(e.message)){setModalHTML(restartingHTML('Restore failed',e.message));waitForRestart('restartWait');return}
+    lockModal(false);
     const err=document.getElementById('restoreErr');if(err)err.textContent=e.message;
     if(b)b.disabled=false;
   }
@@ -442,11 +446,13 @@ async function confirmApplyUpdate(){
   }
   if(btn)btn.textContent='Updating…';
   state.updateApplying=true;
+  lockModal(true);
   try{
     await api('POST','/updates/apply');
     setModalHTML(restartingHTML('Updating to '+((state.updateInfo||{}).latest||'the latest version'),'The update was applied and the server is restarting.'));
     waitForRestart('restartWait');
   }catch(e){
+    lockModal(false);
     state.updateApplying=false;syncUpdateConfirm();fail(e.message);
   }
 }
