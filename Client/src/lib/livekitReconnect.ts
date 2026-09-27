@@ -234,7 +234,8 @@ export async function attemptAutoReconnect(
         return;
       }
 
-      // BUG-099: Reapply saved audio devices after reconnect (matches initial join path).
+      // BUG-099: Reapply the saved output device after reconnect (matches initial join path;
+      // the saved input went in above, before the mic was re-captured).
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput) {
         try {
