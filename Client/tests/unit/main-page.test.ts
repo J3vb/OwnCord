@@ -1049,6 +1049,26 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).not.toBe("none");
   });
 
+  it("silently ends an incoming ring once this client is in the ringing channel by any path", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    expect(banner.style.display).not.toBe("none");
+
+    // Joined without Accept (the header's call button, the Join strip, the
+    // sidebar): being in the room answers the ring.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50 }));
+    voiceStore.flush();
+
+    expect(banner.style.display).toBe("none");
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "call_decline" }));
+  });
+
   it("clears settingsOpen on destroy so the next page (e.g. ConnectPage after logout) doesn't inherit a stale open overlay", () => {
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });
     page.mount(container);

@@ -970,10 +970,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     );
 
     // The outgoing ring is over once anyone else is in the room, or once
-    // the caller is not; and "Join with video" turns the camera on as soon
-    // as the accepted call is connected.
+    // the caller is not; an incoming ring is answered by being in its room,
+    // however you got there; and "Join with video" turns the camera on as
+    // soon as the accepted call is connected.
     unsubscribers.push(
       voiceStore.subscribe((state) => {
+        const ring = ringCtrl?.current() ?? null;
+        if (ring !== null && state.currentChannelId === ring.channelId) {
+          ringCtrl?.cancel(ring.channelId);
+        }
         const out = outgoingCall?.current() ?? null;
         if (out !== null) {
           const roster = state.voiceUsers.get(out.channelId);

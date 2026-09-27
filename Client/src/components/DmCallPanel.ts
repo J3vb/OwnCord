@@ -14,7 +14,7 @@
  * way back to the call from anywhere else.
  *
  * The DOM is rebuilt only when the panel's structure changes (state, who is in
- * the room, collapsed); speaking rings, mute badges, control states and the
+ * the room and their names and avatars, collapsed); speaking rings, mute badges, control states and the
  * timer update in place, so a speaking tick never re-fetches an avatar or drops
  * keyboard focus.
  */
@@ -279,6 +279,22 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     }
   }
 
+  /** Who the panel may draw, by name and avatar, so a rename or a new avatar
+   *  redraws the stage but a presence flip does not. */
+  function identitiesOf(v: Exclude<DmCallView, { kind: "none" }>): string {
+    const me = currentUserId();
+    const voice = voiceStore.getState();
+    const ids = new Set([me, ...v.dm.participants.map((p) => p.id)]);
+    if (v.kind === "incoming") ids.add(v.ring.fromUserId);
+    if (v.kind === "live" || v.kind === "connected") for (const id of v.inRoom) ids.add(id);
+    return [...ids]
+      .map((id) => {
+        const { name, subject } = resolvePerson(id, v.dm, voice, me);
+        return `${id}:${name}:${subject.username}:${subject.displayName ?? ""}:${subject.avatar ?? ""}`;
+      })
+      .join(",");
+  }
+
   // --- Building blocks ------------------------------------------------------
 
   function avatar(userId: number, dm: DmChannel, size: "lg" | "sm", extra = ""): HTMLElement {
@@ -404,7 +420,12 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     return btn;
   }
 
-  function topBar(status: string, tone: "" | "warn" | "bad", withCall: boolean): HTMLElement {
+  function topBar(
+    status: string,
+    tone: "" | "warn" | "bad",
+    withCall: boolean,
+    collapsible = false,
+  ): HTMLElement {
     const bar = createElement("div", { class: "dcp-top" });
     statusEl = createElement(
       "span",
@@ -419,7 +440,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       appendChildren(bar, securedEl, timer);
     }
     bar.appendChild(createElement("span", { class: "dcp-spacer" }));
-    if (withCall) bar.appendChild(collapseButton());
+    if (collapsible) bar.appendChild(collapseButton());
     return bar;
   }
 
@@ -506,7 +527,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     for (const id of callees) stage.appendChild(person(id, v.dm, "dcp-avatar--ringing"));
     appendChildren(
       body,
-      topBar(d("calling"), "warn", true),
+      topBar(d("calling"), "warn", true, true),
       stage,
       ...caption(d("callingName", { name: callName(v.dm, currentUserId()) }), d("ringingHint")),
       callControls(false),
@@ -549,7 +570,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     root.classList.add("dm-call-panel--expanded");
     const stage = createElement("div", { class: "dcp-stage" });
     for (const id of v.inRoom) stage.appendChild(person(id, v.dm));
-    appendChildren(body, topBar(status, "", true), stage, callControls(false));
+    appendChildren(body, topBar(status, "", true, true), stage, callControls(false));
   }
 
   function renderCollapsed(dm: DmChannel, ids: readonly number[], status: string): void {
@@ -736,9 +757,12 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     // A late ring-state change during page teardown must not re-arm the timer.
     if (destroyed) return;
     view = computeView();
-    // The name is part of the structure: a rename redraws the captions.
+    // Names and avatars are part of the structure: a rename redraws the stage
+    // and the captions.
     const key =
-      view.kind === "none" ? "none" : `${keyOf(view)}|${callName(view.dm, currentUserId())}`;
+      view.kind === "none"
+        ? "none"
+        : `${keyOf(view)}|${callName(view.dm, currentUserId())}|${identitiesOf(view)}`;
     if (key !== structureKey) {
       structureKey = key;
       rebuild();
@@ -763,11 +787,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
         ),
         membersStore.subscribeSelector(
           (s) => s.members,
-          () => {
-            // A rename or new avatar changes what the stage draws.
-            structureKey = "";
-            update();
-          },
+          () => update(),
         ),
         uiStore.subscribeSelector(
           (s) => s.connectionStatus,

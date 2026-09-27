@@ -16,7 +16,7 @@ import {
 import { voiceStore, type VoiceUser } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore, type DmChannel } from "../../src/stores/dm.store";
-import { membersStore } from "../../src/stores/members.store";
+import { membersStore, updateMemberProfile, updatePresence } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { setConnectionStatus, uiStore } from "../../src/stores/ui.store";
 import type { RingState, OutgoingCallState } from "../../src/lib/call-ring";
@@ -322,6 +322,17 @@ describe("DmCallPanel — caller side", () => {
     panel!.setOutgoing({ channelId: DM, phase: "no-answer", pending: [OTTO] });
     expect(q(root, "dcp-caption")!.textContent).toBe("Otto didn't answer");
   });
+
+  it("offers no Collapse once the call went unanswered, only while ringing", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "ringing", pending: [OTTO] });
+    expect(q(root, "dcp-collapse")).not.toBeNull();
+
+    panel!.setOutgoing({ channelId: DM, phase: "declined", pending: [] });
+    expect(q(root, "dcp-collapse")).toBeNull();
+    expect(q(root, "dcp-secured")).not.toBeNull();
+  });
 });
 
 describe("DmCallPanel — live call you are not in", () => {
@@ -412,6 +423,22 @@ describe("DmCallPanel — connected", () => {
     const after = root.querySelector(`.dcp-avatar[data-user-id='${OTTO}']`)!;
     expect(after).toBe(before);
     expect(after.classList.contains("dcp-avatar--speaking")).toBe(true);
+  });
+
+  it("redraws avatars on a rename, but not on someone's presence flip", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    const before = root.querySelector(`.dcp-avatar[data-user-id='${OTTO}']`)!;
+
+    updatePresence(OTTO, "idle");
+    membersStore.flush();
+    expect(root.querySelector(`.dcp-avatar[data-user-id='${OTTO}']`)).toBe(before);
+
+    updateMemberProfile(OTTO, { username: "otheruser", avatar: null, displayName: "Otto II" });
+    membersStore.flush();
+    const renamed = root.querySelector(`.dcp-avatar[data-user-id='${OTTO}']`)!;
+    expect(renamed).not.toBe(before);
+    expect(root.textContent).toContain("Otto II");
   });
 
   it("keeps keyboard focus on the same control when the stage is redrawn", () => {
