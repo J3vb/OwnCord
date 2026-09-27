@@ -11,7 +11,7 @@
 
 import type { ApiClient, OwnReportSummary } from "@lib/api";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
-import { parseTimestamp } from "@components/message-list/formatting";
+import { parseTimestamp } from "@lib/formatting";
 import { formatDate } from "../../i18n/format";
 import { reportsText as t } from "../../i18n/reports";
 

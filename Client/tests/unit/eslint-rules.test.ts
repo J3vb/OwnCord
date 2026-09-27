@@ -297,6 +297,14 @@ describe("eslint-rules", () => {
         ws.on("ready", () => {
           setLocalThing();
         });`,
+        // A feature-local store instance is READ, not called — `safetyStore`
+        // is imported from a features/*/store module but only its .getState()
+        // is reached, so recording every named import must not flag a member
+        // call (OC-0478).
+        `import { safetyStore } from "../features/safety/store";
+        ws.on("mod_action", () => {
+          safetyStore.getState();
+        });`,
       ],
       invalid: [
         {
@@ -316,6 +324,37 @@ describe("eslint-rules", () => {
             });
           });`,
           errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        // OC-0478: the B9 domain stores live under features/*/store.ts, not
+        // stores/, and several of their mutators fall outside the
+        // set*/add*/... prefix list — applySnapshot, noteQueueChange,
+        // applyAppealStatus. A page-local ws.on that writes any of them is
+        // the same second-writer violation and must be flagged.
+        {
+          code: `import { applyFrame } from "../features/message-requests/store";
+          ws.on("dm_request", (p) => applyFrame(p, true));`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        {
+          code: `import { applySnapshot, beginSnapshot } from "./features/message-requests/store";
+          ws.on("ready", () => { beginSnapshot(); applySnapshot([], token); });`,
+          errors: [
+            { messageId: "storeWriteOutsideDispatcher" },
+            { messageId: "storeWriteOutsideDispatcher" },
+          ],
+        },
+        {
+          code: `import { noteQueueChange } from "../features/moderation/store";
+          ws.on("mod_queue", () => noteQueueChange());`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        {
+          code: `import { addNotice, setActiveTimeout } from "../features/safety/store";
+          ws.on("mod_action", (p) => { addNotice(1, "x", "y"); setActiveTimeout(null); });`,
+          errors: [
+            { messageId: "storeWriteOutsideDispatcher" },
+            { messageId: "storeWriteOutsideDispatcher" },
+          ],
         },
       ],
     });

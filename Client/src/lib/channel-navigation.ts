@@ -12,7 +12,7 @@ import { clearDmUnread, dmStore, dmDisplayName } from "@stores/dm.store";
 // handler) — a DM that `ready` reported in dmStore but that the user has not
 // yet opened this session has no mirror row until one of these two call
 // sites creates it.
-import { addDmToChannelsStore } from "@pages/main-page/SidebarDmHelpers";
+import { addDmToChannelsStore } from "@stores/dm.store";
 
 /**
  * Activate `channelId`, clearing its unread and mention badges.

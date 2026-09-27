@@ -20,7 +20,7 @@ import {
   type ModerationQueueRow,
   type ModerationReportDetail,
 } from "@lib/api";
-import { parseTimestamp } from "@components/message-list/formatting";
+import { parseTimestamp } from "@lib/formatting";
 import { NSFW_ACKNOWLEDGEMENT_REQUIRED, nsfwContentBlocked } from "../content-consent/nsfw";
 
 /** Whether a request failed with this HTTP status (and error code, when given). */

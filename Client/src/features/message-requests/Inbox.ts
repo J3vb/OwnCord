@@ -19,7 +19,7 @@
 import type { DmRequestDecision } from "@lib/api";
 import { createElement, setText } from "@lib/dom";
 import type { ModalInstance } from "@lib/modalFactory";
-import { parseTimestamp } from "@components/message-list/formatting";
+import { parseTimestamp } from "@lib/formatting";
 import { uiStore } from "@stores/ui.store";
 import { formatDate } from "../../i18n/format";
 import { messageRequestsText as t } from "../../i18n/messageRequests";

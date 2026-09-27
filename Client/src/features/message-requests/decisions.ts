@@ -25,7 +25,7 @@ import { blocksStore, setBlockedByMe, setUserBlockedByMe } from "@stores/blocks.
 import { setActiveChannel } from "@stores/channels.store";
 import { addDmChannel, clearDmUnread, dmStore, type DmChannel } from "@stores/dm.store";
 import { setActiveDmUser, setSidebarMode } from "@stores/ui.store";
-import { addDmToChannelsStore, dmChannelFromPayload } from "../../pages/main-page/SidebarDmHelpers";
+import { addDmToChannelsStore, dmChannelFromPayload } from "../../stores/dm.store";
 import { messageRequestsText as t } from "../../i18n/messageRequests";
 import type { MessageRequest } from "./api";
 import { applyFrame } from "./store";

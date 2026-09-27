@@ -12,11 +12,10 @@ vi.mock("@stores/ui.store", () => ({
 }));
 
 vi.mock("@lib/themes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/themes")>()),
   getActiveThemeName: mockGetActiveThemeName,
   restoreTheme: mockRestoreTheme,
   applyThemeByName: mockApplyThemeByName,
-  // The real single writer of the accent tokens (B9-2).
-  applyAccent: (await importOriginal<typeof import("@lib/themes")>()).applyAccent,
 }));
 
 describe("AppearanceTab — Accessibility", () => {

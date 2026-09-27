@@ -19,7 +19,7 @@ import {
 } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
-import { loadPref } from "@components/settings/helpers";
+import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { isLinuxDesktop } from "../features/voice/native/platform";
 import { voiceText } from "../i18n/voice";

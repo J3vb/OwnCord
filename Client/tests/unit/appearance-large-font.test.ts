@@ -18,7 +18,8 @@ const { mockGetActiveThemeName, mockApplyThemeByName } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
   mockApplyThemeByName: vi.fn(),
 }));
-vi.mock("@lib/themes", () => ({
+vi.mock("@lib/themes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/themes")>()),
   getActiveThemeName: mockGetActiveThemeName,
   restoreAccent: vi.fn(),
   restoreTheme: vi.fn(),

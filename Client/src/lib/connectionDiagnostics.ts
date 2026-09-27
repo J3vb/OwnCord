@@ -2,7 +2,7 @@
 import type { Room } from "livekit-client";
 import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
-import { loadPref } from "@components/settings/helpers";
+import { loadPref } from "@lib/preferences";
 import { settingsText as t } from "../i18n/settings";
 
 export type DiagnosticStatus = "running" | "passed" | "failed" | "not-tested";

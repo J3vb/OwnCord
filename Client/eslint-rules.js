@@ -325,15 +325,27 @@ const noIdentityScopeFallback = {
 // is one of those handlers writing to a domain store directly, bypassing the
 // dispatcher. Store *reads* (`fooStore.getState()`) are unaffected; this only
 // flags calls to an imported store-mutator function (set/add/update/... from
-// a `*/stores/*` module) reached from inside a `ws.on(...)` callback.
+// a store module) reached from inside a `ws.on(...)` callback.
+//
+// OC-0478: B9 added three domain stores under `features/*/store.ts`
+// (safety, message-requests, moderation) that this rule used to miss — their
+// module path is not `stores/`, and several mutators (apply*, note*, begin*,
+// fail*, refresh*) were outside the verb list, so a page-local ws.on could
+// write them clean. Both are widened here. Store *instances* stay safe: a
+// `safetyStore.getState()` read is a member callee, never a bare call to a
+// recorded import, so recording the instance name flags no read.
 // ─────────────────────────────────────────────────────────────────────────
 
 const STORE_MUTATOR_PREFIX =
-  /^(set|add|remove|update|increment|clear|toggle|open|close|join|leave|mark|confirm|bulk|rollback|reset|prepend|reattach|invalidate|load)[A-Z_]/;
+  /^(set|add|remove|update|increment|clear|toggle|open|close|join|leave|mark|confirm|bulk|rollback|reset|prepend|reattach|invalidate|load|apply|note|begin|fail|refresh)[A-Z_]/;
 
 function isStoreModuleSource(source) {
-  // Matches both the "@stores/..." alias and relative "../stores/..." paths.
-  return typeof source === "string" && /(?:^|\/)@?stores\//.test(source);
+  if (typeof source !== "string") return false;
+  // The `stores/` layer: "@stores/..." alias or relative "../stores/...".
+  if (/(?:^|\/)@?stores\//.test(source)) return true;
+  // A feature-local domain store: "features/<name>/store" (relative) — and
+  // the bare "./store" a module inside that feature directory uses.
+  return /(?:^|\/)features\/[^/]+\/store$/.test(source) || source === "./store";
 }
 
 function isWsOnCall(node) {

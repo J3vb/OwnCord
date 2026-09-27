@@ -11,7 +11,7 @@ import type { SessionInfo } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
 import { sessionDeviceLabel } from "@lib/session-notice";
-import { formatMessageTimestamp } from "@components/message-list/formatting";
+import { formatMessageTimestamp } from "@lib/formatting";
 import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
 import { loadUserStatus, saveUserStatus } from "@lib/userStatus";

@@ -10,7 +10,7 @@ import {
   setListenOnly,
   setVoiceStatus,
 } from "@stores/voice.store";
-import { loadPref } from "@components/settings/helpers";
+import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { AudioPipeline } from "@lib/audioPipeline";
 import { AudioElements } from "@lib/audioElements";

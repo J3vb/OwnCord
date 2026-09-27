@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
 import { createQuickSwitcher } from "@components/QuickSwitcher";
 import type { QuickSwitcherOptions } from "@components/QuickSwitcher";
 import { channelsStore, setChannels } from "@stores/channels.store";
-import { addDmToChannelsStore } from "../../src/pages/main-page/SidebarDmHelpers";
+import { addDmToChannelsStore } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import type { ReadyChannel } from "../../src/lib/types";
 

@@ -755,7 +755,7 @@ describe("notifyIncomingMessage", () => {
 
     // OC-0233: the popup that tells you who wrote to you has to name them the
     // same way the message row you click through to does. resolveAuthor
-    // (message-list/formatting.ts) prefers the live membersStore copy of the
+    // (lib/formatting.ts) prefers the live membersStore copy of the
     // author's nickname over whatever was frozen into the payload.
     it("titles the notification with the member store's nickname, not the raw username", async () => {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");

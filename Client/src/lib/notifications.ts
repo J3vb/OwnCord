@@ -13,7 +13,7 @@ import { isWindowDetached } from "@stores/messages.store";
 import type { ChatMessagePayload } from "./types";
 import { mentionsCurrentUser } from "./mentions";
 import { createLogger } from "./logger";
-import { resolveAuthor } from "@components/message-list/formatting";
+import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { desktop } from "../platform/desktop";
 import { connectText } from "../i18n/connect";

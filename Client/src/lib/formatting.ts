@@ -6,8 +6,8 @@
 import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
-import { loadPref } from "@components/settings/helpers";
-import { messageStatusText } from "../../i18n/messageStatus";
+import { loadPref } from "@lib/preferences";
+import { messageStatusText } from "../i18n/messageStatus";
 
 // -- Constants ----------------------------------------------------------------
 

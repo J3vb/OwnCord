@@ -4,7 +4,7 @@ const { mockLoadPref } = vi.hoisted(() => ({
   mockLoadPref: vi.fn((_key: string, defaultVal: unknown) => defaultVal),
 }));
 
-vi.mock("@components/settings/helpers", () => ({
+vi.mock("@lib/preferences", () => ({
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: vi.fn(),
 }));
