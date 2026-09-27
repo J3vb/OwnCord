@@ -184,6 +184,108 @@ interface CellEntry {
   applyVolume?: (volume: number, muted: boolean) => void;
 }
 
+/** The stream (screen-share audio, 0-100 %) or voice (mic, 0-200 %) volume
+ *  of a remote tile: mute, a slider named for whose it is, and its value. */
+function buildVolumeControls(config: TileConfig): {
+  overlay: HTMLDivElement;
+  apply: (volume: number, muted: boolean) => void;
+} {
+  // Mic and screenshare audio state both survive tile rebuilds —
+  // initialize from the same persisted values the sidebar volume menu
+  // reads, instead of hardcoding "unmuted at 100%" (B3-5). Screenshare
+  // sliders are 0-100 (HTMLAudioElement.volume caps at 1.0); mic sliders
+  // keep 0-200 (LiveKit setVolume supports boost up to 2.0).
+  const savedVolume = config.isScreenshare
+    ? Math.round(getScreenshareAudioVolume(config.audioUserId) * 100)
+    : getUserVolume(config.audioUserId);
+  let currentVolume = savedVolume;
+  let muted = config.isScreenshare
+    ? getScreenshareAudioMuted(config.audioUserId)
+    : savedVolume === 0;
+  /** What the slider shows: the stored level on open (even if muted), 0
+   *  once muted from here, the level again on unmute. */
+  let shown = currentVolume;
+
+  const overlay = createElement("div", { class: "video-tile-overlay" });
+  const volumeSlider = createElement("input", {
+    type: "range",
+    min: "0",
+    max: config.isScreenshare ? "100" : "200",
+    value: String(currentVolume),
+    class: "tile-volume-slider",
+    // Lets a tile rebuild or removal put focus back on the same control
+    // (captureFocusedControl), not just the tile.
+    "data-tile-control": "volume",
+  });
+  const output = createElement("output", { class: "tile-volume-value" });
+  const muteBtn = createElement("button", {
+    type: "button",
+    class: "tile-mute-btn",
+    "data-tile-control": "mute",
+  });
+
+  /** Draw the state; the slider shows 0 while muted. */
+  function render(): void {
+    volumeSlider.value = String(shown);
+    const text = voiceText("tile.percent", { percent: shown });
+    volumeSlider.setAttribute("aria-valuetext", text);
+    setText(output, text);
+    setButtonIcon(muteBtn, muted ? volumeXIcon() : volumeIcon());
+    muteBtn.setAttribute(
+      "aria-label",
+      muted ? voiceText("widget.control.unmute") : voiceText("widget.control.mute"),
+    );
+    overlay.classList.toggle("muted", muted);
+  }
+
+  function commit(): void {
+    if (config.isScreenshare) {
+      // BUG-102: Set actual volume, not just mute toggle. Slider 100 maps
+      // to element volume 1.0 (the attach-time default).
+      muteScreenshareAudio(config.audioUserId, muted);
+      if (!muted) setScreenshareAudioVolume(config.audioUserId, currentVolume / 100);
+    } else {
+      setUserVolume(config.audioUserId, muted ? 0 : currentVolume);
+    }
+  }
+
+  volumeSlider.addEventListener("input", () => {
+    const value = Number(volumeSlider.value);
+    muted = value === 0;
+    shown = value;
+    if (!muted) currentVolume = value;
+    if (config.isScreenshare) {
+      muteScreenshareAudio(config.audioUserId, muted);
+      setScreenshareAudioVolume(config.audioUserId, value / 100);
+    } else {
+      setUserVolume(config.audioUserId, value);
+    }
+    render();
+  });
+
+  muteBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    muted = !muted;
+    if (!muted && currentVolume === 0) currentVolume = 100;
+    shown = muted ? 0 : currentVolume;
+    commit();
+    render();
+  });
+
+  render();
+  appendChildren(overlay, muteBtn, volumeSlider, output);
+  return {
+    overlay,
+    // A tile menu changed the same setting: show it here too.
+    apply(volume: number, isMuted: boolean): void {
+      muted = isMuted;
+      if (volume > 0) currentVolume = volume;
+      shown = muted ? 0 : currentVolume;
+      render();
+    },
+  };
+}
+
 export function createVideoGrid(): VideoGridComponent {
   let root: HTMLDivElement | null = null;
   const cells = new Map<number, CellEntry>();
@@ -431,108 +533,6 @@ export function createVideoGrid(): VideoGridComponent {
     return focusedTileId;
   }
 
-  /** The stream (screen-share audio, 0-100 %) or voice (mic, 0-200 %) volume
-   *  of a remote tile: mute, a slider named for whose it is, and its value. */
-  function buildVolumeControls(config: TileConfig): {
-    overlay: HTMLDivElement;
-    apply: (volume: number, muted: boolean) => void;
-  } {
-    // Mic and screenshare audio state both survive tile rebuilds —
-    // initialize from the same persisted values the sidebar volume menu
-    // reads, instead of hardcoding "unmuted at 100%" (B3-5). Screenshare
-    // sliders are 0-100 (HTMLAudioElement.volume caps at 1.0); mic sliders
-    // keep 0-200 (LiveKit setVolume supports boost up to 2.0).
-    const savedVolume = config.isScreenshare
-      ? Math.round(getScreenshareAudioVolume(config.audioUserId) * 100)
-      : getUserVolume(config.audioUserId);
-    let currentVolume = savedVolume;
-    let muted = config.isScreenshare
-      ? getScreenshareAudioMuted(config.audioUserId)
-      : savedVolume === 0;
-    /** What the slider shows: the stored level on open (even if muted), 0
-     *  once muted from here, the level again on unmute. */
-    let shown = currentVolume;
-
-    const overlay = createElement("div", { class: "video-tile-overlay" });
-    const volumeSlider = createElement("input", {
-      type: "range",
-      min: "0",
-      max: config.isScreenshare ? "100" : "200",
-      value: String(currentVolume),
-      class: "tile-volume-slider",
-      // Lets a tile rebuild or removal put focus back on the same control
-      // (captureFocusedControl), not just the tile.
-      "data-tile-control": "volume",
-    });
-    const output = createElement("output", { class: "tile-volume-value" });
-    const muteBtn = createElement("button", {
-      type: "button",
-      class: "tile-mute-btn",
-      "data-tile-control": "mute",
-    });
-
-    /** Draw the state; the slider shows 0 while muted. */
-    function render(): void {
-      volumeSlider.value = String(shown);
-      const text = voiceText("tile.percent", { percent: shown });
-      volumeSlider.setAttribute("aria-valuetext", text);
-      setText(output, text);
-      setButtonIcon(muteBtn, muted ? volumeXIcon() : volumeIcon());
-      muteBtn.setAttribute(
-        "aria-label",
-        muted ? voiceText("widget.control.unmute") : voiceText("widget.control.mute"),
-      );
-      overlay.classList.toggle("muted", muted);
-    }
-
-    function commit(): void {
-      if (config.isScreenshare) {
-        // BUG-102: Set actual volume, not just mute toggle. Slider 100 maps
-        // to element volume 1.0 (the attach-time default).
-        muteScreenshareAudio(config.audioUserId, muted);
-        if (!muted) setScreenshareAudioVolume(config.audioUserId, currentVolume / 100);
-      } else {
-        setUserVolume(config.audioUserId, muted ? 0 : currentVolume);
-      }
-    }
-
-    volumeSlider.addEventListener("input", () => {
-      const value = Number(volumeSlider.value);
-      muted = value === 0;
-      shown = value;
-      if (!muted) currentVolume = value;
-      if (config.isScreenshare) {
-        muteScreenshareAudio(config.audioUserId, muted);
-        setScreenshareAudioVolume(config.audioUserId, value / 100);
-      } else {
-        setUserVolume(config.audioUserId, value);
-      }
-      render();
-    });
-
-    muteBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      muted = !muted;
-      if (!muted && currentVolume === 0) currentVolume = 100;
-      shown = muted ? 0 : currentVolume;
-      commit();
-      render();
-    });
-
-    render();
-    appendChildren(overlay, muteBtn, volumeSlider, output);
-    return {
-      overlay,
-      // A tile menu changed the same setting: show it here too.
-      apply(volume: number, isMuted: boolean): void {
-        muted = isMuted;
-        if (volume > 0) currentVolume = volume;
-        shown = muted ? 0 : currentVolume;
-        render();
-      },
-    };
-  }
-
   /** Stop watching (or hide your own preview) locally, or bring it back. The
    *  stream stays subscribed: opt-in watching is a separate decision (Q3). */
   function setStopped(tileId: number, stopped: boolean): void {
@@ -717,8 +717,8 @@ export function createVideoGrid(): VideoGridComponent {
             name: entry.name,
             config,
             signal: entry.listeners.signal,
-            onVolumeChange: (isScreenshare, volume, muted) =>
-              applyVolume(config.audioUserId, isScreenshare, volume, muted),
+            onVolumeChange: (isScreenshare, level, muted) =>
+              applyVolume(config.audioUserId, isScreenshare, level, muted),
             onStopWatching: () => setStopped(userId, true),
           });
         });
