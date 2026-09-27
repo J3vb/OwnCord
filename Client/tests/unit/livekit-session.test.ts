@@ -21,6 +21,7 @@ const mockVoiceState = vi.hoisted(() => ({
   // the server's voice_config event. Empty by default; tests exercising the
   // audio-bitrate publish path populate an entry for the channel under test.
   voiceConfigs: new Map<number, { bitrate: number }>(),
+  voiceStatus: "idle",
 }));
 
 /** Backing cell for the mocked voice.store PTT-poller-live flag. Boxed so the
@@ -59,6 +60,9 @@ vi.mock("livekit-client", () => ({
     TrackSubscribed: "trackSubscribed",
     TrackUnsubscribed: "trackUnsubscribed",
     Disconnected: "disconnected",
+    Reconnecting: "reconnecting",
+    SignalReconnecting: "signalReconnecting",
+    Reconnected: "reconnected",
     ActiveSpeakersChanged: "activeSpeakersChanged",
     AudioPlaybackStatusChanged: "audioPlaybackStatusChanged",
     EncryptionError: "encryptionError",
@@ -340,6 +344,7 @@ describe("LiveKitSession", () => {
     mockVoiceState.pttGated = false;
     mockVoiceState.currentChannelId = 1;
     mockVoiceState.voiceConfigs = new Map();
+    mockVoiceState.voiceStatus = "idle";
     session = new LiveKitSession();
     // Reset mockRoom state
     mockRoom.state = "connected";
@@ -1261,6 +1266,76 @@ describe("LiveKitSession", () => {
 
       expect((session as any)._state.type).toBe("reconnecting");
       expect(setVoiceStatus).toHaveBeenCalledWith("reconnecting");
+    });
+
+    // RT-9: livekit-client (and the native room) retry a dropped signal
+    // socket on their own before any Disconnected, so the SDK's reconnecting
+    // phase must reach the widget too.
+    it.each(["reconnecting", "signalReconnecting"])(
+      "writes reconnecting while the SDK retries (%s), then connected once it recovers",
+      async (event) => {
+        session.setServerHost("localhost:7880");
+        session.setWsClient({ send: vi.fn() } as any);
+        const handlers = new Map<string, Array<() => void>>();
+        mockRoom.on.mockImplementation((name: string, handler: () => void) => {
+          handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+          return mockRoom;
+        });
+        await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+        mockVoiceState.voiceStatus = "connected";
+        (setVoiceStatus as any).mockClear();
+
+        for (const h of handlers.get(event) ?? []) h();
+        expect(statusCalls()).toEqual(["reconnecting"]);
+
+        mockVoiceState.voiceStatus = "reconnecting";
+        for (const h of handlers.get("reconnected") ?? []) h();
+        expect(statusCalls()).toEqual(["reconnecting", "connected"]);
+        expect((session as any)._state.type).toBe("connected");
+      },
+    );
+
+    // RT-9: the key can arrive over WS while the SFU is already gone and the
+    // SDK is retrying on its own; the join must not then claim "connected".
+    it.each(["reconnecting", "signalReconnecting"])(
+      "writes reconnecting, not connected, when the joined room is already SDK-%s",
+      async (roomState) => {
+        session.setServerHost("localhost:7880");
+        session.setWsClient({ send: vi.fn() } as any);
+        mockRoom.state = roomState;
+        (setVoiceStatus as any).mockClear();
+
+        await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+
+        expect(statusCalls()).not.toContain("connected");
+        expect(statusCalls().at(-1)).toBe("reconnecting");
+      },
+    );
+
+    it("writes reconnecting, not connected, when the auto-reconnected room is already SDK-reconnecting", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 7,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      mockRoom.state = "signalReconnecting";
+      (setVoiceStatus as any).mockClear();
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        7,
+        "ws://localhost:7880",
+        new AbortController().signal,
+      );
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(statusCalls()).not.toContain("connected");
+      expect(statusCalls().at(-1)).toBe("reconnecting");
     });
 
     it("writes connected after a successful auto-reconnect", async () => {
@@ -3289,6 +3364,48 @@ describe("LiveKitSession", () => {
   });
 
   describe("attemptAutoReconnect (lifecycle)", () => {
+    // RT-9: a companion LiveKit restart backs off from 3 s and doubles, plus
+    // its own start-up, so the old 2 tries 3 s apart (about 6 s) gave up
+    // before the SFU was back and ejected every call. The loop must keep
+    // retrying with backoff, so an SFU that returns on the third attempt
+    // still resumes the call.
+    it("RT-9: keeps retrying with backoff so a companion LiveKit restart can land", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      session.setServerHost("localhost:7880");
+      const errorCb = vi.fn();
+      session.setOnError(errorCb);
+      const ac = new AbortController();
+
+      mockRoom.connect
+        .mockRejectedValueOnce(new Error("sfu restarting"))
+        .mockRejectedValueOnce(new Error("sfu restarting"))
+        .mockResolvedValueOnce(undefined);
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "token",
+        "/livekit",
+        5,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+
+      await vi.advanceTimersByTimeAsync(3000); // attempt 1 fails
+      await vi.advanceTimersByTimeAsync(6000); // attempt 2 fails — the old budget gave up here
+      await vi.advanceTimersByTimeAsync(6000); // attempt 3 succeeds
+      await reconnectPromise;
+
+      expect(mockRoom.connect).toHaveBeenCalledTimes(3);
+      expect(errorCb).not.toHaveBeenCalled();
+      expect(setVoiceStatus).toHaveBeenCalledWith("connected");
+    });
+
     it("returns without reconnecting when signal is aborted during delay", async () => {
       (session as any)._state = {
         type: "reconnecting",
@@ -3365,8 +3482,8 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      await vi.advanceTimersByTimeAsync(3100);
-      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(6000);
       await reconnectPromise;
 
       expect(mockRoom.connect).toHaveBeenCalledTimes(2);
@@ -3396,8 +3513,8 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      await vi.advanceTimersByTimeAsync(3100);
-      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(6000);
       await reconnectPromise;
 
       // The room whose connect failed must be torn down — in "reconnecting"
@@ -3436,8 +3553,8 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      await vi.advanceTimersByTimeAsync(3100);
-      await vi.advanceTimersByTimeAsync(3100);
+      // Exhaust the whole RT-9 budget: 3 s, then 6 s per attempt.
+      await vi.advanceTimersByTimeAsync(27_000);
       await reconnectPromise;
 
       expect(leaveVoiceChannel).toHaveBeenCalled();
@@ -3476,12 +3593,12 @@ describe("LiveKitSession", () => {
 
       // Every attempt fails, and on the LAST attempt's failure the session
       // has already moved on to a different (live) channel — simulating the
-      // user joining channel 9 while attempt 2 (MAX_RECONNECT_ATTEMPTS) was
-      // still connecting.
+      // user joining channel 9 while the final attempt
+      // (MAX_RECONNECT_ATTEMPTS) was still connecting.
       let connectCalls = 0;
       mockRoom.connect.mockImplementation(() => {
         connectCalls++;
-        if (connectCalls >= 2) {
+        if (connectCalls >= 5) {
           (session as any)._state = {
             type: "connected",
             room: mockRoom,
@@ -3502,8 +3619,8 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      await vi.advanceTimersByTimeAsync(3100);
-      await vi.advanceTimersByTimeAsync(3100);
+      // Exhaust the whole RT-9 budget so the loop reaches the post-loop check.
+      await vi.advanceTimersByTimeAsync(27_000);
       await reconnectPromise;
 
       // The give-up path must not have run: no error toast, no leaveVoiceChannel,
@@ -3536,7 +3653,7 @@ describe("LiveKitSession", () => {
       let connectCalls = 0;
       mockRoom.connect.mockImplementation(() => {
         connectCalls++;
-        if (connectCalls >= 2) {
+        if (connectCalls >= 5) {
           // A fresh join for the SAME channel completed while the final
           // reconnect attempt was in flight.
           (session as any)._state = {
@@ -3559,8 +3676,8 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      await vi.advanceTimersByTimeAsync(3100);
-      await vi.advanceTimersByTimeAsync(3100);
+      // Exhaust the whole RT-9 budget so the loop reaches the post-loop check.
+      await vi.advanceTimersByTimeAsync(27_000);
       await reconnectPromise;
 
       expect(errorCb).not.toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
@@ -3593,8 +3710,7 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      await vi.advanceTimersByTimeAsync(3100);
-      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(27_000);
       await reconnectPromise;
 
       expect(leaveVoiceChannel).toHaveBeenCalled();
