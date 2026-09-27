@@ -40,20 +40,20 @@ support-bundle contract below treats log excerpts as sensitive.
 
 ## Desktop client support bundle
 
-B7-15c (PRD decision 7). **Settings > Logs > Export Support Bundle** writes a
+B7-15c (PRD decision 7). **Settings > Diagnostics & logs > Export Support Bundle** writes a
 zip to a path the user picks in the OS save dialog. It is user-initiated, read
 and written on the user's machine, and makes no server call. The zip is
 store-only and written in TypeScript (`Client/src/lib/supportBundle.ts`,
 loaded lazily from the button); there is no Rust command behind it.
 
-| File                       | Contents                                                                                                                                                                                                                                            |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `README.txt`               | what the bundle holds and the verbatim-logs warning below                                                                                                                                                                                           |
-| `app.json`                 | client version, export time, OS (`navigator.platform`) and webview (`navigator.userAgent`); `serverVersion` is always null, since the export makes no server call                                                                                   |
-| `settings.json`            | an **allowlist** of `owncord:settings:` keys (display, accessibility, notification, voice) and the listed fields of each saved server profile (name, host, username, sign-in options, last connection)                                              |
-| `voice-diagnostics.json`   | the voice session state the Logs tab shows, including the join timeline (`voiceJoin`): the per-attempt stage, URL kind, retries, phase and milestone timings, the self-test's per-stage result, and the receive-side decrypt-failure count (SRE-M2) |
-| `logs/*.jsonl`             | the rotated client log files (at most five days)                                                                                                                                                                                                    |
-| `logs/owncord-client*.log` | the native host log (the Rust `owncord-client.log` plus rotated `owncord-client_<date>.log`), newest first, each tail-capped at 2 MB                                                                                                                |
+| File                       | Contents                                                                                                                                                                                                                                                          |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `README.txt`               | what the bundle holds and the verbatim-logs warning below                                                                                                                                                                                                         |
+| `app.json`                 | client version, export time, OS (`navigator.platform`) and webview (`navigator.userAgent`); `serverVersion` is always null, since the export makes no server call                                                                                                 |
+| `settings.json`            | an **allowlist** of `owncord:settings:` keys (display, accessibility, notification, voice) and the listed fields of each saved server profile (name, host, username, sign-in options, last connection)                                                            |
+| `voice-diagnostics.json`   | the voice session state the Diagnostics & logs tab shows, including the join timeline (`voiceJoin`): the per-attempt stage, URL kind, retries, phase and milestone timings, the self-test's per-stage result, and the receive-side decrypt-failure count (SRE-M2) |
+| `logs/*.jsonl`             | the rotated client log files (at most five days)                                                                                                                                                                                                                  |
+| `logs/owncord-client*.log` | the native host log (the Rust `owncord-client.log` plus rotated `owncord-client_<date>.log`), newest first, each tail-capped at 2 MB                                                                                                                              |
 
 A settings key that is not on the allowlist never enters the bundle, whatever
 it holds; device ids and the custom status text are left out on purpose. The
@@ -63,7 +63,7 @@ kit secret, recovery code and TOTP secret in storage and in the profiles, and
 proves none reaches the zip.
 
 **Log lines are exported verbatim.** The client logger does not redact, so the
-bundle does not claim to: the Logs tab and `README.txt` both say the log files
+bundle does not claim to: the Diagnostics & logs tab and `README.txt` both say the log files
 are unredacted and should be read before the bundle is shared.
 
 ## Egress inventory

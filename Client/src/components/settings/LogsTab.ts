@@ -14,6 +14,7 @@ import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "../SettingsOverlay";
 import { getSessionDebugInfo } from "@lib/livekitSession";
 import { savePref, readMigratedStringPref } from "./helpers";
+import { createDisclosure } from "./status";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
@@ -21,13 +22,6 @@ import { settingsText as t } from "../../i18n/settings";
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const LOG_LEVEL_COLORS: Record<LogLevel, string> = {
-  debug: "#888",
-  info: "#3ba55d",
-  warn: "#faa61a",
-  error: "#ed4245",
-};
 
 const LOG_FILTER_LEVELS = ["all", "debug", "info", "warn", "error"] as const;
 const LOG_MIN_LEVELS = ["debug", "info", "warn", "error"] as const;
@@ -37,37 +31,31 @@ const LOG_MIN_LEVELS = ["debug", "info", "warn", "error"] as const;
 // ---------------------------------------------------------------------------
 
 function formatLogEntry(entry: LogEntry): HTMLDivElement {
-  const row = createElement("div", {
-    class: "log-entry",
-    style: `border-left: 3px solid ${LOG_LEVEL_COLORS[entry.level]}; padding: 4px 8px; margin: 2px 0; font-family: monospace; font-size: 12px; line-height: 1.4;`,
-  });
+  // Level colour comes from the log-<level> class (settings.css tokens).
+  const row = createElement("div", { class: `log-entry log-${entry.level}` });
   const time = entry.timestamp.slice(11, 23); // HH:MM:SS.mmm
   const level = entry.level.toUpperCase().padEnd(5);
   const text = `${time} ${level} [${entry.component}] ${entry.message}`;
-  const textEl = createElement(
-    "span",
-    {
-      style: `color: ${LOG_LEVEL_COLORS[entry.level]}; overflow-wrap: anywhere;`,
-    },
-    text,
-  );
-  row.appendChild(textEl);
+  row.appendChild(createElement("span", {}, text));
 
   if (entry.data !== undefined) {
     const dataStr =
       typeof entry.data === "string" ? entry.data : JSON.stringify(entry.data, null, 2);
-    const dataEl = createElement(
-      "pre",
-      {
-        style:
-          "margin: 2px 0 0 0; color: #999; font-size: 11px; white-space: pre-wrap; word-break: break-all;",
-      },
-      dataStr,
-    );
-    row.appendChild(dataEl);
+    row.appendChild(createElement("pre", { class: "log-data" }, dataStr));
   }
 
   return row;
+}
+
+/** "N entries · N warnings · N errors" for the client logs summary. */
+function logCounts(entries: readonly LogEntry[]): string {
+  const warnings = entries.filter((e) => e.level === "warn").length;
+  const errors = entries.filter((e) => e.level === "error").length;
+  return [
+    t("logs.entries", { count: entries.length }),
+    t("logs.warnings", { count: warnings }),
+    t("logs.errors", { count: errors }),
+  ].join(" · ");
 }
 
 // ---------------------------------------------------------------------------
@@ -88,7 +76,7 @@ export interface LogsTabHandle {
 
 export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal): LogsTabHandle {
   let logListEl: HTMLDivElement | null = null;
-  let countEl: HTMLDivElement | null = null;
+  let countEl: HTMLSpanElement | null = null;
   let logFilterLevel: LogLevel | "all" = readMigratedStringPref(
     "logs_filter_level",
     "all",
@@ -103,7 +91,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
   function renderLogEntries(): void {
     const entries = getLogBuffer();
     if (countEl !== null) {
-      countEl.textContent = t("logs.entries", { count: entries.length });
+      countEl.textContent = logCounts(entries);
     }
 
     if (logListEl === null) return;
@@ -125,39 +113,105 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     cleanupConnectionDiagnostics = diagnostics.cleanup;
     section.appendChild(diagnostics.element);
 
-    // Version display
-    const versionEl = createElement(
-      "div",
-      {
-        style: "font-size: 12px; color: var(--text-muted); margin: -8px 0 12px 0;",
-      },
-      t("logs.version.loading"),
-    );
-    section.appendChild(versionEl);
-    void desktop.appMetadata
-      .getVersion()
-      .then((v) => {
-        versionEl.textContent = t("logs.version.known", { version: v });
-      })
-      .catch(() => {
-        versionEl.textContent = t("logs.version.unknown");
-      });
+    // ---- Get help: one primary action, the support bundle -----------------
 
-    // Controls row
-    const controls = createElement("div", {
-      style: "display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; align-items: center;",
+    const diagPanel = createElement("pre", { class: "diag-state" });
+    function refreshDiag(): void {
+      const info = getSessionDebugInfo();
+      diagPanel.textContent = JSON.stringify(info, null, 2);
+    }
+    refreshDiag();
+
+    const helpCard = createElement("section", {
+      class: "settings-card",
+      "data-testid": "get-help",
+      "aria-labelledby": "logs-get-help-title",
     });
+    const helpHead = createElement("div", { class: "settings-card-head" });
+    const helpTitle = createElement("h3", { id: "logs-get-help-title" }, t("logs.getHelp"));
 
-    // Filter dropdown
-    const filterLabel = createElement(
-      "span",
-      { class: "setting-label", style: "margin: 0;" },
-      t("logs.filter"),
+    const diagCopy = createElement(
+      "button",
+      { class: "ac-btn secondary", type: "button" },
+      t("logs.copyDiagnostics"),
     );
+    diagCopy.addEventListener(
+      "click",
+      () => {
+        void navigator.clipboard
+          .writeText(diagPanel.textContent ?? "")
+          .then(() => {
+            diagCopy.textContent = t("logs.copied");
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                diagCopy.textContent = t("logs.copyDiagnostics");
+              },
+              1500,
+            );
+          })
+          .catch(() => {
+            diagCopy.textContent = t("logs.copyFailed");
+            setOwnedTimeout(
+              buildSignal,
+              () => {
+                diagCopy.textContent = t("logs.copyDiagnostics");
+              },
+              1500,
+            );
+          });
+      },
+      { signal: buildSignal },
+    );
+
+    // Support bundle (B7-15c): lazily loaded so the zip writer stays off the
+    // startup path. Everything is read and written on this machine.
+    const bundleBtn = createElement(
+      "button",
+      { class: "ac-btn", type: "button", "data-testid": "export-support-bundle" },
+      t("logs.exportBundle"),
+    );
+    const bundleNote = createElement("p", { class: "setting-desc" }, t("logs.bundleNote"));
+    const bundleStatus = createElement("div", {
+      class: "setting-desc",
+      role: "status",
+      "data-testid": "support-bundle-status",
+    });
+    bundleBtn.addEventListener(
+      "click",
+      () => {
+        bundleBtn.disabled = true;
+        bundleStatus.textContent = "";
+        void import("@lib/supportBundle")
+          .then(({ exportSupportBundle }) => exportSupportBundle(desktop, getSessionDebugInfo()))
+          .then((saved) => {
+            bundleStatus.textContent = saved ? t("logs.bundleSaved") : "";
+          })
+          .catch((err: unknown) => {
+            bundleStatus.textContent = t("logs.exportFailed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          })
+          .finally(() => {
+            bundleBtn.disabled = false;
+          });
+      },
+      { signal: buildSignal },
+    );
+    appendChildren(helpHead, helpTitle, diagCopy, bundleBtn);
+    appendChildren(helpCard, helpHead, bundleNote, bundleStatus);
+    section.appendChild(helpCard);
+
+    // ---- Client logs (disclosure; the summary carries the counts) ---------
+
+    const logs = createDisclosure(t("logs.clientLogs"));
+    countEl = logs.count;
+    const controls = createElement("div", { class: "settings-toolbar" });
+
+    const filterLabel = createElement("span", { class: "setting-label" }, t("logs.filter"));
     const filterSelect = createElement("select", {
+      class: "settings-select",
       "aria-label": t("logs.filterLabel"),
-      style:
-        "background: var(--bg-tertiary); color: var(--text-normal); border: 1px solid var(--bg-active); border-radius: 4px; padding: 4px 8px; font-size: 13px;",
     });
     for (const lvl of LOG_FILTER_LEVELS) {
       const opt = createElement("option", { value: lvl }, lvl.toUpperCase());
@@ -175,16 +229,10 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       { signal: buildSignal },
     );
 
-    // Log level selector
-    const levelLabel = createElement(
-      "span",
-      { class: "setting-label", style: "margin: 0 0 0 16px;" },
-      t("logs.minLevel"),
-    );
+    const levelLabel = createElement("span", { class: "setting-label" }, t("logs.minLevel"));
     const levelSelect = createElement("select", {
+      class: "settings-select",
       "aria-label": t("logs.minLevelLabel"),
-      style:
-        "background: var(--bg-tertiary); color: var(--text-normal); border: 1px solid var(--bg-active); border-radius: 4px; padding: 4px 8px; font-size: 13px;",
     });
     for (const lvl of LOG_MIN_LEVELS) {
       const opt = createElement("option", { value: lvl }, lvl.toUpperCase());
@@ -214,13 +262,9 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       { signal: buildSignal },
     );
 
-    // Copy All button
     const copyBtn = createElement(
       "button",
-      {
-        class: "ac-btn",
-        style: "margin-left: auto;",
-      },
+      { class: "ac-btn secondary", type: "button" },
       t("logs.copyAll"),
     );
     copyBtn.addEventListener(
@@ -265,8 +309,11 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       { signal: buildSignal },
     );
 
-    // Clear button
-    const clearBtn = createElement("button", { class: "ac-btn" }, t("logs.clear"));
+    const clearBtn = createElement(
+      "button",
+      { class: "ac-btn secondary", type: "button" },
+      t("logs.clear"),
+    );
     clearBtn.addEventListener(
       "click",
       () => {
@@ -276,8 +323,11 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       { signal: buildSignal },
     );
 
-    // Refresh button
-    const refreshBtn = createElement("button", { class: "ac-btn" }, t("logs.refresh"));
+    const refreshBtn = createElement(
+      "button",
+      { class: "ac-btn secondary", type: "button" },
+      t("logs.refresh"),
+    );
     refreshBtn.addEventListener("click", () => renderLogEntries(), { signal: buildSignal });
 
     appendChildren(
@@ -290,132 +340,37 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       clearBtn,
       refreshBtn,
     );
-    section.appendChild(controls);
+    logListEl = createElement("div", { class: "log-viewer" });
+    appendChildren(logs.details, controls, logListEl);
+    section.appendChild(logs.details);
 
-    // Voice diagnostics panel
-    const diagHeader = createElement(
-      "h3",
-      { style: "margin: 12px 0 6px 0;" },
-      t("logs.voiceDiagnostics"),
-    );
-    section.appendChild(diagHeader);
+    renderLogEntries();
 
-    const diagPanel = createElement("div", {
-      style:
-        "background: var(--bg-tertiary); border-radius: 8px; padding: 10px; margin-bottom: 12px; font-family: monospace; font-size: 12px; line-height: 1.6; color: var(--text-muted);",
-    });
+    // ---- Voice engine state (disclosure) ----------------------------------
 
-    function refreshDiag(): void {
-      const info = getSessionDebugInfo();
-      diagPanel.textContent = JSON.stringify(info, null, 2);
-    }
-
-    refreshDiag();
+    const voice = createDisclosure(t("logs.voiceDiagnostics"));
     const diagRefresh = createElement(
       "button",
-      { class: "ac-btn", style: "margin-top: 6px;" },
+      { class: "ac-btn secondary", type: "button" },
       t("logs.refreshDiagnostics"),
     );
     diagRefresh.addEventListener("click", refreshDiag, { signal: buildSignal });
+    const voiceTools = createElement("div", { class: "settings-toolbar" });
+    voiceTools.appendChild(diagRefresh);
+    appendChildren(voice.details, voiceTools, diagPanel);
+    section.appendChild(voice.details);
 
-    const diagCopy = createElement(
-      "button",
-      { class: "ac-btn", style: "margin: 6px 0 0 6px;" },
-      t("logs.copyDiagnostics"),
-    );
-    diagCopy.addEventListener(
-      "click",
-      () => {
-        void navigator.clipboard
-          .writeText(diagPanel.textContent ?? "")
-          .then(() => {
-            diagCopy.textContent = t("logs.copied");
-            setOwnedTimeout(
-              buildSignal,
-              () => {
-                diagCopy.textContent = t("logs.copyDiagnostics");
-              },
-              1500,
-            );
-          })
-          .catch(() => {
-            diagCopy.textContent = t("logs.copyFailed");
-            setOwnedTimeout(
-              buildSignal,
-              () => {
-                diagCopy.textContent = t("logs.copyDiagnostics");
-              },
-              1500,
-            );
-          });
-      },
-      { signal: buildSignal },
-    );
-
-    // Support bundle (B7-15c): lazily loaded so the zip writer stays off the
-    // startup path. Everything is read and written on this machine.
-    const bundleBtn = createElement(
-      "button",
-      { class: "ac-btn", style: "margin: 6px 0 0 6px;", "data-testid": "export-support-bundle" },
-      t("logs.exportBundle"),
-    );
-    const bundleNote = createElement(
-      "div",
-      { style: "font-size: 12px; color: var(--text-muted); margin-top: 6px;" },
-      t("logs.bundleNote"),
-    );
-    const bundleStatus = createElement("div", {
-      style: "font-size: 12px; margin-top: 4px;",
-      role: "status",
-      "data-testid": "support-bundle-status",
-    });
-    bundleBtn.addEventListener(
-      "click",
-      () => {
-        bundleBtn.disabled = true;
-        bundleStatus.textContent = "";
-        void import("@lib/supportBundle")
-          .then(({ exportSupportBundle }) => exportSupportBundle(desktop, getSessionDebugInfo()))
-          .then((saved) => {
-            bundleStatus.textContent = saved ? t("logs.bundleSaved") : "";
-          })
-          .catch((err: unknown) => {
-            bundleStatus.textContent = t("logs.exportFailed", {
-              error: err instanceof Error ? err.message : String(err),
-            });
-          })
-          .finally(() => {
-            bundleBtn.disabled = false;
-          });
-      },
-      { signal: buildSignal },
-    );
-
-    section.appendChild(diagPanel);
-    const diagBtns = createElement("div", { style: "display: flex; flex-wrap: wrap;" });
-    appendChildren(diagBtns, diagRefresh, diagCopy, bundleBtn);
-    section.appendChild(diagBtns);
-    appendChildren(section, bundleNote, bundleStatus);
-
-    // Log count
-    countEl = createElement(
-      "div",
-      {
-        style: "font-size: 12px; color: #888; margin: 12px 0 4px 0;",
-      },
-      t("logs.entries", { count: getLogBuffer().length }),
-    );
-    section.appendChild(countEl);
-
-    // Log list (scrollable)
-    logListEl = createElement("div", {
-      class: "log-viewer",
-      style:
-        "max-height: 60vh; overflow-y: auto; background: var(--bg-tertiary); border-radius: 8px; padding: 8px;",
-    });
-    section.appendChild(logListEl);
-
-    renderLogEntries();
+    // Version, last and quiet: support asks for it, nobody else needs it.
+    const versionEl = createElement("p", { class: "setting-desc" }, t("logs.version.loading"));
+    section.appendChild(versionEl);
+    void desktop.appMetadata
+      .getVersion()
+      .then((v) => {
+        versionEl.textContent = t("logs.version.known", { version: v });
+      })
+      .catch(() => {
+        versionEl.textContent = t("logs.version.unknown");
+      });
 
     // Live update: subscribe to new log entries
     unsubLogListener?.();

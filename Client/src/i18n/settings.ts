@@ -16,7 +16,7 @@ export const settingsText = defineCatalog("settings", {
   "tabs.voice": "Voice & Audio",
   "tabs.keybinds": "Keybinds",
   "tabs.advanced": "Advanced",
-  "tabs.logs": "Logs",
+  "tabs.logs": "Diagnostics & logs",
 
   "common.unknown": "Unknown",
   "common.save": "Save",
@@ -146,11 +146,12 @@ export const settingsText = defineCatalog("settings", {
   "advanced.launchOnLogin.label": "Launch on Login",
   "advanced.launchOnLogin.desc": "Start OwnCord automatically when you sign in to your computer",
 
-  "diagnostics.title": "Test my connection and voice",
+  "diagnostics.title": "Connection test",
   "diagnostics.description":
     "Checks this client's connection. To check incoming voice or video, join a call with someone speaking or sharing video before starting. The test does not join a call or send microphone audio.",
   "diagnostics.micCheck": " Include a brief microphone permission check",
   "diagnostics.start": "Start connection test",
+  "diagnostics.runAgain": "Run again",
   "diagnostics.cancel": "Cancel test",
   "diagnostics.ready": "Ready to test.",
   "diagnostics.limitation":
@@ -159,7 +160,17 @@ export const settingsText = defineCatalog("settings", {
   "diagnostics.sessionChanged":
     "The signed-in session changed. Run a new test for the current server.",
   "diagnostics.notTested": "Not tested",
-  "diagnostics.complete": "Test complete. Review each result below.",
+  "diagnostics.completeOk": "Test complete. Everything tested is working.",
+  "diagnostics.completeProblems": {
+    one: "Test complete. {count} problem found.",
+    other: "Test complete. {count} problems found.",
+  },
+  "diagnostics.completeUntested": "Test complete. Nothing could be tested yet.",
+  "diagnostics.count.passed": "{count} passed",
+  "diagnostics.count.failed": "{count} failed",
+  "diagnostics.count.notTested": "{count} not tested",
+  "diagnostics.result": "{status} — {detail}",
+  "diagnostics.limitsSummary": "What this test does not check",
   "diagnostics.cancelled": "Test cancelled.",
   "diagnostics.failed": "The test could not finish. Try again.",
   "diagnostics.status.passed": "Passed",
@@ -167,6 +178,10 @@ export const settingsText = defineCatalog("settings", {
   "diagnostics.status.failed": "Failed",
 
   "logs.entries": "{count} entries",
+  "logs.warnings": { one: "{count} warning", other: "{count} warnings" },
+  "logs.errors": { one: "{count} error", other: "{count} errors" },
+  "logs.clientLogs": "Client logs",
+  "logs.getHelp": "Get help",
   "logs.version.loading": "Client version: loading...",
   "logs.version.known": "Client version: v{version}",
   "logs.version.unknown": "Client version: unknown",
@@ -179,7 +194,7 @@ export const settingsText = defineCatalog("settings", {
   "logs.copyFailed": "Failed to copy",
   "logs.clear": "Clear Logs",
   "logs.refresh": "Refresh",
-  "logs.voiceDiagnostics": "Voice Diagnostics",
+  "logs.voiceDiagnostics": "Voice engine state",
   "logs.refreshDiagnostics": "Refresh Diagnostics",
   "logs.copyDiagnostics": "Copy Diagnostics",
   "logs.exportBundle": "Export Support Bundle",
@@ -188,7 +203,7 @@ export const settingsText = defineCatalog("settings", {
   "logs.bundleSaved": "Support bundle saved.",
   "logs.exportFailed": "Export failed: {error}",
   "logs.bundleReadme":
-    "OwnCord support bundle\n\nCreated on this computer by the OwnCord desktop client. Nothing was sent to\na server. Contents:\n\n  app.json               client version, OS, webview and when this bundle\n                         was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings > Logs\n  logs/*.jsonl           the client's log files, copied verbatim\n  logs/owncord-client*.log the native host log (startup, updates, TLS/TOFU and,\n                         on Linux, native voice), copied verbatim and\n                         tail-capped at 2 MB per file\n\nPasswords, session tokens, recovery kits, recovery codes and 2FA secrets are\nnever read into this bundle: settings are copied from a fixed allowlist and the\nOS keychain is not touched. The log files are NOT redacted: they are exported\nexactly as written. Read them before sharing this bundle, and share it only\nwith someone you trust.\n",
+    "OwnCord support bundle\n\nCreated on this computer by the OwnCord desktop client. Nothing was sent to\na server. Contents:\n\n  app.json               client version, OS, webview and when this bundle\n                         was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings >\n                         Diagnostics & logs\n  logs/*.jsonl           the client's log files, copied verbatim\n  logs/owncord-client*.log the native host log (startup, updates, TLS/TOFU and,\n                         on Linux, native voice), copied verbatim and\n                         tail-capped at 2 MB per file\n\nPasswords, session tokens, recovery kits, recovery codes and 2FA secrets are\nnever read into this bundle: settings are copied from a fixed allowlist and the\nOS keychain is not touched. The log files are NOT redacted: they are exported\nexactly as written. Read them before sharing this bundle, and share it only\nwith someone you trust.\n",
 
   "diagnostics.stage.connection": "Server connection",
   "diagnostics.stage.authentication": "Signed-in access",

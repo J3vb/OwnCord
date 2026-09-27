@@ -49,6 +49,9 @@ export type IconName =
   | "play"
   | "pause"
   | "check"
+  | "circle-check"
+  | "circle-x"
+  | "circle-dashed"
   | "external-link"
   | "link"
   | "loader"
@@ -170,6 +173,11 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Checkmark
   check: `<path d="M20 6 9 17l-5-5"/>`,
+  // Status icons (settings): passed, failed, not yet known
+  "circle-check": `<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>`,
+  "circle-x": `<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>`,
+  // Eight dashes round r=10 (circumference 62.8), Lucide's circle-dashed look in one element.
+  "circle-dashed": `<circle cx="12" cy="12" r="10" stroke-dasharray="3.8 4.05"/>`,
 
   // External link arrow out of box
   "external-link": `<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>`,

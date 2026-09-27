@@ -140,7 +140,7 @@ describe("SettingsOverlay", () => {
       "Voice & Audio",
       "Keybinds",
       "Advanced",
-      "Logs",
+      "Diagnostics & logs",
     ]);
 
     overlay.destroy?.();

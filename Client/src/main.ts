@@ -162,7 +162,7 @@ function handleUnauthorized(): void {
 }
 const api = createApiClient({ host: "" }, handleUnauthorized);
 const ws = createWsClient();
-// Diagnostics back the lazily loaded Settings > Logs panel, so their engine and
+// Diagnostics back the lazily loaded Settings > Diagnostics & logs panel, so their engine and
 // text stay out of the startup chunk (B9-20). The import resolves long before
 // the panel can be opened, and the panel's own module imports the same chunk.
 void import("@lib/connectionDiagnostics").then(({ configureConnectionDiagnostics }) => {
