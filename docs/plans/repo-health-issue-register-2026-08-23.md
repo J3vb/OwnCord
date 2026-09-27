@@ -95,7 +95,8 @@ findings are fixed by PRs #1802, #1798 and #1800 (the keyboard context menus;
 the login, contrast, motion and roving-tabindex fixes with the shared
 keyboard-reachability helper; the owner-only backup policy; and the
 backup/upgrade hardening), two are declined (owner declined screen-reader-only
-work), and four stay open for after the beta.
+work), and five stay open for after the beta (`OC-0479` among them, since
+confirmed fixed — above).
 
 As of 2026-09-23, `OC-0446` and `OC-0447` (the k6 channel-spreading and
 restart-measurement harness fixes) and `OC-0448` (release tags moved only after
