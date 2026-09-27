@@ -280,12 +280,35 @@
 .ac-btn:hover {
   background: var(--accent-hover);
 }
-.ac-btn.account-delete-btn {
+/* One accent .ac-btn per card: every other action is secondary. */
+.ac-btn.secondary {
+  background: var(--bg-active);
+  color: var(--text-normal);
+}
+.ac-btn.secondary:hover {
+  background: color-mix(in srgb, var(--bg-active) 85%, var(--text-normal));
+}
+/* A destructive action at rest; .ac-btn-danger (after it, same specificity)
+   fills it once armed. */
+.ac-btn.destructive {
+  background: transparent;
+  color: var(--text-danger);
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+.ac-btn.destructive:hover {
+  background: color-mix(in srgb, var(--danger-fill) 12%, transparent);
+}
+.ac-btn.account-delete-btn,
+.ac-btn.ac-btn-danger {
   background: var(--danger-fill);
   color: var(--on-fill);
+  box-shadow: none;
+}
+.ac-btn.account-delete-btn {
   margin-left: 0;
 }
-.ac-btn.account-delete-btn:hover {
+.ac-btn.account-delete-btn:hover,
+.ac-btn.ac-btn-danger:hover {
   background: var(--danger-fill-hover);
 }
 .ac-btn.account-delete-btn:disabled {

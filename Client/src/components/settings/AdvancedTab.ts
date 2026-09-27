@@ -43,17 +43,14 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   // Launch on login — OS-level state via the autostart plugin, not a stored pref.
   section.appendChild(buildAutostartRow(signal));
 
-  // ---- Separator -------------------------------------------------------------
-
-  const sep = createElement("div", { class: "settings-separator" });
-  section.appendChild(sep);
-
-  // ---- Debug section ---------------------------------------------------------
-
-  const debugTitle = createElement("div", { class: "settings-section-title" }, t("advanced.debug"));
-  section.appendChild(debugTitle);
+  // ---- Debug section (dev builds only: its one row is DevTools) --------------
 
   if (import.meta.env.DEV) {
+    section.appendChild(createElement("div", { class: "settings-separator" }));
+    section.appendChild(
+      createElement("div", { class: "settings-section-title" }, t("advanced.debug")),
+    );
+
     // DevTools button row
     const devtoolsRow = createElement("div", { class: "setting-row" });
     const devtoolsInfo = createElement("div", {});
@@ -69,7 +66,11 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
     );
     appendChildren(devtoolsInfo, devtoolsLabel, devtoolsDesc);
 
-    const devtoolsBtn = createElement("button", { class: "ac-btn" }, t("advanced.devtools.button"));
+    const devtoolsBtn = createElement(
+      "button",
+      { class: "ac-btn secondary" },
+      t("advanced.devtools.button"),
+    );
     devtoolsBtn.addEventListener(
       "click",
       () => {
@@ -104,6 +105,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
       t("advanced.clearImages.label"),
       t("advanced.clearImages.desc"),
       t("advanced.button.clear"),
+      false,
       signal,
       async (btn) => {
         btn.textContent = t("advanced.button.clearing");
@@ -141,6 +143,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
       t("advanced.clearLogs.label"),
       t("advanced.clearLogs.desc"),
       t("advanced.button.clear"),
+      false,
       signal,
       async (btn) => {
         btn.textContent = t("advanced.button.clearing");
@@ -182,6 +185,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
       t("advanced.clearAll.label"),
       t("advanced.clearAll.desc"),
       t("advanced.button.clearRestart"),
+      true,
       signal,
       async (btn) => {
         // Two-step confirmation: first click shows warning, second click confirms
@@ -301,6 +305,7 @@ function buildCacheRow(
   label: string,
   desc: string,
   btnText: string,
+  destructive: boolean,
   signal: AbortSignal,
   onClick: (btn: HTMLButtonElement) => void,
 ): HTMLDivElement {
@@ -310,7 +315,8 @@ function buildCacheRow(
   const descEl = createElement("div", { class: "setting-desc" }, desc);
   appendChildren(info, labelEl, descEl);
 
-  const btn = createElement("button", { class: "ac-btn" }, btnText);
+  const btn = createElement("button", { class: "ac-btn secondary" }, btnText);
+  btn.classList.toggle("destructive", destructive);
   btn.addEventListener(
     "click",
     () => {

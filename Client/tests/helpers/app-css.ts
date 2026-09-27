@@ -139,3 +139,13 @@ export function keyword(d: CssDeclaration | undefined): string | undefined {
   if (t.value.type === "number") return String(t.value.value);
   return undefined;
 }
+
+/** The custom-property name a declaration reads as a bare `var(--x)`, or undefined. */
+export function varToken(d: CssDeclaration | undefined): string | undefined {
+  const v = d?.value;
+  if (v?.property !== "unparsed") return undefined;
+  const tokens = v.value.value;
+  if (tokens.length !== 1) return undefined;
+  const t = tokens[0]!;
+  return t.type === "var" ? t.value.name.ident : undefined;
+}

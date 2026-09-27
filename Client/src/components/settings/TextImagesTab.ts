@@ -58,7 +58,7 @@ function buildConsentResetRow(signal: AbortSignal): HTMLDivElement {
   );
   const btn = createElement(
     "button",
-    { class: "ac-btn", type: "button", "aria-label": externalConsentText("reset.label") },
+    { class: "ac-btn secondary", type: "button", "aria-label": externalConsentText("reset.label") },
     externalConsentText("reset.button"),
   );
   btn.addEventListener(
