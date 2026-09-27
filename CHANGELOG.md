@@ -46,6 +46,15 @@ and only when it changes something a contributor or fork holder must do
 - A server update, backup restore or restart no longer signs everyone out — the desktop client counts down, reconnects on its own and returns to the channel it was in. Voice calls still end when the server actually stops.
 - **A half-open connection no longer stays "connected" forever.** When the network path drops silently — a firewall change, a lost Wi-Fi hop — the client used to keep showing Connected while sends vanished. It now treats a minute without any server frame as a dead link, shows Reconnecting and dials again.
 
+### Messages & files
+
+- **Large attachments no longer fail on a slow connection.** Uploads and
+  downloads used to be cut after 30 seconds no matter how steadily they were
+  moving, so a 25 MB file on a 1 Mbit/s uplink was lost mid-transfer and a
+  download stopped without an error. The server now keeps a transfer alive
+  while it is making progress and gives up on one that has stalled; any
+  single transfer is still closed after 10 minutes.
+
 ### Voice
 
 - Linux desktop voice works against a server on the same Docker host again — the client tried LiveKit's Docker-internal hostname, which does not resolve outside the container network, and now uses the same rule as the other platforms: only a loopback `ws:`/`http:` address is used directly, anything else goes through the `/livekit` tunnel.

@@ -117,6 +117,31 @@ const (
 	// (filesystem-safe limit).
 	maxUploadFilenameLength = 255
 
+	// transferProgressTimeout is the gap without any byte read or written
+	// after which a file transfer is abandoned. The server's global
+	// ReadTimeout/WriteTimeout (30 s) bound the WHOLE request — the client
+	// tunnel's own 600 s data-copy bound is wider — so a 25 MB upload on a
+	// slow uplink (about 200 s at 1 Mbit/s) is otherwise cut mid-body and a
+	// download truncates with no error. The per-route progress wrappers in
+	// upload_handler.go push the connection deadline out on every chunk, so a
+	// transfer that keeps moving is not cut before transferMaxLifetime, while
+	// a peer that stalls is.
+	transferProgressTimeout = 30 * time.Second
+
+	// transferMaxLifetime caps a file transfer's total lifetime however
+	// steadily it progresses, restoring the bound the whole-request 30 s
+	// timeouts used to give: without it a peer trickling one byte per
+	// transferProgressTimeout holds its storage reservation, connection and
+	// goroutine indefinitely. 10 minutes matches the client tunnel's 600 s
+	// data-copy bound, so any transfer the client would finish is not cut.
+	transferMaxLifetime = 10 * time.Minute
+
+	// shutdownTransferGrace is how long an in-flight transfer may keep going
+	// once server shutdown begins. It fits inside the 30 s HTTP drain budget
+	// (shutdownBudget in internal/app), so a short transfer still finishes
+	// while a trickling one cannot hold the drain past it.
+	shutdownTransferGrace = 20 * time.Second
+
 	// maxAvatarURLLen is the maximum length of a user avatar URL.
 	maxAvatarURLLen = 512
 
