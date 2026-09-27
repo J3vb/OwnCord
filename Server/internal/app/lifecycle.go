@@ -70,6 +70,7 @@ type stage struct {
 func (a *App) stages() []stage {
 	return []stage{
 		{"data-dir", a.startDataDir},
+		{"boot-marker", a.startBootMarker},
 		{"tls", a.startTLS},
 		{"database", a.startDatabase},
 		{"migrate", a.startMigrate},
@@ -292,6 +293,7 @@ func (a *App) startHub() error {
 	}
 	a.runtime = rt
 	a.hub = a.runtime.Hub
+	recordBootStatus(rt.Services, a.prevBoot)
 	// The emergency restart path must stop LiveKit even when an earlier
 	// shutdown step wedges before the hub's closer can run.
 	a.deps.Restart.setCompanionStop(a.hub.StopLiveKit)

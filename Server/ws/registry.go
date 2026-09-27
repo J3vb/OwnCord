@@ -56,6 +56,15 @@ func (r *HandlerRegistry) DispatchV2(ctx context.Context, cmd Command, info Clie
 				"panic", rec,
 				"stack", stackutil.Capture(),
 			)
+			// SRE-08: on Windows a nil deref or invalid address may have left
+			// the heap corrupt (golang/go#81238), so it exits for a supervisor
+			// restart instead of resuming on damaged memory. Every other panic
+			// stays recovered.
+			if stackutil.Recovered(rec) {
+				slog.Error("DispatchV2: hardware fault, exiting for supervisor restart",
+					"type", cmd.Type(), "user_id", info.UserID)
+				stackutil.Fatal()
+			}
 			result = Result{Error: ClientError{Code: ErrCodeInternal, Message: "internal error"}}
 			ok = true
 		}

@@ -17,6 +17,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/plugin"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -77,6 +78,11 @@ type App struct {
 	prunerDone  <-chan struct{}
 	auditWriter *db.AuditWriter
 	markers     *db.MarkerStore
+	// bootMarker is the current run's handle on boot.json (SRE-08); prevBoot
+	// is what the previous run left there, folded into the attention panel at
+	// start-up.
+	bootMarker *bootMarker
+	prevBoot   service.BootStatus
 	// pushVAPIDKey is loaded by startPushVAPIDKey and installed on svc.Push
 	// by startHub once the service layer exists (B5-4).
 	pushVAPIDKey *ecdh.PrivateKey

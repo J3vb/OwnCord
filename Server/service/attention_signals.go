@@ -303,6 +303,32 @@ func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 	s.settle(sig, title, action)
 }
 
+// evalBootStatus reports how the previous run ended (SRE-08): a marker left
+// behind by a kill, a crash or a hardware exit is a warning, a clean shutdown
+// is ok, and a first start with no marker is unknown.
+func (s *AttentionService) evalBootStatus(now time.Time) {
+	sig := AttentionSignal{ID: "last_exit", Label: "Last server exit", ObservedAt: now}
+	title := "The server did not shut down cleanly"
+	action := "Check Server Logs for a panic or an out-of-memory kill just before the restart, and Server Logs or the boot marker under the data directory for the time it happened. A kill -9 or a crash is not a graceful shutdown."
+	switch {
+	case !s.boot.Recorded:
+		sig.Status, sig.Detail = AttentionStatusUnknown, "no record from a previous run"
+	case s.boot.Unclean:
+		sig.Status = AttentionStatusWarning
+		if !s.boot.StartedAt.IsZero() {
+			sig.Value = "stopped " + s.boot.StartedAt.UTC().Format("2006-01-02 15:04 UTC") + " without a clean shutdown"
+		} else {
+			sig.Value = "previous run ended without a clean shutdown"
+		}
+		if !s.boot.LastPanicAt.IsZero() {
+			sig.Detail = "last panic recovered " + s.boot.LastPanicAt.UTC().Format("2006-01-02 15:04 UTC")
+		}
+	default:
+		sig.Status = AttentionStatusOK
+	}
+	s.settle(sig, title, action)
+}
+
 func (s *AttentionService) evalJobs(now time.Time) {
 	for _, j := range s.jobs {
 		sig := AttentionSignal{ID: "job:" + j.label, Label: "Maintenance: " + j.label, ObservedAt: now}

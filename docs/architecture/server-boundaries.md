@@ -534,28 +534,35 @@ on every return — a failed start, a serve error and a clean shutdown alike.
 | --- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | (in `Run`) `bgCtx`     | `background-context` — cancels bgCtx; registered first, so it runs **last**                                                                                                                    |
 | 2   | `data-dir`             | —                                                                                                                                                                                              |
-| 3   | `tls`                  | —                                                                                                                                                                                              |
-| 4   | `database`             | `database` — `database.Close()`, registered before the migration runs                                                                                                                          |
-| 5   | `migrate`              | —                                                                                                                                                                                              |
-| 6   | `erasure-markers`      | `erasure-markers` — `markers.Close()`, releases the deletion-marker file                                                                                                                       |
-| 7   | `push-vapid-key`       | —                                                                                                                                                                                              |
-| 8   | `telemetry`            | `telemetry` — bounded OTel shutdown                                                                                                                                                            |
-| 9   | `plugins`              | `plugins` — `registry.Close`                                                                                                                                                                   |
-| 10  | `hub`                  | `hub` — joins the dispatch loop; on an early return it is the `GracefulStopContext`, the only caller of `LiveKitProcess.Stop`                                                                  |
-| 11  | `router`               | `router` — the rate-limiter cleanup goroutine                                                                                                                                                  |
-| 12  | `event-persistence`    | `event-persistence` — drains the persister, cancels bgCtx, joins the pruner                                                                                                                    |
-| 13  | `audit-writer`         | `audit-writer` — drains the audit queue                                                                                                                                                        |
-| 14  | `maintenance`          | `maintenance` — joins the maintenance loop                                                                                                                                                     |
-| 15  | `acme`                 | — (shut down by the `http` step, in the order the drain requires)                                                                                                                              |
-| 16  | `signals`              | `signals` — unregisters the signal handler; armed before the bind retry below                                                                                                                  |
-| 17  | `http`                 | `http` — ACME shutdown and the drain of in-flight handlers (an open admin Logs stream is ended as `Shutdown` begins), then `hub-notice` stops the hub, then `listener` releases the bound port |
+| 3   | `boot-marker`          | `boot-marker` — clears the process panic recorder and rewrites `data/boot.json` as a clean shutdown (SRE-08)                                                                                   |
+| 4   | `tls`                  | —                                                                                                                                                                                              |
+| 5   | `database`             | `database` — `database.Close()`, registered before the migration runs                                                                                                                          |
+| 6   | `migrate`              | —                                                                                                                                                                                              |
+| 7   | `erasure-markers`      | `erasure-markers` — `markers.Close()`, releases the deletion-marker file                                                                                                                       |
+| 8   | `push-vapid-key`       | —                                                                                                                                                                                              |
+| 9   | `telemetry`            | `telemetry` — bounded OTel shutdown                                                                                                                                                            |
+| 10  | `plugins`              | `plugins` — `registry.Close`                                                                                                                                                                   |
+| 11  | `hub`                  | `hub` — joins the dispatch loop; on an early return it is the `GracefulStopContext`, the only caller of `LiveKitProcess.Stop`                                                                  |
+| 12  | `router`               | `router` — the rate-limiter cleanup goroutine                                                                                                                                                  |
+| 13  | `event-persistence`    | `event-persistence` — drains the persister, cancels bgCtx, joins the pruner                                                                                                                    |
+| 14  | `audit-writer`         | `audit-writer` — drains the audit queue                                                                                                                                                        |
+| 15  | `maintenance`          | `maintenance` — joins the maintenance loop                                                                                                                                                     |
+| 16  | `acme`                 | — (shut down by the `http` step, in the order the drain requires)                                                                                                                              |
+| 17  | `signals`              | `signals` — unregisters the signal handler; armed before the bind retry below                                                                                                                  |
+| 18  | `http`                 | `http` — ACME shutdown and the drain of in-flight handlers (an open admin Logs stream is ended as `Shutdown` begins), then `hub-notice` stops the hub, then `listener` releases the bound port |
 
 Close order is therefore `http`, `hub-notice`, `listener`, `signals`, `maintenance`, `audit-writer`,
 `event-persistence`, `router`, `hub`, `plugins`, `telemetry`,
-`erasure-markers`, `database`, `background-context`. All four facts hold, and
+`erasure-markers`, `database`, `boot-marker`, `background-context`. All four facts hold, and
 now hold **because of the ordering rule** rather than because of where a
 `defer` happened to sit: `push-vapid-key` is deliberately absent — it registers
-no closer.
+no closer. `boot-marker` clears the marker as it runs, so any exit that reaches
+`App.Close` — a clean shutdown, a planned restart, or a reported start failure
+— reads back as clean on the next start. An exit that never runs `Close` (a
+`kill -9`, an OOM kill, or a hardware-fault exit through `stackutil.Fatal`, which
+calls `os.Exit` from the hub breaker or the router's recovery site) leaves the
+marker armed, which is exactly the unclean exit the attention panel reports
+(SRE-08).
 
 - the audit writer and event persistence both start after the database opens,
   so both stop before `database.Close`;

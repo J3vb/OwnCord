@@ -237,15 +237,28 @@ func (h *Hub) Run() {
 						"panic_count", panicCount,
 						"stack", stackutil.Capture())
 
-					if panicCount >= 3 {
-						// The hub's state after three panics in a minute is
-						// unknown, and a stopped dispatch loop is invisible from
-						// the outside: registerNow keeps admitting clients that
-						// can never receive a broadcast. Exit and let the
-						// process supervisor restart us (fatalFn is os.Exit(1)
-						// in production; tests substitute a no-op and rely on
+					// SRE-08: a Windows hardware fault (a nil deref or an
+					// invalid address) may have left the heap corrupt
+					// (golang/go#81238), so it exits at once rather than
+					// being recovered onto damaged memory. Software panics
+					// keep the breaker below.
+					hardware := stackutil.Recovered(r)
+					breaker := panicCount >= 3
+					if hardware || breaker {
+						// The hub's state after a hardware fault, or after
+						// three panics in a minute, is unknown, and a stopped
+						// dispatch loop is invisible from the outside:
+						// registerNow keeps admitting clients that can never
+						// receive a broadcast. Exit and let the process
+						// supervisor restart us (fatalFn is os.Exit(1) in
+						// production; tests substitute a no-op and rely on
 						// the Stop below).
-						slog.Error("hub: too many panics in 60s, stopping and exiting for supervisor restart")
+						reason := "too many panics in 60s"
+						if hardware {
+							reason = "hardware fault"
+						}
+						slog.Error("hub: stopping and exiting for supervisor restart",
+							"reason", reason, "panic_count", panicCount)
 						h.Stop()
 						h.dispatchExited.Store(true)
 						if h.fatalFn != nil {

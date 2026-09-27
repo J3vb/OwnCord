@@ -3243,7 +3243,13 @@ Nothing here is exported off the host.
   both `0`).
   It is never reported as healthy and neither raises nor clears a warning.
 - `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `voice`,
-  `backup`, and `job:<name>` for each maintenance step.
+  `last_exit`, `backup`, and `job:<name>` for each maintenance step.
+- `last_exit` reports how the previous run ended (SRE-08): `ok` after a clean
+  shutdown, `warning` when the run before this one left its boot marker armed
+  (a `kill -9`, a crash, or a hardware-fault exit), with the previous run's
+  start time as `value` and the last panic it recovered, if any, in `detail`;
+  `unknown` on a first start, when there was no marker to read. A planned
+  (clean) restart clears the marker, so it recovers this warning.
 - `voice` reports LiveKit. An OwnCord-managed companion reports its
   supervisor's local state — `running`, plus a `not running` warning when it is
   down and a `gave up` critical when the backoff stopped restarting it; a
