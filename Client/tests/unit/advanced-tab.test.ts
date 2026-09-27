@@ -484,6 +484,45 @@ describe("AdvancedTab — Toggles & Structure", () => {
     expect(titleTexts).toContain("Storage & Cache");
   });
 
+  it("shows no Debug heading or separator in a production build", () => {
+    vi.stubEnv("DEV", false);
+    try {
+      const section = buildAdvancedTab(ac.signal);
+      container.appendChild(section);
+
+      const titleTexts = Array.from(container.querySelectorAll(".settings-section-title")).map(
+        (t) => t.textContent,
+      );
+      expect(titleTexts).toEqual(["Storage & Cache"]);
+      expect(container.querySelectorAll(".settings-separator")).toHaveLength(1);
+      expect(container.textContent).not.toContain("Open DevTools");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("makes the cache actions secondary and marks clear-and-restart destructive", () => {
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const byText = (text: string): HTMLButtonElement =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>("button.ac-btn")).find(
+        (b) => b.textContent === text,
+      )!;
+    const clears = Array.from(
+      container.querySelectorAll<HTMLButtonElement>("button.ac-btn"),
+    ).filter((b) => b.textContent === "Clear");
+    expect(clears).toHaveLength(2);
+    for (const b of clears) {
+      expect(b.classList.contains("secondary")).toBe(true);
+      expect(b.classList.contains("destructive")).toBe(false);
+    }
+    const restart = byText("Clear & Restart");
+    expect(restart.classList.contains("secondary")).toBe(true);
+    expect(restart.classList.contains("destructive")).toBe(true);
+    expect(restart.classList.contains("ac-btn-danger")).toBe(false);
+  });
+
   it("renders separators between sections", () => {
     const section = buildAdvancedTab(ac.signal);
     container.appendChild(section);
@@ -601,6 +640,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
     await vi.waitFor(() => {
       expect(btn.textContent).toBe("Failed");
     });
+    expect(btn.classList.contains("ac-btn-danger")).toBe(false);
   });
 
   it("deletes only .jsonl files when clearing log files, skips directories", async () => {

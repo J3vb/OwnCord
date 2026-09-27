@@ -31,7 +31,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const pttClear = createElement(
     "button",
     {
-      class: "ac-btn",
+      class: "ac-btn secondary",
       style: `margin-left: 8px; font-size: 12px; padding: 4px 10px; ${currentVk !== 0 ? "" : hiddenStyle}`,
     },
     t("keybinds.clear"),
