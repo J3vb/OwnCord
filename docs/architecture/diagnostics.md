@@ -49,7 +49,7 @@ loaded lazily from the button); there is no Rust command behind it.
 | File                       | Contents                                                                                                                                                                                               |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `README.txt`               | what the bundle holds and the verbatim-logs warning below                                                                                                                                              |
-| `app.json`                 | client version, export time, OS (`navigator.platform`), webview (`navigator.userAgent`) and the connected server's version (or a `serverVersionNote` saying why it is absent)                          |
+| `app.json`                 | client version, export time, OS (`navigator.platform`) and webview (`navigator.userAgent`); `serverVersion` is always null, since the export makes no server call                                      |
 | `settings.json`            | an **allowlist** of `owncord:settings:` keys (display, accessibility, notification, voice) and the listed fields of each saved server profile (name, host, username, sign-in options, last connection) |
 | `voice-diagnostics.json`   | the voice session state the Logs tab shows                                                                                                                                                             |
 | `logs/*.jsonl`             | the rotated client log files (at most five days)                                                                                                                                                       |
@@ -61,13 +61,6 @@ OS keychain, which holds saved passwords and session tokens, is never read.
 `Client/tests/unit/support-bundle.test.ts` plants a token, password, recovery
 kit secret, recovery code and TOTP secret in storage and in the profiles, and
 proves none reaches the zip.
-
-The server version is read from the admin-gated
-`GET /api/v1/diagnostics/connectivity` (CLI-03). C-2 keeps build identity off
-every unauthenticated endpoint, so a principal who may not read it records
-`serverVersion: null` with `serverVersionNote: "not permitted"` (or
-`"unavailable"` when the request fails) rather than widening the server
-surface; `app.json` never blocks the export on it.
 
 **Log lines are exported verbatim.** The client logger does not redact, so the
 bundle does not claim to: the Logs tab and `README.txt` both say the log files

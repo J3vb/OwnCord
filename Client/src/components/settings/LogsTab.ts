@@ -13,7 +13,6 @@ import {
 import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "../SettingsOverlay";
 import { getSessionDebugInfo } from "@lib/livekitSession";
-import { getServerVersionForBundle } from "@lib/connectionDiagnostics";
 import { savePref, readMigratedStringPref } from "./helpers";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";
@@ -376,9 +375,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
         bundleBtn.disabled = true;
         bundleStatus.textContent = "";
         void import("@lib/supportBundle")
-          .then(({ exportSupportBundle }) =>
-            exportSupportBundle(desktop, getSessionDebugInfo(), getServerVersionForBundle),
-          )
+          .then(({ exportSupportBundle }) => exportSupportBundle(desktop, getSessionDebugInfo()))
           .then((saved) => {
             bundleStatus.textContent = saved ? t("logs.bundleSaved") : "";
           })

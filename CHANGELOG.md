@@ -87,7 +87,7 @@ and only when it changes something a contributor or fork holder must do
 ### Desktop app
 
 - **The desktop client's own log now survives long enough to explain a problem.** It used to delete itself each time it reached ten megabytes; the two previous files are now kept beside it. A crash is written to the log with a backtrace, a window that never finishes loading leaves a `frontend not ready` line after 30 seconds, and the tray icon gains **Open Log Folder** so the log is reachable even when the window is blank.
-- **The exported support bundle now carries the desktop app's own log too.** It held only the webview's log, so an update or a Linux voice problem arrived without the file that explains it. The bundle also records your OS, webview and the connected server's version; the server's version is only read where your account may see it, and the bundle says so when it cannot rather than widening what the server exposes.
+- **The exported support bundle now carries the desktop app's own log too.** It held only the webview's log, so an update or a Linux voice problem arrived without the file that explains it. The bundle also records your OS and webview; it still makes no server call.
 
 ## v2.0.0-beta.1
 

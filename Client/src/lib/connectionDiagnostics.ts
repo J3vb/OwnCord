@@ -28,28 +28,13 @@ export function diagnosticLabel(stage: DiagnosticStage): string {
 }
 
 export interface DiagnosticServices {
-  api: Pick<ApiClient, "getSession" | "getConfig" | "getHealth" | "getMe" | "getServerVersion">;
+  api: Pick<ApiClient, "getSession" | "getConfig" | "getHealth" | "getMe">;
   ws: Pick<WsClient, "ping">;
   getRoom(): Room | null | Promise<Room | null>;
   getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
 }
 
 let configured: DiagnosticServices | null = null;
-
-/**
- * The connected server's version for the support bundle (CLI-03), or null with
- * a reason. Lives here rather than on the settings overlay so the call stays
- * out of the startup chunk: this module is already lazy (B9-20), and the
- * bundle's Logs tab imports it.
- */
-export function getServerVersionForBundle(): Promise<{
-  version: string | null;
-  note: string | null;
-}> {
-  return (
-    configured?.api.getServerVersion() ?? Promise.resolve({ version: null, note: "unavailable" })
-  );
-}
 
 export function getConnectionDiagnosticsSessionSignal(): AbortSignal | undefined {
   return configured?.api.getSession().signal;

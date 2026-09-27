@@ -117,7 +117,6 @@ function sources(overrides: Partial<SupportBundleSources> = {}): SupportBundleSo
       { name: "2026-09-22.jsonl", text: '{"message":"two"}\n' },
     ],
     nativeLogs: [{ name: "owncord-client.log", text: "[startup] frontend ready after 42 ms\n" }],
-    serverVersion: { version: "2.0.0-beta.1", note: null },
     environment: { platform: "Win32", userAgent: "Mozilla/5.0 (Windows) OwnCord" },
     profiles: [
       {
@@ -156,7 +155,7 @@ describe("buildSupportBundle", () => {
     ]);
   });
 
-  it("records OS, webview and server version in app.json (CLI-03)", () => {
+  it("records OS and webview in app.json, and no server version (CLI-03, decision 7)", () => {
     const entries = readZip(buildSupportBundle(sources()));
     const app = JSON.parse(text(entries.find((e) => e.name === "app.json")!.data));
     expect(app).toEqual({
@@ -164,17 +163,9 @@ describe("buildSupportBundle", () => {
       exportedAt: "2026-09-22T12:00:00.000Z",
       os: "Win32",
       userAgent: "Mozilla/5.0 (Windows) OwnCord",
-      serverVersion: "2.0.0-beta.1",
+      serverVersion: null,
+      serverVersionNote: "not collected (bundle makes no server call, decision 7)",
     });
-  });
-
-  it("explains a server version the principal may not read, and never blocks the export", () => {
-    const entries = readZip(
-      buildSupportBundle(sources({ serverVersion: { version: null, note: "not permitted" } })),
-    );
-    const app = JSON.parse(text(entries.find((e) => e.name === "app.json")!.data));
-    expect(app.serverVersion).toBeNull();
-    expect(app.serverVersionNote).toBe("not permitted");
   });
 
   it("carries the Rust log verbatim with the JSONL logs", () => {
@@ -311,29 +302,5 @@ describe("exportSupportBundle", () => {
     ).toEqual({ hasRoom: true });
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
-  });
-
-  it("reads the server version through the provider and never blocks on its failure", async () => {
-    desktop.fileSaver.pickSaveLocation.mockResolvedValue("/tmp/bundle.zip");
-    const getServerVersion = vi.fn().mockRejectedValue(new Error("connection refused"));
-
-    await expect(exportSupportBundle(desktop as never, {}, getServerVersion)).resolves.toBe(true);
-
-    const [, bytes] = desktop.fileSaver.writeFile.mock.calls[0]! as [string, Uint8Array];
-    const app = JSON.parse(text(readZip(bytes).find((e) => e.name === "app.json")!.data));
-    expect(app.serverVersion).toBeNull();
-    expect(app.serverVersionNote).toBe("unavailable");
-  });
-
-  it("records the server version when the principal may read it", async () => {
-    desktop.fileSaver.pickSaveLocation.mockResolvedValue("/tmp/bundle.zip");
-    const getServerVersion = vi.fn().mockResolvedValue({ version: "2.0.0-beta.1", note: null });
-
-    await expect(exportSupportBundle(desktop as never, {}, getServerVersion)).resolves.toBe(true);
-
-    const [, bytes] = desktop.fileSaver.writeFile.mock.calls[0]! as [string, Uint8Array];
-    const app = JSON.parse(text(readZip(bytes).find((e) => e.name === "app.json")!.data));
-    expect(app.serverVersion).toBe("2.0.0-beta.1");
-    expect(app.serverVersionNote).toBeUndefined();
   });
 });

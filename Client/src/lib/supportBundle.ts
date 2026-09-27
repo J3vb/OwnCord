@@ -15,7 +15,6 @@
  * here (pinned equal to `preferences.STORAGE_PREFIX` by the unit test).
  */
 import type { Platform } from "../platform/contracts";
-import type { ServerVersionInfo } from "./types";
 import { settingsText } from "../i18n/settings";
 
 export const SETTINGS_PREFIX = "owncord:settings:";
@@ -173,8 +172,6 @@ export interface SupportBundleSources {
   readonly logs: readonly { readonly name: string; readonly text: string }[];
   /** The Rust log files (`owncord-client*.log`), newest first, tail-capped. */
   readonly nativeLogs: readonly { readonly name: string; readonly text: string }[];
-  /** The connected server's build version, or the reason it is unavailable. */
-  readonly serverVersion: ServerVersionInfo;
   /** The OS and webview identity the bundle records in `app.json`. */
   readonly environment: { readonly platform: string; readonly userAgent: string };
   /** Saved profiles as stored; only `PROFILE_FIELDS` are read. */
@@ -229,8 +226,8 @@ export function buildSupportBundle(src: SupportBundleSources): Uint8Array {
           exportedAt: src.now.toISOString(),
           os: src.environment.platform,
           userAgent: src.environment.userAgent,
-          serverVersion: src.serverVersion.version,
-          ...(src.serverVersion.note === null ? {} : { serverVersionNote: src.serverVersion.note }),
+          serverVersion: null,
+          serverVersionNote: "not collected (bundle makes no server call, decision 7)",
         }),
       },
       {
@@ -258,27 +255,21 @@ export function buildSupportBundle(src: SupportBundleSources): Uint8Array {
 export async function exportSupportBundle(
   desktop: Pick<Platform, "fileSaver" | "appMetadata" | "logFiles" | "settings">,
   voiceDiagnostics: unknown,
-  getServerVersion?: () => Promise<ServerVersionInfo>,
 ): Promise<boolean> {
   const now = new Date();
   const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, "-");
   const path = await desktop.fileSaver.pickSaveLocation(`owncord-support-${stamp}.zip`);
   if (path === null) return false;
-  const [appVersion, logs, nativeLogs, snapshot, serverVersion] = await Promise.all([
+  const [appVersion, logs, nativeLogs, snapshot] = await Promise.all([
     desktop.appMetadata.getVersion(),
     desktop.logFiles.readAll(),
     desktop.logFiles.readNative(),
     desktop.settings.load(),
-    // Unauthenticated or unavailable resolves to a null version with a note;
-    // it must never block the export.
-    getServerVersion?.().catch(() => ({ version: null, note: "unavailable" })) ??
-      Promise.resolve({ version: null, note: "unavailable" }),
   ]);
   const bundle = buildSupportBundle({
     appVersion,
     logs,
     nativeLogs,
-    serverVersion,
     environment: {
       platform: navigator.platform,
       userAgent: navigator.userAgent,

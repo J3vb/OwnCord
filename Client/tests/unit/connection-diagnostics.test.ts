@@ -41,7 +41,6 @@ describe("connection diagnostics", () => {
         getConfig: () => ({ host: "server.test:8443", token: "[redacted]" }),
         getHealth: vi.fn().mockResolvedValue({}),
         getMe: vi.fn().mockResolvedValue({ id: 1 }),
-        getServerVersion: vi.fn().mockResolvedValue({ version: null, note: "unavailable" }),
       },
       ws: { ping: vi.fn().mockResolvedValue(undefined) },
       getRoom: vi.fn().mockReturnValue(null),

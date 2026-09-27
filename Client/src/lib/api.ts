@@ -18,7 +18,6 @@ import type {
   RegisterResponse,
   HealthResponse,
   ServerInfoResponse,
-  ServerVersionInfo,
   MessagesResponse,
   MessagesAroundResponse,
   ReactionUsersResponse,
@@ -1258,35 +1257,8 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       }
     },
 
-    /**
-     * The connected server's build version, for the support bundle's
-     * `app.json` (CLI-03). Version lives only on the admin-gated
-     * `GET /api/v1/diagnostics/connectivity` — C-2 keeps it off every
-     * unauthenticated endpoint — so this answers null when the signed-in
-     * principal may not read it (a 403), and never widens what the server
-     * exposes. A transport failure also answers null: a bundle must still
-     * export when the server is unreachable.
-     */
-    async getServerVersion(signal?: AbortSignal): Promise<ServerVersionInfo> {
-      try {
-        const { server } = await request<{ server?: { version?: string } }>(
-          "GET",
-          "/diagnostics/connectivity",
-          undefined,
-          signal,
-        );
-        return { version: server?.version || null, note: null };
-      } catch (err) {
-        // C-2 keeps version off unauthenticated endpoints, so a 403 is the
-        // expected "your account may not read it" answer here.
-        const forbidden = err instanceof ApiClientError && err.status === 403;
-        // i18n-exempt: machine-readable note stored in the bundle's app.json, never rendered
-        const note = forbidden ? "not permitted" : "unavailable";
-        return { version: null, note };
-      }
-    },
-
     // ── Admin: Channels ──────────────────────────────────────
+
     adminCreateChannel(
       data: {
         name: string;

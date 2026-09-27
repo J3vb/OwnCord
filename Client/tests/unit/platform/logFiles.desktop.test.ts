@@ -255,6 +255,24 @@ describe("LogFiles.readNative", () => {
     await expect(mod.logFiles.readNative()).resolves.toEqual([]);
   });
 
+  test("keeps the files it read when a rotated file vanishes mid-read", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    readDir.mockResolvedValue([
+      { name: "owncord-client.log", isDirectory: false },
+      { name: "owncord-client_2026-09-19_10-00-00.log", isDirectory: false },
+    ]);
+    readTextFile.mockImplementation((path: string) =>
+      path.endsWith("owncord-client.log")
+        ? Promise.resolve("active\n")
+        : Promise.reject(new Error("No such file or directory (os error 2)")),
+    );
+
+    await expect(mod.logFiles.readNative()).resolves.toEqual([
+      { name: "owncord-client.log", text: "active\n" },
+    ]);
+  });
+
   test("is empty, not a rejection, when a read fails for another reason", async () => {
     const mod = await freshModule();
     appLogDir.mockResolvedValue("/logs");

@@ -251,8 +251,12 @@ async function readNative(): Promise<{ name: string; text: string }[]> {
       });
     const files = [];
     for (const name of names) {
-      // oxlint-disable-next-line no-await-in-loop -- at most three files, kept in order
-      files.push({ name, text: await readLogTail(`${baseDir}/${name}`) });
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- at most three files, kept in order
+        files.push({ name, text: await readLogTail(`${baseDir}/${name}`) });
+      } catch (err) {
+        if (!isMissingPathError(err)) log.warn(`reading ${name} failed`, err);
+      }
     }
     return files;
   } catch (err) {
