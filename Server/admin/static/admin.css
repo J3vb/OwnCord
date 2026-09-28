@@ -510,8 +510,6 @@ details.disclose:not([open])>summary.section-card-header{border-bottom:none}
 .log-line.l-error .log-lvl{color:var(--text-danger)}
 .log-line.l-error{color:var(--text-danger)}
 .log-status{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11px;color:var(--text-muted)}
-.log-status .dot-live{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
-.log-status .dot-off{width:6px;height:6px;border-radius:50%;background:var(--red)}
 /* The connection state leads the toolbar as a dot and a word; an off level
    chip is struck through, not just paler. Log line attrs read as chips. */
 .log-conn{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);min-width:96px}

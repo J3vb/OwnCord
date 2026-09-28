@@ -457,14 +457,14 @@ function logAttrs(raw){
 function logChipsHtml(entry){
   const a=logAttrs(entry.attrs);
   if(!a){return entry.attrs&&entry.attrs!=='{}'?' <span class="log-raw">'+esc(entry.attrs)+'</span>':''}
-  const rest=Object.assign({},a);let html='';
-  if(entry.msg==='http request'&&a.method&&a.path){
+  const isReq=entry.msg==='http request'&&a.method&&a.path;
+  /* Bytes, client address and request id wait in the details. */
+  const rest=isReq?{}:a;let html='';
+  if(isReq){
     const st=Number(a.status)||0;
     html+='<span class="log-chip log-req">'+esc(a.method)+' '+esc(a.path)+'</span>';
     if(st)html+='<span class="log-chip log-status-'+(st>=500?'5xx':st>=400?'4xx':'ok')+'">'+st+'</span>';
     if(a.duration_ms!==undefined)html+='<span class="log-chip">'+esc(a.duration_ms)+' ms</span>';
-    /* Bytes, client address and request id wait in the details. */
-    Object.keys(rest).forEach(k=>{delete rest[k]});
   }
   let cut=false;
   Object.keys(rest).forEach(k=>{
