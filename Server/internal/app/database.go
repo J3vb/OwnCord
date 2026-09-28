@@ -74,7 +74,7 @@ func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *Res
 }
 
 // backupBeforePendingMigrations writes a verified copy of the live database
-// before initDatabase lets a pending migration move the schema (O3). Compose
+// before initDatabase lets a pending migration move the schema. Compose
 // tracks :latest, so a routine `docker compose pull` upgrades the schema with
 // no safety copy; this is that copy, taken at boot and named for the first
 // migration it precedes.

@@ -148,7 +148,7 @@ func runScheduledBackup(ctx context.Context, database *db.DB, interval time.Dura
 const preRestoreBackupPrefix = "pre_restore_"
 
 // PreMigrateBackupPrefix names the safety copy the boot path writes before a
-// pending migration moves the schema (O3, app.database.go). Like the
+// pending migration moves the schema (internal/app/database.go). Like the
 // pre_restore_ copies it is not retention history — it is the rollback target
 // for a schema move — so pruning never removes it.
 const PreMigrateBackupPrefix = "pre_migrate_"
@@ -163,7 +163,7 @@ func isSafetyCopy(name string) bool {
 
 // pruneExpiredBackups deletes *.db backups whose mtime is older than the
 // backup_retention window (in days), always keeping the newest one and never
-// touching the pre_restore_* safety copies.
+// touching the pre_restore_* or pre_migrate_* safety copies.
 func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service.SettingsService) error {
 	retStr, err := settings.Setting(ctx, "backup_retention")
 	if err != nil {

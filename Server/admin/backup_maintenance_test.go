@@ -183,7 +183,7 @@ func TestMaintainBackups_RetentionKeepsPreRestoreCopies(t *testing.T) {
 }
 
 // TestMaintainBackups_RetentionKeepsPreMigrateCopies: the boot-time
-// pre_migrate_* safety copy (O3) is the rollback target for the schema move
+// pre_migrate_* safety copy is the rollback target for the schema move
 // that was about to happen. Like the pre_restore_ copies it is not retention
 // history and must survive pruning even when older than the window.
 func TestMaintainBackups_RetentionKeepsPreMigrateCopies(t *testing.T) {

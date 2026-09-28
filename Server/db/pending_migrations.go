@@ -1,14 +1,14 @@
 package db
 
-// pending_migrations.go — the boot-time pre-migration backup gate's input
-// (O3). Split out of migrate.go so that file stays under the file-size limit;
+// pending_migrations.go — the boot-time pre-migration backup gate's input.
+// Split out of migrate.go so that file stays under the file-size limit;
 // it shares migrate.go's schema_versions helpers.
 
 import "github.com/J3vb/OwnCord/Server/migrations"
 
 // PendingMigrations reports the embedded migrations a boot will execute
 // against the current on-disk schema — the input to the boot-time
-// pre-migration backup gate (O3). It returns none for the two cases that run
+// pre-migration backup gate. It returns none for the two cases that run
 // no migration SQL: a fresh database (nothing to protect, and the seeding
 // path never fires) and a pre-tracking database being seeded (its migration
 // set is recorded without being executed). A partially migrated database

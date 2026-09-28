@@ -62,7 +62,7 @@ func onlyBackup(t *testing.T, dir string) string {
 	return found[0]
 }
 
-// TestInitDatabase_BacksUpBeforeApplyingPendingMigrations is O3's core
+// TestInitDatabase_BacksUpBeforeApplyingPendingMigrations is the core
 // promise: a boot that is about to move the schema takes a verified copy of
 // the database FIRST, so a `docker compose pull` cannot migrate an
 // unbacked-up database. The copy must hold the PRE-migration schema, which is
