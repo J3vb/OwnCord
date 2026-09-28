@@ -114,9 +114,17 @@ func (h *Hub) recordBroadcastLatency(enqueuedAt time.Time) {
 // under the per-channel topic rate limit. The limit is a sliding 1s window via
 // the shared auth.RateLimiter (the deleted TopicRateLimiter was a token bucket
 // with a full refill at each window boundary — sliding is stricter on
-// boundary-straddling bursts, the same sustained rate). A shed frame is
-// counted here (topic_sheds_total, SRE-M1); SRV-03's follow-up recovery
-// (forcing a resync on a content shed) layers onto this same site.
+// boundary-straddling bursts, the same sustained rate).
+//
+// A shed frame is counted (topic_sheds_total, SRE-M1). SRV-03: for a
+// CONTENT-bearing frame (nsfwChannelID marks the kinds in contentBearingKinds)
+// it also ratchets the visibility watermark, so a client resuming from a seq at
+// or before this point takes the full-ready path and recovers the message from
+// the database — the shed frame consumed no seq, so replay can never carry it.
+// Metadata sheds are not ratcheted: they are ephemeral or reconstructed
+// elsewhere, and forcing a full resync on a metadata burst would be a herd for
+// nothing. bumpVisibilityWatermark is lock-free, so this is safe to call while
+// holding seqMu.
 func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 	if bm.recipients != nil || bm.channelID == 0 {
 		return true
@@ -125,8 +133,66 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 		return true
 	}
 	h.latency.topicSheds.Add(1)
-	slog.Warn("hub: topic rate limit exceeded, dropping message", "channel_id", bm.channelID)
+	if bm.nsfwChannelID != 0 {
+		h.bumpVisibilityWatermark()
+		slog.Warn("hub: topic rate limit shed a content frame, forcing resync on reconnect",
+			"channel_id", bm.channelID)
+	} else {
+		slog.Warn("hub: topic rate limit exceeded, dropping message", "channel_id", bm.channelID)
+	}
 	return false
+}
+
+// queueDropState records content-bearing frames the full broadcast queue
+// dropped in enqueue (SRV-03): dropped counts them, applied is how many
+// applyQueueContentDrops has settled into the resync watermark. applied is
+// guarded by seqMu.
+type queueDropState struct {
+	dropped atomic.Uint64
+	applied uint64
+}
+
+// recordQueueDrop counts a frame enqueue dropped on a full broadcast queue. A
+// content-bearing one is also left for applyQueueContentDrops to settle into
+// the resync watermark under seqMu (SRV-03).
+func (h *Hub) recordQueueDrop(bm broadcastMsg, kind string) {
+	h.broadcastDrops.Add(1)
+	if bm.nsfwChannelID != 0 {
+		h.queueDrops.dropped.Add(1)
+	}
+	slog.Warn("hub: broadcast channel full, dropping "+kind,
+		"channel_id", bm.channelID, "msg_len", len(bm.msg))
+}
+
+// applyQueueContentDrops is SRV-03's recovery for a content-bearing frame the
+// full broadcast queue dropped in enqueue. Unlike a topic shed, that frame's
+// place in the seq stream lies behind every frame still queued ahead of it, so
+// while such a drop is unsettled every call ratchets the watermark to the
+// current seq, and the drop only counts as settled once the queue is seen
+// empty — every frame queued before it has been sequenced by then. That proof
+// holds only on the dispatch goroutine, so deliverBroadcast is the sole caller,
+// under seqMu after each frame; mustFullResyncAtRegister bumps for an
+// unsettled drop but never settles it.
+func (h *Hub) applyQueueContentDrops() {
+	n := h.queueDrops.dropped.Load()
+	if n == h.queueDrops.applied {
+		return
+	}
+	h.bumpVisibilityWatermark()
+	if len(h.broadcast) == 0 {
+		h.queueDrops.applied = n
+	}
+}
+
+// mustFullResyncAtRegister is reconnectRegister's final watermark check, run
+// under seqMu. An unsettled queue drop (SRV-03) ratchets the watermark first,
+// so a resume racing the dispatch of the frames ahead of it still takes the
+// full-ready path.
+func (h *Hub) mustFullResyncAtRegister(lastSeq uint64) bool {
+	if h.queueDrops.dropped.Load() != h.queueDrops.applied {
+		h.bumpVisibilityWatermark()
+	}
+	return h.mustFullResync(lastSeq)
 }
 
 // BroadcastQueueDepth is the number of frames currently waiting on the hub's

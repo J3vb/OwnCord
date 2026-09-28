@@ -57,6 +57,7 @@ type Hub struct {
 	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
 	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
 	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
+	queueDrops     queueDropState   // SRV-03 (hub_stats.go)
 
 	// latency is the shipped in-process metrics surface (SRE-M1): broadcast
 	// and dispatch-lag histograms, the max seqMu hold, the chat-ack histogram
@@ -126,10 +127,9 @@ type Hub struct {
 	reconnectTierDB   atomic.Uint64
 	reconnectTierFull atomic.Uint64
 
-	// Sequence watermark of the last channel-visibility change. Visibility
-	// updates are sent as targeted, unsequenced messages, so clients resuming
-	// from a seq at or before this point must take the full-ready path to
-	// converge (replay cannot deliver them). Reset on restart — a fresh
+	// Sequence watermark of the last channel-visibility change or content shed
+	// (SRV-03): neither reaches a client via replay, so one resuming from a seq
+	// at or before it takes the full-ready path. Reset on restart — a fresh
 	// connection always gets a correctly filtered ready payload anyway.
 	visibilityChangeSeq atomic.Uint64
 
