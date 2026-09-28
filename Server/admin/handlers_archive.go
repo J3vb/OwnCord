@@ -101,27 +101,45 @@ func handleArchive(database *db.DB, opts SetupOptions) http.Handler {
 	})
 }
 
+// archiveBeforeSnapshotHook, when set, runs between the space check and the
+// snapshot; tests use it to land an upload in that window.
+var archiveBeforeSnapshotHook func()
+
 // buildArchive writes the archive to work/owncord-archive.zip and returns its
 // path. It snapshots the live database with VACUUM INTO and walks the data
 // directory wholesale (docs/deployment.md's rule: copy data/, never a hand
 // list), replacing the live database file with the snapshot and leaving out
 // the backup directory. Before the snapshot it refuses with errArchiveNoSpace
-// when the build would take the backup volume below server.min_free_disk_mb.
+// when the build would take the backup volume below server.min_free_disk_mb;
+// that estimate's plan is then retaken, so the zip is written from a walk
+// that follows the snapshot.
 func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, work string) (string, error) {
 	cfg := opts.RunningCfg
 	snapshot := filepath.Join(work, "snapshot.db")
-	t, err := planTrees(ctx, cfg.Server.DataDir, cfg.Upload.StorageDir, backupBaseDir, work, snapshot)
+	plan := func() (*archiveTree, error) {
+		return planTrees(ctx, cfg.Server.DataDir, cfg.Upload.StorageDir, backupBaseDir, work, snapshot)
+	}
+	t, err := plan()
 	if err != nil {
 		return "", err
 	}
 	if err := checkArchiveSpace(work, t.need(), cfg.Server.MinFreeDiskBytes()); err != nil {
 		return "", err
 	}
+	if archiveBeforeSnapshotHook != nil {
+		archiveBeforeSnapshotHook()
+	}
 	if err := database.BackupToSafe(ctx, snapshot, work); err != nil {
 		return "", fmt.Errorf("snapshotting database: %w", err)
 	}
 	if err := os.Chmod(snapshot, 0o600); err != nil {
 		return "", fmt.Errorf("restricting snapshot: %w", err)
+	}
+	// Write from a plan taken after the snapshot: an upload lands its file
+	// before its row, so every file a snapshotted row names is on disk by
+	// now, while the first plan may predate it.
+	if t, err = plan(); err != nil {
+		return "", err
 	}
 
 	outPath := filepath.Join(work, archiveName)

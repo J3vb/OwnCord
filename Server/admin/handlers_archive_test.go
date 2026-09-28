@@ -330,6 +330,25 @@ func TestHandleArchive_RefusesBelowFreeDiskFloor(t *testing.T) {
 	}
 }
 
+// TestHandleArchive_UploadDuringBuildIsArchived: an upload that lands after
+// the space-check plan but before the snapshot is recorded by the snapshot,
+// so its file must be in the archive too.
+func TestHandleArchive_UploadDuringBuildIsArchived(t *testing.T) {
+	f := newArchiveFixture(t)
+	late := filepath.Join(f.dataDir, "uploads", "late.bin")
+	restore := admin.SetArchiveBeforeSnapshotHook(func() {
+		if err := os.WriteFile(late, []byte("late upload"), 0o600); err != nil {
+			t.Error(err)
+		}
+	})
+	defer restore()
+
+	entries := archiveEntries(t, f)
+	if got := string(entries["data/uploads/late.bin"]); got != "late upload" {
+		t.Errorf("upload landed before the snapshot is missing from the archive; got %v", archiveNames(entries))
+	}
+}
+
 // TestHandleArchive_NoRunningConfigIs500: without the running config there is
 // no data dir to archive, so the handler refuses rather than guessing one.
 func TestHandleArchive_NoRunningConfigIs500(t *testing.T) {
