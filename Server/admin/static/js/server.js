@@ -62,7 +62,7 @@ async function renderSettings(){
     ['Max upload size',facts.upload_max_size_mb+' MB','upload.max_size_mb'],
     ['Per-user quota',facts.user_quota_mb?facts.user_quota_mb+' MB':'Unlimited','upload.user_quota_mb'],
     ['Voice quality',voiceQualityLabel(facts.voice_quality),'voice.quality'],
-    ['Voice URL','voice_url' in facts?facts.voice_url||'Auto':undefined,'voice.livekit_url'],
+    ['Voice URL','voice_url' in facts?facts.voice_url:undefined,'voice.livekit_url'],
     ['Max connections',facts.max_ws_connections||'Unlimited','server.max_ws_connections'],
     ['Reserved disk headroom',facts.min_free_disk_mb?facts.min_free_disk_mb+' MB':'Off','server.min_free_disk_mb'],
     ['Backup directory','backup_dir' in facts?facts.backup_dir:undefined,'backup.dir'],
