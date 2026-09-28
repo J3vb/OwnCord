@@ -81,7 +81,7 @@ func handleGetConfigFacts(cfg *config.Config) http.HandlerFunc {
 			MaxWSConnections: cfg.Server.MaxWSConnections,
 			TLSMode:          cfg.TLS.Mode,
 			UserQuotaMB:      cfg.Upload.UserQuotaMB,
-			LoggingLevel:     cfg.Logging.Level,
+			LoggingLevel:     runningLogLevel(cfg.Logging.Level),
 			ReportRetention:  cfg.Moderation.ReportRetentionDays,
 			ActionRetention:  cfg.Moderation.ActionRetentionDays,
 			// Booleans only: never the secret itself.
@@ -96,6 +96,17 @@ func handleGetConfigFacts(cfg *config.Config) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
+}
+
+// runningLogLevel names the level the server runs for a logging.level value:
+// the normalized name, or info for a value boot did not recognise. An empty
+// value stays empty so the card reads "Not set".
+func runningLogLevel(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	level, _ := config.ParseLevel(value)
+	return levelName(level)
 }
 
 func handlePatchSettings(settings *service.SettingsService, retention *service.RetentionService) http.HandlerFunc {

@@ -1022,6 +1022,37 @@ func TestAdminAPI_GetConfigFacts_PathsAndURLsAdminOnly(t *testing.T) {
 	}
 }
 
+// The card reports the level the server runs, not the raw config string: boot
+// reads logging.level case-insensitively and falls back to info for a value
+// it does not know. An empty value stays empty so the card reads "Not set".
+func TestAdminAPI_GetConfigFacts_ReportsRunningLogLevel(t *testing.T) {
+	for _, tc := range []struct{ configured, want string }{
+		{"verbose", "info"},
+		{"WARNING", "warn"},
+		{"Debug", "debug"},
+		{"", ""},
+	} {
+		t.Run(tc.configured, func(t *testing.T) {
+			database := openAdminTestDB(t)
+			cfg := &config.Config{Logging: config.LoggingConfig{Level: tc.configured}}
+			handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database), admin.SetupOptions{RunningCfg: cfg})
+			token := createAdminUser(t, database)
+
+			w := doRequest(t, handler, http.MethodGet, "/config", token, nil)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+			}
+			var got map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if got["logging_level"] != tc.want {
+				t.Errorf("logging_level = %v, want %q", got["logging_level"], tc.want)
+			}
+		})
+	}
+}
+
 func TestAdminAPI_GetConfigFacts_WithoutRunningConfig(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
