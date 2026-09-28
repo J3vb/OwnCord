@@ -18,6 +18,7 @@ import {
   type ArtifactDriver,
 } from "../support/artifact-app";
 import { startTestServer, TEST_PASSWORD } from "../support/server";
+import { nonLoopbackIPv4 } from "../support/process";
 
 const exec = promisify(execFile);
 const ARTIFACTS = process.env.OWNCORD_ARTIFACT_DIR ?? "";
@@ -142,5 +143,70 @@ test("the .deb package installs through apt and boots", async ({}, info) => {
     });
   } finally {
     await exec("sudo", ["apt-get", "remove", "-y", name], { timeout: 60_000 }).catch(() => {});
+  }
+});
+
+/**
+ * RT-11: the Linux artifact joins voice against a server that is NOT on
+ * loopback, which is the path RT-1 broke — the Rust LiveKit SDK sends its
+ * join token only as an `Authorization: Bearer` header, and the client
+ * tunnels a remote server's LiveKit through the server's `/livekit` proxy.
+ * On loopback the client takes the `direct_url` shortcut and never exercises
+ * the tunnel (proxy start, TLS pin, WS proxy, the server's `/livekit` reverse
+ * proxy), so a regression there is invisible. The journey dials the server by
+ * the runner's own non-loopback IPv4 and asserts the native voice join
+ * succeeded over the `tunnel` path, not `direct`. The tunnel moves the bearer
+ * token into the query before the server sees it, so the server's
+ * Authorization forwarding keeps its own unit coverage.
+ */
+test("installed Linux artifact joins voice by a non-loopback server address", async ({}, info) => {
+  test.skip(
+    process.platform !== "linux",
+    "RT-11 guards the Linux native voice join, whose SDK sends a bearer-only header",
+  );
+  // Resolve the address before starting the server, so a runner with only
+  // loopback fails without leaking a server and its LiveKit child.
+  const host = nonLoopbackIPv4();
+  if (host === null) throw new Error("RT-11: the runner has no non-loopback IPv4 to dial");
+  test.setTimeout(300_000);
+  const server = await startTestServer({ tls: true, livekit: true });
+  const remoteHost = `${host}:${server.port}`;
+  const { installation, binary } = await installArtifact(ARTIFACTS);
+  try {
+    const app = await launchArtifact(binary);
+    await withArtifact(app, info, async () => {
+      await waitFor(app, "#host", "", 60_000);
+      // Connect to the LAN address: real TLS first-use trust over the tunnel.
+      await artifactLogin(app, remoteHost, "alice", TEST_PASSWORD);
+      await waitFor(app, ".channel-item");
+
+      await app.click(".channel-item.voice", "voice-one");
+      await waitFor(app, ".voice-widget.visible", "Voice Connected", 60_000);
+
+      // The join must have gone through the local TLS tunnel (serverHost is
+      // non-loopback), which is exactly the path RT-1 fixed. `direct` here
+      // would mean the test dialed loopback and proves nothing. "Voice
+      // Connected" shows before the join is recorded, so wait for the record.
+      await expect
+        .poll(
+          () =>
+            app.evaluate<{ urlKind: string; succeeded: boolean } | null>(`() => {
+              const voiceJoin = window.__owncord?.lkDebug?.().voiceJoin;
+              const last = voiceJoin?.lastJoins?.[0];
+              if (voiceJoin?.active !== null || last === undefined) return null;
+              return { urlKind: last.urlKind, succeeded: last.succeeded };
+            }`),
+          { timeout: 30_000 },
+        )
+        .toEqual({ urlKind: "tunnel", succeeded: true });
+
+      await app.click(".voice-widget.visible button[aria-label='Disconnect']");
+      await expect
+        .poll(() => app.evaluate<boolean>(`() => !document.querySelector(".voice-widget.visible")`))
+        .toBe(true);
+    });
+  } finally {
+    await server.close();
+    await rm(installation, { recursive: true, force: true });
   }
 });
