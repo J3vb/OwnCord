@@ -52,6 +52,7 @@ const ACCEPTED_AVATAR_TYPES = "image/png,image/jpeg,image/webp";
 interface ProfileCardResult {
   readonly card: HTMLDivElement;
   readonly headerName: HTMLDivElement;
+  readonly headerHandle: HTMLDivElement;
   readonly usernameValue: HTMLDivElement;
   readonly editUsernameBtn: HTMLButtonElement;
   /** The big avatar; the uploader swaps its contents on success. */
@@ -85,6 +86,13 @@ function buildProfileCard(
   // Header row
   const accountHeader = createElement("div", { class: "account-header" });
   const headerName = createElement("div", { class: "account-header-name" }, displayName);
+  const headerHandle = createElement(
+    "div",
+    { class: "account-header-handle" },
+    t("profile.handle", { username }),
+  );
+  const headerIdentity = createElement("div", { class: "account-header-identity" });
+  appendChildren(headerIdentity, headerName, headerHandle);
   const editor = createElement("div", { class: "account-editor" });
   const editProfileBtn = createRevealToggle(
     t("profile.editProfile"),
@@ -99,7 +107,7 @@ function buildProfileCard(
     () => editProfileBtn.classList.toggle("secondary", !editor.hidden),
     { signal },
   );
-  appendChildren(accountHeader, headerName, editProfileBtn);
+  appendChildren(accountHeader, headerIdentity, editProfileBtn);
 
   // Username field row
   const fieldsContainer = createElement("div", { class: "account-fields" });
@@ -123,7 +131,7 @@ function buildProfileCard(
 
   appendChildren(card, banner, avatarWrap, accountHeader, editor);
 
-  return { card, headerName, usernameValue, editUsernameBtn, avatarLarge, editor };
+  return { card, headerName, headerHandle, usernameValue, editUsernameBtn, avatarLarge, editor };
 }
 
 // ---------------------------------------------------------------------------
@@ -911,7 +919,7 @@ function buildSessionRow(
   s: SessionInfo,
   options: SettingsOverlayOptions,
   signal: AbortSignal,
-  onSignedOut: () => void,
+  onListChanged: () => void,
 ): HTMLDivElement {
   const row = createElement("div", {
     class: "session-row",
@@ -951,7 +959,7 @@ function buildSessionRow(
       void options
         .onRevokeSession(s.id)
         .then(() => {
-          onSignedOut();
+          onListChanged();
           showToast(
             uiStore.getState().sessionReplaced
               ? t("devices.signedOutReplaced")
@@ -963,6 +971,7 @@ function buildSessionRow(
           // The server kept the session, so the row comes back.
           if (next?.parentNode === list) list?.insertBefore(row, next);
           else list?.appendChild(row);
+          onListChanged();
           showToast(errorText(err, t("devices.signOutFailed")), "error");
         });
     },
@@ -1313,7 +1322,7 @@ export function buildAccountTab(
   });
 
   // Profile card
-  const { card, headerName, usernameValue, editUsernameBtn, avatarLarge, editor } =
+  const { card, headerName, headerHandle, usernameValue, editUsernameBtn, avatarLarge, editor } =
     buildProfileCard(displayName, username, signal);
   section.appendChild(card);
 
@@ -1400,6 +1409,7 @@ export function buildAccountTab(
             }),
           );
           setText(usernameValue, newName);
+          setText(headerHandle, t("profile.handle", { username: newName }));
           closeEditForm();
         })
         .catch((err: unknown) => {

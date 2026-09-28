@@ -93,12 +93,14 @@
 }
 /* User/server-provided row text wraps rather than clipping (B9-23). */
 .account-header-name,
+.account-header-handle,
 .account-field-value,
 .settings-sidebar-name {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 .account-header,
+.account-header-identity,
 .account-field,
 .settings-sidebar-profile {
   min-width: 0;
@@ -591,6 +593,10 @@ details.disclose[open] > summary .icon {
   font-size: var(--font-size-xl);
   font-weight: 700;
   color: var(--header-primary);
+}
+.account-header-handle {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
 }
 .account-fields {
   background: var(--bg-primary);

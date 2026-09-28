@@ -9,6 +9,7 @@ import { defineCatalog } from "./format";
  */
 export const accountText = defineCatalog("account", {
   "profile.editProfile": "Edit profile",
+  "profile.handle": "@{username}",
   "profile.username": "Username",
   "profile.edit": "Edit",
   "profile.changeAvatar": "Change Avatar",

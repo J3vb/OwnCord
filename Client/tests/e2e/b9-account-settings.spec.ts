@@ -354,6 +354,7 @@ test.describe("B9-23 account reflow", () => {
 
     const pane = accountPane(page);
     // Open every on-demand form and disclosure, so all of them are measured.
+    await pane.getByTestId("profile-edit-toggle").click();
     await pane.getByTestId("password-change-toggle").click();
     await pane.getByTestId("sessions-manage").click();
     await pane.locator("summary", { hasText: "Delete account" }).click();

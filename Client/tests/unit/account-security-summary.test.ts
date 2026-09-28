@@ -223,6 +223,26 @@ describe("Account tab: security summary", () => {
     card().querySelector<HTMLButtonElement>("[data-testid='session-revoke']")!.click();
     await vi.waitFor(() => expect(result()).toBe("2 devices"));
   });
+
+  it("recounts when a sign-out fails after another succeeded", async () => {
+    let failSecond: (err: Error) => void = () => {};
+    const onRevokeSession = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(() => new Promise((_, reject) => (failSecond = reject)));
+    mount(options({ onListSessions: vi.fn().mockResolvedValue(sessions(4)), onRevokeSession }));
+    const result = () => row("sessions-section").querySelector(".status-result")!.textContent;
+    await vi.waitFor(() => expect(result()).toBe("4 devices"));
+    const [first, second] = card().querySelectorAll<HTMLButtonElement>(
+      "[data-testid='session-revoke']",
+    );
+    first!.click();
+    second!.click();
+    await vi.waitFor(() => expect(result()).toBe("2 devices"));
+    failSecond(new Error("nope"));
+    await vi.waitFor(() => expect(result()).toBe("3 devices"));
+    expect(card().querySelectorAll("[data-testid='session-row']")).toHaveLength(3);
+  });
 });
 
 describe("Account tab: profile strip", () => {
@@ -269,6 +289,26 @@ describe("Account tab: profile strip", () => {
     edit.click();
     expect(editor.hidden).toBe(true);
     expect(accentIn(profile)).toEqual(["Edit profile"]);
+  });
+
+  it("shows the username under the display name at rest and follows a rename", async () => {
+    mockAuthState.user.display_name = "Alice";
+    const opts = options();
+    pane = buildAccountTab(opts, ac.signal);
+    document.body.appendChild(pane);
+    mockAuthState.user.display_name = null;
+    const handle = pane.querySelector<HTMLElement>(".account-header-handle")!;
+    expect(pane.querySelector(".account-header-name")!.textContent).toBe("Alice");
+    expect(handle.textContent).toBe("@testuser");
+    expect(shown(handle)).toBe(true);
+
+    pane.querySelector<HTMLButtonElement>(".account-field-edit")!.click();
+    pane.querySelector<HTMLInputElement>("[data-testid='username-edit-input']")!.value = "alice";
+    [...pane.querySelectorAll<HTMLButtonElement>(".account-editor button")]
+      .find((b) => b.textContent === "Save")!
+      .click();
+    await vi.waitFor(() => expect(handle.textContent).toBe("@alice"));
+    expect(opts.onUpdateProfile).toHaveBeenCalledWith({ username: "alice" });
   });
 });
 
