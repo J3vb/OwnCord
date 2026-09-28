@@ -133,7 +133,7 @@ for (const media of [false, true]) {
           .getByRole("navigation", { name: "Admin sections" })
           .getByRole("button", { name: /^Updates\b/ })
           .click();
-        await admin.getByRole("button", { name: /^Update to v/ }).click();
+        await admin.getByRole("button", { name: /^Update now/ }).click();
         const applied = admin.waitForResponse(
           (response) =>
             response.url().endsWith("/updates/apply") && response.request().method() === "POST",

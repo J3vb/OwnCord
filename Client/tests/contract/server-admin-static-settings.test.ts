@@ -295,6 +295,34 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     });
   });
 
+  it("shows the Members › Pending link only while Approval is the checked mode", async () => {
+    const booted = await boot([], respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const group = document.getElementById("s-registration_mode")!;
+    const hint = document.getElementById("s-registration_mode-desc")!;
+    const pick = (value: string) => {
+      const radio = group.querySelector<HTMLInputElement>(`input[value="${value}"]`)!;
+      radio.checked = true;
+      radio.dispatchEvent(new dom!.window.Event("change", { bubbles: true }));
+    };
+    expect(hint.hidden).toBe(true);
+    expect(group.hasAttribute("aria-describedby")).toBe(false);
+
+    pick("approval");
+    expect(hint.hidden).toBe(false);
+    expect(hint.querySelector("button")?.textContent).toBe("Members › Pending");
+    expect(group.getAttribute("aria-describedby")).toBe("s-registration_mode-desc");
+
+    await booted.bridge.saveSettings();
+    expect(hint.hidden).toBe(false);
+
+    pick("open");
+    expect(hint.hidden).toBe(true);
+    expect(group.hasAttribute("aria-describedby")).toBe(false);
+  });
+
   it("drives the save bar from the actual difference, so reverting an edit clears it", async () => {
     const booted = await boot([], respondWith());
     dom = booted.dom;
@@ -394,6 +422,68 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
 
     const patch = fetchCalls.find((c) => c.method === "PATCH");
     expect(patch).toMatchObject({ path: "/settings", body: { backup_schedule: "weekly" } });
+  });
+
+  async function backupStatus(
+    backups: unknown[],
+    schedule: string,
+    signal: Record<string, unknown>,
+  ): Promise<{ title: string; sub: string }> {
+    const booted = await boot(
+      [],
+      respondWith({
+        "GET /backups": { json: backups },
+        "GET /settings": { json: { ...LOADED_SETTINGS, backup_schedule: schedule } },
+        "GET /attention": { json: { signals: [{ id: "backup", ...signal }] } },
+      }),
+    );
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    const content = await render(booted.bridge, dom.window, booted.bridge.renderBackups);
+    return {
+      title: content.querySelector("#backupStatus .status-line-title")?.textContent ?? "",
+      sub: content.querySelector("#backupStatus .status-line-sub")?.textContent ?? "",
+    };
+  }
+
+  it("ignores a backup signal observed before the newest backup", async () => {
+    const status = await backupStatus(
+      [{ name: BACKUP, size: 1024, date: new Date().toISOString() }],
+      "off",
+      {
+        status: "warning",
+        detail: "no backup exists and scheduled backups are off",
+        observed_at: new Date(Date.now() - 30_000).toISOString(),
+      },
+    );
+    expect(status.title).toBe("Last backup just now (Healthy)");
+    expect(status.sub).toBe("1 backup kept · Automatic backups are off");
+  });
+
+  it("still warns from a backup signal observed after the newest backup", async () => {
+    const taken = new Date(Date.now() - 3 * 86_400_000);
+    const status = await backupStatus(
+      [{ name: BACKUP, size: 1024, date: taken.toISOString() }],
+      "daily",
+      {
+        status: "critical",
+        detail: "72h0m0s old",
+        value: taken.toISOString(),
+        observed_at: new Date().toISOString(),
+      },
+    );
+    expect(status.title).toBe("Last backup 3 days ago (Critical)");
+    expect(status.sub).toBe("1 backup kept · Automatic backups run daily · 72h0m0s old");
+  });
+
+  it("does not promise a first automatic backup once the scheduled run has failed", async () => {
+    const status = await backupStatus([], "daily", {
+      status: "warning",
+      detail: "no successful backup yet",
+      observed_at: new Date().toISOString(),
+    });
+    expect(status.title).toBe("No backups yet (Warning)");
+    expect(status.sub).toBe("Automatic backups run daily · no successful backup yet");
   });
 
   it("restores only after the backup's name is typed, then waits for the restart", async () => {

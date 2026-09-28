@@ -74,7 +74,13 @@ function regModeCards(cur){
     +'<span class="radio-card-text"><span class="radio-card-title">'+esc(label)+'</span><span class="radio-card-desc">'+esc(REG_MODE_EFFECT[val]||'')+'</span></span></label>').join('');
   return'<fieldset class="radio-cards" id="s-registration_mode"'+(cur==='approval'?' aria-describedby="s-registration_mode-desc"':'')+'><legend class="setting-name">Who can join</legend>'
     +'<div class="radio-card-grid">'+cards+'</div>'
-    +(cur==='approval'?'<p class="setting-desc" id="s-registration_mode-desc">Waiting accounts are under <button type="button" class="link-btn" data-action="openPendingMembers">Members › Pending</button>.</p>':'')+'</fieldset>';
+    +'<p class="setting-desc" id="s-registration_mode-desc"'+(cur==='approval'?'':' hidden')+'>Waiting accounts are under <button type="button" class="link-btn" data-action="openPendingMembers">Members › Pending</button>.</p></fieldset>';
+}
+function syncRegModeHint(){
+  const approval=!!document.querySelector('input[name="registration_mode"][value="approval"]:checked');
+  const hint=document.getElementById('s-registration_mode-desc');if(hint)hint.hidden=!approval;
+  const set=document.getElementById('s-registration_mode');
+  if(set){if(approval)set.setAttribute('aria-describedby','s-registration_mode-desc');else set.removeAttribute('aria-describedby')}
 }
 function openPendingMembers(){state.membersTab='pending';navigateTo('users')}
 
@@ -86,6 +92,7 @@ function setSettingsChanged(changed){
 }
 
 function markSettingsChanged(){
+  syncRegModeHint();
   setSettingsChanged(Object.keys(settingsDiff(settingsFormValues(SETTINGS_KEYS))).length>0);
 }
 
@@ -370,15 +377,17 @@ function backupStatusLine(backups,schedule,signal){
   const dated=backups.filter(b=>b.date&&!isNaN(new Date(b.date).getTime())).sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime());
   const latest=dated[0];
   const auto={daily:'Automatic backups run daily',weekly:'Automatic backups run weekly',off:'Automatic backups are off'}[schedule]||'';
+  if(latest&&signal&&(!signal.value||new Date(signal.observed_at).getTime()<new Date(latest.date).getTime()))signal=null;
+  const alarm=!!signal&&(signal.status==='warning'||signal.status==='critical');
   let tone,title;
   if(latest){tone='ok';title='Last backup '+relTime(new Date(latest.date))}
-  else if(schedule&&schedule!=='off'){tone='unknown';title='No backup yet; the first automatic one is still to come'}
+  else if(schedule&&schedule!=='off'&&!alarm){tone='unknown';title='No backup yet; the first automatic one is still to come'}
   else{tone='warning';title='No backups yet'}
-  if(signal&&(signal.status==='warning'||signal.status==='critical'))tone=signal.status;
+  if(alarm)tone=signal.status;
   const parts=[];
   if(latest)parts.push(backups.length+(backups.length===1?' backup kept':' backups kept'));
   if(auto)parts.push(auto);
-  if(signal&&(signal.status==='warning'||signal.status==='critical')&&signal.detail)parts.push(signal.detail);
+  if(alarm&&signal.detail)parts.push(signal.detail);
   return'<div class="status-line" id="backupStatus">'+statusIcon(tone)+'<div><div class="status-line-title">'+esc(title)+'<span class="sr-only"> ('+esc(attnWord(tone))+')</span></div>'+(parts.length?'<div class="status-line-sub">'+esc(parts.join(' · '))+'</div>':'')+'</div></div>';
 }
 

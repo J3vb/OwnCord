@@ -248,7 +248,6 @@ input,select,textarea{font-family:inherit;border:none}
 .save-bar.dirty{position:sticky;bottom:0}
 .save-bar{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:12px 16px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:var(--radius-md);box-shadow:0 -8px 24px rgba(0,0,0,.45);z-index:5}
 .save-bar-status{margin-right:auto;font-size:13px;color:var(--text-muted)}
-.update-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
 .btn-row{display:flex;gap:8px;flex-wrap:wrap}
 .callout-warning{background:rgba(242,184,75,.1);border:1px solid rgba(242,184,75,.35);color:var(--text-warning);font-size:13px;padding:10px 12px;border-radius:var(--radius-sm);margin-top:12px;line-height:1.45}
 .check-row{display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer}
@@ -261,7 +260,6 @@ input,select,textarea{font-family:inherit;border:none}
   .setting-row{flex-direction:column;align-items:stretch;gap:8px}
   .setting-ctrl{margin-left:0}
   .setting-ctrl .form-input,.setting-ctrl .filter-select{width:100%}
-  .update-grid{grid-template-columns:1fr}
   .fact-row{flex-direction:column;gap:4px}
   .fact-row dd{justify-content:flex-start}
 }
@@ -457,12 +455,6 @@ details.disclose:not([open])>summary.section-card-header{border-bottom:none}
   .member-btn{padding:6px 10px}
   .member-actions{gap:2px}
 }
-
-.update-card{display:flex;align-items:flex-start;gap:16px;padding:20px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border)}
-.update-icon{width:48px;height:48px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.update-icon svg{width:24px;height:24px}
-.update-info{flex:1}.update-ver{font-size:18px;font-weight:700;color:var(--header-primary)}
-.update-notes{font-size:13px;color:var(--text-muted);margin-top:6px;line-height:1.5}
 
 .code-copy{display:flex;align-items:center;gap:8px;background:var(--bg-tertiary);padding:8px 12px;border-radius:var(--radius-sm);margin-top:8px}
 .code-copy code{flex:1;font-family:var(--font-mono);font-size:13px;color:var(--text-link);word-break:break-all}
