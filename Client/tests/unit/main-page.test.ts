@@ -313,10 +313,13 @@ function resetStores(): void {
 type FakeWsClient = WsClient & {
   /** Test-only: drive a registered `ws.on(type, ...)` listener directly. */
   emit: (type: ServerMessage["type"], payload: unknown) => void;
+  /** Test-only: drive the U4 suspend-wake listeners. */
+  emitSuspendWake: () => void;
 };
 
 function fakeWs(): FakeWsClient {
   const listeners = new Map<string, Set<WsListener<ServerMessage["type"]>>>();
+  const suspendWakeListeners = new Set<() => void>();
   return {
     ping: vi.fn(async () => {}),
     connect: vi.fn(),
@@ -334,7 +337,14 @@ function fakeWs(): FakeWsClient {
         (listener as (p: unknown, id?: string) => void)(payload);
       }
     },
+    emitSuspendWake() {
+      for (const listener of suspendWakeListeners) listener();
+    },
     onStateChange: vi.fn(() => () => {}),
+    onSuspendWake(listener: () => void) {
+      suspendWakeListeners.add(listener);
+      return () => suspendWakeListeners.delete(listener);
+    },
     onSendFailure: vi.fn(() => () => {}),
     onCertMismatch: vi.fn(() => () => {}),
     onCertFirstUse: vi.fn(() => () => {}),
@@ -1654,6 +1664,72 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(retry.textContent).toBe("Retry");
     retry.click();
     expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
+  });
+
+  it("offers Reconnect here after a suspend wake, and it reconnects this device (U4)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    // ws.ts stopped after a real suspend; the page learns through onSuspendWake.
+    ws.emitSuspendWake();
+
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toBe(
+        "Woke from sleep. This device's connection ended; reconnect to take it back. Reconnect here",
+      );
+    });
+    banner.querySelector("button")!.click();
+
+    expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
+  });
+
+  it("drops the suspend prompt once Use here takes the connection back (U4)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    // The overdue heartbeat noticed the suspend first; the server's
+    // SESSION_REPLACED arrived once the network came back.
+    ws.emitSuspendWake();
+    uiStore.setState((prev) => ({
+      ...prev,
+      sessionReplaced: true,
+      connectionStatus: "disconnected",
+    }));
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toBe("Signed in elsewhere Use here");
+    });
+    banner.querySelector("button")!.click();
+
+    expect(banner.textContent).not.toContain("Woke from sleep");
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    await vi.waitFor(() => {
+      expect(banner.classList.contains("visible")).toBe(false);
+    });
+  });
+
+  it("drops the suspend prompt when the connection comes back by any path (U4)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "disconnected" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    ws.emitSuspendWake();
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toContain("Woke from sleep");
+    });
+
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    await vi.waitFor(() => {
+      expect(banner.classList.contains("visible")).toBe(false);
+    });
   });
 
   it("keeps Reconnecting... until a dial fails, then offers Retry (B9-25)", async () => {

@@ -375,7 +375,17 @@ test.describe("Composer gating — slow mode", () => {
     await page.clock.install();
     await boot(page, {
       channels: [SLOW_CHANNEL],
-      wsHandlers: [chatSendOkHandler()],
+      wsHandlers: [
+        chatSendOkHandler(),
+        // A live server answers heartbeats, so the 5-minute wait below reads
+        // as an awake connection rather than a silent socket.
+        {
+          type: "ping",
+          handler: `setTimeout(function() {
+            __tauriEmitEvent("ws-message", JSON.stringify({ type: "pong", payload: {} }));
+          }, 0);`,
+        },
+      ],
     });
     // The fixture user is admin (bypasses slow mode); demote to a plain member
     // so the cooldown applies, exactly as it would to a real member.
@@ -394,8 +404,10 @@ test.describe("Composer gating — slow mode", () => {
     // produce a second chat_send frame.
     await expect.poll(async () => (await chatSendFrames(page)).length).toBe(1);
 
-    // The ticker releases the composer once the 300s window elapses.
-    await page.clock.fastForward("05:01");
+    // The ticker releases the composer once the 300s window elapses. runFor
+    // fires every timer on the way (heartbeats included); a single 5-minute
+    // fastForward jump is what a suspend looks like and trips the U4 gate.
+    await page.clock.runFor("05:01");
     await expect(textarea(page)).toBeEnabled({ timeout: 5_000 });
     await expect(textarea(page)).toHaveAttribute("placeholder", "Message #general");
     await expect(composer(page)).not.toHaveClass(/composer-disabled/);

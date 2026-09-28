@@ -128,6 +128,9 @@ export const shellText = defineCatalog("shell", {
   "banner.retry": "Retry",
   "banner.signedInElsewhere": "Signed in elsewhere",
   "banner.useHere": "Use here",
+  "banner.suspendWake":
+    "Woke from sleep. This device's connection ended; reconnect to take it back.",
+  "banner.reconnectHere": "Reconnect here",
 
   "invite.invite": "Invite",
   "invite.invitePeople": "Invite people",

@@ -112,14 +112,16 @@ describe("wake probe (U7d)", () => {
     expect(pingSends().length).toBeGreaterThanOrEqual(1);
   });
 
-  it("probes on the first heartbeat after the wall clock jumped over a sleep", async () => {
+  it("probes on the first heartbeat after a brief freeze", async () => {
     await connectAndAuth();
     const states: ConnectionState[] = [];
     client.onStateChange((s) => states.push(s));
     mockInvoke.mockClear();
 
-    // The suspend moves the wall clock without running any timer.
-    vi.setSystemTime(Date.now() + 10 * 60_000);
+    // A freeze past the wake gap but under the suspend gate (U4) moves the
+    // wall clock without running any timer. A real sleep is the gate's case,
+    // covered in ws-suspend-gate.test.ts.
+    vi.setSystemTime(Date.now() + 2 * 60_000);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(pingSends()).toHaveLength(1);
 
