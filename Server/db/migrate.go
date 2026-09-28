@@ -80,7 +80,7 @@ func CheckBackupSchemaAhead(ctx context.Context, path string) ([]string, error) 
 	if err != nil {
 		return nil, fmt.Errorf("CheckBackupSchemaAhead: resolving path: %w", err)
 	}
-	conn, err := sql.Open("sqlite", "file:"+filepath.ToSlash(abs)+"?mode=ro&_pragma=busy_timeout(2000)")
+	conn, err := sql.Open("sqlite", readOnlyURI(abs))
 	if err != nil {
 		return nil, fmt.Errorf("CheckBackupSchemaAhead: open: %w", err)
 	}

@@ -87,8 +87,8 @@ func StubCopyBackup(fn func(src, dst string) error) (restore func()) {
 	return func() { copyBackupFile = prev }
 }
 
-// CopyBackupForTest exposes the real copyFile for StubCopyBackup delegates.
-var CopyBackupForTest = copyFile
+// CopyBackupForTest exposes the real copy for StubCopyBackup delegates.
+var CopyBackupForTest = db.CopyDatabaseFile
 
 // StubCloseError makes the next handleRestoreBackup call's database.Close()
 // return err instead of actually closing the pools, so tests can exercise the

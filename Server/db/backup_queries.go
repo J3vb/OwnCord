@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -216,9 +217,8 @@ func validateBackupPathChars(absClean string) error {
 // it is restored over the live database — a truncated or corrupt file must
 // never be presented (or accepted) as restorable.
 //
-// The path travels into a file: URI, so it is restricted with the same
-// character allowlist BackupToSafe enforces; callers always pass paths that
-// already passed that gate.
+// The path is escaped into its file: URI by readOnlyURI, so an operator-named
+// file (the restore CLI) is the file that gets checked.
 func CheckBackupIntegrity(ctx context.Context, path string) error {
 	abs, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
@@ -227,7 +227,7 @@ func CheckBackupIntegrity(ctx context.Context, path string) error {
 	if _, err := os.Stat(abs); err != nil {
 		return fmt.Errorf("CheckBackupIntegrity: %w", err)
 	}
-	conn, err := sql.Open("sqlite", "file:"+filepath.ToSlash(abs)+"?mode=ro&_pragma=busy_timeout(2000)")
+	conn, err := sql.Open("sqlite", readOnlyURI(abs))
 	if err != nil {
 		return fmt.Errorf("CheckBackupIntegrity: open: %w", err)
 	}
@@ -240,4 +240,41 @@ func CheckBackupIntegrity(ctx context.Context, path string) error {
 		return fmt.Errorf("CheckBackupIntegrity: integrity_check reported %q", result)
 	}
 	return nil
+}
+
+// CopyDatabaseFile streams src over dst without loading it into memory,
+// truncating dst, and syncs it before closing so a power loss cannot leave a
+// partially-written database behind. Both restore paths — the admin endpoint
+// and the `chatserver restore` CLI — swap the live file through it.
+func CopyDatabaseFile(src, dst string) error {
+	in, err := os.Open(src) //nolint:gosec // G304: a sanitized backup path or an operator-supplied one
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer in.Close() //nolint:errcheck
+
+	out, err := os.Create(dst) //nolint:gosec // G304: the configured database path
+	if err != nil {
+		return fmt.Errorf("create destination: %w", err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("copy: %w", err)
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("sync: %w", err)
+	}
+	return out.Close()
+}
+
+// uriPathEscaper escapes the characters SQLite gives meaning in a file: URI
+// path: % starts an escape, ? the query and # the fragment. Left raw, a path
+// such as "backup#2.db" opens (and creates) "backup" instead.
+var uriPathEscaper = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23")
+
+// readOnlyURI is the read-only file: URI for the absolute path abs, used by
+// the checks that verify a file before it is restored.
+func readOnlyURI(abs string) string {
+	return "file:" + uriPathEscaper.Replace(filepath.ToSlash(abs)) + "?mode=ro&_pragma=busy_timeout(2000)"
 }

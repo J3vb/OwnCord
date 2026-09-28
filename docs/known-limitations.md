@@ -46,11 +46,11 @@ Each item links to the guidance that owns it.
   restore `data/` from your archive and re-run setup, or recover through a
   configured recovery kit — see [Backup Strategy](deployment.md#backup-strategy)
   and [Restore](deployment.md#restore). A setup-time recovery kit is post-beta.
-- **Restore needs a running server or the archive.** The only in-product restore
-  is `POST /admin/api/backups/{name}/restore`, which needs the server (and the
-  admin panel) to be up. A server that will not boot has only the full-archive
-  procedure — [Restoring without a running server](deployment.md#restoring-without-a-running-server).
-  A `chatserver restore <file>` command is post-beta.
+- **Restore needs a running server or the CLI.** `POST /admin/api/backups/{name}/restore`
+  is the in-product path and needs the server (and the admin panel) to be up.
+  When the server will not boot, `chatserver restore [--force] <file>` puts a
+  database backup back offline; a full archive is still the supported path for
+  a whole-state rollback — [Restoring without a running server](deployment.md#restoring-without-a-running-server).
 - **Health is poll-only.** `/health` answers, but the server never pushes an
   alert and Docker only _surfaces_ `unhealthy` rather than restarting on it.
   Point an uptime monitor at `/health` and, for voice,

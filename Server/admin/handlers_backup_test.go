@@ -503,7 +503,7 @@ func TestHandleRestoreBackup_AbortsCopyWhenRetryFloorCannotPersist(t *testing.T)
 }
 
 // TestHandleRestoreBackup_RollsBackWhenCopyFails verifies the live database file
-// is not left destroyed when the copy fails partway. copyFile truncates the live
+// is not left destroyed when the copy fails partway. copyBackupFile truncates the live
 // DB with os.Create before it can know whether the read will succeed, so a
 // failure there leaves a closed DB and a zero-byte file underneath it; the
 // pre-restore safety copy must be put back, and the process must still respawn
