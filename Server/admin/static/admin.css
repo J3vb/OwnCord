@@ -510,8 +510,23 @@ details.disclose:not([open])>summary.section-card-header{border-bottom:none}
 .log-line.l-error .log-lvl{color:var(--text-danger)}
 .log-line.l-error{color:var(--text-danger)}
 .log-status{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11px;color:var(--text-muted)}
-.log-status .dot-live{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
-.log-status .dot-off{width:6px;height:6px;border-radius:50%;background:var(--red)}
+/* The connection state leads the toolbar as a dot and a word; an off level
+   chip is struck through, not just paler. Log line attrs read as chips. */
+.log-conn{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);min-width:96px}
+.log-conn .dot-live{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+.log-conn .dot-off{width:8px;height:8px;border-radius:50%;background:var(--red)}
+.log-conn .dot-wait{width:8px;height:8px;border-radius:50%;background:var(--text-muted)}
+.level-toggle[aria-pressed="false"]{text-decoration:line-through;border-style:dashed}
+.log-chips{display:inline;white-space:normal}
+.log-chip{display:inline-block;margin:0 4px 0 0;padding:0 6px;border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-normal);font-size:11px;line-height:1.7;word-break:break-all}
+.log-chip .log-key{color:var(--text-muted)}
+.log-chip.log-req{font-weight:700}
+.log-chip.log-status-ok{color:var(--text-muted)}.log-chip.log-status-4xx{color:var(--text-warning)}.log-chip.log-status-5xx{color:var(--text-danger)}
+.log-raw{color:var(--text-muted)}
+.log-more{display:inline}
+.log-more>summary{display:inline;cursor:pointer;color:var(--text-link);font-size:11px;font-family:var(--font-body)}
+.log-more[open]{display:block}
+.log-more pre{margin:4px 0 6px 16px;padding:6px 10px;background:var(--bg-primary);border-radius:var(--radius-sm);color:var(--text-normal);white-space:pre-wrap}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
 /* Audit log */

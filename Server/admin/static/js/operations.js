@@ -362,8 +362,8 @@ function renderLogs(){
   /* Each level chip is a toggle button: aria-pressed carries its state, and
      the filled or hollow dot shows it without relying on colour. */
   const lvlBtn=(l)=>'<button class="level-toggle lvl-'+l.toLowerCase()+'" aria-pressed="'+!!state.logLevels[l]+'" data-level="'+l+'" data-action="toggleLogLevel" data-args="'+actArgs(l)+'">'+l+'</button>';
-  let html='<div class="page-title">Server logs</div><div class="page-desc">Real-time structured log stream</div>';
-  html+='<div class="log-toolbar">';
+  let html='<div class="page-title">Server logs</div><div class="page-desc">What the server is doing right now, newest at the bottom. Open the details on a line for everything it logged.</div>';
+  html+='<div class="log-toolbar"><div class="log-conn"><span class="'+(state.logPaused?'dot-off':'dot-wait')+'" id="logDot" aria-hidden="true"></span><span id="logStatusText" role="status">'+(state.logPaused?'Paused':'Connecting...')+'</span></div>';
   html+='<div class="level-group" role="group" aria-label="Show levels">'+lvlBtn('DEBUG')+lvlBtn('INFO')+lvlBtn('WARN')+lvlBtn('ERROR')+'</div>';
   html+='<input type="search" class="filter-search log-filter" aria-label="Filter logs" placeholder="Filter logs…" value="'+esc(state.logSearch)+'" data-input-action="setLogSearch">';
   html+='<div class="log-actions">';
@@ -375,7 +375,7 @@ function renderLogs(){
   // A focusable region, so the log scrolls from the keyboard. Not role=log:
   // that is a live region, and a streaming log would talk over everything.
   html+='<div class="log-output" id="logOutput" role="region" aria-label="Log lines" tabindex="0"></div>';
-  html+='<div class="log-status"><span class="'+(state.logPaused?'dot-off':'dot-live')+'" id="logDot"></span><span id="logStatusText" role="status">'+(state.logPaused?'Paused':'Connecting...')+'</span><span style="margin-left:auto" id="logCount">'+state.logEntries.length+' entries</span></div>';
+  html+='<div class="log-status"><span style="margin-left:auto" id="logCount">'+state.logEntries.length+' entries</span></div>';
   setTimeout(()=>{renderLogLines();if(!state.logPaused)connectLogStream()},0);
   return html;
 }
@@ -387,10 +387,10 @@ function toggleLogAutoScroll(){state.logAutoScroll=!state.logAutoScroll;const bt
 function toggleLogPause(){
   state.logPaused=!state.logPaused;
   const btn=document.getElementById('pauseBtn');if(btn)btn.innerHTML=pauseLabel();
-  const dot=document.getElementById('logDot');if(dot)dot.className=state.logPaused?'dot-off':'dot-live';
+  const dot=document.getElementById('logDot');if(dot)dot.className=state.logPaused?'dot-off':'dot-wait';
   const txt=document.getElementById('logStatusText');
   if(state.logPaused){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}if(txt)txt.textContent='Paused'}
-  else{connectLogStream()}
+  else{if(txt)txt.textContent='Connecting...';connectLogStream()}
 }
 
 function scheduleLogReconnect(){
@@ -428,7 +428,7 @@ async function connectLogStream(){
   };
   const es=new EventSource('/admin/api/logs/stream?ticket='+encodeURIComponent(ticket));
   state.logEventSource=es;
-  es.onopen=function(){replaceBufferOnce();const t=document.getElementById('logStatusText');if(t)t.textContent='Connected'};
+  es.onopen=function(){replaceBufferOnce();const t=document.getElementById('logStatusText');if(t)t.textContent='Connected';const d=document.getElementById('logDot');if(d)d.className='dot-live'};
   es.onmessage=function(e){
     try{const entry=JSON.parse(e.data);replaceBufferOnce();state.logEntries.push(entry);
       while(state.logEntries.length>state.logMaxLines)state.logEntries.shift();
@@ -436,7 +436,7 @@ async function connectLogStream(){
       const c=document.getElementById('logCount');if(c)c.textContent=state.logEntries.length+' entries';
     }catch(err){}
   };
-  es.onerror=function(){if(state.logEventSource===es){state.logEventSource.close();state.logEventSource=null}const t=document.getElementById('logStatusText');if(t)t.textContent='Reconnecting...';const d=document.getElementById('logDot');if(d)d.className='dot-off';scheduleLogReconnect()};
+  es.onerror=function(){if(state.logEventSource===es){state.logEventSource.close();state.logEventSource=null}const t=document.getElementById('logStatusText');if(t)t.textContent='Reconnecting...';const d=document.getElementById('logDot');if(d)d.className='dot-wait';scheduleLogReconnect()};
 }
 
 function matchesLogFilter(entry){
@@ -445,12 +445,44 @@ function matchesLogFilter(entry){
   return true;
 }
 
+/* A line's attrs as chips instead of raw JSON: an http request reads
+   "GET /path · 200 · 3 ms" with the status coloured by class (the number is
+   always there) and nothing more, anything else as key=value. The full attrs
+   stay one click away, and search, Copy and the filters keep using the raw
+   text. */
+const LOG_CHIP_MAX=60;
+function logAttrs(raw){
+  if(!raw||raw==='{}')return null;
+  try{const o=JSON.parse(raw);return o&&typeof o==='object'&&!Array.isArray(o)?o:null}catch(e){return null}
+}
+function logChipsHtml(entry){
+  const a=logAttrs(entry.attrs);
+  if(!a){return entry.attrs&&entry.attrs!=='{}'?' <span class="log-raw">'+esc(entry.attrs)+'</span>':''}
+  const isReq=entry.msg==='http request'&&a.method&&a.path;
+  /* Bytes, client address and request id wait in the details. */
+  const rest=isReq?{}:a;let html='';
+  if(isReq){
+    const st=Number(a.status)||0;
+    html+='<span class="log-chip log-req">'+esc(a.method)+' '+esc(a.path)+'</span>';
+    if(st)html+='<span class="log-chip log-status-'+(st>=500?'5xx':st>=400?'4xx':'ok')+'">'+st+'</span>';
+    if(a.duration_ms!==undefined)html+='<span class="log-chip">'+esc(a.duration_ms)+' ms</span>';
+  }
+  let cut=false;
+  Object.keys(rest).forEach(k=>{
+    let v=rest[k];v=typeof v==='string'?v:JSON.stringify(v);
+    if(v.length>LOG_CHIP_MAX){v=v.slice(0,LOG_CHIP_MAX)+'…';cut=true}
+    html+='<span class="log-chip"><span class="log-key">'+esc(k)+'=</span>'+esc(v)+'</span>';
+  });
+  const detail='<details class="log-more"><summary>'+(cut?'full details':'details')+'</summary><pre>'+esc(JSON.stringify(a,null,2))+'</pre></details>';
+  return' <span class="log-chips">'+html+'</span>'+detail;
+}
+
 function appendLogLine(entry){
   if(!matchesLogFilter(entry))return;
   const out=document.getElementById('logOutput');if(!out)return;
   const div=document.createElement('div');
   div.className='log-line l-'+entry.level.toLowerCase();
-  div.innerHTML='<span class="log-ts">'+fmtLocal(entry.ts,LOG_TIME)+'</span><span class="log-lvl">'+esc(entry.level)+'</span><span class="log-src">['+esc(entry.source||'server')+']</span>'+esc(entry.msg)+(entry.attrs&&entry.attrs!=='{}'?' <span style="color:var(--text-muted)">'+esc(entry.attrs)+'</span>':'');
+  div.innerHTML='<span class="log-ts">'+fmtLocal(entry.ts,LOG_TIME)+'</span><span class="log-lvl">'+esc(entry.level)+'</span><span class="log-src">['+esc(entry.source||'server')+']</span>'+esc(entry.msg)+logChipsHtml(entry);
   out.appendChild(div);
   // Trim DOM to max lines
   while(out.children.length>state.logMaxLines)out.removeChild(out.firstChild);

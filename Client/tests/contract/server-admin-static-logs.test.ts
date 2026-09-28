@@ -267,4 +267,93 @@ describe("Server/admin/static — log stream (re)connect (OC-0435)", () => {
     expect(out.getAttribute("tabindex")).toBe("0");
     expect(out.getAttribute("role")).toBe("region");
   });
+  // UX clarity: attrs read as chips, an http request as "METHOD path ·
+  // status · ms" with the status class carried by a class and the number,
+  // and the full attrs behind a per-line details; the filter still searches
+  // the raw text.
+  it("renders structured log lines with the full attrs behind details", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    const es = FakeEventSource.instances[0]!;
+    const attrs = JSON.stringify({
+      method: "GET",
+      path: "/admin/api/channels",
+      status: 404,
+      duration_ms: 3,
+      client_ip: "10.0.0.<b>1</b>",
+    });
+    es.onmessage?.({ data: JSON.stringify({ ...backfillEntry(1), msg: "http request", attrs }) });
+    es.onmessage?.({ data: JSON.stringify({ ...backfillEntry(2), attrs: "not json" }) });
+
+    const [req, raw] = [...doc.querySelectorAll("#logOutput .log-line")];
+    const chips = [...req!.querySelectorAll(".log-chips > .log-chip")].map((c) => c.textContent);
+    expect(chips).toEqual(["GET /admin/api/channels", "404", "3 ms"]);
+    expect(req!.querySelector(".log-status-4xx")?.textContent).toBe("404");
+    // The rest of an http line's attrs wait in its details, escaped.
+    expect(req!.querySelector(".log-more pre")?.textContent).toContain("10.0.0.<b>1</b>");
+    expect(req!.querySelector(".log-more b")).toBeNull();
+    expect(JSON.parse(req!.querySelector(".log-more pre")!.textContent!)).toEqual(
+      JSON.parse(attrs),
+    );
+    // Any other line reads as key=value chips; unparseable attrs still show, as text.
+    es.onmessage?.({
+      data: JSON.stringify({ ...backfillEntry(3), msg: "setup", attrs: '{"owner":"alice"}' }),
+    });
+    expect(
+      doc.querySelectorAll("#logOutput .log-line")[2]!.querySelector(".log-chip")?.textContent,
+    ).toBe("owner=alice");
+    expect(raw!.querySelector(".log-raw")?.textContent).toBe("not json");
+
+    // The filter matches the raw attrs, including keys no chip shows.
+    const search = doc.querySelector<HTMLInputElement>(".log-filter")!;
+    search.value = "client_ip";
+    search.dispatchEvent(new window.Event("input", { bubbles: true }));
+    expect(doc.querySelectorAll("#logOutput .log-line")).toHaveLength(1);
+  });
+
+  // Waiting is grey and never healthy: the dot turns live only once the
+  // stream opens, on first connect, after an error, and on resume.
+  it("shows a grey dot while connecting or reconnecting and a live dot only once open", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    const conn = () => [
+      doc.getElementById("logDot")!.className,
+      doc.getElementById("logStatusText")!.textContent,
+    ];
+    const tick = () => new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    expect(conn()).toEqual(["dot-wait", "Connecting..."]);
+    await tick();
+    await tick();
+    FakeEventSource.instances[0]!.onopen?.();
+    expect(conn()).toEqual(["dot-live", "Connected"]);
+
+    FakeEventSource.instances[0]!.onerror?.();
+    expect(conn()).toEqual(["dot-wait", "Reconnecting..."]);
+
+    const pause = doc.getElementById("pauseBtn")!;
+    pause.click();
+    expect(conn()).toEqual(["dot-off", "Paused"]);
+    pause.click();
+    expect(conn()).toEqual(["dot-wait", "Connecting..."]);
+    await tick();
+    await tick();
+    FakeEventSource.instances.at(-1)!.onopen?.();
+    expect(conn()).toEqual(["dot-live", "Connected"]);
+  });
 });
