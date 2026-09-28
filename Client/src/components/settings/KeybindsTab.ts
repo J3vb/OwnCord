@@ -187,10 +187,13 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     t("keybinds.globalHint"),
   );
   section.appendChild(globalHint);
-  void desktop.globalShortcuts.supported().then((supported) => {
-    if (signal.aborted || supported) return;
-    setText(globalHint, t("keybinds.globalHintUnsupported"));
-  });
+  void desktop.globalShortcuts
+    .supported()
+    .catch(() => false)
+    .then((supported) => {
+      if (signal.aborted || supported) return;
+      setText(globalHint, t("keybinds.globalHintUnsupported"));
+    });
 
   // ── Messages section ───────────────────────────────────────
   section.appendChild(createElement("div", { class: "settings-separator" }));

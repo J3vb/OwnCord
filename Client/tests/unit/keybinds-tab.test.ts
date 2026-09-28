@@ -376,4 +376,15 @@ describe("KeybindsTab", () => {
       );
     });
   });
+
+  it("falls back to the tray-only hint when the host cannot answer (U6)", async () => {
+    mockSupported.mockRejectedValue(new Error("no Tauri host"));
+    const el = buildKeybindsTab(new AbortController().signal);
+    const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
+    await vi.waitFor(() => {
+      expect(hint.textContent).toBe(
+        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global Ctrl + Shift + M / Ctrl + Shift + D shortcuts.",
+      );
+    });
+  });
 });
