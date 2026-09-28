@@ -785,10 +785,10 @@ sudo systemctl stop owncord          # or: docker compose down
 ./chatserver restore --force /path/to/chatserver_20260101_030000.db
 ```
 
-It verifies the file is a readable database before touching the live one,
-takes a `pre_restore_*` safety copy, preserves the message-retry cutoff, and
-uses the same `database.path` and `backup.dir` from `config.yaml` the server
-does. This restores the database alone — a full archive below is still the
+It verifies the file is a readable database that a newer server version did
+not write before touching the live one, takes a `pre_restore_*` safety copy,
+preserves the message-retry cutoff, and uses the same `database.path` and
+`backup.dir` from `config.yaml` the server does. This restores the database alone — a full archive below is still the
 supported path when uploads, the key files or `config.yaml` changed too.
 
 **The whole state, from an archive.** Put the whole pre-failure state back,

@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
@@ -56,6 +58,24 @@ func runRestoreCLI(cfgPath string, args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %s is not a readable database backup: %v\n", source, err)
 		return 1
 	}
+	// A backup a newer server wrote would leave this binary refusing to boot
+	// on a schema it has never seen (REL-02), exactly as the admin path refuses.
+	ahead, err := db.CheckBackupSchemaAhead(context.Background(), source)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: could not read the schema version of %s: %v\n", source, err)
+		return 1
+	}
+	if len(ahead) > 0 {
+		fmt.Fprintf(os.Stderr, "error: %s was written by a newer server version (unknown migrations: %s); upgrade this server before restoring it\n", source, strings.Join(ahead, ", "))
+		return 1
+	}
+	// Copying the live database over itself truncates it to zero bytes.
+	if srcInfo, err := os.Stat(source); err == nil {
+		if liveInfo, err := os.Stat(dbPath); err == nil && os.SameFile(srcInfo, liveInfo) {
+			fmt.Fprintf(os.Stderr, "error: %s is the live database itself; restore from a copy kept elsewhere\n", source)
+			return 1
+		}
+	}
 
 	if !*force {
 		fmt.Fprintf(os.Stderr, `refusing to overwrite %s with %s.
@@ -72,7 +92,7 @@ first), or copy the file in by hand if that is what you meant to do.
 	// rather than swapping the file under a live process.
 	lock, err := db.AcquireProcessLock(dbPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %s looks like it is in use by another process (the server?) — stop it first: %v\n", dbPath, err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
 	defer lock()
@@ -87,12 +107,16 @@ first), or copy the file in by hand if that is what you meant to do.
 	}
 
 	// A pre-restore safety copy of the CURRENT database, so the overwrite is
-	// reversible. Best-effort by design: if the live database is already
-	// unreadable (the usual reason for restoring), there is nothing to copy,
-	// and refusing here would block the very recovery the command exists for.
-	safety, err := safetyCopy(dbPath, backupDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: no pre-restore safety copy was taken (%v); continuing\n", err)
+	// reversible. It is skipped only when the live database is missing or
+	// unreadable (the usual reason for restoring): there is nothing to copy,
+	// and refusing would block the very recovery the command exists for. Any
+	// other failure refuses, like the admin path, with the database untouched.
+	safety := ""
+	if err := db.CheckBackupIntegrity(context.Background(), dbPath); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: the live database is missing or unreadable, so no pre-restore safety copy was taken (%v); continuing\n", err)
+	} else if safety, err = safetyCopy(dbPath, backupDir); err != nil {
+		fmt.Fprintf(os.Stderr, "error: could not take the pre-restore safety copy — database untouched: %v\n", err)
+		return 1
 	}
 
 	// Preserve the message-delivery cutoff across the replacement, exactly as
@@ -101,6 +125,15 @@ first), or copy the file in by hand if that is what you meant to do.
 	if err := db.AdvanceMessageDeliveryFloorForRestore(dbPath); err != nil {
 		fmt.Fprintf(os.Stderr, "error: could not preserve message retry protection — database untouched: %v\n", err)
 		return 1
+	}
+
+	// A dead server's -wal would be replayed onto the restored file on the next
+	// boot. The safety copy above already captured whatever it held.
+	for _, sidecar := range []string{dbPath + "-wal", dbPath + "-shm"} {
+		if err := os.Remove(sidecar); err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "error: could not remove the stale %s — database untouched: %v\n", sidecar, err)
+			return 1
+		}
 	}
 
 	if err := copyFile(source, dbPath); err != nil {
@@ -124,12 +157,8 @@ first), or copy the file in by hand if that is what you meant to do.
 }
 
 // safetyCopy VACUUMs the current database to a timestamped pre_restore_ file
-// in backupDir, returning its path. A database that cannot be read (already
-// the failure the operator is recovering from) returns an error and no path.
+// in backupDir, returning its path.
 func safetyCopy(dbPath, backupDir string) (string, error) {
-	if _, err := os.Stat(dbPath); err != nil {
-		return "", err
-	}
 	src, err := db.OpenShared(dbPath)
 	if err != nil {
 		return "", err

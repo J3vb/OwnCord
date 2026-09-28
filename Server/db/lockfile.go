@@ -23,8 +23,11 @@ var errAlreadyLocked = errors.New("database lock held by another process")
 // sentinel callers must match.
 func AcquireProcessLock(dbPath string) (release func(), err error) {
 	release, err = tryLockFile(lockFilePath(dbPath))
-	if err != nil {
+	if errors.Is(err, errAlreadyLocked) {
 		return nil, fmt.Errorf("database %s is in use by another process (stop the server first): %w", dbPath, err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("could not take the process lock for database %s: %w", dbPath, err)
 	}
 	return release, nil
 }
