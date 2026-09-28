@@ -40,6 +40,10 @@ export interface ServerBannerControl {
   showDisconnected(opts?: ConnectionBannerOptions): void;
   /** Persistent "signed in elsewhere" notice with a "Use here" action. */
   showSignedInElsewhere(onUseHere: () => void): void;
+  /** U4: this device woke from sleep and its socket ended; reconnect on the
+   *  user's say-so so it cannot silently take the connection from another
+   *  device. One-shot: the choice is made once. */
+  showSuspendReconnect(onReconnectHere: () => void): void;
   hide(): void;
   destroy(): void;
 }
@@ -176,6 +180,19 @@ export function createServerBanner(): ServerBannerControl {
     announce(shellText("banner.signedInElsewhere"));
   }
 
+  function showSuspendReconnect(onReconnectHere: () => void): void {
+    clearCountdown();
+    root.classList.add("visible");
+    const reconnect = createElement(
+      "button",
+      { class: "reconnecting-banner-action", type: "button" },
+      shellText("banner.reconnectHere"),
+    );
+    reconnect.addEventListener("click", onReconnectHere, { once: true });
+    root.replaceChildren(`${shellText("banner.suspendWake")} `, reconnect);
+    announce(shellText("banner.suspendWake"));
+  }
+
   function hide(): void {
     clearCountdown();
     root.classList.remove("visible");
@@ -195,6 +212,7 @@ export function createServerBanner(): ServerBannerControl {
     showReconnecting,
     showDisconnected,
     showSignedInElsewhere,
+    showSuspendReconnect,
     hide,
     destroy,
   };

@@ -231,6 +231,23 @@ describe("ServerBanner", () => {
     banner.destroy();
   });
 
+  it("offers Reconnect here after a suspend wake, taking the connection back once", () => {
+    const banner = createServerBanner();
+    const onReconnectHere = vi.fn();
+    banner.showSuspendReconnect(onReconnectHere);
+
+    expect(banner.element.classList.contains("visible")).toBe(true);
+    expect(banner.element.textContent).toBe(
+      "Woke from sleep. This device's connection ended; reconnect to take it back. Reconnect here",
+    );
+    const button = banner.element.querySelector("button");
+    button!.click();
+    button!.click();
+    expect(onReconnectHere).toHaveBeenCalledTimes(1);
+
+    banner.destroy();
+  });
+
   it("destroy removes element from DOM", () => {
     const banner = createServerBanner();
     const parent = document.createElement("div");
