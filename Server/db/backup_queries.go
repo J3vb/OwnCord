@@ -17,6 +17,21 @@ import (
 	"time"
 )
 
+// BackupVACUUMPreExecHook runs once inside BackupToSafe when non-nil, after it
+// has checked out the connection the VACUUM runs on and before the VACUUM
+// executes. Test-only (always nil in production; exported because the
+// service-level proof that Reserve is not blocked by a backup, SRV-02/PERF-10,
+// drives this through UploadService.Reserve rather than calling
+// db.BackupToSafe directly): it parks the backup at a known point while it
+// provably owns its pool's connection, so a test can assert Reserve completes
+// without a timing-ratio sleep. It guards the writer only while it sits between
+// the pinned Conn checkout and the Exec on that same conn: moving that pinned
+// conn to the writer makes Reserve block here, but an unpinned
+// d.writer.ExecContext after the hook would not. Whether a running VACUUM
+// delays a write at the SQLite lock level is covered separately by
+// TestBackupToSafe_ConcurrentWriteIsNotDelayed.
+var BackupVACUUMPreExecHook func()
+
 // BackupTo creates an online backup of the database using SQLite's VACUUM INTO.
 // The destination path must not already exist.
 //
@@ -97,8 +112,21 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 
 	// Read on the reader pool: under WAL it runs concurrently with writers, so
 	// the VACUUM's whole duration no longer queues behind — or blocks — the
-	// single writer.
-	if _, err := d.reader.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absTemp)); err != nil {
+	// single writer. Pin one reader connection for the whole call so the
+	// test hook below (BackupVACUUMPreExecHook) can hold the very connection
+	// the VACUUM uses.
+	conn, err := d.reader.Conn(ctx)
+	if err != nil {
+		_ = os.Remove(absTemp)
+		return fmt.Errorf("BackupToSafe: acquiring reader connection: %w", err)
+	}
+	defer conn.Close() //nolint:errcheck
+
+	if BackupVACUUMPreExecHook != nil {
+		BackupVACUUMPreExecHook()
+	}
+
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absTemp)); err != nil {
 		// Nothing to clean up beyond the temp VACUUM may have partially
 		// written; the final path was never touched.
 		_ = os.Remove(absTemp)
