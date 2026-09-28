@@ -9,7 +9,8 @@ import { createElement, setText, appendChildren, clearChildren } from "@lib/dom"
 import type { MountableComponent } from "@lib/safe-render";
 import type { SearchResultItem } from "@lib/types";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { parseTimestamp } from "@lib/formatting";
+import { parseTimestamp, resolveAuthor } from "@lib/formatting";
+import { resolveDisplayName } from "@lib/avatar";
 import { messagingText } from "../i18n/messaging";
 
 // ---------------------------------------------------------------------------
@@ -89,7 +90,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       const dm = dmStore.getState().channels.find((c) => c.channelId === r.channel_id);
       setText(channel, dm !== undefined ? `@${dmDisplayName(dm)}` : `#${r.channel_name}`);
       const author = createElement("span", { class: "search-result-author" });
-      setText(author, r.user.username);
+      setText(author, resolveDisplayName(resolveAuthor(r.user)));
       const time = createElement("span", { class: "search-result-time" });
       setText(time, formatTimestamp(r.timestamp));
       appendChildren(header, channel, author, time);

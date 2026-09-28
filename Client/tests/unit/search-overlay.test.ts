@@ -4,6 +4,7 @@ import type { SearchOverlayOptions } from "../../src/components/SearchOverlay";
 import type { SearchResultItem } from "../../src/lib/types";
 import { setDmChannels } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
+import { membersStore, setMembers } from "../../src/stores/members.store";
 
 function makeDmChannel(overrides: Partial<DmChannel> = {}): DmChannel {
   return {
@@ -215,6 +216,56 @@ describe("createSearchOverlay", () => {
     const channelLabel = container.querySelector(".search-result-channel")!;
     expect(channelLabel.textContent).toBe("@bob");
     expect(channelLabel.textContent).not.toBe("#");
+
+    overlay.destroy?.();
+  });
+
+  it("shows the author's display name when the member list has one", async () => {
+    membersStore.setState(() => ({
+      members: new Map([
+        [
+          1,
+          {
+            id: 1,
+            username: "alice_w",
+            displayName: "Alice",
+            avatar: null,
+            role: "member" as const,
+            status: "online" as const,
+          },
+        ],
+      ]),
+      typingUsers: new Map(),
+    }));
+
+    const results = [makeResult({ user: { id: 1, username: "alice_w", avatar: null } })];
+    const onSearch = vi.fn().mockResolvedValue(results);
+    const overlay = createSearchOverlay(makeOptions({ onSearch }));
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "hello";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(container.querySelector(".search-result-author")!.textContent).toBe("Alice");
+
+    overlay.destroy?.();
+  });
+
+  it("falls back to the username when no display name is set", async () => {
+    setMembers([]);
+    const results = [makeResult()];
+    const onSearch = vi.fn().mockResolvedValue(results);
+    const overlay = createSearchOverlay(makeOptions({ onSearch }));
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "hello";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(container.querySelector(".search-result-author")!.textContent).toBe("alice");
 
     overlay.destroy?.();
   });

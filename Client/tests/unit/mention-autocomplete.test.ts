@@ -130,6 +130,41 @@ describe("filterMentionSuggestions", () => {
     seedMembers(["John Smith"]);
     expect(filterMentionSuggestions("john")).toEqual([]);
   });
+
+  it("matches a member by display name and shows it, keeping the username as the token", () => {
+    membersStore.setState(() => ({
+      members: new Map([
+        [
+          1,
+          {
+            id: 1,
+            username: "alice_w",
+            displayName: "Alice",
+            avatar: null,
+            role: "member" as const,
+            status: "online" as const,
+          },
+        ],
+        [
+          2,
+          {
+            id: 2,
+            username: "bob",
+            displayName: null,
+            avatar: null,
+            role: "member" as const,
+            status: "online" as const,
+          },
+        ],
+      ]),
+      typingUsers: new Map(),
+    }));
+
+    const found = filterMentionSuggestions("Ali");
+    expect(found.map((s) => s.token)).toEqual(["alice_w"]);
+    expect(found.map((s) => s.label)).toEqual(["Alice"]);
+    expect(found[0]!.detail).toBe("member");
+  });
 });
 
 describe("createMentionAutocomplete", () => {
