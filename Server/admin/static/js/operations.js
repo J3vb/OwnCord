@@ -447,8 +447,9 @@ function matchesLogFilter(entry){
 
 /* A line's attrs as chips instead of raw JSON: an http request reads
    "GET /path · 200 · 3 ms" with the status coloured by class (the number is
-   always there) and nothing more, anything else as key=value. The full attrs stay one click
-   away, and search, Copy and the filters keep using the raw text. */
+   always there) and nothing more, anything else as key=value. The full attrs
+   stay one click away, and search, Copy and the filters keep using the raw
+   text. */
 const LOG_CHIP_MAX=60;
 function logAttrs(raw){
   if(!raw||raw==='{}')return null;
