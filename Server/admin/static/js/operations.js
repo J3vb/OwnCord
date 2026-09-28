@@ -416,7 +416,10 @@ function applyLogLevel(res){
   clearLogLevelTimer();
   state.logLevel=res.level;state.logLevelBase=res.base_level;
   state.logLevelUntil=res.reverts_at&&res.level!==res.base_level?new Date(res.reverts_at).getTime():0;
-  if(state.logLevelUntil)state.logLevelTimer=setInterval(()=>{if(Date.now()>=state.logLevelUntil){clearLogLevelTimer();loadLogLevel()}else paintLogLevel()},1000);
+  if(state.logLevelUntil&&state.section==='logs'&&state.token)state.logLevelTimer=setInterval(()=>{
+    if(state.section!=='logs'||!state.token){clearLogLevelTimer();return}
+    if(Date.now()>=state.logLevelUntil){clearLogLevelTimer();loadLogLevel()}else paintLogLevel();
+  },1000);
   paintLogLevel();
 }
 

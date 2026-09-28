@@ -345,6 +345,7 @@ describe("Server/admin/static — log stream (re)connect (OC-0435)", () => {
     const bridge = (window as unknown as { __test: Bridge }).__test;
     const doc = window.document;
     bridge.state.me = { permissions: 0x40000000, is_owner: true };
+    bridge.state.token = "admin-token";
     bridge.state.section = "logs";
     doc.getElementById("content")!.innerHTML = bridge.renderLogs();
     (doc.getElementById("logLevelToggle") as HTMLButtonElement).click();
@@ -353,6 +354,26 @@ describe("Server/admin/static — log stream (re)connect (OC-0435)", () => {
     expect(bridge.state.logLevelTimer).toBeTruthy();
 
     (window as unknown as { doLogout: () => void }).doLogout();
+    expect(bridge.state.logLevelTimer).toBeNull();
+  });
+
+  // A boost response that lands after sign-out must not re-arm the countdown.
+  it("does not start the countdown from a response that lands after sign-out", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.me = { permissions: 0x40000000, is_owner: true };
+    bridge.state.token = "admin-token";
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    (doc.getElementById("logLevelToggle") as HTMLButtonElement).click();
+    (window as unknown as { doLogout: () => void }).doLogout();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(fetchCalls.some((c) => c.path === "/logs/level" && c.method === "PATCH")).toBe(true);
     expect(bridge.state.logLevelTimer).toBeNull();
   });
 
