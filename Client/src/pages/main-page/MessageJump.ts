@@ -16,7 +16,7 @@ import { createLogger } from "@lib/logger";
 import { ApiClientError } from "@lib/api";
 import { showToast } from "@lib/toast";
 import { findChannelById, navigateToChannel } from "@lib/channel-navigation";
-import { setAroundMessages, hasMessageLoaded } from "@stores/messages.store";
+import { setAroundMessages, hasMessageLoaded, isChannelLoaded } from "@stores/messages.store";
 import { NSFW_ACKNOWLEDGEMENT_REQUIRED } from "../../features/content-consent/nsfw";
 import type { ChannelController } from "./ChannelController";
 import { messagingText } from "../../i18n/messaging";
@@ -89,7 +89,11 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
       await nextFrame();
     }
 
-    if (scrollIfMounted(channelId, messageId)) return true;
+    // Only a loaded window is stable. Before the channel's mount-time history
+    // fetch lands, live rows can already show the target, but that fetch then
+    // re-renders the list at the tail and loses it — so take the around-window
+    // instead, which marks the channel loaded and makes that fetch stand down.
+    if (isChannelLoaded(channelId) && scrollIfMounted(channelId, messageId)) return true;
 
     // Not in the loaded window (or the fresh channel is still fetching) —
     // replace the window with one centred on the target.

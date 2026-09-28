@@ -66,9 +66,6 @@ fn native_voice_state() -> NoNativeVoice {
     NoNativeVoice
 }
 
-// Used by the startup log below.
-use tauri::Manager;
-
 /// Whether a forwarded single-instance launch should restore the main window.
 ///
 /// Once an installer is launching the old process must not take handoffs: the
