@@ -316,7 +316,7 @@ describe("Server/admin/static — setup wizard and sign-in", () => {
     );
     expect(doc.getElementById("setupRestart")!.classList.contains("hidden")).toBe(false);
     // The page will not redirect, so the copy must not promise it will.
-    const restartText = doc.getElementById("setupRestart")!.textContent!;
+    const restartText = doc.getElementById("setupRestart")!.textContent;
     expect(restartText).toContain("Save your recovery kit, then open the link above.");
     expect(restartText).not.toContain("redirect on its own");
     expect(doc.querySelector("#setupRestart .spinner")).toBeNull();
