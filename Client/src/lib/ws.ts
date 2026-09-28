@@ -220,11 +220,13 @@ export function createWsClient({
   // U7d: owns the visibilitychange / online wake-probe listeners.
   // Armed on auth_ok and released on close or disconnect().
   let wakeOwner: Disposable | null = null;
-  // U4: the last time the app could observe the clock running (an inbound
-  // frame, a heartbeat tick, a wake probe). A jump larger than SUSPEND_GATE_MS
-  // between reads means the process was suspended. Checked both by the
-  // heartbeat tick (still connected) and at the reconnect point (the socket
-  // already closed before the suspend), so a wake never silently dials.
+  // U4: the last time the app could observe the clock running: a parsed
+  // inbound frame (handleMessage), a heartbeat tick (handleWakeSignal), a dial
+  // (connect()) or a reconnect-point check (suspendGapExceeded). A jump larger
+  // than SUSPEND_GATE_MS between reads means the process was suspended.
+  // Checked both by the heartbeat tick (still connected) and at the reconnect
+  // point (the socket already closed before the suspend), so a long suspend
+  // does not silently dial.
   let lastActivityAt = Date.now();
   // When the oldest heartbeat ping sent since the last inbound frame went out.
   let unansweredPingAt: number | null = null;

@@ -125,7 +125,8 @@ describe("suspend wake gate (U4)", () => {
     client.onSuspendWake(() => wakes.push(1));
 
     // A long-hidden page's intensive throttling spaces ticks ~60 s apart,
-    // under the 90 s suspend threshold.
+    // under both the 90 s wake-probe gap and the 180 s suspend threshold. The
+    // probe-versus-gate boundary is covered in ws-wake-probe.test.ts.
     vi.setSystemTime(Date.now() + 31_000);
     await vi.advanceTimersByTimeAsync(30_000);
 
