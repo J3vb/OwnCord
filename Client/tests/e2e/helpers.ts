@@ -799,8 +799,10 @@ export function buildTauriMockScript(opts: {
              "plugin:deep-link|get_current", "plugin:deep-link|register", "plugin:fs|mkdir", "plugin:fs|write_text_file", "plugin:fs|remove", "plugin:autostart|is_enabled",
              "plugin:notification|is_permission_granted", "plugin:notification|notify",
              "plugin:opener|open_url", "ptt_set_key", "ptt_start", "ptt_stop",
+             "voice_shortcuts_start", "voice_shortcuts_stop",
              "open_devtools", "frontend_ready"].includes(cmd)) return null;
         if (cmd === "ptt_polling_supported") return false;
+        if (cmd === "voice_shortcuts_supported") return false;
         if (cmd === "check_client_update") return { available: false, version: null, body: null };
         // ---- External-content broker (B7-16) ----
         // No external network here: refuse the way the native broker does,

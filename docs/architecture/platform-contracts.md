@@ -70,18 +70,18 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 22    |
-| Distinct `invoke` command names called from `Client/src/`  | 50    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 53    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 23    |
+| Distinct `invoke` command names called from `Client/src/`  | 53    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 56    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
-| Files under `Client/src/platform/`                         | 47    |
+| Files under `Client/src/platform/`                         | 49    |
 
-The handler count covers the 53 distinct registrations
+The handler count covers the 56 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]` and the eighteen `native_voice_*` commands behind
-`#[cfg(target_os = "linux")]`, so a default build registers 52 on Linux and 34
+`#[cfg(target_os = "linux")]`, so a default build registers 55 on Linux and 37
 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
@@ -151,6 +151,9 @@ start_livekit_proxy
 stop_http_proxy
 stop_livekit_proxy
 store_identity_pin
+voice_shortcuts_start
+voice_shortcuts_stop
+voice_shortcuts_supported
 ws_connect
 ws_disconnect
 ws_send
@@ -169,8 +172,8 @@ to desktop/browser branching.
 
 ## Proposed contracts
 
-Seventeen capability clusters (the seventeenth, external content, added by
-B7-16). Each becomes one file under `contracts/` (a few
+Eighteen capability clusters (the seventeenth, external content, added by
+B7-16; the eighteenth, global shortcuts, added with U6). Each becomes one file under `contracts/` (a few
 split across two or three), with matching implementations under `desktop/` and
 `browser/`. Since B7-5 the "Files today" column names the app-side callers; the
 native surface itself lives only in `platform/desktop/`.

@@ -1100,6 +1100,30 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     setFullscreen.mockRestore();
   });
 
+  it("toggles mute and deafen from a global shortcut while unfocused (U6)", async () => {
+    const shortcutHandlers = new Set<(action: "mute" | "deafen") => void>();
+    const onShortcut = vi
+      .spyOn(desktop.globalShortcuts, "onShortcut")
+      .mockImplementation((handler) => {
+        shortcutHandlers.add(handler);
+        return () => shortcutHandlers.delete(handler);
+      });
+    const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    const ws = fakeWs();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    expect(start).toHaveBeenCalledTimes(1);
+    for (const handler of shortcutHandlers) handler("mute");
+
+    // The same toggle the in-app Ctrl+M runs: muting sends voice_mute(true).
+    expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+
+    onShortcut.mockRestore();
+    start.mockRestore();
+  });
+
   it("stops your screen share from the grid's self-preview cover, and names remote tiles for their controls", async () => {
     const { disableScreenshare } = await import("@lib/livekitSession");
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });

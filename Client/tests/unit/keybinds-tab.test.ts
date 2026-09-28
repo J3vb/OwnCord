@@ -13,6 +13,16 @@ vi.mock("../../src/platform/desktop/pushToTalk", () => ({
     updateKey: (...args: unknown[]) => mockUpdatePttKey(...args),
   },
 }));
+// U6: the tab discloses whether global (unfocused) shortcuts are available.
+const mockSupported = vi.fn(async () => true);
+vi.mock("../../src/platform/desktop/globalShortcuts", () => ({
+  globalShortcuts: {
+    supported: () => mockSupported(),
+    start: vi.fn(async () => {}),
+    stop: vi.fn(async () => {}),
+    onShortcut: vi.fn(() => () => {}),
+  },
+}));
 
 import { buildKeybindsTab } from "../../src/components/settings/KeybindsTab";
 
@@ -343,6 +353,26 @@ describe("KeybindsTab", () => {
 
     await vi.waitFor(() => {
       expect(pttBtn.textContent).toBe("F2");
+    });
+  });
+
+  it("promises unfocused shortcuts through the tray and the global keys when supported (U6)", async () => {
+    mockSupported.mockResolvedValue(true);
+    const el = buildKeybindsTab(new AbortController().signal);
+    const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
+    expect(hint.textContent).toBe(
+      "Mute and Deafen also work while OwnCord is unfocused — via Ctrl + M / Ctrl + D, or the tray menu.",
+    );
+  });
+
+  it("discloses the missing global-key path on a desktop without it (U6)", async () => {
+    mockSupported.mockResolvedValue(false);
+    const el = buildKeybindsTab(new AbortController().signal);
+    const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
+    await vi.waitFor(() => {
+      expect(hint.textContent).toBe(
+        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global Ctrl + M / Ctrl + D shortcuts.",
+      );
     });
   });
 });

@@ -68,7 +68,7 @@ fn is_allowed_ptt_capture_vk(vk: i32) -> bool {
 // ---------------------------------------------------------------------------
 
 #[cfg(windows)]
-fn is_key_down(vk: i32) -> bool {
+pub(crate) fn is_key_down(vk: i32) -> bool {
     // VK codes 1-254 are valid; 0 and 255 are reserved/undefined
     if !(1..=254).contains(&vk) {
         return false;
@@ -80,24 +80,8 @@ fn is_key_down(vk: i32) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn is_key_down(vk: i32) -> bool {
-    use device_query::{DeviceQuery, DeviceState};
-    // Cache DeviceState per thread — creating it on every call would open/close
-    // /dev/input/ file descriptors every 20ms in the polling loop.
-    // checked_new() returns None when no X11 display is reachable (e.g. a
-    // pure-Wayland session without XWayland), so PTT degrades to "key never
-    // pressed" instead of panicking on every poll.
-    thread_local! {
-        static DEVICE_STATE: Option<DeviceState> = {
-            let ds = DeviceState::checked_new();
-            if ds.is_none() {
-                log::warn!(
-                    "PTT unavailable: no X11/XWayland display for global key state"
-                );
-            }
-            ds
-        };
-    }
+pub(crate) fn is_key_down(vk: i32) -> bool {
+    use device_query::DeviceQuery;
     let Some(keycode) = linux::vk_to_keycode(vk) else {
         return false;
     };
@@ -107,8 +91,54 @@ fn is_key_down(vk: i32) -> bool {
     })
 }
 
+// The shared per-thread X11 key-state handle. Hoisted to module scope so both
+// `is_key_down` and `ctrl_down` read the same cached DeviceState. Cache per
+// thread — creating it on every call would open/close /dev/input/ file
+// descriptors every 20ms in a polling loop. checked_new() returns None when no
+// X11 display is reachable (e.g. a pure-Wayland session without XWayland), so
+// the global paths degrade to "key never pressed" instead of panicking.
+#[cfg(target_os = "linux")]
+thread_local! {
+    static DEVICE_STATE: Option<device_query::DeviceState> = {
+        use device_query::DeviceState;
+        let ds = DeviceState::checked_new();
+        if ds.is_none() {
+            log::warn!("Global key state unavailable: no X11/XWayland display");
+        }
+        ds
+    };
+}
+
 #[cfg(not(any(windows, target_os = "linux")))]
-fn is_key_down(_vk: i32) -> bool {
+pub(crate) fn is_key_down(_vk: i32) -> bool {
+    false
+}
+
+/// Whether Ctrl is held right now. Needed by U6's global Ctrl+M/Ctrl+D, whose
+/// Ctrl half `is_key_down(0x11)` cannot answer on Linux: the modifier VKs are
+/// deliberately absent from `linux::vk_to_keycode` (LShift/RShift and
+/// LControl/RControl each collapse to one VK, which a single (vk, Keycode)
+/// pair cannot represent), so `is_key_down` returns false for them there.
+/// `device_query` does expose the modifiers as distinct Keycodes, so this reads
+/// them directly.
+#[cfg(windows)]
+pub(crate) fn ctrl_down() -> bool {
+    is_key_down(0x11)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn ctrl_down() -> bool {
+    use device_query::{DeviceQuery, Keycode};
+    DEVICE_STATE.with(|ds| {
+        ds.as_ref().is_some_and(|ds| {
+            let keys = ds.get_keys();
+            keys.contains(&Keycode::LControl) || keys.contains(&Keycode::RControl)
+        })
+    })
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn ctrl_down() -> bool {
     false
 }
 
