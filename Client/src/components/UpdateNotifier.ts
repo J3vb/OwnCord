@@ -135,10 +135,11 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       banner.appendChild(
         createElement(
           "span",
-          { class: "update-banner-warning" },
+          { class: "update-banner-warning", id: "update-banner-warning" },
           connectText("update.smartScreen"),
         ),
       );
+      updateBtn.setAttribute("aria-describedby", "update-banner-warning");
     }
     container.prepend(banner);
     announce(connectText("update.available", { version }));

@@ -192,9 +192,13 @@ describe("createUpdateNotifier download progress", () => {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0",
       );
     const notifier = await mountWithAvailableUpdate();
-    expect(host.querySelector(".update-banner-warning")?.textContent).toContain(
-      "Windows protected your PC",
-    );
+    const warning = host.querySelector(".update-banner-warning");
+    expect(warning?.textContent).toContain("Windows protected your PC");
+    const describedBy = host
+      .querySelector(".update-banner-install")
+      ?.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(host.querySelector(`#${describedBy}`)).toBe(warning);
     notifier.destroy?.();
     ua.mockRestore();
   });
@@ -207,6 +211,9 @@ describe("createUpdateNotifier download progress", () => {
       );
     const notifier = await mountWithAvailableUpdate();
     expect(host.querySelector(".update-banner-warning")).toBeNull();
+    expect(host.querySelector(".update-banner-install")?.hasAttribute("aria-describedby")).toBe(
+      false,
+    );
     notifier.destroy?.();
     ua.mockRestore();
   });
