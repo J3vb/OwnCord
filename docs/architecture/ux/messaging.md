@@ -285,8 +285,9 @@ instead of resetting to 0.
 
 Every affordance that can jump — a search hit, a pinned entry, the quoted
 reply bar above a reply, an `owncord://message/…` permalink pasted into chat or
-opened from the OS — goes through one path (`lib/message-navigation.ts`
-registry → `main-page/MessageJump.ts`), so they behave identically.
+opened from the OS, a clicked message notification — goes through one path
+(`lib/message-navigation.ts` registry → `main-page/MessageJump.ts`), so they
+behave identically.
 
 | Step                                  | Target UX                                                                                                              |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
