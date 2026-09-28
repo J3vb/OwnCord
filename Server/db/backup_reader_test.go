@@ -26,7 +26,7 @@ import (
 // writer-based VACUUM INTO this test hangs until its timeout: the exec queues
 // behind the transaction, and every other writer waits behind it (measured at
 // 0.4-1.3 s per INSERT once a day). Taking the backup off the writer is also
-// what satisfies PERF-10; its service-level measurement lives beside the quota
+// what satisfies PERF-10; its service-level proof lives beside the quota
 // code (TestReserve_NotBlockedByAConcurrentBackup, service/storage_quota_test.go).
 func TestBackupToSafe_RunsWhileTheWriterIsBusy(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
