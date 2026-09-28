@@ -300,9 +300,28 @@ describe("main.ts notification-click opens the message (U1d)", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    emitTauriEvent("notification-click", { channelId: 7, messageId: 42 });
+    const { setChannelMutesHost } = await import("@lib/channel-mutes");
+    setChannelMutesHost("a.example");
+    vi.mocked(jumpToMessage).mockClear();
+
+    emitTauriEvent("notification-click", { host: "a.example", channelId: 7, messageId: 42 });
 
     expect(vi.mocked(jumpToMessage)).toHaveBeenCalledWith(7, 42);
+    setChannelMutesHost(null);
+  });
+
+  it("drops a click from a notification another server raised", async () => {
+    const { jumpToMessage } = await import("@lib/message-navigation");
+    await Promise.resolve();
+    await Promise.resolve();
+    const { setChannelMutesHost } = await import("@lib/channel-mutes");
+    setChannelMutesHost("b.example");
+    vi.mocked(jumpToMessage).mockClear();
+
+    emitTauriEvent("notification-click", { host: "a.example", channelId: 7, messageId: 42 });
+
+    expect(vi.mocked(jumpToMessage)).not.toHaveBeenCalled();
+    setChannelMutesHost(null);
   });
 });
 

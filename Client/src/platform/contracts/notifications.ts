@@ -11,10 +11,12 @@ export interface NotifierShowOptions {
 
 /**
  * Where a clicked notification should take the reader: the message it was
- * raised for. The native host reports the same pair back when the user
- * activates the notification, and the app opens it.
+ * raised for, on the server (`host`) it came from — channel and message ids are
+ * only unique per server. The native host reports the target back when the
+ * user activates the notification, and the app opens it.
  */
 export interface NotificationTarget {
+  readonly host: string;
   readonly channelId: number;
   readonly messageId: number;
 }

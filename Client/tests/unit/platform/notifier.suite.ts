@@ -73,22 +73,27 @@ export function describeNotifierSuite(
 
     check("shows a message notification carrying its target", async () => {
       await ctx.subject.showMessage("Alice in #general", "hello", {
+        host: "h",
         channelId: 7,
         messageId: 42,
       });
       expect(ctx.native.messageShown()).toEqual([
-        { title: "Alice in #general", body: "hello", target: { channelId: 7, messageId: 42 } },
+        {
+          title: "Alice in #general",
+          body: "hello",
+          target: { host: "h", channelId: 7, messageId: 42 },
+        },
       ]);
     });
 
     check("hands a message activation to its handler exactly as it arrived", async () => {
       const handler = vi.fn();
       ctx.subject.onMessageActivated(handler);
-      await ctx.native.emitsActivation({ channelId: 7, messageId: 42 });
-      await ctx.native.emitsActivation({ channelId: 9, messageId: 1 });
+      await ctx.native.emitsActivation({ host: "h", channelId: 7, messageId: 42 });
+      await ctx.native.emitsActivation({ host: "h", channelId: 9, messageId: 1 });
       expect(handler.mock.calls).toEqual([
-        [{ channelId: 7, messageId: 42 }],
-        [{ channelId: 9, messageId: 1 }],
+        [{ host: "h", channelId: 7, messageId: 42 }],
+        [{ host: "h", channelId: 9, messageId: 1 }],
       ]);
     });
 
@@ -97,10 +102,10 @@ export function describeNotifierSuite(
     check("stops delivering activations once unsubscribed", async () => {
       const handler = vi.fn();
       const unsubscribe = ctx.subject.onMessageActivated(handler);
-      await ctx.native.emitsActivation({ channelId: 3, messageId: 4 });
+      await ctx.native.emitsActivation({ host: "h", channelId: 3, messageId: 4 });
       unsubscribe();
-      await ctx.native.emitsActivation({ channelId: 5, messageId: 6 });
-      expect(handler.mock.calls).toEqual([[{ channelId: 3, messageId: 4 }]]);
+      await ctx.native.emitsActivation({ host: "h", channelId: 5, messageId: 6 });
+      expect(handler.mock.calls).toEqual([[{ host: "h", channelId: 3, messageId: 4 }]]);
     });
   });
 }

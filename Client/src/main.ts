@@ -11,7 +11,7 @@ import { createApiClient, ApiClientError, errorText } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { resetNotificationCoalescing } from "@lib/notifications";
+import { openNotificationTarget, resetNotificationCoalescing } from "@lib/notifications";
 import { cleanupNotificationAudio } from "@lib/notificationSound";
 import { settleNotificationLevelDefault } from "@lib/notificationLevel";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
@@ -1208,8 +1208,6 @@ void desktop.deepLinks.init(handleInviteDeepLink, handleMessageDeepLink);
 // A clicked message notification opens the message it was for (U1d). The native
 // host emits `notification-click` with the target; routing it through the same
 // jumper a permalink uses keeps one implementation.
-desktop.notifier.onMessageActivated((target) => {
-  jumpToMessage(target.channelId, target.messageId);
-});
+desktop.notifier.onMessageActivated(openNotificationTarget);
 
 log.info("OwnCord client initialized");

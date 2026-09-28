@@ -60,13 +60,14 @@ describeNotifierSuite(async () => {
             const args = call[1] as {
               title: string;
               body: string;
+              host: string;
               channelId: number;
               messageId: number;
             };
             return {
               title: args.title,
               body: args.body,
-              target: { channelId: args.channelId, messageId: args.messageId },
+              target: { host: args.host, channelId: args.channelId, messageId: args.messageId },
             };
           }),
       async emitsActivation(target) {

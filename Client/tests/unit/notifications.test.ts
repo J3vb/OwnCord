@@ -9,6 +9,8 @@ import { membersStore } from "../../src/stores/members.store";
 import { messagesStore } from "../../src/stores/messages.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
 import { setLogLevel } from "../../src/lib/logger";
+import { setChannelMutesHost } from "../../src/lib/channel-mutes";
+import { setMessageJumpHandler } from "../../src/lib/message-navigation";
 
 // The three tests that assert on the logger's debug lines raise the level the
 // global setup lowered (C-04) for themselves; this puts it back.
@@ -1834,25 +1836,51 @@ describe("notifyIncomingMessage", () => {
       });
     });
 
-    it("falls back to the Web Notification API when the host command is unavailable", async () => {
-      const { invoke } = await import("@tauri-apps/api/core");
-      (invoke as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("no native host"));
-      const mockWebNotification = vi.fn();
-      const originalNotification = globalThis.Notification;
-      (globalThis as Record<string, unknown>).Notification = Object.assign(mockWebNotification, {
-        permission: "granted",
-        requestPermission: vi.fn(),
-      });
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+    it.each([
+      ["opens the message", "a.example", [[7, 42]]],
+      ["ignores a click once signed into another server", "b.example", []],
+    ])(
+      "falls back to the Web Notification API, whose click %s",
+      async (_name, hostAtClick, expectedJumps) => {
+        const { invoke } = await import("@tauri-apps/api/core");
+        (invoke as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("no native host"));
+        const shown: EventTarget[] = [];
+        const mockWebNotification = vi.fn(function () {
+          const popup = new EventTarget();
+          shown.push(popup);
+          return popup;
+        });
+        const originalNotification = globalThis.Notification;
+        (globalThis as Record<string, unknown>).Notification = Object.assign(mockWebNotification, {
+          permission: "granted",
+          requestPermission: vi.fn(),
+        });
+        const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
+        const jump = vi.fn();
+        const unregister = setMessageJumpHandler(jump);
+        setChannelMutesHost("a.example");
+        testPrefs.set("desktopNotifications", true);
+        testPrefs.set("flashTaskbar", false);
+        testPrefs.set("notificationSounds", false);
 
-      notifyIncomingMessage(makePayload({ id: 42, channel_id: 7 }));
+        try {
+          notifyIncomingMessage(makePayload({ id: 42, channel_id: 7 }));
 
-      await vi.waitFor(() => {
-        expect(mockWebNotification).toHaveBeenCalled();
-      });
-      (globalThis as Record<string, unknown>).Notification = originalNotification;
-    });
+          await vi.waitFor(() => {
+            expect(shown).toHaveLength(1);
+          });
+          setChannelMutesHost(hostAtClick);
+          shown[0]!.dispatchEvent(new Event("click"));
+
+          expect(focus).toHaveBeenCalledOnce();
+          expect(jump.mock.calls).toEqual(expectedJumps);
+        } finally {
+          focus.mockRestore();
+          unregister();
+          setChannelMutesHost(null);
+          (globalThis as Record<string, unknown>).Notification = originalNotification;
+        }
+      },
+    );
   });
 });

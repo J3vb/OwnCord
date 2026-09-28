@@ -36,6 +36,7 @@ export const notifier: Notifier = {
     await invoke("notify_message", {
       title,
       body,
+      host: target.host,
       channelId: target.channelId,
       messageId: target.messageId,
     });

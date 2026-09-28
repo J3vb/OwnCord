@@ -45,9 +45,10 @@ impl Drop for WaiterSlot<'_> {
 }
 
 /// The message a clicked notification should open.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageTarget {
+    pub host: String,
     pub channel_id: i64,
     pub message_id: i64,
 }
@@ -59,6 +60,7 @@ pub fn notify_message<R: Runtime>(
     app: AppHandle<R>,
     title: String,
     body: String,
+    host: String,
     channel_id: i64,
     message_id: i64,
 ) -> Result<(), String> {
@@ -67,6 +69,7 @@ pub fn notify_message<R: Runtime>(
         &title,
         &body,
         MessageTarget {
+            host,
             channel_id,
             message_id,
         },
@@ -203,10 +206,14 @@ mod tests {
     #[test]
     fn a_target_serializes_camel_case_for_the_renderer() {
         let target = MessageTarget {
+            host: "chat.example:8443".into(),
             channel_id: 7,
             message_id: 42,
         };
         let json = serde_json::to_value(target).expect("serialize");
-        assert_eq!(json, serde_json::json!({ "channelId": 7, "messageId": 42 }));
+        assert_eq!(
+            json,
+            serde_json::json!({ "host": "chat.example:8443", "channelId": 7, "messageId": 42 })
+        );
     }
 }

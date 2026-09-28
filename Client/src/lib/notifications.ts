@@ -4,7 +4,7 @@
  */
 
 import { loadPref } from "./preferences";
-import { notificationAllowed } from "./channel-mutes";
+import { getChannelMutesHost, notificationAllowed } from "./channel-mutes";
 import { effectiveNotificationLevel, shouldNotifyForLevel } from "./notificationLevel";
 import { loadUserStatus } from "./userStatus";
 import { authStore } from "@stores/auth.store";
@@ -176,6 +176,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // (bundle-budget's startup-closure gate).
   if (!dnd && loadPref<boolean>("desktopNotifications", true)) {
     fireDesktopNotification(title, payload.content, {
+      host: currentHost(),
       channelId: payload.channel_id,
       messageId: payload.id,
     });
@@ -210,6 +211,24 @@ async function plainBody(rawContent: string): Promise<string> {
   return sanitizeNotif(markdownToPlainText(rawContent, connectText("notifications.spoiler")), 100);
 }
 
+/** The server the client is signed into now, as a notification target names it. */
+function currentHost(): string {
+  return getChannelMutesHost() ?? "";
+}
+
+/**
+ * Open the message a clicked notification was for — unless it came from
+ * another server than the one signed into now, whose ids would name an
+ * unrelated channel and message here.
+ */
+export function openNotificationTarget(target: NotificationTarget): void {
+  if (target.host !== currentHost()) {
+    log.debug("Notification click from another server ignored", { host: target.host });
+    return;
+  }
+  jumpToMessage(target.channelId, target.messageId);
+}
+
 /**
  * Fire a Tauri desktop notification. Falls back to Web Notification API.
  *
@@ -235,10 +254,13 @@ function fireDesktopNotification(
     } catch (err) {
       log.debug("Tauri notification plugin unavailable, falling back to Web API", err);
       // Fallback to Web Notification API (dev mode / non-Tauri). Clicking it
-      // calls the same jump the native activation does.
+      // focuses the window and opens the target as the native activation does.
       try {
         const body = await plainBody(rawContent);
-        const onClick = (): void => jumpToMessage(target.channelId, target.messageId);
+        const onClick = (): void => {
+          window.focus();
+          openNotificationTarget(target);
+        };
         if (Notification.permission === "granted") {
           new Notification(title, { body }).addEventListener("click", onClick);
         } else if (Notification.permission !== "denied") {
