@@ -171,6 +171,7 @@ export const shards = {
     "src/features/safety/SafetyTab.ts",
     "src/features/safety/store.ts",
     "src/features/safety/wsHandlers.ts",
+    "src/features/settings/status.ts",
   ], // size hint only
 };
 

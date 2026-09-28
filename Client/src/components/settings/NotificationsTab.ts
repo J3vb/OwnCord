@@ -4,7 +4,7 @@
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
 import { appendToggleRows } from "./helpers";
-import { setStatusIcon, statusIcon, type StatusKind } from "./status";
+import { setStatusIcon, statusIcon, type StatusKind } from "../../features/settings/status";
 import { listMutedChannels, unmuteChannel } from "@lib/channel-mutes";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";

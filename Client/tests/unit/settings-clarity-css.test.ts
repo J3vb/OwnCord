@@ -38,3 +38,12 @@ describe("settings status icons", () => {
     );
   });
 });
+
+describe("settings pane section headings", () => {
+  it.each([".settings-content h3.setting-group-title", ".settings-content h3.safety-heading"])(
+    "colours %s with the qualified --text-muted, not the generic --text-faint",
+    (selector) => {
+      expect(varToken(cascadedDeclaration(selector, "color"))).toBe("--text-muted");
+    },
+  );
+});

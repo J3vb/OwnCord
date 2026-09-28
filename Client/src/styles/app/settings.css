@@ -437,9 +437,13 @@ details.disclose > summary {
 .account-security {
   margin-top: var(--space-6);
 }
+/* Section headings in a pane read at 4.5:1 (the generic h3 uses --text-faint). */
+.settings-content h3.setting-group-title,
+.settings-content h3.safety-heading {
+  color: var(--text-muted);
+}
 .settings-content h3.setting-group-title {
   margin: var(--space-5) 0 var(--space-1);
-  color: var(--text-muted);
 }
 .setting-group:first-child h3.setting-group-title {
   margin-top: 0;
@@ -896,12 +900,6 @@ details.disclose[open] > summary .icon {
 }
 
 /* ── Safety: My reports (B9-10) ── */
-.my-reports h2 {
-  font-size: var(--font-size-lg);
-  font-weight: 700;
-  color: var(--header-primary);
-  margin: 0 0 var(--space-1);
-}
 .my-reports-status {
   margin: var(--space-3) 0;
   font-size: var(--font-size-md);

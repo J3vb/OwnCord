@@ -255,7 +255,7 @@ test.describe("B9-10 report form and My reports (Q1)", () => {
         await page.keyboard.press("Escape");
 
         const section = await openSafety(page);
-        await measure("my reports heading", section.locator("h2"));
+        await measure("my reports heading", section.locator("h3"));
         await measure("my reports description", section.locator(".setting-desc"));
         await measure("report", section.locator(".my-reports-what").first());
         await measure("status", section.locator(".my-reports-state").first());

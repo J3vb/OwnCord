@@ -18,8 +18,11 @@ export const safetyText = defineCatalog("safety", {
   "timeout.composer": "You can't send messages until {time}",
   "timeout.react": "You can't add reactions until {time}",
   "timeout.voice": "You can't join voice until {time}",
-  "tab.restrictions": "Current restrictions",
-  "tab.none": "You have no active restrictions.",
+  "tab.standingOk": "Your account is in good standing.",
+  "tab.activeRestrictions": {
+    one: "{count} active restriction",
+    other: "{count} active restrictions",
+  },
   "tab.timedOut":
     "You're timed out until {time}. You can't send messages, react or join voice until then.",
   "tab.history": "Moderation history",

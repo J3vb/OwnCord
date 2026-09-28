@@ -558,11 +558,33 @@ describe("Safety tab", () => {
     expect(rows[2]).toContain("Appeal: overturned");
     expect(rows[3]).toContain("Acknowledged");
     expect(pane.textContent).not.toMatch(/4242|RPT-SECRET|note-SECRET-9/);
-    expect(pane.textContent).toContain("You have no active restrictions.");
+    // Answer first: no restriction reads as good standing, with an ok icon.
+    const standing = pane.querySelector<HTMLElement>("[data-testid='safety-standing']")!;
+    expect(standing.getAttribute("role")).toBe("status");
+    expect(standing.textContent).toBe("Your account is in good standing.");
+    expect(standing.querySelector(".st-ic.st-ok")).not.toBeNull();
 
     setActiveTimeout(later());
     await flush();
+    expect(standing.textContent).toBe("1 active restriction");
+    expect(standing.querySelector(".st-ic.st-warn")).not.toBeNull();
     expect(pane.textContent).toMatch(/You're timed out until .+ You can't send messages/);
+    ac.abort();
+  });
+
+  it("keeps an empty history to one line", async () => {
+    refreshOwnModeration({ getOwnModeration: vi.fn().mockResolvedValue([]) });
+    const ac = new AbortController();
+    const pane = document.createElement("div");
+    renderSafetyTab(pane, ac.signal);
+    document.body.appendChild(pane);
+    await flush();
+    expect(pane.textContent).toContain("Nothing to show.");
+    // The what-it-lists hint only matters once there is history to read.
+    const hint = [...pane.querySelectorAll<HTMLElement>("p")].find((p) =>
+      p.textContent.startsWith("Warnings, timeouts, removed messages"),
+    )!;
+    expect(hint.hidden).toBe(true);
     ac.abort();
   });
 
@@ -571,7 +593,7 @@ describe("Safety tab", () => {
     const ac = new AbortController();
     const pane = buildSafetyTab(ac.signal);
     expect(pane.classList.contains("safety-tab")).toBe(true);
-    await vi.waitFor(() => expect(pane.textContent).toContain("Current restrictions"));
+    await vi.waitFor(() => expect(pane.textContent).toContain("Your account is in good standing."));
     ac.abort();
   });
 });

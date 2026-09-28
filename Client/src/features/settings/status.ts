@@ -1,6 +1,7 @@
 /**
  * Status icons and disclosures for the settings tabs (UX clarity pass).
- * Kept out of helpers.ts, which loads at startup: only the lazy tabs use these.
+ * Kept out of components/settings/helpers.ts, which loads at startup, and in
+ * features/ so feature-owned panes (Safety) can use them too.
  */
 
 import { createElement } from "@lib/dom";

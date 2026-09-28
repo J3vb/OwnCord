@@ -107,7 +107,11 @@ export function buildMyReportsSection(
 ): HTMLElement {
   const titleId = `my-reports-${++sectionSeq}`;
   const section = createElement("section", { class: "my-reports", "aria-labelledby": titleId });
-  const heading = createElement("h2", { id: titleId, tabindex: "-1" }, t("mine.title"));
+  const heading = createElement(
+    "h3",
+    { class: "safety-heading", id: titleId, tabindex: "-1" },
+    t("mine.title"),
+  );
   const desc = createElement("p", { class: "setting-desc" }, t("mine.desc"));
   // Both live regions exist before their text changes, so each change is read.
   const status = createElement("div", { class: "my-reports-status", role: "status" });

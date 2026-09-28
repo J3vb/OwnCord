@@ -60,6 +60,8 @@ describe("My reports", () => {
     const section = mount();
     const heading = document.getElementById(section.getAttribute("aria-labelledby")!);
     expect(heading?.textContent).toBe("My reports");
+    // A section of the Safety tab, at the tab's heading level, not a new page.
+    expect(heading?.tagName).toBe("H3");
     const status = section.querySelector("[role=status]")!;
     expect(status.textContent).toBe("Loading your reports…");
     expect(section.getAttribute("aria-busy")).toBe("true");
@@ -130,7 +132,7 @@ describe("My reports", () => {
     pending[1]!.resolve([row()]);
     await flush();
     expect(retry.hidden).toBe(true);
-    expect(document.activeElement).toBe(section.querySelector("h2"));
+    expect(document.activeElement).toBe(section.querySelector("h3"));
     expect(section.querySelectorAll("li")).toHaveLength(1);
   });
 
