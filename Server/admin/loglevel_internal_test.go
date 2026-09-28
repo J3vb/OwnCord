@@ -88,6 +88,45 @@ func TestLogLevelController_SecondSetReplacesTheFirst(t *testing.T) {
 	}
 }
 
+// A revert whose timer fired while a newer Set held the lock must not undo
+// the newer window.
+func TestLogLevelController_StaleRevertKeepsNewerWindow(t *testing.T) {
+	var lv slog.LevelVar
+	lv.Set(slog.LevelInfo)
+	c := NewLogLevelController(&lv, slog.LevelInfo)
+	t.Cleanup(c.Close)
+
+	if _, err := c.Set("debug", 10*time.Second); err != nil {
+		t.Fatalf("Set(debug): %v", err)
+	}
+	stale := c.gen
+	if _, err := c.Set("warn", 10*time.Second); err != nil {
+		t.Fatalf("Set(warn): %v", err)
+	}
+	c.revert(stale)
+	level, deadline := c.Current()
+	if level != "warn" || deadline == nil {
+		t.Fatalf("Current() = %q, %v after a stale revert; want warn and a deadline", level, deadline)
+	}
+}
+
+func TestLogLevelController_RejectsNonPositiveWindow(t *testing.T) {
+	var lv slog.LevelVar
+	lv.Set(slog.LevelInfo)
+	c := NewLogLevelController(&lv, slog.LevelInfo)
+	t.Cleanup(c.Close)
+
+	for _, window := range []time.Duration{0, -time.Second} {
+		if _, err := c.Set("debug", window); err == nil {
+			t.Fatalf("Set(debug, %s) = nil error, want a refusal", window)
+		}
+	}
+	level, deadline := c.Current()
+	if level != "info" || deadline != nil {
+		t.Fatalf("Current() = %q, %v after refusals; want info unchanged and no deadline", level, deadline)
+	}
+}
+
 func TestLogLevelController_CloseStopsTheRevert(t *testing.T) {
 	var lv slog.LevelVar
 	lv.Set(slog.LevelInfo)

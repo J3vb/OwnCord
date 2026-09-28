@@ -25,6 +25,9 @@ type LogLevelController struct {
 	mu       sync.Mutex
 	timer    *time.Timer
 	deadline time.Time
+	// gen identifies the latest Set, so a revert whose timer fired while a
+	// newer Set held mu cannot undo that newer window.
+	gen uint64
 }
 
 func NewLogLevelController(level *slog.LevelVar, base slog.Level) *LogLevelController {
@@ -32,13 +35,14 @@ func NewLogLevelController(level *slog.LevelVar, base slog.Level) *LogLevelContr
 }
 
 // Set applies name for the given window and returns the deadline it reverts
-// at. durationSeconds of 0 or less means no timed revert is wanted for this
-// override — but the API layer requires a positive window, so only tests pass
-// zero.
+// at. Every override is timed: a non-positive window is refused.
 func (c *LogLevelController) Set(name string, window time.Duration) (time.Time, error) {
 	level, ok := config.ParseLevel(name)
 	if !ok {
 		return time.Time{}, fmt.Errorf("unknown log level %q", name)
+	}
+	if window <= 0 {
+		return time.Time{}, fmt.Errorf("log level window must be positive, got %s", window)
 	}
 
 	c.mu.Lock()
@@ -48,19 +52,21 @@ func (c *LogLevelController) Set(name string, window time.Duration) (time.Time, 
 		c.timer = nil
 	}
 	c.level.Set(level)
-	c.deadline = time.Time{}
-	if window <= 0 {
-		return time.Time{}, nil
-	}
+	c.gen++
+	gen := c.gen
 	c.deadline = time.Now().Add(window)
-	c.timer = time.AfterFunc(window, c.revert)
+	c.timer = time.AfterFunc(window, func() { c.revert(gen) })
 	return c.deadline, nil
 }
 
-// revert restores the base level when the window elapses.
-func (c *LogLevelController) revert() {
+// revert restores the base level when window gen elapses. A stale gen is a
+// superseded window and does nothing.
+func (c *LogLevelController) revert(gen uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if gen != c.gen {
+		return
+	}
 	c.timer = nil
 	c.deadline = time.Time{}
 	c.level.Set(c.base)
@@ -84,6 +90,7 @@ func (c *LogLevelController) Current() (string, *time.Time) {
 func (c *LogLevelController) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.gen++
 	if c.timer != nil {
 		c.timer.Stop()
 		c.timer = nil
@@ -114,11 +121,22 @@ type logLevelRequest struct {
 // maxLogLevelWindow bounds a boost so one request cannot pin debug for days.
 const maxLogLevelWindow = 24 * time.Hour
 
-// logLevelResponse is GET/PATCH /logs/level: the level in force and, for a
-// timed boost, when it reverts (empty for a level with no pending revert).
+// logLevelResponse is GET/PATCH /logs/level: the level in force, the base
+// level it reverts to, and, for a timed boost, when it reverts (empty for a
+// level with no pending revert).
 type logLevelResponse struct {
 	Level     string `json:"level"`
+	BaseLevel string `json:"base_level"`
 	RevertsAt string `json:"reverts_at,omitempty"`
+}
+
+func writeLogLevel(w http.ResponseWriter, c *LogLevelController) {
+	level, deadline := c.Current()
+	resp := logLevelResponse{Level: level, BaseLevel: levelName(c.base)}
+	if deadline != nil {
+		resp.RevertsAt = deadline.Format(time.RFC3339)
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func handleGetLogLevel(c *LogLevelController) http.HandlerFunc {
@@ -127,12 +145,7 @@ func handleGetLogLevel(c *LogLevelController) http.HandlerFunc {
 			writeErr(w, http.StatusServiceUnavailable, "CONFIG_UNAVAILABLE", "running configuration unavailable")
 			return
 		}
-		level, deadline := c.Current()
-		resp := logLevelResponse{Level: level}
-		if deadline != nil {
-			resp.RevertsAt = deadline.Format(time.RFC3339)
-		}
-		writeJSON(w, http.StatusOK, resp)
+		writeLogLevel(w, c)
 	}
 }
 
@@ -156,11 +169,10 @@ func handleSetLogLevel(c *LogLevelController) http.HandlerFunc {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "duration_seconds must be between 1 and 86400")
 			return
 		}
-		deadline, err := c.Set(req.Level, time.Duration(req.DurationSeconds)*time.Second)
-		if err != nil {
+		if _, err := c.Set(req.Level, time.Duration(req.DurationSeconds)*time.Second); err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, logLevelResponse{Level: req.Level, RevertsAt: deadline.Format(time.RFC3339)})
+		writeLogLevel(w, c)
 	}
 }

@@ -382,15 +382,12 @@ function renderLogs(){
     +'<span class="setting-desc" id="logLevelDesc">'+(canLevel?'Temporarily raise what the server logs, then it reverts on its own':'Requires an administrator account')+'</span>'
     +'<span class="log-level-status" id="logLevelStatus" role="status"></span>'
     +'<button class="toggle '+(state.logLevel==='debug'?'on':'')+'" id="logLevelToggle" role="switch" aria-checked="'+(state.logLevel==='debug')+'" aria-labelledby="logLevelName" aria-describedby="logLevelDesc"'
-    +' data-action="toggleServerLogLevel" data-args="'+actArgs(15)+'"'+(canLevel?'':' disabled')+'></button>'
-    +'<label class="log-level-window" for="logLevelWindow">for <select id="logLevelWindow" data-input-action="setLogLevelWindow">'
-    +[15,30,60].map(m=>'<option value="'+m+'"'+(state.logLevelWindow===m?' selected':'')+'>'+m+' min</option>').join('')
-    +'</select></label></div>';
+    +' data-action="toggleServerLogLevel"'+(canLevel?'':' disabled')+'></button></div>';
   // A focusable region, so the log scrolls from the keyboard. Not role=log:
   // that is a live region, and a streaming log would talk over everything.
   html+='<div class="log-output" id="logOutput" role="region" aria-label="Log lines" tabindex="0"></div>';
   html+='<div class="log-status"><span style="margin-left:auto" id="logCount">'+state.logEntries.length+' entries</span></div>';
-  setTimeout(()=>{renderLogLines();if(!state.logPaused)connectLogStream()},0);
+  setTimeout(()=>{renderLogLines();if(!state.logPaused)connectLogStream();if(canLevel)loadLogLevel()},0);
   return html;
 }
 
@@ -399,36 +396,37 @@ function toggleLogLevel(l){state.logLevels[l]=!state.logLevels[l];document.query
 function toggleLogAutoScroll(){state.logAutoScroll=!state.logAutoScroll;const btn=document.getElementById('autoScrollBtn');if(btn)btn.setAttribute('aria-pressed',String(state.logAutoScroll))}
 
 /* The timed server log-level toggle (SRE-07). Raising the level is a PATCH
-   the server reverts on its own; the client mirrors that with a countdown so
-   the switch does not sit "on" past the window the server already closed. */
+   the server reverts on its own. The switch mirrors the server's own answer
+   (level, the base it reverts to, and when), and asks again once the window
+   closes rather than guessing what the server went back to. */
+const LOG_LEVEL_MINUTES=15;
 function clearLogLevelTimer(){if(state.logLevelTimer){clearInterval(state.logLevelTimer);state.logLevelTimer=null}}
 
 function paintLogLevel(){
   const on=state.logLevel==='debug';
-  const toggle=document.getElementById('logLevelToggle');
-  if(toggle){toggle.classList.toggle('on',on);toggle.setAttribute('aria-checked',String(on))}
+  const fromConfig=state.logLevelBase==='debug';
+  const toggle=/** @type {HTMLButtonElement|null} */(document.getElementById('logLevelToggle'));
+  if(toggle){toggle.classList.toggle('on',on);toggle.setAttribute('aria-checked',String(on));if(fromConfig)toggle.disabled=true}
   const status=document.getElementById('logLevelStatus');
-  if(status)status.textContent=on?'Debug until it reverts':'';
+  const left=state.logLevelUntil-Date.now();
+  if(status)status.textContent=!on?'':fromConfig?'Debug, set in config.yaml':left>0?'Debug for '+Math.ceil(left/60000)+' more min':'Debug until it reverts';
 }
 
-async function toggleServerLogLevel(minutes){
+function applyLogLevel(res){
+  clearLogLevelTimer();
+  state.logLevel=res.level;state.logLevelBase=res.base_level;
+  state.logLevelUntil=res.reverts_at&&res.level!==res.base_level?new Date(res.reverts_at).getTime():0;
+  if(state.logLevelUntil)state.logLevelTimer=setInterval(()=>{if(Date.now()>=state.logLevelUntil){clearLogLevelTimer();loadLogLevel()}else paintLogLevel()},1000);
+  paintLogLevel();
+}
+
+async function loadLogLevel(){try{applyLogLevel(await api('GET','/logs/level'))}catch(e){showToast(e.message,'error')}}
+
+async function toggleServerLogLevel(){
   const on=state.logLevel==='debug';
   try{
-    if(on){
-      await api('PATCH','/logs/level',{level:'info',duration_seconds:1});
-      state.logLevel='info';clearLogLevelTimer();paintLogLevel();showToast('Log level set back to info','success');return;
-    }
-    const res=await api('PATCH','/logs/level',{level:'debug',duration_seconds:Math.max(1,minutes)*60});
-    state.logLevel='debug';paintLogLevel();
-    const until=res&&res.reverts_at?new Date(res.reverts_at).getTime():0;
-    clearLogLevelTimer();
-    state.logLevelTimer=setInterval(()=>{
-      const left=until-Date.now();
-      const status=document.getElementById('logLevelStatus');
-      if(status&&left>0)status.textContent='Debug for '+Math.ceil(left/60000)+' more min';
-      if(left<=0){clearLogLevelTimer();state.logLevel='info';paintLogLevel()}
-    },1000);
-    showToast('Debug logging on for '+Math.max(1,minutes)+' minutes','success');
+    applyLogLevel(await api('PATCH','/logs/level',on?{level:state.logLevelBase,duration_seconds:1}:{level:'debug',duration_seconds:LOG_LEVEL_MINUTES*60}));
+    showToast(on?'Log level set back to '+state.logLevelBase:'Debug logging on for '+LOG_LEVEL_MINUTES+' minutes','success');
   }catch(e){showToast(e.message,'error')}
 }
 
@@ -760,7 +758,6 @@ Object.assign(ACTIONS,{clearLogs,confirmRevokeToken,copyAllLogs,copyAuditLog,cop
   discardSupportBundle,downloadSupportBundle,exportAuditCSV,reloadAudit,installPlugin,openCreateTokenModal,openUninstallPlugin,
   previewSupportBundle,revokeToken,setPluginEnabled,toggleLogAutoScroll,toggleLogLevel,toggleLogPause,uninstallPlugin,
   toggleServerLogLevel,
-  setLogLevelWindow(){const el=/** @type {HTMLSelectElement|null} */(document.getElementById('logLevelWindow'));state.logLevelWindow=(el&&Number(el.value))||15},
   turnAuditPage(delta){reloadAudit(Math.max(1,state.auditPage+delta))},
   setAuditSearch(){
     state.auditSearch=this.value;clearTimeout(auditSearchTimer);

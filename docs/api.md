@@ -3807,12 +3807,30 @@ user has TOTP enabled.
 The config.yaml values the admin panel's Settings page shows as read-only
 facts, taken from the configuration the server booted with — so an edit to
 config.yaml shows here only after a restart, which is also when it takes
-effect.
+effect. Secrets appear only as `gif_configured` / `github_configured`
+booleans. `tls_domain`, `voice_url` and `backup_dir` are included only when
+the caller holds `ADMINISTRATOR` or is the owner.
 
 #### Response 200 OK
 
 ```json
-{ "upload_max_size_mb": 100, "voice_quality": "medium" }
+{
+  "upload_max_size_mb": 100,
+  "voice_quality": "medium",
+  "server_port": 8443,
+  "min_free_disk_mb": 256,
+  "max_ws_connections": 1000,
+  "tls_mode": "acme",
+  "tls_domain": "chat.example.com",
+  "user_quota_mb": 0,
+  "backup_dir": "data/backups",
+  "logging_level": "info",
+  "voice_url": "ws://localhost:7880",
+  "moderation_report_retention_days": 30,
+  "moderation_action_retention_days": 90,
+  "gif_configured": true,
+  "github_configured": false
+}
 ```
 
 #### Errors

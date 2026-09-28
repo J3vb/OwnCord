@@ -975,6 +975,53 @@ func TestAdminAPI_GetConfigFacts_EffectiveConfigMasksSecrets(t *testing.T) {
 	}
 }
 
+// The host path and endpoints are for an ADMINISTRATOR or the owner only; a
+// MANAGE_SERVER-only caller reads the rest of the card without them.
+func TestAdminAPI_GetConfigFacts_PathsAndURLsAdminOnly(t *testing.T) {
+	database := openAdminTestDB(t)
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8443},
+		Voice:  config.VoiceConfig{LiveKitURL: "ws://localhost:7880"},
+		TLS:    config.TLSConfig{Mode: "acme", Domain: "chat.example"},
+		Backup: config.BackupConfig{Dir: "/var/backups"},
+	}
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database), admin.SetupOptions{RunningCfg: cfg})
+	_, managerToken := createRoleUser(t, database, 12, "Manager", permissions.ManageServer, 50, "manageruser")
+	adminToken := createAdminUser(t, database)
+	hidden := []string{"backup_dir", "voice_url", "tls_domain"}
+
+	for _, tc := range []struct {
+		name     string
+		token    string
+		wantShow bool
+	}{
+		{"manage server only", managerToken, false},
+		{"owner", adminToken, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := doRequest(t, handler, http.MethodGet, "/config", tc.token, nil)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+			}
+			var got map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if got["server_port"] != float64(8443) || got["tls_mode"] != "acme" {
+				t.Errorf("config facts = %v, want the non-sensitive rows", got)
+			}
+			for _, key := range hidden {
+				if _, ok := got[key]; ok != tc.wantShow {
+					t.Errorf("%s present = %v, want %v; body: %s", key, ok, tc.wantShow, w.Body.String())
+				}
+			}
+			if tc.wantShow && (got["backup_dir"] != "/var/backups" || got["voice_url"] != "ws://localhost:7880" || got["tls_domain"] != "chat.example") {
+				t.Errorf("config facts = %v", got)
+			}
+		})
+	}
+}
+
 func TestAdminAPI_GetConfigFacts_WithoutRunningConfig(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
@@ -1008,8 +1055,8 @@ func TestAdminAPI_LogLevel_ReadAndSet(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got["level"] != "info" {
-		t.Errorf("GET level = %v, want info", got["level"])
+	if got["level"] != "info" || got["base_level"] != "info" {
+		t.Errorf("GET = %v, want level and base_level info", got)
 	}
 	if _, ok := got["reverts_at"]; ok {
 		t.Errorf("GET reverts_at present with no boost: %v", got["reverts_at"])

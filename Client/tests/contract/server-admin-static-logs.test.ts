@@ -48,7 +48,17 @@ class FakeEventSource {
   }
 }
 
-function loadAdminPanel(fetchCalls: FetchCall[]): JSDOM {
+interface LogLevelState {
+  level: string;
+  base_level: string;
+  reverts_at?: string;
+}
+
+function loadAdminPanel(
+  fetchCalls: FetchCall[],
+  serverLevel: LogLevelState = { level: "info", base_level: "info" },
+): JSDOM {
+  const logLevel = { ...serverLevel };
   return new JSDOM(ADMIN_HTML, {
     url: "http://localhost:8080/admin",
     runScripts: "dangerously",
@@ -77,15 +87,14 @@ function loadAdminPanel(fetchCalls: FetchCall[]): JSDOM {
             json: async () => ({ ticket: "t-" + fetchCalls.length }),
           } as Response;
         }
-        if (p === "/logs/level" && method === "PATCH") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              level: (opts.body as string) && JSON.parse(opts.body as string).level,
-              reverts_at: new Date(Date.now() + 900000).toISOString(),
-            }),
-          } as Response;
+        if (p === "/logs/level") {
+          if (method === "PATCH") {
+            const body = call.body as { level: string; duration_seconds: number };
+            logLevel.level = body.level;
+            logLevel.reverts_at = new Date(Date.now() + body.duration_seconds * 1000).toISOString();
+          }
+          const snapshot = { ...logLevel };
+          return { ok: true, status: 200, json: async () => snapshot } as Response;
         }
         return { ok: true, status: 200, json: async () => ({}) } as Response;
       }) as typeof fetch;
@@ -318,9 +327,46 @@ describe("Server/admin/static — log stream (re)connect (OC-0435)", () => {
     const patch = fetchCalls.find((c) => c.path === "/logs/level" && c.method === "PATCH");
     expect(patch).toBeTruthy();
     expect(patch!.body).toMatchObject({ level: "debug" });
-    expect(patch!.body.duration_seconds).toBeGreaterThan(0);
+    expect(patch!.body.duration_seconds).toBe(900);
     expect(bridge.state.logLevel).toBe("debug");
     expect(adminToggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  // A reload (or a second admin) during a boost must see the server's real
+  // level, and turning it off must go back to the server's base level, not
+  // an assumed "info".
+  it("shows the server's running level on load and turns off to its base level", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls, {
+      level: "debug",
+      base_level: "warn",
+      reverts_at: new Date(Date.now() + 600000).toISOString(),
+    });
+    const { window } = dom;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.me = { permissions: 0x40000000, is_owner: true };
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    const toggle = doc.getElementById("logLevelToggle") as HTMLButtonElement;
+    expect(fetchCalls.some((c) => c.path === "/logs/level" && c.method === "GET")).toBe(true);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(doc.getElementById("logLevelStatus")!.textContent).toBe("Debug for 10 more min");
+    expect(doc.getElementById("logLevelWindow")).toBeNull();
+
+    fetchCalls.length = 0;
+    toggle.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const patch = fetchCalls.find((c) => c.path === "/logs/level" && c.method === "PATCH");
+    expect(patch!.body).toMatchObject({ level: "warn" });
+    expect(bridge.state.logLevel).toBe("warn");
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(doc.getElementById("logLevelStatus")!.textContent).toBe("");
   });
   // UX clarity: attrs read as chips, an http request as "METHOD path ·
   // status · ms" with the status class carried by a class and the number,

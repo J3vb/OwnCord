@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -42,32 +43,36 @@ func handleGetSettings(settings *service.SettingsService) http.HandlerFunc {
 // cross this boundary only as `*_configured` booleans, so the card can say
 // "configured" without handing the value to the admin panel (or, since the
 // panel is a browser page, to the browser).
+//
+// The host path and endpoints (backup_dir, voice_url, tls_domain) are sent
+// only to an ADMINISTRATOR or the owner; a MANAGE_SERVER-only caller gets the
+// response without them, like the support bundle leaves them out.
 type configFactsResponse struct {
 	UploadMaxSizeMB int    `json:"upload_max_size_mb"`
 	VoiceQuality    string `json:"voice_quality"`
 
-	ServerPort       int    `json:"server_port"`
-	MinFreeDiskMB    int    `json:"min_free_disk_mb"`
-	MaxWSConnections int    `json:"max_ws_connections"`
-	TLSMode          string `json:"tls_mode"`
-	TLSDomain        string `json:"tls_domain"`
-	UserQuotaMB      int    `json:"user_quota_mb"`
-	BackupDir        string `json:"backup_dir"`
-	LoggingLevel     string `json:"logging_level"`
-	VoiceURL         string `json:"voice_url"`
-	ReportRetention  int    `json:"moderation_report_retention_days"`
-	ActionRetention  int    `json:"moderation_action_retention_days"`
-	GIFConfigured    bool   `json:"gif_configured"`
-	GitHubConfigured bool   `json:"github_configured"`
+	ServerPort       int     `json:"server_port"`
+	MinFreeDiskMB    int     `json:"min_free_disk_mb"`
+	MaxWSConnections int     `json:"max_ws_connections"`
+	TLSMode          string  `json:"tls_mode"`
+	TLSDomain        *string `json:"tls_domain,omitempty"`
+	UserQuotaMB      int     `json:"user_quota_mb"`
+	BackupDir        *string `json:"backup_dir,omitempty"`
+	LoggingLevel     string  `json:"logging_level"`
+	VoiceURL         *string `json:"voice_url,omitempty"`
+	ReportRetention  int     `json:"moderation_report_retention_days"`
+	ActionRetention  int     `json:"moderation_action_retention_days"`
+	GIFConfigured    bool    `json:"gif_configured"`
+	GitHubConfigured bool    `json:"github_configured"`
 }
 
 func handleGetConfigFacts(cfg *config.Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if cfg == nil {
 			writeErr(w, http.StatusServiceUnavailable, "CONFIG_UNAVAILABLE", "running configuration unavailable")
 			return
 		}
-		writeJSON(w, http.StatusOK, configFactsResponse{
+		resp := configFactsResponse{
 			UploadMaxSizeMB: cfg.Upload.MaxSizeMB,
 			VoiceQuality:    cfg.Voice.Quality,
 
@@ -75,17 +80,21 @@ func handleGetConfigFacts(cfg *config.Config) http.HandlerFunc {
 			MinFreeDiskMB:    cfg.Server.MinFreeDiskMB,
 			MaxWSConnections: cfg.Server.MaxWSConnections,
 			TLSMode:          cfg.TLS.Mode,
-			TLSDomain:        cfg.TLS.Domain,
 			UserQuotaMB:      cfg.Upload.UserQuotaMB,
-			BackupDir:        cfg.Backup.Dir,
 			LoggingLevel:     cfg.Logging.Level,
-			VoiceURL:         cfg.Voice.LiveKitURL,
 			ReportRetention:  cfg.Moderation.ReportRetentionDays,
 			ActionRetention:  cfg.Moderation.ActionRetentionDays,
 			// Booleans only: never the secret itself.
 			GIFConfigured:    cfg.GIF.APIKey != "",
 			GitHubConfigured: cfg.GitHub.Token != "",
-		})
+		}
+		if role := actorRoleFromContext(r); role != nil &&
+			(permissions.HasAdmin(role.Permissions) || permissions.IsOwner(role.ID, role.Position)) {
+			resp.TLSDomain = &cfg.TLS.Domain
+			resp.BackupDir = &cfg.Backup.Dir
+			resp.VoiceURL = &cfg.Voice.LiveKitURL
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 

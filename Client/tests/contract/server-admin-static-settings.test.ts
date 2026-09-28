@@ -204,7 +204,7 @@ const CONFIG_FACTS = {
   gif_configured: true,
   github_configured: false,
 };
-const LOG_LEVEL = { level: "warn" };
+const LOG_LEVEL = { level: "warn", base_level: "warn" };
 const BACKUP = "chatserver_20260926_055335.db";
 
 function respondWith(
@@ -285,6 +285,25 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     expect(content.querySelector("#s-require_2fa")?.getAttribute("aria-labelledby")).toBe(
       "s-require_2fa-name",
     );
+  });
+
+  // A MANAGE_SERVER-only caller gets GET /config without the host path and
+  // endpoints; the card drops those rows instead of printing "undefined".
+  it("leaves out the admin-only rows when GET /config omits them", async () => {
+    const managerFacts = Object.fromEntries(
+      Object.entries(CONFIG_FACTS).filter(
+        ([k]) => !["tls_domain", "voice_url", "backup_dir"].includes(k),
+      ),
+    );
+    const booted = await boot([], respondWith({ "GET /config": { json: managerFacts } }));
+    dom = booted.dom;
+    const content = await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const facts = content.querySelector(".fact-list")?.textContent ?? "";
+    expect(facts).toContain("8443");
+    expect(facts).toContain("acme");
+    for (const hidden of ["tls.domain", "voice.livekit_url", "backup.dir", "undefined"]) {
+      expect(facts).not.toContain(hidden);
+    }
   });
 
   // UX clarity: registration is four radio cards with what each means, fed
