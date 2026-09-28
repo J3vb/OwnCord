@@ -164,7 +164,7 @@ describe("Server/admin/static — Members (AO-4)", () => {
     // Deny opens a confirmation naming the applicant; no request is sent yet.
     (
       doc.querySelector(
-        '[data-action="decideRegistration"][data-args=\'[9,"deny"]\']',
+        '[data-action="decideRegistration"][data-args=\'[9,"deny","applicant"]\']',
       ) as HTMLElement
     ).click();
     await settle();
@@ -180,7 +180,7 @@ describe("Server/admin/static — Members (AO-4)", () => {
     // Reopening and confirming sends exactly the deny.
     (
       doc.querySelector(
-        '[data-action="decideRegistration"][data-args=\'[9,"deny"]\']',
+        '[data-action="decideRegistration"][data-args=\'[9,"deny","applicant"]\']',
       ) as HTMLElement
     ).click();
     await settle();
