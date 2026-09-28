@@ -1,6 +1,6 @@
 {
   "method": "Node zlib.gzipSync level 9 (owner decision 2026-09-20, amends decision 10's 'gzip -9' by pinning the implementation, not the level or format). Budgets are per-manifest-chunk gzip bytes.",
-  "ratchet": "B9-26 re-baseline rule (owner decision 2026-09-25), applied to every budget and never raising one: new budget = min(current budget, measured + 1,000 B rounded up to the next 500 B). Measured at dev 7732f969 (head of the B9 chain). Startup headroom is tight (394 B) ahead of B9-27.",
+  "ratchet": "B9-26 re-baseline rule (owner decision 2026-09-25), applied to every budget and never raising one: new budget = min(current budget, measured + 1,000 B rounded up to the next 500 B). Measured at dev 7732f969 (head of the B9 chain).",
   "startup": {
     "budget": 76500,
     "rebaseline": "B9-26 re-baseline 2026-09-25: measured 96,606 B; the ratchet rule gives min(97,000, 98,000) = 97,000 B, unchanged (394 B headroom).",
