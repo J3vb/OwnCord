@@ -144,6 +144,27 @@ export const connectText = defineCatalog("connect", {
     "This server is not accepting new applications right now. Try again later.",
   "error.loginUnavailable": "Sign-in is temporarily unavailable. Try again shortly.",
   "error.registrationFailed": "Registration failed. Please try again.",
+  "error.recoveryLocked":
+    "Account recovery is temporarily locked after too many failed attempts. Try again later.",
+  "error.tooManyAttempts": "Too many failed attempts. Try again later.",
+  "error.registrationRateLimited":
+    "Too many accounts have been created from this network. Try again later.",
+  "error.authBusy": "The server is busy with other sign-ins. Try again in a moment.",
+  "error.recoveryCredentialBudget":
+    "Too many recovery credentials have been issued. Try again later.",
+  "error.registrationUnavailable": "Registration is temporarily unavailable. Try again shortly.",
+  "error.sessionFailed": "Could not start your session. Try signing in again.",
+  "error.registeredSignInFailed":
+    "Your account was created, but signing in failed. Sign in to continue.",
+  "error.totpUnavailable": "Two-factor verification is temporarily unavailable. Try again shortly.",
+  "error.logoutFailed": "Could not sign out. Try again.",
+  "error.deleteAccountFailed": "Could not delete your account. Try again.",
+  "error.totpEnableFailed": "Could not turn on two-factor authentication. Try again.",
+  "error.totpDisableFailed": "Could not turn off two-factor authentication. Try again.",
+  "error.recoveryCodesFailed": "Could not create new recovery codes. Try again.",
+  "error.recoveryFailed": "Account recovery failed. Please try again.",
+  "error.recoveryKitFailed": "Could not create a recovery kit. Try again.",
+  "error.recoveryCredentialFailed": "Could not issue a recovery credential. Try again.",
   "error.unauthorized": "Your session has expired — sign in again.",
   "error.invalidCredentials": "Incorrect username or password.",
   "error.forbidden": "You don't have permission to do that.",

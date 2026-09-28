@@ -82,6 +82,61 @@ function isSessionExpired(message: string): boolean {
   );
 }
 
+function authSliceCopy(message: string): string | null {
+  switch (message) {
+    case "account temporarily locked due to too many failed attempts":
+      return connectText("error.accountLocked");
+    case "recovery temporarily locked due to too many failed attempts":
+      return connectText("error.recoveryLocked");
+    case "too many failed attempts, try again later":
+      return connectText("error.tooManyAttempts");
+    case "registration queue is full, try again later":
+      return connectText("error.registrationQueueFull");
+    case "too many registrations from this address, try again later":
+      return connectText("error.registrationRateLimited");
+    case "too many authentication attempts in progress, try again later":
+      return connectText("error.authBusy");
+    case "too many recovery credentials issued; try again later":
+      return connectText("error.recoveryCredentialBudget");
+    case "login temporarily unavailable":
+    case "failed to load authentication policy":
+      return connectText("error.loginUnavailable");
+    case "failed to load registration policy":
+      return connectText("error.registrationUnavailable");
+    case "registration failed — please try again":
+    case "failed to process registration":
+      return connectText("error.registrationFailed");
+    case "failed to create session":
+      return connectText("error.sessionFailed");
+    case "registration succeeded but user fetch failed":
+      return connectText("error.registeredSignInFailed");
+    case "failed to start two-factor challenge":
+    case "failed to verify two-factor code":
+    case "two-factor verification temporarily unavailable":
+      return connectText("error.totpUnavailable");
+    case "failed to logout":
+      return connectText("error.logoutFailed");
+    case "failed to delete account":
+      return connectText("error.deleteAccountFailed");
+    case "failed to generate two-factor secret":
+    case "failed to stage two-factor enrolment":
+    case "failed to enable two-factor authentication":
+      return connectText("error.totpEnableFailed");
+    case "failed to disable two-factor authentication":
+      return connectText("error.totpDisableFailed");
+    case "failed to issue recovery codes":
+      return connectText("error.recoveryCodesFailed");
+    case "recovery failed — please try again":
+      return connectText("error.recoveryFailed");
+    case "failed to issue the recovery kit":
+      return connectText("error.recoveryKitFailed");
+    case "failed to issue the recovery credential":
+      return connectText("error.recoveryCredentialFailed");
+    default:
+      return null;
+  }
+}
+
 const PERMISSION_REFUSAL =
   /\bmissing\b.*\bpermission\b|insufficient permissions|permission required$|role required$|^access denied$/i;
 
@@ -97,22 +152,17 @@ const PERMISSION_REFUSAL =
  * approval"). Only a refused sign-in, session, suspension or permission has
  * fixed copy — the rest keep the server's own sentence, which says what went
  * wrong. RATE_LIMITED and INTERNAL_ERROR carry the auth slice's lockout,
- * full-queue and unavailable sentences, which get copy of their own.
+ * budget and failure sentences, each of which gets copy of its own; any other
+ * rate limit reads as the generic line and any other internal failure as the
+ * caller's fallback.
  */
 export function serverErrorCopy(code: string, message: string): string | null {
   switch (code) {
     case "RATE_LIMITED":
-      if (message === "account temporarily locked due to too many failed attempts")
-        return connectText("error.accountLocked");
-      if (message === "registration queue is full, try again later")
-        return connectText("error.registrationQueueFull");
-      return connectText("error.rateLimited");
+      return authSliceCopy(message) ?? connectText("error.rateLimited");
     case "INTERNAL":
     case "INTERNAL_ERROR":
-      if (message === "login temporarily unavailable") return connectText("error.loginUnavailable");
-      if (message === "registration failed — please try again")
-        return connectText("error.registrationFailed");
-      return null;
+      return authSliceCopy(message);
     case "UNAUTHORIZED":
       if (message === "invalid credentials") return connectText("error.invalidCredentials");
       return isSessionExpired(message) ? connectText("error.unauthorized") : null;

@@ -1351,18 +1351,14 @@ describe("API Client", () => {
 
 describe("errorText (B9-20, Q7)", () => {
   it("shows catalog text for a mapped server code, not the server's message", () => {
-    const err = new ApiClientError(
-      429,
-      "RATE_LIMITED",
-      "too many failed attempts, try again later",
-    );
+    const err = new ApiClientError(429, "RATE_LIMITED", "rate limit exceeded");
     expect(errorText(err, "Failed to change password.")).toBe(
       "Too many requests. Try again later.",
     );
   });
 
   it("shows the caller's catalog text for an internal server failure", () => {
-    const err = new ApiClientError(500, "INTERNAL_ERROR", "failed to delete account");
+    const err = new ApiClientError(500, "INTERNAL_ERROR", "internal error");
     expect(errorText(err, "Failed to delete account.")).toBe("Failed to delete account.");
   });
 
@@ -1444,38 +1440,136 @@ describe("errorText (B9-20, Q7)", () => {
     );
   });
 
-  it("gives the auth slice's lockout, full-queue and unavailable sentences their own copy", () => {
-    expect(
-      errorText(
-        new ApiClientError(
-          429,
-          "RATE_LIMITED",
-          "account temporarily locked due to too many failed attempts",
-        ),
-        "F",
-      ),
-    ).toBe(
+  it.each([
+    [
+      "RATE_LIMITED",
+      "account temporarily locked due to too many failed attempts",
       "Your account is temporarily locked after too many failed sign-in attempts. Try again later.",
-    );
+    ],
+    [
+      "RATE_LIMITED",
+      "recovery temporarily locked due to too many failed attempts",
+      "Account recovery is temporarily locked after too many failed attempts. Try again later.",
+    ],
+    [
+      "RATE_LIMITED",
+      "too many failed attempts, try again later",
+      "Too many failed attempts. Try again later.",
+    ],
+    [
+      "RATE_LIMITED",
+      "registration queue is full, try again later",
+      "This server is not accepting new applications right now. Try again later.",
+    ],
+    [
+      "RATE_LIMITED",
+      "too many registrations from this address, try again later",
+      "Too many accounts have been created from this network. Try again later.",
+    ],
+    [
+      "RATE_LIMITED",
+      "too many authentication attempts in progress, try again later",
+      "The server is busy with other sign-ins. Try again in a moment.",
+    ],
+    [
+      "RATE_LIMITED",
+      "too many recovery credentials issued; try again later",
+      "Too many recovery credentials have been issued. Try again later.",
+    ],
+    ["RATE_LIMITED", "slow down, try again later", "Too many requests. Try again later."],
+    [
+      "INTERNAL_ERROR",
+      "login temporarily unavailable",
+      "Sign-in is temporarily unavailable. Try again shortly.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to load authentication policy",
+      "Sign-in is temporarily unavailable. Try again shortly.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to load registration policy",
+      "Registration is temporarily unavailable. Try again shortly.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "registration failed — please try again",
+      "Registration failed. Please try again.",
+    ],
+    ["INTERNAL_ERROR", "failed to process registration", "Registration failed. Please try again."],
+    [
+      "INTERNAL_ERROR",
+      "failed to create session",
+      "Could not start your session. Try signing in again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "registration succeeded but user fetch failed",
+      "Your account was created, but signing in failed. Sign in to continue.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to start two-factor challenge",
+      "Two-factor verification is temporarily unavailable. Try again shortly.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to verify two-factor code",
+      "Two-factor verification is temporarily unavailable. Try again shortly.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "two-factor verification temporarily unavailable",
+      "Two-factor verification is temporarily unavailable. Try again shortly.",
+    ],
+    ["INTERNAL_ERROR", "failed to logout", "Could not sign out. Try again."],
+    ["INTERNAL_ERROR", "failed to delete account", "Could not delete your account. Try again."],
+    [
+      "INTERNAL_ERROR",
+      "failed to generate two-factor secret",
+      "Could not turn on two-factor authentication. Try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to stage two-factor enrolment",
+      "Could not turn on two-factor authentication. Try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to enable two-factor authentication",
+      "Could not turn on two-factor authentication. Try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to disable two-factor authentication",
+      "Could not turn off two-factor authentication. Try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to issue recovery codes",
+      "Could not create new recovery codes. Try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "recovery failed — please try again",
+      "Account recovery failed. Please try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to issue the recovery kit",
+      "Could not create a recovery kit. Try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to issue the recovery credential",
+      "Could not issue a recovery credential. Try again.",
+    ],
+    ["INTERNAL_ERROR", "internal error", "F"],
+  ])("maps the auth slice's %s %j to its own copy", (code, message, shown) => {
     expect(
-      errorText(
-        new ApiClientError(429, "RATE_LIMITED", "registration queue is full, try again later"),
-        "F",
-      ),
-    ).toBe("This server is not accepting new applications right now. Try again later.");
-    expect(
-      errorText(new ApiClientError(429, "RATE_LIMITED", "slow down, try again later"), "F"),
-    ).toBe("Too many requests. Try again later.");
-    expect(
-      errorText(new ApiClientError(500, "INTERNAL_ERROR", "login temporarily unavailable"), "F"),
-    ).toBe("Sign-in is temporarily unavailable. Try again shortly.");
-    expect(
-      errorText(
-        new ApiClientError(500, "INTERNAL_ERROR", "registration failed — please try again"),
-        "F",
-      ),
-    ).toBe("Registration failed. Please try again.");
-    expect(errorText(new ApiClientError(500, "INTERNAL_ERROR", "failed to logout"), "F")).toBe("F");
+      errorText(new ApiClientError(code === "RATE_LIMITED" ? 429 : 500, code, message), "F"),
+    ).toBe(shown);
   });
 
   it("keeps the server's text for a FORBIDDEN fault that is not a missing permission", () => {
