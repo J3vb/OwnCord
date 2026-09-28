@@ -638,7 +638,26 @@ change them, and that page is the Owner's alone:
 - Retention is `0` (keep forever) or between 7 and 3650 days. It deletes
   backups older than that, but always keeps the newest one, so a stale
   schedule can never delete your last copy, and it never removes the
-  `pre_restore_*` safety copies — delete those by hand.
+  `pre_restore_*` or `pre_migrate_*` safety copies — delete those by hand.
+
+### Backups taken automatically before an upgrade
+
+A server that starts with migrations pending — the state every upgrade leaves
+behind, including a Docker `docker compose pull` — takes a database backup
+**before** it applies them, so a schema move is never unbacked-up. The copy
+lands in the configured backup directory as
+`pre_migrate_<first-migration>.db` (with a `_2`, `_3`, … suffix when that name
+is already taken, so an earlier copy is never overwritten), is verified with
+`integrity_check`, and is
+kept out of retention pruning like the `pre_restore_*` copies. A boot that
+cannot write it refuses to start rather than migrate without it. If the
+database has not changed since the newest copy for that migration — a
+migration that fails on every boot, say — the boot reuses that copy instead of
+writing another.
+
+This protects the schema, not your uploads or keys: it is a database copy, so
+pair it with the full [archive](#before-upgrading-take-the-archive) for a
+complete rollback.
 
 External scheduling still works if you prefer it, but the admin API accepts
 **Bearer tokens only** — there is no cookie session for it — so the job needs an
@@ -760,17 +779,17 @@ marker store and the managed LiveKit binary, while `database.path`,
 their own independent `data/...` default. What each path holds, what bounds it
 and what — if anything — ever deletes it:
 
-| Path                                        | Written by                                                             | Bounded by                                                                                                         | Pruned by                                                                                                                               |
-| ------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `chatserver.db` + `chatserver.db-wal`       | every feature                                                          | messages: the server window or a per-channel retention policy (`0` = keep forever); the persisted event tier: 24 h | retention sweep, at most 5 000 messages per tick; the event pruner, every 60 minutes; the WAL is truncated after an erasure completes   |
-| `uploads/`                                  | attachments, avatars, emoji                                            | `upload.max_size_mb` (default 100) per file, `upload.user_quota_mb` (default `0` = unlimited) per user             | the orphan sweep (unlinked for more than 1 hour), the retention sweep, erasure, and the reconciliation pass, at most 500 files per tick |
-| `backups/`                                  | manual and scheduled backups, and the `pre_restore_*.db` safety copies | `Keep backups for (days)` on the admin panel's Backups & restore page                                              | retention always keeps the newest backup and never removes the `pre_restore_*` safety copies, which must be deleted by hand             |
-| `acme_certs/`                               | `tls.mode: acme` only                                                  | one certificate for the configured domain                                                                          | the ACME client manages renewal itself                                                                                                  |
-| `livekit/`                                  | `voice.auto_download_livekit`                                          | one pinned release of the LiveKit server binary                                                                    | never — delete the file by hand to force a fresh download                                                                               |
-| `plugins/`                                  | plugins loaded by `-tags wazero` builds                                | what the plugins themselves write                                                                                  | never                                                                                                                                   |
-| `cert.pem`, `key.pem`                       | first run, `tls.mode: self_signed`                                     | one TLS pair                                                                                                       | never — replacing them is the rotation procedure under [TLS Setup](#tls-setup)                                                          |
-| `totp.key`, `erasure.key`, `push_vapid.key` | first run                                                              | three small files                                                                                                  | never — and must never be: each loss is permanent (see [Before upgrading](#before-upgrading-take-the-archive))                          |
-| `erasure/markers.sqlite`                    | every account erasure and every swept channel                          | one row per erased account or swept channel                                                                        | never; small by construction                                                                                                            |
+| Path                                        | Written by                                                                                    | Bounded by                                                                                                         | Pruned by                                                                                                                                      |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chatserver.db` + `chatserver.db-wal`       | every feature                                                                                 | messages: the server window or a per-channel retention policy (`0` = keep forever); the persisted event tier: 24 h | retention sweep, at most 5 000 messages per tick; the event pruner, every 60 minutes; the WAL is truncated after an erasure completes          |
+| `uploads/`                                  | attachments, avatars, emoji                                                                   | `upload.max_size_mb` (default 100) per file, `upload.user_quota_mb` (default `0` = unlimited) per user             | the orphan sweep (unlinked for more than 1 hour), the retention sweep, erasure, and the reconciliation pass, at most 500 files per tick        |
+| `backups/`                                  | manual and scheduled backups, and the `pre_restore_*.db` and `pre_migrate_*.db` safety copies | `Keep backups for (days)` on the admin panel's Backups & restore page                                              | retention always keeps the newest backup and never removes the `pre_restore_*` or `pre_migrate_*` safety copies, which must be deleted by hand |
+| `acme_certs/`                               | `tls.mode: acme` only                                                                         | one certificate for the configured domain                                                                          | the ACME client manages renewal itself                                                                                                         |
+| `livekit/`                                  | `voice.auto_download_livekit`                                                                 | one pinned release of the LiveKit server binary                                                                    | never — delete the file by hand to force a fresh download                                                                                      |
+| `plugins/`                                  | plugins loaded by `-tags wazero` builds                                                       | what the plugins themselves write                                                                                  | never                                                                                                                                          |
+| `cert.pem`, `key.pem`                       | first run, `tls.mode: self_signed`                                                            | one TLS pair                                                                                                       | never — replacing them is the rotation procedure under [TLS Setup](#tls-setup)                                                                 |
+| `totp.key`, `erasure.key`, `push_vapid.key` | first run                                                                                     | three small files                                                                                                  | never — and must never be: each loss is permanent (see [Before upgrading](#before-upgrading-take-the-archive))                                 |
+| `erasure/markers.sqlite`                    | every account erasure and every swept channel                                                 | one row per erased account or swept channel                                                                        | never; small by construction                                                                                                                   |
 
 Four facts the table cannot carry:
 
@@ -804,8 +823,10 @@ a specific migration and are run by hand (see `Server/rollback/README.md`).
 There is no supported way to run an older binary against a database a newer
 one has already migrated; the server refuses to start on such a schema rather
 than risk it, because doing it anyway is how you lose the database, not how you
-go back. The copy you take before upgrading is therefore the only rollback that
-exists.
+go back. The copy you take before upgrading is therefore the only complete
+rollback that exists; the server's own
+[pre-migration copy](#backups-taken-automatically-before-an-upgrade) holds the
+database alone.
 
 ### Before upgrading: take the archive
 
