@@ -24,6 +24,7 @@
  */
 
 import { loadPref, savePref, STORAGE_PREFIX } from "./preferences";
+import { getChannelMutesHost } from "./channel-mutes";
 
 export const DEFAULT_NOTIFICATION_LEVEL = "mentions" as const;
 
@@ -35,11 +36,12 @@ export type NotificationLevel = (typeof NOTIFICATION_LEVELS)[number];
 const GLOBAL_KEY = "notificationLevel";
 const SERVER_KEY_PREFIX = "notificationLevel";
 
-/** Server host the per-server override belongs to; see channel-mutes.ts. */
-let currentHost: string | null = null;
-
 function serverKey(): string {
-  return currentHost === null ? SERVER_KEY_PREFIX : `${SERVER_KEY_PREFIX}:${currentHost}`;
+  // The per-server host is owned by channel-mutes (set once on connect); a
+  // second copy here and a second MainPage setter would be two writers of the
+  // same fact.
+  const host = getChannelMutesHost();
+  return host === null ? SERVER_KEY_PREFIX : `${SERVER_KEY_PREFIX}:${host}`;
 }
 
 /** Sentinel fallback for reads: `loadPref`'s typeof guard rejects a nullish
@@ -54,12 +56,6 @@ function asLevel(raw: unknown): NotificationLevel | null {
 
 function readLevel(key: string): NotificationLevel | null {
   return asLevel(loadPref<unknown>(key, NO_LEVEL));
-}
-
-/** Point per-server override reads/writes at a specific server. Call on
- *  connect and on server switch — mirroring setChannelMutesHost. */
-export function setNotificationLevelHost(host: string | null): void {
-  currentHost = host;
 }
 
 /**

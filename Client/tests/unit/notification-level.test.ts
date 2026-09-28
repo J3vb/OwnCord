@@ -3,6 +3,7 @@
  * per-server override, defaulting to Mentions only.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { setChannelMutesHost } from "../../src/lib/channel-mutes";
 
 const { testPrefs } = vi.hoisted(() => ({ testPrefs: new Map<string, unknown>() }));
 
@@ -20,7 +21,6 @@ import {
   setGlobalNotificationLevel,
   setServerNotificationLevel,
   clearServerNotificationLevel,
-  setNotificationLevelHost,
   shouldNotifyForLevel,
 } from "../../src/lib/notificationLevel";
 
@@ -28,7 +28,7 @@ describe("notification level storage", () => {
   beforeEach(() => {
     testPrefs.clear();
     localStorage.clear();
-    setNotificationLevelHost(null);
+    setChannelMutesHost(null);
   });
 
   it("defaults to mentions only", () => {
@@ -60,21 +60,21 @@ describe("notification level storage", () => {
   });
 
   it("reports no per-server override by default", () => {
-    setNotificationLevelHost("a.example");
+    setChannelMutesHost("a.example");
     expect(getServerNotificationLevel()).toBeNull();
   });
 
   it("scopes a per-server override to its host", () => {
-    setNotificationLevelHost("a.example");
+    setChannelMutesHost("a.example");
     setServerNotificationLevel("nothing");
     expect(getServerNotificationLevel()).toBe("nothing");
 
-    setNotificationLevelHost("b.example");
+    setChannelMutesHost("b.example");
     expect(getServerNotificationLevel()).toBeNull();
   });
 
   it("removes a per-server override with clear", () => {
-    setNotificationLevelHost("a.example");
+    setChannelMutesHost("a.example");
     setServerNotificationLevel("all");
     clearServerNotificationLevel();
     expect(getServerNotificationLevel()).toBeNull();

@@ -38,11 +38,6 @@ export const shellText = defineCatalog("shell", {
   "member.banDuration": "Ban duration",
   "member.banConfirm": "Confirm Ban",
   "member.banning": "Banning...",
-  "server.notifications": "Notifications for this server",
-  "server.notifications.followGlobal": "Follow global setting",
-  "server.notifications.all": "All messages",
-  "server.notifications.mentions": "Mentions only",
-  "server.notifications.nothing": "Nothing",
 
   "channel.edit": "Edit Channel",
   "channel.create": "Create Channel",

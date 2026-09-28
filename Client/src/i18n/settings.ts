@@ -82,6 +82,9 @@ export const settingsText = defineCatalog("settings", {
   "notifications.level.all": "All",
   "notifications.level.mentions": "Mentions only",
   "notifications.level.nothing": "Nothing",
+  "notifications.serverLevel.label": "This server",
+  "notifications.serverLevel.desc": "Override the level for the server you are connected to",
+  "notifications.serverLevel.follow": "Follow global setting",
   "notifications.muted.title": "Muted Channels",
   "notifications.muted.desc":
     "Muted channels never notify you, but messages that mention you still do.",

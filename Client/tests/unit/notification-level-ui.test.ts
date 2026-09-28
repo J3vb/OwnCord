@@ -17,9 +17,9 @@ vi.mock("../../src/platform/desktop", () => ({
 }));
 
 import { buildNotificationsTab } from "@components/settings/NotificationsTab";
+import { setChannelMutesHost } from "../../src/lib/channel-mutes";
 import {
   getGlobalNotificationLevel,
-  setNotificationLevelHost,
   setGlobalNotificationLevel,
 } from "@lib/notificationLevel";
 
@@ -28,7 +28,7 @@ let ac: AbortController;
 
 beforeEach(() => {
   localStorage.clear();
-  setNotificationLevelHost(null);
+  setChannelMutesHost(null);
   container = document.createElement("div");
   document.body.appendChild(container);
   ac = new AbortController();

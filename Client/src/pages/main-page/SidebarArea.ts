@@ -52,7 +52,6 @@ import { dmStore, closeDmLocally } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
-import { attachServerNotificationMenu } from "@components/server-notification-menu";
 import { canModerateMembers, canViewAuditLog } from "@lib/permissions";
 import type { ProfileManager } from "@lib/profiles";
 import type { ContentViewId, NavigationDestinations } from "../../features/navigation/destinations";
@@ -309,13 +308,6 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   );
 
   sidebarWrapper.appendChild(serverHeader);
-
-  // Right-click the server header to set a per-server notification level
-  // (U1b). The row listener dies with the sidebar; the menu itself is mounted
-  // on document.body, so it gets the sidebar's own lifetime signal instead.
-  const serverMenuLifetime = new AbortController();
-  unsubscribers.push(() => serverMenuLifetime.abort());
-  attachServerNotificationMenu(serverHeader, serverMenuLifetime.signal, serverMenuLifetime.signal);
 
   // Load per-server collapsed category state from localStorage, scoped to
   // the connected host (not the display name) — the same convention as

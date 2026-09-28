@@ -5,11 +5,14 @@
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
 import { appendToggleRows } from "./helpers";
 import { setStatusIcon, statusIcon, type StatusKind } from "../../features/settings/status";
-import { listMutedChannels, unmuteChannel } from "@lib/channel-mutes";
+import { getChannelMutesHost, listMutedChannels, unmuteChannel } from "@lib/channel-mutes";
 import {
   NOTIFICATION_LEVELS,
   getGlobalNotificationLevel,
+  getServerNotificationLevel,
   setGlobalNotificationLevel,
+  setServerNotificationLevel,
+  clearServerNotificationLevel,
   type NotificationLevel,
 } from "@lib/notificationLevel";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
@@ -28,9 +31,7 @@ const LEVEL_LABELS: Readonly<Record<NotificationLevel, () => string>> = {
  * The notification level row: All / Mentions only / Nothing.
  *
  * A radiogroup in the row shape the tab already uses, rather than a `<select>`
- * — three options are all visible at once and each is one keystroke away. The
- * per-server override lives on the server menu (SidebarArea), so this control
- * is always the global level.
+ * — three options are all visible at once and each is one keystroke away.
  */
 function buildLevelRow(signal: AbortSignal): HTMLDivElement {
   const row = createElement("div", { class: "setting-row" });
@@ -89,6 +90,52 @@ function buildLevelRow(signal: AbortSignal): HTMLDivElement {
   return row;
 }
 
+/**
+ * The connected server's override of the global level, shown only while
+ * connected. "Follow global setting" clears the override; the three levels set
+ * an explicit value, so one noisy community can be quieted without muting every
+ * other server. Stored against the host (see @lib/notificationLevel), so the
+ * choice returns when you switch back.
+ */
+function buildServerLevelRow(signal: AbortSignal): HTMLDivElement | null {
+  if (getChannelMutesHost() === null) return null;
+  const row = createElement("div", {
+    class: "setting-row",
+    "data-testid": "server-notification-level-row",
+  });
+  const info = createElement("div", {});
+  appendChildren(
+    info,
+    createElement("div", { class: "setting-label" }, t("notifications.serverLevel.label")),
+    createElement("div", { class: "setting-desc" }, t("notifications.serverLevel.desc")),
+  );
+
+  const select = createElement("select", {
+    class: "form-input",
+    "aria-label": t("notifications.serverLevel.label"),
+    "data-testid": "server-notification-level",
+  });
+  const options: ReadonlyArray<{ value: string; label: string }> = [
+    { value: "", label: t("notifications.serverLevel.follow") },
+    ...NOTIFICATION_LEVELS.map((level) => ({ value: level, label: LEVEL_LABELS[level]() })),
+  ];
+  for (const { value, label } of options) {
+    select.appendChild(createElement("option", { value }, label));
+  }
+  select.value = getServerNotificationLevel() ?? "";
+  select.addEventListener(
+    "change",
+    () => {
+      if (select.value === "") clearServerNotificationLevel();
+      else setServerNotificationLevel(select.value as NotificationLevel);
+    },
+    { signal },
+  );
+
+  appendChildren(row, info, select);
+  return row;
+}
+
 export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
 
@@ -106,6 +153,8 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   section.appendChild(permissionRow);
 
   section.appendChild(buildLevelRow(signal));
+  const serverLevelRow = buildServerLevelRow(signal);
+  if (serverLevelRow !== null) section.appendChild(serverLevelRow);
 
   const toggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
     {
