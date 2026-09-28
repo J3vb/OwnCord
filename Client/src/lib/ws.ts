@@ -11,6 +11,7 @@ import type {
 } from "../platform/contracts/socket";
 import { createLogger } from "./logger";
 import { PROTOCOL_EPOCH } from "./protocolTypes";
+import { Disposable } from "./disposable";
 
 const log = createLogger("ws");
 
@@ -201,6 +202,9 @@ export function createWsClient({
   // CLI-01: fires when no inbound frame has arrived for
   // SERVER_SILENCE_RECONNECT_MS while the socket still reports open.
   let livenessTimer: ReturnType<typeof setTimeout> | null = null;
+  // U7d: owns the focus / visibilitychange / online wake-probe listeners.
+  // Armed on auth_ok and released on close or disconnect().
+  let wakeOwner: Disposable | null = null;
   // When the oldest heartbeat ping sent since the last inbound frame went out.
   let unansweredPingAt: number | null = null;
   let intentionalClose = false;
@@ -289,11 +293,45 @@ export function createWsClient({
   // CLI-01: re-arm the silence deadline. Called after auth_ok and on every
   // inbound frame, so any traffic — pong, chat, presence — proves the socket
   // is still delivering bytes. A half-open socket delivers nothing, so the
-  // timer survives to fire.
-  function armLiveness(): void {
+  // timer survives to fire. The wake probe arms the same timer with a shorter
+  // deadline once the process may have been suspended.
+  function armLiveness(deadlineMs = SERVER_SILENCE_RECONNECT_MS): void {
     if (livenessTimer !== null) clearTimeout(livenessTimer);
     unansweredPingAt = null;
-    livenessTimer = setTimeout(onLivenessDeadline, SERVER_SILENCE_RECONNECT_MS);
+    livenessTimer = setTimeout(onLivenessDeadline, deadlineMs);
+  }
+
+  // U7d: a focus/visibility/network-return is the earliest evidence the
+  // process may have been frozen, so ping now instead of waiting on the
+  // throttled heartbeat, and arm the pong grace as the deadline: an awake
+  // server answers within seconds, while a socket that died over the suspend
+  // is redialled in 15 s rather than the 60 s silence deadline.
+  function onWake(): void {
+    if (state !== "connected" || !proxyOpen) return;
+    sendRaw(JSON.stringify({ type: "ping", payload: {} }));
+    armLiveness(PONG_GRACE_MS);
+    unansweredPingAt = Date.now();
+  }
+
+  // Armed on auth_ok and released on disconnect(); a reconnect cycle keeps them
+  // (the handler no-ops while not connected). A signal owns each listener so
+  // the lifecycle inventory sees them as owned.
+  function armWakeListeners(): void {
+    if (wakeOwner !== null) return;
+    const owner = new Disposable();
+    window.addEventListener("focus", onWake, { signal: owner.signal });
+    window.addEventListener("online", onWake, { signal: owner.signal });
+    document.addEventListener(
+      "visibilitychange",
+      () => document.visibilityState === "visible" && onWake(),
+      { signal: owner.signal },
+    );
+    wakeOwner = owner;
+  }
+
+  function stopWakeListeners(): void {
+    wakeOwner?.destroy();
+    wakeOwner = null;
   }
 
   function onLivenessDeadline(): void {
@@ -441,6 +479,10 @@ export function createWsClient({
       reconnectAttempt = 0;
       startHeartbeat();
       armLiveness();
+      // U7d: only an authenticated session needs the wake probe, and arming it
+      // here keeps the listeners off the connect page (and off tests that
+      // never authenticate). disconnect() releases them.
+      armWakeListeners();
     }
 
     dispatch(msg);
@@ -541,6 +583,7 @@ export function createWsClient({
       });
       stopHeartbeat();
       stopLiveness();
+      stopWakeListeners();
       if (!intentionalClose) {
         scheduleReconnect(retryHint?.retryAfterMs);
       } else {
@@ -659,6 +702,7 @@ export function createWsClient({
     cancelReconnect();
     stopHeartbeat();
     stopLiveness();
+    stopWakeListeners();
     proxyOpen = false;
     void disconnectProxy();
     setState("disconnected");

@@ -241,6 +241,16 @@ beforeEach(() => {
   clearAuth();
 });
 
+afterEach(async () => {
+  // ws.ts arms its app-lifetime wake-probe listeners (window focus/online,
+  // document visibilitychange) at construction, and releases them on
+  // disconnect(). clearAuth() drives main.ts's isAuthenticated subscriber,
+  // which calls ws.disconnect(); the advance flushes the microtask-deferred
+  // store notification that runs it.
+  clearAuth();
+  await vi.advanceTimersByTimeAsync(10);
+});
+
 /** Drive a full login → WS connect → auth_ok cycle through the captured
  *  ConnectPage callback and the real ws.ts client living inside main.ts. */
 async function loginAndReachAuthOk(
