@@ -3763,8 +3763,7 @@ Because they control which of the owner's backups survive, they are the one
 pair of settings a PATCH may not change without the **Owner** role: a request
 carrying either key from a non-owner principal is refused with `403 FORBIDDEN`
 even though the rest of this route only needs `MANAGE_SERVER`. `ADMINISTRATOR`
-does not bypass it. Retention pruning never removes the `pre_restore_*`
-safety copies.
+does not bypass it.
 
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change
