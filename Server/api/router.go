@@ -440,6 +440,10 @@ func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storag
 			// three after the fact, once the lock has already been released.
 			svc.Appeals.SetNotifier(hub)
 			svc.Appeals.SetQueueBroadcaster(hub)
+			// OC-0486: an overturned ban must re-add the member to every
+			// connected roster, exactly as the admin unban path does. The
+			// decision commits in the DB layer; this is its transport half.
+			svc.Appeals.SetUnbanBroadcaster(hub)
 		}
 	}
 	if svc.Erasure != nil {

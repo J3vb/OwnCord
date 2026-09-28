@@ -1,5 +1,5 @@
 {
-  "nextId": 485,
+  "nextId": 487,
   "findings": [
     {
       "id": "OC-0001",
@@ -11218,6 +11218,54 @@
         "notes": "Fixed by #1940: handleFreshConnect now promotes active_channel_id to c.channelID via (*Hub).gateResumeChannel, gated on c.lastSeq > 0 and on the channel being READ-visible, before registerNow. Verified by a fresh corrected-drill run on dev 8e9e8443 (run 36372371602): ws_replay_gap max 0 across all 100 resumes (the gate was max 9 and 13 on the two pre-fix dev runs), every other drill gate green, and the equal pre/post-restart steady windows publish in docs/capacity.md. A same-day intermediate re-dispatch (run 36371370515, dev 8e9e8443) also measured ws_replay_gap max 0 but failed only the sends_lost==0 gate (3 of 248 drain sends absent from history); that run is an observed stop-boundary flake with the identical code and the next dispatch passed, not a regression of this fix."
       },
       "note": "Found while re-running the corrected restart profile for PERF-03. The ceiling-search half of PERF-03 is unaffected (run 36360932108 is green and published). The restart half is now published from run 36372371602 after this fix."
+    },
+    {
+      "id": "OC-0485",
+      "title": "A client-supplied timeout duration_seconds is multiplied into a time.Duration before it is range-checked, so uint64 wrap shrinks an overflowing value into the accepted 1-minute..28-day window",
+      "file": "Server/api/moderation_handler.go",
+      "line": 151,
+      "severity": "low",
+      "why": "Affected property: the timeout endpoints accept only durations in [1 minute, 28 days] and treat every other value as bad input. Both entry points computed time.Duration(req.DurationSeconds)*time.Second from a raw client int64 and let ModerationService.Timeout range-check the product. time.Duration is an int64 nanosecond count, so the multiply wraps modulo 2^64; a value like 36028797018967568 (3600 + 2^55) collapses to exactly 1h0m0s, which the gate accepts. docs/api.md promises the field is bounded 60..2419200, so an out-of-range value must be refused, not silently shrunk. The failure direction is a shorter, not longer, timeout, so a moderator gains nothing they could not get with the legal maximum; the defect is a misleadingly accepted input rather than a privilege change.",
+      "repro": "POST /api/v1/moderation/users/{id}/timeout as a MODERATE_MEMBERS holder with {\"reason\":\"x\",\"duration_seconds\":36028797018967568}: before the fix the response is 201 with a one-hour timeout stored, not a 400. The same value through POST /api/v1/moderation/queue/{id}/act with kind=timeout returned 200 before the fix.",
+      "evidence": "Server/api/moderation_handler.go:151-152 (time.Duration(req.DurationSeconds)*time.Second, then svc.Moderation.Timeout); Server/service/moderation.go ActOnReport timeout arm did the same; the range check at Server/service/moderation.go (duration < minTimeoutDuration || duration > maxTimeoutDuration) inspects the wrapped product. minTimeoutDuration = time.Minute, maxTimeoutDuration = 28*24*time.Hour.",
+      "suggestedFix": "Bound the raw seconds against minTimeoutDuration/time.Second..maxTimeoutDuration/time.Second before converting, in one helper shared by both callers, so the check cannot drift. Fixed by TimeoutDurationFromSeconds.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-09-28",
+      "hunt": "bug-09-second-pass-2026-09-28",
+      "lens": "integer-bounds",
+      "finder": "d11g",
+      "fixedDate": "2026-09-28",
+      "fix": {
+        "commit": "1520bf579247a0a150210c789da14ba7a5cdb091",
+        "test": "Server/service/moderation_timeout_seconds_test.go (TestTimeoutDurationFromSeconds_RejectsOverflow, TestTimeoutDurationFromSeconds_AcceptsTheWindow); Server/api/moderation_timeout_overflow_test.go (both entry points refused with 400)",
+        "revertProof": "pass (stashing the fix reproduced the pre-fix acceptance: the direct route returned 201 and the act route 200 with duration_seconds=36028797018967568; with the fix both return 400)"
+      },
+      "note": "Found in the BUG-09 second pass over the server moderation handlers (D11g). D11g remains open: its rounds so far confirmed OC-0485 and OC-0486, the native video/screen paths were hunted in a separate pass that came back dry, and the two consecutive dry rounds its stop condition needs are still owed."
+    },
+    {
+      "id": "OC-0486",
+      "title": "Overturning a ban appeal lifts the ban in the database but never broadcasts the unban, so connected clients keep the user missing until a full resync",
+      "file": "Server/service/appeal.go",
+      "line": 645,
+      "severity": "low",
+      "why": "Affected property: lifting a ban must re-add the member to every connected roster, exactly as the admin unban path does after OC-0058. The admin PATCH /users/{id} {\"banned\":false} path calls (*ws.Hub).BroadcastMemberUnban, but the appeal-overturn path flips users.banned to 0 inside DecideAppealTx and writes only an audit row in applyOverturnReversalEffects; nothing broadcasts. member_ban hard-deletes the row on every connected client, so a client connected through the ban keeps the user absent from its member store, mention autocomplete and typing lists until it reconnects onto a full ready \u2014 two clients side by side can disagree, and a user who never reconnects stays missing indefinitely.",
+      "repro": "Mod A bans member U (BroadcastMemberBan fans member_ban out; every connected client drops U). Mod B overturns U's ban appeal. On a third client connected throughout, U is still absent from the member list until that client reconnects; a freshly connecting client sees U. Before the fix the appeal service had no unban capability at all.",
+      "evidence": "Server/service/appeal.go applyOverturnReversalEffects wrote only the audit row; Server/service/appeal.go's AppealService held notifier and queue broadcasters only. The admin counterpart: Server/admin/handlers_users.go (case !*req.Banned broadcasts via memberUnbanBroadcaster), Server/ws/hub_broadcast.go BroadcastMemberUnban (OC-0058). The DB flip is guarded by the NOT EXISTS newer-ban check in Server/db/appeal_queries.go (ban case), so reversalApplied is a truthful signal that a live ban was lifted.",
+      "suggestedFix": "Give AppealService an optional AppealUnbanBroadcaster (same shape as its queue broadcaster), fire BroadcastMemberUnban when an overturn actually reversed a ban (reversalApplied && action.Kind == \"ban\"), and wire it to the hub in wireAuth with a compile-time assertion.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-09-28",
+      "hunt": "bug-09-second-pass-2026-09-28",
+      "lens": "state-desync",
+      "finder": "d11g",
+      "fixedDate": "2026-09-28",
+      "fix": {
+        "commit": "1520bf579247a0a150210c789da14ba7a5cdb091",
+        "test": "Server/service/appeal_unban_broadcast_test.go (TestAppeal_OverturnBanRebroadcastsMemberUnban plus negative controls for an upheld ban, a superseded re-ban and a timeout overturn)",
+        "revertProof": "pass (disabling the broadcastUnban call reproduced the miss: BroadcastMemberUnban calls = [], want [3]; restoring it is green)"
+      },
+      "note": "Found in the BUG-09 second pass over the server moderation/appeal service (D11g). Distinct from OC-0058, which fixed the admin unban path; this is the appeal-overturn sibling. D11g remains open: its rounds so far confirmed OC-0485 and OC-0486, the native video/screen paths were hunted in a separate pass that came back dry, and the two consecutive dry rounds its stop condition needs are still owed."
     }
   ]
 }

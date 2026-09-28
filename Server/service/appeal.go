@@ -35,7 +35,13 @@ type AppealService struct {
 	limiter    *auth.RateLimiter
 	notifier   AppealStatusNotifier
 	queue      AppealQueueBroadcaster
-	locks      *appealLocker
+	// unban broadcasts the member_join a lifted ban needs, exactly as the
+	// admin unban path does (OC-0058): member_ban hard-deletes the row on
+	// every connected client, so flipping users.banned back to 0 without a
+	// frame leaves those clients missing the user until a full resync
+	// (OC-0486). Optional, like the other two.
+	unban AppealUnbanBroadcaster
+	locks *appealLocker
 }
 
 // appealLocker is F4's per-appeal serialization: a transition's guarded
@@ -646,6 +652,17 @@ func (s *AppealService) applyOverturnReversalEffects(ctx context.Context, appeal
 	if reversalApplied {
 		if auditAction, ok := db.ReversalAuditActionFor(action.Kind); ok && action.Kind != "timeout" {
 			db.WriteAudit(context.WithoutCancel(ctx), s.st, 0, auditAction, "user", action.TargetID, "overturned appeal "+appeal.PublicID)
+		}
+		if action.Kind == "ban" {
+			// The reversal actually lifted a live ban (reversalApplied is
+			// only true when the guarded UPDATE changed a row: the target
+			// was banned and no newer ban superseded this action). Every
+			// connected client hard-deleted the row on the ban's own
+			// member_ban, so it must be re-added exactly as the admin unban
+			// path does (OC-0058/OC-0486), or those clients keep the user
+			// missing until they reconnect onto a full ready. Detached like
+			// the audit above: the decision already committed.
+			s.broadcastUnban(action.TargetID)
 		}
 	}
 	if outcome == "overturned" && action.Kind == "timeout" {

@@ -2793,7 +2793,10 @@ Each reversal that actually changes something writes its own audit row
 (`user_untimeout`, `user_unban`, or a warning-acknowledged equivalent),
 actor `0` (a mechanical consequence of the decision, not a second
 moderation action by the human decider), alongside the decision's own
-`appeal_decide` row.
+`appeal_decide` row. A ban that is actually undone also broadcasts
+`member_join` for the target after the commit, exactly as the admin unban
+does, so every connected client re-adds the member it dropped on the ban's
+`member_ban`.
 
 **Voice**, for a live target server-muted by the overturned timeout: lifts
 alongside the ledger reversal above, through

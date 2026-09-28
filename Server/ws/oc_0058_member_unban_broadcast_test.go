@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -55,6 +56,49 @@ func TestBroadcastMemberUnban_FansOutMemberJoin(t *testing.T) {
 		}
 		if parsed.Payload.Status != "offline" {
 			t.Fatalf("member_join status = %q, want offline — the unbanned user cannot be connected", parsed.Payload.Status)
+		}
+		return
+	}
+	t.Fatal("no member_join reached a connected client after BroadcastMemberUnban")
+}
+
+// A temporary ban whose ban_expires has passed leaves users.banned at 1 but no
+// longer blocks a reconnect, so the user can be online when a moderator
+// overturns the appeal or an admin unbans them. The member_join must then
+// carry their stamped status, not "offline".
+func TestBroadcastMemberUnban_ConnectedUserKeepsStatus(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	alice := seedMemberUser(t, database, "unban-live-alice")
+	bob := seedMemberUser(t, database, "unban-live-bob")
+	if err := database.UpdateUserStatus(context.Background(), alice.ID, "idle"); err != nil {
+		t.Fatalf("UpdateUserStatus: %v", err)
+	}
+
+	aliceClient := ws.NewTestClientWithUser(hub, alice, 0, make(chan []byte, 32))
+	hub.Register(aliceClient)
+	waitRegistered(t, hub, aliceClient)
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, bob, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+	drainChanTimeout(send, 100*time.Millisecond)
+
+	hub.BroadcastMemberUnban(alice.ID)
+
+	for _, m := range drainChanTimeout(send, 300*time.Millisecond) {
+		if extractType(t, m) != "member_join" {
+			continue
+		}
+		var parsed struct {
+			Payload struct {
+				Status string `json:"status"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(m, &parsed); err != nil {
+			t.Fatalf("unmarshal member_join: %v", err)
+		}
+		if parsed.Payload.Status != "idle" {
+			t.Fatalf("member_join status = %q, want idle — the unbanned user is connected", parsed.Payload.Status)
 		}
 		return
 	}

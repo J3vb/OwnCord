@@ -969,7 +969,11 @@ All member messages are broadcast to all connected clients.
 
 ### member_join (Server -> Client, broadcast)
 
-Sent when a user first connects (fresh connection, not reconnect replay).
+Sent when a user first connects (fresh connection, not reconnect replay), and
+when a ban is lifted (an admin unban or an overturned ban appeal) so clients
+re-add the row `member_ban` removed. On an unban, `status` is `"offline"`
+unless the user holds a live connection (a lapsed temporary ban lets them
+reconnect before the unban).
 
 ```json
 {

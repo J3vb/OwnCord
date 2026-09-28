@@ -22,3 +22,8 @@ var _ supportHubMetrics = (*ws.Hub)(nil)
 // each declare their own copy, so this pins the production hub to one of them
 // from a package that may import both.
 var _ service.SessionDisconnector = (*ws.Hub)(nil)
+
+// OC-0486: AppealService reaches BroadcastMemberUnban through the same kind of
+// optional capability, wired in wireAuth. A renamed or removed hub method
+// would otherwise leave an overturned ban broadcasting nothing at runtime.
+var _ service.AppealUnbanBroadcaster = (*ws.Hub)(nil)
