@@ -13,11 +13,13 @@ import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { isWindowDetached } from "@stores/messages.store";
 import type { ChatMessagePayload } from "./types";
 import { mentionsCurrentUser } from "./mentions";
+import { jumpToMessage } from "./message-navigation";
 import { createLogger } from "./logger";
 import { playNotificationSound } from "./notificationSound";
 import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { desktop } from "../platform/desktop";
+import type { NotificationTarget } from "../platform/contracts/notifications";
 import { connectText } from "../i18n/connect";
 
 const log = createLogger("notifications");
@@ -173,7 +175,10 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // closure, so a static import would drag the tokenizer in with it
   // (bundle-budget's startup-closure gate).
   if (!dnd && loadPref<boolean>("desktopNotifications", true)) {
-    fireDesktopNotification(title, payload.content);
+    fireDesktopNotification(title, payload.content, {
+      channelId: payload.channel_id,
+      messageId: payload.id,
+    });
   }
 
   // Flash taskbar
@@ -205,8 +210,18 @@ async function plainBody(rawContent: string): Promise<string> {
   return sanitizeNotif(markdownToPlainText(rawContent, connectText("notifications.spoiler")), 100);
 }
 
-/** Fire a Tauri desktop notification. Falls back to Web Notification API. */
-function fireDesktopNotification(title: string, rawContent: string): void {
+/**
+ * Fire a Tauri desktop notification. Falls back to Web Notification API.
+ *
+ * The native host shows a message notification through its own command so a
+ * click can open `target` (the plugin's desktop backend drops clicks); the Web
+ * Notification fallback keeps its own `onclick`, which works in the browser.
+ */
+function fireDesktopNotification(
+  title: string,
+  rawContent: string,
+  target: NotificationTarget,
+): void {
   void (async () => {
     try {
       let permitted = await desktop.notifier.permissionGranted();
@@ -215,19 +230,21 @@ function fireDesktopNotification(title: string, rawContent: string): void {
       }
 
       if (permitted) {
-        await desktop.notifier.show(title, await plainBody(rawContent));
+        await desktop.notifier.showMessage(title, await plainBody(rawContent), target);
       }
     } catch (err) {
       log.debug("Tauri notification plugin unavailable, falling back to Web API", err);
-      // Fallback to Web Notification API (dev mode / non-Tauri)
+      // Fallback to Web Notification API (dev mode / non-Tauri). Clicking it
+      // calls the same jump the native activation does.
       try {
         const body = await plainBody(rawContent);
+        const onClick = (): void => jumpToMessage(target.channelId, target.messageId);
         if (Notification.permission === "granted") {
-          void new Notification(title, { body });
+          new Notification(title, { body }).addEventListener("click", onClick);
         } else if (Notification.permission !== "denied") {
           const result = await Notification.requestPermission();
           if (result === "granted") {
-            void new Notification(title, { body });
+            new Notification(title, { body }).addEventListener("click", onClick);
           }
         }
       } catch (fallbackErr) {

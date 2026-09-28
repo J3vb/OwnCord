@@ -293,6 +293,19 @@ describe("main.ts tray status-change listener (OC-0037)", () => {
   });
 });
 
+describe("main.ts notification-click opens the message (U1d)", () => {
+  it("routes a clicked message notification through the shared jumper", async () => {
+    const { jumpToMessage } = await import("@lib/message-navigation");
+    // Let the notifier's subscription register (the event API resolves async).
+    await Promise.resolve();
+    await Promise.resolve();
+
+    emitTauriEvent("notification-click", { channelId: 7, messageId: 42 });
+
+    expect(vi.mocked(jumpToMessage)).toHaveBeenCalledWith(7, 42);
+  });
+});
+
 describe("main.ts tray status-change routes through the shared PresenceSender (OC-0176)", () => {
   afterEach(() => {
     setActivePresenceSender(null);

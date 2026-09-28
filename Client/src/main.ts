@@ -1205,4 +1205,11 @@ function handleMessageDeepLink(channelId: number, messageId: number): void {
 }
 void desktop.deepLinks.init(handleInviteDeepLink, handleMessageDeepLink);
 
+// A clicked message notification opens the message it was for (U1d). The native
+// host emits `notification-click` with the target; routing it through the same
+// jumper a permalink uses keeps one implementation.
+desktop.notifier.onMessageActivated((target) => {
+  jumpToMessage(target.channelId, target.messageId);
+});
+
 log.info("OwnCord client initialized");

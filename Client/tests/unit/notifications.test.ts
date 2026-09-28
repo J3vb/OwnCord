@@ -44,6 +44,13 @@ const { shouldTauriNotifThrow } = vi.hoisted(() => ({
   shouldTauriNotifThrow: { value: false },
 }));
 
+// The shared notification mock. The native path now shows a *message*
+// notification through the host's `notify_message` command (so a click can
+// open the message), and the plugin's `sendNotification` is only reached when
+// that command is unavailable — so the mocked invoker forwards to it, and the
+// existing title/body assertions keep observing the same call.
+const { sendNotificationMock } = vi.hoisted(() => ({ sendNotificationMock: vi.fn() }));
+
 // Mock Tauri notification plugin (not available in test env)
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn(() => {
@@ -51,7 +58,22 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
     return Promise.resolve(true);
   }),
   requestPermission: vi.fn().mockResolvedValue("granted"),
-  sendNotification: vi.fn(),
+  sendNotification: sendNotificationMock,
+}));
+
+// Mock the Tauri core invoker: `notify_message` records the same title/body a
+// `sendNotification` call used to.
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn((cmd: string, args: { title: string; body: string }) => {
+    if (cmd === "notify_message") sendNotificationMock({ title: args.title, body: args.body });
+    return Promise.resolve();
+  }),
+}));
+
+// Mock the Tauri event API: no native host in the test env, so a subscription
+// simply never delivers.
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
 }));
 
 // Mock Tauri window API
@@ -1791,6 +1813,46 @@ describe("notifyIncomingMessage", () => {
 
       await new Promise((r) => setTimeout(r, 50));
       expect(sendNotification).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("click-to-open (U1d)", () => {
+    it("shows the message notification with the channel and message it points at", async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      (invoke as ReturnType<typeof vi.fn>).mockClear();
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("flashTaskbar", false);
+      testPrefs.set("notificationSounds", false);
+
+      notifyIncomingMessage(makePayload({ id: 42, channel_id: 7 }));
+
+      await vi.waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith(
+          "notify_message",
+          expect.objectContaining({ channelId: 7, messageId: 42 }),
+        );
+      });
+    });
+
+    it("falls back to the Web Notification API when the host command is unavailable", async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      (invoke as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("no native host"));
+      const mockWebNotification = vi.fn();
+      const originalNotification = globalThis.Notification;
+      (globalThis as Record<string, unknown>).Notification = Object.assign(mockWebNotification, {
+        permission: "granted",
+        requestPermission: vi.fn(),
+      });
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("flashTaskbar", false);
+      testPrefs.set("notificationSounds", false);
+
+      notifyIncomingMessage(makePayload({ id: 42, channel_id: 7 }));
+
+      await vi.waitFor(() => {
+        expect(mockWebNotification).toHaveBeenCalled();
+      });
+      (globalThis as Record<string, unknown>).Notification = originalNotification;
     });
   });
 });

@@ -4,8 +4,8 @@
 // behaviour rather than the moved code's. Which notification fires, and the
 // Web Notification fallback, are the caller's — `tests/unit/notifications.test.ts`
 // covers those.
-import { beforeEach, describe, expect, test } from "vitest";
-import type { Notifier } from "../../../src/platform/contracts/notifications";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import type { Notifier, NotificationTarget } from "../../../src/platform/contracts/notifications";
 
 export interface NativeControl {
   /** The permission the native plugin reports as already held. */
@@ -16,6 +16,10 @@ export interface NativeControl {
   unavailable(): void;
   /** Notifications the native plugin was asked to show. */
   shown(): ReadonlyArray<{ title: string; body: string }>;
+  /** Message notifications the native host was asked to show, with their target. */
+  messageShown(): ReadonlyArray<{ title: string; body: string; target: NotificationTarget }>;
+  /** The user activates (clicks) a message notification. Resolves once delivered. */
+  emitsActivation(target: NotificationTarget): Promise<void>;
   /** How many times the window asked for the user's attention. */
   attentionRequests(): number;
 }
@@ -65,6 +69,38 @@ export function describeNotifierSuite(
     check("asks for the user's attention once per flash", async () => {
       await ctx.subject.flashTaskbar();
       expect(ctx.native.attentionRequests()).toBe(1);
+    });
+
+    check("shows a message notification carrying its target", async () => {
+      await ctx.subject.showMessage("Alice in #general", "hello", {
+        channelId: 7,
+        messageId: 42,
+      });
+      expect(ctx.native.messageShown()).toEqual([
+        { title: "Alice in #general", body: "hello", target: { channelId: 7, messageId: 42 } },
+      ]);
+    });
+
+    check("hands a message activation to its handler exactly as it arrived", async () => {
+      const handler = vi.fn();
+      ctx.subject.onMessageActivated(handler);
+      await ctx.native.emitsActivation({ channelId: 7, messageId: 42 });
+      await ctx.native.emitsActivation({ channelId: 9, messageId: 1 });
+      expect(handler.mock.calls).toEqual([
+        [{ channelId: 7, messageId: 42 }],
+        [{ channelId: 9, messageId: 1 }],
+      ]);
+    });
+
+    // Paired with a delivery first: "nothing arrives after unsubscribing" is
+    // also what a subject that never delivers anything does.
+    check("stops delivering activations once unsubscribed", async () => {
+      const handler = vi.fn();
+      const unsubscribe = ctx.subject.onMessageActivated(handler);
+      await ctx.native.emitsActivation({ channelId: 3, messageId: 4 });
+      unsubscribe();
+      await ctx.native.emitsActivation({ channelId: 5, messageId: 6 });
+      expect(handler.mock.calls).toEqual([[{ channelId: 3, messageId: 4 }]]);
     });
   });
 }

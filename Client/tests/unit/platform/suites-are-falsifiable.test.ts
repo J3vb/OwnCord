@@ -287,6 +287,8 @@ describeNotifierSuite(async () => {
     permissionGranted: async () => undefined,
     requestPermission: async () => undefined,
     show: async () => undefined,
+    showMessage: async () => undefined,
+    onMessageActivated: () => () => undefined,
     flashTaskbar: async () => undefined,
   } as unknown as Notifier;
   const native: NotifierNativeControl = {
@@ -294,6 +296,8 @@ describeNotifierSuite(async () => {
     userAnswers: () => undefined,
     unavailable: () => undefined,
     shown: () => [],
+    messageShown: () => [],
+    emitsActivation: async () => undefined,
     attentionRequests: () => 0,
   };
   return { subject, native };
