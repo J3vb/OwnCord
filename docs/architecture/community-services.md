@@ -12,7 +12,9 @@ trust-deletion row was re-measured at `dev` @ `a3a0a49b`. **Amended
 2026-09-21 (B7-16):** the desktop half of S2 exists — the three renderer
 paths below, and the client cells of the abuse-case table, describe the tree
 before the native external-content broker; its current policy is
-[trust-model.md](../trust-model.md) §C-09. Other historical
+[trust-model.md](../trust-model.md) §C-09. **Amended 2026-09-28 (PERF-09):**
+`054_audit_action_index.sql` only indexes the existing `audit_log` table's
+`action` column, so it adds no data class here. Other historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
