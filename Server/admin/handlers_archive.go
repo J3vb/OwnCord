@@ -15,12 +15,18 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// archiveWriteWindow bounds one archive download's write deadline. The
-// server's global WriteTimeout is 30 s, which a multi-gigabyte archive cannot
-// be built and sent in; this is set once, before the build,
-// mirroring the bounded window the transfer routes use, so a stalled client is
-// still abandoned rather than holding the handler forever.
-const archiveWriteWindow = 10 * time.Minute
+// The server's global ReadTimeout/WriteTimeout are 30 s, which a
+// multi-gigabyte archive cannot be built and sent in. Like the transfer
+// routes (api/transfer_deadline.go), the download instead gets a progress
+// deadline: every chunk written pushes the connection's deadlines out by
+// archiveProgressTimeout, so a client that stops reading is abandoned, while
+// a slow but moving one is not cut. archiveMaxLifetime is the hard bound on
+// one archive request, build and transfer together, however it progresses:
+// 2 h carries tens of gigabytes over an ordinary uplink.
+const (
+	archiveProgressTimeout = 30 * time.Second
+	archiveMaxLifetime     = 2 * time.Hour
+)
 
 // archiveName is the download's fixed name. The snapshot inside is a real
 // database copy; the fixed name means a browser never overwrites two archives
@@ -48,10 +54,15 @@ func handleArchive(database *db.DB, opts SetupOptions) http.Handler {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "server configuration unavailable")
 			return
 		}
-		// The archive can outlive the global write deadline; give this
-		// connection its own bounded window covering the build and the copy
-		// (a stalled client still times out).
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(archiveWriteWindow))
+		// Nothing is written while the archive builds, so the build runs
+		// under the lifetime bound alone; the copy below re-arms per chunk.
+		progress := archiveProgressWriter{
+			w:     w,
+			ctl:   http.NewResponseController(w),
+			idle:  archiveProgressTimeout,
+			until: time.Now().Add(archiveMaxLifetime),
+		}
+		progress.setDeadlines(progress.until)
 
 		// The work dir lives under backup.dir: the snapshot is a VACUUM INTO
 		// target, and that directory is already the one backups write to.
@@ -96,12 +107,42 @@ func handleArchive(database *db.DB, opts SetupOptions) http.Handler {
 		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "backup_archive", "server", 0,
 			fmt.Sprintf("downloaded full archive (%d bytes)", info.Size()))
 
-		if _, err := io.Copy(w, f); err != nil {
+		if _, err := io.Copy(progress, f); err != nil {
 			// Headers are already committed; the client sees a truncated
 			// download. Log it — the operator can retry.
 			slog.Warn("backup archive download interrupted", "err", err)
 		}
 	})
+}
+
+// archiveProgressWriter re-arms the connection's read and write deadlines to
+// now+idle on every write that lands bytes, never past until.
+type archiveProgressWriter struct {
+	w     io.Writer
+	ctl   *http.ResponseController
+	idle  time.Duration
+	until time.Time
+}
+
+func (p archiveProgressWriter) Write(b []byte) (int, error) {
+	n, err := p.w.Write(b)
+	if n > 0 {
+		deadline := time.Now().Add(p.idle)
+		if deadline.After(p.until) {
+			deadline = p.until
+		}
+		p.setDeadlines(deadline)
+	}
+	return n, err
+}
+
+// setDeadlines sets both deadlines; the read one too, because on HTTP/1.1 an
+// expired read deadline cancels the request context mid-response. Errors are
+// ignored: the only realistic one is http.ErrNotSupported on a writer with no
+// connection, where there is no deadline to manage.
+func (p archiveProgressWriter) setDeadlines(deadline time.Time) {
+	_ = p.ctl.SetReadDeadline(deadline)
+	_ = p.ctl.SetWriteDeadline(deadline)
 }
 
 // buildArchive writes the archive to work/owncord-archive.zip and returns its
@@ -179,6 +220,9 @@ func addTrees(zw *zip.Writer, dataDir, uploadsDir, backupDir, work, snapshot str
 	if t.db, err = resolvePath(dbFilePath); err != nil {
 		return fmt.Errorf("resolving database path: %w", err)
 	}
+	if t.uploads, err = resolvePath(uploadsDir); err != nil {
+		return fmt.Errorf("resolving uploads dir: %w", err)
+	}
 	for _, dir := range []string{backupDir, work} {
 		abs, err := resolvePath(dir)
 		if err != nil {
@@ -190,13 +234,9 @@ func addTrees(zw *zip.Writer, dataDir, uploadsDir, backupDir, work, snapshot str
 	if err := t.walk(realData, "data"); err != nil {
 		return fmt.Errorf("archiving data dir: %w", err)
 	}
-	realUploads, err := resolvePath(uploadsDir)
-	if err != nil {
-		return fmt.Errorf("resolving uploads dir: %w", err)
-	}
-	if !isWithin(realUploads, realData) {
-		if _, err := os.Stat(realUploads); err == nil {
-			if err := t.walk(realUploads, "data/uploads"); err != nil {
+	if !isWithin(t.uploads, realData) {
+		if _, err := os.Stat(t.uploads); err == nil {
+			if err := t.walk(t.uploads, "data/uploads"); err != nil {
 				return fmt.Errorf("archiving uploads dir: %w", err)
 			}
 		}
@@ -209,7 +249,7 @@ func addTrees(zw *zip.Writer, dataDir, uploadsDir, backupDir, work, snapshot str
 		if err != nil {
 			return err
 		}
-		if err := addFile(zw, "data/chatserver.db", snapshot, info); err != nil {
+		if err := addFile(zw, "data/chatserver.db", snapshot, info, zip.Deflate); err != nil {
 			return err
 		}
 	}
@@ -217,10 +257,13 @@ func addTrees(zw *zip.Writer, dataDir, uploadsDir, backupDir, work, snapshot str
 }
 
 // archiveTree walks directories into one zip, sharing the exclusions and
-// the live-database substitution across every walked root.
+// the live-database substitution across every walked root. Files under
+// uploads are stored as-is: attachments are mostly already-compressed media,
+// and recompressing them only slows the build.
 type archiveTree struct {
 	zw            *zip.Writer
 	db            string
+	uploads       string
 	snapshot      string
 	skip          []string
 	snapshotAdded bool
@@ -260,7 +303,7 @@ func (t *archiveTree) walk(root, prefix string) error {
 		// The live database is replaced by the snapshot; its WAL sidecars are
 		// superseded by it. The WAL belongs to dbFilePath, not this walk.
 		if path == t.db {
-			if err := addFile(t.zw, name, t.snapshot, info); err != nil {
+			if err := addFile(t.zw, name, t.snapshot, info, zip.Deflate); err != nil {
 				return err
 			}
 			t.snapshotAdded = true
@@ -269,7 +312,11 @@ func (t *archiveTree) walk(root, prefix string) error {
 		if strings.HasPrefix(path, t.db+"-") || strings.HasSuffix(path, ".tmp") {
 			return nil // -wal / -shm, and in-progress writes
 		}
-		return addFile(t.zw, name, path, info)
+		method := zip.Deflate
+		if isWithin(path, t.uploads) {
+			method = zip.Store
+		}
+		return addFile(t.zw, name, path, info, method)
 	})
 }
 
@@ -284,9 +331,9 @@ func addDir(zw *zip.Writer, name string, info os.FileInfo) error {
 	return err
 }
 
-// addFile copies src into the zip under name, carrying info's mode and mtime
-// so an extracted key file keeps its 0600.
-func addFile(zw *zip.Writer, name, src string, info os.FileInfo) error {
+// addFile copies src into the zip under name with method, carrying info's
+// mode and mtime so an extracted key file keeps its 0600.
+func addFile(zw *zip.Writer, name, src string, info os.FileInfo, method uint16) error {
 	in, err := os.Open(src) //nolint:gosec // G304: path from our own walk
 	if err != nil {
 		return err
@@ -297,7 +344,7 @@ func addFile(zw *zip.Writer, name, src string, info os.FileInfo) error {
 		return err
 	}
 	hdr.Name = name
-	hdr.Method = zip.Deflate
+	hdr.Method = method
 	w, err := zw.CreateHeader(hdr)
 	if err != nil {
 		return err
@@ -318,5 +365,5 @@ func addConfig(zw *zip.Writer, configPath string) error {
 	if err != nil {
 		return nil
 	}
-	return addFile(zw, "config.yaml", configPath, info)
+	return addFile(zw, "config.yaml", configPath, info, zip.Deflate)
 }

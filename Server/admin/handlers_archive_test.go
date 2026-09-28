@@ -278,6 +278,27 @@ func TestHandleArchive_KeepsFileModes(t *testing.T) {
 	}
 }
 
+// TestHandleArchive_StoresUploadsUncompressed: attachments are stored as-is
+// (recompressing media only slows the build); the database and config are
+// still deflated.
+func TestHandleArchive_StoresUploadsUncompressed(t *testing.T) {
+	f := newArchiveFixture(t)
+	methods := map[string]uint16{}
+	for _, zf := range archiveZip(t, f).File {
+		methods[zf.Name] = zf.Method
+	}
+	want := map[string]uint16{
+		"data/uploads/hello.bin": zip.Store,
+		"data/chatserver.db":     zip.Deflate,
+		"config.yaml":            zip.Deflate,
+	}
+	for name, method := range want {
+		if got, ok := methods[name]; !ok || got != method {
+			t.Errorf("%s method = %d (present %v), want %d", name, got, ok, method)
+		}
+	}
+}
+
 // TestHandleArchive_NoRunningConfigIs500: without the running config there is
 // no data dir to archive, so the handler refuses rather than guessing one.
 func TestHandleArchive_NoRunningConfigIs500(t *testing.T) {
