@@ -156,7 +156,7 @@ func (h *Hub) leaveVoiceOnDisconnect(ctx context.Context, c *Client, reason stri
 		e2eeKey:   key,
 		e2eeSig:   sig,
 	}
-	h.voiceGrace.put(c.userID, entry, func() {
+	h.voiceGrace.put(c.userID, entry, func() { //nolint:contextcheck // the timer outlives the disconnect ctx; expiry uses its own.
 		h.expireVoiceGrace(c.userID, entry)
 	})
 	slog.Info("voice leave deferred (grace window)",
@@ -200,4 +200,37 @@ func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
 		slog.Info("voice grace dropped: its voice state row is gone",
 			"user_id", userID, "channel_id", e.channelID)
 	}
+}
+
+// inheritParkedVoice is registerNow's RT-8 step: a resuming socket
+// (lastSeq > 0) inherits the voice membership its previous socket parked in
+// the grace window when it dropped, so a short network blip keeps the call
+// instead of ending it. The parked entry carries the completed join's token
+// and E2EE key; re-stamping them lets registerNow's subscribe block restore
+// the voice topic exactly as the still-registered-old-client transfer does.
+// `take` stops the expiry timer, so inheriting and tearing down can never
+// both run. It returns the inherited channel id, or 0.
+//
+// Skipped when the old-client transfer already supplied a session
+// (c.getVoiceChID() != 0) — a reconnect that beat the drop teardown. A fresh
+// connect (lastSeq == 0) is a deliberate reload rather than a blip, so it
+// discards any parked entry instead.
+func (h *Hub) inheritParkedVoice(c *Client) int64 {
+	if c.lastSeq == 0 {
+		h.voiceGrace.take(c.userID)
+		return 0
+	}
+	if c.getVoiceChID() != 0 {
+		return 0
+	}
+	e := h.voiceGrace.take(c.userID)
+	if e == nil {
+		return 0
+	}
+	c.setVoiceState(e.channelID, e.joinToken)
+	c.markVoiceJoinCompleteIfMatch(e.channelID, e.joinToken)
+	c.setE2EEPubKey(e.e2eeKey, e.e2eeSig)
+	slog.Info("hub: resumed connection inherited the grace-window voice membership",
+		"user_id", c.userID, "channel_id", e.channelID)
+	return e.channelID
 }
