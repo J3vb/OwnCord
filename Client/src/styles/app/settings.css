@@ -351,6 +351,10 @@ details.disclose > summary {
 .settings-toolbar {
   margin: var(--space-2) 0;
 }
+.summary-line,
+details.disclose > summary {
+  flex-wrap: nowrap;
+}
 .summary-line {
   margin-top: var(--space-3);
 }
@@ -377,35 +381,41 @@ details.disclose > summary {
 .st-ic.st-pending {
   color: var(--text-muted);
 }
-.status-list {
-  list-style: none;
-  margin: var(--space-2) 0 0;
-  padding: 0;
-}
-.status-item {
+.diag-stepper {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
-  padding: 10px 0;
-  border-top: 1px solid var(--border);
+  row-gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
 }
-.status-name {
-  flex: 0 1 170px;
-  font-weight: 600;
+.diag-step {
+  display: flex;
+  align-items: center;
+}
+/* The connector between stages; decorative, the list order carries it. */
+.diag-step + .diag-step::before {
+  content: "";
+  width: var(--space-2);
+  height: 2px;
+  background: var(--border-strong);
+}
+.diag-step-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px 6px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
   color: var(--text-normal);
 }
-.status-result {
-  flex: 1 1 200px;
-  min-width: 0;
+.diag-step-btn[aria-pressed="true"] {
+  background: var(--bg-active);
+}
+.diag-step-detail {
+  margin: var(--space-2) 0;
   font-size: var(--font-size-sm);
   color: var(--text-muted);
-  overflow-wrap: anywhere;
-}
-.status-detail {
-  flex: 1 0 100%;
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
 }
 details.disclose > summary {
   padding: var(--space-2) 0;

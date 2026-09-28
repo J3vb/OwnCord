@@ -1182,7 +1182,9 @@ descriptions):
   and sequenced events were lost; alert on any growth. `topic_sheds_total`
   growing → a single channel exceeded the per-channel topic limit and frames
   were shed before sequencing; replay cannot recover them, so alert on any
-  growth too.
+  growth too. A content frame lost to either counter also forces the next
+  reconnect of a client at or behind the loss onto the full-ready path, so
+  that client recovers the message from the database.
 - `ws_dispatch_lag_ms.p95` climbing → the single hub dispatch goroutine is
   falling behind its queue; `hub_broadcast_queue_depth` approaching 1024 is the
   same signal from the other side.

@@ -97,39 +97,100 @@ describe("connection diagnostics session ownership in settings", () => {
       expect(summary().dataset.state).toBe("crit");
     });
 
-    it("shows each stage as a list row with a status icon, name and short result", async () => {
+    const stepButton = (stage: string) =>
+      row(stage).querySelector<HTMLButtonElement>("button.diag-step-btn")!;
+    const detail = () =>
+      panel.element.querySelector<HTMLElement>("[data-testid=diagnostics-detail]")!;
+
+    it("lays the stages out left to right as one ordered stepper with short labels", async () => {
       start();
       await vi.waitFor(() => expect(status()).toContain("Test complete"));
-      const passed = row("connection");
-      expect(passed.tagName).toBe("LI");
-      expect(passed.closest("ul")).not.toBeNull();
-      expect(passed.querySelector(".st-ic.st-ok svg")).not.toBeNull();
-      expect(passed.querySelector(".status-name")!.textContent).toBe("Server connection");
-      expect(passed.querySelector(".status-result")!.textContent).toBe("Passed");
-      // A passing stage keeps its full sentence as a visible detail line.
-      expect(passed.querySelector(".status-detail")!.textContent).toContain(
-        "certificate-checked connection",
-      );
-      expect(passed.title).toBe("");
-
-      // A stage that was not tested shows what to do next, in words.
-      const media = row("media");
-      expect(media.querySelector(".st-ic.st-pending svg")).not.toBeNull();
-      expect(media.querySelector(".status-result")!.textContent).toContain("Not tested");
-      expect(media.querySelector(".status-result")!.textContent).toContain(
-        "Join a call with another person",
-      );
+      const stepper = panel.element.querySelector<HTMLOListElement>("ol.diag-stepper")!;
+      const steps = [...stepper.children] as HTMLElement[];
+      expect(steps.map((li) => li.dataset.testid)).toEqual([
+        "diagnostic-connection",
+        "diagnostic-authentication",
+        "diagnostic-websocket",
+        "diagnostic-microphone",
+        "diagnostic-signaling",
+        "diagnostic-media",
+      ]);
+      expect(steps.map((li) => li.querySelector(".diag-step-label")!.textContent)).toEqual([
+        "Server",
+        "Sign-in",
+        "Messages",
+        "Microphone",
+        "Voice",
+        "Media",
+      ]);
+      expect(row("connection").querySelector(".st-ic.st-ok svg")).not.toBeNull();
+      expect(row("media").querySelector(".st-ic.st-pending svg")).not.toBeNull();
     });
 
-    it("shows a failed stage's fix beside a critical icon", async () => {
+    it("names each stage in full, with its status and detail, for assistive technology", async () => {
+      start();
+      await vi.waitFor(() => expect(status()).toContain("Test complete"));
+      // The name starts with the visible label (WCAG 2.5.3), then says it in full.
+      expect(stepButton("connection").getAttribute("aria-label")).toBe(
+        "Server — Server connection, Passed",
+      );
+      expect(stepButton("authentication").getAttribute("aria-label")).toBe(
+        "Sign-in — Signed-in access, Passed",
+      );
+      expect(stepButton("media").getAttribute("aria-label")).toBe(
+        "Media — Incoming media, Not tested",
+      );
+      // Each stage still carries its whole sentence, so the list reads completely.
+      expect(row("connection").querySelector(".sr-only")!.textContent).toContain(
+        "certificate-checked connection",
+      );
+      expect(row("media").textContent).toContain("Join a call with another person");
+    });
+
+    it("keeps a focused stage focused as its result arrives, described by its full sentence", async () => {
+      let resolve!: (value: unknown) => void;
+      health.mockReturnValue(
+        new Promise((done) => {
+          resolve = done;
+        }),
+      );
+      start();
+      await vi.waitFor(() => expect(row("connection").dataset.status).toBe("running"));
+      const focused = stepButton("connection");
+      focused.focus();
+      resolve({});
+      await vi.waitFor(() => expect(status()).toContain("Test complete"));
+      expect(stepButton("connection")).toBe(focused);
+      expect(document.activeElement).toBe(focused);
+      expect(focused.getAttribute("aria-label")).toBe("Server — Server connection, Passed");
+      expect(focused.querySelector(".st-ic.st-ok svg")).not.toBeNull();
+      const described = document.getElementById(focused.getAttribute("aria-describedby")!)!;
+      expect(described.textContent).toContain("certificate-checked connection");
+    });
+
+    it("shows the failing stage's detail below the row, beside a critical icon", async () => {
       getMe.mockRejectedValue(new Error("401"));
       start();
       await vi.waitFor(() => expect(status()).toContain("Test complete"));
       const auth = row("authentication");
       expect(auth.dataset.status).toBe("failed");
       expect(auth.querySelector(".st-ic.st-crit svg")).not.toBeNull();
-      expect(auth.querySelector(".status-result")!.textContent).toContain("Failed");
-      expect(auth.querySelector(".status-result")!.textContent).toContain("sign in again");
+      expect(stepButton("authentication").getAttribute("aria-pressed")).toBe("true");
+      expect(detail().textContent).toContain("Signed-in access");
+      expect(detail().textContent).toContain("Failed");
+      expect(detail().textContent).toContain("sign in again");
+    });
+
+    it("with nothing failing, shows the first untested stage, and any stage on selection", async () => {
+      start();
+      await vi.waitFor(() => expect(status()).toContain("Test complete"));
+      expect(stepButton("microphone").getAttribute("aria-pressed")).toBe("true");
+      expect(detail().textContent).toContain("Microphone check was not selected.");
+
+      stepButton("connection").click();
+      expect(stepButton("connection").getAttribute("aria-pressed")).toBe("true");
+      expect(stepButton("microphone").getAttribute("aria-pressed")).toBe("false");
+      expect(detail().textContent).toContain("certificate-checked connection");
     });
 
     it("makes Start the primary action, then Run again secondary once results show, and resets with them", async () => {

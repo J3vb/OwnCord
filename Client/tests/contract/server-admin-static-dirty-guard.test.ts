@@ -25,6 +25,8 @@ window.__test = {
   dismissModal: dismissModal,
   markModalDirty: markModalDirty,
   renderChannelPermsModal: renderChannelPermsModal,
+  renderPermMatrix: renderPermMatrix,
+  clearPermOverride: clearPermOverride,
   saveChannelPerms: saveChannelPerms
 };
 </script>`;
@@ -45,6 +47,8 @@ interface Bridge {
   dismissModal: () => void;
   markModalDirty: () => void;
   renderChannelPermsModal: () => void;
+  renderPermMatrix: () => void;
+  clearPermOverride: () => Promise<void>;
   saveChannelPerms: () => Promise<void>;
 }
 
@@ -326,6 +330,136 @@ describe("Server/admin/static — dialog dirty guard (UX-10)", () => {
     expect(booted.modalVisible()).toBe(false);
     expect(bridge.state.modalDirty).toBe(false);
     expect(unload(dom!).defaultPrevented).toBe(false);
+  });
+});
+
+describe("Server/admin/static — channel-access drawer unsaved-edit paths (UX-10)", () => {
+  let dom: JSDOM | undefined;
+  afterEach(() => {
+    dom?.window?.close();
+    dom = undefined;
+  });
+
+  function drawer(bridge: Bridge, tab: string): void {
+    bridge.state.permChannel = {
+      id: 42,
+      name: "general",
+      roles: [
+        { role_id: 4, role_name: "Member", permissions: 0, allow: 0, deny: 0 },
+        { role_id: 5, role_name: "Moderator", permissions: 0, allow: 0, deny: 0 },
+      ],
+      users: [],
+      allUsers: [],
+      tab,
+    };
+    bridge.renderChannelPermsModal();
+  }
+
+  it("asks before Clear override discards the drawer's other unsaved edits", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    drawer(bridge, "overrides");
+
+    // An edit on the Access tab is pending when the operator clears an
+    // override: it must not be dropped without asking.
+    const accessBox = doc.getElementById("permRole4") as HTMLInputElement;
+    accessBox.checked = false;
+    accessBox.dispatchEvent(new dom!.window.Event("change", { bubbles: true }));
+    expect(bridge.state.modalDirty).toBe(true);
+    (doc.getElementById("permTarget") as HTMLSelectElement).value = "r:5";
+    bridge.renderPermMatrix();
+
+    const declined = stubConfirm(dom, false);
+    await bridge.clearPermOverride();
+    expect(declined.length).toBe(1);
+    expect(booted.modalVisible()).toBe(true);
+    expect(bridge.state.modalDirty).toBe(true);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+
+    const confirmed = stubConfirm(dom, true);
+    await bridge.clearPermOverride();
+    expect(confirmed.length).toBe(1);
+    expect(booted.modalVisible()).toBe(false);
+    expect(bridge.state.modalDirty).toBe(false);
+    expect(
+      calls.some((c) => c.method === "DELETE" && c.path === "/channels/42/permissions/5"),
+    ).toBe(true);
+  });
+
+  it("asks before switching the permission target discards matrix edits, and reverts when declined", async () => {
+    const booted = await boot();
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    drawer(bridge, "overrides");
+
+    const target = doc.getElementById("permTarget") as HTMLSelectElement;
+    target.value = "r:4";
+    bridge.renderPermMatrix();
+    const denyRead = () =>
+      doc.querySelector('input[data-ovrbit="2"][value="deny"]') as HTMLInputElement;
+    denyRead().checked = true;
+    denyRead().dispatchEvent(new dom!.window.Event("change", { bubbles: true }));
+    expect(bridge.state.modalDirty).toBe(true);
+
+    const declined = stubConfirm(dom, false);
+    target.value = "r:5";
+    target.dispatchEvent(new dom!.window.Event("change", { bubbles: true }));
+    expect(declined.length).toBe(1);
+    expect(target.value).toBe("r:4");
+    expect(denyRead().checked).toBe(true);
+    expect(bridge.state.modalDirty).toBe(true);
+
+    const confirmed = stubConfirm(dom, true);
+    target.value = "r:5";
+    target.dispatchEvent(new dom!.window.Event("change", { bubbles: true }));
+    expect(confirmed.length).toBe(1);
+    expect(target.value).toBe("r:5");
+    expect(denyRead().checked).toBe(false);
+    expect(bridge.state.modalDirty).toBe(false);
+  });
+
+  it("switches the permission target without asking when the matrix is clean", async () => {
+    const booted = await boot();
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    drawer(bridge, "overrides");
+
+    const target = doc.getElementById("permTarget") as HTMLSelectElement;
+    target.value = "r:4";
+    bridge.renderPermMatrix();
+
+    const asked = stubConfirm(dom, false);
+    target.value = "r:5";
+    target.dispatchEvent(new dom!.window.Event("change", { bubbles: true }));
+
+    expect(asked).toEqual([]);
+    expect(target.value).toBe("r:5");
+  });
+
+  it("keeps the dirt after an accepted target switch when Access edits remain", async () => {
+    const booted = await boot();
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    drawer(bridge, "overrides");
+
+    const accessBox = doc.getElementById("permRole4") as HTMLInputElement;
+    accessBox.checked = false;
+    accessBox.dispatchEvent(new dom!.window.Event("change", { bubbles: true }));
+    const target = doc.getElementById("permTarget") as HTMLSelectElement;
+    target.value = "r:5";
+    bridge.renderPermMatrix();
+    const denyRead = doc.querySelector('input[data-ovrbit="2"][value="deny"]') as HTMLInputElement;
+    denyRead.checked = true;
+    denyRead.dispatchEvent(new dom!.window.Event("change", { bubbles: true }));
+
+    stubConfirm(dom, true);
+    target.value = "r:4";
+    target.dispatchEvent(new dom!.window.Event("change", { bubbles: true }));
+
+    expect(target.value).toBe("r:4");
+    expect(bridge.state.modalDirty).toBe(true);
   });
 });
 

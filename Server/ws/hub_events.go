@@ -80,8 +80,8 @@ func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
 }
 
 // mustFullResync reports whether a client resuming from lastSeq predates the
-// most recent channel-visibility change and therefore cannot converge via
-// replay.
+// most recent channel-visibility change or content shed (SRV-03) and
+// therefore cannot converge via replay.
 func (h *Hub) mustFullResync(lastSeq uint64) bool {
 	if w := h.visibilityChangeSeq.Load(); w > 0 && lastSeq <= w {
 		return true

@@ -1176,6 +1176,45 @@ describe("Server/admin/static — panel behaviour", () => {
       retention_days: "90",
     });
   });
+  it("states channel counts only from the full channel list, in agreeing verb form", async () => {
+    let channelsReadable = true;
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p === "/retention")
+        return {
+          json: {
+            server_days: 0,
+            revision: "revision-1",
+            channels: [{ channel_id: 7, days: 30, updated_by: 1, updated_at: "" }],
+          },
+        };
+      if (p === "/retention/preview") return { json: [] };
+      if (p === "/channels")
+        return channelsReadable
+          ? {
+              json: [
+                { id: 5, name: "general", type: "text" },
+                { id: 7, name: "archive", type: "text" },
+              ],
+            }
+          : { status: 403, json: { message: "forbidden" } };
+      return { json: {} };
+    };
+    const booted = await boot([], respond);
+    dom = booted.dom;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+
+    const full = await booted.bridge.renderRetention();
+    expect(full).toContain("1 channel follows this; 1 channel has its own rule.");
+    expect(full).toContain("Show all 2 channels");
+
+    channelsReadable = false;
+    const partial = await booted.bridge.renderRetention();
+    expect(partial).toContain("1 channel has its own rule; every other channel follows this.");
+    expect(partial).not.toContain("0 channels follow");
+    expect(partial).not.toContain("Show all");
+    expect(partial).toContain("Show listed channels");
+  });
   it("binds the confirmation to the proposed window and shows its observation and exclusions", async () => {
     const calls: FetchCall[] = [];
     const booted = await boot(calls, (p) =>

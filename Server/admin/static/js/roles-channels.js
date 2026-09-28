@@ -259,7 +259,7 @@ function renderChannelPermsModal(){
     +panel('overrides',
       '<p class="drawer-intro">Set single permissions for one role or member in this channel. Resolution order: base role permissions → role override → member override. A member deny beats a role allow; Administrator bypasses everything.</p>'
       +'<div class="form-group"><label class="form-label" for="permTarget">Role or member</label>'
-      +'<select class="form-input" id="permTarget" style="appearance:auto" data-change-action="renderPermMatrix">'+opts+'</select></div>'
+      +'<select class="form-input" id="permTarget" style="appearance:auto" data-change-action="onPermTargetChange">'+opts+'</select></div>'
       +'<div id="permMatrix"></div>'
       +'<div id="permPreview"></div>')
     +panel('explain',
@@ -312,15 +312,16 @@ function renderPermMatrix(){
   const pv=document.getElementById('permPreview');if(pv)pv.innerHTML='';
   const sel=document.getElementById('permTarget');
   const val=sel?sel.value:'';
+  /* The radios read from the snapshot, so remember which target they belong
+     to; onPermTargetChange compares the live radios against that target's
+     snapshot to tell whether a switch would discard edits. */
+  if(sel)sel.dataset.painted=val;
   if(!val){box.innerHTML='<p class="drawer-intro">Pick a role or member above to edit its per-channel permissions.</p>';return}
-  const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
-  let allow=0,deny=0,adminNote='';
-  if(kind==='r'){
-    const role=pc.roles.find(r=>r.role_id===tid);
-    if(role){allow=role.allow;deny=role.deny;if((role.permissions&ADMIN_BIT)!==0)adminNote='This role holds Administrator — every override below is bypassed.'}
-  }else{
-    const o=pc.users.find(u=>u.user_id===tid);
-    if(o){allow=o.allow;deny=o.deny}
+  const {allow,deny}=snapshotOverrideMasks(val);
+  let adminNote='';
+  if(val.charAt(0)==='r'){
+    const role=pc.roles.find(r=>r.role_id===parseInt(val.slice(2),10));
+    if(role&&(role.permissions&ADMIN_BIT)!==0)adminNote='This role holds Administrator — every override below is bypassed.';
   }
   let html='';
   if(adminNote)html+='<p style="color:var(--text-warning);font-size:12px;margin:0 0 8px">'+esc(adminNote)+'</p>';
@@ -356,6 +357,47 @@ function permTargetPath(){
   if(!pc||!val)return null;
   const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
   return '/channels/'+pc.id+(kind==='r'?'/permissions/':'/user-permissions/')+tid;
+}
+
+/* The masks a target carried in the snapshot — what renderPermMatrix painted
+   its radios from. */
+function snapshotOverrideMasks(val){
+  const pc=state.permChannel;
+  if(!pc||!val)return {allow:0,deny:0};
+  const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
+  if(kind==='r'){const r=pc.roles.find(r=>r.role_id===tid);return r?{allow:r.allow,deny:r.deny}:{allow:0,deny:0}}
+  const o=pc.users.find(u=>u.user_id===tid);return o?{allow:o.allow,deny:o.deny}:{allow:0,deny:0};
+}
+/* True when the matrix's live radios differ from the target they were painted
+   for — i.e. an override edit that switching the target would discard. */
+function permMatrixHasEdits(){
+  const sel=document.getElementById('permTarget');
+  const painted=sel&&sel.dataset.painted;
+  if(!painted)return false;
+  const now=collectOverrideMasks(),was=snapshotOverrideMasks(painted);
+  return now.allow!==was.allow||now.deny!==was.deny;
+}
+/* True when an Access-tab checkbox differs from the snapshot, so a discarded
+   matrix edit does not clear dirt that belongs to another tab. */
+function accessTabHasEdits(){
+  const pc=state.permChannel;if(!pc)return false;
+  return (pc.roles||[]).some(role=>{
+    if((role.permissions&ADMIN_BIT)!==0)return false;
+    const box=document.getElementById('permRole'+role.role_id);
+    if(!(box instanceof HTMLInputElement))return false;
+    return box.checked!==((role.deny&0x2)===0);
+  });
+}
+/* Switching the target repaints the matrix from the snapshot. Ask first when
+   the current target holds an edit; declining keeps the select on the target
+   the edits belong to. */
+function onPermTargetChange(){
+  const sel=this;
+  if(permMatrixHasEdits()&&!confirmDiscardModal()){sel.value=sel.dataset.painted||'';return}
+  renderPermMatrix();
+  /* The repaint discarded the previous target's edits; keep the flag honest
+     for a beforeunload or a later dismiss. */
+  state.modalDirty=accessTabHasEdits();
 }
 
 /* ═══ Access explanation and change preview (RI-06) ═══ */
@@ -440,6 +482,9 @@ async function previewPermChange(){
 async function clearPermOverride(){
   const path=permTargetPath();
   if(!path){showToast('Pick a role or member first','error');return}
+  /* Clearing closes the drawer, so any other unsaved edit in it would go with
+     it — ask first, the same way the dismissals do. */
+  if(!confirmDiscardModal())return;
   try{
     await api('DELETE',path);
     closeModal();showToast('Override cleared');renderContent();
@@ -899,6 +944,6 @@ async function deleteEmoji(id){
 }
 
 Object.assign(ACTIONS,{clearPermOverride,confirmDeleteChannel,confirmDeleteEmoji,confirmDeleteRole,createChannel,
-  deleteEmoji,explainAccess,moveRole,openChannelEditModal,openChannelModal,openChannelPermsModal,openDeleteChannel,
-  openDeleteRole,openRoleModal,placeRoleAboveDefault,previewPermChange,renderPermMatrix,renderRolePlacement,
+  deleteEmoji,explainAccess,moveRole,onPermTargetChange,openChannelEditModal,openChannelModal,openChannelPermsModal,openDeleteChannel,
+  openDeleteRole,openRoleModal,placeRoleAboveDefault,previewPermChange,renderRolePlacement,
   saveChannelEdit,saveChannelPerms,saveRole,selectChannelTab,syncTypedConfirm,uploadEmoji});
