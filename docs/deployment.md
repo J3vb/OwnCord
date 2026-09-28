@@ -646,7 +646,9 @@ A server that starts with migrations pending — the state every upgrade leaves
 behind, including a Docker `docker compose pull` — takes a database backup
 **before** it applies them, so a schema move is never unbacked-up. The copy
 lands in the configured backup directory as
-`pre_migrate_<first-migration>.db`, is verified with `integrity_check`, and is
+`pre_migrate_<first-migration>.db` (with a `_2`, `_3`, … suffix when that name
+is already taken, so an earlier copy is never overwritten), is verified with
+`integrity_check`, and is
 kept out of retention pruning like the `pre_restore_*` copies. A boot that
 cannot write it refuses to start rather than migrate without it.
 

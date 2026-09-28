@@ -113,28 +113,20 @@ func backupBeforePendingMigrations(log *slog.Logger, cfg *config.Config, databas
 	}
 
 	// Name the copy for the first migration it precedes, so an operator can
-	// see at a glance which schema move this protects.
-	first := strings.TrimSuffix(filepath.Base(pending[0]), ".sql")
-	path := filepath.Join(backupDir, preMigrateBackupPrefix+first+".db")
-
-	ctx := context.Background()
-	// A same-name copy can only mean a previous boot died between the backup
-	// and the migration (once the migration applies, the first pending file
-	// changes), so the copy it left is the pre-migration state and is reused
-	// rather than overwritten. Verify it first: a process that died mid-write
-	// can leave a file that is present but unusable, and a bad safety copy is
-	// worse than none.
-	if _, statErr := os.Stat(path); statErr == nil {
-		if verifyErr := db.CheckBackupIntegrity(ctx, path); verifyErr == nil {
-			log.Info("pre-migration backup already present; skipping", "path", path, "migrations", len(pending))
-			return nil
+	// see at a glance which schema move this protects. A same-name copy may
+	// predate a rollback and hold none of the data written since, so every
+	// boot takes a fresh copy under the first free _N suffix and never
+	// touches an earlier one.
+	name := preMigrateBackupPrefix + strings.TrimSuffix(filepath.Base(pending[0]), ".sql")
+	path := filepath.Join(backupDir, name+".db")
+	for n := 2; ; n++ {
+		if _, statErr := os.Stat(path); statErr != nil {
+			break
 		}
-		log.Warn("pre-migration backup present but unreadable — retaking", "path", path)
-		if rmErr := os.Remove(path); rmErr != nil {
-			return fmt.Errorf("pre-migration backup: removing unreadable copy %s: %w", path, rmErr)
-		}
+		path = filepath.Join(backupDir, fmt.Sprintf("%s_%d.db", name, n))
 	}
 
+	ctx := context.Background()
 	if err := database.BackupToSafe(ctx, path, backupDir); err != nil {
 		return fmt.Errorf("pre-migration backup: %w", err)
 	}

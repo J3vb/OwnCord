@@ -128,6 +128,125 @@ func TestInitDatabase_BacksUpBeforeApplyingPendingMigrations(t *testing.T) {
 	}
 }
 
+// TestInitDatabase_UpgradeAfterRollbackTakesFreshBackup covers upgrade,
+// rollback that leaves the first pre_migrate_ copy behind, then upgrade again:
+// the second boot faces the same first pending migration, and must still take
+// a fresh copy holding the data written since the rollback, beside the
+// untouched earlier one.
+func TestInitDatabase_UpgradeAfterRollbackTakesFreshBackup(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "chatserver.db")
+	archive := filepath.Join(dir, "archive.db")
+	backupDir := filepath.Join(dir, "backups")
+	t.Cleanup(func() { admin.SetBackupDir(filepath.Join("data", "backups")) })
+
+	seed, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open seed: %v", err)
+	}
+	if err := db.MigrateFS(seed, migrationsUpTo(t, "020_")); err != nil {
+		t.Fatalf("MigrateFS(<020): %v", err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("Close seed: %v", err)
+	}
+	copyFile(t, dbPath, archive)
+
+	cfg := &config.Config{
+		Database: config.DatabaseConfig{Path: dbPath},
+		Backup:   config.BackupConfig{Dir: backupDir},
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	boot := func() {
+		t.Helper()
+		database, err := db.Open(dbPath)
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		if err := initDatabase(log, cfg, database, NewRestartCoordinator(time.Hour, nil)); err != nil {
+			t.Fatalf("initDatabase: %v", err)
+		}
+		if err := database.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	}
+
+	boot()
+	first := onlyBackup(t, backupDir)
+
+	// Roll back: restore the pre-upgrade archive over the live database,
+	// leaving the backup directory as it is, and run the old version long
+	// enough to write new data.
+	for _, suffix := range []string{"-wal", "-shm"} {
+		_ = os.Remove(dbPath + suffix)
+	}
+	copyFile(t, archive, dbPath)
+	old, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open rolled-back: %v", err)
+	}
+	if _, err := old.CreateUser(context.Background(), "rollback-era-user", "hash", 4); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatalf("Close rolled-back: %v", err)
+	}
+
+	boot()
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("backup dir holds %d files, want the earlier copy plus a fresh one", len(entries))
+	}
+	var second string
+	for _, e := range entries {
+		if p := filepath.Join(backupDir, e.Name()); p != first {
+			second = p
+		}
+	}
+	if second == "" {
+		t.Fatal("the earlier pre-migration copy was replaced instead of kept")
+	}
+	if hasUser(t, first, "rollback-era-user") {
+		t.Fatal("the earlier pre-migration copy was overwritten")
+	}
+	if !hasUser(t, second, "rollback-era-user") {
+		t.Fatal("the second upgrade migrated data written since the rollback without backing it up")
+	}
+	if hasVersion(t, second, "021_voice_server_moderation.sql") {
+		t.Fatal("fresh pre-migration backup was taken after migrating")
+	}
+}
+
+func copyFile(t *testing.T, src, dst string) {
+	t.Helper()
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", src, err)
+	}
+	if err := os.WriteFile(dst, data, 0o600); err != nil {
+		t.Fatalf("WriteFile(%s): %v", dst, err)
+	}
+}
+
+// hasUser reports whether the SQLite file at path holds a user with the name.
+func hasUser(t *testing.T, path, username string) bool {
+	t.Helper()
+	conn, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	defer conn.Close() //nolint:errcheck
+	var n int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM users WHERE username = ?`, username).Scan(&n); err != nil {
+		t.Fatalf("count users in %s: %v", path, err)
+	}
+	return n > 0
+}
+
 // TestInitDatabase_NoBackupWhenNothingIsPending keeps the gate from firing on
 // every ordinary boot: a database already at HEAD runs no migration SQL, so
 // there is nothing to protect.
