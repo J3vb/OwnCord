@@ -190,6 +190,22 @@ test("the Linux native-voice build scripts run the Rust suite", () => {
   }
 });
 
+test("a native-voice interop spec runs the Rust suite", () => {
+  // The only job that runs tests/e2e/native-voice is rust-tests (ci.yml's
+  // `npm run test:e2e:native-voice` step). Client/ alone selects client/
+  // browser/integration/native but NOT rust, so without this rule a change to
+  // the interop spec or its support would merge with the one job that runs it
+  // skipped — a fix that looks tested and never ran. Same class as the
+  // toolchain installer above.
+  for (const p of [
+    "Client/tests/e2e/native-voice/interop.spec.ts",
+    "Client/playwright.config.native-voice.ts",
+  ]) {
+    const sel = picked(`M\t${p}`);
+    assert.equal(sel.rust, true, `${p} must run rust-tests, which executes it`);
+  }
+});
+
 test("the k6 load harness runs the server job, where its offline test lives", () => {
   // Both paths live under `Server/`, so the prefix branch already selects
   // `server` today and a behaviour-only assertion here would pass with this
