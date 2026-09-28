@@ -8,9 +8,8 @@ import { setTimeout as delay } from "node:timers/promises";
 /** The first non-internal IPv4 address from `interfaces`, or null when the
  *  host has only loopback. The RT-11 Linux voice journey (artifact-smoke)
  *  dials the test server by this address so the client takes its remote
- *  tunnel path, which is what makes the server's `/livekit` Authorization
- *  forwarding load-bearing. Pure, so the selection is unit-tested without a
- *  real NIC. */
+ *  tunnel path instead of the loopback `direct_url` shortcut. Pure, so the
+ *  selection is unit-tested without a real NIC. */
 export function pickNonLoopbackIPv4(
   interfaces: NodeJS.Dict<NetworkInterfaceInfo[]>,
 ): string | null {

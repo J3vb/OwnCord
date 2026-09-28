@@ -152,14 +152,17 @@ test("the .deb package installs through apt and boots", async ({}, info) => {
  * join token only as an `Authorization: Bearer` header, and the client
  * tunnels a remote server's LiveKit through the server's `/livekit` proxy.
  * On loopback the client takes the `direct_url` shortcut and never exercises
- * the tunnel or the server's Authorization forwarding, so a regression there
- * is invisible. The journey dials the server by the runner's own non-loopback
- * IPv4 and asserts the join timeline took the `tunnel` path, not `direct`.
+ * the tunnel (proxy start, TLS pin, WS proxy, the server's `/livekit` reverse
+ * proxy), so a regression there is invisible. The journey dials the server by
+ * the runner's own non-loopback IPv4 and asserts the native voice join
+ * succeeded over the `tunnel` path, not `direct`. The tunnel moves the bearer
+ * token into the query before the server sees it, so the server's
+ * Authorization forwarding keeps its own unit coverage.
  */
 test("installed Linux artifact joins voice by a non-loopback server address", async ({}, info) => {
   test.skip(
     process.platform !== "linux",
-    "RT-11 is the Linux native-voice journey; the tunnel path is Linux-only",
+    "RT-11 guards the Linux native voice join, whose SDK sends a bearer-only header",
   );
   // Resolve the address before starting the server, so a runner with only
   // loopback skips without leaking a server and its LiveKit child.
@@ -182,12 +185,20 @@ test("installed Linux artifact joins voice by a non-loopback server address", as
 
       // The join must have gone through the local TLS tunnel (serverHost is
       // non-loopback), which is exactly the path RT-1 fixed. `direct` here
-      // would mean the test dialed loopback and proves nothing.
-      const urlKind = await app.evaluate<string | null>(`() => {
-        const voiceJoin = window.__owncord?.lkDebug?.().voiceJoin;
-        return voiceJoin?.lastJoins?.[0]?.urlKind ?? null;
-      }`);
-      expect(urlKind).toBe("tunnel");
+      // would mean the test dialed loopback and proves nothing. "Voice
+      // Connected" shows before the join is recorded, so wait for the record.
+      await expect
+        .poll(
+          () =>
+            app.evaluate<{ urlKind: string; succeeded: boolean } | null>(`() => {
+              const voiceJoin = window.__owncord?.lkDebug?.().voiceJoin;
+              const last = voiceJoin?.lastJoins?.[0];
+              if (voiceJoin?.active !== null || last === undefined) return null;
+              return { urlKind: last.urlKind, succeeded: last.succeeded };
+            }`),
+          { timeout: 30_000 },
+        )
+        .toEqual({ urlKind: "tunnel", succeeded: true });
 
       await app.click(".voice-widget.visible button[aria-label='Disconnect']");
       await expect
