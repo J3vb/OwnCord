@@ -239,11 +239,14 @@ func (h *Hub) BroadcastMemberUnban(userID int64) {
 	if role, err := h.readers.Members.GetRoleForUser(ctx, userID); err == nil && role != nil {
 		roleName = role.Name
 	}
-	// The ban disconnected them and reconnecting was refused while banned,
-	// so they cannot be online at unban time — report offline regardless of
-	// the stale status the row carries (serve_ready's "no live connection is
-	// offline, whatever the row says" rule).
-	user.Status = "offline"
+	// A lapsed temporary ban lets the user reconnect while users.banned is
+	// still 1, so they can be online at unban time. With no live connection,
+	// report offline regardless of the stale status the row carries
+	// (serve_ready's "no live connection is offline, whatever the row says"
+	// rule); with one, the row holds the status their connect stamped.
+	if h.GetClient(userID) == nil {
+		user.Status = db.StatusOffline
+	}
 	h.BroadcastToAll(buildMemberJoin(user, roleName))
 }
 

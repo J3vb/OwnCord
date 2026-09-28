@@ -11241,7 +11241,7 @@
         "test": "Server/service/moderation_timeout_seconds_test.go (TestTimeoutDurationFromSeconds_RejectsOverflow, TestTimeoutDurationFromSeconds_AcceptsTheWindow); Server/api/moderation_timeout_overflow_test.go (both entry points refused with 400)",
         "revertProof": "pass (stashing the fix reproduced the pre-fix acceptance: the direct route returned 201 and the act route 200 with duration_seconds=36028797018967568; with the fix both return 400)"
       },
-      "note": "Found in the BUG-09 second pass over the server moderation handlers (D11g)."
+      "note": "Found in the BUG-09 second pass over the server moderation handlers (D11g). D11g remains open: its rounds so far confirmed OC-0485 and OC-0486, the native video/screen paths were hunted in a separate pass that came back dry, and the two consecutive dry rounds its stop condition needs are still owed."
     },
     {
       "id": "OC-0486",
@@ -11265,7 +11265,7 @@
         "test": "Server/service/appeal_unban_broadcast_test.go (TestAppeal_OverturnBanRebroadcastsMemberUnban plus negative controls for an upheld ban, a superseded re-ban and a timeout overturn)",
         "revertProof": "pass (disabling the broadcastUnban call reproduced the miss: BroadcastMemberUnban calls = [], want [3]; restoring it is green)"
       },
-      "note": "Found in the BUG-09 second pass over the server moderation/appeal service (D11g). Distinct from OC-0058, which fixed the admin unban path; this is the appeal-overturn sibling."
+      "note": "Found in the BUG-09 second pass over the server moderation/appeal service (D11g). Distinct from OC-0058, which fixed the admin unban path; this is the appeal-overturn sibling. D11g remains open: its rounds so far confirmed OC-0485 and OC-0486, the native video/screen paths were hunted in a separate pass that came back dry, and the two consecutive dry rounds its stop condition needs are still owed."
     }
   ]
 }
