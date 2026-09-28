@@ -71,7 +71,58 @@ decisions live in Rust:
    header caveat and allows per-request logging. Still no TLS termination in
    the webview.
 
-## TOFU semantics (must match ws_proxy)
+## Measured per-request TLS cost (CLI-04(b), 2026-09-28)
+
+`Connection: close` is injected per request, so every REST call and the first
+image fetch opens a fresh TLS connection through the tunnel. CLI-04(b) asked
+for that cost to be measured before deciding whether to add connection reuse.
+
+**What one cold open costs.** Driving the real client against a real
+self-signed server (the fullstack e2e harness, one login to first channel)
+made **18 REST calls**, all through the tunnel:
+
+```
+GET  /api/v1/server-info            GET  /api/v1/blocks
+POST /api/v1/auth/login             GET  /api/v1/appeals/mine
+GET  /api/v1/emoji                  GET  /api/v1/users/me/moderation
+GET  /api/v1/dm-requests            PATCH /api/v1/users/me
+GET  /api/v1/users/me/sessions   x2 GET  /api/v1/auth/me
+GET  /api/v1/users/me/recovery-kit  GET  /api/v1/channels/1/messages
+GET  /api/v1/server-info ...
+```
+
+so a remote-server cold open pays 18 TLS handshakes instead of one. Each
+handshake is one extra round trip beyond the request itself (TLS 1.3 sends the
+ClientHello and Finished in one flight, so the handshake adds one RTT, not the
+two of a full TLS 1.2 exchange).
+
+**The handshake cost is one RTT.** Measured against a real server over a
+loopback delay gate that adds a fixed one-way delay to every hop (so the
+figure is the network's, not the machine's):
+
+| Added one-way delay | RTT    | Fresh-connection request | Keep-alive request | Handshake overhead |
+| ------------------- | ------ | ------------------------ | ------------------ | ------------------ |
+| 5 ms                | 10 ms  | 63 ms                    | 10 ms              | **53 ms**          |
+| 10 ms               | 20 ms  | 83 ms                    | 21 ms              | **62 ms**          |
+| 25 ms               | 50 ms  | 143 ms                   | 51 ms              | **92 ms**          |
+| 50 ms               | 100 ms | 253 ms                   | 100 ms             | **152 ms**         |
+
+The overhead is roughly one RTT plus the record-layer work; the reused-request
+column already includes the round trip, so the two columns differ by the
+handshake. On loopback (sub-millisecond RTT) the handshake is **~0.9 ms**, which
+is why the cost is invisible locally and why U7e is about remote servers.
+
+**Decision: not worth a connection pool now, and the claim is published as
+measured rather than asserted.** 18 handshakes at a LAN RTT (~1 ms) adds ~15 ms
+to a cold open; at a 100 ms WAN RTT it adds ~2.5 s, but that open already pays
+~2.5 s of request RTTs, so the handshake roughly doubles a slow cold open — the
+user-visible pain the report records, and real. It is still not fixed here: the
+tunnel's one-request-per-connection design is what makes the `Host` rewrite and
+per-request TOFU safe (see the design notes in `http_proxy.rs`), and reuse is a
+security-relevant change to that path, not a perf-only one. The right shape is
+a pooled keep-alive tunnel that keeps the rewrite invariant, which is its own
+change with its own review; the report keeps CLI-04(b) as a measurement. The
+measured ceiling a future fix targets is the "Handshake overhead" column above.
 
 - **Pin store:** the same per-host fingerprint store used by `ws_proxy.rs`
   (`certs.json` via `commands.rs`); one fingerprint per host covers all three
