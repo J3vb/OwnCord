@@ -421,4 +421,37 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
       "Actions",
     ]);
   });
+
+  // Category names are free text, so one named after an Object.prototype key
+  // groups like any other, and each group is its own row group.
+  it("groups any category name, each under a rowgroup heading", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, (p) =>
+      p === "/channels"
+        ? [
+            { id: 1, name: "a", type: "text", category: "constructor" },
+            { id: 2, name: "b", type: "text", category: "__proto__" },
+            { id: 3, name: "c", type: "text", category: "constructor" },
+          ]
+        : {},
+    );
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    const host = doc.createElement("div");
+    host.innerHTML = await bridge.renderChannels();
+
+    const groups = [...host.querySelectorAll(".ch-tbl tbody")].map((tb) => {
+      const th = tb.querySelector("tr.ch-cat th")!;
+      return {
+        heading: th.textContent,
+        scope: th.getAttribute("scope"),
+        rows: [...tb.querySelectorAll("strong")].map((s) => s.textContent),
+      };
+    });
+    expect(groups).toEqual([
+      { heading: "constructor", scope: "rowgroup", rows: ["a", "c"] },
+      { heading: "__proto__", scope: "rowgroup", rows: ["b"] },
+    ]);
+    expect(bridge.state.channelCategories).toEqual(["__proto__", "constructor"]);
+  });
 });
