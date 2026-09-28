@@ -84,7 +84,9 @@ Two things are needed together:
 2. Give LiveKit a routable media address. OwnCord's generated `livekit.yaml`
    sets `use_external_ip: true`, so with `voice.node_ip` **left empty** LiveKit
    detects the public address itself on every start — the right choice on a
-   dynamic IP (see [Dynamic public IP](#dynamic-public-ip)). Set `voice.node_ip`
+   dynamic IP (see [Dynamic public IP](#dynamic-public-ip)). On the Docker
+   stack LiveKit reads your own `livekit.yaml` instead: keep the example's
+   `rtc.use_external_ip: true` there. Set `voice.node_ip` (Docker: `rtc.node_ip`)
    only when auto-detection cannot work (a tailnet-only host, or a NAT where
    LiveKit's lookup is blocked): it is the address LiveKit advertises in its
    ICE candidates, so a private value hands remote clients something they
@@ -167,6 +169,10 @@ the address clients type, and the media address LiveKit advertises.
   — and then nobody hears anything, because the ICE candidate names an address
   no longer yours. If you did pin it, clear it (or update it) after an IP
   change and restart the server so `livekit.yaml` is rewritten.
+- **Media on the Docker stack:** LiveKit runs from your own `livekit.yaml` and
+  never reads `voice.node_ip`. Use `rtc.use_external_ip: true` there (the
+  example's default) rather than a pinned `rtc.node_ip`, then
+  `docker compose restart livekit` after an IP change.
 - **The server cannot detect this for you.** It never learns its public address,
   so it cannot notice the address changing; the fix above is what makes the
   address changing harmless.

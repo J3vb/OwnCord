@@ -28,7 +28,7 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
    starting with `change-me`) the same way it refuses the `devkey` dev
    defaults: voice stays off and a start-up warning says why.
 
-2. **Edit `livekit.yaml`** (copy from `livekit.yaml.example`) — use the same key/secret and set your public IP:
+2. **Edit `livekit.yaml`** (copy from `livekit.yaml.example`) — use the same key/secret:
 
    ```yaml
    port: 7880
@@ -36,7 +36,7 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
      tcp_port: 7881
      port_range_start: 50000
      port_range_end: 60000
-     node_ip: "YOUR_SERVER_PUBLIC_IP" # required for remote clients
+     use_external_ip: true # LiveKit detects the public IP on every start
    keys:
      my-unique-key: my-secret-at-least-32-characters-long
    logging:
@@ -56,7 +56,7 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
    opened: OwnCord proxies signalling to clients through `/livekit` on its own
    `8443` port.
 
-> **`node_ip` is required** for remote clients. Without it, LiveKit advertises internal Docker IP addresses as ICE candidates, which are unreachable from the internet. If your cloud VM has a metadata service (AWS, GCP, DigitalOcean) you can use `use_external_ip: true` instead.
+> **LiveKit needs a routable media address** for remote clients. Without `use_external_ip: true` or a `node_ip`, it advertises internal Docker IP addresses as ICE candidates, which are unreachable from the internet. Prefer `use_external_ip: true`: it re-detects the public address on every start, so a dynamic IP keeps working. Pin `node_ip` only where detection cannot work (a tailnet-only host, set to its `100.x` address) — a pinned public IP goes stale silently when the address changes.
 
 ---
 

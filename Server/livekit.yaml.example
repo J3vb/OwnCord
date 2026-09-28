@@ -9,12 +9,13 @@ rtc:
   port_range_start: 50000
   port_range_end: 60000
 
-  # Your server's public IP address — required so browser WebRTC clients can
-  # reach LiveKit directly for media. Leave blank only if running entirely on
-  # localhost (development). On cloud VMs with a metadata service (AWS, GCP,
-  # DigitalOcean) you can set use_external_ip: true instead.
-  node_ip: "YOUR_SERVER_PUBLIC_IP"
-  # use_external_ip: true   # uncomment on cloud VMs instead of node_ip
+  # LiveKit detects your public IP itself (over STUN) on every start, so a
+  # dynamic residential address keeps working after it changes. Pin node_ip
+  # instead only when detection cannot work — a tailnet-only host (use its
+  # 100.x address) or a network that blocks the lookup. A pinned public IP goes
+  # stale silently when the address changes: calls connect and carry no audio.
+  use_external_ip: true
+  # node_ip: "YOUR_SERVER_PUBLIC_IP"
 
   # If the server is reachable via both a LAN IP and a public IP (dual-homed),
   # uncomment this so LiveKit also advertises the internal address — clients on
