@@ -71,9 +71,7 @@ func (h *Hub) kickClient(c *Client) {
 // read-loop teardown ends a voice call at once instead of parking it in the
 // grace window for a resume that can never come.
 func (h *Hub) kickClientTerminal(c *Client) {
-	c.mu.Lock()
-	c.terminalKick = true
-	c.mu.Unlock()
+	c.markTerminalKick()
 	h.kickClient(c)
 }
 

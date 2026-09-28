@@ -134,16 +134,21 @@ func (s *voiceGraceState) snapshot() map[int64]int64 {
 	return out
 }
 
-// leaveVoiceOnDisconnect is the readPump-teardown voice step. A completed
+// leaveVoiceOnDisconnect is the socket-teardown voice step (readPump and a
+// failed handshake). A completed
 // membership is parked in the grace window; anything else (disabled window, a
 // failed/half join, a kick that refuses reconnection) leaves immediately.
-func (h *Hub) leaveVoiceOnDisconnect(ctx context.Context, c *Client, chID int64, joinToken string, completed bool) {
-	if !completed || voiceGraceWindow <= 0 || c.isTerminallyKicked() {
-		h.handleVoiceLeave(ctx, c, voiceLeaveReasonDisconnect)
+func (h *Hub) leaveVoiceOnDisconnect(ctx context.Context, c *Client, reason string) {
+	key, sig := c.getE2EEPubKey()
+	chID, joinToken, completed := c.clearVoiceState()
+	if chID == 0 {
 		return
 	}
-	key, sig := c.getE2EEPubKey()
-	h.clearVoiceAndUnsubscribe(c)
+	h.pubsub.Unsubscribe(c, VoiceTopic(chID))
+	if !completed || voiceGraceWindow <= 0 || c.isTerminallyKicked() {
+		h.finishVoiceLeave(ctx, c, chID, joinToken, reason)
+		return
+	}
 	entry := &voiceGraceEntry{
 		client:    c,
 		channelID: chID,

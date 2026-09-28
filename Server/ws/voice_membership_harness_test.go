@@ -338,10 +338,10 @@ func (h *vmHarness) disconnect(m *vmMember, teardown bool) {
 	h.step++
 	h.t.Helper()
 	ctx := context.Background()
-	voiceChID, token, completed := m.c.getVoiceStateCompleted()
+	voiceChID := m.c.getVoiceChID()
 	replaced := h.hub.unregisterNow(m.c)
 	if teardown && voiceChID != 0 && !replaced {
-		h.hub.leaveVoiceOnDisconnect(ctx, m.c, voiceChID, token, completed)
+		h.hub.leaveVoiceOnDisconnect(ctx, m.c, voiceLeaveReasonDisconnect)
 	}
 	m.c = nil
 	h.note("disconnect %s (was ch%d, teardown=%v)", m.name, voiceChID, teardown)
@@ -1001,6 +1001,72 @@ func TestVoiceMembership_GraceWindowResumeReelectsKeyHolder(t *testing.T) {
 	h.resume(alice)
 	if !h.hub.IsVoiceKeyHolder(chA, alice.userID) {
 		t.Fatalf("a grace resume did not restore the lowest-uid key holder")
+	}
+}
+
+// TestVoiceMembership_GraceWindowHandshakeFailure pins the failed-handshake
+// teardown: a resume that inherited a parked call and then fails its
+// handshake write parks the call again for the next redial, while a session
+// revoked during the handshake ends it at once.
+func TestVoiceMembership_GraceWindowHandshakeFailure(t *testing.T) {
+	withGraceWindow(t, time.Minute)
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chA := h.chanOf("vm-grace-handshake")
+	ctx := context.Background()
+
+	h.connect(alice)
+	h.join(alice, chA)
+	h.disconnect(alice, true)
+	h.resume(alice)
+
+	h.hub.unregisterFailedHandshake(ctx, alice.c)
+	alice.c = nil
+	h.check()
+	if !h.hub.voiceGrace.has(alice.userID, chA) {
+		t.Fatalf("a failed resume handshake did not park the inherited call")
+	}
+
+	h.resume(alice)
+	if ch := alice.c.getVoiceChID(); ch != chA {
+		t.Fatalf("the redial after a failed handshake inherited ch%d, want ch%d", ch, chA)
+	}
+	alice.c.tokenHash = "revoked-during-handshake"
+	if !h.hub.postRegisterSessionRecheck(ctx, alice.c) {
+		t.Fatalf("precondition: the session recheck did not see the revoked session")
+	}
+	alice.c = nil
+	h.check()
+	if h.hub.voiceGrace.has(alice.userID, chA) {
+		t.Fatalf("a session revoked during the handshake parked the call")
+	}
+	if row, err := h.db.GetVoiceState(ctx, alice.userID); err != nil || row != nil {
+		t.Fatalf("a session revoked during the handshake left a row: row=%v err=%v", row, err)
+	}
+}
+
+// TestVoiceMembership_GraceWindowConcurrentEvictNotParked pins that a
+// teardown finding the membership already cleared by a concurrent eviction
+// parks nothing, so no expiry re-runs a leave that already happened.
+func TestVoiceMembership_GraceWindowConcurrentEvictNotParked(t *testing.T) {
+	withGraceWindow(t, time.Minute)
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chA := h.chanOf("vm-grace-evict-race")
+	ctx := context.Background()
+
+	h.connect(alice)
+	h.join(alice, chA)
+	c := alice.c
+	h.hub.unregisterNow(c)
+	if !h.hub.handleVoiceLeaveIfStillIn(ctx, c, chA, voiceLeaveReasonModerator) {
+		t.Fatalf("precondition: the eviction did not clear the membership")
+	}
+	h.hub.leaveVoiceOnDisconnect(ctx, c, voiceLeaveReasonDisconnect)
+	alice.c = nil
+	h.check()
+	if h.hub.voiceGrace.get(alice.userID) != nil {
+		t.Fatalf("a membership already evicted was parked")
 	}
 }
 

@@ -204,7 +204,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		// cancel its own cleanup — so detach cancellation but keep values.
 		cleanupCtx := context.WithoutCancel(ctx)
 		// Snapshot voice state BEFORE unregister to avoid TOCTOU with replacement connections.
-		voiceChID, voiceJoinToken, voiceCompleted := c.getVoiceStateCompleted()
+		voiceChID := c.getVoiceChID()
 		replaced := hub.unregisterNow(c)
 		if c.user != nil {
 			// Clean up voice state only when this was the user's final
@@ -219,7 +219,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 			// socket can inherit the call. leaveVoiceOnDisconnect runs the
 			// immediate teardown for an incomplete join or a disabled window.
 			if voiceChID != 0 && !replaced {
-				hub.leaveVoiceOnDisconnect(cleanupCtx, c, voiceChID, voiceJoinToken, voiceCompleted)
+				hub.leaveVoiceOnDisconnect(cleanupCtx, c, voiceLeaveReasonDisconnect)
 			}
 			c.mu.Lock()
 			received := c.msgsReceived

@@ -299,6 +299,7 @@ func (h *Hub) postRegisterSessionRecheck(ctx context.Context, c *Client) bool {
 	}
 	if result == nil || auth.IsSessionExpired(result.ExpiresAt) {
 		slog.Info("ws post-register session recheck: session revoked during handshake, aborting", "user_id", c.userID)
+		c.markTerminalKick()
 		h.unregisterFailedHandshake(ctx, c)
 		return true
 	}
