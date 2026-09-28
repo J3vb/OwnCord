@@ -151,6 +151,11 @@ const CHECK_CLIENT = [
   // D6: the CI job that runs this on every PR (client-check) mirrors ci.yml, so
   // the nightly mutation union check cannot drift unnoticed.
   step("node", ["scripts/check-mutation-shards.mjs"], "Client"),
+  // D1: the quarantine list is what keeps a known-flaky required test out of
+  // the run. Both halves are self-tested, like the count and migration
+  // matchers: the audit, and the pattern the Playwright configs actually apply.
+  step("node", ["--test", "scripts/check-quarantine.test.mjs"], "Client"),
+  step("node", ["scripts/check-quarantine.mjs"], "Client"),
   step("npm", ["run", "test:coverage"], "Client"),
   // B7-7 bundle budgets: scratch --manifest build (dist-budget/, never the
   // shipped dist/) then the gate. Node zlib, not the gzip CLI, so it runs

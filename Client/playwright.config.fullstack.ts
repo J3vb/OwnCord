@@ -1,8 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
+import { quarantineGrepInvert } from "./scripts/check-quarantine.mjs";
 
 export default defineConfig({
   outputDir: "test-results/fullstack",
   testDir: "./tests/e2e/fullstack",
+  // Known flakes tracked in tests/e2e/quarantine.json are excluded from the
+  // required run; `OWNCORD_FLAKES=1` runs them again. Policy and guard:
+  // docs/testing-behavior.md, scripts/check-quarantine.mjs.
+  grepInvert: quarantineGrepInvert(),
   timeout: 90_000,
   expect: { timeout: 15_000 },
   workers: 1,

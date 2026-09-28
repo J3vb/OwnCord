@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { quarantineGrepInvert } from "./scripts/check-quarantine.mjs";
 
 /** Built Windows WebView2 app, isolated credentials/profile and local Go server.
  * Five projects share one built binary: `native-core` is the required CI
@@ -10,6 +11,10 @@ import { defineConfig } from "@playwright/test";
  */
 export default defineConfig({
   outputDir: "test-results/native",
+  // Known flakes tracked in tests/e2e/quarantine.json are excluded from the
+  // required run; `OWNCORD_FLAKES=1` runs them again. Policy and guard:
+  // docs/testing-behavior.md, scripts/check-quarantine.mjs.
+  grepInvert: quarantineGrepInvert(),
   timeout: 120_000,
   expect: {
     timeout: 15_000,
