@@ -6,6 +6,10 @@
  * apart is what lets the renderer stay a strict DOM builder (no innerHTML)
  * while the grammar gets tested on its own.
  *
+ * `markdownToPlainText` flattens that grammar back to visible words for
+ * surfaces that may not render markup or reveal a spoiler (OS notifications);
+ * it is a consumer of the tokenizer, not part of its grammar.
+ *
  * The tokenizer is a single left-to-right scan with recursive descent into
  * matched delimiter pairs — not a stack of regexes — so nesting
  * (`**bold *and italic* **`), escaping (`\*literal\*`) and "markdown is dead
@@ -302,6 +306,106 @@ export function parseInline(src: string, depth = 0): InlineNode[] {
 
   flush();
   return out;
+}
+
+// -- Code fences --------------------------------------------------------------
+
+export interface MarkdownSegment {
+  readonly kind: "prose" | "code";
+  readonly text: string;
+  /** Raw fence tag, e.g. "ts" — present only on code segments that had one. */
+  readonly lang: string | null;
+}
+
+const FENCE = "```";
+const LANG_TAG_REGEX = /^[A-Za-z][\w+#-]{0,19}$/;
+
+/** Split a message into prose and fenced-code segments. */
+export function splitCodeFences(content: string): MarkdownSegment[] {
+  const segments: MarkdownSegment[] = [];
+  let i = 0;
+  while (i < content.length) {
+    const open = content.indexOf(FENCE, i);
+    const close = open < 0 ? -1 : content.indexOf(FENCE, open + FENCE.length);
+    if (open < 0 || close < 0) break;
+
+    if (open > i) segments.push({ kind: "prose", text: content.slice(i, open), lang: null });
+
+    const inner = content.slice(open + FENCE.length, close);
+    const newline = inner.indexOf("\n");
+    const tag = newline > 0 ? inner.slice(0, newline).trim() : "";
+    if (tag.length > 0 && LANG_TAG_REGEX.test(tag)) {
+      segments.push({
+        kind: "code",
+        text: inner.slice(newline + 1).replace(/\s+$/, ""),
+        lang: tag,
+      });
+    } else {
+      segments.push({ kind: "code", text: inner.trim(), lang: null });
+    }
+    i = close + FENCE.length;
+  }
+  if (i < content.length) segments.push({ kind: "prose", text: content.slice(i), lang: null });
+  return segments;
+}
+
+/**
+ * The visible words of a message: markdown structure removed, a spoiler
+ * replaced by `spoilerLabel` rather than its hidden text.
+ *
+ * This is for surfaces that must not show raw markup or a spoiler nobody has
+ * clicked — chiefly the OS notification body, which appears on a lock screen.
+ * The label is passed in rather than baked in so it stays translatable copy,
+ * resolved through the caller's catalog.
+ */
+export function markdownToPlainText(content: string, spoilerLabel: string): string {
+  const lines: string[] = [];
+  for (const segment of splitCodeFences(content)) {
+    if (segment.kind === "code") {
+      lines.push(segment.text);
+      continue;
+    }
+    for (const block of parseBlocks(segment.text)) {
+      lines.push(blockText(block, spoilerLabel));
+    }
+  }
+  return lines.join(" ").replace(/\s+/g, " ").trim();
+}
+
+/** Flatten one block node's text (recursing through quotes). */
+function blockText(block: BlockNode, spoilerLabel: string): string {
+  switch (block.type) {
+    case "paragraph":
+    case "heading":
+      return inlineText(parseInline(block.text), spoilerLabel);
+    case "quote":
+      return parseBlocks(block.text)
+        .map((b) => blockText(b, spoilerLabel))
+        .join(" ");
+    case "list":
+      return block.items.map((item) => inlineText(parseInline(item.text), spoilerLabel)).join(" ");
+    default:
+      return "";
+  }
+}
+
+/** Flatten inline nodes to their visible text, hiding spoiler content. */
+function inlineText(nodes: readonly InlineNode[], spoilerLabel: string): string {
+  return nodes
+    .map((node) => {
+      switch (node.type) {
+        case "text":
+        case "code":
+          return node.value;
+        case "spoiler":
+          return spoilerLabel;
+        case "link":
+          return inlineText(node.children, spoilerLabel);
+        default:
+          return inlineText(node.children, spoilerLabel);
+      }
+    })
+    .join("");
 }
 
 // -- Block constructs ---------------------------------------------------------

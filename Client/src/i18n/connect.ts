@@ -201,6 +201,7 @@ export const connectText = defineCatalog("connect", {
   "notifications.channelFallback": "Channel {id}",
   "notifications.mentioned": "{author} mentioned you in {channel}",
   "notifications.inChannel": "{author} in {channel}",
+  "notifications.spoiler": "Spoiler",
   "retention.kept": "keeps messages until they are deleted",
   "retention.deleted": {
     one: "deletes messages after {days} day",

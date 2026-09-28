@@ -46,6 +46,13 @@ red mention badge. It is a client-side preference on purpose (stored in
 settings table, and "which of my devices bothers me" is a property of the
 device, not the account.
 
+The mute sits under the **notification level** (Settings › Notifications,
+`lib/notificationLevel.ts`): All, Mentions only (a DM counts as addressed to
+you) or Nothing, a device-wide default with a per-server override keyed by
+host like the mutes. The level is checked first, so Nothing silences even a
+mention, which a mute never does. A new install starts at Mentions only; an
+install with earlier OwnCord state keeps All.
+
 ### 1.2 Channel switching
 
 ```mermaid

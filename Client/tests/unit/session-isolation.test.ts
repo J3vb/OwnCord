@@ -94,8 +94,8 @@ vi.mock("@lib/profiles", () => ({
 // The media session is its own suite (session-isolation-media.test.ts); here
 // only the switch's call into it is observed.
 vi.mock("@lib/livekitSession", () => ({ leaveVoice: vi.fn() }));
-vi.mock("@lib/notifications", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/notifications")>()),
+vi.mock("@lib/notificationSound", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/notificationSound")>()),
   cleanupNotificationAudio: vi.fn(),
 }));
 
@@ -204,7 +204,7 @@ import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
 import { voiceStore } from "@stores/voice.store";
 import { currentUserPermissions } from "@lib/permissions";
-import { cleanupNotificationAudio } from "@lib/notifications";
+import { cleanupNotificationAudio } from "@lib/notificationSound";
 import { leaveVoice } from "@lib/livekitSession";
 import { deleteCredential, loadCredential } from "@lib/credentials";
 import { createConnectPage } from "@pages/ConnectPage";
