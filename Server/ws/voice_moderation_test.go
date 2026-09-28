@@ -612,6 +612,46 @@ func TestVoiceMod_Move_DisconnectsAndSendsVoiceMoved(t *testing.T) {
 	}
 }
 
+// TestVoiceMod_Move_ParkedTargetIsRemovedNotMoved pins a move of a target
+// whose socket dropped and whose membership is parked in the RT-8 grace
+// window: the membership is ejected, but nothing can deliver voice_moved, so
+// the move reports and audits itself as a removal, not a completed move.
+func TestVoiceMod_Move_ParkedTargetIsRemovedNotMoved(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-parked-from")
+	toID := seedVoiceChan(t, database, "vc-parked-to")
+	actor := seedVoiceUserWithRole(t, database, "admin-parked", 2)
+	target := seedVoiceUserWithRole(t, database, "member-parked", 4)
+
+	targetClient, targetSend := joinVoice(t, hub, target, fromID)
+	hub.DropSocketForTest(targetClient)
+	if state, err := database.GetVoiceState(context.Background(), target.ID); err != nil || state == nil {
+		t.Fatalf("precondition: the dropped target's membership was not parked: state=%v err=%v", state, err)
+	}
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+
+	frame, ok := receiveErrorFrame(send, waitTimeout)
+	if !ok || frame.Message != "user was reconnecting; removed from voice instead of moved" {
+		t.Fatalf("moderator response = %+v (ok=%v), want the removed-instead-of-moved error", frame, ok)
+	}
+	if state, err := database.GetVoiceState(context.Background(), target.ID); err != nil || state != nil {
+		t.Fatalf("the parked membership was not ejected: state=%v err=%v", state, err)
+	}
+	if receiveMsgOfType(targetSend, "voice_moved", 50*time.Millisecond) != nil {
+		t.Error("voice_moved was sent to a target that was not moved")
+	}
+	actions := auditActions(t, database)
+	if slices.Contains(actions, "voice_mod_move") || !slices.Contains(actions, "voice_mod_kick") {
+		t.Errorf("audit actions = %v, want a voice_mod_kick and no voice_mod_move", actions)
+	}
+}
+
 // TestVoiceMod_Move_PreservesServerMute locks OC-0245: a moderator move is
 // implemented as a server-driven leave (which deletes the target's
 // voice_states row) followed by the target's client answering voice_moved

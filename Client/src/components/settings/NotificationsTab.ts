@@ -5,11 +5,136 @@
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
 import { appendToggleRows } from "./helpers";
 import { setStatusIcon, statusIcon, type StatusKind } from "../../features/settings/status";
-import { listMutedChannels, unmuteChannel } from "@lib/channel-mutes";
+import { getChannelMutesHost, listMutedChannels, unmuteChannel } from "@lib/channel-mutes";
+import {
+  NOTIFICATION_LEVELS,
+  getGlobalNotificationLevel,
+  getServerNotificationLevel,
+  setGlobalNotificationLevel,
+  setServerNotificationLevel,
+  clearServerNotificationLevel,
+  type NotificationLevel,
+} from "@lib/notificationLevel";
+import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
+
+const LEVEL_LABELS: Readonly<Record<NotificationLevel, () => string>> = {
+  all: () => t("notifications.level.all"),
+  mentions: () => t("notifications.level.mentions"),
+  nothing: () => t("notifications.level.nothing"),
+};
+
+/**
+ * The notification level row: All / Mentions only / Nothing.
+ *
+ * A radiogroup in the row shape the tab already uses, rather than a `<select>`
+ * — three options are all visible at once and each is one keystroke away.
+ */
+function buildLevelRow(signal: AbortSignal): HTMLDivElement {
+  const row = createElement("div", { class: "setting-row" });
+  const info = createElement("div", {});
+  appendChildren(
+    info,
+    createElement("div", { class: "setting-label" }, t("notifications.level.label")),
+    createElement("div", { class: "setting-desc" }, t("notifications.level.desc")),
+  );
+
+  const group = createElement("div", {
+    class: "level-options",
+    role: "radiogroup",
+    "aria-label": t("notifications.level.label"),
+    "data-testid": "notification-level",
+  });
+
+  const buttons = new Map<NotificationLevel, HTMLButtonElement>();
+  const paint = (): void => {
+    const current = getGlobalNotificationLevel();
+    for (const [level, button] of buttons) {
+      const on = level === current;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-checked", String(on));
+    }
+  };
+  const choose = (level: NotificationLevel): void => {
+    setGlobalNotificationLevel(level);
+    paint();
+  };
+
+  for (const level of NOTIFICATION_LEVELS) {
+    const button = createElement(
+      "button",
+      {
+        class: "level-opt",
+        type: "button",
+        role: "radio",
+        "aria-checked": "false",
+        tabindex: "-1",
+        "data-testid": `notification-level-${level}`,
+      },
+      LEVEL_LABELS[level](),
+    );
+    button.addEventListener("click", () => choose(level), { signal });
+    // Enter/Space are handled by the roving navigation below (so keyboard and
+    // mouse share the click path), matching the theme tiles in Appearance.
+    buttons.set(level, button);
+    group.appendChild(button);
+  }
+  paint();
+  setRovingTabindex(group, "[role='radio']");
+  enableRovingNavigation(group, "[role='radio']", signal);
+
+  appendChildren(row, info, group);
+  return row;
+}
+
+/**
+ * The connected server's override of the global level, shown only while
+ * connected. "Follow global setting" clears the override; the three levels set
+ * an explicit value, so one noisy community can be quieted without muting every
+ * other server. Stored against the host (see @lib/notificationLevel), so the
+ * choice returns when you switch back.
+ */
+function buildServerLevelRow(signal: AbortSignal): HTMLDivElement | null {
+  if (getChannelMutesHost() === null) return null;
+  const row = createElement("div", {
+    class: "setting-row",
+    "data-testid": "server-notification-level-row",
+  });
+  const info = createElement("div", {});
+  appendChildren(
+    info,
+    createElement("div", { class: "setting-label" }, t("notifications.serverLevel.label")),
+    createElement("div", { class: "setting-desc" }, t("notifications.serverLevel.desc")),
+  );
+
+  const select = createElement("select", {
+    class: "form-input",
+    "aria-label": t("notifications.serverLevel.label"),
+    "data-testid": "server-notification-level",
+  });
+  const options: ReadonlyArray<{ value: string; label: string }> = [
+    { value: "", label: t("notifications.serverLevel.follow") },
+    ...NOTIFICATION_LEVELS.map((level) => ({ value: level, label: LEVEL_LABELS[level]() })),
+  ];
+  for (const { value, label } of options) {
+    select.appendChild(createElement("option", { value }, label));
+  }
+  select.value = getServerNotificationLevel() ?? "";
+  select.addEventListener(
+    "change",
+    () => {
+      if (select.value === "") clearServerNotificationLevel();
+      else setServerNotificationLevel(select.value as NotificationLevel);
+    },
+    { signal },
+  );
+
+  appendChildren(row, info, select);
+  return row;
+}
 
 export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
@@ -26,6 +151,10 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     blockedReason.hidden = !blocked;
   });
   section.appendChild(permissionRow);
+
+  section.appendChild(buildLevelRow(signal));
+  const serverLevelRow = buildServerLevelRow(signal);
+  if (serverLevelRow !== null) section.appendChild(serverLevelRow);
 
   const toggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
     {

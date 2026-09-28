@@ -191,8 +191,9 @@ _"alice, bob, carol and 4 others reacted with 👍"_. The debounce mirrors
 `lib/streamPreview.ts` so a pointer crossing a row of pills fires no requests.
 The list comes from `GET /channels/{id}/messages/{messageId}/reactions/{emoji}/users`
 (oldest first, capped at 100 server-side) and is cached per message+emoji in
-`message-list/reaction-tooltip.ts`; a `reaction_update` for that message evicts
-every one of its lists, since the event names only the emoji that changed.
+`features/messaging/reactionUsers.ts` (the tooltip component renders it); a
+`reaction_update` for that message evicts every one of its lists, since the
+event names only the emoji that changed.
 Usernames are inserted as text nodes — never markup.
 
 ---
@@ -406,8 +407,7 @@ the same signal in future.
 `src/stores/messages.store.ts` (+ its reducers in `src/features/messaging/`), `src/lib/dispatcher.ts`, `src/features/messaging/wsHandlers.ts`, `src/lib/ws.ts`,
 `src/components/SearchOverlay.ts`, `src/components/PinnedMessages.ts`,
 `src/components/MentionAutocomplete.ts`, `src/lib/mentions.ts`,
-`src/components/message-list/content-parser.ts` (+ `markdown.ts`,
-`syntax-highlight.ts`),
-`src/lib/channel-navigation.ts`, `src/lib/notifications.ts`;
+`src/components/message-list/content-parser.ts` (+ `syntax-highlight.ts`),
+`src/lib/markdown.ts`, `src/lib/channel-navigation.ts`, `src/lib/notifications.ts`;
 server `Server/service/message.go`, `Server/service/mentions.go`,
 `Server/ws/handlers_chat.go`.

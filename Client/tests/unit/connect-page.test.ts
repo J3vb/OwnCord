@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { ApiClientError } from "../../src/lib/api";
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
 import { uiStore, setTransientError } from "../../src/stores/ui.store";
@@ -1516,6 +1517,30 @@ describe("ConnectPage", () => {
     // Verify button should be re-enabled
     expect(verifyBtn.disabled).toBe(false);
     expect(verifyBtn.textContent).toBe("Verify");
+
+    page.destroy?.();
+  });
+
+  it("TOTP submit refused for too many codes shows the lockout copy", async () => {
+    const onTotpSubmit = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiClientError(429, "RATE_LIMITED", "too many failed attempts, try again later"),
+      );
+    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
+    page.mount(container);
+
+    page.showTotp();
+
+    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    totpInput.value = "999999";
+    (container.querySelector(".totp-overlay .btn-primary") as HTMLButtonElement).click();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.textContent).toBe(
+        "Too many incorrect codes. Try again later.",
+      );
+    });
 
     page.destroy?.();
   });

@@ -7,11 +7,13 @@ import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
 
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
-import { createApiClient, ApiClientError } from "@lib/api";
+import { createApiClient, ApiClientError, errorText } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { cleanupNotificationAudio } from "@lib/notifications";
+import { resetNotificationCoalescing } from "@lib/notifications";
+import { cleanupNotificationAudio } from "@lib/notificationSound";
+import { settleNotificationLevelDefault } from "@lib/notificationLevel";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { setLastChannelHost } from "@lib/last-channel";
@@ -60,6 +62,10 @@ import { getActivePresenceSender } from "@lib/presence";
 
 import { desktop } from "./platform/desktop";
 import { connectText } from "./i18n/connect";
+
+// First, while storage still holds only what earlier sessions wrote: that is
+// how an install from before the notification level is told from a new one.
+settleNotificationLevelDefault();
 
 // Gate the log level before anything logs: debug entries are serialized and
 // persisted to disk, so in production the level must filter real work, not
@@ -171,6 +177,10 @@ void import("@lib/connectionDiagnostics").then(({ configureConnectionDiagnostics
 // Registered here rather than imported by auth.store: notifications imports
 // auth.store, so that import was a cycle.
 onAuthCleared(cleanupNotificationAudio);
+// Coalescing is keyed by channel id, which is only unique per server, so a
+// stale window from the previous profile must not suppress the next server's
+// first notification for the same id.
+onAuthCleared(resetNotificationCoalescing);
 // A profile switch or sign-out must not carry one account's moderation notices into the next.
 onAuthCleared(resetSafetyStore);
 onAuthCleared((reason) => {
@@ -909,8 +919,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         // credential read was still pending) must not paint an error over
         // the login that superseded it.
         if (!autoLoginCancelled && pageOwner.isCurrent() && attempt.isCurrent()) {
-          const message =
-            err instanceof Error ? err.message : connectText("session.autoLoginFailed");
+          const message = errorText(err, connectText("session.autoLoginFailed"));
           log.warn("Auto-login failed", { host: profile.host, error: message });
           connectPage.showError(connectText("session.autoLoginFailedDetail", { message }));
         }

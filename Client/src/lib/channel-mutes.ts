@@ -62,6 +62,13 @@ export function setChannelMutesHost(host: string | null): void {
   invalidateMuteCache();
 }
 
+/** The host the per-server prefs are currently scoped to. Other per-server
+ *  client prefs (the notification level override) read it through this getter
+ *  rather than carrying their own copy and a second MainPage setter. */
+export function getChannelMutesHost(): string | null {
+  return currentHost;
+}
+
 function parseMutedIds(raw: unknown): Set<number> {
   const ids = new Set<number>();
   if (Array.isArray(raw)) {

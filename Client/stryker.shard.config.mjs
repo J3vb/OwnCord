@@ -70,6 +70,7 @@ export const shards = {
     "src/features/direct-messages/wsHandlers.ts",
     "src/features/channels/wsHandlers.ts",
     "src/features/messaging/wsHandlers.ts",
+    "src/features/messaging/reactionUsers.ts",
     "src/features/voice/wsHandlers.ts",
   ], // 3103 mutants
   "lib-rest": [
@@ -78,6 +79,7 @@ export const shards = {
     "src/lib/appearance.ts",
     "src/lib/autoIdle.ts",
     "src/lib/avatar.ts",
+    "src/components/message-list/avatar.ts",
     "src/lib/call-ring.ts",
     "src/lib/channel-mutes.ts",
     "src/lib/channel-navigation.ts",
@@ -93,9 +95,12 @@ export const shards = {
     "src/lib/last-channel.ts",
     "src/lib/logger.ts",
     "src/lib/logPersistence.ts",
+    "src/lib/markdown.ts",
     "src/lib/mentions.ts",
     "src/lib/message-navigation.ts",
     "src/lib/modalFactory.ts",
+    "src/lib/notificationLevel.ts",
+    "src/lib/notificationSound.ts",
     "src/lib/notifications.ts",
     "src/lib/os-motion.ts",
     "src/lib/preferences.ts",

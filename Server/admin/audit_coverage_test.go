@@ -159,6 +159,15 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 			}
 			return rec, []string{token}
 		}},
+		{"backup archive download", "backup_archive", func(t *testing.T) (*audittest.Recorder, []string) {
+			f := newArchiveFixture(t)
+			rec := audittest.Install(t, f.database)
+			w := doRequest(t, f.handler, http.MethodGet, "/archive", f.token, nil)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+			}
+			return rec, nil
+		}},
 		{"config write (setup wizard)", "config_write", func(t *testing.T) (*audittest.Recorder, []string) {
 			database := openAdminTestDB(t)
 			cfgPath := filepath.Join(t.TempDir(), "config.yaml")

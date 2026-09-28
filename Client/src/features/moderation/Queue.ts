@@ -47,6 +47,7 @@
 import {
   ApiClientError,
   errorText,
+  serverErrorText,
   type ModerationActRequest,
   type ModerationOutcome,
   type ModerationQueueFilter,
@@ -113,10 +114,11 @@ interface ReportsView {
 }
 
 /** A removal's refusal: the channel's rules, the reader's bit, or the server's own words. */
-function removalRefusal(message: string): string {
+function removalRefusal(code: string, message: string): string {
   if (message === "forbidden: channel is archived") return t("act.refusedArchived");
   if (message === "forbidden: cannot delete this message") return t("act.refusedRemoval");
-  return message === "" ? t("act.unknown") : t("act.invalid", { message });
+  const text = serverErrorText(code, message, "");
+  return text === "" ? t("act.unknown") : t("act.invalid", { message: text });
 }
 
 const TABS = ["reports", "appeals"] as const;
@@ -208,15 +210,17 @@ function actionErrorText(w: ActionWrite, err: unknown): string {
   if (isStatus(err, 403)) {
     // Kick and ban each have their own bit, which a role change can take
     // while MODERATE_MEMBERS stays, so a refusal is not only about rank.
-    if (w.kind === "removal") return removalRefusal((err as ApiClientError).message);
+    if (w.kind === "removal")
+      return removalRefusal((err as ApiClientError).code, (err as ApiClientError).message);
     return t(w.kind === "kick" || w.kind === "ban" ? "act.refusedEnforce" : "act.refused");
   }
   if (isStatus(err, 404) && w.kind === "lift") return t("act.liftNone");
   // 409 ALREADY_DELETED (B9-14's removal of an already-removed message): a
   // known end state, not the uncertain "may still have been recorded" answer.
   if (isStatus(err, 409, "ALREADY_DELETED")) return t("act.alreadyDeleted");
-  if (isStatus(err, 400) && (err as ApiClientError).message !== "") {
-    return t("act.invalid", { message: (err as ApiClientError).message });
+  if (isStatus(err, 400)) {
+    const message = err instanceof ApiClientError ? serverErrorText(err.code, err.message, "") : "";
+    if (message !== "") return t("act.invalid", { message });
   }
   // No answer, or an internal failure: the action may still have been recorded.
   return err instanceof ApiClientError ? errorText(err, t("act.unknown")) : t("act.unknown");

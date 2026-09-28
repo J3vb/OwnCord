@@ -343,7 +343,9 @@ async function renderBackups(){
   try{state._settings=await api('GET','/settings')}catch(e){policyErr=e.message}
   const v=k=>(state._settings||{})[k]||'';
   let html='<div class="page-head"><div><div class="page-title">Backups &amp; restore</div><div class="page-desc">Copies of the server database. Restoring one replaces everything that happened after it was taken.</div></div>'
-    +'<button class="btn btn-accent" data-action="createBackup"'+(state.backupRunning?' disabled':'')+'>'+(state.backupRunning?'<span class="spinner" aria-hidden="true"></span> Backing up…':I.download+' Create backup now')+'</button></div>';
+    +'<div class="btn-row"><button class="btn btn-ghost" data-action="downloadArchive"'+(state.archiveRunning?' disabled':'')+'>'+(state.archiveRunning?'<span class="spinner" aria-hidden="true"></span> Preparing…':I.download+' Download full archive')+'</button>'
+    +'<button class="btn btn-accent" data-action="createBackup"'+(state.backupRunning?' disabled':'')+'>'+(state.backupRunning?'<span class="spinner" aria-hidden="true"></span> Backing up…':I.download+' Create backup now')+'</button></div></div>';
+  html+='<p class="card-note">The full archive holds the database, uploads, the key files and <code>config.yaml</code> — everything a restore needs. A database backup alone does not.</p>';
   html+=backupStatusLine(backups||[],policyErr?'':(v('backup_schedule')||'off'),await backupSignal());
   let sched;
   if(policyErr)sched='<p style="color:var(--text-danger)">'+esc(policyErr)+'</p>';
@@ -413,6 +415,26 @@ async function saveBackupPolicy(){
 async function createBackup(){
   state.backupRunning=true;renderContent();
   try{await api('POST','/backup');state.backupRunning=false;showToast('Backup created');renderContent()}catch(e){state.backupRunning=false;showToast(e.message,'error');renderContent()}
+}
+
+/* The full archive is a streamed zip, so it is fetched (not through api(),
+   which always parses JSON) and saved with a Blob link, like the support
+   bundle. A failure before the server writes a body is a JSON error; a failure
+   mid-stream truncates the download, which the browser reports as a failed
+   save. */
+async function downloadArchive(){
+  if(state.archiveRunning)return;
+  const token=state.token;state.archiveRunning=true;renderContent();
+  try{
+    const res=await fetch('/admin/api/archive',{headers:{Authorization:'Bearer '+token}});
+    if(state.token!==token)return;
+    if(res.status===401){handleSessionExpired();return}
+    if(!res.ok){let msg='Could not build the archive';try{const d=await res.json();if(d&&d.message)msg=d.message}catch(e){}throw new Error(msg)}
+    const blob=await res.blob();if(state.token!==token)return;
+    const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='owncord-archive.zip';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    showToast('Archive downloaded');
+  }catch(e){if(state.token===token)showToast(e.message,'error')}
+  finally{if(state.token===token){state.archiveRunning=false;if(state.section==='backups')renderContent()}}
 }
 
 /* Restore overwrites the live database and restarts the server, so it asks
@@ -553,7 +575,7 @@ async function confirmApplyUpdate(){
 }
 
 Object.assign(ACTIONS,{showPendingMembers,applyRetention,toggleRetentionEdit,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
-  confirmDeleteBackup,confirmRestore,createBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,
+  confirmDeleteBackup,confirmRestore,createBackup,downloadArchive,discardSettings,markBackupPolicyChanged,markSettingsChanged,
   openApplyRetention,openChannelRetention,openDeleteBackupModal,openRestoreModal,saveBackupPolicy,saveChannelRetention,
   saveSettings,syncUpdateConfirm,
   reloadPage(){location.reload()},

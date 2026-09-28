@@ -20,6 +20,7 @@ import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/safe-render";
 import { getKnownCategories } from "@stores/channels.store";
 import { shellText } from "../i18n/shell";
@@ -377,7 +378,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
           await onSave(data);
         } catch (err) {
           errorEl.style.display = "block";
-          setText(errorEl, err instanceof Error ? err.message : shellText("channel.updateFailed"));
+          setText(errorEl, errorText(err, shellText("channel.updateFailed")));
           saveBtn.removeAttribute("disabled");
           setText(saveBtn, shellText("channelForm.save"));
         }

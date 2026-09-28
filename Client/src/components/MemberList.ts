@@ -21,7 +21,7 @@ import type { UserProfilePopupComponent } from "@components/UserProfilePopup";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
 import { roleHasPermission } from "@lib/permissions";
-import { createAvatarElement } from "@lib/avatar";
+import { createAvatarElement } from "./message-list/avatar";
 import { readableRoleColor } from "@lib/themes";
 import { showToast } from "@lib/toast";
 import { reportEntryText } from "../i18n/reportEntry";

@@ -127,9 +127,10 @@ test.describe("Saved-password login", () => {
     await page.locator(".btn-primary[type='submit']").click();
 
     // A relayed error must surface, not strand the form loading.
-    await expect(page.locator(".login-message, .error-banner").first()).toContainText(/invalid/i, {
-      timeout: 10000,
-    });
+    await expect(page.locator(".login-message, .error-banner").first()).toContainText(
+      /invalid username or password/i,
+      { timeout: 10000 },
+    );
   });
 
   test("falls back to a typed password once the user edits the box", async ({ page }) => {

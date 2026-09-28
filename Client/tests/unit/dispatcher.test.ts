@@ -38,7 +38,7 @@ import {
   getCachedReactionUsers,
   loadReactionUsers,
   setReactionUsersFetcher,
-} from "../../src/components/message-list/reaction-tooltip";
+} from "../../src/features/messaging/reactionUsers";
 import { setMarkReadSender } from "../../src/lib/read-state";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ServerMessage, MessageResponse } from "../../src/lib/types";
@@ -3726,7 +3726,7 @@ describe("WS Dispatcher", () => {
     expect(uiStore.getState().transientError).toBeNull();
   });
 
-  it("wires error FORBIDDEN to an in-app toast (OC-0064)", () => {
+  it("wires error FORBIDDEN to an in-app toast with its catalog text (OC-0064)", () => {
     mockShowToast.mockClear();
     mock.dispatch("error", {
       code: "FORBIDDEN",
@@ -3734,7 +3734,7 @@ describe("WS Dispatcher", () => {
     });
     expectConsole("error", /\[dispatcher\] Server error/);
 
-    expect(mockShowToast).toHaveBeenCalledWith("Insufficient permissions", "error");
+    expect(mockShowToast).toHaveBeenCalledWith("You don't have permission to do that.", "error");
     expect(uiStore.getState().transientError).toBeNull();
   });
 
@@ -3748,7 +3748,7 @@ describe("WS Dispatcher", () => {
 
   it("wires an unmapped error with an empty message to the generic fallback toast", () => {
     mockShowToast.mockClear();
-    mock.dispatch("error", { code: "FORBIDDEN", message: "" });
+    mock.dispatch("error", { code: "SOMETHING_ODD", message: "" });
     expectConsole("error", /\[dispatcher\] Server error/);
     expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
   });
@@ -5195,14 +5195,18 @@ describe("WS Dispatcher", () => {
     it("rolls back the camera publish on a correlated refusal", async () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue("camera");
 
-      mock.dispatch("error", { code: "FORBIDDEN", message: "no permission" }, "vid-1");
+      mock.dispatch(
+        "error",
+        { code: "FORBIDDEN", message: "missing CONNECT_VIDEO permission" },
+        "vid-1",
+      );
       expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
       expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-1");
       expect(mockDisableCamera).toHaveBeenCalled();
       expect(mockDisableScreenshare).not.toHaveBeenCalled();
-      expect(mockShowToast).toHaveBeenCalledWith("no permission", "error");
+      expect(mockShowToast).toHaveBeenCalledWith("You don't have permission to do that.", "error");
       expect(uiStore.getState().transientError).toBeNull();
     });
 
@@ -5227,7 +5231,7 @@ describe("WS Dispatcher", () => {
 
       expect(mockDisableCamera).not.toHaveBeenCalled();
       expect(mockDisableScreenshare).not.toHaveBeenCalled();
-      expect(mockShowToast).toHaveBeenCalledWith("nope", "error");
+      expect(mockShowToast).toHaveBeenCalledWith("Nope", "error");
       expect(uiStore.getState().transientError).toBeNull();
     });
 

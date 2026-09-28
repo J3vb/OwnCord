@@ -408,7 +408,7 @@ describe("refusals", () => {
     );
     await flush();
     expect(alerts(root)).toBe(
-      "The server didn't accept this: bad request: duration must be between 1 minute and 28 days",
+      "The server didn't accept this: Bad request: duration must be between 1 minute and 28 days",
     );
   });
 

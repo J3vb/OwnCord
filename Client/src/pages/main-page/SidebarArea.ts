@@ -10,7 +10,7 @@ import { createIcon, type IconName } from "@lib/icons";
 import { isTextLikeChannel } from "@lib/types";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
-import type { ApiClient } from "@lib/api";
+import { type ApiClient, errorText } from "@lib/api";
 import type { RateLimiterSet } from "@lib/rate-limiter";
 import type { PresenceSender } from "@lib/presence";
 import type { ToastContainer } from "@components/Toast";
@@ -363,7 +363,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
               modal.destroy?.();
               activeModal = null;
             } catch (err) {
-              const msg = err instanceof Error ? err.message : shellText("channel.createFailed");
+              const msg = errorText(err, shellText("channel.createFailed"));
               getToast()?.show(msg, "error");
               // The modal's own catch re-enables its submit button and renders
               // the inline error, so the failure must propagate to it.
@@ -408,8 +408,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
                   modal.destroy?.();
                   activeModal = null;
                 } catch (err) {
-                  const msg =
-                    err instanceof Error ? err.message : shellText("channel.updateFailed");
+                  const msg = errorText(err, shellText("channel.updateFailed"));
                   getToast()?.show(msg, "error");
                   // Propagate so the modal re-enables its save button and shows
                   // the inline error.
@@ -440,7 +439,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
               modal.destroy?.();
               activeModal = null;
             } catch (err) {
-              const msg = err instanceof Error ? err.message : shellText("channel.deleteFailed");
+              const msg = errorText(err, shellText("channel.deleteFailed"));
               getToast()?.show(msg, "error");
               // Propagate so the modal re-enables its confirm button and shows
               // the inline error.
@@ -482,7 +481,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
             result.count === 0 ? "info" : "success",
           );
         } catch (err) {
-          const msg = err instanceof Error ? err.message : shellText("purge.failed");
+          const msg = errorText(err, shellText("purge.failed"));
           getToast()?.show(msg, "error");
         }
       },
@@ -593,7 +592,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         // The store is updated by the dm_channel_open the server fans out to
         // every participant, so the response is only used for the error path.
         void api.renameGroupDm(channelId, name).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : shellText("dm.renameFailed");
+          const msg = errorText(err, shellText("dm.renameFailed"));
           getToast()?.show(msg, "error");
         });
       },

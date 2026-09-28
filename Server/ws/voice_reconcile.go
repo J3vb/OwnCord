@@ -188,6 +188,7 @@ func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, 
 	// Delete the row if it still matches, then broadcast the leave for any
 	// bystander and re-elect the key holder. Mirrors the webhook's stale-row
 	// cleanup (webhookLeftCleanupClient's else branch).
+	h.voiceGrace.takeJoin(userID, channelID, joinedAt)
 	deleted, err := h.voice.LeaveIfMatch(ctx, userID, channelID, joinedAt)
 	if err != nil {
 		slog.Error("voice reconcile: LeaveIfMatch failed", "err", err,

@@ -3,6 +3,7 @@
 
 import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { ApiClientError, errorText } from "@lib/api";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
 import { connectText } from "../../i18n/connect";
@@ -979,7 +980,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // The caller may also call showTotp() or showError() on this page.
     } catch (err: unknown) {
       let message: string;
-      if (err instanceof Error) {
+      if (err instanceof ApiClientError) {
+        // A server refusal: plain catalog copy for a known code, the
+        // capitalised server message otherwise.
+        message = errorText(err, connectText("error.serverFallback"));
+      } else if (err instanceof Error) {
         message = err.message;
       } else if (typeof err === "string") {
         message = err;
@@ -1034,7 +1039,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // partial token has already been consumed by main.ts.
       totpPending = false;
     } catch (err) {
-      const message = err instanceof Error ? err.message : connectText("totp.failed");
+      const message =
+        err instanceof ApiClientError &&
+        err.code === "RATE_LIMITED" &&
+        err.message === "too many failed attempts, try again later"
+          ? connectText("error.totpTooManyAttempts")
+          : errorText(err, connectText("totp.failed"));
       transitionTo("error", message);
     } finally {
       totpSubmitBtn.disabled = false;

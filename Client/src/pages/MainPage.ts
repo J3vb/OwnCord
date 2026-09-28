@@ -58,7 +58,7 @@ import { forgetAdmittedItems } from "../features/content-consent/external";
 import {
   setReactionUsersFetcher,
   clearReactionUsersCache,
-} from "@components/message-list/reaction-tooltip";
+} from "../features/messaging/reactionUsers";
 import { setMarkReadSender } from "@lib/read-state";
 import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setAudioVolumeHost } from "@lib/audioElements";
@@ -81,7 +81,7 @@ import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner
 import { createRingController, createOutgoingCall } from "@lib/call-ring";
 import type { RingController, OutgoingCall } from "@lib/call-ring";
 import type { DmCallPanelComponent } from "@components/DmCallPanel";
-import { startRingChime, stopRingChime } from "@lib/notifications";
+import { startRingChime, stopRingChime } from "@lib/notificationSound";
 import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
 import { createChatArea } from "./main-page/ChatArea";

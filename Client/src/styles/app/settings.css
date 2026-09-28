@@ -192,6 +192,30 @@
 .toggle.on::after {
   transform: translateX(16px);
 }
+/* Notification level: All / Mentions only / Nothing, one segmented row. */
+.level-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.level-opt {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-pill);
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.level-opt:hover {
+  border-color: var(--border-strong);
+}
+.level-opt.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
 /* ── Mic Level Meter ── */
 .mic-meter-wrap {
   display: flex;

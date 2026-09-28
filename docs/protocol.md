@@ -1483,6 +1483,12 @@ place someone where they could not go themselves) and against the destination's
 ordinary `voice_join` for the destination, so capacity, token minting and
 key-holder election keep their single implementation.
 
+A target whose socket has dropped while the server holds its call open for a
+reconnect (up to 15 seconds) has no socket to receive `voice_moved`. The server
+removes it from voice instead, audits the action as `voice_mod_kick`, and
+answers the moderator with `VOICE_ERROR` ("user was reconnecting; removed from
+voice instead of moved").
+
 ### voice_moved (Server -> Client, direct)
 
 ```json
@@ -1499,7 +1505,9 @@ Sent only to the moved user. The client tears down its LiveKit session and joins
 ```
 
 Removes the target from the LiveKit room, deletes their `voice_states` row and
-broadcasts `voice_leave`, then sends them `voice_disconnected`.
+broadcasts `voice_leave`, then sends them `voice_disconnected`. A target whose
+call is being held for a reconnect is still removed, but gets no
+`voice_disconnected`; on resume it sees only the replayed `voice_leave`.
 
 ### voice_disconnected (Server -> Client, direct)
 

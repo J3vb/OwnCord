@@ -13,9 +13,8 @@ package admin
 // parses the tree, and when a new Warn/Error message has no code it names the
 // message and file, so an author adds the entry it needs. A message held in a
 // struct field (a maintenance step's failLog, a voice toggle's updateLog) needs
-// an entry for each constant that field is set to. A few messages are built
-// with a variable suffix and are covered by supportEventPrefixCodes
-// (support_redaction.go).
+// an entry for each constant that field is set to. Messages with a variable
+// suffix are covered by supportEventPrefixCodes (support_redaction.go).
 var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positive — log messages and event codes, not credentials
 	"ACME HTTP server error — HTTP-01 challenges and certificate renewal will fail until the next restart": "acme_http_server_error_http_01",
 	"ACME HTTP server shutdown error": "acme_http_server_shutdown_error",
@@ -276,7 +275,6 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"plugin: some plugin directories failed to scan and were skipped":                                              "plugin_directories_scan_failed",
 	"port in use, retrying...":                                                                                     "port_in_use_retrying",
 	"pprof listener error":                                                                                         "pprof_listener_error",
-	"pre-migration backup written before applying migrations":                                                      "pre_migration_backup_written",
 	"pre-restore WAL checkpoint failed":                                                                            "pre_restore_wal_checkpoint_failed",
 	"pre-restore backup failed — aborting restore":                                                                 "restore_safety_backup_failed",
 	"ratelimit: failed to clean up expired persisted lockouts":                                                     "ratelimit_clean_up_expired_lockouts_failed",
