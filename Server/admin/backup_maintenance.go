@@ -147,6 +147,20 @@ func runScheduledBackup(ctx context.Context, database *db.DB, interval time.Dura
 // retention window, so pruning never removes them.
 const preRestoreBackupPrefix = "pre_restore_"
 
+// preMigrateBackupPrefix names the safety copy the boot path writes before a
+// pending migration moves the schema (O3, app.database.go). Like the
+// pre_restore_ copies it is not retention history — it is the rollback target
+// for a schema move — so pruning never removes it.
+const preMigrateBackupPrefix = "pre_migrate_"
+
+// isSafetyCopy reports whether a backup file name is a safety copy rather
+// than retention history. Both the pre-restore and pre-migration prefixes
+// count; retention must never prune either.
+func isSafetyCopy(name string) bool {
+	base := filepath.Base(name)
+	return strings.HasPrefix(base, preRestoreBackupPrefix) || strings.HasPrefix(base, preMigrateBackupPrefix)
+}
+
 // pruneExpiredBackups deletes *.db backups whose mtime is older than the
 // backup_retention window (in days), always keeping the newest one and never
 // touching the pre_restore_* safety copies.
@@ -178,7 +192,7 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 	pruned := 0
 	for _, e := range entries {
-		if strings.HasPrefix(filepath.Base(e.path), preRestoreBackupPrefix) {
+		if isSafetyCopy(e.path) {
 			continue
 		}
 		if e.mtime.Before(cutoff) && !e.mtime.Equal(newest) {

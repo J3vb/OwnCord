@@ -638,7 +638,21 @@ change them, and that page is the Owner's alone:
 - Retention is `0` (keep forever) or between 7 and 3650 days. It deletes
   backups older than that, but always keeps the newest one, so a stale
   schedule can never delete your last copy, and it never removes the
-  `pre_restore_*` safety copies — delete those by hand.
+  `pre_restore_*` or `pre_migrate_*` safety copies — delete those by hand.
+
+### Backups taken automatically before an upgrade
+
+A server that starts with migrations pending — the state every upgrade leaves
+behind, including a Docker `docker compose pull` — takes a database backup
+**before** it applies them, so a schema move is never unbacked-up. The copy
+lands in the configured backup directory as
+`pre_migrate_<first-migration>.db`, is verified with `integrity_check`, and is
+kept out of retention pruning like the `pre_restore_*` copies. A boot that
+cannot write it refuses to start rather than migrate without it.
+
+This protects the schema, not your uploads or keys: it is a database copy, so
+pair it with the full [archive](#before-upgrading-take-the-archive) for a
+complete rollback.
 
 External scheduling still works if you prefer it, but the admin API accepts
 **Bearer tokens only** — there is no cookie session for it — so the job needs an
