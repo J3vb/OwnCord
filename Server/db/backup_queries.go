@@ -17,6 +17,18 @@ import (
 	"time"
 )
 
+// BackupVACUUMPreExecHook runs once inside BackupToSafe when non-nil, after it
+// has checked out the connection the VACUUM runs on and before the VACUUM
+// executes. Test-only (always nil in production; exported because the
+// service-level proof that Reserve is not blocked by a backup, SRV-02/PERF-10,
+// drives this through UploadService.Reserve rather than calling
+// db.BackupToSafe directly): it parks the backup at a known point while it
+// provably owns its pool's connection, so a test can assert Reserve completes
+// without a timing-ratio sleep. If a future refactor moved the VACUUM back to
+// the single writer connection, this hook would hold that writer and Reserve
+// would block on it — which is exactly what the test guards against.
+var BackupVACUUMPreExecHook func()
+
 // BackupTo creates an online backup of the database using SQLite's VACUUM INTO.
 // The destination path must not already exist.
 //
@@ -97,8 +109,22 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 
 	// Read on the reader pool: under WAL it runs concurrently with writers, so
 	// the VACUUM's whole duration no longer queues behind — or blocks — the
-	// single writer.
-	if _, err := d.reader.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absTemp)); err != nil {
+	// single writer. Pin one reader connection for the whole call so the
+	// test hook below (BackupVACUUMPreExecHook) can hold the very connection
+	// the VACUUM uses: it then proves Reserve proceeds without racing the
+	// VACUUM's own timing rather than merely favouring one ordering.
+	conn, err := d.reader.Conn(ctx)
+	if err != nil {
+		_ = os.Remove(absTemp)
+		return fmt.Errorf("BackupToSafe: acquiring reader connection: %w", err)
+	}
+	defer conn.Close() //nolint:errcheck
+
+	if BackupVACUUMPreExecHook != nil {
+		BackupVACUUMPreExecHook()
+	}
+
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absTemp)); err != nil {
 		// Nothing to clean up beyond the temp VACUUM may have partially
 		// written; the final path was never touched.
 		_ = os.Remove(absTemp)

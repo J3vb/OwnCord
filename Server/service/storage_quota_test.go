@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,11 +17,15 @@ import (
 // An upload's charge is writer I/O made under the quota mutex, so a backup
 // holding the single writer used to stall every upload admission for the
 // backup's whole duration. SRV-02 moved the backup to the reader pool, which
-// is what satisfies PERF-10: a Reserve and a Release issued while a real
-// file-backed backup runs finish in a small fraction of the backup's time.
-// The comparison is against the backup's own duration, as in
-// TestBackupToSafe_ConcurrentWriteIsNotDelayed, so a slow or fast box does not
-// decide the result.
+// is what satisfies PERF-10.
+//
+// Deterministic, no sleep and no wall-clock ratio: db.BackupVACUUMPreExecHook
+// parks the backup at its VACUUM, while it provably holds the connection the
+// VACUUM runs on, until this test releases it. Reserve and Release must
+// complete during that hold. If a refactor ever moved the VACUUM back to the
+// single writer, the hook would be holding that writer and Reserve would block
+// here — a clean assertion instead of the old "Reserve+Release took a quarter
+// of the backup's time" comparison, which broke under parallel package load.
 func TestReserve_NotBlockedByAConcurrentBackup(t *testing.T) {
 	dir := t.TempDir()
 	database, err := db.Open(filepath.Join(dir, "quota.db"))
@@ -38,48 +43,63 @@ func TestReserve_NotBlockedByAConcurrentBackup(t *testing.T) {
 	}})
 	ctx := context.Background()
 
-	// Large enough that the backup is clearly the long pole.
-	if _, err := database.ExecContext(ctx, `CREATE TABLE bulk (v TEXT)`); err != nil {
-		t.Fatalf("create bulk table: %v", err)
-	}
-	if _, err := database.ExecContext(ctx,
-		`WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < 400000)
-		 INSERT INTO bulk (v) SELECT 'seed ' || i || ' xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' FROM seq`); err != nil {
-		t.Fatalf("seed rows: %v", err)
-	}
-
 	backupDir := filepath.Join(dir, "backups")
 	if err := os.MkdirAll(backupDir, 0o750); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	backupStart := time.Now()
+
+	// The seam the backup parks on: it signals reached once it holds the
+	// connection its VACUUM will use, then blocks until the test releases it.
+	parked := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseBackup := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(func() {
+		releaseBackup()
+		db.BackupVACUUMPreExecHook = nil
+	})
+	db.BackupVACUUMPreExecHook = func() {
+		close(parked)
+		<-release
+	}
+
 	done := make(chan error, 1)
 	go func() {
 		done <- database.BackupToSafe(ctx, filepath.Join(backupDir, "during-uploads.db"), backupDir)
 	}()
-	// Let the backup reach its VACUUM so the upload lands inside it.
-	time.Sleep(50 * time.Millisecond)
 
-	uploadStart := time.Now()
-	res, err := svc.Reserve(ctx, quotaTestUser, 100)
-	if err != nil {
-		t.Fatalf("Reserve during backup: %v", err)
+	select {
+	case <-parked:
+	case <-time.After(10 * time.Second):
+		t.Fatal("backup never reached its VACUUM; the test exercised nothing")
 	}
-	res.Release(ctx)
-	uploadLatency := time.Since(uploadStart)
 
-	backupErr := <-done
-	backupDuration := time.Since(backupStart)
-	if backupErr != nil {
+	// Reserve and Release while the backup is provably parked inside it.
+	reserveDone := make(chan error, 1)
+	go func() {
+		res, err := svc.Reserve(ctx, quotaTestUser, 100)
+		if err != nil {
+			reserveDone <- err
+			return
+		}
+		res.Release(ctx)
+		reserveDone <- nil
+	}()
+
+	select {
+	case err := <-reserveDone:
+		if err != nil {
+			t.Fatalf("Reserve during backup: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Reserve did not complete while the backup was held at its VACUUM; the upload charge is queuing behind the backup")
+	}
+
+	releaseBackup()
+	if backupErr := <-done; backupErr != nil {
 		t.Fatalf("BackupToSafe: %v", backupErr)
 	}
 	if got := used(t, svc, quotaTestUser); got != 0 {
 		t.Fatalf("counter = %d after Reserve and Release, want 0", got)
-	}
-	if backupDuration < 100*time.Millisecond {
-		t.Skipf("backup too fast (%v) to measure contention on this box", backupDuration)
-	}
-	if uploadLatency > backupDuration/4 {
-		t.Fatalf("Reserve+Release during backup took %v against a backup of %v; the upload charge is queuing behind the backup", uploadLatency, backupDuration)
 	}
 }
