@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,7 +112,7 @@ first), or copy the file in by hand if that is what you meant to do.
 	// other failure refuses, like the admin path, with the database untouched.
 	safety := ""
 	if err := db.CheckBackupIntegrity(context.Background(), dbPath); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: the live database is missing or unreadable, so no pre-restore safety copy was taken (%v); continuing\n", err)
+		fmt.Fprintf(os.Stderr, "warning: the live database is missing or unreadable, so no pre-restore safety copy was taken (%v); its files will be moved aside instead\n", err)
 	} else if safety, err = safetyCopy(dbPath, backupDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: could not take the pre-restore safety copy — database untouched: %v\n", err)
 		return 1
@@ -128,22 +127,38 @@ first), or copy the file in by hand if that is what you meant to do.
 	}
 
 	// A dead server's -wal would be replayed onto the restored file on the next
-	// boot. The safety copy above already captured whatever it held.
-	for _, sidecar := range []string{dbPath + "-wal", dbPath + "-shm"} {
-		if err := os.Remove(sidecar); err != nil && !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "error: could not remove the stale %s — database untouched: %v\n", sidecar, err)
+	// boot, so no sidecar may stay beside it. With a safety copy they hold
+	// nothing it did not capture. Without one, the unreadable database and its
+	// sidecars are the only pre-restore state left, so they are moved aside
+	// rather than truncated and deleted.
+	aside := ""
+	if safety == "" {
+		aside = dbPath + ".pre_restore_" + time.Now().UTC().Format("20060102_150405")
+	}
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		var err error
+		switch {
+		case aside != "":
+			err = os.Rename(dbPath+suffix, aside+suffix)
+		case suffix != "":
+			err = os.Remove(dbPath + suffix)
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "error: could not clear %s before restoring: %v\n", dbPath+suffix, err)
 			return 1
 		}
 	}
 
-	if err := copyFile(source, dbPath); err != nil {
+	if err := db.CopyDatabaseFile(source, dbPath); err != nil {
 		fmt.Fprintf(os.Stderr, "error: restoring %s failed: %v\n", source, err)
 		if safety != "" {
-			if rbErr := copyFile(safety, dbPath); rbErr != nil {
+			if rbErr := db.CopyDatabaseFile(safety, dbPath); rbErr != nil {
 				fmt.Fprintf(os.Stderr, "error: rollback from %s also failed: %v\n", safety, rbErr)
 			} else {
 				fmt.Fprintf(os.Stderr, "the pre-restore safety copy was put back\n")
 			}
+		} else {
+			fmt.Fprintf(os.Stderr, "the previous database files, if any, are at %s*\n", aside)
 		}
 		return 1
 	}
@@ -151,6 +166,8 @@ first), or copy the file in by hand if that is what you meant to do.
 	fmt.Printf("restored %s from %s\n", dbPath, source)
 	if safety != "" {
 		fmt.Printf("pre-restore safety copy: %s\n", safety)
+	} else {
+		fmt.Printf("the previous database files, if any, were moved aside to %s*\n", aside)
 	}
 	fmt.Println("start the server to load the restored data")
 	return 0
@@ -170,30 +187,6 @@ func safetyCopy(dbPath, backupDir string) (string, error) {
 		return "", err
 	}
 	return out, nil
-}
-
-// copyFile streams src to dst, truncating dst, and syncs it before closing so
-// a power loss cannot leave a partially-written database behind.
-func copyFile(src, dst string) error {
-	in, err := os.Open(src) //nolint:gosec // G304: operator-supplied paths
-	if err != nil {
-		return fmt.Errorf("open source: %w", err)
-	}
-	defer in.Close() //nolint:errcheck
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return fmt.Errorf("create destination: %w", err)
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return fmt.Errorf("copy: %w", err)
-	}
-	if err := out.Sync(); err != nil {
-		_ = out.Close()
-		return fmt.Errorf("sync: %w", err)
-	}
-	return out.Close()
 }
 
 func restoreUsage() {

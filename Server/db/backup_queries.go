@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -240,4 +241,30 @@ func CheckBackupIntegrity(ctx context.Context, path string) error {
 		return fmt.Errorf("CheckBackupIntegrity: integrity_check reported %q", result)
 	}
 	return nil
+}
+
+// CopyDatabaseFile streams src over dst without loading it into memory,
+// truncating dst, and syncs it before closing so a power loss cannot leave a
+// partially-written database behind. Both restore paths — the admin endpoint
+// and the `chatserver restore` CLI — swap the live file through it.
+func CopyDatabaseFile(src, dst string) error {
+	in, err := os.Open(src) //nolint:gosec // G304: a sanitized backup path or an operator-supplied one
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer in.Close() //nolint:errcheck
+
+	out, err := os.Create(dst) //nolint:gosec // G304: the configured database path
+	if err != nil {
+		return fmt.Errorf("create destination: %w", err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("copy: %w", err)
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("sync: %w", err)
+	}
+	return out.Close()
 }

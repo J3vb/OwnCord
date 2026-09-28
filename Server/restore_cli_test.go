@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -217,6 +218,41 @@ func TestRestoreCLI_DropsStaleWAL(t *testing.T) {
 	}
 	if !userExists(t, dbPath, "restored-user") || userExists(t, dbPath, "wal-only-user") {
 		t.Fatal("the stale WAL was replayed onto the restored database")
+	}
+	// With no safety copy possible, the stale WAL is the only record of those
+	// transactions: it is moved aside, not deleted.
+	kept, _ := filepath.Glob(dbPath + ".pre_restore_*-wal")
+	if len(kept) != 1 {
+		t.Fatalf("the stale WAL was not kept aside: %v", kept)
+	}
+	if got, err := os.ReadFile(kept[0]); err != nil || !bytes.Equal(got, wal) {
+		t.Fatalf("the WAL kept aside does not match the original (%d bytes, %v)", len(got), err)
+	}
+}
+
+// TestRestoreCLI_KeepsUnreadableLiveDatabaseAside: a live database too broken
+// for a safety copy is still the only pre-restore state, so the restore moves
+// it aside rather than truncating it.
+func TestRestoreCLI_KeepsUnreadableLiveDatabaseAside(t *testing.T) {
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+	broken := []byte("a database SQLite can no longer read")
+	if err := os.WriteFile(dbPath, broken, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 0 {
+		t.Fatalf("restore --force exited %d, want 0", code)
+	}
+	if !userExists(t, dbPath, "restored-user") {
+		t.Fatal("the backup was not restored into the live database")
+	}
+	kept, _ := filepath.Glob(dbPath + ".pre_restore_*")
+	if len(kept) != 1 {
+		t.Fatalf("the unreadable live database was not kept aside: %v", kept)
+	}
+	if got, err := os.ReadFile(kept[0]); err != nil || !bytes.Equal(got, broken) {
+		t.Fatalf("the database kept aside does not match the original (%q, %v)", got, err)
 	}
 }
 

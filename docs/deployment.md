@@ -783,13 +783,21 @@ sudo systemctl stop owncord          # or: docker compose down
 # Without --force it changes nothing and explains itself; with it, the live
 # database is replaced after a pre_restore_* safety copy is taken.
 ./chatserver restore --force /path/to/chatserver_20260101_030000.db
+
+# Docker: the image's entrypoint is the binary and its working dir is /app,
+# so run it in a one-off container against the same volume, naming the
+# backup by its path inside that volume.
+docker compose run --rm --no-deps owncord restore --force data/backups/chatserver_20260101_030000.db
 ```
 
 It verifies the file is a readable database that a newer server version did
 not write before touching the live one, takes a `pre_restore_*` safety copy,
 preserves the message-retry cutoff, and uses the same `database.path` and
-`backup.dir` from `config.yaml` the server does. This restores the database alone — a full archive below is still the
-supported path when uploads, the key files or `config.yaml` changed too.
+`backup.dir` from `config.yaml` the server does. When the live database is too
+broken to copy, it is moved aside with its `-wal` and `-shm` files as
+`chatserver.db.pre_restore_<time>` instead, and the command prints where. This
+restores the database alone — a full archive below is still the supported path
+when uploads, the key files or `config.yaml` changed too.
 
 **The whole state, from an archive.** Put the whole pre-failure state back,
 then start the same version that wrote it.
