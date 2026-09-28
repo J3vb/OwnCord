@@ -93,7 +93,7 @@ voice:
   # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.7")
   # livekit_binary: ""             # path to an existing livekit-server binary; set this to
   #                                # skip auto-download and run your own build
-  # node_ip: ""                    # public IP for WebRTC media (required for remote users behind NAT)
+  # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)
   # advertise_internal_ip: false   # also advertise LAN IPs so local-network clients can connect
   # quality: "medium"              # low | medium | high
 

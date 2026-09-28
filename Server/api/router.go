@@ -76,6 +76,11 @@ func warnOnServerConfig(cfg *config.Config) {
 			"the key has no effect yet: no route is mounted and no asset is served")
 	}
 	warnOnVoiceNodeIP(cfg)
+	if cfg.Voice.LiveKitURL != "" && cfg.Voice.NodeIP != "" && cfg.Voice.AdvertiseInternalIP {
+		slog.Warn("voice.node_ip is ignored while voice.advertise_internal_ip is on — LiveKit detects its public address over STUN instead",
+			"node_ip", cfg.Voice.NodeIP,
+			"fix", "clear voice.node_ip, or turn voice.advertise_internal_ip off if the pinned address must be advertised")
+	}
 	warnOnAdminPeerAddress(cfg)
 }
 
@@ -104,7 +109,8 @@ func warnOnVoiceNodeIP(cfg *config.Config) {
 		"address_class", kind,
 		"why", "node_ip is the address LiveKit advertises in ICE candidates. A client outside this "+
 			"network cannot route to it, so the call connects over signalling and carries no media",
-		"fix", "set voice.node_ip to this server's public address and forward UDP 50000-60000 — "+
+		"fix", "clear voice.node_ip so LiveKit detects this server's public address (or set it to "+
+			"that address) and forward UDP 50000-60000 — "+
 			"see docs/port-forwarding.md. Ignore this if every client is on the LAN or your tailnet")
 }
 

@@ -206,8 +206,9 @@ type VoiceConfig struct {
 	LiveKitVersion string `yaml:"livekit_version"`
 	NodeIP         string `yaml:"node_ip"` // public IP for WebRTC ICE candidates; empty = auto-detect
 	// AdvertiseInternalIP makes LiveKit advertise internal (LAN) host candidates
-	// in addition to the external node_ip mapping, so clients on the local
-	// network can connect while remote clients use the public IP.
+	// in addition to the detected public address, so clients on the local
+	// network can connect while remote clients use the public IP. It keeps
+	// use_external_ip on in the generated livekit.yaml, so NodeIP is ignored.
 	AdvertiseInternalIP bool   `yaml:"advertise_internal_ip"`
 	Quality             string `yaml:"quality"` // low | medium | high
 }
@@ -587,7 +588,7 @@ voice:
   # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.7")
   # livekit_binary: ""             # path to an existing livekit-server binary; set this to
   #                                # skip auto-download and run your own build
-  # node_ip: ""                    # public IP for WebRTC media (required for remote users behind NAT)
+  # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)
   # advertise_internal_ip: false   # also advertise LAN IPs so local-network clients can connect
   # quality: "medium"              # low | medium | high
 

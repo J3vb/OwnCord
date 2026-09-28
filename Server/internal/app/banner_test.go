@@ -102,6 +102,73 @@ func TestPickBannerAddr_PrefersPublicOverPrivate(t *testing.T) {
 	}
 }
 
+// ─── O1: the banner must offer an admin URL the allowlist actually admits ──
+
+// TestPickBannerLANAddr_ReturnsPrivateOrUniqueLocalOnly — the printed admin
+// URL follows the most widely reachable address, so on a dual-stack host it
+// can be a global IPv6. The default admin_allowed_cidrs admits only private
+// and unique-local addresses, so that URL answers 403 even from the host.
+// pickBannerLANAddr finds the address that does pass the perimeter.
+func TestPickBannerLANAddr_ReturnsPrivateOrUniqueLocalOnly(t *testing.T) {
+	cases := []struct {
+		name  string
+		addrs []string
+		want  string
+	}{
+		{
+			name:  "LAN IPv4 behind a global IPv6",
+			addrs: []string{"2a02:1234::1", "192.168.1.50"},
+			want:  "192.168.1.50",
+		},
+		{
+			name:  "private outranks unique-local",
+			addrs: []string{"fd12::1", "10.0.0.5"},
+			want:  "10.0.0.5",
+		},
+		{
+			name:  "no LAN address at all",
+			addrs: []string{"2a02:1234::1", "93.184.216.34"},
+			want:  "",
+		},
+		{
+			name:  "loopback is not a LAN address to advertise",
+			addrs: []string{"127.0.0.1", "::1"},
+			want:  "",
+		},
+		{
+			name:  "empty table",
+			addrs: nil,
+			want:  "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := pickBannerLANAddr(mustAddrs(t, tc.addrs...))
+			if got != tc.want {
+				t.Errorf("pickBannerLANAddr(%v) = %q, want %q", tc.addrs, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBannerLANAdminLine_OnlyWhenItDiffers — the extra line is noise when the
+// primary admin URL already is the LAN address; it exists only to rescue the
+// case where the printed address is outside the allowlist.
+func TestBannerLANAdminLine_OnlyWhenItDiffers(t *testing.T) {
+	if got := bannerLANAdminLine("https", "192.168.1.50", "192.168.1.50", 8443); got != "" {
+		t.Errorf("line for a primary==LAN address = %q, want empty", got)
+	}
+	got := bannerLANAdminLine("https", "192.168.1.50", "2a02:1234::1", 8443)
+	for _, want := range []string{"Admin (LAN)", "https://192.168.1.50:8443/admin"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("line %q does not mention %q", got, want)
+		}
+	}
+	if got := bannerLANAdminLine("https", "", "2a02:1234::1", 8443); got != "" {
+		t.Errorf("line with no LAN address = %q, want empty", got)
+	}
+}
+
 // TestPickBannerAddr_EmptyFallsBackToLocalhost keeps the old behaviour for a
 // host with no readable interface table.
 func TestPickBannerAddr_EmptyFallsBackToLocalhost(t *testing.T) {

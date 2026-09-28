@@ -178,7 +178,7 @@ func (s *SetupService) mintBootstrapInvite(ctx context.Context, uid int64, warni
 	if err != nil {
 		slog.Error("setup: failed to generate bootstrap invite", "error", err)
 		*warnings = append(*warnings,
-			"your account was created, but the bootstrap invite could not be generated — create one from the admin panel after logging in")
+			"your account was created, but the bootstrap invite could not be generated — create one in the OwnCord desktop client with the “Invite people” action in the server sidebar")
 		return ""
 	}
 	return code

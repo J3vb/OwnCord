@@ -1,17 +1,19 @@
 # OwnCord server stack — chat server + LiveKit voice/video
 #
 # Quick start:
-#   1. cp .env.example .env  && edit .env (set secrets + public IP)
+#   1. cp .env.example .env  && edit .env (set secrets)
 #   2. cp livekit.yaml.example livekit.yaml  && edit livekit.yaml (same keys)
-#   3. cp config.yaml.example config.yaml  && set voice.livekit_url to
-#      ws://livekit:7880 (the service below; the copied default is localhost)
-#      and voice.auto_download_livekit to false (LiveKit is its own container)
+#   3. cp config.yaml.example config.yaml  && edit as needed
 #   4. docker compose up -d
 #
 # LiveKit runs as a separate container on the same internal network.
 # The OwnCord server reaches it at ws://livekit:7880 (Docker DNS), and it
 # proxies signalling to clients at :8443/livekit — so 7880 need not be
 # published or forwarded. Firewall TCP 7881 and UDP 50000-60000 for media.
+#
+# The environment block below already points the server at that service and
+# keeps its own auto-download off (LiveKit is its own container here), so
+# config.yaml needs no voice.livekit_url or voice.auto_download_livekit edit.
 
 # Log rotation shared by both services: without a cap the default json-file
 # driver grows unbounded on the host disk.
@@ -35,6 +37,13 @@ services:
       # Secrets injected from .env — never hardcode these
       OWNCORD_VOICE_LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
       OWNCORD_VOICE_LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      # Voice wiring for this stack: reach LiveKit by its compose service name
+      # and leave the server's own auto-download off, so it never starts a
+      # second LiveKit inside this container on media ports nothing publishes.
+      # Set here rather than in config.yaml so the operator's mounted config
+      # stays free of Docker-specific values.
+      OWNCORD_VOICE_LIVEKIT_URL: ws://livekit:7880
+      OWNCORD_VOICE_AUTO_DOWNLOAD_LIVEKIT: "false"
     volumes:
       # Mount your config.yaml for non-secret settings (server name, TLS, etc.)
       # See the example config at: https://github.com/J3vb/OwnCord#configuration

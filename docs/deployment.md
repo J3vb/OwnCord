@@ -18,18 +18,19 @@ Production deployment guide for OwnCord server on Windows and Linux.
 
 ```bash
 cd Server
-go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.4" .
+go build -o chatserver.exe -ldflags "-s -w -X main.version=dev" .
 ```
 
 **Linux:**
 
 ```bash
 cd Server
-CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.4" .
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=dev" .
 ```
 
 - `-s -w` strips debug info (smaller binary)
-- `-X main.version=...` embeds the version string
+- `-X main.version=...` embeds the version string; a source build reports `dev`
+  unless you set it to the tag you built from
 - `CGO_ENABLED=0` produces a fully static binary on Linux
 
 Alternatively, download a pre-built binary from GitHub Releases:
@@ -108,18 +109,17 @@ cp .env.example .env
 
 # 2. Create your LiveKit config
 cp livekit.yaml.example livekit.yaml
-# Edit livekit.yaml — set node_ip to your server's public IP, and paste the same key/secret
+# Edit livekit.yaml — paste the same key/secret (use_external_ip detects the
+# public IP; only on a tailnet-only host, replace it with node_ip)
 
 # 3. Create config.yaml from the shipped example
 cp config.yaml.example config.yaml
-# Edit it: set voice.livekit_url to "ws://livekit:7880" (the compose service
-# address). The copied default is ws://localhost:7880, which is the server
-# container itself — voice would never reach the LiveKit container.
-# Set voice.auto_download_livekit to false (the copied default is true), or the
-# server downloads and runs a second LiveKit inside its own container.
-# Leave voice.livekit_api_key, voice.livekit_api_secret and voice.livekit_binary
-# unset: compose injects the key and secret from .env, and LiveKit runs as its
-# own container.
+# Edit it for non-secret settings (server name, TLS, etc.). The compose file
+# already points the server at the LiveKit service (voice.livekit_url =
+# "ws://livekit:7880") and turns auto-download off, so no voice edit is needed
+# here. Leave voice.livekit_api_key, voice.livekit_api_secret and
+# voice.livekit_binary unset: compose injects the key and secret from .env, and
+# LiveKit runs as its own container.
 
 # 4. Start
 docker compose up -d
@@ -140,16 +140,15 @@ unreachable from your laptop until you either tunnel to it —
 
 ### config.yaml for Docker
 
-The shipped compose file injects **only the LiveKit key and secret** as
-environment variables from `.env`. It does not set `voice.livekit_url`, so that
-key **must** be set in `config.yaml` — and it must point at the LiveKit
-container, `ws://livekit:7880`, not the copied default `ws://localhost:7880`
-(which is the server container itself). Set `voice.auto_download_livekit` to
-`false` (the copied default is `true`, which would download and run a second
-LiveKit inside the server container), leave `voice.livekit_binary` unset, and
-do not set `voice.livekit_api_key` / `voice.livekit_api_secret` in the file
-(the environment values win, and keeping secrets out of `config.yaml` is the
-point of `.env`). Set everything else as normal:
+The shipped compose file injects the LiveKit key and secret from `.env`, and
+it also sets `voice.livekit_url` to `ws://livekit:7880` and
+`voice.auto_download_livekit` to `false` as environment variables, so those two
+keys need not be set in `config.yaml`: the environment value wins over
+anything the file says, so the copied example's values are harmless. Leave
+`voice.livekit_binary` unset, and do not set `voice.livekit_api_key` /
+`voice.livekit_api_secret` in the file either (compose injects them from `.env`,
+and keeping secrets out of `config.yaml` is the point of `.env`). Set everything
+else as normal:
 
 ```yaml
 server:
@@ -157,8 +156,6 @@ server:
   port: 8443
 
 voice:
-  livekit_url: "ws://livekit:7880" # Docker service DNS — do not change
-  auto_download_livekit: false # LiveKit runs as its own container
   quality: "medium"
 
 tls:
@@ -1294,7 +1291,9 @@ Three named refusals, each with the one thing to do:
 
 ### Voice joins but nobody hears anything
 
-The UDP media range (`50000-60000`) or `voice.node_ip` is wrong — the one
+The UDP media range (`50000-60000`) is not forwarded, or a pinned
+`voice.node_ip` is not your current public address (leave it empty so LiveKit
+detects it, and restart after the address changes) — the one
 failure the server cannot see, because the media never reaches it. The
 check-by-check walkthrough is in [Port Forwarding Guide](port-forwarding.md).
 
@@ -1554,7 +1553,7 @@ choose one: [TLS Setup](#tls-setup).
 - [ ] **Set `trusted_proxies`** -- only if behind a reverse proxy, list the proxy's own addresses so client IPs come from `X-Forwarded-For`
 - [ ] **Leave `allowed_origins` empty unless you know why** -- empty denies cross-origin WebSocket connections, which is what a desktop-only deployment wants; set it only to admit browser clients from your own domain
 - [ ] **Set stable voice credentials** -- set `livekit_api_key` and `livekit_api_secret` to avoid token breakage on restart
-- [ ] **Set `voice.node_ip`** -- required for remote users behind NAT
+- [ ] **Check the voice media address** -- leave `voice.node_ip` empty so LiveKit detects the public address (Docker: `use_external_ip: true` in `livekit.yaml`, replaced by `node_ip` when pinned); pin it only when detection cannot work, such as a tailnet-only host ([Port Forwarding](port-forwarding.md#dynamic-public-ip))
 - [ ] **Review upload limits** -- adjust `upload.max_size_mb` for your use case
 - [ ] **Configure GitHub token** -- optional, for reliable update checks
 - [ ] **Schedule backups** -- use the built-in schedule on the admin panel's Backups & restore page, or the endpoint from your own cron ([Scheduled Backups](#scheduled-backups))

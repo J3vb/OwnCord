@@ -360,16 +360,15 @@ jobs:
       # the server runs it as its companion process exactly as an owner's would,
       # from OwnCord's OWN generated livekit.yaml rather than a hand-written one.
       #
-      # node_ip=127.0.0.1 with advertise_internal_ip is what makes that
-      # generated config usable by a load client on the same machine: the
-      # template sets `use_external_ip: true`, so without a node_ip LiveKit
-      # discovers the runner's public address via STUN and advertises ICE
-      # candidates no loopback peer can reach — the room connects and carries no
-      # media, which is the "voice works but nobody hears anything" failure
-      # warnOnVoiceNodeIP exists to shout about. Verified 2026-09-12: with these
-      # two knobs `lk load-test` gets 25/25 tracks at 0% loss against the
-      # generated config; the server logs the expected not-a-public-address
-      # warning, which is correct for a single-machine rig.
+      # advertise_internal_ip is what makes that generated config usable by a
+      # load client on the same machine: the template sets
+      # `use_external_ip: true`, so on its own LiveKit advertises only the
+      # runner's STUN-discovered public address, which no local peer can reach
+      # — the room connects and carries no media, the "voice works but nobody
+      # hears anything" failure. advertise_internal_ip keeps the host
+      # candidates alongside it. Verified 2026-09-12: `lk load-test` gets 25/25
+      # tracks at 0% loss against this generated config (then also carrying a
+      # node_ip=127.0.0.1 that use_external_ip overrode, now dropped).
       - name: Boot server (constrained — 2 CPUs, 4 GB, no swap)
         if: matrix.leg == 'constrained'
         run: |
@@ -408,7 +407,6 @@ jobs:
             -e OWNCORD_VOICE_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET" \
             -e OWNCORD_VOICE_LIVEKIT_URL=ws://127.0.0.1:7880 \
             -e OWNCORD_VOICE_LIVEKIT_BINARY=/app/livekit-server \
-            -e OWNCORD_VOICE_NODE_IP=127.0.0.1 \
             -e OWNCORD_VOICE_ADVERTISE_INTERNAL_IP=true \
             "${extra_env[@]}" \
             debian:bookworm-slim /app/chatserver
@@ -437,7 +435,6 @@ jobs:
           OWNCORD_VOICE_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET" \
           OWNCORD_VOICE_LIVEKIT_URL=ws://127.0.0.1:7880 \
           OWNCORD_VOICE_LIVEKIT_BINARY="$WORK/livekit-server" \
-          OWNCORD_VOICE_NODE_IP=127.0.0.1 \
           OWNCORD_VOICE_ADVERTISE_INTERNAL_IP=true \
             ./chatserver > server.log 2>&1 &
           echo $! > server.pid

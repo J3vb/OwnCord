@@ -190,7 +190,9 @@ func undeterminable(p Params) []Unknown {
 			Fact: "Whether your public IP address changes",
 			Why:  "This server never learns its public address, so it cannot notice the address changing.",
 			HowToCheck: "Most residential connections get a new address periodically. Use dynamic DNS " +
-				"and share a hostname rather than an IP literal — see docs/port-forwarding.md.",
+				"and share a hostname rather than an IP literal. Leave voice.node_ip empty so LiveKit " +
+				"detects the address when it starts, and restart the server after the address changes " +
+				"— see docs/port-forwarding.md.",
 		},
 	}
 
@@ -201,8 +203,8 @@ func undeterminable(p Params) []Unknown {
 				"separate UDP range, so a missing forwarding rule there produces a call that connects " +
 				"and then carries no audio.",
 			HowToCheck: "Have someone outside your network join a voice channel. If they connect but " +
-				"nobody hears anything, forward UDP 50000-60000 and set voice.node_ip to your public " +
-				"address.",
+				"nobody hears anything, forward UDP 50000-60000 and leave voice.node_ip empty so LiveKit " +
+				"detects your public address (or set it to that address).",
 		})
 	}
 	return list
