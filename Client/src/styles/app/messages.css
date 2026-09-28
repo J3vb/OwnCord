@@ -1081,6 +1081,7 @@ ul.md-list-nested {
 .update-banner {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 8px 16px;
   background: var(--accent);
@@ -1113,6 +1114,12 @@ ul.md-list-nested {
 .update-banner-later {
   background: color-mix(in srgb, var(--on-accent) 20%, transparent);
   color: var(--on-accent);
+}
+.update-banner-warning {
+  flex-basis: 100%;
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  opacity: 0.9;
 }
 
 /* System message */
